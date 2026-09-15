@@ -40,7 +40,9 @@ mod selection_outline;
 mod shell;
 mod taskbar;
 
-pub use taskbar::{NativeTaskbar, TaskbarProgress};
+pub use taskbar::{
+    NativeTaskbar, TaskbarAction, TaskbarEvent, TaskbarIcons, TaskbarProgress, TaskbarTransport,
+};
 
 pub use recent::{RecentEntry, RecentFiles, RecentKind, RecentUpdate};
 mod tempo;

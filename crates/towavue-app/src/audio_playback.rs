@@ -798,6 +798,9 @@ mod tests {
                     app.toggle_pause();
                     assert_eq!(app.state, PlaybackState::Playing);
                     assert_eq!(app.playback_selection, inside.then_some(selected));
+                    if ms == 0 {
+                        crate::taskbar::tests::playback_round_trip(&mut app);
+                    }
                     assert_eq!(
                         app.session.as_ref().expect("session").range_end(),
                         inside.then_some(selected.end())

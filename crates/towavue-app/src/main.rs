@@ -64,6 +64,7 @@ mod tab_focus;
 mod tab_menu;
 mod tab_preview;
 mod tab_transfer;
+mod taskbar;
 mod time_selection;
 mod timeline_edit;
 mod timeline_input;
@@ -260,6 +261,7 @@ enum UiAction {
 
 enum AppEvent {
     TaskbarReady,
+    TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
     TabVideoSheet(
         tab_preview::Target,
         u64,
@@ -825,6 +827,7 @@ struct Application<N> {
     window: Option<Arc<Window>>,
     native_caption: Option<NativeCaption>,
     native_taskbar: Option<NativeTaskbar>,
+    taskbar_ui: taskbar::State,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
     fullscreen_was_maximized: bool,
@@ -1073,6 +1076,7 @@ where
             window: None,
             native_caption: None,
             native_taskbar: None,
+            taskbar_ui: taskbar::State::default(),
             fullscreen: false,
             fullscreen_controls_visible: false,
             fullscreen_was_maximized: false,
@@ -1276,14 +1280,20 @@ where
         self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
         let notify = Arc::clone(&self.notify);
-        let native_taskbar =
-            match NativeTaskbar::new(window.clone(), move || notify(AppEvent::TaskbarReady)) {
-                Ok(taskbar) => Some(taskbar),
-                Err(error) => {
-                    eprintln!("Taskbar integration unavailable: {error}");
-                    None
+        let native_taskbar = match NativeTaskbar::new(window.clone(), move |event| {
+            notify(match event {
+                towavue_runtime_windows::TaskbarEvent::Ready => AppEvent::TaskbarReady,
+                towavue_runtime_windows::TaskbarEvent::Click { context, action } => {
+                    AppEvent::TaskbarClick(context, action)
                 }
-            };
+            })
+        }) {
+            Ok(taskbar) => Some(taskbar),
+            Err(error) => {
+                eprintln!("Taskbar integration unavailable: {error}");
+                None
+            }
+        };
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(11);
         let mut renderer = if let Some(device) = graphics_device {
@@ -2714,7 +2724,11 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
-            AppEvent::TaskbarReady => self.sync_taskbar_progress(),
+            AppEvent::TaskbarReady => {
+                self.sync_taskbar_progress();
+                self.sync_taskbar_transport();
+            }
+            AppEvent::TaskbarClick(revision, action) => self.handle_taskbar_click(revision, action),
             AppEvent::TabVideoSheet(target, generation, result) => {
                 if self
                     .tabs
@@ -9759,6 +9773,7 @@ where
     fn schedule(&mut self) -> ControlFlow {
         // Export notifications still update the Shell while drawing is suspended.
         self.sync_taskbar_progress();
+        self.sync_taskbar_transport();
         if self.exit_requested {
             return ControlFlow::Poll;
         }
@@ -22833,6 +22848,7 @@ mod tests {
                 app.shortcuts = shortcuts::defaults();
                 let tab = app.tabs.open_new(self.0.clone(), MediaKind::Video);
                 let time = |seconds| media_time(Duration::from_secs(seconds));
+                taskbar::tests::playback_round_trip(&mut app);
                 for kind in [MediaKind::Video, MediaKind::Audio] {
                     app.media_kind = Some(kind);
                     for (key, forward) in

@@ -68,6 +68,7 @@ mod taskbar;
 mod time_selection;
 mod timeline_edit;
 mod timeline_input;
+mod track_drag;
 mod trim;
 #[cfg(test)]
 mod video_context_tests;
@@ -226,6 +227,7 @@ enum UiAction {
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
     Command(CommandId),
     BeginReadingDrag(egui::Pos2, egui::Vec2),
+    BeginTrackDrag(u64, egui::Pos2, egui::Vec2, bool),
     NativeCaption(CaptionAction),
     ActivateTab(TabId),
     TabCommand(TabId, CommandId),
@@ -926,6 +928,7 @@ struct Application<N> {
     view_drag: Option<ViewDrag>,
     reading_mode: bool,
     reading_drag: Option<reading_input::ReadingDrag>,
+    track_drag: Option<track_drag::Drag>,
     reading_cursor: Option<towavue_runtime_windows::PinnedCursor>,
     reading_settings: ReadingSettings,
     reading_pages: Vec<Result<ImagePresentation, String>>,
@@ -1182,6 +1185,7 @@ where
             view_drag: None,
             reading_mode: false,
             reading_drag: None,
+            track_drag: None,
             reading_cursor: None,
             reading_settings: ReadingSettings::default(),
             reading_pages: Vec::new(),
@@ -3477,6 +3481,7 @@ where
         {
             self.cancel_hold_speed();
             self.finish_reading_drag(true);
+            self.finish_track_drag(true);
         }
         // Decide before the menu can close itself with this same Escape event.
         if self.grid_open
@@ -4272,6 +4277,7 @@ where
 
     fn cancel_view_drag(&mut self) -> bool {
         let mut canceled_press = self.cancel_hold_speed();
+        canceled_press |= self.finish_track_drag(true);
         canceled_press |= self.cancel_video_scrub();
         canceled_press |= self.rotation_drag.take().is_some();
         canceled_press |= self.video_rotation_drag.take().is_some();
@@ -5499,13 +5505,10 @@ where
                     }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
-                        let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::button(
+                        let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::transport_button(
                             ui,
-                            if playing {
-                                chrome::Icon::Pause
-                            } else {
-                                chrome::Icon::Play
-                            },
+                            self.track_drag.as_ref().and_then(track_drag::Drag::icon)
+                                .unwrap_or(if playing { chrome::Icon::Pause } else { chrome::Icon::Play }),
                             &self.command_hint(
                                 CommandId::TogglePause,
                                 if playing { "Pause" } else { "Play / replay" },
@@ -5515,8 +5518,22 @@ where
                         } else {
                             "Playback is unavailable while loading or after an error"
                         });
-                        let held = self.hold_response(&play, actions);
-                        if play.clicked() && !held {
+                        let dragging = self.track_drag.is_some();
+                        if !dragging && self.held_speed.is_none()
+                            && let Some((origin, delta)) = track_drag::completed(&play)
+                        {
+                            actions.push(UiAction::BeginTrackDrag(self.media_generation, origin, delta, true));
+                        } else if !dragging && self.held_speed.is_none()
+                            && play.drag_started_by(egui::PointerButton::Primary)
+                            && ui.input(|input| input.pointer.primary_down() && input.modifiers.is_none())
+                            && let Some((origin, position)) = ui.input(|input|
+                                input.pointer.press_origin().zip(input.pointer.interact_pos()))
+                            && (position.x - origin.x).abs() > (position.y - origin.y).abs()
+                        {
+                            actions.push(UiAction::BeginTrackDrag(self.media_generation, origin, position - origin, false));
+                        }
+                        let held = !dragging && self.hold_response(&play, actions);
+                        if play.clicked() && !held && !dragging {
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
                         let duration = self
@@ -6155,6 +6172,9 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
+        if !matches!(action, UiAction::BeginTrackDrag(..)) {
+            self.finish_track_drag(true);
+        }
         if !matches!(action, UiAction::CommitVideoScrub(_)) {
             self.cancel_video_scrub();
         }
@@ -6228,6 +6248,9 @@ where
             }
             UiAction::Command(command) => self.dispatch(command),
             UiAction::BeginReadingDrag(position, delta) => self.begin_reading_drag(position, delta),
+            UiAction::BeginTrackDrag(media, position, delta, released) => {
+                self.begin_track_drag(media, position, delta, released)
+            }
             UiAction::NativeCaption(action) => {
                 if !self.fullscreen
                     && let Some(caption) = &self.native_caption
@@ -9091,6 +9114,7 @@ where
     }
 
     fn fail(&mut self, error: String) {
+        self.finish_track_drag(true);
         self.cancel_hold_speed();
         self.cancel_frame_steps();
         if let Some(session) = &mut self.session {
@@ -9135,8 +9159,10 @@ where
         if self.reading_drag.is_some() {
             return Some(self.reading_status());
         }
-        if self.held_speed.is_some() {
-            return Some("2× while held · release to restore playback".into());
+        if (self.held_speed.is_some() || self.track_drag.is_some())
+            && let Some((message, _)) = &self.status_message
+        {
+            return Some(message.clone());
         }
         if let Some((message, shown)) = &self.status_message
             && shown.elapsed() < STATUS_MESSAGE_DURATION
@@ -10426,6 +10452,9 @@ where
                 }
             }
         }
+        if self.track_window_event(&event) {
+            return;
+        }
         if self.reading_drag.is_some() {
             match &event {
                 WindowEvent::MouseInput {
@@ -10599,6 +10628,17 @@ where
         _: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
+        if self.track_drag.is_some() {
+            if !self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.has_focus())
+            {
+                self.finish_track_drag(true);
+            } else if let winit::event::DeviceEvent::MouseMotion { delta } = event {
+                self.move_track_drag(delta);
+            }
+        }
         if self.reading_drag.is_some() {
             if !self
                 .window

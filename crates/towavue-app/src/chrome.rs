@@ -165,6 +165,8 @@ pub enum Icon {
     ExitFullscreen,
     Speaker,
     Muted,
+    PreviousTrack,
+    NextTrack,
 }
 
 impl Icon {
@@ -176,6 +178,8 @@ impl Icon {
             Self::ExitFullscreen => '\u{eb4d}',
             Self::Speaker => '\u{eb75}',
             Self::Muted => '\u{eb24}',
+            Self::PreviousTrack => '\u{eab5}',
+            Self::NextTrack => '\u{eab6}',
         };
         egui::RichText::new(glyph).font(crate::fonts::icon_font())
     }
@@ -222,8 +226,19 @@ pub fn tab_label(label: String, active: bool) -> egui::Atoms<'static> {
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
+    button_with_sense(ui, icon, label, egui::Sense::click())
+}
+
+pub fn transport_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
+    button_with_sense(ui, icon, label, egui::Sense::click_and_drag())
+}
+
+fn button_with_sense(ui: &mut Ui, icon: Icon, label: &str, sense: egui::Sense) -> egui::Response {
     let response = ui
-        .add_sized([28.0, 24.0], egui::Button::new(icon.text()).frame(false))
+        .add_sized(
+            [28.0, 24.0],
+            egui::Button::new(icon.text()).frame(false).sense(sense),
+        )
         .help_text(label);
     let origin = response.rect.center() - egui::vec2(8.0, 8.0);
     let color = ui.style().interact(&response).fg_stroke.color;
@@ -248,7 +263,7 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
         }
         _ => {}
     }
-    let role = if matches!(icon, Icon::Pause) {
+    let role = if matches!(icon, Icon::Pause | Icon::PreviousTrack | Icon::NextTrack) {
         Icon::Play
     } else {
         icon

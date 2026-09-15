@@ -40,6 +40,15 @@ fn input_id() -> egui::Id {
     egui::Id::new("temporary-speed-hold")
 }
 
+pub(super) fn pending_press_origin(response: &egui::Response) -> Option<egui::Pos2> {
+    response
+        .ctx
+        .data(|data| data.get_temp::<Input>(input_id()))?
+        .press
+        .filter(|press| press.id == response.id && !press.active)
+        .map(|press| press.origin)
+}
+
 fn cancel_input(context: &egui::Context) -> bool {
     context.data_mut(|data| {
         let input = data.get_temp_mut_or_default::<Input>(input_id());

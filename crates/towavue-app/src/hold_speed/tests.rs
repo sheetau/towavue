@@ -1,6 +1,45 @@
 use super::*;
 
 #[test]
+fn held_video_progress_reaches_painted_status_and_does_not_expire_mid_gesture() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "hold_speed::tests::held_video_progress_reaches_painted_status_and_does_not_expire_mid_gesture",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    app.media_kind = Some(MediaKind::Video);
+    app.state = PlaybackState::Playing;
+    app.held_speed = Some(Held {
+        token: 1,
+        media: app.media_generation,
+        rate: 2.0,
+        was_paused: false,
+    });
+    for progress in [0, 50, 100] {
+        app.show_hold_progress(progress);
+        app.status_message.as_mut().expect("notice").1 = Instant::now() - Duration::from_secs(60);
+        for _ in 0..2 {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                },
+            );
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains(&format!("{progress}% to lock 1×")))));
+        }
+    }
+}
+
+#[test]
 fn video_hold_preserves_history_bounds_and_the_prior_transport_state() {
     run_session_trial(
         false,
@@ -366,10 +405,8 @@ fn run_session_trial(audio: bool, test: &str) {
                             );
                             let target = if original == 2.0 { 1.0 } else { 2.0 };
                             assert!(
-                                app.status_message
-                                    .as_ref()
+                                app.status_notice()
                                     .expect("progress")
-                                    .0
                                     .contains(&format!("100% to lock {target}×"))
                             );
                             let release = egui::Event::PointerButton {

@@ -172,7 +172,7 @@ fn png_paeth_thumbnail_matches_unhooked_decode_for_four_byte_pixel_strides() {
 #[test]
 fn png_row_thumbnail_matches_full_decode_for_colors_depths_and_all_orientations() {
     let path = path("colors");
-    for (width, height) in [(503, 317), (7, 5), (1, 1)] {
+    for (width, height) in [(503, 317), (7, 5), (1, 1), (1, 31), (31, 1), (317, 503)] {
         for color in [
             png::ColorType::Grayscale,
             png::ColorType::GrayscaleAlpha,

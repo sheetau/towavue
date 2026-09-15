@@ -2609,8 +2609,9 @@ where
                     .iter()
                     .any(|tab| tab.id == target.tab && tab.target.current_path() == target.path)
                     && let Some(context) = &self.ui_context
+                    && self.tab_preview.finish(context, target, generation, result)
                 {
-                    self.tab_preview.finish(context, target, generation, result);
+                    self.request_redraw();
                 }
             }
             AppEvent::ImagePreview(path, generation, preview) => {

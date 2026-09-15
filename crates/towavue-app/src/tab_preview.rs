@@ -329,9 +329,9 @@ impl TabPreview {
         target: Target,
         generation: u64,
         result: Result<PreviewImage, String>,
-    ) {
+    ) -> bool {
         if generation != self.generation || self.target.as_ref() != Some(&target) {
-            return;
+            return false;
         }
         self.sheet_uv = None;
         self.sheet_layout = None;
@@ -347,6 +347,7 @@ impl TabPreview {
             ))
         }));
         context.request_repaint();
+        true
     }
 
     pub fn finish_sheet(
@@ -770,7 +771,14 @@ mod tests {
                 }),
             );
             match case {
-                0 => preview.finish(&context, target.clone(), preview.generation, Ok(pixels())),
+                0 => {
+                    assert!(preview.finish(
+                        &context,
+                        target.clone(),
+                        preview.generation,
+                        Ok(pixels())
+                    ));
+                }
                 _ => {
                     let result = match case {
                         1 => Err("decode failed".to_owned()),
@@ -797,6 +805,142 @@ mod tests {
             assert!(preview.sheet_layout.is_none() && preview.sheet_uv.is_none());
             assert_eq!(matches!(preview.texture, Some(Ok(_))), case == 0);
         }
+    }
+
+    #[test]
+    fn first_preview_completion_wakes_an_idle_native_window() {
+        use crate::*;
+        use winit::event::StartCause;
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        let Some(root) = crate::tests::isolated_test_root(
+            "tab_preview::tests::first_preview_completion_wakes_an_idle_native_window",
+        ) else {
+            return;
+        };
+        struct Trial {
+            app: Application<fn(AppEvent)>,
+            target: Target,
+            deadline: Instant,
+            waiting: bool,
+            redraws: Vec<bool>,
+        }
+        impl Trial {
+            fn finish_case(&mut self, event_loop: &ActiveEventLoop, redrawn: bool) {
+                self.redraws.push(redrawn);
+                self.waiting = false;
+                self.deadline = Instant::now() + Duration::from_millis(100);
+                if self.redraws.len() == 5 {
+                    event_loop.set_control_flow(ControlFlow::Poll);
+                    event_loop.exit();
+                }
+            }
+        }
+        impl ApplicationHandler for Trial {
+            fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+                self.app.window = Some(Arc::new(
+                    event_loop
+                        .create_window(
+                            Window::default_attributes()
+                                .with_title("towavue preview redraw verification")
+                                .with_inner_size(winit::dpi::LogicalSize::new(480.0, 240.0))
+                                .with_active(false),
+                        )
+                        .expect("visible owned window"),
+                ));
+                self.deadline = Instant::now() + Duration::from_millis(100);
+            }
+            fn new_events(&mut self, event_loop: &ActiveEventLoop, _: StartCause) {
+                if self.app.window.is_none() || Instant::now() < self.deadline {
+                    return;
+                }
+                if self.waiting {
+                    self.finish_case(event_loop, false);
+                    return;
+                }
+                if self.redraws.len() == 5 {
+                    return;
+                }
+                self.app.tab_preview.clear();
+                self.app.tab_preview.target = Some(self.target.clone());
+                let case = self.redraws.len();
+                let result = if case != 3 {
+                    Ok(PreviewImage {
+                        width: 2,
+                        height: 1,
+                        rgba: vec![255; 8].into(),
+                    })
+                } else {
+                    Err("controlled preview failure".into())
+                };
+                self.waiting = true;
+                self.deadline = Instant::now() + Duration::from_millis(250);
+                match case {
+                    0 => self.app.request_redraw(),
+                    1 => {
+                        // Historical completion handler: egui-only repaint.
+                        assert!(self.app.tab_preview.finish(
+                            self.app.ui_context.as_ref().expect("context"),
+                            self.target.clone(),
+                            self.app.tab_preview.generation,
+                            result,
+                        ));
+                    }
+                    _ => self.app.handle_app_event(AppEvent::TabPreview(
+                        self.target.clone(),
+                        self.app
+                            .tab_preview
+                            .generation
+                            .wrapping_add(u64::from(case == 4)),
+                        result,
+                    )),
+                }
+                assert_eq!(
+                    self.app.tab_preview.texture.is_some(),
+                    (1..=3).contains(&case),
+                    "only current completions are accepted"
+                );
+                assert_eq!(self.app.ui_repaint_at, None, "no previous repaint timer");
+            }
+            fn window_event(
+                &mut self,
+                event_loop: &ActiveEventLoop,
+                _: WindowId,
+                event: WindowEvent,
+            ) {
+                if self.waiting && matches!(event, WindowEvent::RedrawRequested) {
+                    self.finish_case(event_loop, true);
+                }
+            }
+            fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+                if self.redraws.len() < 5 {
+                    event_loop.set_control_flow(ControlFlow::WaitUntil(self.deadline));
+                }
+            }
+        }
+        let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+        app.ui_context = Some(crate::fonts::test_context());
+        app.tabs
+            .open_new(root.join("pending.png"), MediaKind::Image);
+        let target = app.tab_preview.target(app.tabs.active().expect("tab"));
+        let mut trial = Trial {
+            app,
+            target,
+            deadline: Instant::now(),
+            waiting: false,
+            redraws: Vec::new(),
+        };
+        let mut builder = EventLoop::builder();
+        builder.with_any_thread(true);
+        builder
+            .build()
+            .expect("event loop")
+            .run_app(&mut trial)
+            .expect("native wakeup trial");
+        assert_eq!(
+            trial.redraws,
+            [true, false, true, true, false],
+            "native control/current completions wake; egui-only/stale remain idle"
+        );
     }
 
     #[test]

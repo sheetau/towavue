@@ -1,7 +1,70 @@
 use super::*;
 use image::metadata::Orientation;
 use std::io::Cursor;
-use zune_core::{bytestream::ZCursor, colorspace::ColorSpace, options::DecoderOptions};
+use zune_core::{
+    bytestream::{ZByteIoError, ZByteReaderTrait, ZCursor, ZSeekFrom},
+    colorspace::ColorSpace,
+    options::DecoderOptions,
+};
+
+// zune's std blanket reader loops over Read even for an in-memory four-byte
+// entropy refill. Specialize only exact reads; preserve partial-buffer writes
+// and unchanged cursor position on EOF, and delegate the remaining operations.
+struct JpegReader<'a>(ZCursor<&'a [u8]>);
+
+impl ZByteReaderTrait for JpegReader<'_> {
+    #[inline(always)]
+    fn read_exact_bytes(&mut self, buf: &mut [u8]) -> Result<(), ZByteIoError> {
+        let (_, remaining) = self.0.split();
+        if let Some(bytes) = remaining.get(..buf.len()) {
+            buf.copy_from_slice(bytes);
+            self.0.skip(buf.len());
+            Ok(())
+        } else {
+            let read = remaining.len();
+            buf[..read].copy_from_slice(remaining);
+            Err(ZByteIoError::NotEnoughBytes(read, buf.len()))
+        }
+    }
+
+    #[inline(always)]
+    fn read_byte_no_error(&mut self) -> u8 {
+        self.0.read_byte_no_error()
+    }
+
+    #[inline(always)]
+    fn read_bytes(&mut self, buf: &mut [u8]) -> Result<usize, ZByteIoError> {
+        self.0.read_bytes(buf)
+    }
+
+    #[inline(always)]
+    fn peek_bytes(&mut self, buf: &mut [u8]) -> Result<usize, ZByteIoError> {
+        self.0.peek_bytes(buf)
+    }
+
+    fn peek_exact_bytes(&mut self, buf: &mut [u8]) -> Result<(), ZByteIoError> {
+        self.0.peek_exact_bytes(buf)
+    }
+
+    #[inline(always)]
+    fn z_seek(&mut self, from: ZSeekFrom) -> Result<u64, ZByteIoError> {
+        self.0.z_seek(from)
+    }
+
+    #[inline(always)]
+    fn is_eof(&mut self) -> Result<bool, ZByteIoError> {
+        self.0.is_eof()
+    }
+
+    #[inline(always)]
+    fn z_position(&mut self) -> Result<u64, ZByteIoError> {
+        self.0.z_position()
+    }
+
+    fn read_remaining(&mut self, sink: &mut Vec<u8>) -> Result<usize, ZByteIoError> {
+        self.0.read_remaining(sink)
+    }
+}
 
 /// Use image's pinned JPEG backend, but decode directly into the retained RGBA
 /// canvas instead of allocating RGB/Luma and then converting the entire image.
@@ -21,8 +84,10 @@ pub(super) fn decode(
         .set_max_width(usize::MAX)
         .set_max_height(usize::MAX)
         .jpeg_set_out_colorspace(ColorSpace::RGBA);
-    let mut decoder =
-        zune_jpeg::JpegDecoder::new_with_options(ZCursor::new(bytes.as_slice()), options);
+    let mut decoder = zune_jpeg::JpegDecoder::new_with_options(
+        JpegReader(ZCursor::new(bytes.as_slice())),
+        options,
+    );
     decoder.decode_headers().map_err(decode_error)?;
     let (width, height) = decoder.dimensions().expect("decoded JPEG headers");
     let len = width
@@ -94,6 +159,87 @@ pub(super) fn decode_error(error: zune_jpeg::errors::DecodeErrors) -> ImageDecod
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_memory_reads_match_zcursor_at_and_beyond_eof() {
+        let bytes: Vec<_> = (0..=255).collect();
+        for end in [0, 1, 3, 4, 7, 128, 256] {
+            for position in 0..=end + 2 {
+                for len in [0, 1, 2, 4, 8, 32, 300] {
+                    let mut old = ZCursor::new(&bytes[..end]);
+                    let mut new = JpegReader(ZCursor::new(&bytes[..end]));
+                    old.z_seek(ZSeekFrom::Start(position as u64)).expect("seek");
+                    new.z_seek(ZSeekFrom::Start(position as u64)).expect("seek");
+                    let mut expected = vec![77; len];
+                    let mut actual = expected.clone();
+                    let before = old.read_exact_bytes(&mut expected);
+                    let after = new.read_exact_bytes(&mut actual);
+                    assert_eq!(format!("{after:?}"), format!("{before:?}"));
+                    assert_eq!(actual, expected, "partial output at EOF");
+                    assert_eq!(
+                        new.z_position().expect("position"),
+                        old.z_position().expect("position")
+                    );
+                    assert_eq!(new.read_byte_no_error(), old.read_byte_no_error());
+                    assert_eq!(new.is_eof().expect("EOF"), old.is_eof().expect("EOF"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "Release reader comparison; explicit read-only TOWAVUE_JPEG_READER_SOURCE"]
+    fn exact_memory_reader_reports_decode_cost() -> Result<(), &'static str> {
+        if cfg!(debug_assertions) {
+            return Err("use Release for timing");
+        }
+        fn rgba(reader: impl ZByteReaderTrait) -> Vec<u8> {
+            let options = DecoderOptions::default()
+                .set_strict_mode(true)
+                .set_max_width(usize::MAX)
+                .set_max_height(usize::MAX)
+                .jpeg_set_out_colorspace(ColorSpace::RGBA);
+            zune_jpeg::JpegDecoder::new_with_options(reader, options)
+                .decode()
+                .expect("JPEG pixels")
+        }
+        let source = std::env::var_os("TOWAVUE_JPEG_READER_SOURCE")
+            .map(std::path::PathBuf::from)
+            .ok_or("set an explicit static JPEG source")?;
+        let modified = std::fs::metadata(&source)
+            .expect("source")
+            .modified()
+            .expect("mtime");
+        let bytes = std::fs::read(&source).expect("read-only source");
+        let expected = rgba(ZCursor::new(bytes.as_slice()));
+        for specialized in [false, true, true, false] {
+            let mut samples = Vec::new();
+            for _ in 0..5 {
+                let started = std::time::Instant::now();
+                let image = if specialized {
+                    rgba(JpegReader(ZCursor::new(bytes.as_slice())))
+                } else {
+                    rgba(ZCursor::new(bytes.as_slice()))
+                };
+                samples.push(started.elapsed().as_secs_f64() * 1000.0);
+                assert!(image == expected, "all decoded pixels must match");
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "JPEG_READER specialized={specialized} median_ms={:.3}",
+                samples[2]
+            );
+        }
+        assert!(std::fs::read(&source).expect("source identity") == bytes);
+        assert_eq!(
+            std::fs::metadata(&source)
+                .expect("source")
+                .modified()
+                .expect("mtime"),
+            modified
+        );
+        Ok(())
+    }
 
     fn baseline(bytes: &[u8]) -> DecodedImageFrame {
         static_frame(

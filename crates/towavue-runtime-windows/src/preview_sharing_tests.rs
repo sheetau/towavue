@@ -181,6 +181,81 @@ fn native_thumbnail_publication_reports_round_trip_cost() -> Result<(), &'static
     Ok(())
 }
 
+#[test]
+fn decoded_cache_png_preserves_owned_and_converted_pixel_layouts() {
+    for image in [
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_fn(37, 23, |x, y| {
+            image::Rgba([x as u8, y as u8, 97, (x * y) as u8])
+        })),
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(37, 23, |x, y| {
+            image::Rgb([x as u8, y as u8, 97])
+        })),
+        image::DynamicImage::ImageLumaA16(image::ImageBuffer::from_fn(37, 23, |x, y| {
+            image::LumaA([(x * 733) as u16, (y * 2017) as u16])
+        })),
+    ] {
+        let expected = image.to_rgba8();
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("generated PNG");
+        let actual = decode_png(encoded.get_ref()).expect("cached PNG");
+        assert_eq!((actual.width, actual.height), expected.dimensions());
+        assert!(
+            actual.rgba == *expected.as_raw(),
+            "full RGBA pixels, including hidden RGB"
+        );
+        assert!(decode_png(&encoded.get_ref()[..encoded.get_ref().len() / 2]).is_err());
+    }
+}
+
+#[test]
+#[ignore = "generated cache PNG decode/copy comparison; run in Release without concurrent builds"]
+fn owned_cache_png_reports_decode_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    for (width, height) in [(240, 160), (960, 640)] {
+        let pixels = image::RgbaImage::from_fn(width, height, |x, y| {
+            image::Rgba([x as u8, y as u8, (x / 7 + y) as u8, (x ^ y) as u8])
+        });
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        pixels
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("cache PNG");
+        for owned in [false, true, true, false] {
+            let mut samples = Vec::new();
+            for _ in 0..25 {
+                let started = std::time::Instant::now();
+                let actual = if owned {
+                    decode_png(encoded.get_ref()).expect("owned decode")
+                } else {
+                    let rgba = image::load_from_memory_with_format(
+                        encoded.get_ref(),
+                        image::ImageFormat::Png,
+                    )
+                    .expect("historical decode")
+                    .to_rgba8();
+                    PreviewImage {
+                        width: rgba.width(),
+                        height: rgba.height(),
+                        rgba: rgba.into_raw(),
+                    }
+                };
+                samples.push(started.elapsed());
+                assert_eq!((actual.width, actual.height), (width, height));
+                assert!(actual.rgba == *pixels.as_raw(), "full cached pixels");
+            }
+            samples.sort();
+            eprintln!(
+                "CACHE_PNG {width}x{height} owned={owned} median_ms={:.3}",
+                samples[12].as_secs_f64() * 1000.0
+            );
+        }
+    }
+    Ok(())
+}
+
 fn check_native_thumbnail_publication(sample_count: usize) {
     for (width, height) in [(32, 24), (240, 160), (1920, 1080)] {
         let root = cache("native-thumbnail-publication").root;

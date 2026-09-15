@@ -1149,7 +1149,7 @@ fn probed_duration(text: &str) -> Result<Duration, PreviewError> {
 }
 
 fn decode_png(bytes: &[u8]) -> Result<PreviewImage, image::ImageError> {
-    let rgba = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)?.to_rgba8();
+    let rgba = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)?.into_rgba8();
     Ok(PreviewImage {
         width: rgba.width(),
         height: rgba.height(),

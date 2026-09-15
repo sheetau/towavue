@@ -50,6 +50,8 @@ mod rotation;
 #[cfg(test)]
 mod rotation_tests;
 mod scroll_style;
+#[cfg(test)]
+mod seek_notice_tests;
 mod seekbar;
 mod selection;
 mod selection_aspect;
@@ -1773,6 +1775,7 @@ where
         transferred: bool,
         handoff: Option<image_handoff::ImageHandoff>,
     ) {
+        self.relative_seek_notice = None;
         let video_repeat = kind == MediaKind::Video
             && self
                 .tabs
@@ -5492,10 +5495,23 @@ where
                             .unwrap_or_else(|| "—".into());
                         let position = format_time(self.current_position());
                         let compact = ui.max_rect().width() < 340.0;
-                        let time_label = if compact {
-                            position
-                        } else { format!("{position} / {duration}") };
-                        let time_text = RichText::new(time_label).size(12.0).color(chrome::MUTED);
+                        let mut time_text = egui::text::LayoutJob::default();
+                        let format = egui::TextFormat {
+                            font_id: egui::FontId::proportional(12.0),
+                            color: chrome::MUTED,
+                            ..Default::default()
+                        };
+                        time_text.append(&position, 0.0, format.clone());
+                        if let Some(delta) = self.relative_seek_text() {
+                            time_text.append(&format!("({delta})"), 0.0, egui::TextFormat {
+                                color: chrome::FOREGROUND,
+                                ..format.clone()
+                            });
+                        }
+                        let full_time = format!("{} / {duration}", time_text.text);
+                        if !compact {
+                            time_text.append(&format!(" / {duration}"), 0.0, format);
+                        }
                         if compact {
                             // Keep volume and mode controls visible before truncating a long clock.
                             let controls_width = if self.media_kind == Some(MediaKind::Audio) { 114.0 } else { 80.0 };
@@ -5506,7 +5522,7 @@ where
                                 |ui| {
                                     ui.add(egui::Label::new(time_text).truncate())
                                 },
-                            ).inner.help_text(format!("{} / {duration}", format_time(self.current_position())));
+                            ).inner.help_text(full_time);
                         } else { ui.label(time_text); }
                         let volume = ui
                             .add_sized(
@@ -8108,6 +8124,7 @@ where
     }
 
     fn clear_active_media(&mut self) {
+        self.relative_seek_notice = None;
         self.close_filmstrip();
         self.reading_mode = false;
         self.session.take();
@@ -8479,17 +8496,11 @@ where
                 .saturating_sub(KEYBOARD_SEEK_STEP)
                 .max(MediaTime::ZERO)
         };
-        // Accumulate only the still-visible seek notice, not a restored or replaced
-        // message from another operation/tab. Playback time itself is not a seek.
+        // Playback time itself is not a seek. This transient notice is neither
+        // retained with a tab nor restored into the path/status-message area.
         let previous = self
             .relative_seek_notice
-            .filter(|(shown, _)| {
-                shown.elapsed() < STATUS_MESSAGE_DURATION
-                    && self
-                        .status_message
-                        .as_ref()
-                        .is_some_and(|(_, time)| time == shown)
-            })
+            .filter(|(shown, _)| shown.elapsed() < STATUS_MESSAGE_DURATION)
             .map_or(0, |(_, delta)| delta);
         if let Some(target) = self.seek_to_target(target) {
             let delta = previous.saturating_add(
@@ -8497,19 +8508,14 @@ where
                     .as_nanoseconds()
                     .saturating_sub(position.as_nanoseconds()),
             );
-            let seconds = format!("{:+.3}", delta as f64 / 1_000_000_000.0);
-            self.set_status(format!(
-                "{}s",
-                seconds.trim_end_matches('0').trim_end_matches('.')
-            ));
-            self.relative_seek_notice = self
-                .status_message
-                .as_ref()
-                .map(|(_, shown)| (*shown, delta));
+            self.status_message = None;
+            self.relative_seek_notice = Some((Instant::now(), delta));
+            self.request_redraw();
         }
     }
 
     fn seek_to(&mut self, target: MediaTime) {
+        self.relative_seek_notice = None;
         let _ = self.seek_to_target(target);
     }
 
@@ -9075,6 +9081,17 @@ where
         self.relative_seek_notice = None;
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
+    }
+
+    fn relative_seek_text(&self) -> Option<String> {
+        let (_, delta) = self
+            .relative_seek_notice
+            .filter(|(shown, _)| shown.elapsed() < STATUS_MESSAGE_DURATION)?;
+        let seconds = format!("{:+.3}", delta as f64 / 1_000_000_000.0);
+        Some(format!(
+            "{}s",
+            seconds.trim_end_matches('0').trim_end_matches('.')
+        ))
     }
 
     fn reading_status(&self) -> String {
@@ -9750,6 +9767,13 @@ where
             self.request_redraw();
         }
         self.expire_shortcut_prefix();
+        if self
+            .relative_seek_notice
+            .is_some_and(|(shown, _)| shown.elapsed() >= STATUS_MESSAGE_DURATION)
+        {
+            self.relative_seek_notice = None;
+            self.request_redraw();
+        }
         self.discard_late_video_frames();
         if self.state == PlaybackState::Playing {
             if let (Some(window), Some(presentation_time)) = (&self.window, self.pending_time) {
@@ -9832,12 +9856,16 @@ where
             .as_ref()
             .map(|(_, shown)| *shown + STATUS_MESSAGE_DURATION);
         let prefix_expiry = self.prefix_started.map(|started| started + PREFIX_TIMEOUT);
+        let seek_notice_expiry = self
+            .relative_seek_notice
+            .map(|(shown, _)| shown + STATUS_MESSAGE_DURATION);
         [
             self.background_wakeup(now),
             folder_poll,
             next_image_frame,
             self.ui_repaint_at,
             status_expiry,
+            seek_notice_expiry,
             prefix_expiry,
             self.viewing_cursor.deadline,
             (self.state == PlaybackState::Playing
@@ -22758,7 +22786,7 @@ mod tests {
                         assert_eq!(app.state, PlaybackState::Paused);
                         assert_eq!(app.current_position(), time(if forward { 6 } else { 0 }));
                         assert_eq!(
-                            app.status_notice().as_deref(),
+                            app.relative_seek_text().as_deref(),
                             Some(if forward { "+5s" } else { "-1s" })
                         );
                         assert!(!app.edits.contains_key(&tab));
@@ -22773,22 +22801,25 @@ mod tests {
                         ("Left", "+0s"),
                     ] {
                         app.process_shortcut(key.parse().expect("relative seek"));
-                        assert_eq!(app.status_notice().as_deref(), Some(expected));
+                        assert_eq!(app.relative_seek_text().as_deref(), Some(expected));
+                        assert!(
+                            app.status_message.is_none(),
+                            "relative seek preserves the path slot"
+                        );
                     }
                     app.set_status("Another operation".into());
                     app.dispatch(CommandId::SeekForward);
-                    assert_eq!(app.status_notice().as_deref(), Some("+5s"));
+                    assert_eq!(app.relative_seek_text().as_deref(), Some("+5s"));
                     let expired = Instant::now() - STATUS_MESSAGE_DURATION;
-                    app.status_message.as_mut().expect("seek notice").1 = expired;
                     app.relative_seek_notice.as_mut().expect("seek total").0 = expired;
                     app.dispatch(CommandId::SeekForward);
-                    assert_eq!(app.status_notice().as_deref(), Some("+5s"));
-                    app.status_message = None;
+                    assert_eq!(app.relative_seek_text().as_deref(), Some("+5s"));
+                    app.relative_seek_notice = None;
                     app.dispatch(CommandId::SeekBackward);
-                    assert_eq!(app.status_notice().as_deref(), Some("-5s"));
+                    assert_eq!(app.relative_seek_text().as_deref(), Some("-5s"));
                     app.seek_to(media_time(Duration::from_millis(1250)));
                     app.dispatch(CommandId::SeekBackward);
-                    assert_eq!(app.status_notice().as_deref(), Some("-1.25s"));
+                    assert_eq!(app.relative_seek_text().as_deref(), Some("-1.25s"));
                     assert!(!app.edits.contains_key(&tab));
                     app.seek_to(time(1));
                     app.process_shortcut("K".parse().expect("play"));
@@ -22806,9 +22837,9 @@ mod tests {
                 app.media_duration = Some(Duration::from_secs(2));
                 app.seek_to(media_time(Duration::from_millis(1250)));
                 app.dispatch(CommandId::SeekForward);
-                assert_eq!(app.status_notice().as_deref(), Some("+0.75s"));
+                assert_eq!(app.relative_seek_text().as_deref(), Some("+0.75s"));
                 app.dispatch(CommandId::SeekForward);
-                assert_eq!(app.status_notice().as_deref(), Some("+0.75s"));
+                assert_eq!(app.relative_seek_text().as_deref(), Some("+0.75s"));
                 app.state = PlaybackState::Playing;
                 app.seek_to(time(999));
                 assert_eq!(app.current_position(), time(2));

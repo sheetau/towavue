@@ -36,6 +36,10 @@ use windows::core::{Interface, PCWSTR, w};
 #[cfg(feature = "shell-lifecycle-verification")]
 pub(crate) mod verification;
 
+#[cfg(test)]
+#[path = "shell/tests/enumeration_tests.rs"]
+mod enumeration_tests;
+
 #[derive(Debug, Error)]
 pub enum FolderOrderError {
     #[error("the Shell worker stopped")]

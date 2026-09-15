@@ -1,7 +1,7 @@
 use egui::{Context, Event, Id, Pos2, Response};
 
 mod native;
-pub use native::prepare_native_input;
+pub use native::{prepare_native_input, record_scroll_area};
 
 #[derive(Clone, Default)]
 struct Position {

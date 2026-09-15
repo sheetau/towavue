@@ -19,7 +19,10 @@ pub(crate) trait ScrollAreaStyle {
     ) -> ScrollAreaOutput<R>;
 }
 
-fn with_style<R>(ui: &mut Ui, show: impl FnOnce(&mut Ui, Arc<Style>) -> R) -> R {
+fn with_style<R>(
+    ui: &mut Ui,
+    show: impl FnOnce(&mut Ui, Arc<Style>) -> ScrollAreaOutput<R>,
+) -> ScrollAreaOutput<R> {
     let original = ui.style().clone();
     // egui paints bars with the parent's widget visuals after laying out content.
     // Restore the content's style separately, without adding a scope or changing IDs.
@@ -32,6 +35,7 @@ fn with_style<R>(ui: &mut Ui, show: impl FnOnce(&mut Ui, Arc<Style>) -> R) -> R 
         visual.corner_radius = egui::CornerRadius::same(u8::MAX);
     }
     let result = show(ui, original.clone());
+    crate::wheel_input::record_scroll_area(ui, &result);
     ui.set_style(original);
     result
 }

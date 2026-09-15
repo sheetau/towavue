@@ -311,7 +311,8 @@ pub(super) fn show(
     );
     painter.add(cti);
     for start in [true, false] {
-        let selection = output.selection.unwrap_or(selection);
+        // Report the displayed drag preview without committing it to the model.
+        let selection = output.selection.unwrap_or(preview);
         let current = selection.map_or(if start { MediaTime::ZERO } else { duration }, |range| {
             if start { range.start() } else { range.end() }
         });
@@ -1260,6 +1261,165 @@ mod tests {
                     }
                 }
                 assert!(frame(&context, vec![button(300.0, false)], true, selected).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn selection_readouts_follow_held_previews_without_committing() {
+        let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+        let original = TimeRange::new(time(2.5), time(5.0));
+        for density in [1.0, 1.25, 2.0] {
+            for discard in [false, true] {
+                for cancel in [false, true] {
+                    for (selection, origin, target, modifiers) in [
+                        (None, 120.0, 320.0, egui::Modifiers::NONE),
+                        (None, 320.0, 120.0, egui::Modifiers::NONE),
+                        (original, 220.0, 320.0, egui::Modifiers::NONE),
+                        (original, 180.0, 280.0, egui::Modifiers::ALT),
+                    ] {
+                        let context = egui::Context::default();
+                        context.set_pixels_per_point(density);
+                        context.enable_accesskit();
+                        let draw = |events| {
+                            let mut results = Vec::new();
+                            let output = context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(500.0, 200.0),
+                                    )),
+                                    events,
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let response = ui.interact(
+                                        rect,
+                                        "readout-preview".into(),
+                                        egui::Sense::click_and_drag(),
+                                    );
+                                    let result = show(
+                                        ui,
+                                        &response,
+                                        time(10.0),
+                                        time(0.0),
+                                        selection,
+                                        None,
+                                        true,
+                                    );
+                                    if result.seek.is_some()
+                                        || result.selection.is_some()
+                                        || result.edit.is_some()
+                                    {
+                                        results.push(result);
+                                    }
+                                    if discard && context.current_pass_index() == 0 {
+                                        context.request_discard(
+                                            "readout preview must survive a discarded pass",
+                                        );
+                                    }
+                                },
+                            );
+                            let labels: Vec<_> = output
+                                .shapes
+                                .iter()
+                                .filter_map(|shape| {
+                                    if let egui::Shape::Text(text) = &shape.shape {
+                                        let text = text.galley.text();
+                                        if text.starts_with("In ") || text.starts_with("Out ") {
+                                            return Some(text.to_owned());
+                                        }
+                                    }
+                                    None
+                                })
+                                .collect();
+                            let tree = output
+                                .platform_output
+                                .accesskit_update
+                                .expect("accessibility tree");
+                            for (prefix, name) in [
+                                ("In ", "Time selection start (seconds)"),
+                                ("Out ", "Time selection end (seconds)"),
+                            ] {
+                                if let Some(value) =
+                                    labels.iter().find_map(|label| label.strip_prefix(prefix))
+                                {
+                                    let value: f64 = value
+                                        .trim_end_matches('s')
+                                        .parse()
+                                        .expect("displayed seconds");
+                                    let node = tree
+                                        .nodes
+                                        .iter()
+                                        .find(|(_, node)| node.label() == Some(name))
+                                        .expect("endpoint node");
+                                    assert_eq!(
+                                        node.1.numeric_value(),
+                                        Some(value),
+                                        "accessible and visible endpoints agree"
+                                    );
+                                }
+                            }
+                            (labels, results)
+                        };
+                        let button = |x, pressed| egui::Event::PointerButton {
+                            pos: egui::pos2(x, 70.0),
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers,
+                        };
+                        draw(vec![]);
+                        draw(vec![button(origin, true)]);
+                        let (labels, actions) =
+                            draw(vec![egui::Event::PointerMoved(egui::pos2(target, 70.0))]);
+                        assert!(
+                            actions.is_empty(),
+                            "held preview must not commit or seek again"
+                        );
+                        assert_eq!(
+                            labels,
+                            ["In 2.500s", "Out 7.500s"],
+                            "readouts follow the displayed range"
+                        );
+                        let (labels, actions) = draw(vec![if cancel {
+                            egui::Event::Key {
+                                key: egui::Key::Escape,
+                                physical_key: None,
+                                pressed: true,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            }
+                        } else {
+                            button(target, false)
+                        }]);
+                        if cancel {
+                            assert!(actions.is_empty());
+                            let expected = if selection.is_some() {
+                                vec!["In 2.500s", "Out 5.000s"]
+                            } else {
+                                vec![]
+                            };
+                            assert_eq!(labels, expected, "cancel restores the committed readout");
+                        } else {
+                            assert_eq!(labels, ["In 2.500s", "Out 7.500s"]);
+                            assert_eq!(actions.len(), 1, "release commits once");
+                            if modifiers.alt {
+                                assert_eq!(
+                                    actions[0].edit,
+                                    Some(TimelineEdit::Stretch(
+                                        original.expect("selection"),
+                                        time(5.0)
+                                    ))
+                                );
+                            } else {
+                                assert_eq!(
+                                    actions[0].selection,
+                                    Some(TimeRange::new(time(2.5), time(7.5)))
+                                );
+                            }
+                        }
+                    }
+                }
             }
         }
     }

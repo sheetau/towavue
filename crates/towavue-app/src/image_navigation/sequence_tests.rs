@@ -103,6 +103,85 @@ fn draw(app: &mut App, context: &egui::Context) -> Option<u64> {
 }
 
 #[test]
+fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::held_image_keys_preserve_original_order_and_only_repeat_navigation",
+    ) else {
+        return;
+    };
+    let (mut app, context, paths) = fixture(&root);
+    app.process_shortcut("Right".parse().expect("key"));
+    app.image_loader.request(Vec::new());
+    for _ in 0..99 {
+        app.repeat_image_shortcut("Right".parse().expect("key"));
+    }
+    assert_eq!(app.path.as_ref(), Some(&paths[1]));
+    assert_eq!(app.image_sequence.steps.len(), 99);
+    for index in 1..=100 {
+        assert_eq!(app.path.as_ref(), Some(&paths[index % 100]));
+        assert_eq!(draw(&mut app, &context), None, "loading cannot advance");
+        complete(&mut app);
+        let token = draw(&mut app, &context).expect("original drawn");
+        app.finish_image_sequence_frame(Some(token));
+        app.image_loader.request(Vec::new());
+        app.folder_order.request(None);
+    }
+    assert!(app.image_sequence.awaiting.is_none());
+    assert!(app.image_sequence.steps.is_empty());
+
+    app.repeat_image_shortcut("Left".parse().expect("key"));
+    app.image_loader.request(Vec::new());
+    assert_eq!(app.path.as_ref(), Some(&paths[99]));
+    for _ in 0..300 {
+        app.repeat_image_shortcut("Backspace".parse().expect("alias"));
+    }
+    assert_eq!(app.image_sequence.steps.len(), 256);
+    assert!(app.image_sequence.steps.iter().all(|forward| !forward));
+    assert!(
+        app.status_message
+            .as_ref()
+            .expect("queue limit")
+            .0
+            .contains("queue is full")
+    );
+
+    app.image_sequence.steps.clear();
+    for key in ["F11", "Delete", "Ctrl+S", "Alt+Right"] {
+        app.repeat_image_shortcut(key.parse().expect("non-image command"));
+    }
+    assert!(app.image_sequence.steps.is_empty());
+    assert!(!app.fullscreen);
+    assert_eq!(app.path.as_ref(), Some(&paths[99]));
+    for state in 0..4 {
+        app.filmstrip_open = state == 0;
+        app.palette_open = state == 1;
+        app.grid_open = state == 2;
+        app.entered_shortcut = if state == 3 {
+            vec!["Ctrl+K".parse().expect("prefix")]
+        } else {
+            vec![]
+        };
+        app.repeat_image_shortcut("Right".parse().expect("key"));
+        assert!(app.image_sequence.steps.is_empty());
+    }
+    app.entered_shortcut.clear();
+    app.shortcuts
+        .set(CommandId::NextImage, "N".parse().expect("custom key"));
+    app.shortcuts.set(
+        CommandId::ToggleFullscreen,
+        "Right".parse().expect("rebound key"),
+    );
+    app.repeat_image_shortcut("Right".parse().expect("key"));
+    assert!(!app.fullscreen, "rebound toggles must not repeat");
+    assert!(app.image_sequence.steps.is_empty());
+    app.repeat_image_shortcut("N".parse().expect("custom key"));
+    assert_eq!(
+        app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+        [true]
+    );
+}
+
+#[test]
 fn queued_destinations_precede_speculation_without_expanding_neighbors() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_navigation::sequence_tests::queued_destinations_precede_speculation_without_expanding_neighbors",

@@ -7,6 +7,20 @@ pub(crate) struct ImageSequence {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(crate) fn repeat_image_shortcut(&mut self, stroke: KeyStroke) {
+        // Repeat only standalone image navigation, never a chord prefix or a
+        // command rebound to the same physical key. Reuse the presentation queue.
+        if self.image_sequence_blocked() || self.filmstrip_open || !self.entered_shortcut.is_empty()
+        {
+            return;
+        }
+        if let ShortcutMatch::Command(command @ (CommandId::PreviousImage | CommandId::NextImage)) =
+            self.shortcuts.resolve(&[stroke], self.command_context())
+        {
+            self.dispatch(command);
+        }
+    }
+
     fn image_sequence_blocked(&self) -> bool {
         self.media_kind != Some(MediaKind::Image)
             || self.reading_mode

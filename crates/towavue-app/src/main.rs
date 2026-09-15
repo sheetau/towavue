@@ -9093,7 +9093,13 @@ where
         if self.modal_input_blocked() {
             return;
         }
-        if event.state != ElementState::Pressed || event.repeat {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        if event.repeat {
+            if let Some(stroke) = self.key_stroke(event) {
+                self.repeat_image_shortcut(stroke);
+            }
             return;
         }
         self.expire_shortcut_prefix();

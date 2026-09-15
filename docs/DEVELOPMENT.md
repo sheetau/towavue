@@ -16,6 +16,8 @@ $env:PATH = (Join-Path $ffmpegDir 'bin') + ';' + $env:PATH
 cargo run -p towavue-app -- 'path/to/media.mp4'
 ```
 
+For normal-speed use or performance comparisons, add `--release`: `cargo run -p towavue-app --release -- 'path/to/media.mp4'` (omit the final `--` and path to open Welcome). Plain `cargo run` uses unoptimized Debug code, including Rust image decoding and UI processing; Debug latency is not representative of the Release application.
+
 The setup script retrieves the checksum-pinned BtbN development build. **That build is not a distribution candidate:** its transitive FFTW linkage was rejected. For the native Windows rebuild and scoped ZVBI candidate, use the packaging references below. Do not introduce WSL.
 
 To use an already prepared compatible FFmpeg prefix, set `FFMPEG_DIR` to its root and add its `bin` to this shell's PATH instead. Use `CARGO_TARGET_DIR` to isolate incompatible native build variants; do not put personal absolute paths in tracked documentation.

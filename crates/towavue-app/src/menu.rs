@@ -32,6 +32,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "File",
         &[
             &[OpenFile, OpenFolder, OpenGallery],
+            &[GoToFile, OpenRecentFolder],
             &[
                 Save,
                 ExportAs,
@@ -820,6 +821,8 @@ mod tests {
         navigate(egui::Key::ArrowDown, false, "Open folder");
         navigate(egui::Key::ArrowDown, false, "Open Gallery");
         navigate(egui::Key::ArrowDown, false, "Open Recent");
+        navigate(egui::Key::ArrowDown, false, "Go to File");
+        navigate(egui::Key::ArrowDown, false, "Open Recent Folder");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
@@ -1146,7 +1149,7 @@ mod tests {
                 }]);
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
-            for _ in 0..leading + 2 * usize::from(category == "File") {
+            for _ in 0..leading + 4 * usize::from(category == "File") {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             for (index, definition) in command_definitions()

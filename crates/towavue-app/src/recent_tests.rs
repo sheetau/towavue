@@ -1,6 +1,135 @@
 use crate::*;
 use menu::{OpenTarget, RecentAction};
+use towavue_core::KeySequence;
 use towavue_runtime_windows::{RecentFiles, RecentKind};
+
+#[test]
+fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_bindings() {
+    let Some(_) = tests::isolated_test_root(
+        "recent_tests::picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_bindings",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    let mut query = String::new();
+    let _ = context.run_ui(egui::RawInput::default(), |ui| {
+        ui.text_edit_singleline(&mut query).request_focus();
+    });
+    assert!(context.text_edit_focused());
+    let stroke = |text: &str| text.parse::<KeySequence>().expect("key").strokes()[0].clone();
+    for palette in [false, true] {
+        app.palette_open = palette;
+        for keys in ["Ctrl+P", "Ctrl+Shift+P", "Ctrl+Alt+O"] {
+            assert!(app.owns_focused_shortcut(&stroke(keys)));
+            app.native_ime_composing = true;
+            assert!(!app.owns_focused_shortcut(&stroke(keys)));
+            app.native_ime_composing = false;
+            app.pending_guard = Some(GuardedAction::CloseTab(
+                app.tabs.gallery().expect("Gallery"),
+            ));
+            assert!(!app.owns_focused_shortcut(&stroke(keys)));
+            app.pending_guard = None;
+        }
+    }
+    app.shortcuts.set(
+        CommandId::GoToFile,
+        "Ctrl+Q".parse().expect("custom shortcut"),
+    );
+    assert!(!app.owns_focused_shortcut(&stroke("Ctrl+P")));
+    assert!(app.owns_focused_shortcut(&stroke("Ctrl+Q")));
+    assert!(!app.owns_focused_shortcut(&stroke("Q")));
+}
+
+#[test]
+fn quick_open_dispatches_from_gallery_and_preserves_replacement_guards() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::quick_open_dispatches_from_gallery_and_preserves_replacement_guards",
+    ) else {
+        return;
+    };
+    let first = root.join("first.bmp");
+    let second = root.join("second.bmp");
+    for path in [&first, &second] {
+        tab_transfer::tests::bitmap(path);
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    let tab =
+        tab_transfer::tests::install(&mut app, first.clone(), tab_transfer::tests::decoded(false));
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    let edits = app.edits[&tab].clone();
+    let gallery = app.tabs.gallery().expect("Gallery");
+    app.activate_tab(gallery);
+    app.recent_paths = vec![first.clone()];
+    let frame = |app: &mut Application<_>, events| {
+        let mut actions = Vec::new();
+        let _ = context.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |_| {
+                if app.palette_open {
+                    app.draw_command_palette(&context, 0.0, &mut actions);
+                }
+            },
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+    };
+    let enter = |modifiers| {
+        vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }]
+    };
+    app.process_shortcut("Ctrl+P".parse::<KeySequence>().expect("binding").strokes()[0].clone());
+    assert!(app.palette_open);
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    frame(&mut app, enter(egui::Modifiers::NONE));
+    assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(!app.palette_open);
+    assert_eq!(app.edits[&tab], edits);
+    app.recent_paths = vec![second.clone()];
+    app.dispatch(CommandId::GoToFile);
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    frame(&mut app, enter(egui::Modifiers::ALT));
+    assert!(!app.palette_open);
+    assert!(matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &second));
+    app.dispatch(CommandId::OpenRecentFolder);
+    assert!(!app.palette_open, "pending guard blocks other pickers");
+    app.resolve_guard(GuardDecision::Cancel);
+    assert_eq!(app.path.as_ref(), Some(&first));
+    assert_eq!(app.edits[&tab], edits);
+    app.activate_tab(gallery);
+    app.recent_folders = vec![root.clone()];
+    app.process_shortcut(
+        "Ctrl+Alt+O"
+            .parse::<KeySequence>()
+            .expect("folder binding")
+            .strokes()[0]
+            .clone(),
+    );
+    assert!(app.palette_open);
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    frame(&mut app, enter(egui::Modifiers::CTRL));
+    assert_eq!(app.pending_window_launches, [root]);
+    assert_eq!(app.tabs.active_id(), Some(gallery));
+    assert_eq!(app.edits[&tab], edits);
+}
 
 #[test]
 fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {

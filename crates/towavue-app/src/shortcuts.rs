@@ -42,6 +42,8 @@ pub fn defaults() -> ShortcutBindings {
     let mut bindings = ShortcutBindings::default();
     for (command, shortcut) in [
         (CommandId::OpenFile, "Ctrl+O"),
+        (CommandId::GoToFile, "Ctrl+P"),
+        (CommandId::OpenRecentFolder, "Ctrl+Alt+O"),
         (CommandId::ToggleFullscreen, "F11"),
         (CommandId::OpenFolder, "Ctrl+Shift+O"),
         (CommandId::CloseTab, "Ctrl+W"),
@@ -289,6 +291,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                     CommandId::FreeRotateImage
                         | CommandId::FreeRotateVideo
                         | CommandId::ToggleVideoRepeat
+                        | CommandId::GoToFile
+                        | CommandId::OpenRecentFolder
                 ))
                 && !declared.contains(&definition.id)
         })
@@ -296,6 +300,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         let contexts: Vec<_> = [
             towavue_core::MediaKind::Image,
             towavue_core::MediaKind::Video,
+            towavue_core::MediaKind::Audio,
         ]
         .into_iter()
         .flat_map(|kind| {
@@ -307,6 +312,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 ..Default::default()
             })
         })
+        .chain(std::iter::once(towavue_core::CommandContext::default()))
         .filter(|context| definition.is_enabled(*context))
         .collect();
         let kept: Vec<_> = bindings
@@ -1487,6 +1493,31 @@ mod tests {
             reloaded.get(CommandId::ZoomIn),
             bindings.get(CommandId::ZoomIn)
         );
+    }
+
+    #[test]
+    fn quick_open_defaults_do_not_shadow_existing_custom_keys_or_prefixes() {
+        for (text, removed) in [
+            ("open_file = Ctrl+P\n", CommandId::GoToFile),
+            ("open_folder = Ctrl+Alt+O X\n", CommandId::OpenRecentFolder),
+            ("toggle_audio_shuffle = Ctrl+P\n", CommandId::GoToFile),
+        ] {
+            let bindings = parse(text, defaults()).expect("existing custom binding");
+            assert!(bindings.get(removed).is_none(), "do not shadow {text}");
+        }
+        let bindings = defaults();
+        for (keys, command) in [
+            ("Ctrl+P", CommandId::GoToFile),
+            ("Ctrl+Alt+O", CommandId::OpenRecentFolder),
+        ] {
+            assert_eq!(
+                bindings.resolve(
+                    keys.parse::<KeySequence>().expect("key").strokes(),
+                    CommandContext::default()
+                ),
+                ShortcutMatch::Command(command)
+            );
+        }
     }
 
     #[test]

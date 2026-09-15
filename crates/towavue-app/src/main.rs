@@ -829,6 +829,7 @@ struct Application<N> {
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
+    native_ime_composing: bool,
     folder_order: FolderOrderProvider,
     pending_folder: Option<(u64, FolderIntent)>,
     folder_snapshot: Option<FolderSnapshot>,
@@ -1069,6 +1070,7 @@ where
             renderer: None,
             ui_context: None,
             ui_state: None,
+            native_ime_composing: false,
             folder_order,
             pending_folder: None,
             folder_snapshot: None,
@@ -5280,6 +5282,8 @@ where
                                         command,
                                         CommandId::ToggleGridMenu
                                             | CommandId::ToggleCommandPalette
+                                            | CommandId::GoToFile
+                                            | CommandId::OpenRecentFolder
                                             | CommandId::ToggleFilmstrip
                                     ) {
                                         self.grid_open = false;
@@ -6029,9 +6033,24 @@ where
         actions: &mut Vec<UiAction>,
     ) {
         let commands = self.command_context();
-        let (chosen, close) = self.palette.show(context, commands, &self.shortcuts, top);
-        if let Some(command) = chosen {
-            actions.push(UiAction::Command(command));
+        let (chosen, close) = self.palette.show_with_sources(
+            context,
+            commands,
+            &self.shortcuts,
+            top,
+            palette::OpenSources {
+                files: &self.recent_paths,
+                folders: &self.recent_folders,
+                folder: self.folder_snapshot.as_ref(),
+            },
+        );
+        match chosen {
+            Some(palette::Choice::Command(command)) => actions.push(UiAction::Command(command)),
+            Some(palette::Choice::Open(action)) => {
+                self.cancel_command_overlay();
+                actions.push(UiAction::Recent(action));
+            }
+            None => {}
         }
         if close {
             self.cancel_command_overlay();
@@ -6323,7 +6342,10 @@ where
         }
         self.command_overlay_return_focus = if matches!(
             command,
-            CommandId::ToggleCommandPalette | CommandId::ToggleGridMenu
+            CommandId::ToggleCommandPalette
+                | CommandId::ToggleGridMenu
+                | CommandId::GoToFile
+                | CommandId::OpenRecentFolder
         ) {
             if self.palette_open || self.grid_open {
                 self.command_overlay_return_focus
@@ -6429,6 +6451,13 @@ where
                 self.grid_open = false;
                 self.palette_open = !self.palette_open;
                 self.palette.reset();
+                self.request_redraw();
+            }
+            CommandId::GoToFile | CommandId::OpenRecentFolder => {
+                self.grid_open = false;
+                self.palette_open = true;
+                self.palette
+                    .open_files(command == CommandId::OpenRecentFolder);
                 self.request_redraw();
             }
             CommandId::ToggleGridMenu => {
@@ -9354,6 +9383,24 @@ where
         let Some(context) = &self.ui_context else {
             return false;
         };
+        // The modified picker shortcuts remain available from Gallery search and
+        // the palette itself; ordinary text/IME and modal input keep ownership.
+        if !self.native_ime_composing
+            && !self.modal_input_blocked()
+            && !egui::Popup::is_any_open(context)
+            && (stroke.modifiers.control || stroke.modifiers.logo)
+            && matches!(
+                self.shortcuts
+                    .resolve(std::slice::from_ref(stroke), self.command_context()),
+                ShortcutMatch::Command(
+                    CommandId::GoToFile
+                        | CommandId::OpenRecentFolder
+                        | CommandId::ToggleCommandPalette
+                )
+            )
+        {
+            return true;
+        }
         if self.palette_open
             || self.grid_open
             || self.modal_input_blocked()
@@ -9446,6 +9493,8 @@ where
                     command,
                     CommandId::ToggleGridMenu
                         | CommandId::ToggleCommandPalette
+                        | CommandId::GoToFile
+                        | CommandId::OpenRecentFolder
                         | CommandId::ToggleFilmstrip
                 ) {
                     self.grid_open = false;
@@ -10107,6 +10156,14 @@ where
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        match &event {
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, _)) => {
+                self.native_ime_composing = !text.is_empty();
+            }
+            WindowEvent::Ime(winit::event::Ime::Commit(_) | winit::event::Ime::Disabled)
+            | WindowEvent::Focused(false) => self.native_ime_composing = false,
+            _ => {}
         }
         #[cfg(feature = "presentation-verification")]
         if let WindowEvent::KeyboardInput {
@@ -18508,6 +18565,8 @@ mod tests {
         };
         for command in [
             CommandId::ToggleCommandPalette,
+            CommandId::GoToFile,
+            CommandId::OpenRecentFolder,
             CommandId::ToggleGridMenu,
             CommandId::ToggleFilmstrip,
             CommandId::RotateClockwise,
@@ -18544,7 +18603,10 @@ mod tests {
                 false,
             );
             assert!(!app.grid_open);
-            if command == CommandId::ToggleCommandPalette {
+            if matches!(
+                command,
+                CommandId::ToggleCommandPalette | CommandId::GoToFile | CommandId::OpenRecentFolder
+            ) {
                 assert!(app.palette_open);
                 frame(&mut app, vec![], false);
                 app.cancel_command_overlay();

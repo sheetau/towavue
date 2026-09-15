@@ -3,12 +3,43 @@ use egui::AtomExt;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 use crate::hover_help::HoverHelp;
+use crate::menu::{OpenTarget, RecentAction};
+use std::path::{Path, PathBuf};
+use towavue_runtime_windows::RecentKind;
 
-#[derive(Default)]
 pub struct CommandPalette {
     query: String,
     selected: Option<usize>,
+    selected_path: Option<PathBuf>,
+    folders: bool,
+    fresh: bool,
     ime_composing: bool,
+}
+
+impl Default for CommandPalette {
+    fn default() -> Self {
+        Self {
+            query: ">".into(),
+            selected: None,
+            selected_path: None,
+            folders: false,
+            fresh: true,
+            ime_composing: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct OpenSources<'a> {
+    pub files: &'a [PathBuf],
+    pub folders: &'a [PathBuf],
+    pub folder: Option<&'a towavue_core::FolderSnapshot>,
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Choice {
+    Command(CommandId),
+    Open(RecentAction),
 }
 
 impl CommandPalette {
@@ -16,6 +47,13 @@ impl CommandPalette {
         *self = Self::default();
     }
 
+    pub fn open_files(&mut self, folders: bool) {
+        self.reset();
+        self.query.clear();
+        self.folders = folders;
+    }
+
+    #[cfg(test)]
     pub fn show(
         &mut self,
         context: &egui::Context,
@@ -23,8 +61,38 @@ impl CommandPalette {
         shortcuts: &ShortcutBindings,
         top: f32,
     ) -> (Option<CommandId>, bool) {
+        let (choice, close) =
+            self.show_with_sources(context, commands, shortcuts, top, OpenSources::default());
+        (
+            choice.and_then(|choice| match choice {
+                Choice::Command(command) => Some(command),
+                Choice::Open(_) => None,
+            }),
+            close,
+        )
+    }
+
+    pub(crate) fn show_with_sources(
+        &mut self,
+        context: &egui::Context,
+        commands: CommandContext,
+        shortcuts: &ShortcutBindings,
+        top: f32,
+        sources: OpenSources<'_>,
+    ) -> (Option<Choice>, bool) {
         let mut chosen = None;
         let query_id = egui::Id::new("command-palette-query");
+        let opened = self.fresh;
+        if self.fresh {
+            let mut state = egui::text_edit::TextEditState::default();
+            state
+                .cursor
+                .set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(self.query.chars().count()),
+                )));
+            state.store(context, query_id);
+            self.fresh = false;
+        }
         let (up, down, enter, close) = context.input_mut(|input| {
             // The pinned TextEdit exposes UIA ValuePattern but does not handle SetValue.
             if input.has_accesskit_action_request(query_id, egui::accesskit::Action::SetValue) {
@@ -75,12 +143,33 @@ impl CommandPalette {
                 ] {
                     input.consume_key(egui::Modifiers::NONE, key);
                 }
-                return (false, false, false, false);
+                input.events.retain(|event| {
+                    !matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Enter,
+                            ..
+                        }
+                    )
+                });
+                return (false, false, None, false);
+            }
+            let enter = input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key: egui::Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if !modifiers.shift && !modifiers.mac_cmd => Some(*modifiers),
+                _ => None,
+            });
+            if let Some(modifiers) = enter {
+                input.consume_key(modifiers, egui::Key::Enter);
             }
             (
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
                 input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
+                enter,
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
@@ -121,18 +210,35 @@ impl CommandPalette {
                         .id(query_id)
                         .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
-                        .hint_text("> Search commands"),
+                        .hint_text(if self.folders {
+                            "Select to open (hold Ctrl-key to force new window or Alt-key for same window)"
+                        } else if previous_query.starts_with('>') {
+                            "Type the name of a command to run."
+                        } else {
+                            "Search files by name"
+                        }),
                 )
-                .help_text("Up / Down: select   Enter: run   Esc: close");
+                .help_text("Up / Down: select   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
+                let command_mode = self.query.starts_with('>');
+                if command_mode {
+                    self.folders = false;
+                }
                 context.accesskit_node_builder(query_id, |node| {
-                    node.set_label("Search commands");
+                    node.set_label(if command_mode { "Search commands" }
+                        else if self.folders { "Search recent folders" } else { "Search files" });
                     node.add_action(egui::accesskit::Action::SetValue);
                 });
-                let query_changed = previous_query != self.query;
+                let query_changed = opened || previous_query != self.query;
                 if query_changed {
                     self.selected = None;
+                    self.selected_path = None;
                 }
-                let query = self.query.trim().to_ascii_lowercase();
+                if !command_mode {
+                    chosen = self.show_files(ui, &sources, (up, down), enter, query_changed)
+                        .map(Choice::Open);
+                    return;
+                }
+                let query = self.query[1..].trim().to_ascii_lowercase();
                 let matches: Vec<_> = command_definitions()
                     .iter()
                     .filter(|definition| definition.title.to_ascii_lowercase().contains(&query))
@@ -150,8 +256,8 @@ impl CommandPalette {
                 if up || down {
                     self.selected = next_enabled(self.selected, &enabled, down);
                 }
-                if enter && let Some(index) = self.selected {
-                    chosen = Some(matches[index].id);
+                if enter.is_some() && let Some(index) = self.selected {
+                    chosen = Some(Choice::Command(matches[index].id));
                 }
                 egui::ScrollArea::vertical()
                     .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
@@ -197,8 +303,8 @@ impl CommandPalette {
                             if (up || down || query_changed) && self.selected == Some(index) {
                                 response.scroll_to_me(Some(egui::Align::Center));
                             }
-                            if response.clicked() {
-                                chosen = Some(definition.id);
+                            if response.clicked() && !query_changed {
+                                chosen = Some(Choice::Command(definition.id));
                             }
                         }
                     });
@@ -208,6 +314,195 @@ impl CommandPalette {
             close || (!egui::Popup::is_any_open(context) && backdrop.response.clicked()),
         )
     }
+
+    fn show_files(
+        &mut self,
+        ui: &mut egui::Ui,
+        sources: &OpenSources<'_>,
+        navigation: (bool, bool),
+        enter: Option<egui::Modifiers>,
+        query_changed: bool,
+    ) -> Option<RecentAction> {
+        let (up, down) = navigation;
+        let recent = if self.folders {
+            sources.folders
+        } else {
+            sources.files
+        };
+        let query = normalized(self.query.trim());
+        let mut seen = std::collections::HashSet::new();
+        let mut paths: Vec<_> = recent
+            .iter()
+            .filter(|path| {
+                let score = if self.folders {
+                    text_score(&normalized(&path.to_string_lossy()), &query)
+                } else {
+                    path_score(path, &query)
+                };
+                score.is_some() && seen.insert(normalized(&path.to_string_lossy()))
+            })
+            .collect();
+        let recent_count = paths.len();
+        // Empty Go to File shows history immediately, as in the reference picker.
+        if !self.folders
+            && !query.is_empty()
+            && let Some(folder) = sources.folder
+        {
+            let mut found: Vec<_> = folder
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let score = path_score(&item.path, &query)?;
+                    seen.insert(normalized(&item.path.to_string_lossy()))
+                        .then_some((score, &item.path))
+                })
+                .collect();
+            found.sort_by_key(|(score, _)| *score);
+            paths.extend(found.into_iter().map(|(_, path)| path));
+        }
+        let selected = self
+            .selected_path
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| *path == selected))
+            .or_else(|| (!paths.is_empty()).then_some(0));
+        let selected = if up || down {
+            next_enabled(selected, &vec![true; paths.len()], down)
+        } else {
+            selected
+        };
+        let selection_moved = self.selected != selected;
+        self.selected = selected;
+        self.selected_path = selected.map(|index| paths[index].clone());
+        let kind = if self.folders {
+            RecentKind::Folder
+        } else {
+            RecentKind::File
+        };
+        let mut chosen = enter.zip(selected).map(|(modifiers, index)| {
+            RecentAction::Open(paths[index].clone(), kind, open_target(modifiers))
+        });
+        egui::ScrollArea::vertical()
+            .id_salt(("quick-open-results", self.folders))
+            .max_height((ui.ctx().content_rect().height() - 90.0).clamp(40.0, 264.0))
+            .show_styled(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                if paths.is_empty() {
+                    ui.weak(if self.folders {
+                        "No matching recent folders"
+                    } else {
+                        "No matching files"
+                    });
+                }
+                for (index, path) in paths.iter().enumerate() {
+                    if index == 0 || index == recent_count {
+                        ui.weak(if index < recent_count {
+                            "recently opened"
+                        } else {
+                            "file results"
+                        });
+                    }
+                    let name = path
+                        .file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy();
+                    let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
+                    let response = ui
+                        .push_id(path, |ui| {
+                            ui.add(
+                                egui::Button::selectable(
+                                    selected == Some(index),
+                                    (
+                                        name.as_ref(),
+                                        egui::Atom::grow(),
+                                        egui::RichText::new(parent.as_ref())
+                                            .color(crate::chrome::MUTED)
+                                            .atom_max_width(ui.available_width() * 0.6),
+                                    ),
+                                )
+                                .truncate()
+                                .min_size(egui::vec2(ui.available_width(), 22.0)),
+                            )
+                        })
+                        .inner
+                        .help_text(path.to_string_lossy());
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.clear_toggled();
+                        node.set_label(path.to_string_lossy().as_ref());
+                    });
+                    if (up || down || query_changed || selection_moved) && selected == Some(index) {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if response.clicked() && !query_changed {
+                        let modifiers = ui.input(|input| {
+                            input
+                                .events
+                                .iter()
+                                .rev()
+                                .find_map(|event| match event {
+                                    egui::Event::PointerButton {
+                                        button: egui::PointerButton::Primary,
+                                        pressed: false,
+                                        modifiers,
+                                        ..
+                                    } => Some(*modifiers),
+                                    _ => None,
+                                })
+                                .unwrap_or(input.modifiers)
+                        });
+                        chosen = Some(RecentAction::Open(
+                            (*path).clone(),
+                            kind,
+                            open_target(modifiers),
+                        ));
+                    }
+                }
+            });
+        chosen
+    }
+}
+
+fn open_target(modifiers: egui::Modifiers) -> OpenTarget {
+    if modifiers.ctrl {
+        OpenTarget::Window
+    } else if modifiers.alt {
+        OpenTarget::Replace
+    } else {
+        OpenTarget::Tab
+    }
+}
+
+fn normalized(value: &str) -> String {
+    value.replace('\\', "/").to_lowercase()
+}
+
+fn path_score(path: &Path, query: &str) -> Option<usize> {
+    let name = normalized(
+        &path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy(),
+    );
+    let full = normalized(&path.to_string_lossy());
+    let text = if query.contains('/') { &full } else { &name };
+    text_score(text, query)
+}
+
+fn text_score(text: &str, query: &str) -> Option<usize> {
+    if query.is_empty() || text == query {
+        return Some(0);
+    }
+    if text.starts_with(query) {
+        return Some(1);
+    }
+    if text.contains(query) {
+        return Some(2);
+    }
+    let mut chars = text.chars();
+    query
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .all(|ch| chars.any(|value| value == ch))
+        .then_some(3)
 }
 
 fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Option<usize> {
@@ -227,6 +522,308 @@ fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn open_frame(
+        context: &egui::Context,
+        palette: &mut CommandPalette,
+        sources: OpenSources<'_>,
+        events: Vec<egui::Event>,
+    ) -> (egui::FullOutput, Vec<Choice>) {
+        let mut choices = Vec::new();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |_| {
+                let (choice, _) = palette.show_with_sources(
+                    context,
+                    CommandContext {
+                        palette_open: true,
+                        ..Default::default()
+                    },
+                    &crate::shortcuts::defaults(),
+                    0.0,
+                    sources,
+                );
+                choices.extend(choice);
+            },
+        );
+        (output, choices)
+    }
+
+    #[test]
+    fn file_and_folder_picker_preserve_event_modifiers_for_enter_and_click() {
+        for folders in [false, true] {
+            for pointer in [false, true] {
+                for (modifiers, target) in [
+                    (egui::Modifiers::NONE, OpenTarget::Tab),
+                    (egui::Modifiers::CTRL, OpenTarget::Window),
+                    (egui::Modifiers::ALT, OpenTarget::Replace),
+                    (
+                        egui::Modifiers::CTRL | egui::Modifiers::ALT,
+                        OpenTarget::Window,
+                    ),
+                ] {
+                    let context = egui::Context::default();
+                    context.enable_accesskit();
+                    let mut palette = CommandPalette::default();
+                    palette.open_files(folders);
+                    let files = [PathBuf::from("C:/media/日本語 image.png")];
+                    let directories = [PathBuf::from("C:/media/folder.mp4")];
+                    let sources = OpenSources {
+                        files: &files,
+                        folders: &directories,
+                        folder: None,
+                    };
+                    for _ in 0..4 {
+                        open_frame(&context, &mut palette, sources, vec![]);
+                    }
+                    let path = if folders { &directories[0] } else { &files[0] };
+                    let choices = if pointer {
+                        let output = open_frame(&context, &mut palette, sources, vec![]).0;
+                        let tree = output.platform_output.accesskit_update.expect("tree");
+                        let (_, node) = tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(path.to_string_lossy().as_ref()))
+                            .expect("path row");
+                        let rect = node.bounds().expect("row bounds");
+                        let pos = egui::pos2(
+                            (rect.x0 + rect.x1) as f32 / 2.0,
+                            (rect.y0 + rect.y1) as f32 / 2.0,
+                        );
+                        let button = |pressed| egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers,
+                        };
+                        open_frame(
+                            &context,
+                            &mut palette,
+                            sources,
+                            vec![egui::Event::PointerMoved(pos)],
+                        );
+                        open_frame(&context, &mut palette, sources, vec![button(true)]);
+                        open_frame(&context, &mut palette, sources, vec![button(false)]).1
+                    } else {
+                        open_frame(
+                            &context,
+                            &mut palette,
+                            sources,
+                            vec![key(egui::Key::Enter, modifiers)],
+                        )
+                        .1
+                    };
+                    assert_eq!(
+                        choices,
+                        [Choice::Open(RecentAction::Open(
+                            path.clone(),
+                            if folders {
+                                RecentKind::Folder
+                            } else {
+                                RecentKind::File
+                            },
+                            target
+                        ))]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn picker_prefix_reset_and_ime_keep_text_editing_separate_from_opening() {
+        let context = egui::Context::default();
+        let mut palette = CommandPalette::default();
+        let files = [PathBuf::from("C:/media/open file.png")];
+        let sources = OpenSources {
+            files: &files,
+            ..Default::default()
+        };
+        palette.open_files(true);
+        for _ in 0..3 {
+            open_frame(&context, &mut palette, sources, vec![]);
+        }
+        open_frame(
+            &context,
+            &mut palette,
+            sources,
+            vec![egui::Event::Text(">".into())],
+        );
+        assert!(
+            !palette.folders,
+            "command prefix leaves the recent-folder provider"
+        );
+        open_frame(
+            &context,
+            &mut palette,
+            sources,
+            vec![key(egui::Key::Backspace, egui::Modifiers::NONE)],
+        );
+        assert!(palette.query.is_empty());
+        assert_eq!(
+            open_frame(
+                &context,
+                &mut palette,
+                sources,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+            )
+            .1,
+            [Choice::Open(RecentAction::Open(
+                files[0].clone(),
+                RecentKind::File,
+                OpenTarget::Tab
+            ))]
+        );
+        for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT] {
+            palette.open_files(false);
+            open_frame(&context, &mut palette, sources, vec![]);
+            assert!(
+                open_frame(
+                    &context,
+                    &mut palette,
+                    sources,
+                    vec![
+                        egui::Event::Ime(egui::ImeEvent::Commit("open".into())),
+                        key(egui::Key::Enter, modifiers),
+                    ]
+                )
+                .1
+                .is_empty()
+            );
+        }
+        palette.reset();
+        open_frame(
+            &context,
+            &mut palette,
+            sources,
+            vec![egui::Event::Text("open file".into())],
+        );
+        assert_eq!(
+            palette.query, ">open file",
+            "reopening resets the persisted text cursor"
+        );
+        assert_eq!(
+            open_frame(
+                &context,
+                &mut palette,
+                sources,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+            )
+            .1,
+            [Choice::Command(CommandId::OpenFile)]
+        );
+    }
+
+    #[test]
+    fn file_search_keeps_recent_priority_shell_ties_and_selected_path_after_refresh() {
+        use towavue_core::{
+            FolderMediaItem, FolderSnapshot, FolderSnapshotSource, MediaKind, ShellIdentity,
+        };
+        let context = egui::Context::default();
+        let mut palette = CommandPalette::default();
+        palette.open_files(false);
+        palette.query = "image".into();
+        let files = [PathBuf::from("C:/elsewhere/recent-image.png")];
+        let mut folder = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![0]),
+            folder_path: "C:/media".into(),
+            items: ["recent-image.png", "image2.png", "image1.png"]
+                .into_iter()
+                .enumerate()
+                .map(|(id, name)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![id as u8]),
+                    path: if id == 0 {
+                        files[0].clone()
+                    } else {
+                        Path::new("C:/media").join(name)
+                    },
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        };
+        for _ in 0..3 {
+            open_frame(
+                &context,
+                &mut palette,
+                OpenSources {
+                    files: &files,
+                    folder: Some(&folder),
+                    ..Default::default()
+                },
+                vec![],
+            );
+        }
+        assert_eq!(palette.selected_path.as_ref(), Some(&files[0]));
+        open_frame(
+            &context,
+            &mut palette,
+            OpenSources {
+                files: &files,
+                folder: Some(&folder),
+                ..Default::default()
+            },
+            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        assert_eq!(
+            palette.selected_path.as_ref(),
+            Some(&folder.items[1].path),
+            "deduplicate history and preserve Shell score ties"
+        );
+        let selected = palette.selected_path.clone().expect("selected path");
+        folder.items.swap(1, 2);
+        assert_eq!(
+            open_frame(
+                &context,
+                &mut palette,
+                OpenSources {
+                    files: &files,
+                    folder: Some(&folder),
+                    ..Default::default()
+                },
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+            )
+            .1,
+            [Choice::Open(RecentAction::Open(
+                selected,
+                RecentKind::File,
+                OpenTarget::Tab
+            ))]
+        );
+        assert_eq!(
+            path_score(Path::new("C:/Media/日本語.png"), "日本"),
+            Some(1)
+        );
+        assert_eq!(
+            path_score(Path::new("C:/Media/holiday-image.png"), "hlimg"),
+            Some(3)
+        );
+        assert_eq!(
+            path_score(Path::new("C:/Media/holiday.png"), "media/hol"),
+            Some(2)
+        );
+        assert_eq!(path_score(Path::new("C:/Media/holiday.png"), "other"), None);
+    }
 
     #[test]
     fn accessibility_names_and_replaces_the_query_without_running_commands() {
@@ -285,7 +882,7 @@ mod tests {
                 .iter()
                 .find(|(id, _)| *id == query_id)
                 .expect("accessible query field");
-            assert_eq!(node.label(), Some("Search commands"));
+            assert_eq!(node.label(), Some("Search files"));
             assert_eq!(node.role(), egui::accesskit::Role::TextInput);
             assert!(node.supports_action(egui::accesskit::Action::SetValue));
             assert_eq!(node.value(), Some(expected));
@@ -320,6 +917,7 @@ mod tests {
         for text in ["open", "日本語 café 🎞️"] {
             let context = egui::Context::default();
             let mut palette = CommandPalette::default();
+            palette.open_files(false);
             let commands = CommandContext {
                 palette_open: true,
                 ..Default::default()
@@ -392,7 +990,7 @@ mod tests {
                 style.interaction.tooltip_delay = 0.0;
             });
             let mut palette = CommandPalette {
-                query: "open".into(),
+                query: ">open".into(),
                 ..Default::default()
             };
             let commands = CommandContext {
@@ -473,7 +1071,7 @@ mod tests {
             };
             let file = text("Open file");
             assert_eq!(
-                text("open").galley.job.sections[0].format.color,
+                text(">open").galley.job.sections[0].format.color,
                 crate::chrome::FOREGROUND
             );
             let folder = text("Open folder");
@@ -487,7 +1085,7 @@ mod tests {
             assert!(first.pos.x >= file.pos.x + file.galley.size().x);
             assert!(second.pos.x >= folder.pos.x + folder.galley.size().x);
             assert!(second.pos.x + second.galley.size().x < panel.right());
-            let pos = egui::pos2(panel.right() - 8.0, folder.pos.y + 7.0);
+            let pos = egui::pos2(folder.pos.x + 32.0, folder.pos.y + 7.0);
             for _ in 0..3 {
                 frame(vec![egui::Event::PointerMoved(pos)]);
             }
@@ -669,21 +1267,21 @@ mod tests {
                 key(egui::Key::ArrowDown),
             ],
         );
-        assert_eq!(palette.query, "volume");
+        assert_eq!(palette.query, ">volume");
         assert_eq!(palette.selected, Some(1));
         assert_eq!(
             run(&mut palette, vec![key(egui::Key::Enter)]),
             vec![CommandId::VolumeUp]
         );
-        palette.query = "no matching command exists".into();
+        palette.query = ">no matching command exists".into();
         assert!(run(&mut palette, vec![key(egui::Key::Enter)]).is_empty());
         assert_eq!(palette.selected, None);
-        palette.query = "zoom".into();
+        palette.query = ">zoom".into();
         assert_eq!(
             run(&mut palette, vec![key(egui::Key::Enter)]),
             vec![CommandId::ZoomIn]
         );
-        palette.query = "crop".into();
+        palette.query = ">crop".into();
         assert!(run(&mut palette, vec![key(egui::Key::Enter)]).is_empty());
         assert_eq!(palette.selected, None);
         let mut closed = false;
@@ -757,7 +1355,7 @@ mod tests {
                 .expect("committed text input")
                 .should_interrupt_composition
         );
-        assert_eq!(palette.query, "日本語");
+        assert_eq!(palette.query, ">日本語");
     }
 
     #[test]
@@ -822,7 +1420,7 @@ mod tests {
             ),
             (None, false)
         );
-        assert_eq!(palette.query, "open file");
+        assert_eq!(palette.query, ">open file");
         assert_eq!(
             run(&mut palette, vec![key(egui::Key::Enter)]),
             (Some(CommandId::OpenFile), false)
@@ -865,7 +1463,7 @@ mod tests {
                 active_range_chars: Some(0..4),
             })],
         );
-        assert_eq!(palette.query, "にほんご");
+        assert_eq!(palette.query, ">にほんご");
         assert_eq!(
             run(
                 &mut palette,
@@ -876,7 +1474,7 @@ mod tests {
             ),
             (None, false)
         );
-        assert_eq!(palette.query, "日本語");
+        assert_eq!(palette.query, ">日本語");
         run(
             &mut palette,
             vec![egui::Event::Ime(egui::ImeEvent::Preedit {
@@ -887,7 +1485,7 @@ mod tests {
         assert!(palette.ime_composing);
         palette.reset();
         assert!(!palette.ime_composing);
-        assert!(palette.query.is_empty());
+        assert_eq!(palette.query, ">");
     }
 
     #[test]

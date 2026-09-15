@@ -59,16 +59,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 return None;
             }
         }
-        tab_drag::incoming_gap(
-            context,
-            &self
-                .tabs
-                .tabs()
-                .iter()
-                .map(|tab| tab.id)
-                .collect::<Vec<_>>(),
-            point,
-        )
+        tab_drag::incoming_gap(context, &self.tabs.tab_ids().collect::<Vec<_>>(), point)
     }
 }
 

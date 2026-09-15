@@ -285,7 +285,8 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .expect("return detached tab");
     assert!(host.windows[&detached].tabs.tabs().is_empty());
     assert!(host.windows[&detached].path.is_none());
-    assert!(host.windows[&detached].tabs.welcome().is_some());
+    assert!(host.windows[&detached].tabs.is_empty());
+    assert!(host.windows[&detached].exit_requested);
     app_close(host, detached);
     let app = host.windows.get_mut(&source).expect("source");
     assert_frame(app, position, frame, generation);
@@ -344,9 +345,51 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .activate_tab(target_active);
     exercise_audio(host, event_loop, source);
     exercise_images(host, event_loop, source, target);
+    exercise_gallery(host, event_loop);
     eprintln!(
         "PASS live video transfer: dirty state, exact paused frame/clock, unchanged session generation, shared-device draw with no CPU transfer, repeat moves, hidden detached HWND, Welcome source, failed startup/modal/stale/gap guards"
     );
+}
+
+fn exercise_gallery(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
+    let source = host.add_application(None).expect("Gallery source");
+    let target = host.add_application(None).expect("Gallery destination");
+    host.start_pending(event_loop, false);
+    let gallery = host.windows[&source]
+        .tabs
+        .gallery()
+        .expect("source Gallery");
+    let existing = host.windows[&target]
+        .tabs
+        .gallery()
+        .expect("destination Gallery");
+    let request = host.windows[&source]
+        .tab_detach_request(gallery)
+        .expect("request");
+    host.windows
+        .get_mut(&target)
+        .expect("target")
+        .exit_requested = true;
+    assert!(host.move_tab(source, target, &request, 0).is_err());
+    assert_eq!(host.windows[&source].tabs.active_id(), Some(gallery));
+    host.windows
+        .get_mut(&target)
+        .expect("target")
+        .exit_requested = false;
+    let moved = host
+        .move_tab(source, target, &request, 0)
+        .expect("Gallery transfer");
+    assert_eq!(moved, existing, "reuse the destination Gallery");
+    assert_eq!(host.windows[&target].tabs.len(), 1);
+    assert!(host.windows[&source].tabs.is_empty());
+    assert!(host.windows[&source].exit_requested);
+    assert!(
+        host.move_tab(source, target, &request, 0).is_err(),
+        "reject stale release"
+    );
+    host.remove_closed();
+    assert!(!host.windows.contains_key(&source));
+    app_close(host, target);
 }
 
 fn draw_image(app: &mut WindowApplication, original: &Arc<DecodedImage>, frame: usize) {

@@ -47,6 +47,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::CloseTab, "Ctrl+W"),
         (CommandId::ReopenClosedTab, "Ctrl+Shift+T"),
         (CommandId::NextTab, "Ctrl+Tab"),
+        (CommandId::OpenGallery, "Ctrl+T"),
         (CommandId::PreviousTab, "Ctrl+Shift+Tab"),
         (CommandId::TogglePause, "Space"),
         (CommandId::PlayTimeSelection, "Shift+Space"),

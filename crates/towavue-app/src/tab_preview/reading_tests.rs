@@ -12,6 +12,8 @@ fn reading_tab_hover_joins_retained_pages_without_decoding_uploading_or_activati
             .map(|index| PathBuf::from(format!("reading-page-{index}.png")))
             .collect();
         let tab = app.tabs.open_new(paths[1].clone(), MediaKind::Image);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         app.path = Some(paths[1].clone());
         app.displayed_tab = Some(tab);
         app.media_kind = Some(MediaKind::Image);

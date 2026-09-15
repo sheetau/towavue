@@ -1011,6 +1011,8 @@ mod tests {
         app.ui_context = Some(context.clone());
         let path = PathBuf::from("background-video.mp4");
         let video = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         app.path = Some(path.clone());
         app.media_kind = Some(MediaKind::Video);
         app.media_duration = Some(Duration::from_secs(100));
@@ -1166,6 +1168,8 @@ mod tests {
         app.ui_context = Some(context.clone());
         let path = PathBuf::from("current-animation.gif");
         let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         app.path = Some(path.clone());
         app.displayed_tab = Some(tab);
         app.media_kind = Some(MediaKind::Image);
@@ -1394,6 +1398,8 @@ mod tests {
         app.ui_context = Some(context.clone());
         let path = PathBuf::from("preview-image.png");
         app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         app.path = Some(path);
         app.media_kind = Some(MediaKind::Image);
         app.push_edit(towavue_core::EditOperation::RotateClockwise);

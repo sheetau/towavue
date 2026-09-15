@@ -11,7 +11,7 @@ struct Drag {
     origin: egui::Pos2,
     pointer: egui::Pos2,
     crossed: bool,
-    tabs: Vec<(TabId, PathBuf)>,
+    tabs: Vec<(TabId, Option<PathBuf>)>,
     source: (Option<TabId>, u64, u64),
     screen: egui::Rect,
     density: f32,
@@ -41,7 +41,7 @@ pub(super) struct Layout {
 impl Layout {
     pub(super) fn new(
         ui: &egui::Ui,
-        tabs: Vec<(TabId, PathBuf)>,
+        tabs: Vec<(TabId, Option<PathBuf>)>,
         rectangles: Vec<egui::Rect>,
         strip: egui::Rect,
         source: (Option<TabId>, u64, u64),

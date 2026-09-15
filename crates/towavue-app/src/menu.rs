@@ -7,7 +7,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
     (
         "File",
         &[
-            &[OpenFile, OpenFolder],
+            &[OpenFile, OpenFolder, OpenGallery],
             &[
                 Save,
                 ExportAs,
@@ -499,6 +499,7 @@ mod tests {
         };
         navigate(egui::Key::ArrowRight, false, "Open file");
         navigate(egui::Key::ArrowDown, false, "Open folder");
+        navigate(egui::Key::ArrowDown, false, "Open Gallery");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
@@ -825,7 +826,7 @@ mod tests {
                 }]);
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
-            for _ in 0..leading {
+            for _ in 0..leading + usize::from(category == "File") {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             for (index, definition) in command_definitions()

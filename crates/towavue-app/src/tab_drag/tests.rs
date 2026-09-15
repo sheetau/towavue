@@ -59,6 +59,8 @@ fn setup(root: &Path) -> Application<fn(AppEvent)> {
     for name in ["a.png", "b.png", "c.png"] {
         app.tabs.open_new(root.join(name), MediaKind::Image);
     }
+    app.tabs
+        .close_gallery(app.tabs.gallery().expect("media-only fixture"));
     app.path = Some(root.join("c.png"));
     app.media_kind = Some(MediaKind::Image);
     for _ in 0..3 {
@@ -523,10 +525,14 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
         frame(&mut app, size, false, vec![]);
     }
     let context = app.ui_context.as_ref().expect("context");
-    assert_eq!(incoming_gap(context, &[], drop_point(context, 0)), Some(0));
+    let gallery = app.tabs.gallery().expect("default Gallery");
     assert_eq!(
-        incoming_gap(context, &[], egui::pos2(240.0, 300.0)),
+        incoming_gap(context, &[gallery], drop_point(context, 0)),
         Some(0)
+    );
+    assert_eq!(
+        incoming_gap(context, &[gallery], egui::pos2(240.0, 300.0)),
+        Some(1)
     );
 }
 

@@ -7,11 +7,16 @@ pub(crate) mod tests;
 #[derive(Clone)]
 pub(super) struct DetachRequest {
     pub tab: TabId,
-    path: PathBuf,
+    path: Option<PathBuf>,
     instance: u64,
 }
 
-pub(super) struct TabTransfer {
+pub(super) enum TabTransfer {
+    Gallery,
+    Media(Box<MediaTabTransfer>),
+}
+
+pub(super) struct MediaTabTransfer {
     target: towavue_core::TabTarget,
     media: MediaTransfer,
     edits: Option<EditHistory>,
@@ -80,6 +85,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn tab_detach_request(&self, id: TabId) -> Result<DetachRequest, String> {
         self.validate_transfer_window()?;
+        if self.tabs.gallery() == Some(id) {
+            return Ok(DetachRequest {
+                tab: id,
+                path: None,
+                instance: 0,
+            });
+        }
         let tab = self
             .tabs
             .tabs()
@@ -111,7 +123,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         Ok(DetachRequest {
             tab: id,
-            path: path.to_owned(),
+            path: Some(path.to_owned()),
             instance,
         })
     }
@@ -129,6 +141,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         id: TabId,
         context: &egui::Context,
     ) -> Result<Option<ImageStage>, String> {
+        if self.tabs.gallery() == Some(id) {
+            return Ok(None);
+        }
         let tab = self
             .tabs
             .tabs()
@@ -191,6 +206,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         stage: Option<ImageStage>,
     ) -> TabTransfer {
         let id = request.tab;
+        if self.tabs.gallery() == Some(id) {
+            self.remove_tab(id, false);
+            return TabTransfer::Gallery;
+        }
         let target = self
             .tabs
             .tabs()
@@ -238,7 +257,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 )))
             })
         });
-        let transfer = TabTransfer {
+        let transfer = MediaTabTransfer {
             target,
             media,
             edits: self.edits.remove(&id),
@@ -251,10 +270,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             timeline,
         };
         self.remove_tab(id, false);
-        transfer
+        TabTransfer::Media(Box::new(transfer))
     }
 
-    pub(super) fn accept_tab_transfer(&mut self, mut transfer: TabTransfer, gap: usize) -> TabId {
+    pub(super) fn accept_tab_transfer(&mut self, transfer: TabTransfer, gap: usize) -> TabId {
+        let TabTransfer::Media(mut transfer) = transfer else {
+            self.dispatch(CommandId::OpenGallery);
+            let id = self.tabs.gallery().expect("opened Gallery");
+            self.tabs.reorder(id, gap);
+            return id;
+        };
         let path = transfer.target.current_path().to_owned();
         let kind = transfer.target.media_kind();
         let id = self.tabs.open_new(path.clone(), kind);

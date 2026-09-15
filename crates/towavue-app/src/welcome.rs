@@ -5,6 +5,60 @@ use towavue_core::{CommandId, ShortcutBindings};
 use crate::chrome;
 use crate::hover_help::HoverHelp;
 
+pub(super) fn tab(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    active: bool,
+    can_close: bool,
+) -> (egui::Response, egui::Response) {
+    ui.painter().rect_filled(
+        rect,
+        3.0,
+        if active {
+            chrome::BORDER
+        } else {
+            chrome::BACKGROUND
+        },
+    );
+    let mut label_rect = rect;
+    label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
+    let response = ui.put(
+        label_rect,
+        egui::Button::new(chrome::tab_label("Gallery".into(), active))
+            .fill(egui::Color32::TRANSPARENT)
+            .stroke(egui::Stroke::NONE)
+            .truncate()
+            .sense(egui::Sense::click_and_drag()),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "Gallery tab")
+    });
+    let close_rect = egui::Rect::from_min_max(egui::pos2(label_rect.right(), rect.top()), rect.max);
+    let close = ui
+        .add_enabled_ui(can_close, |ui| chrome::tab_close(ui, close_rect, false))
+        .inner
+        .help_text("Close Gallery");
+    close.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            close.enabled(),
+            "Close tab: Gallery",
+        )
+    });
+    crate::tab_focus::release_pointer_focus(&response);
+    crate::tab_focus::release_pointer_button_focus(&response, egui::PointerButton::Middle);
+    crate::tab_focus::release_pointer_focus(&close);
+    if response.has_focus() || close.has_focus() {
+        ui.painter().rect_stroke(
+            rect,
+            3.0,
+            ui.visuals().selection.stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+    (response, close)
+}
+
 pub fn show(
     ui: &mut egui::Ui,
     shortcuts: &ShortcutBindings,

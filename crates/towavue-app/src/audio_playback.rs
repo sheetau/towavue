@@ -847,6 +847,9 @@ mod tests {
                 app.play_time_selection();
                 app.open_external(self.0.join("image.bmp"), true);
                 let audition_image = app.tabs.active().expect("image").id;
+                app.dispatch(CommandId::OpenGallery);
+                let gallery = app.tabs.gallery().expect("Gallery");
+                assert!(app.path.is_none() && app.session.is_none());
                 wait(&mut app, &events, |app| {
                     app.retained_playback[&audio].state == PlaybackState::Ended
                 });
@@ -868,10 +871,7 @@ mod tests {
                         saved.session.as_ref().expect("session").target(),
                         selected.start()
                     );
-                    assert_eq!(
-                        app.tabs.active().expect("image remains active").id,
-                        audition_image
-                    );
+                    assert_eq!(app.tabs.active_id(), Some(gallery));
                     // Arm the next EOF while the background session is playing.
                     app.advance_audio_queues();
                     wait(&mut app, &events, |app| {

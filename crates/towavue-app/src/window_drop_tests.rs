@@ -335,7 +335,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let app = host.windows.get_mut(&target).expect("target");
     assert!(app.incoming_tab_pointer.is_none());
     let moved = app.tabs.active().expect("moved tab").id;
-    assert_eq!(app.tabs.tabs()[1].id, moved);
+    assert_eq!(app.tabs.tab_ids().nth(1), Some(moved));
     assert_eq!(app.edits[&moved], edits);
     assert!(
         app.filmstrip_open,

@@ -98,21 +98,20 @@ pub(crate) fn popup(
 }
 
 pub fn close_targets(tabs: &TabSet, target: TabId, command: CommandId) -> Vec<TabId> {
-    let Some(index) = tabs.tabs().iter().position(|tab| tab.id == target) else {
+    let Some(index) = tabs.tab_ids().position(|tab| tab == target) else {
         return Vec::new();
     };
-    tabs.tabs()
-        .iter()
+    tabs.tab_ids()
         .enumerate()
         .filter(|(position, tab)| match command {
-            CloseTab => tab.id == target,
-            CloseOtherTabs => tab.id != target,
+            CloseTab => *tab == target && tabs.can_close(*tab),
+            CloseOtherTabs => *tab != target,
             CloseTabsLeft => *position < index,
             CloseTabsRight => *position > index,
             CloseAllTabs => true,
             _ => false,
         })
-        .map(|(_, tab)| tab.id)
+        .map(|(_, tab)| tab)
         .collect()
 }
 
@@ -191,6 +190,7 @@ mod tests {
         let a = tabs.open_new("a.png".into(), MediaKind::Image);
         let b = tabs.open_new("b.png".into(), MediaKind::Image);
         let c = tabs.open_new("c.png".into(), MediaKind::Image);
+        tabs.close_gallery(tabs.gallery().expect("media-only fixture"));
         assert_eq!(close_targets(&tabs, b, CloseTab), [b]);
         assert_eq!(close_targets(&tabs, b, CloseOtherTabs), [a, c]);
         assert_eq!(close_targets(&tabs, b, CloseTabsLeft), [a]);
@@ -395,6 +395,8 @@ mod tests {
         app.tabs.open_new("a.png".into(), MediaKind::Image);
         let target = app.tabs.open_new("b.png".into(), MediaKind::Image);
         let active = app.tabs.open_new("c.png".into(), MediaKind::Image);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
         let mut time = 0.0;

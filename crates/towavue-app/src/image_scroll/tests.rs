@@ -323,6 +323,8 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         .entry(tab)
         .or_default()
         .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    app.tabs
+        .close_gallery(app.tabs.gallery().expect("media-only fixture"));
     app.path = Some(path.clone());
     app.media_kind = Some(MediaKind::Image);
     app.fullscreen = true;

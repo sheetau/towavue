@@ -50,15 +50,17 @@ pub(crate) fn install<N: Fn(AppEvent) + Send + Sync + 'static>(
 fn transfer(source: &mut App, destination: &mut App, id: TabId) -> TabId {
     let request = DetachRequest {
         tab: id,
-        path: source
-            .tabs
-            .tabs()
-            .iter()
-            .find(|tab| tab.id == id)
-            .expect("tab")
-            .target
-            .current_path()
-            .to_owned(),
+        path: Some(
+            source
+                .tabs
+                .tabs()
+                .iter()
+                .find(|tab| tab.id == id)
+                .expect("tab")
+                .target
+                .current_path()
+                .to_owned(),
+        ),
         instance: if source.displayed_tab == Some(id) {
             source.media_generation
         } else {
@@ -109,11 +111,14 @@ fn playback_volume_survives_navigation_transfer_and_close() {
         source.set_playback_volume(0.37);
         source.toggle_playback_mute();
         let neighbor = destination.tabs.open_new(root.join("neighbor.wav"), kind);
+        destination
+            .tabs
+            .close_gallery(destination.tabs.gallery().expect("media-only destination"));
         destination.media_kind = Some(kind);
         destination.set_playback_volume(0.8);
         let request = DetachRequest {
             tab: id,
-            path,
+            path: Some(path),
             instance: source.media_generation,
         };
         let packet = source.take_tab_transfer(&request, None);

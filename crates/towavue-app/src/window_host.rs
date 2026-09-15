@@ -210,7 +210,7 @@ impl WindowHost {
             .get(&destination)
             .ok_or("destination window is closed")?;
         target.validate_transfer_window()?;
-        if gap > target.tabs.tabs().len() {
+        if gap > target.tabs.len() {
             return Err("the destination tab strip changed".into());
         }
         let stage = self.windows[&source].prepare_image_transfer(
@@ -274,6 +274,13 @@ impl WindowHost {
         let moved = started.and_then(|()| self.move_tab(source, destination, request, 0));
         match moved {
             Ok(_) => {
+                // A detached window contains the transferred tab, not a new start tab.
+                let app = self.windows.get_mut(&destination).expect("destination");
+                if let Some(gallery) = app.tabs.gallery()
+                    && app.tabs.active_id() != Some(gallery)
+                {
+                    app.tabs.close_gallery(gallery);
+                }
                 self.windows[&destination]
                     .window
                     .as_ref()

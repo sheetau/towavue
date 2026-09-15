@@ -15,6 +15,8 @@ mod file_drop;
 mod filmstrip;
 mod fonts;
 mod frame_step;
+#[cfg(test)]
+mod gallery_tests;
 mod grid;
 mod hold_speed;
 mod hover_help;
@@ -4562,7 +4564,7 @@ where
             data.remove_temp::<bool>("tab-focus-fallback".into())
                 .unwrap_or(false)
         }) || tab_menu_focus
-            .is_some_and(|(target, _)| !self.tabs.tabs().iter().any(|tab| tab.id == target));
+            .is_some_and(|(target, _)| !self.tabs.tab_ids().any(|tab| tab == target));
         let density = root.ctx().pixels_per_point();
         let native = self
             .native_caption
@@ -4627,11 +4629,14 @@ where
                             "towavue menu",
                         )
                     });
+                    if menu.response.clicked_by(egui::PointerButton::Middle) {
+                        actions.push(UiAction::Command(CommandId::OpenGallery));
+                    }
                     menu.response
                         .help_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
-                    let width = chrome::tab_width(strip_width, self.tabs.tabs().len());
+                    let width = chrome::tab_width(strip_width, self.tabs.len());
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
                     let strip_scroll = egui::ScrollArea::horizontal()
@@ -4643,8 +4648,7 @@ where
                             ui.horizontal_centered(|ui| {
                                 let tab_rects: Vec<_> = self
                                     .tabs
-                                    .tabs()
-                                    .iter()
+                                    .tab_ids()
                                     .map(|_| {
                                         ui.allocate_exact_size(
                                             egui::vec2(width, layout.tab_height),
@@ -4657,14 +4661,24 @@ where
                                 let mut drag_layout = tab_drag::Layout::new(
                                     ui,
                                     self.tabs
-                                        .tabs()
-                                        .iter()
-                                        .map(|tab| (tab.id, tab.target.current_path().to_owned()))
+                                        .tab_ids()
+                                        .map(|id| {
+                                            (
+                                                id,
+                                                self.tabs
+                                                    .tabs()
+                                                    .iter()
+                                                    .find(|tab| tab.id == id)
+                                                    .map(|tab| {
+                                                        tab.target.current_path().to_owned()
+                                                    }),
+                                            )
+                                        })
                                         .collect(),
                                     tab_rects.clone(),
                                     strip,
                                     (
-                                        self.tabs.active().map(|tab| tab.id),
+                                        self.tabs.active_id(),
                                         self.media_generation,
                                         self.graphics_epoch,
                                     ),
@@ -4673,7 +4687,69 @@ where
                                         && !self.grid_open
                                         && !egui::Popup::is_any_open(ui.ctx()),
                                 );
-                                for (index, tab) in self.tabs.tabs().iter().enumerate() {
+                                for (index, id) in self.tabs.tab_ids().enumerate() {
+                                    if self.tabs.gallery() == Some(id) {
+                                        let rect = tab_rects[index];
+                                        let active = self.tabs.active_id() == Some(id);
+                                        let mut tab_ui = ui.new_child(
+                                            egui::UiBuilder::new()
+                                                .id(ui.id().with(("gallery-tab", id)))
+                                                .max_rect(rect),
+                                        );
+                                        let (response, close) = welcome::tab(
+                                            &mut tab_ui,
+                                            rect,
+                                            active,
+                                            self.tabs.can_close(id),
+                                        );
+                                        if response.clicked() {
+                                            actions.push(UiAction::ActivateTab(id));
+                                        }
+                                        if close.clicked()
+                                            || (self.tabs.can_close(id)
+                                                && response.clicked_by(egui::PointerButton::Middle))
+                                        {
+                                            actions.push(UiAction::CloseTab(id));
+                                        }
+                                        if return_to_tab && active {
+                                            response.request_focus();
+                                        }
+                                        if active {
+                                            let marker = ui.id().with("visible-active-tab");
+                                            let focus = (id, index, width, strip_width);
+                                            let changed = ui.data_mut(|data| {
+                                                let changed = data
+                                                    .get_temp::<(TabId, usize, f32, f32)>(marker)
+                                                    != Some(focus);
+                                                data.insert_temp(marker, focus);
+                                                changed
+                                            });
+                                            if changed {
+                                                ui.scroll_to_rect(rect, None);
+                                            }
+                                        }
+                                        drag_layout.register(id, &response);
+                                        if let Some(command) =
+                                            tab_menu::popup(&tab_ui, &response, &close, |ui| {
+                                                tab_menu::show(
+                                                    ui,
+                                                    &self.tabs,
+                                                    id,
+                                                    !self.closed_tabs.is_empty(),
+                                                    &self.shortcuts,
+                                                )
+                                            })
+                                        {
+                                            actions.push(UiAction::TabCommand(id, command));
+                                        }
+                                        continue;
+                                    }
+                                    let tab = self
+                                        .tabs
+                                        .tabs()
+                                        .iter()
+                                        .find(|tab| tab.id == id)
+                                        .expect("ordered media tab");
                                     let active =
                                         self.tabs.active().is_some_and(|item| item.id == tab.id);
                                     let dirty =
@@ -4919,10 +4995,10 @@ where
                                 if let Some(action) = drag_layout.finish(ui, strip) {
                                     actions.push(action);
                                 }
-                                if !self.tabs.tabs().is_empty() {
+                                if !self.tabs.is_empty() {
                                     tab_drag::incoming(
                                         ui,
-                                        self.tabs.tabs().iter().map(|tab| tab.id).collect(),
+                                        self.tabs.tab_ids().collect(),
                                         tab_rects,
                                         strip,
                                         incoming_pointer,
@@ -4943,35 +5019,6 @@ where
                         ),
                         egui::Sense::hover(),
                     );
-                    if let Some(id) = self.tabs.welcome() {
-                        tab_drag::incoming(ui, Vec::new(), Vec::new(), drag_rect, incoming_pointer);
-                        let welcome_rect = egui::Rect::from_min_size(
-                            drag_rect.min,
-                            egui::vec2(drag_rect.width().min(150.0), drag_rect.height()),
-                        );
-                        ui.push_id(("welcome-tab", id.value()), |ui| {
-                            let response = ui.put(
-                                welcome_rect,
-                                egui::Button::new((
-                                    RichText::new("Welcome").color(chrome::FOREGROUND),
-                                    egui::Atom::grow(),
-                                ))
-                                .fill(chrome::BORDER)
-                                .stroke(egui::Stroke::NONE)
-                                .truncate(),
-                            );
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    ui.is_enabled(),
-                                    "Welcome tab",
-                                )
-                            });
-                            if return_to_tab {
-                                response.request_focus();
-                            }
-                        });
-                    }
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
                             chrome::caption_accessibility(ui, &caption.accessible_buttons())
@@ -6125,9 +6172,19 @@ where
             CommandId::OpenFolder => {
                 self.begin_dialog(FileDialogKind::OpenFolder, DialogIntent::OpenFolder);
             }
+            CommandId::OpenGallery => {
+                let previous = self.tabs.active_id();
+                let gallery = self.tabs.open_gallery();
+                if previous != Some(gallery) {
+                    self.cancel_hold_speed();
+                    self.retain_image_tab();
+                    self.retain_playback_tab();
+                    self.clear_active_media();
+                }
+            }
             CommandId::ShowLicenses => self.show_licenses(),
             CommandId::CloseTab => {
-                if let Some(id) = self.tabs.active().map(|tab| tab.id) {
+                if let Some(id) = self.tabs.active_id() {
                     self.request_guarded(GuardedAction::CloseTab(id));
                 }
             }
@@ -6138,7 +6195,7 @@ where
             | CommandId::CloseAllTabs
             | CommandId::CopyFilePath
             | CommandId::RevealFile => {
-                if let Some(id) = self.tabs.active().map(|tab| tab.id) {
+                if let Some(id) = self.tabs.active_id() {
                     self.dispatch_tab_command(id, command);
                 }
             }
@@ -7415,18 +7472,24 @@ where
     }
 
     fn activate_tab(&mut self, id: TabId) {
-        if self.tabs.active().is_some_and(|tab| tab.id == id) {
+        if self.tabs.active_id() == Some(id) {
             return;
         }
-        if self.tabs.activate(id)
-            && let Some((path, kind)) = self.tabs.active().map(|tab| {
-                (
-                    tab.target.current_path().to_owned(),
-                    tab.target.media_kind(),
-                )
-            })
-        {
+        if !self.tabs.activate(id) {
+            return;
+        }
+        if let Some((path, kind)) = self.tabs.active().map(|tab| {
+            (
+                tab.target.current_path().to_owned(),
+                tab.target.media_kind(),
+            )
+        }) {
             self.load_path(path, kind);
+        } else {
+            self.cancel_hold_speed();
+            self.retain_image_tab();
+            self.retain_playback_tab();
+            self.clear_active_media();
         }
     }
 
@@ -7447,6 +7510,21 @@ where
         }
         self.cancel_shortcut_prefix();
         self.cancel_view_drag();
+        if self.tabs.gallery() == Some(id) {
+            match command {
+                CommandId::ReopenClosedTab => self.reopen_closed_tab(),
+                CommandId::CloseTab
+                | CommandId::CloseOtherTabs
+                | CommandId::CloseTabsLeft
+                | CommandId::CloseTabsRight
+                | CommandId::CloseAllTabs => {
+                    let ids = tab_menu::close_targets(&self.tabs, id, command);
+                    self.request_guarded(GuardedAction::CloseTabs(ids));
+                }
+                _ => {}
+            }
+            return;
+        }
         let Some(path) = self
             .tabs
             .tabs()
@@ -7672,10 +7750,39 @@ where
     }
 
     fn remove_tab(&mut self, id: TabId, remember: bool) {
+        if self.tabs.gallery() == Some(id) {
+            let was_active = self.tabs.active_id() == Some(id);
+            let removed = if remember {
+                self.tabs.close_gallery(id)
+            } else {
+                self.tabs.take_gallery(id)
+            };
+            if removed {
+                if !remember && self.tabs.is_empty() {
+                    self.exit_requested = true;
+                }
+                if was_active && let Some(tab) = self.tabs.active() {
+                    self.load_path(
+                        tab.target.current_path().to_owned(),
+                        tab.target.media_kind(),
+                    );
+                }
+                self.request_redraw();
+            }
+            return;
+        }
         let was_active = self.tabs.active().is_some_and(|tab| tab.id == id);
-        let Some(removed) = self.tabs.close(id) else {
+        let removed = if remember {
+            self.tabs.close(id)
+        } else {
+            self.tabs.take(id)
+        };
+        let Some(removed) = removed else {
             return;
         };
+        if !remember && self.tabs.is_empty() {
+            self.exit_requested = true;
+        }
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
         if remember {
@@ -7725,76 +7832,86 @@ where
         }) {
             self.load_path(path, kind);
         } else {
-            self.session.take();
-            self.playback_origin = None;
-            self.displayed_tab = None;
-            self.cancel_frame_steps();
-            self.playback_error = None;
-            self.reset_image_edits();
-            self.image_loading = false;
-            self.image_error = None;
-            self.image = None;
-            self.reading_pages.clear();
-            self.image_handoff = None;
-            self.image_sequence = image_navigation::ImageSequence::default();
-            self.clear_image_previews();
-            self.path = None;
-            self.refresh_status_file_details();
-            self.playlist.clear();
-            self.media_kind = None;
-            self.timeline_open = false;
-            self.waveform = None;
-            self.waveform_detail = waveform_detail::Detail::default();
-            self.media_duration = None;
-            self.time_selection = None;
-            self.playback_selection = None;
-            self.hover_thumbnail = None;
-            self.next_media_instance();
-            self.duration_workers.clear();
-            self.playlist_duration_worker.clear();
-            self.playlist_duration_pending = None;
-            self.waveform_worker.clear();
-            self.thumbnail_worker.clear();
-            self.failed_thumbnails.clear();
-            self.waveform_loading = false;
-            self.thumbnail_loading = None;
-            self.image_view = ImageViewState::default();
-            self.folder_snapshot = None;
-            self.folder_watcher = None;
-            self.folder_order.request(None);
-            self.pending_folder = None;
-            self.pending_time = None;
-            self.clock = None;
-            self.decode_finished = false;
-            self.audio_drained = true;
-            self.metrics_recorded = false;
-            self.pending_seek_started = None;
-            self.seek_latencies.clear();
-            self.drift_samples.clear();
-            self.status_message = None;
-            self.state = PlaybackState::Paused;
-            self.refresh_title();
-            self.request_redraw();
+            self.clear_active_media();
         }
+    }
+
+    fn clear_active_media(&mut self) {
+        self.close_filmstrip();
+        self.reading_mode = false;
+        self.session.take();
+        self.playback_origin = None;
+        self.displayed_tab = None;
+        self.cancel_frame_steps();
+        self.playback_error = None;
+        self.reset_image_edits();
+        self.image_loading = false;
+        self.image_error = None;
+        self.image = None;
+        self.reading_pages.clear();
+        self.image_handoff = None;
+        self.image_sequence = image_navigation::ImageSequence::default();
+        self.clear_image_previews();
+        self.path = None;
+        self.refresh_status_file_details();
+        self.playlist.clear();
+        self.media_kind = None;
+        self.timeline_open = false;
+        self.waveform = None;
+        self.waveform_detail = waveform_detail::Detail::default();
+        self.media_duration = None;
+        self.time_selection = None;
+        self.playback_selection = None;
+        self.hover_thumbnail = None;
+        self.next_media_instance();
+        self.duration_workers.retain(|instance, _| {
+            self.retained_playback
+                .values()
+                .any(|saved| saved.instance == *instance)
+        });
+        self.playlist_duration_worker.clear();
+        self.playlist_duration_pending = None;
+        self.waveform_worker.clear();
+        self.thumbnail_worker.clear();
+        self.failed_thumbnails.clear();
+        self.waveform_loading = false;
+        self.thumbnail_loading = None;
+        self.image_view = ImageViewState::default();
+        self.folder_snapshot = None;
+        self.folder_watcher = None;
+        self.folder_order.request(None);
+        self.pending_folder = None;
+        self.pending_time = None;
+        self.clock = None;
+        self.decode_finished = false;
+        self.audio_drained = true;
+        self.metrics_recorded = false;
+        self.pending_seek_started = None;
+        self.seek_latencies.clear();
+        self.drift_samples.clear();
+        self.status_message = None;
+        self.state = PlaybackState::Paused;
+        self.refresh_title();
+        self.request_redraw();
     }
 
     fn cycle_tab(&mut self, forward: bool) {
         let id = {
-            let tabs = self.tabs.tabs();
+            let tabs: Vec<_> = self.tabs.tab_ids().collect();
             if tabs.is_empty() {
                 return;
             }
             let current = self
                 .tabs
-                .active()
-                .and_then(|active| tabs.iter().position(|tab| tab.id == active.id))
+                .active_id()
+                .and_then(|active| tabs.iter().position(|tab| *tab == active))
                 .unwrap_or(0);
             let index = if forward {
                 (current + 1) % tabs.len()
             } else {
                 (current + tabs.len() - 1) % tabs.len()
             };
-            tabs[index].id
+            tabs[index]
         };
         self.activate_tab(id);
     }
@@ -8810,7 +8927,7 @@ where
             .path
             .as_deref()
             .map(display_name)
-            .unwrap_or_else(|| "Welcome".to_owned());
+            .unwrap_or_else(|| "Gallery".to_owned());
         if self
             .tabs
             .active()
@@ -12525,6 +12642,8 @@ mod tests {
         let a = app.tabs.open_new(root.join("a.png"), MediaKind::Image);
         let b = app.tabs.open_new(root.join("b.png"), MediaKind::Image);
         let c = app.tabs.open_new(root.join("c.png"), MediaKind::Image);
+        app.tabs
+            .close_gallery(app.tabs.gallery().expect("media-only fixture"));
         app.path = Some(root.join("c.png"));
         app.media_kind = Some(MediaKind::Image);
         app.edits
@@ -12817,6 +12936,8 @@ mod tests {
                         .open_new(root.join("a-much-longer-name.png"), MediaKind::Image);
                     app.tabs.activate(first);
                     app.timeline_open = timeline;
+                    app.tabs
+                        .close_gallery(app.tabs.gallery().expect("media-only fixture"));
                     app.media_kind = Some(kind);
                     app.media_duration = Some(Duration::from_secs(10));
                     app.state = PlaybackState::Paused;
@@ -23418,6 +23539,8 @@ mod tests {
                 MediaKind::Audio => "active.wav",
             });
             let active = app.tabs.open_new(path.clone(), kind);
+            app.tabs
+                .close_gallery(app.tabs.gallery().expect("media-only fixture"));
             app.path = Some(path.clone());
             app.media_kind = Some(kind);
             app.state = PlaybackState::Paused;

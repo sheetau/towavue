@@ -8,6 +8,7 @@ use crate::MediaKind;
 pub enum CommandId {
     OpenFile,
     OpenFolder,
+    OpenGallery,
     ShowLicenses,
     CloseTab,
     NextTab,
@@ -121,6 +122,7 @@ impl CommandId {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OpenFile => "open_file",
+            Self::OpenGallery => "open_gallery",
             Self::OpenFolder => "open_folder",
             Self::ShowLicenses => "show_licenses",
             Self::CloseTab => "close_tab",
@@ -546,6 +548,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::OpenFile, "Open file", &[]),
     command(CommandId::ToggleFullscreen, "Toggle fullscreen", &[]),
     command(CommandId::OpenFolder, "Open folder", &[]),
+    command(CommandId::OpenGallery, "Open Gallery", &[]),
     command(CommandId::ShowLicenses, "Show licenses and sources", &[]),
     command(CommandId::CloseTab, "Close tab", &[]),
     command(CommandId::NextTab, "Next tab", &[]),

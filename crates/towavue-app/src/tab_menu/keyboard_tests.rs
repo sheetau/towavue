@@ -30,6 +30,8 @@ fn setup(root: &Path) -> Application<fn(AppEvent)> {
     for name in ["first.png", "second.png", "third.png"] {
         app.tabs.open_new(root.join(name), MediaKind::Image);
     }
+    app.tabs
+        .close_gallery(app.tabs.gallery().expect("media-only fixture"));
     app.path = Some(root.join("third.png"));
     app.media_kind = Some(MediaKind::Image);
     app
@@ -464,7 +466,7 @@ fn tab_context_close_restores_a_surviving_tab_or_welcome_and_compact_menus_stay_
     tree(&mut app, vec![action(all, egui::accesskit::Action::Click)]);
     let welcome = settle(&mut app);
     assert!(app.tabs.tabs().is_empty());
-    assert_eq!(welcome.focus, node(&welcome, "Welcome tab"));
+    assert_eq!(welcome.focus, node(&welcome, "Gallery tab"));
 }
 
 pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(

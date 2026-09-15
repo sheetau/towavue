@@ -160,6 +160,45 @@ impl Trace {
 
 impl super::Mailbox {
     pub(super) fn trace(&mut self, path: &Path, kind: ImageLoadTraceKind) {
+        #[cfg(feature = "presentation-verification")]
+        {
+            use crate::BurstEvent as Event;
+            let outcome_code = |outcome| match outcome {
+                Outcome::Completed => 1,
+                Outcome::Failed => 2,
+                Outcome::Unsupported => 3,
+                Outcome::BudgetRejected => 4,
+                Outcome::Superseded => 5,
+            };
+            let event = match kind {
+                ImageLoadTraceKind::Requested => Some((Event::LoaderRequested, 0, 0)),
+                ImageLoadTraceKind::PrefetchDecodeStarted => Some((Event::PrefetchStarted, 0, 0)),
+                ImageLoadTraceKind::ForegroundDecodeStarted => {
+                    Some((Event::ForegroundStarted, 0, 0))
+                }
+                ImageLoadTraceKind::PrefetchReturned { elapsed, outcome } => Some((
+                    Event::PrefetchReturned,
+                    elapsed.as_nanos() as u64,
+                    outcome_code(outcome),
+                )),
+                ImageLoadTraceKind::ForegroundReturned { elapsed, outcome } => Some((
+                    Event::ForegroundReturned,
+                    elapsed.as_nanos() as u64,
+                    outcome_code(outcome),
+                )),
+                ImageLoadTraceKind::OriginalCached => Some((Event::OriginalCached, 0, 0)),
+                ImageLoadTraceKind::ForegroundCacheHit => Some((Event::CacheHit, 0, 0)),
+                ImageLoadTraceKind::OriginalPublished => Some((Event::OriginalPublished, 0, 0)),
+                ImageLoadTraceKind::WaitStarted => Some((Event::WaitStarted, 0, 0)),
+                ImageLoadTraceKind::WaitFinished { elapsed } => {
+                    Some((Event::WaitFinished, elapsed.as_nanos() as u64, 0))
+                }
+                _ => None,
+            };
+            if let Some((event, elapsed, outcome)) = event {
+                crate::record_burst(event, self.generation, Some(path), [elapsed, outcome, 0]);
+            }
+        }
         if let Some(trace) = &mut self.trace {
             trace.record(path, self.generation, kind);
         }

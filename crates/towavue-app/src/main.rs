@@ -1940,6 +1940,11 @@ where
         let Some(folder) = path.parent() else { return };
         self.watch_folder(folder);
         let generation = self.folder_order.request(Some(folder.to_owned()));
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(
+            towavue_runtime_windows::BurstEvent::FolderRequested,
+            generation,
+        );
         self.pending_folder = Some((generation, FolderIntent::Refresh(path)));
         self.request_redraw();
     }
@@ -1948,6 +1953,13 @@ where
         let Some(snapshot) = self.folder_order.take_completed() else {
             return;
         };
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::record_burst(
+            towavue_runtime_windows::BurstEvent::FolderCompleted,
+            snapshot.generation,
+            self.path.as_deref(),
+            [snapshot.items.len() as u64, self.media_generation, 0],
+        );
         if self
             .pending_folder
             .as_ref()
@@ -1984,6 +1996,21 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        #[cfg(feature = "presentation-verification")]
+        towavue_runtime_windows::record_burst(
+            towavue_runtime_windows::BurstEvent::FolderApplied,
+            snapshot.generation,
+            self.path.as_deref(),
+            [
+                snapshot.items.len() as u64,
+                self.media_generation,
+                match snapshot.source {
+                    FolderSnapshotSource::LiveExplorerView => 1,
+                    FolderSnapshotSource::PersistedShellView => 2,
+                    FolderSnapshotSource::NaturalNameFallback => 3,
+                },
+            ],
+        );
         if self.folder_snapshot.as_ref().is_some_and(|previous| {
             previous.folder_path != snapshot.folder_path
                 || !previous
@@ -2281,6 +2308,11 @@ where
     }
 
     fn apply_loaded_images(&mut self, mut result: towavue_runtime_windows::LoadedImages) {
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(
+            towavue_runtime_windows::BurstEvent::CompletionReceived,
+            result.generation,
+        );
         result.first_index += self.image_request_offset;
         result.total += self.image_request_offset;
         if result.generation != self.image_generation
@@ -2306,6 +2338,10 @@ where
                 timing[1] = Instant::now();
             }
             towavue_runtime_windows::towavue_presentation_stage(2);
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::OriginalAccepted,
+                self.image_generation,
+            );
             towavue_runtime_windows::towavue_original_ready(decoded.dimensions());
         }
         // Matching prefetch now survives the next request, so overlap it with texture preparation.
@@ -2345,6 +2381,10 @@ where
                             timing[2] = Instant::now();
                         }
                         towavue_runtime_windows::towavue_presentation_stage(3);
+                        self.trace_burst(
+                            towavue_runtime_windows::BurstEvent::TexturePrepared,
+                            self.image_generation,
+                        );
                     }
                     self.image_error = None;
                     self.state = PlaybackState::Paused;
@@ -2866,6 +2906,19 @@ where
     }
 
     fn render_frame(&mut self) {
+        #[cfg(feature = "presentation-verification")]
+        let trace_frame = towavue_runtime_windows::burst_enabled()
+            && (self.image_loading
+                || self.image_sequence.awaiting.is_some()
+                || !self.image_sequence.steps.is_empty()
+                || self.pending_folder.is_some());
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::FrameStarted,
+                self.image_generation,
+            );
+        }
         self.advance_media();
         if self.renderer.is_none() {
             self.finish_reading_drag(true);
@@ -2919,6 +2972,13 @@ where
                 && self.pending_time.is_none()
                 && !self.audio_drained,
         );
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::UiPrepared,
+                self.image_generation,
+            );
+        }
         let renderer = self.renderer.as_mut().expect("renderer exists");
         let media_result = renderer.clear([0.0, 0.0, 0.0, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
@@ -2955,6 +3015,13 @@ where
                 return;
             }
         };
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::UiRendered,
+                self.image_generation,
+            );
+        }
         if self.viewing_cursor.hidden {
             platform_output.cursor_icon = egui::CursorIcon::None;
             platform_output.cursor_image = None;
@@ -2981,6 +3048,13 @@ where
                 self.media_cursors.as_ref(),
             );
         }
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::PresentStarted,
+                self.image_generation,
+            );
+        }
         if let Err(error) = self
             .renderer
             .as_ref()
@@ -2991,7 +3065,45 @@ where
             return;
         }
         #[cfg(feature = "presentation-verification")]
+        {
+            if trace_frame {
+                self.trace_burst(
+                    towavue_runtime_windows::BurstEvent::FrameSubmitted,
+                    image_presentation.unwrap_or(0),
+                );
+            }
+            if image_presentation.is_some() {
+                self.trace_burst(
+                    towavue_runtime_windows::BurstEvent::OriginalSubmitted,
+                    self.image_generation,
+                );
+                if towavue_runtime_windows::burst_enabled()
+                    && let Some(image) = &self.image
+                {
+                    let frame = &image.decoded.frames[0];
+                    let client = self.window.as_ref().expect("window exists").inner_size();
+                    let scale = self.image_view.logical_scale(
+                        (frame.width, frame.height),
+                        self.image_viewport.into(),
+                        context.pixels_per_point(),
+                    ) * context.pixels_per_point();
+                    towavue_runtime_windows::record_burst(
+                        towavue_runtime_windows::BurstEvent::OriginalGeometry,
+                        self.media_generation,
+                        self.path.as_deref(),
+                        [
+                            (u64::from(frame.width) << 32) | u64::from(frame.height),
+                            (u64::from(client.width) << 32) | u64::from(client.height),
+                            (u64::from((frame.width as f32 * scale).to_bits()) << 32)
+                                | u64::from((frame.height as f32 * scale).to_bits()),
+                        ],
+                    );
+                }
+            }
+        }
+        #[cfg(feature = "presentation-verification")]
         if image_presentation.is_some()
+            && !towavue_runtime_windows::burst_enabled()
             && let Some(image) = &self.image
         {
             let frame = &image.decoded.frames[0];
@@ -7639,6 +7751,11 @@ where
     }
 
     fn navigate(&mut self, forward: bool, same_kind: bool) {
+        #[cfg(feature = "presentation-verification")]
+        self.trace_burst(
+            towavue_runtime_windows::BurstEvent::Navigate,
+            u64::from(forward) | (u64::from(same_kind) << 1),
+        );
         let sequence = same_kind && self.media_kind == Some(MediaKind::Image) && !self.reading_mode;
         if sequence && self.queue_image_step(forward) {
             return;
@@ -7677,6 +7794,17 @@ where
                 .find(|item| !same_kind || item.kind == kind)
         };
         if let Some(target) = target {
+            #[cfg(feature = "presentation-verification")]
+            towavue_runtime_windows::record_burst(
+                towavue_runtime_windows::BurstEvent::TargetSelected,
+                self.media_generation,
+                Some(&target.path),
+                [
+                    u64::from(forward),
+                    items.len() as u64,
+                    self.image_generation,
+                ],
+            );
             self.request_guarded(GuardedAction::Navigate(target.path.clone()));
         }
     }
@@ -9611,6 +9739,27 @@ where
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        #[cfg(feature = "presentation-verification")]
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic,
+            ..
+        } = &event
+        {
+            let key = match event.physical_key {
+                PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) => Some(0x27u64),
+                PhysicalKey::Code(winit::keyboard::KeyCode::ArrowLeft) => Some(0x25),
+                PhysicalKey::Code(winit::keyboard::KeyCode::Space) => Some(0x20),
+                PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => Some(0x08),
+                _ => None,
+            };
+            if let Some(key) = key {
+                let flags = u64::from(event.state == ElementState::Pressed)
+                    | (u64::from(event.repeat) << 1)
+                    | (u64::from(*is_synthetic) << 2);
+                self.trace_burst(towavue_runtime_windows::BurstEvent::Key, key | (flags << 8));
+            }
         }
         if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
             self.media_cursors = Some(cursor::MediaCursors::new(event_loop, *scale_factor));

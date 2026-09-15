@@ -2,6 +2,10 @@
 
 mod audio;
 mod avif_container;
+#[cfg(feature = "presentation-verification")]
+mod burst_verification;
+#[cfg(feature = "presentation-verification")]
+pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_burst};
 mod cancellation;
 mod caption;
 mod decode;

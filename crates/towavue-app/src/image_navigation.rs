@@ -9,6 +9,23 @@ pub(crate) mod performance_tests;
 mod sequence_tests;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    #[cfg(feature = "presentation-verification")]
+    pub(super) fn trace_burst(&self, event: towavue_runtime_windows::BurstEvent, value: u64) {
+        let state = u64::from(self.image_loading)
+            | (u64::from(self.image_sequence.awaiting.is_some()) << 1)
+            | (u64::from(self.image_error.is_some()) << 2)
+            | (u64::from(self.reading_mode) << 3)
+            | (u64::from(self.pending_folder.is_some()) << 4)
+            | (u64::from(self.image.is_some()) << 5)
+            | (u64::from(self.image_handoff.is_some()) << 6);
+        towavue_runtime_windows::record_burst(
+            event,
+            self.media_generation,
+            self.path.as_deref(),
+            [value, self.image_sequence.steps.len() as u64, state],
+        );
+    }
+
     pub(super) fn jump_images(&mut self, offset: i32) {
         if self.media_kind != Some(MediaKind::Image) {
             return;

@@ -29,15 +29,27 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return false;
         }
         if self.image_sequence_blocked() {
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(towavue_runtime_windows::BurstEvent::QueueCancelled, 1);
             self.image_sequence = ImageSequence::default();
             return false;
         }
         if self.image_sequence.steps.len() == 256 {
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::QueueFull,
+                u64::from(forward),
+            );
             self.set_status(
                 "Image navigation queue is full. Wait for accepted steps to finish.".into(),
             );
         } else {
             self.image_sequence.steps.push_back(forward);
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::Queued,
+                u64::from(forward),
+            );
         }
         true
     }
@@ -69,6 +81,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         if self.image_sequence_blocked() {
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(towavue_runtime_windows::BurstEvent::QueueCancelled, 2);
             self.image_sequence = ImageSequence::default();
             return;
         }
@@ -82,12 +96,25 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         self.image_sequence.awaiting = None;
         if let Some(forward) = self.image_sequence.steps.pop_front() {
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::Dequeued,
+                u64::from(forward),
+            );
             // Only this continuation preserves queued directions across load/guard cancellation.
             let remaining = std::mem::take(&mut self.image_sequence.steps);
             self.navigate(forward, true);
             if self.image_sequence.awaiting.is_some() {
                 self.image_sequence.steps = remaining;
+                #[cfg(feature = "presentation-verification")]
+                self.trace_burst(towavue_runtime_windows::BurstEvent::QueueRestored, 0);
             }
+        } else {
+            #[cfg(feature = "presentation-verification")]
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::SequenceSettled,
+                self.image_generation,
+            );
         }
     }
 }

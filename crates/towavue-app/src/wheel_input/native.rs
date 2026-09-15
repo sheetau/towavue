@@ -253,7 +253,14 @@ mod tests {
     fn native_pages_follow_rendered_scroll_areas_and_ignore_discarded_or_missing_layout() {
         use crate::scroll_style::ScrollAreaStyle;
         for density in [1.0, 1.25, 2.0] {
-            for (kind, horizontal) in [(0, false), (0, true), (1, false), (2, false), (2, true)] {
+            for (kind, horizontal) in [
+                (0, false),
+                (0, true),
+                (1, false),
+                (2, false),
+                (2, true),
+                (3, false),
+            ] {
                 let context = egui::Context::default();
                 context.set_pixels_per_point(density);
                 let mut time = 0.0;
@@ -300,6 +307,29 @@ mod tests {
                                 0 => area.show_styled(ui, content),
                                 1 => area.show_rows_styled(ui, 20.0, 80, |ui, _| content(ui)),
                                 2 => area.show_viewport_styled(ui, |ui, _| content(ui)),
+                                3 => {
+                                    let mut output = area
+                                        .scroll_bar_visibility(
+                                            egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                        )
+                                        .show_styled(ui, |ui| {
+                                            content(ui);
+                                            vec![crate::gallery_rail::Month {
+                                                date: Some((2026, 9)),
+                                                offset: 0.0,
+                                            }]
+                                        });
+                                    let mut rail = output.inner_rect;
+                                    rail.min.x = rail.right() - 32.0;
+                                    crate::gallery_rail::show(ui, &mut output, rail);
+                                    egui::scroll_area::ScrollAreaOutput {
+                                        inner: (),
+                                        id: output.id,
+                                        state: output.state,
+                                        content_size: output.content_size,
+                                        inner_rect: output.inner_rect,
+                                    }
+                                }
                                 _ => unreachable!(),
                             });
                         }

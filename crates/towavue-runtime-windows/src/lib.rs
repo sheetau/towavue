@@ -38,7 +38,7 @@ mod renderer;
 mod selection_outline;
 mod shell;
 
-pub use recent::{RecentFiles, RecentUpdate};
+pub use recent::{RecentEntry, RecentFiles, RecentUpdate};
 mod tempo;
 mod watch;
 mod waveform;

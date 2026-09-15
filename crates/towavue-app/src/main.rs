@@ -15,6 +15,7 @@ mod file_drop;
 mod filmstrip;
 mod fonts;
 mod frame_step;
+mod gallery_rail;
 #[cfg(test)]
 mod gallery_tests;
 mod grid;
@@ -839,6 +840,7 @@ struct Application<N> {
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
+    recent_months: BTreeMap<PathBuf, (u16, u16)>,
     gallery_search: String,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
     image_edit_worker: towavue_runtime_windows::LatestTask,
@@ -1076,6 +1078,7 @@ where
             closed_tabs: VecDeque::new(),
             recent_files: None,
             recent_paths: Vec::new(),
+            recent_months: BTreeMap::new(),
             gallery_search: String::new(),
             image_copy: None,
             image_edit_worker: towavue_runtime_windows::LatestTask::new("towavue-image-edits")
@@ -2665,7 +2668,17 @@ where
                     .as_ref()
                     .and_then(|recent| recent.take_completed())
                 {
-                    self.recent_paths = update.paths;
+                    self.recent_months = update
+                        .entries
+                        .iter()
+                        .filter_map(|entry| {
+                            entry
+                                .opened_month()
+                                .map(|month| (entry.path.clone(), month))
+                        })
+                        .collect();
+                    self.recent_paths =
+                        update.entries.into_iter().map(|entry| entry.path).collect();
                     if let Some(error) = update.error {
                         self.set_status(error);
                     }
@@ -3428,7 +3441,16 @@ where
                                     if paths.is_empty() && !self.recent_paths.is_empty() {
                                         ui.label("No matching files.");
                                     }
-                                    self.filmstrip.show_recent(ui, paths, enabled, actions)
+                                    let offsets =
+                                        self.filmstrip.show_recent(ui, paths, enabled, actions);
+                                    let mut months: Vec<gallery_rail::Month> = Vec::new();
+                                    for (path, offset) in paths.iter().zip(offsets) {
+                                        let date = self.recent_months.get(path).copied();
+                                        if !months.iter().any(|month| month.date == date) {
+                                            months.push(gallery_rail::Month { date, offset });
+                                        }
+                                    }
+                                    months
                                 },
                             )
                         })
@@ -10804,7 +10826,7 @@ mod tests {
                         &mut String::new(),
                         false,
                         true,
-                        |_, _| {},
+                        |_, _| Vec::new(),
                     ) {
                         chosen.push(command);
                     }

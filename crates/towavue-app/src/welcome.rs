@@ -65,7 +65,7 @@ pub fn show(
     query: &mut String,
     has_recent: bool,
     enabled: bool,
-    recent: impl FnOnce(&mut egui::Ui, &str),
+    recent: impl FnOnce(&mut egui::Ui, &str) -> Vec<crate::gallery_rail::Month>,
 ) -> Option<CommandId> {
     let viewport = ui.available_rect_before_wrap();
     let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
@@ -75,13 +75,14 @@ pub fn show(
     if !enabled {
         ui.disable();
     }
-    let width = (ui.available_width() - 32.0).clamp(0.0, 660.0);
+    let width = (ui.available_width() - 40.0).clamp(0.0, 660.0);
     let top = (ui.available_height() * 0.08).clamp(12.0, 40.0);
     let mut chosen = None;
     ui.add_space(top);
     let search_changed = ui
         .horizontal(|ui| {
-            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            let gap = (ui.available_width() - width).max(0.0);
+            ui.add_space((gap / 2.0).min((gap - 40.0).max(0.0)));
             ui.spacing_mut().item_spacing.x = 8.0;
             let search = ui
                 .allocate_ui_with_layout(
@@ -137,11 +138,12 @@ pub fn show(
     };
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt("welcome")
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .auto_shrink([false, false]);
     if search_changed {
         scroll = scroll.vertical_scroll_offset(0.0);
     }
-    scroll.show_styled(ui, |ui| {
+    let mut output = scroll.show_styled(ui, |ui| {
         ui.set_style(content_style);
         if gutter_scroll != 0.0 {
             ui.scroll_with_delta_animation(
@@ -150,12 +152,14 @@ pub fn show(
             );
         }
         ui.horizontal(|ui| {
-            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            let width = width.min((ui.available_width() - 40.0).max(0.0));
+            let gap = (ui.available_width() - width).max(0.0);
+            ui.add_space((gap / 2.0).min((gap - 40.0).max(0.0)));
             ui.allocate_ui_with_layout(
                 egui::vec2(width, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    recent(ui, query);
+                    let months = recent(ui, query);
                     if !has_recent {
                         ui.add(
                             egui::Label::new(
@@ -166,10 +170,15 @@ pub fn show(
                         );
                     }
                     ui.add_space(16.0);
+                    months
                 },
-            );
-        });
+            )
+            .inner
+        })
+        .inner
     });
+    let rail = egui::Rect::from_min_max(egui::pos2(body.right() - 32.0, body.top()), body.max);
+    crate::gallery_rail::show(ui, &mut output, rail);
     chosen
 }
 
@@ -208,14 +217,19 @@ mod tests {
         recent: impl FnOnce(&mut egui::Ui),
     ) -> Option<CommandId> {
         super::show(ui, shortcuts, &mut String::new(), false, true, |ui, _| {
-            recent(ui)
+            recent(ui);
+            vec![crate::gallery_rail::Month {
+                date: None,
+                offset: 0.0,
+            }]
         })
     }
 
     #[test]
-    fn welcome_scrollbar_is_inset_muted_and_keeps_gutter_wheel_input() {
+    fn gallery_rail_is_inset_and_keeps_body_gutter_wheel_input() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
+            context.enable_accesskit();
             context.set_pixels_per_point(density);
             context.global_style_mut(chrome::style);
             context.global_style_mut(|style| style.animation_time = 0.0);
@@ -231,71 +245,39 @@ mod tests {
                     |ui| {
                         assert!(
                             show(ui, &ShortcutBindings::default(), |ui| {
-                                assert_eq!(
-                                    ui.visuals().widgets,
-                                    original,
-                                    "recent cards retain their style"
-                                );
+                                assert_eq!(ui.visuals().widgets, original, "card style");
                                 ui.set_min_height(1200.0);
                             })
                             .is_none()
                         );
-                        assert_eq!(
-                            ui.visuals().widgets,
-                            original,
-                            "siblings retain their style"
-                        );
+                        assert_eq!(ui.visuals().widgets, original, "sibling style");
                     },
                 )
             };
-            let bars = |output: &egui::FullOutput| {
+            let marker = |output: &egui::FullOutput| {
                 output
                     .shapes
                     .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect)
-                            if rect.rect.left() >= screen.right() - 14.0
-                                && rect.rect.width() <= 5.0
-                                && rect.rect.height() > 6.0 =>
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::LineSegment { points, stroke }
+                            if stroke.color == chrome::FOREGROUND && points[0].x > 400.0 =>
                         {
-                            Some(rect.clone())
+                            Some(points[0].y)
                         }
                         _ => None,
                     })
-                    .collect::<Vec<_>>()
+                    .expect("current-position bar")
             };
             for _ in 0..3 {
                 frame(vec![]);
             }
-            let idle = bars(&frame(vec![]));
-            assert_eq!(idle.len(), 2, "track and handle");
-            let track = idle[0].rect;
+            let idle = frame(vec![]);
+            let track = node_rect(&idle, "Date unknown");
             assert!(
-                track.top()
-                    > text_rect(&frame(vec![]), "Search Gallery")
-                        .expect("fixed search header")
-                        .bottom()
-                        + 24.0
+                track.top() > text_rect(&idle, "Search Gallery").expect("header").bottom() + 24.0
             );
-            for (actual, expected) in [(track.bottom(), 292.0), (track.right(), 472.0)] {
-                assert!(
-                    (actual - expected).abs() <= 1.0 / density,
-                    "inset track: {track:?}"
-                );
-            }
-            assert_eq!(idle[0].fill.a(), 0);
-            assert!(idle[1].fill.a() > 0);
-            let track_point = egui::pos2(track.center().x, track.bottom() - 3.0);
-            frame(vec![egui::Event::PointerMoved(track_point)]);
-            let hovered_track = bars(&frame(vec![]));
-            assert!(hovered_track[0].fill.a() > 0 && hovered_track[0].fill.a() < 128);
-            let handle = hovered_track[1].rect;
-            frame(vec![egui::Event::PointerMoved(handle.center())]);
-            let hovered_handle = bars(&frame(vec![]));
-            assert_eq!(
-                hovered_handle[1].fill, hovered_track[1].fill,
-                "handle hover stays gray"
-            );
+            assert!((track.right() - 472.0).abs() <= 1.0 / density);
+            assert!((track.bottom() - 292.0).abs() <= 1.0 / density);
             let button = |pos, pressed| egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
@@ -308,18 +290,13 @@ mod tests {
                 egui::pos2(240.0, 2.0),
                 egui::pos2(240.0, 298.0),
             ] {
-                let before = bars(&frame(vec![]));
+                let before = marker(&frame(vec![]));
                 frame(vec![
                     egui::Event::PointerMoved(gutter),
                     button(gutter, true),
                 ]);
-                frame(vec![button(gutter, false)]);
-                let after_click = bars(&frame(vec![]));
-                assert_eq!(
-                    after_click[1].rect.top(),
-                    before[1].rect.top(),
-                    "gutter is outside the bar hit region"
-                );
+                let after = marker(&frame(vec![button(gutter, false)]));
+                assert_eq!(before, after, "gutter clicks cannot jump the rail");
                 frame(vec![egui::Event::MouseWheel {
                     unit: egui::MouseWheelUnit::Point,
                     delta: egui::vec2(0.0, -80.0),
@@ -329,30 +306,21 @@ mod tests {
                 for _ in 0..30 {
                     frame(vec![]);
                 }
-                let scrolled = bars(&frame(vec![]));
+                let scrolled = marker(&frame(vec![]));
                 if gutter.y < track.top() {
-                    assert_eq!(
-                        scrolled[1].rect.top(),
-                        after_click[1].rect.top(),
-                        "fixed header does not scroll the body"
-                    );
+                    assert_eq!(scrolled, after, "fixed header does not scroll");
                 } else {
-                    assert!(
-                        scrolled[1].rect.top() > after_click[1].rect.top(),
-                        "wheel works in the body gutter: {gutter:?}"
-                    );
+                    assert!(scrolled > after, "body gutter scrolls: {gutter:?}");
                 }
             }
-            let scrolled = bars(&frame(vec![]));
-            let start = scrolled[1].rect.center();
-            let end = start + egui::vec2(0.0, 40.0);
+            let start = track.center();
+            let end = track.center_bottom() + egui::vec2(0.0, 30.0);
             frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
             frame(vec![egui::Event::PointerMoved(end)]);
-            frame(vec![button(end, false)]);
-            let dragged = bars(&frame(vec![]));
+            let bottom = marker(&frame(vec![button(end, false)]));
             assert!(
-                dragged[1].rect.top() > scrolled[1].rect.top(),
-                "handle remains draggable"
+                (bottom - (track.bottom() - 2.0)).abs() <= 1.0 / density,
+                "owned drag reaches the end outside the rail"
             );
         }
     }

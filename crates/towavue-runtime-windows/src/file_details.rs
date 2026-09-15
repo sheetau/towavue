@@ -25,6 +25,22 @@ impl FileDetails {
 }
 
 fn local_time(ticks: u64, zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>) -> Option<String> {
+    let local = local_system_time(ticks, zone)?;
+    Some(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond
+    ))
+}
+
+pub(crate) fn local_month(ticks: u64) -> Option<(u16, u16)> {
+    let local = local_system_time(ticks, None)?;
+    Some((local.wYear, local.wMonth))
+}
+
+fn local_system_time(
+    ticks: u64,
+    zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>,
+) -> Option<SYSTEMTIME> {
     let file_time = FILETIME {
         dwLowDateTime: ticks as u32,
         dwHighDateTime: (ticks >> 32) as u32,
@@ -37,10 +53,7 @@ fn local_time(ticks: u64, zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>) -> Optio
         FileTimeToSystemTime(&file_time, &mut utc).ok()?;
         SystemTimeToTzSpecificLocalTimeEx(zone.map(std::ptr::from_ref), &utc, &mut local).ok()?;
     }
-    Some(format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        local.wYear, local.wMonth, local.wDay, local.wHour, local.wMinute, local.wSecond
-    ))
+    Some(local)
 }
 
 #[cfg(test)]

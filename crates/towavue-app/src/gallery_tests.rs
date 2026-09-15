@@ -1,6 +1,203 @@
 use crate::*;
 
 #[test]
+fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media() {
+    use crate::audio_export::tests::frame;
+    use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        context.global_style_mut(|style| style.animation_time = 0.0);
+        app.ui_context = Some(context.clone());
+        for index in 0..40 {
+            let (name, date) = match index / 10 {
+                0 => ("september", Some((2026, 9))),
+                1 => ("july", Some((2026, 7))),
+                2 => ("december", Some((2024, 12))),
+                _ => ("legacy", None),
+            };
+            let path = root.join(format!("{name}-{index:02}.png"));
+            if let Some(date) = date {
+                app.recent_months.insert(path.clone(), date);
+            }
+            app.recent_paths.push(path);
+        }
+        let size = egui::vec2(480.0, 300.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let node = |label| crate::video_rotation::tests::node(tree, label);
+        for label in [
+            "September 2026",
+            "July 2026",
+            "December 2024",
+            "Date unknown",
+        ] {
+            node(label);
+        }
+        assert!(
+            !tree
+                .nodes
+                .iter()
+                .any(|(_, n)| n.label() == Some("August 2026"))
+        );
+        let search = node("Search Gallery");
+        let december = node("December 2024");
+        let september = node("September 2026");
+        let july = node("July 2026");
+        let card_top = |output: &egui::FullOutput, name: &str| {
+            output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label() == Some(name))
+                .expect("card")
+                .1
+                .bounds()
+                .expect("bounds")
+                .y0
+        };
+        let first_row_top = card_top(&output, "september-00.png");
+        let activate = |target| {
+            egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::Click,
+                target_tree: TreeId::ROOT,
+                target_node: target,
+                data: None,
+            })
+        };
+        frame(&mut app, size, vec![activate(december)]);
+        let output = frame(&mut app, size, vec![]);
+        assert!(app.path.is_none(), "rail navigation does not open a card");
+        let selected_top = card_top(&output, "december-20.png");
+        assert!(
+            (selected_top - first_row_top).abs() <= 1.0 / f64::from(density),
+            "selected month aligns its first row at {density}x: {selected_top} vs {first_row_top}"
+        );
+        app.palette_open = true;
+        frame(&mut app, size, vec![activate(september)]);
+        app.palette_open = false;
+        let output = frame(&mut app, size, vec![]);
+        assert_eq!(
+            card_top(&output, "december-20.png"),
+            selected_top,
+            "covered month controls cannot scroll the Gallery"
+        );
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::Focus,
+                target_tree: TreeId::ROOT,
+                target_node: july,
+                data: None,
+            })],
+        );
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let output = frame(&mut app, size, vec![]);
+        assert!(
+            (card_top(&output, "july-10.png") - first_row_top).abs() <= 1.0 / f64::from(density),
+            "keyboard activation uses the same month target"
+        );
+        let set = |value: &str| {
+            egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::SetValue,
+                target_tree: TreeId::ROOT,
+                target_node: search,
+                data: Some(ActionData::Value(value.into())),
+            })
+        };
+        let output = frame(&mut app, size, vec![set("july"), activate(december)]);
+        let filtered = output
+            .platform_output
+            .accesskit_update
+            .expect("filtered tree");
+        assert!(
+            filtered
+                .nodes
+                .iter()
+                .any(|(_, n)| n.label() == Some("July 2026"))
+        );
+        for absent in ["September 2026", "December 2024", "Date unknown"] {
+            assert!(
+                !filtered
+                    .nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some(absent))
+            );
+        }
+        assert!(
+            app.path.is_none(),
+            "stale month activation cannot open media"
+        );
+        let output = frame(&mut app, size, vec![set("not-present")]);
+        assert!(
+            !output
+                .platform_output
+                .accesskit_update
+                .expect("empty tree")
+                .nodes
+                .iter()
+                .any(|(_, n)| n.label() == Some("July 2026"))
+        );
+        // Reflow can put several populated months in the same row; every month
+        // remains separately addressable, without duplicate IDs or invented dates.
+        app.recent_paths = [0, 10, 20, 30]
+            .map(|index| app.recent_paths[index].clone())
+            .into();
+        frame(&mut app, size, vec![set("")]);
+        for width in [240.0, 960.0] {
+            let output = frame(&mut app, egui::vec2(width, 576.0), vec![]);
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .expect("reflow tree");
+            for label in [
+                "September 2026",
+                "July 2026",
+                "December 2024",
+                "Date unknown",
+            ] {
+                assert_eq!(
+                    tree.nodes
+                        .iter()
+                        .filter(|(_, n)| n.label() == Some(label))
+                        .count(),
+                    1
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn gallery_retains_dirty_image_state_and_preserves_close_guards() {
     let Some(root) = tests::isolated_test_root(
         "gallery_tests::gallery_retains_dirty_image_state_and_preserves_close_guards",

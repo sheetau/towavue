@@ -726,8 +726,10 @@ impl Filmstrip {
         paths: &[PathBuf],
         enabled: bool,
         actions: &mut Vec<UiAction>,
-    ) {
+    ) -> Vec<f32> {
         let mut wanted = Vec::new();
+        let mut offsets = Vec::with_capacity(paths.len());
+        let origin = ui.cursor().top();
         let width = ui.available_width();
         let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
         let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
@@ -742,6 +744,7 @@ impl Filmstrip {
                                 egui::vec2(cell_width, cell_width * 2.0 / 3.0 + 24.0),
                                 egui::Sense::click(),
                             );
+                            offsets.push(rect.top() - origin);
                             let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
                             response.widget_info(|| {
                                 egui::WidgetInfo::labeled(
@@ -865,6 +868,7 @@ impl Filmstrip {
             }
         }
         self.set_visible(wanted);
+        offsets
     }
 
     fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {

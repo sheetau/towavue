@@ -47,9 +47,9 @@ pub(super) fn gain_range_at(bands: &[(TimeRange, f32)], time: MediaTime) -> Opti
 }
 
 pub(super) fn gain_height(rect: Rect) -> f32 {
-    // Points per linear gain unit. Keep unity at the waveform center and maximum
-    // gain below the top controls; hit testing and drag deltas share this scale.
-    (rect.height() - 44.0).max(1.0) / (2.0 * (towavue_core::MAX_VOLUME - 1.0))
+    // Points per linear gain unit: unity at center, maximum at the top edge,
+    // silence one quarter above the bottom. Hit testing and dragging share it.
+    rect.height().max(1.0) / (2.0 * (towavue_core::MAX_VOLUME - 1.0))
 }
 
 pub(super) fn gain_y(rect: Rect, gain: f32) -> f32 {
@@ -191,6 +191,7 @@ pub(super) fn values(
         };
         let available = enabled
             && response.enabled()
+            && range.end() <= duration
             && !egui::Popup::is_any_open(ui.ctx())
             && (!stretch || selection.is_some());
         let bounds = if stretch {
@@ -273,6 +274,19 @@ mod tests {
     }
     fn range(start: i64, end: i64) -> TimeRange {
         TimeRange::new(time(start), time(end)).expect("range")
+    }
+
+    #[test]
+    fn gain_travel_uses_the_top_edge_and_keeps_unity_centered() {
+        for top in [0.0, 30.0] {
+            for height in [80.0, 100.0, 180.0] {
+                let rect = Rect::from_min_size(egui::pos2(20.0, top), egui::vec2(400.0, height));
+                assert_eq!(gain_height(rect), height / 4.0);
+                for (gain, fraction) in [(0.0, 0.75), (1.0, 0.5), (2.0, 0.25), (3.0, 0.0)] {
+                    assert_eq!(gain_y(rect, gain), top + height * fraction);
+                }
+            }
+        }
     }
 
     #[test]

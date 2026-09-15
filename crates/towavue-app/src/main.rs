@@ -813,6 +813,7 @@ struct Application<N> {
     fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
     platform_cursor: egui::CursorIcon,
+    media_cursors: Option<cursor::MediaCursors>,
     pending_dialog: Option<DialogIntent>,
     file_dialog_return_focus: Option<(u64, Option<TabId>, egui::Id)>,
     renderer: Option<FrameRenderer>,
@@ -1040,6 +1041,7 @@ where
             fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             platform_cursor: egui::CursorIcon::Default,
+            media_cursors: None,
             pending_dialog: None,
             file_dialog_return_focus: None,
             renderer: None,
@@ -1210,6 +1212,7 @@ where
             .with_visible(false)
             .with_decorations(true);
         let window = Arc::new(event_loop.create_window(attributes)?);
+        self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
         let mut renderer = if let Some(device) = graphics_device {
             FrameRenderer::with_native_caption_on_device(&native_caption, device)?
@@ -2874,6 +2877,7 @@ where
             platform_output.cursor_icon = egui::CursorIcon::None;
             platform_output.cursor_image = None;
         }
+        let previous_cursor = self.platform_cursor;
         self.platform_cursor = platform_output.cursor_icon;
         self.ui_state
             .as_mut()
@@ -2882,6 +2886,19 @@ where
                 self.window.as_ref().expect("window exists"),
                 platform_output,
             );
+        // egui-winit owns the other platform output, but its standard Windows
+        // mapping cannot supply these two glyphs. Also restore ordinary cursors
+        // after a custom one, even when egui-winit cached the fallback icon.
+        if context.input(|input| input.pointer.has_pointer())
+            && (cursor::MediaCursors::handles(previous_cursor)
+                || cursor::MediaCursors::handles(self.platform_cursor))
+        {
+            cursor::set_native(
+                self.window.as_ref().expect("window exists"),
+                self.platform_cursor,
+                self.media_cursors.as_ref(),
+            );
+        }
         if let Err(error) = self
             .renderer
             .as_ref()
@@ -9415,12 +9432,15 @@ where
 
     fn window_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
+        event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
         if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
             return;
+        }
+        if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
+            self.media_cursors = Some(cursor::MediaCursors::new(event_loop, *scale_factor));
         }
         if matches!(event, WindowEvent::Focused(false)) {
             self.finish_queued_media_release();

@@ -274,7 +274,7 @@ impl WindowHost {
         }
         self.update_tab_cursor_with(feedback, |app, cursor| {
             if visible && let Some(window) = &app.window {
-                cursor::set_native(window, cursor);
+                cursor::set_native(window, cursor, app.media_cursors.as_ref());
             }
         });
     }

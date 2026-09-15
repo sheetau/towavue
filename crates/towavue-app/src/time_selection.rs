@@ -350,14 +350,20 @@ pub(super) fn show(
         } else {
             "Time selection end (seconds)"
         };
-        describe_focus(&control, enabled, label, current.as_seconds_f64());
+        // Stretch can preview an endpoint beyond the old timeline. Report it
+        // without clamping, but do not edit a range the model does not own yet.
+        let displayed_end = selection
+            .map_or(duration, |range| range.end())
+            .max(duration);
+        let editable = enabled && displayed_end == duration;
+        describe_focus(&control, editable, label, current.as_seconds_f64());
         if let Some(value) = crate::seekbar::value_input(
             &control,
             label,
             current.as_seconds_f64(),
-            0.0..=seconds,
+            0.0..=displayed_end.as_seconds_f64(),
             0.1,
-            enabled,
+            editable,
         ) {
             let value = crate::media_time(std::time::Duration::from_secs_f64(value));
             let candidate = if start {
@@ -1304,6 +1310,8 @@ mod tests {
 
     #[test]
     fn selection_readouts_follow_held_previews_without_committing() {
+        use egui::accesskit;
+
         let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
         let original = TimeRange::new(time(2.5), time(5.0));
         for density in [1.0, 1.25, 2.0] {
@@ -1314,7 +1322,13 @@ mod tests {
                         (None, 320.0, 120.0, egui::Modifiers::NONE),
                         (original, 220.0, 320.0, egui::Modifiers::NONE),
                         (original, 180.0, 280.0, egui::Modifiers::ALT),
+                        (original, 180.0, 480.0, egui::Modifiers::ALT),
                     ] {
+                        let preview_length = if target > rect.right() { 10.0 } else { 5.0 };
+                        let expected_labels = [
+                            "In 2.500s".to_owned(),
+                            format!("Out {:.3}s", 2.5 + preview_length),
+                        ];
                         let context = egui::Context::default();
                         context.set_pixels_per_point(density);
                         context.enable_accesskit();
@@ -1370,7 +1384,7 @@ mod tests {
                                     None
                                 })
                                 .collect();
-                            if labels == ["In 2.500s", "Out 7.500s"] {
+                            if labels == expected_labels {
                                 let lengths: Vec<_> = output
                                     .shapes
                                     .iter()
@@ -1387,7 +1401,7 @@ mod tests {
                                     .collect();
                                 assert_eq!(
                                     lengths,
-                                    ["Length 5.000s"],
+                                    [format!("Length {preview_length:.3}s")],
                                     "one current length label, including the discarded release pass"
                                 );
                             }
@@ -1395,7 +1409,7 @@ mod tests {
                                 .platform_output
                                 .accesskit_update
                                 .expect("accessibility tree");
-                            if labels == ["In 2.500s", "Out 7.500s"]
+                            if labels == expected_labels
                                 && discard
                                 && results.iter().any(|result| {
                                     result.selection.is_some() || result.edit.is_some()
@@ -1408,7 +1422,10 @@ mod tests {
                                         node.label() == Some("Selected duration (seconds)")
                                     })
                                     .expect("release keeps the duration control");
-                                assert_eq!(node.1.numeric_value(), Some(5.0));
+                                assert_eq!(node.1.numeric_value(), Some(preview_length));
+                                if target > rect.right() {
+                                    assert!(!node.1.supports_action(accesskit::Action::SetValue));
+                                }
                             }
                             for (prefix, name) in [
                                 ("In ", "Time selection start (seconds)"),
@@ -1431,6 +1448,18 @@ mod tests {
                                         Some(value),
                                         "accessible and visible endpoints agree"
                                     );
+                                    assert!(
+                                        node.1.max_numeric_value().expect("upper bound") >= value
+                                    );
+                                    if labels == expected_labels && target > rect.right() {
+                                        for action in [
+                                            accesskit::Action::SetValue,
+                                            accesskit::Action::Increment,
+                                            accesskit::Action::Decrement,
+                                        ] {
+                                            assert!(!node.1.supports_action(action));
+                                        }
+                                    }
                                 }
                             }
                             (labels, results)
@@ -1450,8 +1479,7 @@ mod tests {
                             "held preview must not commit or seek again"
                         );
                         assert_eq!(
-                            labels,
-                            ["In 2.500s", "Out 7.500s"],
+                            labels, expected_labels,
                             "readouts follow the displayed range"
                         );
                         let (labels, actions) = draw(vec![if cancel {
@@ -1474,14 +1502,14 @@ mod tests {
                             };
                             assert_eq!(labels, expected, "cancel restores the committed readout");
                         } else {
-                            assert_eq!(labels, ["In 2.500s", "Out 7.500s"]);
+                            assert_eq!(labels, expected_labels);
                             assert_eq!(actions.len(), 1, "release commits once");
                             if modifiers.alt {
                                 assert_eq!(
                                     actions[0].edit,
                                     Some(TimelineEdit::Stretch(
                                         original.expect("selection"),
-                                        time(5.0)
+                                        time(preview_length)
                                     ))
                                 );
                             } else {

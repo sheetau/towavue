@@ -517,7 +517,7 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
             let (_, _, before) = frame(&mut app, vec![]);
             let rect = before.calc_bounds();
             let start = egui::pos2(rect.left() + rect.width() * 0.4, rect.center().y);
-            let end = start - egui::vec2(0.0, (rect.height() - 44.0) * 0.5);
+            let end = egui::pos2(start.x, rect.top());
             let button = |pos, pressed| egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,

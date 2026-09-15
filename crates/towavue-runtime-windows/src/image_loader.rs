@@ -2642,7 +2642,10 @@ mod tests {
                     (preview.preview.image.width, preview.preview.image.height),
                     (240, 160)
                 );
-                assert_eq!(preview.preview.image.rgba, vec![127; 240 * 160 * 4]);
+                assert_eq!(
+                    preview.preview.image.rgba.as_slice(),
+                    vec![127; 240 * 160 * 4]
+                );
                 assert_eq!(
                     previews
                         .cached_image(&path)

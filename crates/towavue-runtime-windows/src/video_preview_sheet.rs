@@ -132,8 +132,12 @@ impl PreviewCache {
                         .is_some_and(Cancellation::is_cancelled)
                 },
                 |slot, frame| {
-                    let frame = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
-                        .expect("packed preview frame");
+                    let frame = image::RgbaImage::from_raw(
+                        frame.width,
+                        frame.height,
+                        Arc::unwrap_or_clone(frame.rgba),
+                    )
+                    .expect("packed preview frame");
                     image::imageops::replace(
                         &mut sheet,
                         &frame,

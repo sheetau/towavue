@@ -205,7 +205,7 @@ fn compare(source: &Path, targets: &[Duration]) {
         let differences = actual
             .rgba
             .iter()
-            .zip(&expected.rgba)
+            .zip(expected.rgba.iter())
             .filter(|(a, b)| a != b)
             .count();
         assert_eq!(
@@ -232,7 +232,7 @@ fn compare(source: &Path, targets: &[Duration]) {
             actual
                 .rgba
                 .iter()
-                .zip(&expected.rgba)
+                .zip(expected.rgba.iter())
                 .filter(|(a, b)| a != b)
                 .count(),
             0,
@@ -256,7 +256,7 @@ fn compare(source: &Path, targets: &[Duration]) {
         card.image
             .rgba
             .iter()
-            .zip(&expected.rgba)
+            .zip(expected.rgba.iter())
             .filter(|(a, b)| a != b)
             .count(),
         0,
@@ -777,7 +777,7 @@ fn shared_sheet_decoder_long_gop_generation_measurement() {
             image
                 .rgba
                 .iter()
-                .zip(&references[slot].rgba)
+                .zip(references[slot].rgba.iter())
                 .filter(|(a, b)| a != b)
                 .count(),
             0,

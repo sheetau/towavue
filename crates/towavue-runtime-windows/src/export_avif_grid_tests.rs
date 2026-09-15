@@ -337,7 +337,7 @@ fn generated_avif_color_alpha_grids_and_mixed_planes_preserve_pixels() {
                     .expect("persisted preview");
                 assert_eq!(cached.source_size, expected.dimensions());
                 assert_eq!(
-                    cached.image.rgba,
+                    cached.image.rgba.as_slice(),
                     DynamicImage::ImageRgba8(expected.clone())
                         .resize(240, 160, image::imageops::FilterType::Nearest)
                         .into_rgba8()

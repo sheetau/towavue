@@ -496,7 +496,8 @@ mod tests {
                                 if opaque { 255 } else { n as u8 },
                             ]
                         })
-                        .collect(),
+                        .collect::<Vec<_>>()
+                        .into(),
                 };
                 let expected =
                     egui::ImageData::Color(Arc::new(egui::ColorImage::from_rgba_unmultiplied(
@@ -659,7 +660,7 @@ mod tests {
             image: PreviewImage {
                 width: 960,
                 height: 640,
-                rgba: vec![255; 960 * 640 * 4],
+                rgba: vec![255; 960 * 640 * 4].into(),
             },
         };
         preview.target = Some(target.clone());
@@ -755,7 +756,7 @@ mod tests {
         let pixels = || PreviewImage {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            rgba: vec![255; 4].into(),
         };
         preview.target = Some(target.clone());
         for case in 0..4 {
@@ -778,7 +779,7 @@ mod tests {
                             image: PreviewImage {
                                 width: context.input(|input| input.max_texture_side) as u32 + 1,
                                 height: 1,
-                                rgba: Vec::new(),
+                                rgba: Vec::new().into(),
                             },
                         }),
                         _ => Ok(towavue_runtime_windows::VideoPreviewSheet {
@@ -834,7 +835,7 @@ mod tests {
             Ok(PreviewImage {
                 width: 1,
                 height: 1,
-                rgba: vec![255; 4],
+                rgba: vec![255; 4].into(),
             }),
         );
         assert!(
@@ -851,7 +852,7 @@ mod tests {
             Ok(PreviewImage {
                 width: 1,
                 height: 1,
-                rgba: vec![255; 4],
+                rgba: vec![255; 4].into(),
             }),
         );
         assert!(preview.target.is_none() && preview.texture.is_none());
@@ -937,7 +938,7 @@ mod tests {
                 image: PreviewImage {
                     width: 960,
                     height: 640,
-                    rgba: vec![255; 960 * 640 * 4],
+                    rgba: vec![255; 960 * 640 * 4].into(),
                 },
             }),
         );
@@ -1169,7 +1170,7 @@ mod tests {
             Ok(PreviewImage {
                 width: 2,
                 height: 1,
-                rgba: [0, 0, 255, 255].repeat(2),
+                rgba: [0, 0, 255, 255].repeat(2).into(),
             }),
         );
         let fallback_texture = app
@@ -1198,7 +1199,7 @@ mod tests {
             Ok(PreviewImage {
                 width: 1,
                 height: 1,
-                rgba: vec![255; 4],
+                rgba: vec![255; 4].into(),
             }),
         );
         assert!(
@@ -1228,7 +1229,7 @@ mod tests {
             Ok(PreviewImage {
                 width: 1,
                 height: 1,
-                rgba: vec![255; 4],
+                rgba: vec![255; 4].into(),
             }),
         );
         assert!(

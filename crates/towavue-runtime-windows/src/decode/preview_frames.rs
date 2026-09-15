@@ -233,7 +233,7 @@ pub(crate) fn preview_video_frames(
             crate::PreviewImage {
                 width: frame.width,
                 height: frame.height,
-                rgba: frame.rgba,
+                rgba: frame.rgba.into(),
             },
         );
     }

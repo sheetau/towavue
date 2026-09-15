@@ -756,7 +756,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
                 image: towavue_runtime_windows::PreviewImage {
                     width: 1,
                     height: 1,
-                    rgba: vec![255, 0, 0, 255],
+                    rgba: vec![255, 0, 0, 255].into(),
                 },
             },
         );

@@ -80,7 +80,7 @@ fn png_row_thumbnail_reports_full_decode_comparison() {
                     image: PreviewImage {
                         width: small.width(),
                         height: small.height(),
-                        rgba: small.into_raw(),
+                        rgba: small.into_raw().into(),
                     },
                 }
             };
@@ -135,7 +135,7 @@ fn compare(path: &Path) {
         expected.dimensions()
     );
     assert_eq!(
-        preview.image.rgba,
+        preview.image.rgba.as_slice(),
         expected.into_raw(),
         "preview pixels must match oriented RGBA resize"
     );

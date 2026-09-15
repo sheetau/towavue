@@ -128,7 +128,9 @@ impl PreviewMemory {
 pub struct PreviewImage {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    // Share immutable preview pixels across cache hits and queued consumers.
+    // Arc<Vec<_>> preserves a decoder's existing allocation, unlike Vec -> Arc<[_]>.
+    pub rgba: Arc<Vec<u8>>,
 }
 
 pub struct MediaPreview {
@@ -329,7 +331,7 @@ impl PreviewCache {
                         let image = image::RgbaImage::from_raw(
                             preview.image.width,
                             preview.image.height,
-                            preview.image.rgba,
+                            Arc::unwrap_or_clone(preview.image.rgba),
                         )?;
                         let image = image::DynamicImage::ImageRgba8(image);
                         let bytes = thumbnail_png(&image, preview.source_size, &current)?;
@@ -338,7 +340,7 @@ impl PreviewCache {
                             Some(PreviewImage {
                                 width: image.width(),
                                 height: image.height(),
-                                rgba: image.into_rgba8().into_raw(),
+                                rgba: image.into_rgba8().into_raw().into(),
                             }),
                         ))
                     })
@@ -393,7 +395,7 @@ impl PreviewCache {
             let prepared = match result {
                 Ok(()) => {
                     let frame = frame.ok_or(PreviewError::NoFrame)?;
-                    let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
+                    let image = image::RgbaImage::from_raw(frame.width, frame.height, Arc::unwrap_or_clone(frame.rgba))
                         .expect("packed preview frame");
                     ready_preview_png(image)?
                 }
@@ -852,7 +854,7 @@ fn preview_pixels(source_width: u32, source_height: u32, pixels: &[u8]) -> Previ
     PreviewImage {
         width,
         height,
-        rgba,
+        rgba: rgba.into(),
     }
 }
 
@@ -908,7 +910,7 @@ fn static_thumbnail_ready(
             image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
                 preview.image.width,
                 preview.image.height,
-                preview.image.rgba,
+                Arc::unwrap_or_clone(preview.image.rgba),
             )?),
         )
     } else {
@@ -939,7 +941,7 @@ fn static_thumbnail_ready(
     let image = PreviewImage {
         width: small.width(),
         height: small.height(),
-        rgba: small.into_rgba8().into_raw(),
+        rgba: small.into_rgba8().into_raw().into(),
     };
     Some((bytes, image))
 }
@@ -1154,7 +1156,7 @@ fn ready_preview_png(
     let ready = PreviewImage {
         width: image.width(),
         height: image.height(),
-        rgba: image.into_raw(),
+        rgba: image.into_raw().into(),
     };
     #[cfg(test)]
     if REDECODE_MEDIA_PNG.get() {
@@ -1168,7 +1170,7 @@ fn decode_png(bytes: &[u8]) -> Result<PreviewImage, image::ImageError> {
     Ok(PreviewImage {
         width: rgba.width(),
         height: rgba.height(),
-        rgba: rgba.into_raw(),
+        rgba: rgba.into_raw().into(),
     })
 }
 
@@ -1181,7 +1183,7 @@ mod tests {
         let small = PreviewImage {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            rgba: vec![255; 4].into(),
         };
         let mut memory = PreviewMemory::default();
         for index in 0..64 {
@@ -1197,7 +1199,7 @@ mod tests {
         let large = PreviewImage {
             width: 1024,
             height: 1024,
-            rgba: vec![127; 4 * 1024 * 1024],
+            rgba: vec![127; 4 * 1024 * 1024].into(),
         };
         for index in 0..5 {
             memory.insert(format!("large-{index}"), large.clone());
@@ -1211,7 +1213,7 @@ mod tests {
             PreviewImage {
                 width: 4096,
                 height: 2048,
-                rgba: vec![0; 32 * 1024 * 1024],
+                rgba: vec![0; 32 * 1024 * 1024].into(),
             },
         );
         assert_eq!(memory.bytes, MEMORY_LIMIT_BYTES);

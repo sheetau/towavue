@@ -155,7 +155,7 @@ fn avif_clean_aperture_precedes_orientation_preview_and_static_saving() {
                 .expect("cached preview");
             assert_eq!(persisted.source_size, expected.dimensions());
             assert_eq!(
-                persisted.image.rgba,
+                persisted.image.rgba.as_slice(),
                 DynamicImage::ImageRgba8(expected.clone())
                     .resize(240, 160, image::imageops::FilterType::Nearest)
                     .into_rgba8()
@@ -584,7 +584,7 @@ fn avif_still_rotation_and_mirror_reach_display_preview_and_saved_pixels() {
                     .prepare_animation_preview(&source, 7 * 5 * 4, &|| true)
                     .expect("thumbnail");
                 assert_eq!(thumbnail.source_size, expected.dimensions());
-                assert_eq!(thumbnail.image.rgba, decoded.frames[0].rgba);
+                assert_eq!(thumbnail.image.rgba.as_slice(), decoded.frames[0].rgba);
                 // Speculative previews are memory-only. A fresh filmstrip cache
                 // exercises the separate persisted-thumbnail generation path.
                 let disk_writer =
@@ -600,7 +600,7 @@ fn avif_still_rotation_and_mirror_reach_display_preview_and_saved_pixels() {
                 assert_eq!(persisted.source_size, thumbnail.source_size);
                 assert_eq!(persisted.image.rgba, disk_thumbnail.image.rgba);
                 assert_eq!(
-                    persisted.image.rgba,
+                    persisted.image.rgba.as_slice(),
                     DynamicImage::ImageRgba8(expected.clone())
                         .resize(240, 160, image::imageops::FilterType::Nearest)
                         .into_rgba8()

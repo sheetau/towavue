@@ -105,7 +105,7 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                         image: towavue_runtime_windows::PreviewImage {
                             width: 1,
                             height: 1,
-                            rgba: vec![255, 0, 0, 255],
+                            rgba: vec![255, 0, 0, 255].into(),
                         },
                     };
                     // Even an eligible late cache result must not upload while held.

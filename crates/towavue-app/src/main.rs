@@ -14167,7 +14167,7 @@ mod tests {
                 Ok(towavue_runtime_windows::PreviewImage {
                     width: 2,
                     height: 1,
-                    rgba: vec![255; 8],
+                    rgba: vec![255; 8].into(),
                 }),
             ));
             assert!(!app.waveform_loading && app.waveform.is_some());
@@ -14487,7 +14487,7 @@ mod tests {
         let preview = towavue_runtime_windows::PreviewImage {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            rgba: vec![255; 4].into(),
         };
         for obsolete_success in [false, true] {
             app.load_hover_thumbnail(Duration::from_secs(15), 10);
@@ -14568,7 +14568,7 @@ mod tests {
         let preview = towavue_runtime_windows::PreviewImage {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            rgba: vec![255; 4].into(),
         };
         app.ui_context = Some(fonts::test_context());
         for result in [Err("old failure".into()), Ok(preview.clone())] {
@@ -16455,7 +16455,10 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             };
             assert_eq!(preview.source_size, (2, 1));
-            assert_eq!(preview.image.rgba, [index as u8, 34, 12, 255].repeat(2));
+            assert_eq!(
+                preview.image.rgba.as_slice(),
+                [index as u8, 34, 12, 255].repeat(2)
+            );
         }
         assert_eq!(app.image_generation, generation);
         assert_eq!(
@@ -20036,7 +20039,7 @@ mod tests {
             image: PreviewImage {
                 width: 3,
                 height: 4,
-                rgba: vec![255; 48],
+                rgba: vec![255; 48].into(),
             },
             source_size: (600, 800),
         };
@@ -20293,7 +20296,7 @@ mod tests {
             image: towavue_runtime_windows::PreviewImage {
                 width: 2,
                 height: 1,
-                rgba: vec![255; 8],
+                rgba: vec![255; 8].into(),
             },
             source_size: (200, 100),
         };
@@ -23370,7 +23373,7 @@ mod tests {
         let preview = towavue_runtime_windows::PreviewImage {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            rgba: vec![255; 4].into(),
         };
         for result in [Ok(Duration::from_secs(99)), Err("old duration".into())] {
             app.handle_app_event(AppEvent::Duration(path.clone(), old, result));

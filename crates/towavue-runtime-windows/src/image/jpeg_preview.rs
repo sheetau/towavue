@@ -67,8 +67,12 @@ fn decode_preview(
     };
     check_current(current)?;
     let mut image = DynamicImage::ImageRgba8(
-        image::RgbaImage::from_raw(reduced.width, reduced.height, reduced.rgba)
-            .expect("packed reduced JPEG"),
+        image::RgbaImage::from_raw(
+            reduced.width,
+            reduced.height,
+            std::sync::Arc::unwrap_or_clone(reduced.rgba),
+        )
+        .expect("packed reduced JPEG"),
     );
     image.apply_orientation(orientation);
     let image = image.into_rgba8();
@@ -78,7 +82,7 @@ fn decode_preview(
         image: PreviewImage {
             width: image.width(),
             height: image.height(),
-            rgba: image.into_raw(),
+            rgba: image.into_raw().into(),
         },
     }))
 }
@@ -165,7 +169,7 @@ fn reduced_jpeg(
     Ok(Some(PreviewImage {
         width: target_width,
         height: target_height,
-        rgba: pixels,
+        rgba: pixels.into(),
     }))
 }
 
@@ -192,7 +196,12 @@ mod tests {
             .expect("decode")
             .expect("reduced");
         let mut expected = DynamicImage::ImageRgba8(
-            image::RgbaImage::from_raw(reduced.width, reduced.height, reduced.rgba).expect("RGBA"),
+            image::RgbaImage::from_raw(
+                reduced.width,
+                reduced.height,
+                std::sync::Arc::unwrap_or_clone(reduced.rgba),
+            )
+            .expect("RGBA"),
         );
         expected.apply_orientation(orientation);
         assert_eq!(
@@ -207,7 +216,7 @@ mod tests {
             (preview.image.width, preview.image.height),
             (expected.width(), expected.height())
         );
-        assert_eq!(preview.image.rgba, expected.as_bytes());
+        assert_eq!(preview.image.rgba.as_slice(), expected.as_bytes());
     }
 
     #[test]

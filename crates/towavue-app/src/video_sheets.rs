@@ -173,7 +173,7 @@ mod tests {
             image: towavue_runtime_windows::PreviewImage {
                 width: 960,
                 height: 640,
-                rgba: vec![127; 960 * 640 * 4],
+                rgba: vec![127; 960 * 640 * 4].into(),
             },
         }
     }

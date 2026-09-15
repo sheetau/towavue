@@ -75,7 +75,7 @@ fn completed_original_is_drawn_before_its_queued_notification() {
                     image: towavue_runtime_windows::PreviewImage {
                         width: 1,
                         height: 1,
-                        rgba: vec![255, 0, 0, 255],
+                        rgba: vec![255, 0, 0, 255].into(),
                     },
                 },
             );
@@ -162,7 +162,7 @@ fn neighbor_prefetch_runs_before_current_texture_preparation() {
             let deadline = Instant::now() + Duration::from_secs(5);
             loop {
                 if let Some(preview) = previews.cached_image(&next).expect("preview lookup") {
-                    assert_eq!(preview.image.rgba, [56, 34, 12, 255].repeat(2));
+                    assert_eq!(preview.image.rgba.as_slice(), [56, 34, 12, 255].repeat(2));
                     return true;
                 }
                 if Instant::now() >= deadline {

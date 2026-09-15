@@ -241,7 +241,7 @@ mod tests {
                         image: crate::PreviewImage {
                             width: 1,
                             height: 1,
-                            rgba: vec![9, 0, 0, 255],
+                            rgba: vec![9, 0, 0, 255].into(),
                         },
                         duration: None,
                     })
@@ -341,7 +341,7 @@ mod tests {
                             image: crate::PreviewImage {
                                 width: 1,
                                 height: 1,
-                                rgba: vec![1, 2, 3, 255],
+                                rgba: vec![1, 2, 3, 255].into(),
                             },
                             duration: None,
                         })
@@ -438,7 +438,7 @@ mod tests {
                         image: crate::PreviewImage {
                             width: 1,
                             height: 1,
-                            rgba: vec![value, 0, 0, 255],
+                            rgba: vec![value, 0, 0, 255].into(),
                         },
                         duration: None,
                     }
@@ -468,7 +468,13 @@ mod tests {
             assert_eq!(results.len(), 1);
             assert_eq!(results[0].generation, generation);
             assert_eq!(
-                results[0].result.as_ref().expect("preview").image.rgba,
+                results[0]
+                    .result
+                    .as_ref()
+                    .expect("preview")
+                    .image
+                    .rgba
+                    .as_slice(),
                 [2, 0, 0, 255]
             );
             drop(loader);
@@ -494,7 +500,7 @@ mod tests {
                         image: crate::PreviewImage {
                             width: 1,
                             height: 1,
-                            rgba: vec![1, 2, 3, 255],
+                            rgba: vec![1, 2, 3, 255].into(),
                         },
                         duration: None,
                     })
@@ -551,7 +557,7 @@ mod tests {
                 && item
                     .result
                     .as_ref()
-                    .is_ok_and(|preview| preview.image.rgba == [1, 2, 3, 255])
+                    .is_ok_and(|preview| preview.image.rgba.as_slice() == [1, 2, 3, 255])
         }));
         assert_eq!(
             generated
@@ -647,7 +653,7 @@ mod tests {
                                 image: crate::PreviewImage {
                                     width: 1,
                                     height: 1,
-                                    rgba: vec![1, 2, 3, 255],
+                                    rgba: vec![1, 2, 3, 255].into(),
                                 },
                                 duration: None,
                             }

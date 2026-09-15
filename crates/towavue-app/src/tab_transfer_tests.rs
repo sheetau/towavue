@@ -1112,7 +1112,7 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
                 image: towavue_runtime_windows::PreviewImage {
                     width: 1,
                     height: 1,
-                    rgba: vec![0, 0, 255, 255],
+                    rgba: vec![0, 0, 255, 255].into(),
                 },
                 source_size: (2, 1),
             },

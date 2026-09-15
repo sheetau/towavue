@@ -76,9 +76,10 @@ fn preview_colors_preserve_dimensions_alpha_and_original_bytes() {
             height,
             rgba: (0..width * height)
                 .flat_map(|n| [n as u8, (n / 3) as u8, (n / 7) as u8, n as u8])
-                .collect(),
+                .collect::<Vec<_>>()
+                .into(),
         };
-        let original = image.rgba.clone();
+        let original = image.rgba.as_ref().clone();
         let expected =
             egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &original);
         for packed in [false, true] {
@@ -87,7 +88,10 @@ fn preview_colors_preserve_dimensions_alpha_and_original_bytes() {
                 preview_color_image(&image) == expected,
                 "exact preview colors"
             );
-            assert!(image.rgba == original, "borrowed input remains unchanged");
+            assert!(
+                image.rgba.as_slice() == original,
+                "borrowed input remains unchanged"
+            );
         }
     }
     PACKED_PREVIEW_COLORS.set(true);

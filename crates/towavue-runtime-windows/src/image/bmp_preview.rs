@@ -81,7 +81,7 @@ pub(super) fn bmp_preview(
         image: PreviewImage {
             width: target_width,
             height: target_height,
-            rgba,
+            rgba: rgba.into(),
         },
     }))
 }

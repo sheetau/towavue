@@ -3,6 +3,183 @@ use std::sync::mpsc;
 use std::thread;
 
 #[test]
+fn shared_preview_pixels_survive_eviction_and_retire_with_the_last_consumer() {
+    let store = cache("shared-pixel-lifetime");
+    let expected = [19, 43, 71, 127].repeat(31 * 17);
+    let pixels = expected.clone();
+    let pointer = pixels.as_ptr();
+    let image = PreviewImage {
+        width: 31,
+        height: 17,
+        rgba: pixels.into(),
+    };
+    let lifetime = Arc::downgrade(&image.rgba);
+    store
+        .memory
+        .lock()
+        .expect("memory")
+        .insert("retained".into(), image);
+    let get = || {
+        store
+            .load_or_generate("retained".into(), || panic!("cached pixels"))
+            .expect("hit")
+    };
+    let first = get();
+    let second = get();
+    assert_eq!(
+        first.rgba.as_ptr(),
+        pointer,
+        "original allocation is retained"
+    );
+    assert!(
+        Arc::ptr_eq(&first.rgba, &second.rgba),
+        "hits share pixel ownership"
+    );
+    let mut edited_copy = second.clone();
+    Arc::make_mut(&mut edited_copy.rgba)[0] = 0;
+    assert!(
+        first.rgba.as_slice() == expected,
+        "explicit copy-on-write cannot modify other owners"
+    );
+    drop(edited_copy);
+    {
+        let mut memory = store.memory.lock().expect("memory");
+        for index in 0..64 {
+            memory.insert(
+                format!("replacement-{index}"),
+                PreviewImage {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![0; 4].into(),
+                },
+            );
+        }
+        assert!(memory.get("retained").is_none(), "normal LRU eviction");
+        assert_eq!(memory.bytes, 64 * 4, "only cache-owned entries are charged");
+    }
+    assert!(
+        second.rgba.as_slice() == expected,
+        "eviction leaves queued pixels intact"
+    );
+    drop(first);
+    assert!(
+        lifetime.upgrade().is_some(),
+        "last consumer keeps pixels alive"
+    );
+    drop(second);
+    assert!(
+        lifetime.upgrade().is_none(),
+        "pixels retire after the last owner"
+    );
+    fs::remove_dir_all(store.root).expect("owned cache cleanup");
+}
+
+#[test]
+#[ignore = "preview cache hit/retained allocation cost; run in Release without concurrent builds"]
+fn preview_cache_hits_report_copy_and_contention_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    for (width, height) in [(240, 160), (960, 640)] {
+        let store = cache("preview-hit-cost");
+        let expected: Vec<Vec<u8>> = (0..6)
+            .map(|seed| {
+                (0..width * height)
+                    .flat_map(|n| [n as u8, seed, 73, (n / 3) as u8])
+                    .collect()
+            })
+            .collect();
+        let keys: Vec<_> = (0..6).map(|index| format!("ready-{index}")).collect();
+        for (key, rgba) in keys.iter().zip(&expected) {
+            store.memory.lock().expect("memory").insert(
+                key.clone(),
+                PreviewImage {
+                    width,
+                    height,
+                    rgba: rgba.clone().into(),
+                },
+            );
+        }
+        for callers in [1, 4] {
+            let mut batches = Vec::new();
+            let mut requests = Vec::new();
+            let mut retained_bytes = None;
+            for _ in 0..5 {
+                let release = std::sync::Barrier::new(callers + 1);
+                let (ready, waiting) = mpsc::channel();
+                let (elapsed, outputs) = thread::scope(|scope| {
+                    let jobs: Vec<_> = (0..callers)
+                        .map(|worker| {
+                            let store = &store;
+                            let keys = &keys;
+                            let release = &release;
+                            let ready = ready.clone();
+                            scope.spawn(move || {
+                                let mut outputs = Vec::with_capacity(64 / callers);
+                                ready.send(()).expect("worker ready");
+                                release.wait();
+                                for n in 0..64 / callers {
+                                    let index = (worker * (64 / callers) + n) % keys.len();
+                                    let started = std::time::Instant::now();
+                                    let image = store
+                                        .load_or_generate(keys[index].clone(), || {
+                                            panic!("memory hit must not generate")
+                                        })
+                                        .expect("cache hit");
+                                    outputs.push((index, started.elapsed(), image));
+                                }
+                                outputs
+                            })
+                        })
+                        .collect();
+                    for _ in 0..callers {
+                        waiting.recv().expect("ready");
+                    }
+                    let started = std::time::Instant::now();
+                    release.wait();
+                    let outputs: Vec<_> = jobs
+                        .into_iter()
+                        .flat_map(|job| job.join().expect("cache worker"))
+                        .collect();
+                    (started.elapsed(), outputs)
+                });
+                batches.push(elapsed);
+                let mut allocations = std::collections::HashMap::new();
+                for (index, elapsed, image) in &outputs {
+                    assert_eq!((image.width, image.height), (width, height));
+                    assert!(
+                        image.rgba.as_slice() == expected[*index],
+                        "all returned pixels"
+                    );
+                    requests.push(*elapsed);
+                    allocations.insert(image.rgba.as_ptr() as usize, image.rgba.len());
+                }
+                let bytes: usize = allocations.values().sum();
+                if let Some(previous) = retained_bytes {
+                    assert_eq!(bytes, previous);
+                }
+                retained_bytes = Some(bytes);
+            }
+            batches.sort();
+            requests.sort();
+            eprintln!(
+                "PREVIEW_HITS width={width} height={height} callers={callers} batch64_median_ms={:.4} request_p95_us={:.3} returned_pixel_bytes={}",
+                batches[2].as_secs_f64() * 1000.0,
+                requests[(requests.len() * 95).div_ceil(100) - 1].as_secs_f64() * 1_000_000.0,
+                retained_bytes.expect("allocation count")
+            );
+        }
+        assert_eq!(
+            fs::read_dir(&store.root).expect("cache directory").count(),
+            0,
+            "memory-only lookup"
+        );
+        fs::remove_dir_all(store.root).expect("owned cache cleanup");
+    }
+    Ok(())
+}
+
+#[test]
 fn native_media_png_transfers_its_canvas_and_matches_persisted_pixels() {
     let image = image::RgbaImage::from_fn(37, 23, |x, y| {
         image::Rgba([x as u8, y as u8, 83, (x * y) as u8])
@@ -146,7 +323,7 @@ fn generated_thumbnail_transfers_pixels_and_keeps_disk_validation_and_fallback()
         let expected = PreviewImage {
             width: 31,
             height: 17,
-            rgba: pixels.clone(),
+            rgba: pixels.clone().into(),
         };
         let result = store
             .load_or_generate_ready("ready".into(), || {
@@ -155,7 +332,7 @@ fn generated_thumbnail_transfers_pixels_and_keeps_disk_validation_and_fallback()
                     Some(PreviewImage {
                         width: 31,
                         height: 17,
-                        rgba: pixels,
+                        rgba: pixels.into(),
                     }),
                 ))
             })
@@ -236,13 +413,13 @@ fn generated_thumbnail_reports_png_round_trip_cost() -> Result<(), &'static str>
                     let image = ready.then(|| PreviewImage {
                         width: small.width(),
                         height: small.height(),
-                        rgba: small.into_rgba8().into_raw(),
+                        rgba: small.into_rgba8().into_raw().into(),
                     });
                     Ok((bytes, image))
                 })
                 .expect("publish");
             samples.push(start.elapsed().as_secs_f64() * 1000.0);
-            assert_eq!(result.rgba, pixels.as_raw().as_slice());
+            assert_eq!(result.rgba.as_slice(), pixels.as_raw().as_slice());
             let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
             assert_eq!(
                 fresh
@@ -297,7 +474,7 @@ fn decoded_cache_png_preserves_owned_and_converted_pixel_layouts() {
         let actual = decode_png(encoded.get_ref()).expect("cached PNG");
         assert_eq!((actual.width, actual.height), expected.dimensions());
         assert!(
-            actual.rgba == *expected.as_raw(),
+            actual.rgba.as_slice() == *expected.as_raw(),
             "full RGBA pixels, including hidden RGB"
         );
         assert!(decode_png(&encoded.get_ref()[..encoded.get_ref().len() / 2]).is_err());
@@ -334,12 +511,15 @@ fn owned_cache_png_reports_decode_cost() -> Result<(), &'static str> {
                     PreviewImage {
                         width: rgba.width(),
                         height: rgba.height(),
-                        rgba: rgba.into_raw(),
+                        rgba: rgba.into_raw().into(),
                     }
                 };
                 samples.push(started.elapsed());
                 assert_eq!((actual.width, actual.height), (width, height));
-                assert!(actual.rgba == *pixels.as_raw(), "full cached pixels");
+                assert!(
+                    actual.rgba.as_slice() == *pixels.as_raw(),
+                    "full cached pixels"
+                );
             }
             samples.sort();
             eprintln!(
@@ -388,7 +568,7 @@ fn check_native_thumbnail_publication(sample_count: usize) {
                     .expect("publication");
                 samples.push(started.elapsed().as_secs_f64() * 1000.0);
                 assert_eq!((image.width, image.height), expected.dimensions());
-                assert_eq!(&image.rgba, expected.as_raw());
+                assert_eq!(image.rgba.as_ref(), expected.as_raw());
                 let fresh = PreviewCache::new(store.root.clone()).expect("fresh memory");
                 let saved = fresh
                     .cached_image(&source)
@@ -612,7 +792,7 @@ fn animated_thumbnails_use_the_first_composited_frame_with_bounded_native_decodi
         assert_eq!(ready, preview, "published pixels equal persisted pixels");
         assert_eq!((preview.width, preview.height), expected.dimensions());
         assert_eq!(
-            &preview.rgba,
+            preview.rgba.as_ref(),
             expected.as_raw(),
             "first frame, alpha and sampling: {extension}"
         );
@@ -708,7 +888,7 @@ fn animation_thumbnail_native_generation_reports_helper_comparison() -> Result<(
                 let image = decode_png(&bytes).expect("thumbnail pixels");
                 assert_eq!((image.width, image.height), expected.dimensions());
                 if native {
-                    assert_eq!(&image.rgba, expected.as_raw());
+                    assert_eq!(image.rgba.as_ref(), expected.as_raw());
                 }
             }
             samples.sort_by(f64::total_cmp);
@@ -1069,7 +1249,7 @@ fn persisted_thumbnail_geometry_uses_all_exif_orientations() {
             .resize(240, 160, image::imageops::FilterType::Nearest)
             .into_rgba8();
         assert_eq!(preview.image, thumbnail.image);
-        assert_eq!(preview.image.rgba, small.into_raw());
+        assert_eq!(preview.image.rgba.as_slice(), small.into_raw());
     }
     fs::remove_dir_all(&cache.root).expect("remove owned fixtures");
 }

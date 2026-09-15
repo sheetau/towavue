@@ -146,7 +146,7 @@ pub(crate) fn png_thumbnail(
             image: PreviewImage {
                 width: target_width,
                 height: target_height,
-                rgba: pixels,
+                rgba: pixels.into(),
             },
         }))
     })();

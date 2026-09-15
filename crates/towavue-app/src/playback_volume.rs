@@ -16,6 +16,14 @@ impl Default for PlaybackVolume {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn stepped_playback_volume(&self, volume: f32, delta: f32) -> f32 {
+        let next = (volume + delta * f32::from(self.volume_step_percent) / 100.0)
+            .clamp(0.0, towavue_core::MAX_VOLUME);
+        // Remove accumulated float residue at mute/full scale while preserving
+        // fractional wheel steps to 0.0001 percentage points.
+        (next * 1_000_000.0).round() / 1_000_000.0
+    }
+
     pub(super) fn tab_audio_indicator(&self, tab: &towavue_core::Tab) -> Option<bool> {
         let id = tab.id;
         let (state, drained, session) = if self.tabs.active().is_some_and(|tab| tab.id == id) {
@@ -129,6 +137,108 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volume_steps_cycle_and_match_keys_wheel_and_exact_limits_without_edits() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "playback_volume::tests::volume_steps_cycle_and_match_keys_wheel_and_exact_limits_without_edits",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let tab = app.tabs.open_new(root.join("media"), kind);
+            app.path = Some(root.join("media"));
+            app.media_kind = Some(kind);
+            for percent in [2, 5, 10, 2] {
+                assert_eq!(app.volume_step_percent, percent);
+                let step = f32::from(percent) / 100.0;
+                app.set_playback_volume(1.0);
+                app.dispatch(CommandId::VolumeUp);
+                assert!((app.playback_volume() - (1.0 + step)).abs() < 0.000001);
+                app.dispatch(CommandId::VolumeDown);
+                assert_eq!(app.playback_volume(), 1.0);
+                for _ in 0..100 / percent {
+                    app.dispatch(CommandId::VolumeDown);
+                }
+                assert_eq!(app.playback_volume(), 0.0, "must reach mute at {percent}%");
+                for _ in 0..300 / u16::from(percent) {
+                    app.dispatch(CommandId::VolumeUp);
+                }
+                assert_eq!(app.playback_volume(), 3.0);
+                app.dispatch(CommandId::VolumeUp);
+                app.dispatch(CommandId::ToggleMute);
+                assert_eq!(app.playback_volume(), 0.0);
+                app.dispatch(CommandId::ToggleMute);
+                assert_eq!(app.playback_volume(), 3.0);
+
+                let context = crate::fonts::test_context();
+                let point = egui::pos2(80.0, 80.0);
+                let frame = |app: &Application<_>, deltas: Vec<(egui::MouseWheelUnit, f32)>| {
+                    let mut actions = Vec::new();
+                    let mut events = vec![egui::Event::PointerMoved(point)];
+                    events.extend(deltas.into_iter().map(|(unit, delta)| {
+                        egui::Event::MouseWheel {
+                            unit,
+                            delta: egui::vec2(0.0, delta),
+                            phase: egui::TouchPhase::Move,
+                            modifiers: egui::Modifiers::NONE,
+                        }
+                    }));
+                    let _ = context.run_ui(
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let target = ui.allocate_rect(
+                                egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(200.0, 200.0),
+                                ),
+                                egui::Sense::hover(),
+                            );
+                            wheel_input::begin_frame(ui.ctx());
+                            app.volume_wheel(ui.ctx(), &[target], &mut actions);
+                        },
+                    );
+                    actions
+                };
+                frame(&app, vec![]);
+                frame(&app, vec![]);
+                app.set_playback_volume(1.0);
+                for (unit, delta, expected) in [
+                    (egui::MouseWheelUnit::Line, 1.0, 1.0 + step),
+                    (egui::MouseWheelUnit::Page, -2.0, 1.0 - step * 2.0),
+                    (egui::MouseWheelUnit::Point, 5.0, 1.0 + step / 10.0),
+                ] {
+                    let actions = frame(&app, vec![(unit, delta)]);
+                    assert!(matches!(actions.as_slice(), [UiAction::Volume(id, level)]
+                        if *id == tab && (*level - expected).abs() < 0.000001));
+                    assert!(frame(&app, vec![]).is_empty(), "no delayed wheel tail");
+                }
+                for (deltas, expected) in [([1000.0, -1.0], 3.0 - step), ([-1000.0, 1.0], step)] {
+                    let actions = frame(
+                        &app,
+                        deltas
+                            .map(|delta| (egui::MouseWheelUnit::Line, delta))
+                            .to_vec(),
+                    );
+                    assert!(matches!(actions.as_slice(), [UiAction::Volume(id, level)]
+                        if *id == tab && (*level - expected).abs() < 0.000001));
+                }
+                assert_eq!(app.edit_state().volume, 1.0);
+                assert!(!app.command_context().has_unsaved_edits);
+                let before = app.playback_volume();
+                app.dispatch(CommandId::CycleVolumeStep);
+                assert_eq!(
+                    app.playback_volume(),
+                    before,
+                    "choosing a step does not change volume"
+                );
+            }
+        }
+    }
 
     #[test]
     #[ignore = "requires D3D11 and a live shared WASAPI endpoint; generated silence only"]
@@ -722,7 +832,7 @@ mod tests {
             app.media_kind = Some(kind);
             app.state = PlaybackState::Paused;
             app.media_duration = Some(Duration::from_secs(2));
-            app.set_playback_volume(2.9);
+            app.set_playback_volume(2.99);
             app.dispatch(CommandId::VolumeUp);
             assert_eq!(app.playback_volume(), 3.0);
             app.dispatch(CommandId::VolumeUp);

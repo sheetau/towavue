@@ -842,6 +842,7 @@ struct Application<N> {
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
+    volume_step_percent: u8,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
@@ -1088,6 +1089,7 @@ where
             retained_playback: BTreeMap::new(),
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
+            volume_step_percent: 2,
             graphics_epoch: 0,
             idle_graphics_frame: None,
             restored_reading_pages: false,
@@ -4195,7 +4197,7 @@ where
         let volume = wheel_input::volume_deltas(context, targets, excluded)
             .into_iter()
             .fold(before, |volume, delta| {
-                (volume + delta * 0.1).clamp(0.0, towavue_core::MAX_VOLUME)
+                self.stepped_playback_volume(volume, delta)
             });
         if volume != before {
             actions.push(UiAction::Volume(tab.id, volume));
@@ -6734,13 +6736,27 @@ where
                 }
             }
             CommandId::VolumeDown => {
-                self.set_playback_volume(self.playback_volume() - 0.1);
+                self.set_playback_volume(
+                    self.stepped_playback_volume(self.playback_volume(), -1.0),
+                );
             }
             CommandId::VolumeUp => {
-                self.set_playback_volume(self.playback_volume() + 0.1);
+                self.set_playback_volume(self.stepped_playback_volume(self.playback_volume(), 1.0));
             }
             CommandId::ToggleMute => {
                 self.toggle_playback_mute();
+            }
+            CommandId::CycleVolumeStep => {
+                self.volume_step_percent = match self.volume_step_percent {
+                    2 => 5,
+                    5 => 10,
+                    _ => 2,
+                };
+                self.set_status(format!(
+                    "Listening volume step: {}%",
+                    self.volume_step_percent
+                ));
+                self.request_redraw();
             }
             CommandId::RateDown => {
                 let rate = (self.edit_state().rate - 0.25).max(0.25);
@@ -15641,6 +15657,8 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.dispatch(CommandId::CycleVolumeStep);
+        app.dispatch(CommandId::CycleVolumeStep);
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
@@ -15897,6 +15915,8 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.dispatch(CommandId::CycleVolumeStep);
+        app.dispatch(CommandId::CycleVolumeStep);
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         let context = fonts::test_context();
         let point = egui::pos2(100.0, 100.0);
@@ -16013,6 +16033,8 @@ mod tests {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
+        app.dispatch(CommandId::CycleVolumeStep);
+        app.dispatch(CommandId::CycleVolumeStep);
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);

@@ -78,7 +78,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             ],
             &[SetTrimStart, SetTrimEnd],
             &[DeleteTimeSelection, KeepTimeSelection, PlayTimeSelection],
-            &[VolumeDown, VolumeUp, ToggleMute],
+            &[VolumeDown, VolumeUp, ToggleMute, CycleVolumeStep],
             &[RateDown, RateUp, ResetRate],
         ],
     ),
@@ -280,7 +280,11 @@ fn show_items(
                     if response.enabled() {
                         items.push(response.id);
                     }
-                    if response.gained_focus() {
+                    if response.gained_focus()
+                        || (response.has_focus()
+                            && (response.rect.top() < ui.clip_rect().top()
+                                || response.rect.bottom() > ui.clip_rect().bottom()))
+                    {
                         response.scroll_to_me(None);
                     }
                     if response.clicked() {
@@ -816,6 +820,10 @@ mod tests {
                 rect.contains(position),
                 "focus belongs to {label} after {key_code:?}: {rect:?} vs {position:?}"
             );
+            assert!(
+                rect.top() >= 0.0 && rect.bottom() <= 300.0,
+                "focused {label} is visible: {rect:?}"
+            );
         };
         navigate(egui::Key::ArrowRight, false, "Open file");
         navigate(egui::Key::ArrowDown, false, "Open folder");
@@ -829,7 +837,11 @@ mod tests {
         navigate(egui::Key::Tab, false, "Open file");
         navigate(egui::Key::ArrowLeft, false, "File");
         navigate(egui::Key::ArrowDown, false, "Edit");
-        navigate(egui::Key::ArrowRight, false, "Edit");
+        navigate(
+            egui::Key::ArrowRight,
+            false,
+            "Cycle volume step (2% / 5% / 10%)",
+        );
         navigate(egui::Key::ArrowLeft, false, "Edit");
         navigate(egui::Key::ArrowDown, false, "View");
         navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");

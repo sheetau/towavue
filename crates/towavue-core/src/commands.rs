@@ -52,6 +52,7 @@ pub enum CommandId {
     VolumeDown,
     VolumeUp,
     ToggleMute,
+    CycleVolumeStep,
     RateDown,
     RateUp,
     ResetRate,
@@ -179,6 +180,7 @@ impl CommandId {
             Self::VolumeDown => "volume_down",
             Self::VolumeUp => "volume_up",
             Self::ToggleMute => "toggle_mute",
+            Self::CycleVolumeStep => "cycle_volume_step",
             Self::RateDown => "rate_down",
             Self::RateUp => "rate_up",
             Self::ResetRate => "reset_rate",
@@ -684,6 +686,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::VolumeDown, "Decrease volume", PLAYABLE_MEDIA),
     command(CommandId::VolumeUp, "Increase volume", PLAYABLE_MEDIA),
     command(CommandId::ToggleMute, "Toggle mute", PLAYABLE_MEDIA),
+    command(
+        CommandId::CycleVolumeStep,
+        "Cycle volume step (2% / 5% / 10%)",
+        &[],
+    ),
     command(
         CommandId::RateDown,
         "Decrease playback rate",

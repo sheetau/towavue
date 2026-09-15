@@ -3,6 +3,144 @@ use std::sync::mpsc;
 use std::thread;
 
 #[test]
+#[ignore = "compares fresh native/CLI duration probes; run without concurrent timing work"]
+fn native_duration_probe_matches_cli_and_reports_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run optimized duration comparison");
+    }
+    let store = cache("native-duration-cost");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1");
+    for name in ["h264-aac.mp4", "hevc-aac.mkv", "vp9-opus.webm"] {
+        let source = fixtures.join(name);
+        let before = fs::read(&source).expect("generated fixture");
+        let stamp = fs::metadata(&source)
+            .expect("source metadata")
+            .modified()
+            .expect("mtime");
+        let expected = store.probe_duration_cli(&source).expect("CLI duration");
+        for native in [false, true, true, false] {
+            let mut elapsed = Vec::new();
+            for _ in 0..5 {
+                let started = std::time::Instant::now();
+                let duration = if native {
+                    store.probe_duration(&source)
+                } else {
+                    store.probe_duration_cli(&source)
+                }
+                .expect("fresh duration probe");
+                elapsed.push(started.elapsed());
+                assert_eq!(duration, expected, "same format duration");
+            }
+            elapsed.sort();
+            eprintln!(
+                "duration probe {name} native={native} median_ms={:.4}",
+                elapsed[2].as_secs_f64() * 1000.0
+            );
+        }
+        assert_eq!(
+            fs::metadata(&source)
+                .expect("metadata")
+                .modified()
+                .expect("mtime"),
+            stamp
+        );
+        assert!(fs::read(&source).expect("unchanged source") == before);
+    }
+    fs::remove_dir_all(&store.root).expect("remove owned cache");
+    Ok(())
+}
+
+#[test]
+fn native_duration_preserves_audio_metadata_errors_and_cancellation() {
+    let store = cache("native-audio-duration");
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+    for (extension, codec) in [("wav", "pcm_s16le"), ("flac", "flac"), ("aac", "aac")] {
+        let target = store.root.join(format!("audio.{extension}"));
+        let output = hidden_command(
+            &tool_path("ffmpeg.exe").expect("fixture encoder"),
+            ["-v", "error", "-i"],
+        )
+        .arg(&source)
+        .args(["-vn", "-c:a", codec])
+        .arg(&target)
+        .output()
+        .expect("generate audio");
+        assert!(output.status.success(), "audio fixture generation");
+        assert_eq!(
+            store.duration(&target).expect("native duration"),
+            store.probe_duration_cli(&target).expect("CLI duration")
+        );
+    }
+    let malformed = store.root.join("malformed.wav");
+    fs::write(&malformed, b"invalid media").expect("malformed fixture");
+    for target in [malformed, store.root.join("missing.wav")] {
+        assert!(store.probe_duration(&target).is_err());
+        assert!(store.probe_duration_cli(&target).is_err());
+    }
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    assert!(matches!(
+        store.cancellable(cancellation).duration(&source),
+        Err(PreviewError::Cancelled)
+    ));
+    fs::remove_dir_all(store.root).expect("owned cache cleanup");
+}
+
+#[test]
+#[ignore = "uncached filmstrip comparison; use Release without concurrent builds"]
+fn native_duration_probe_reduces_uncached_filmstrip_wait() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("run optimized filmstrip comparison");
+    }
+    let source =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+    let before = fs::read(&source).expect("generated video");
+    let stamp = fs::metadata(&source)
+        .expect("metadata")
+        .modified()
+        .expect("mtime");
+    let seed = cache("duration-filmstrip-seed");
+    let expected = seed
+        .filmstrip(&source, MediaKind::Video)
+        .expect("reference thumbnail");
+    for native in [false, true, true, false] {
+        NATIVE_DURATION_PROBE.set(native);
+        let mut elapsed = Vec::new();
+        for _ in 0..5 {
+            let store = cache("duration-filmstrip-trial");
+            let started = std::time::Instant::now();
+            let preview = store
+                .filmstrip(&source, MediaKind::Video)
+                .expect("uncached thumbnail");
+            elapsed.push(started.elapsed());
+            assert_eq!(preview.duration, expected.duration);
+            assert!(
+                preview.image == expected.image,
+                "same full thumbnail pixels"
+            );
+            fs::remove_dir_all(store.root).expect("owned trial cleanup");
+        }
+        elapsed.sort();
+        eprintln!(
+            "uncached filmstrip native_duration={native} median_ms={:.4}",
+            elapsed[2].as_secs_f64() * 1000.0
+        );
+    }
+    NATIVE_DURATION_PROBE.set(true);
+    assert!(fs::read(&source).expect("source") == before);
+    assert_eq!(
+        fs::metadata(&source)
+            .expect("metadata")
+            .modified()
+            .expect("mtime"),
+        stamp
+    );
+    fs::remove_dir_all(seed.root).expect("owned seed cleanup");
+    Ok(())
+}
+
+#[test]
 fn shared_preview_pixels_survive_eviction_and_retire_with_the_last_consumer() {
     let store = cache("shared-pixel-lifetime");
     let expected = [19, 43, 71, 127].repeat(31 * 17);

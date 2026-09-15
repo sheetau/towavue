@@ -31,6 +31,7 @@ static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 thread_local! {
     static REDECODE_MEDIA_PNG: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static NATIVE_DURATION_PROBE: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
 }
 
 type InFlight = Arc<(Mutex<HashSet<String>>, Condvar)>;
@@ -157,7 +158,7 @@ pub enum PreviewError {
     NoFrame,
     #[error("preview input preparation failed: {0}")]
     Seek(#[from] crate::DecodeError),
-    #[error("FFprobe returned an invalid duration")]
+    #[error("media duration is unavailable or invalid")]
     InvalidDuration,
     #[error("LOCALAPPDATA is unavailable")]
     NoLocalAppData,
@@ -529,6 +530,37 @@ impl PreviewCache {
     }
 
     fn probe_duration(&self, source: &Path) -> Result<Duration, PreviewError> {
+        #[cfg(test)]
+        if !NATIVE_DURATION_PROBE.get() {
+            return self.probe_duration_cli(source);
+        }
+        self.check_cancelled()?;
+        ffmpeg_next::init().map_err(|_| PreviewError::InvalidDuration)?;
+        let cancellation = self.cancellation.clone().unwrap_or_default();
+        // The calling worker owns the input and its interrupt closure until drop.
+        // Probe only format metadata; no decoder or native handle leaves this call.
+        let result =
+            ffmpeg_next::format::input_with_interrupt(source, move || cancellation.is_cancelled());
+        self.check_cancelled()?;
+        let input = result.map_err(|_| PreviewError::InvalidDuration)?;
+        let duration = input.duration();
+        if duration == ffmpeg_next::ffi::AV_NOPTS_VALUE {
+            return Err(PreviewError::InvalidDuration);
+        }
+        let mut seconds = duration as f64 / 1_000_000.0;
+        if input
+            .format()
+            .name()
+            .split(',')
+            .any(|name| matches!(name, "matroska" | "webm"))
+        {
+            seconds -= crate::decode::input_origin(&input) as f64 / 1_000_000.0;
+        }
+        Duration::try_from_secs_f64(seconds).map_err(|_| PreviewError::InvalidDuration)
+    }
+
+    #[cfg(test)]
+    fn probe_duration_cli(&self, source: &Path) -> Result<Duration, PreviewError> {
         let executable = tool_path("ffprobe.exe")?;
         let command = hidden_command(
             &executable,
@@ -1129,6 +1161,7 @@ fn run_command(
     output.map_err(|source| PreviewError::Start { program, source })
 }
 
+#[cfg(test)]
 fn probed_duration(text: &str) -> Result<Duration, PreviewError> {
     let field = |prefix| text.lines().find_map(|line| line.strip_prefix(prefix));
     let mut seconds = field("duration=")
@@ -1870,7 +1903,12 @@ mod tests {
                     "{}",
                     String::from_utf8_lossy(&output.stderr)
                 );
-                durations.push(cache.duration(&target).expect("normalized duration"));
+                let duration = cache.duration(&target).expect("normalized duration");
+                assert_eq!(
+                    cache.probe_duration_cli(&target).expect("CLI duration"),
+                    duration
+                );
+                durations.push(duration);
             }
             // MP4's zero-origin edit list can discard one 1,024-sample AAC priming packet.
             assert!(
@@ -2038,9 +2076,15 @@ mod tests {
                     .expect("isolated preview cache");
             let source =
                 Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
+            assert!(
+                cache
+                    .duration(&source)
+                    .expect("native duration without helpers")
+                    > Duration::ZERO
+            );
             if mode == "missing-probe" {
                 assert!(
-                    cache.duration(&source).is_err(),
+                    cache.probe_duration_cli(&source).is_err(),
                     "must not use development FFprobe"
                 );
                 return;
@@ -2055,7 +2099,7 @@ mod tests {
             };
             if mode == "missing-both" {
                 assert!(
-                    cache.duration(&source).is_err(),
+                    cache.probe_duration_cli(&source).is_err(),
                     "must not use PATH FFprobe"
                 );
                 assert!(tool_path("ffmpeg.exe").is_err(), "must not use PATH FFmpeg");
@@ -2074,7 +2118,7 @@ mod tests {
                 );
                 return;
             }
-            assert!(cache.duration(&source).expect("adjacent FFprobe") > Duration::ZERO);
+            assert!(cache.probe_duration_cli(&source).expect("adjacent FFprobe") > Duration::ZERO);
             assert!(
                 cache
                     .thumbnail(&source, Duration::ZERO, 64)

@@ -31,6 +31,169 @@ fn generate(arguments: &[&str], output: &Path) {
     );
 }
 
+#[test]
+fn indexed_preview_reuse_preserves_duplicates_reverse_gops_and_eof() {
+    let root = root("indexed-reuse");
+    let targets: Vec<_> = [
+        0, 66, 66, 267, 366, 400, 500, 800, 1100, 3000, 4000, 5000, 200, 180, 400,
+    ]
+    .into_iter()
+    .map(Duration::from_millis)
+    .collect();
+    for (extension, eligible) in [("mp4", true), ("mkv", false)] {
+        for gop in [12, 90] {
+            let source = root.join(format!("gop-{gop}.{extension}"));
+            generate(
+                &[
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=320x180:rate=30:duration=3",
+                    "-c:v",
+                    "mpeg4",
+                    "-g",
+                    &gop.to_string(),
+                    "-bf",
+                    "2",
+                    "-q:v",
+                    "5",
+                    "-an",
+                ],
+                &source,
+            );
+            let mut expected = None;
+            let mut baseline_work = (0, 0);
+            for reuse in [false, true] {
+                crate::decode::REUSE_PREVIEW_GOP.set(reuse);
+                crate::decode::PREVIEW_WORK.set((0, 0));
+                let mut frames = Vec::new();
+                crate::decode::preview_video_frames(
+                    &source,
+                    &targets,
+                    FILTER,
+                    &|| false,
+                    |slot, image| {
+                        assert_eq!(slot, frames.len());
+                        frames.push(image);
+                    },
+                )
+                .expect("indexed preview frames");
+                let work = crate::decode::PREVIEW_WORK.get();
+                if let Some(expected) = &expected {
+                    assert!(
+                        frames == *expected,
+                        "exact selected pixels including reverse/duplicates/EOF"
+                    );
+                    if eligible {
+                        assert!(
+                            work.0 < baseline_work.0 && work.1 < baseline_work.1,
+                            "less repeated work: {work:?} versus {baseline_work:?}"
+                        );
+                    } else {
+                        assert_eq!(
+                            work, baseline_work,
+                            "other demuxers retain independent seeks"
+                        );
+                    }
+                } else {
+                    expected = Some(frames);
+                    baseline_work = work;
+                }
+            }
+        }
+    }
+    crate::decode::REUSE_PREVIEW_GOP.set(true);
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+#[test]
+#[ignore = "indexed GOP continuation comparison; generates video, run in Release without concurrent builds"]
+fn indexed_preview_reuse_reports_long_and_short_gop_cost() -> Result<(), &'static str> {
+    if cfg!(debug_assertions) {
+        return Err("use Release");
+    }
+    let root = root("indexed-cost");
+    for gop in [30, 180] {
+        let source = root.join(format!("gop-{gop}.mp4"));
+        generate(
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=1920x1080:rate=30:duration=6",
+                "-c:v",
+                "mpeg4",
+                "-g",
+                &gop.to_string(),
+                "-bf",
+                "2",
+                "-q:v",
+                "5",
+                "-an",
+            ],
+            &source,
+        );
+        let original = fs::read(&source).expect("warm source");
+        let modified = fs::metadata(&source)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        let layout =
+            VideoSheetLayout::for_position(Duration::from_secs(6), Duration::ZERO).expect("layout");
+        let targets: Vec<_> = (0..CELLS)
+            .filter_map(|slot| layout.position(slot))
+            .collect();
+        crate::decode::REUSE_PREVIEW_GOP.set(false);
+        let mut expected = Vec::new();
+        crate::decode::preview_video_frames(&source, &targets, FILTER, &|| false, |_, image| {
+            expected.push(image)
+        })
+        .expect("baseline pixels");
+        for reuse in [false, true, true, false] {
+            crate::decode::REUSE_PREVIEW_GOP.set(reuse);
+            let mut times = Vec::new();
+            let mut observed = None;
+            for _ in 0..5 {
+                crate::decode::PREVIEW_WORK.set((0, 0));
+                let mut actual = Vec::new();
+                let started = std::time::Instant::now();
+                crate::decode::preview_video_frames(
+                    &source,
+                    &targets,
+                    FILTER,
+                    &|| false,
+                    |_, image| actual.push(image),
+                )
+                .expect("measured preview");
+                times.push(started.elapsed());
+                assert!(actual == expected, "all selected frame pixels match");
+                let work = crate::decode::PREVIEW_WORK.get();
+                if let Some(previous) = observed {
+                    assert_eq!(work, previous);
+                }
+                observed = Some(work);
+            }
+            times.sort();
+            let (seeks, frames) = observed.expect("work counters");
+            eprintln!(
+                "PREVIEW_GOP gop={gop} reuse={reuse} median_ms={:.3} seeks={seeks} decoded={frames}",
+                times[2].as_secs_f64() * 1000.0
+            );
+        }
+        assert!(fs::read(&source).expect("source unchanged") == original);
+        assert_eq!(
+            fs::metadata(&source)
+                .expect("metadata")
+                .modified()
+                .expect("mtime"),
+            modified
+        );
+    }
+    crate::decode::REUSE_PREVIEW_GOP.set(true);
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+    Ok(())
+}
+
 fn compare(source: &Path, targets: &[Duration]) {
     let mut count = 0;
     crate::decode::preview_video_frames(source, targets, FILTER, &|| false, |slot, actual| {

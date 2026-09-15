@@ -28,6 +28,8 @@ use packet_samples::PacketSamples;
 mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
+pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
+#[cfg(test)]
 mod audio_seek_tests;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;

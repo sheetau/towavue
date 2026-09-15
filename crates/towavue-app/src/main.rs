@@ -2998,6 +2998,7 @@ where
             }));
         }
         let mut actions = Vec::new();
+        wheel_input::prepare_native_input(&context, &mut input);
         let mut output = context.run_ui(input, |ui| {
             self.draw_ui(ui, &mut actions);
         });

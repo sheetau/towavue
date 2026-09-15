@@ -76,7 +76,7 @@ pub use image_loader::verification::{
     Outcome as ImageDecodeOutcome,
 };
 pub use image_loader::{ImageLoader, LoadedImagePreview, LoadedImages};
-pub use input::configure_mouse_input;
+pub use input::{WheelScrollSettings, configure_mouse_input, wheel_scroll_settings};
 pub use latest_task::LatestTask;
 pub use orientation::VideoOrientation;
 pub use pinned_cursor::PinnedCursor;

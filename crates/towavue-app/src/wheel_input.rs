@@ -1,5 +1,8 @@
 use egui::{Context, Event, Id, Pos2, Response};
 
+mod native;
+pub use native::prepare_native_input;
+
 #[derive(Clone, Default)]
 struct Position {
     frame: Option<u64>,
@@ -122,6 +125,7 @@ fn view_events_filtered(
                 target.interact_rect.contains(*pos)
                     && context.layer_id_at(*pos) == Some(target.layer_id)
             })?;
+            let event = native::scroll_event(context, event, target.rect.size());
             let action = match event {
                 Event::MouseWheel {
                     unit,
@@ -169,7 +173,7 @@ fn positioned_events(context: &Context) -> Vec<(Option<Pos2>, Event)> {
         data.get_temp::<Position>(Id::new("wheel-position"))
             .and_then(|position| position.start)
     });
-    let events = context.input(|input| input.events.clone());
+    let events = native::original_events(context);
     let mut result = Vec::new();
     for event in events {
         match event {
@@ -231,7 +235,7 @@ impl Scroll {
                     || position.is_some_and(|pos| {
                         rect.contains(pos) && context.layer_id_at(pos) == Some(ui.layer_id())
                     }))
-                .then_some(event)
+                .then(|| native::scroll_event(context, event, rect.size()))
             })
             .collect();
         let input = context.input(|input| egui::RawInput {

@@ -7,6 +7,42 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use winit::event_loop::EventLoopBuilder;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+/// Suggested wheel lines/characters per detent; `u32::MAX` requests a page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WheelScrollSettings {
+    pub lines: u32,
+    pub characters: u32,
+}
+
+pub fn wheel_scroll_settings() -> WheelScrollSettings {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SPI_GETWHEELSCROLLCHARS, SPI_GETWHEELSCROLLLINES, SYSTEM_PARAMETERS_INFO_ACTION,
+        SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+    };
+    let read = |action: SYSTEM_PARAMETERS_INFO_ACTION| {
+        let mut count = 3_u32;
+        // SAFETY: these GET actions write one UINT to this live stack value and
+        // retain no pointer. No settings or user profile are modified.
+        if unsafe {
+            SystemParametersInfoW(
+                action,
+                0,
+                Some((&mut count as *mut u32).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .is_err()
+        {
+            return 3;
+        }
+        count
+    };
+    WheelScrollSettings {
+        lines: read(SPI_GETWHEELSCROLLLINES),
+        characters: read(SPI_GETWHEELSCROLLCHARS),
+    }
+}
+
 /// Preserves queued button/wheel coordinates before winit emits position-less mouse events.
 pub fn configure_mouse_input<T>(builder: &mut EventLoopBuilder<T>) {
     builder.with_msg_hook(|message| {
@@ -74,6 +110,32 @@ mod tests {
     use winit::event::{ElementState, MouseButton, MouseScrollDelta, StartCause, WindowEvent};
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
     use winit::window::{Window, WindowId};
+
+    #[test]
+    fn wheel_settings_match_read_only_system_queries() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_GETWHEELSCROLLCHARS, SPI_GETWHEELSCROLLLINES, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+            SystemParametersInfoW,
+        };
+        let actual = wheel_scroll_settings();
+        for (action, expected) in [
+            (SPI_GETWHEELSCROLLLINES, actual.lines),
+            (SPI_GETWHEELSCROLLCHARS, actual.characters),
+        ] {
+            let mut value = 0_u32;
+            // SAFETY: each read-only query writes one live UINT and retains no pointer.
+            unsafe {
+                SystemParametersInfoW(
+                    action,
+                    0,
+                    Some((&mut value as *mut u32).cast()),
+                    SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+                )
+            }
+            .expect("read wheel preference");
+            assert_eq!(value, expected);
+        }
+    }
 
     #[test]
     fn queued_mouse_positions_reach_winit_before_buttons_and_wheels_without_cursor_motion() {

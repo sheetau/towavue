@@ -6,6 +6,7 @@ mod audio_queue;
 mod commands;
 mod crop;
 mod edit;
+mod file_search;
 mod image;
 mod media;
 mod navigation;
@@ -27,6 +28,7 @@ pub use edit::{
     EditHistory, EditOperation, EditState, ImageResize, ImageRotation, PlaybackRange,
     ResampleFilter,
 };
+pub use file_search::{file_search_score, search_text, search_text_score};
 pub use image::{
     ImageViewState, ReadingAxis, ReadingSettings, UnitPoint, UnitRect, ZoomMode, fit_scale,
 };

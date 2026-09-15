@@ -169,6 +169,8 @@ The four fixed blit/UI shaders are compiled from tracked HLSL into Cargo build o
 
 ## Shell ordering and asynchronous services
 
+Go to File's recursive filename search is independent of Shell navigation ordering. One latest-task worker per window enumerates metadata only, retains the top 1,000 ranked paths, and reports total matches and exclusions. Depth-first traversal is bounded to 128 directory iterators; do not follow descendant reparse points. Unreadable entries and depth exclusions remain visible rather than implying complete coverage. Request revisions reject stale publication, including A-to-B-to-A changes; clear/close cancels without joining filesystem work on the UI thread. Query changes and source-root changes invalidate prior results; stable frames share the ready result without rescanning.
+
 Use live Explorer view order first, preferring a foreground matching window; otherwise resolve persisted Shell view/default template through IExplorerBrowser with EBO_NOPERSISTVIEWSTATE. Read public IFolderView2 sort metadata and enumeration; never parse registry Bags or substitute name sorting silently.
 
 Initialize the Shell worker's STA only for a current folder request; retain it across requests and balance it on the owning thread, including unwind. Close/invalidation checks stop stale work between native phases, while waiting for a hidden view, and between enumerated items. Cancellation does not trigger filename-order fallback. The request loop remains message-aware when idle; provider drop signals closure without joining a possibly blocked Shell extension on the UI thread. These checks do not interrupt an in-flight native call or prove process-wide shutdown safety.

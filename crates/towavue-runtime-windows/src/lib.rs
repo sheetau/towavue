@@ -12,6 +12,7 @@ mod decode;
 mod dialog;
 mod export;
 mod file_details;
+mod file_search;
 mod fonts;
 mod image;
 mod image_clipboard;
@@ -65,6 +66,7 @@ pub use export::{
     export_media_with_output, read_export_metadata,
 };
 pub use file_details::FileDetails;
+pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};

@@ -5,6 +5,9 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 use crate::hover_help::HoverHelp;
 use crate::menu::{OpenTarget, RecentAction};
 use std::path::{Path, PathBuf};
+use towavue_core::{
+    file_search_score as path_score, search_text as normalized, search_text_score as text_score,
+};
 use towavue_runtime_windows::RecentKind;
 
 pub struct CommandPalette {
@@ -34,6 +37,8 @@ pub(crate) struct OpenSources<'a> {
     pub files: &'a [PathBuf],
     pub folders: &'a [PathBuf],
     pub folder: Option<&'a towavue_core::FolderSnapshot>,
+    pub search: Option<&'a towavue_runtime_windows::FileSearchResult>,
+    pub searching: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -43,6 +48,10 @@ pub(crate) enum Choice {
 }
 
 impl CommandPalette {
+    pub fn file_query(&self) -> Option<String> {
+        (!self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
+            .then(|| normalized(self.query.trim()))
+    }
     pub fn reset(&mut self) {
         *self = Self::default();
     }
@@ -344,13 +353,26 @@ impl CommandPalette {
             .collect();
         let recent_count = paths.len();
         // Empty Go to File shows history immediately, as in the reference picker.
+        let search = sources
+            .search
+            .filter(|result| result.request.query == query);
         if !self.folders
+            && let Some(result) = search
+        {
+            paths.extend(
+                result
+                    .paths
+                    .iter()
+                    .filter(|path| seen.insert(normalized(&path.to_string_lossy()))),
+            );
+        } else if !self.folders
             && !query.is_empty()
             && let Some(folder) = sources.folder
         {
             let mut found: Vec<_> = folder
                 .items
                 .iter()
+                .take(towavue_runtime_windows::FILE_SEARCH_LIMIT)
                 .filter_map(|item| {
                     let score = path_score(&item.path, &query)?;
                     seen.insert(normalized(&item.path.to_string_lossy()))
@@ -381,6 +403,19 @@ impl CommandPalette {
         let mut chosen = enter.zip(selected).map(|(modifiers, index)| {
             RecentAction::Open(paths[index].clone(), kind, open_target(modifiers))
         });
+        if !self.folders {
+            if let Some(result) = search {
+                if let Some(error) = &result.error {
+                    ui.weak(error);
+                } else if result.matches > result.paths.len() as u64 || result.skipped != 0 {
+                    ui.weak(format!("Showing {} of {} matches; {} entries skipped",
+                        result.paths.len(), result.matches, result.skipped))
+                        .help_text("Unreadable entries, links/junctions and folders deeper than 128 levels are skipped. Refine the query to narrow results.");
+                }
+            } else if sources.searching && !query.is_empty() {
+                ui.weak("Searching subfolders...");
+            }
+        }
         egui::ScrollArea::vertical()
             .id_salt(("quick-open-results", self.folders))
             .max_height((ui.ctx().content_rect().height() - 90.0).clamp(40.0, 264.0))
@@ -471,40 +506,6 @@ fn open_target(modifiers: egui::Modifiers) -> OpenTarget {
     }
 }
 
-fn normalized(value: &str) -> String {
-    value.replace('\\', "/").to_lowercase()
-}
-
-fn path_score(path: &Path, query: &str) -> Option<usize> {
-    let name = normalized(
-        &path
-            .file_name()
-            .unwrap_or(path.as_os_str())
-            .to_string_lossy(),
-    );
-    let full = normalized(&path.to_string_lossy());
-    let text = if query.contains('/') { &full } else { &name };
-    text_score(text, query)
-}
-
-fn text_score(text: &str, query: &str) -> Option<usize> {
-    if query.is_empty() || text == query {
-        return Some(0);
-    }
-    if text.starts_with(query) {
-        return Some(1);
-    }
-    if text.contains(query) {
-        return Some(2);
-    }
-    let mut chars = text.chars();
-    query
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .all(|ch| chars.any(|value| value == ch))
-        .then_some(3)
-}
-
 fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Option<usize> {
     let count = enabled.len();
     let current = current.unwrap_or(if forward { count.saturating_sub(1) } else { 0 });
@@ -589,6 +590,7 @@ mod tests {
                         files: &files,
                         folders: &directories,
                         folder: None,
+                        ..Default::default()
                     };
                     for _ in 0..4 {
                         open_frame(&context, &mut palette, sources, vec![]);

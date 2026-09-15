@@ -4,6 +4,72 @@ use towavue_core::KeySequence;
 use towavue_runtime_windows::{RecentFiles, RecentKind};
 
 #[test]
+fn hierarchy_picker_opens_a_real_nested_result_and_clears_work_on_close() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::hierarchy_picker_opens_a_real_nested_result_and_clears_work_on_close",
+    ) else {
+        return;
+    };
+    let first = root.join("first.bmp");
+    let nested = root.join("nested");
+    std::fs::create_dir(&nested).expect("nested directory");
+    let target = nested.join("unique-result.bmp");
+    for path in [&first, &target] {
+        tab_transfer::tests::bitmap(path);
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    tab_transfer::tests::install(&mut app, first, tab_transfer::tests::decoded(false));
+    app.dispatch(CommandId::GoToFile);
+    let frame = |app: &mut Application<_>, events| {
+        let mut actions = Vec::new();
+        let _ = context.run_ui(
+            egui::RawInput {
+                events,
+                ..Default::default()
+            },
+            |_| {
+                app.draw_command_palette(&context, 0.0, &mut actions);
+            },
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+    };
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    frame(&mut app, vec![egui::Event::Text("unique-result".into())]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.file_search.result().is_none() {
+        assert!(Instant::now() < deadline, "background hierarchy result");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        app.file_search.result().expect("result").paths.as_slice(),
+        std::slice::from_ref(&target)
+    );
+    frame(&mut app, vec![]);
+    frame(
+        &mut app,
+        vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(app.path.as_ref(), Some(&target));
+    assert!(!app.palette_open);
+    assert!(
+        app.file_search.result().is_none(),
+        "opening retires the search"
+    );
+}
+
+#[test]
 fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_bindings() {
     let Some(_) = tests::isolated_test_root(
         "recent_tests::picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_bindings",

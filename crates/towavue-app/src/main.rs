@@ -284,6 +284,7 @@ enum AppEvent {
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
+    FileSearchReady,
     ImageCopied(Result<(u32, u32), String>),
     ImageEdited(u64, Result<Arc<DecodedImage>, String>),
     ImageContentCompared(
@@ -829,6 +830,7 @@ struct Application<N> {
     renderer: Option<FrameRenderer>,
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
+    file_search: towavue_runtime_windows::FileSearch,
     native_ime_composing: bool,
     folder_order: FolderOrderProvider,
     pending_folder: Option<(u64, FolderIntent)>,
@@ -1043,6 +1045,10 @@ where
         let folder_order =
             FolderOrderProvider::with_notify(move || folder_notify(AppEvent::FolderReady))?;
         let filmstrip_notify = Arc::clone(&notify);
+        let search_notify = Arc::clone(&notify);
+        let file_search = towavue_runtime_windows::FileSearch::new(move || {
+            search_notify(AppEvent::FileSearchReady)
+        })?;
         let filmstrip = filmstrip::Filmstrip::new(preview_cache.clone(), move || {
             filmstrip_notify(AppEvent::FilmstripReady)
         })?;
@@ -1070,6 +1076,7 @@ where
             renderer: None,
             ui_context: None,
             ui_state: None,
+            file_search,
             native_ime_composing: false,
             folder_order,
             pending_folder: None,
@@ -1439,6 +1446,7 @@ where
         }
         self.palette_open = false;
         self.command_overlay_return_focus = None;
+        self.file_search.update(None);
         self.grid_open = false;
         self.cancel_shortcut_prefix();
         if path.is_dir() {
@@ -2764,6 +2772,7 @@ where
                 Ok(path) => format!("Selected in Explorer: {}", path.display()),
                 Err(error) => format!("Could not reveal file: {error}"),
             }),
+            AppEvent::FileSearchReady => self.request_redraw(),
             AppEvent::RecentFilesReady => {
                 if let Some(update) = self
                     .recent_files
@@ -6032,6 +6041,8 @@ where
         top: f32,
         actions: &mut Vec<UiAction>,
     ) {
+        self.update_file_search();
+        let search = self.file_search.result();
         let commands = self.command_context();
         let (chosen, close) = self.palette.show_with_sources(
             context,
@@ -6042,6 +6053,8 @@ where
                 files: &self.recent_paths,
                 folders: &self.recent_folders,
                 folder: self.folder_snapshot.as_ref(),
+                search: search.as_deref(),
+                searching: self.path.is_some() || self.folder_snapshot.is_some(),
             },
         );
         match chosen {
@@ -6055,9 +6068,34 @@ where
         if close {
             self.cancel_command_overlay();
         }
+        self.update_file_search();
+    }
+
+    fn update_file_search(&mut self) {
+        let request = self
+            .palette_open
+            .then(|| self.palette.file_query())
+            .flatten()
+            .and_then(|query| {
+                let root = self
+                    .folder_snapshot
+                    .as_ref()
+                    .map(|folder| folder.folder_path.clone())
+                    .or_else(|| {
+                        self.path
+                            .as_ref()
+                            .and_then(|path| path.parent())
+                            .map(Path::to_path_buf)
+                    })?;
+                Some(towavue_runtime_windows::FileSearchRequest { root, query })
+            });
+        if self.file_search.update(request) {
+            self.request_redraw();
+        }
     }
 
     fn cancel_command_overlay(&mut self) {
+        self.file_search.update(None);
         self.palette_open = false;
         self.grid_open = false;
         if let Some(id) = self.command_overlay_return_focus.take()
@@ -6358,6 +6396,7 @@ where
             None
         };
         self.palette_open = false;
+        self.file_search.update(None);
         match command {
             CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
             CommandId::OpenFile => {

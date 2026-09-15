@@ -4,6 +4,8 @@ use crate::*;
 pub(super) enum Action {
     Begin(u64),
     End(u64),
+    Progress(u64, u8),
+    Commit(u64),
 }
 
 pub(super) struct Held {
@@ -20,6 +22,7 @@ struct Press {
     origin: egui::Pos2,
     start: f64,
     active: bool,
+    progress: u8,
 }
 
 #[derive(Clone, Default)]
@@ -50,7 +53,9 @@ fn cancel_input(context: &egui::Context) -> bool {
 
 // One owner per press, including discarded egui passes. A cancelled/held press
 // cannot become a normal Play click when its eventual release arrives.
-fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
+const LATCH_DISTANCE: f32 = 60.0;
+
+fn update(response: &egui::Response, enabled: bool, allow_latch: bool) -> (Option<Action>, bool) {
     let context = &response.ctx;
     let (events, now, down, position, focused, modifiers) = context.input(|input| {
         (
@@ -102,6 +107,7 @@ fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
             origin,
             start: now,
             active: false,
+            progress: 0,
         });
         input.claimed = Some(frame);
         input.suppress = None;
@@ -112,16 +118,20 @@ fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
         input.processed = Some(frame);
         let distance = context.options(|options| options.input_options.max_click_dist);
         let events = &events[first_event..];
-        let released = events.iter().any(|event| {
-            matches!(
-                event,
-                egui::Event::PointerButton {
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    ..
-                }
-            )
+        let release = events.iter().find_map(|event| match event {
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            } => Some(*pos),
+            _ => None,
         });
+        let released = release.is_some();
+        let progress = release.or(position).map_or(0, |pos| {
+            (((pos.y - press.origin.y) / LATCH_DISTANCE).clamp(0.0, 1.0) * 100.0).floor() as u8
+        });
+        let latch = press.active && allow_latch;
         let moved = events.iter().any(|event| match event {
             egui::Event::PointerMoved(pos) | egui::Event::PointerButton { pos, .. } => {
                 pos.distance(press.origin) > distance
@@ -146,9 +156,13 @@ fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
                         }
                 )
             });
-        if moved || interrupted || !down || released {
+        if (moved && !latch) || interrupted || !down || released {
             if press.active {
-                action = Some(Action::End(press.token));
+                action = Some(if latch && released && !interrupted && progress == 100 {
+                    Action::Commit(press.token)
+                } else {
+                    Action::End(press.token)
+                });
             }
             if press.active || moved || interrupted {
                 input.suppress = Some(press.id);
@@ -157,6 +171,10 @@ fn update(response: &egui::Response, enabled: bool) -> (Option<Action>, bool) {
                 input.clicked = Some((press.id, frame));
             }
             input.press = None;
+        } else if latch && progress != press.progress {
+            press.progress = progress;
+            input.press = Some(press);
+            action = Some(Action::Progress(press.token, progress));
         } else if !press.active {
             let remaining = (0.4 - (now - press.start)).max(0.0);
             if remaining == 0.0 {
@@ -212,7 +230,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         actions: &mut Vec<UiAction>,
         enabled: bool,
     ) -> bool {
-        let (action, consumed) = update(response, enabled);
+        let (action, consumed) =
+            update(response, enabled, self.media_kind == Some(MediaKind::Video));
         if let Some(action) = action {
             actions.push(UiAction::HoldSpeed(
                 self.media_generation,
@@ -290,6 +309,35 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.cancel_hold_speed();
                 }
             }
+            Action::Progress(token, progress) => {
+                if self
+                    .held_speed
+                    .as_ref()
+                    .is_some_and(|held| held.token == token && held.media == media)
+                {
+                    self.show_hold_progress(progress);
+                }
+            }
+            Action::Commit(token) => {
+                if self.media_kind == Some(MediaKind::Video)
+                    && self.hold_enabled()
+                    && self.held_speed.as_ref().is_some_and(|held| {
+                        held.token == token && held.media == media && media == self.media_generation
+                    })
+                {
+                    let held = self.held_speed.take().expect("validated hold");
+                    if held.was_paused && self.state == PlaybackState::Playing {
+                        self.toggle_pause();
+                    }
+                    self.push_edit(EditOperation::SetRate(if held.rate == 2.0 {
+                        1.0
+                    } else {
+                        2.0
+                    }));
+                } else {
+                    self.handle_hold_speed(media, generation, Action::End(token));
+                }
+            }
         }
     }
 
@@ -303,8 +351,32 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         self.held_speed = Some(held);
         if self.set_temporary_rate(2.0, false) {
-            self.set_status("2× while held · release to restore playback".into());
+            if self.media_kind == Some(MediaKind::Video) {
+                self.show_hold_progress(0);
+            } else {
+                self.set_status("2× while held · release to restore playback".into());
+            }
         }
+    }
+
+    fn show_hold_progress(&mut self, progress: u8) {
+        let target = if self
+            .held_speed
+            .as_ref()
+            .is_some_and(|held| held.rate == 2.0)
+        {
+            "1×"
+        } else {
+            "2×"
+        };
+        self.set_status(format!(
+            "2× while held · {progress}% to lock {target}{}",
+            if progress == 100 {
+                " · release to apply"
+            } else {
+                " · drag down"
+            }
+        ));
     }
 
     pub(super) fn cancel_hold_speed(&mut self) -> bool {

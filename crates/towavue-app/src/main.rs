@@ -10381,6 +10381,9 @@ where
                     ..
                 }
         ) {
+            if self.held_speed.is_some() {
+                self.finish_queued_media_release();
+            }
             let cancelled = self.cancel_hold_speed();
             if cancelled
                 && matches!(
@@ -10396,18 +10399,6 @@ where
             {
                 return;
             }
-        }
-        if self.held_speed.is_some()
-            && matches!(
-                &event,
-                WindowEvent::MouseInput {
-                    state: ElementState::Released,
-                    button: winit::event::MouseButton::Left,
-                    ..
-                }
-            )
-        {
-            self.cancel_hold_speed();
         }
         if let Some(context) = &self.ui_context {
             // CursorLeft is handled in egui event order so it cannot cancel an
@@ -10559,6 +10550,19 @@ where
         let (consumed, repaint) = event_response
             .map(|response| (response.consumed, response.repaint))
             .unwrap_or_default();
+        if self.held_speed.is_some()
+            && matches!(
+                &event,
+                WindowEvent::MouseInput {
+                    state: ElementState::Released,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                }
+            )
+        {
+            self.finish_queued_media_release();
+            self.cancel_hold_speed();
+        }
         // This event already renders below; re-queuing it would keep an idle window spinning.
         if repaint && !matches!(event, WindowEvent::RedrawRequested) {
             self.request_redraw();

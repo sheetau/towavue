@@ -339,6 +339,83 @@ fn run_session_trial(audio: bool, test: &str) {
                     app.export_error = None;
                 }
             }
+            if !self.audio {
+                app.fullscreen = false;
+                app.timeline_open = false;
+                app.set_time_selection(None);
+                app.playback_selection = None;
+                for original in [1.0, 1.25, 2.0, 3.0] {
+                    app.push_edit(EditOperation::SetRate(original));
+                    for paused in [false, true] {
+                        for commit in [false, true] {
+                            app.seek_to(time(400));
+                            if (app.state == PlaybackState::Paused) != paused {
+                                app.toggle_pause();
+                            }
+                            let before = app.edits[&tab].operations().to_vec();
+                            ui_time += 1.0;
+                            body_frame(&mut app, &context, ui_time, vec![]);
+                            body_frame(&mut app, &context, ui_time + 0.1, vec![body_button(true)]);
+                            body_frame(&mut app, &context, ui_time + 0.51, vec![]);
+                            let token = app.held_speed.as_ref().expect("held video").token;
+                            body_frame(
+                                &mut app,
+                                &context,
+                                ui_time + 0.6,
+                                vec![egui::Event::PointerMoved(egui::pos2(240.0, 210.0))],
+                            );
+                            let target = if original == 2.0 { 1.0 } else { 2.0 };
+                            assert!(
+                                app.status_message
+                                    .as_ref()
+                                    .expect("progress")
+                                    .0
+                                    .contains(&format!("100% to lock {target}×"))
+                            );
+                            let release = egui::Event::PointerButton {
+                                pos: egui::pos2(240.0, if commit { 210.0 } else { 150.0 }),
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers: egui::Modifiers::NONE,
+                            };
+                            body_frame(&mut app, &context, ui_time + 0.7, vec![release]);
+                            assert!(app.held_speed.is_none());
+                            assert_eq!(
+                                app.state,
+                                if paused {
+                                    PlaybackState::Paused
+                                } else {
+                                    PlaybackState::Playing
+                                }
+                            );
+                            assert_eq!(app.playback_rate(), if commit { target } else { original });
+                            assert_eq!(
+                                app.edit_state().rate,
+                                if commit { target } else { original }
+                            );
+                            let after = app.edits[&tab].operations().to_vec();
+                            app.handle_hold_speed(
+                                app.media_generation,
+                                app.generation,
+                                Action::Commit(token),
+                            );
+                            assert_eq!(app.edits[&tab].operations(), after);
+                            if commit {
+                                app.undo_edit(false);
+                                assert_eq!(app.playback_rate(), original);
+                                assert_eq!(app.edits[&tab].operations(), before);
+                                app.undo_edit(true);
+                                assert_eq!(app.playback_rate(), target);
+                                app.undo_edit(false);
+                            } else {
+                                assert_eq!(after, before);
+                            }
+                        }
+                    }
+                }
+                app.edits.insert(tab, history.clone());
+                app.sync_playback_edits();
+            }
             // A held press never leaks its rate into the retained background tab.
             app.seek_to(time(400));
             if app.state == PlaybackState::Paused {
@@ -432,6 +509,80 @@ fn run_session_trial(audio: bool, test: &str) {
                     "click replays ended video"
                 );
                 assert_eq!(app.edits[&tab], history);
+            }
+            if !self.audio {
+                // Exercise the native release bridge: no redraw occurs between
+                // the final cursor movement and MouseInput::Released.
+                let context = fonts::test_context();
+                app.ui_context = Some(context.clone());
+                app.ui_state = Some(egui_winit::State::new(
+                    context.clone(),
+                    egui::ViewportId::ROOT,
+                    window.as_ref(),
+                    Some(window.scale_factor() as f32),
+                    window.theme(),
+                    None,
+                ));
+                app.fullscreen = false;
+                app.timeline_open = false;
+                app.seek_to(time(400));
+                let size = window.inner_size();
+                app.renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .resize_surface(size.width, size.height)
+                    .expect("size hidden surface");
+                app.window_event(event_loop, window.id(), WindowEvent::Focused(true));
+                app.render_frame();
+                let origin = app
+                    .video_scrub_surface
+                    .as_ref()
+                    .expect("viewport")
+                    .1
+                    .center();
+                let device_id = winit::event::DeviceId::dummy();
+                let cursor = |position: egui::Pos2| WindowEvent::CursorMoved {
+                    device_id,
+                    position: winit::dpi::PhysicalPosition::new(
+                        f64::from(position.x) * window.scale_factor(),
+                        f64::from(position.y) * window.scale_factor(),
+                    ),
+                };
+                let button = |state| WindowEvent::MouseInput {
+                    device_id,
+                    state,
+                    button: winit::event::MouseButton::Left,
+                };
+                for commit in [false, true] {
+                    app.seek_to(time(400));
+                    if app.state == PlaybackState::Playing {
+                        app.toggle_pause();
+                    }
+                    let before = app.edits[&tab].operations().to_vec();
+                    app.window_event(event_loop, window.id(), cursor(origin));
+                    app.window_event(event_loop, window.id(), button(ElementState::Pressed));
+                    app.render_frame();
+                    context.data_mut(|data| {
+                        let input = data.get_temp_mut_or_default::<Input>(input_id());
+                        input.press.as_mut().expect("native press").start -= 0.5;
+                    });
+                    app.render_frame();
+                    assert!(app.held_speed.is_some(), "native hold activated");
+                    let end = origin + egui::vec2(0.0, if commit { 65.0 } else { 59.0 });
+                    app.window_event(event_loop, window.id(), cursor(end));
+                    app.window_event(event_loop, window.id(), button(ElementState::Released));
+                    assert!(
+                        app.held_speed.is_none(),
+                        "release consumed without later redraw"
+                    );
+                    assert_eq!(app.state, PlaybackState::Paused);
+                    assert_eq!(app.playback_rate(), if commit { 2.0 } else { 1.25 });
+                    if commit {
+                        assert_eq!(app.edits[&tab].operations().len(), before.len() + 1);
+                        app.undo_edit(false);
+                    }
+                    assert_eq!(app.edits[&tab].operations(), before);
+                }
             }
             eprintln!(
                 "PASS hold-speed session: audio={}, normal button hold/release, prior pause/rate, edited bounds/history, focus/Seek/tab/EOF",
@@ -554,6 +705,16 @@ fn frame(
     events: Vec<egui::Event>,
     enabled: bool,
 ) -> (Vec<Action>, bool) {
+    frame_mode(context, time, events, enabled, true)
+}
+
+fn frame_mode(
+    context: &egui::Context,
+    time: f64,
+    events: Vec<egui::Event>,
+    enabled: bool,
+    allow_latch: bool,
+) -> (Vec<Action>, bool) {
     let mut actions = Vec::new();
     let mut clicked = false;
     let _ = context.run_ui(
@@ -570,7 +731,7 @@ fn frame(
             let rect = egui::Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(100.0, 100.0));
             let response = ui.interact(rect, "hold-test".into(), egui::Sense::click_and_drag());
             for _ in 0..2 {
-                let (action, consumed) = update(&response, enabled);
+                let (action, consumed) = update(&response, enabled, allow_latch);
                 if let Some(action) = action {
                     actions.push(action);
                 }
@@ -639,5 +800,88 @@ fn moving_or_cancelled_presses_require_a_fresh_press_and_ignore_late_release() {
         assert!(frame(&context, 0.2, events, kind != 3).0.is_empty());
         assert!(frame(&context, 0.8, vec![], true).0.is_empty());
         assert!(!frame(&context, 0.9, vec![button(false)], true).1);
+    }
+}
+
+#[test]
+fn latched_hold_uses_final_vertical_distance_and_never_commits_cancelled_or_audio_drags() {
+    for (end_y, expected) in [
+        (20.0, false),
+        (50.0, false),
+        (109.9, false),
+        (110.0, true),
+        (150.0, true),
+    ] {
+        let context = fonts::test_context();
+        frame(&context, 0.0, vec![], true);
+        frame(&context, 0.1, vec![button(true)], true);
+        let (actions, _) = frame(&context, 0.51, vec![], true);
+        let Action::Begin(token) = actions[0] else {
+            panic!("begin")
+        };
+        assert_eq!(
+            frame(
+                &context,
+                0.6,
+                vec![egui::Event::PointerMoved(egui::pos2(50.0, 80.0))],
+                true
+            )
+            .0,
+            [Action::Progress(token, 50)]
+        );
+        assert_eq!(
+            frame(
+                &context,
+                0.7,
+                vec![egui::Event::PointerMoved(egui::pos2(50.0, 150.0))],
+                true
+            )
+            .0,
+            [Action::Progress(token, 100)]
+        );
+        let release = egui::Event::PointerButton {
+            pos: egui::pos2(50.0, end_y),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        assert_eq!(
+            frame(
+                &context,
+                0.8,
+                vec![release, egui::Event::PointerMoved(egui::pos2(50.0, 180.0))],
+                true
+            ),
+            (
+                vec![if expected {
+                    Action::Commit(token)
+                } else {
+                    Action::End(token)
+                }],
+                false
+            )
+        );
+        assert!(frame(&context, 0.9, vec![], true).0.is_empty());
+    }
+    for mode in 0..4 {
+        let context = fonts::test_context();
+        frame(&context, 0.0, vec![], true);
+        frame(&context, 0.1, vec![button(true)], true);
+        let (actions, _) = frame(&context, 0.51, vec![], true);
+        let Action::Begin(token) = actions[0] else {
+            panic!("begin")
+        };
+        let mut events = vec![egui::Event::PointerMoved(egui::pos2(50.0, 150.0))];
+        if mode == 1 {
+            events.push(egui::Event::WindowFocused(false));
+        }
+        if mode == 2 {
+            events.push(egui::Event::PointerGone);
+        }
+        assert_eq!(
+            frame_mode(&context, 0.6, events, mode != 3, mode != 0).0,
+            [Action::End(token)]
+        );
+        assert!(frame(&context, 0.7, vec![button(false)], true).0.is_empty());
     }
 }

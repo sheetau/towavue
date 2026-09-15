@@ -115,6 +115,9 @@ impl WindowHost {
             match app.start_on_device(event_loop, device.clone(), visible) {
                 Ok(()) => {
                     device = app.renderer.as_ref().map(FrameRenderer::graphics_device);
+                    if visible {
+                        app.render_ready_launch_image();
+                    }
                 }
                 Err(error) => {
                     eprintln!("towavue: could not create window: {error}");

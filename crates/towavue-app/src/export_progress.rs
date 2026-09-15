@@ -41,7 +41,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     (
                         LoadingOwner::Folder(*generation),
                         match intent {
-                            FolderIntent::Open => "Opening folder",
+                            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
+                                "Opening folder"
+                            }
                             FolderIntent::Refresh(_) => "Loading folder order",
                         },
                     )

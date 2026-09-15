@@ -134,6 +134,26 @@ impl WindowHost {
     }
 
     fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        let local: Vec<_> = self
+            .windows
+            .iter_mut()
+            .flat_map(|(key, app)| {
+                std::mem::take(&mut app.pending_window_launches)
+                    .into_iter()
+                    .map(|path| (*key, path))
+            })
+            .collect();
+        for (source, path) in local {
+            let result = self.open_launched_window_with(Some(path), visible, |app, device| {
+                app.start_on_device(event_loop, device, false)
+                    .map_err(|error| error.to_string())
+            });
+            if let Err(error) = result
+                && let Some(app) = self.windows.get_mut(&source)
+            {
+                app.set_status(format!("Could not open new window: {error}"));
+            }
+        }
         for request in std::mem::take(&mut self.pending_launches) {
             let result =
                 self.open_launched_window_with(request.path.clone(), visible, |app, device| {

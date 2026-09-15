@@ -3,6 +3,30 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 
 use CommandId::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OpenTarget {
+    Tab,
+    Window,
+    Replace,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RecentAction {
+    Open(
+        std::path::PathBuf,
+        towavue_runtime_windows::RecentKind,
+        OpenTarget,
+    ),
+    Clear,
+}
+
+#[derive(Default)]
+pub(crate) struct RecentMenu<'a> {
+    pub folders: &'a [std::path::PathBuf],
+    pub files: &'a [std::path::PathBuf],
+    pub action: Option<RecentAction>,
+}
+
 const MENUS: &[(&str, &[&[CommandId]])] = &[
     (
         "File",
@@ -152,15 +176,26 @@ pub fn show(
     show_section(ui, context, shortcuts, None)
 }
 
+#[cfg(test)]
 pub(crate) fn show_section(
     ui: &mut egui::Ui,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     initial: Option<Section>,
 ) -> Option<CommandId> {
+    show_section_with_recent(ui, context, shortcuts, initial, &mut RecentMenu::default())
+}
+
+pub(crate) fn show_section_with_recent(
+    ui: &mut egui::Ui,
+    context: CommandContext,
+    shortcuts: &ShortcutBindings,
+    initial: Option<Section>,
+    recent: &mut RecentMenu<'_>,
+) -> Option<CommandId> {
     let mut chosen = None;
     if let Some(section) = initial {
-        return show_items(ui, section.title(), context, shortcuts).0;
+        return show_items(ui, section.title(), context, shortcuts, recent).0;
     }
     let keyboard = MenuKeyboard::begin(ui);
     let requested_category = keyboard
@@ -169,7 +204,8 @@ pub(crate) fn show_section(
         .flatten();
     let mut categories = Vec::new();
     for (title, _) in MENUS.iter().filter(|(title, _)| *title != "Image jump") {
-        let (response, command) = submenu(ui, title, context, shortcuts, requested_category);
+        let (response, command) =
+            submenu(ui, title, context, shortcuts, requested_category, recent);
         categories.push(response.id);
         chosen = chosen.or(command);
     }
@@ -183,6 +219,7 @@ fn submenu(
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     requested: Option<egui::Id>,
+    recent: &mut RecentMenu<'_>,
 ) -> (egui::Response, Option<CommandId>) {
     let category = ui.next_auto_id();
     if requested == Some(category) {
@@ -190,7 +227,9 @@ fn submenu(
         egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(submenu));
     }
-    let menu = ui.menu_button(title, |ui| show_items(ui, title, context, shortcuts));
+    let menu = ui.menu_button(title, |ui| {
+        show_items(ui, title, context, shortcuts, recent)
+    });
     let (chosen, back) = menu.inner.unwrap_or_default();
     if back {
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
@@ -204,6 +243,7 @@ fn show_items(
     title: &str,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
+    recent: &mut RecentMenu<'_>,
 ) -> (Option<CommandId>, bool) {
     let groups = MENUS
         .iter()
@@ -247,10 +287,34 @@ fn show_items(
                         ui.close();
                     }
                 }
+                if title == "File" && index == 0 {
+                    let category = ui.next_auto_id();
+                    if requested == Some(category) {
+                        let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
+                        egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
+                        egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                            state.open_item = Some(id)
+                        });
+                    }
+                    let menu = ui.menu_button("Open Recent", |ui| show_recent(ui, recent));
+                    if menu.response.enabled() {
+                        items.push(menu.response.id);
+                    }
+                    if menu.response.gained_focus() {
+                        menu.response.scroll_to_me(None);
+                    }
+                    if menu.inner == Some(true) {
+                        egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                            state.open_item = None
+                        });
+                        menu.response.request_focus();
+                    }
+                }
             }
             if title == "View" {
                 ui.separator();
-                let (response, command) = submenu(ui, "Image jump", context, shortcuts, requested);
+                let (response, command) =
+                    submenu(ui, "Image jump", context, shortcuts, requested, recent);
                 if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
@@ -262,6 +326,90 @@ fn show_items(
         });
     keyboard.finish(ui, items);
     (chosen, back)
+}
+
+fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
+    use crate::hover_help::HoverHelp;
+    use towavue_runtime_windows::RecentKind;
+    let keyboard = MenuKeyboard::begin(ui);
+    let back = keyboard.left;
+    let mut items = Vec::new();
+    ui.set_max_width((ui.ctx().content_rect().width() - 32.0).clamp(120.0, 520.0));
+    egui::ScrollArea::vertical()
+        .max_height((ui.ctx().content_rect().height() - 64.0).max(80.0))
+        .show_styled(ui, |ui| {
+            for (kind, paths) in [
+                (RecentKind::Folder, recent.folders),
+                (RecentKind::File, recent.files),
+            ] {
+                for path in paths.iter().take(10) {
+                    let response = ui
+                        .push_id((kind == RecentKind::Folder, path), |ui| {
+                            ui.add(egui::Button::new(path.display().to_string()).truncate())
+                        })
+                        .inner
+                        .help_text(path.display().to_string());
+                    if response.enabled() {
+                        items.push(response.id);
+                    }
+                    if response.gained_focus() {
+                        response.scroll_to_me(None);
+                    }
+                    let modifiers = ui.input(|input| {
+                        input
+                            .events
+                            .iter()
+                            .rev()
+                            .find_map(|event| match event {
+                                egui::Event::PointerButton {
+                                    modifiers,
+                                    pressed: false,
+                                    ..
+                                }
+                                | egui::Event::Key {
+                                    modifiers,
+                                    key: egui::Key::Enter | egui::Key::Space,
+                                    pressed: true,
+                                    ..
+                                } => Some(*modifiers),
+                                _ => None,
+                            })
+                            .unwrap_or(input.modifiers)
+                    });
+                    let modified_enter = response.enabled()
+                        && response.has_focus()
+                        && (modifiers.ctrl || modifiers.alt)
+                        && ui.input_mut(|input| input.consume_key(modifiers, egui::Key::Enter));
+                    if response.clicked() || modified_enter {
+                        let target = if modifiers.ctrl {
+                            OpenTarget::Window
+                        } else if modifiers.alt {
+                            OpenTarget::Replace
+                        } else {
+                            OpenTarget::Tab
+                        };
+                        recent.action = Some(RecentAction::Open(path.clone(), kind, target));
+                        ui.close();
+                    }
+                }
+                if !paths.is_empty() {
+                    ui.separator();
+                }
+            }
+            let response = ui.add_enabled(
+                !recent.files.is_empty() || !recent.folders.is_empty(),
+                egui::Button::new("Clear Recently Opened"),
+            );
+            if response.enabled() {
+                items.push(response.id);
+            }
+            if response.clicked() {
+                recent.action = Some(RecentAction::Clear);
+                ui.close();
+            }
+        });
+    keyboard.finish(ui, items);
+    back
 }
 
 pub(crate) struct MenuKeyboard {
@@ -431,6 +579,177 @@ mod tests {
     use super::*;
 
     #[test]
+    fn recent_menu_groups_bounds_and_modified_keyboard_activation() {
+        use egui::accesskit::{Action, ActionRequest, TreeId};
+        for density in [1.0, 1.25, 2.0] {
+            for (modifiers, expected, pointer) in [
+                (egui::Modifiers::NONE, OpenTarget::Tab, false),
+                (egui::Modifiers::CTRL, OpenTarget::Window, false),
+                (egui::Modifiers::ALT, OpenTarget::Replace, false),
+                (egui::Modifiers::NONE, OpenTarget::Tab, true),
+                (egui::Modifiers::CTRL, OpenTarget::Window, true),
+                (egui::Modifiers::ALT, OpenTarget::Replace, true),
+            ] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                let folders: Vec<_> = (0..12)
+                    .map(|i| std::path::PathBuf::from(format!("C:/folders/{i:02}")))
+                    .collect();
+                let files: Vec<_> = (0..12)
+                    .map(|i| std::path::PathBuf::from(format!("C:/files/{i:02}.png")))
+                    .collect();
+                let mut time = 0.0;
+                let mut frame = |events| {
+                    time += 0.1;
+                    let mut recent = RecentMenu {
+                        folders: &folders,
+                        files: &files,
+                        action: None,
+                    };
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 760.0),
+                            )),
+                            events,
+                            time: Some(time),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            ui.menu_button("Menu", |ui| {
+                                show_section_with_recent(
+                                    ui,
+                                    CommandContext::default(),
+                                    &ShortcutBindings::default(),
+                                    Some(Section::File),
+                                    &mut recent,
+                                );
+                            });
+                        },
+                    );
+                    (output, recent.action)
+                };
+                let node = |output: &egui::FullOutput, label: &str| {
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .find(|(_, n)| {
+                            n.label()
+                                .is_some_and(|text| text.trim_end_matches('⏵').trim() == label)
+                        })
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "node {label}: {:?}",
+                                output
+                                    .platform_output
+                                    .accesskit_update
+                                    .as_ref()
+                                    .expect("tree")
+                                    .nodes
+                                    .iter()
+                                    .filter_map(|(_, n)| n.label())
+                                    .collect::<Vec<_>>()
+                            )
+                        })
+                        .0
+                };
+                let action = |target, action| {
+                    egui::Event::AccessKitActionRequest(ActionRequest {
+                        target_tree: TreeId::ROOT,
+                        target_node: target,
+                        action,
+                        data: None,
+                    })
+                };
+                for _ in 0..3 {
+                    frame(vec![]);
+                }
+                let output = frame(vec![]).0;
+                frame(vec![action(node(&output, "Menu"), Action::Click)]);
+                let output = frame(vec![]).0;
+                frame(vec![action(node(&output, "Open Recent"), Action::Click)]);
+                let output = frame(vec![]).0;
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("menu tree");
+                let labels: Vec<_> = tree.nodes.iter().filter_map(|(_, n)| n.label()).collect();
+                let folder = folders[0].display().to_string();
+                let file = files[0].display().to_string();
+                let top = |label: &str| {
+                    tree.nodes
+                        .iter()
+                        .find(|(_, n)| n.label() == Some(label))
+                        .expect("entry")
+                        .1
+                        .bounds()
+                        .expect("bounds")
+                        .y0
+                };
+                assert!(top(&folder) < top(&file), "folders precede files visually");
+                for absent in [&folders[10], &files[10]] {
+                    assert!(
+                        !labels.contains(&absent.display().to_string().as_str()),
+                        "ten per menu group"
+                    );
+                }
+                node(&output, "Clear Recently Opened");
+                let target = node(&output, &file);
+                let result = if pointer {
+                    let pos = text_position(&output, &file).expect("file text");
+                    let button = |pressed| egui::Event::PointerButton {
+                        pos,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers,
+                    };
+                    frame(vec![egui::Event::PointerMoved(pos), button(true)]);
+                    frame(vec![button(false)]).1
+                } else {
+                    frame(vec![action(target, Action::Focus)]);
+                    frame(vec![egui::Event::Key {
+                        key: egui::Key::Enter,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }])
+                    .1
+                };
+                assert_eq!(
+                    result,
+                    Some(RecentAction::Open(
+                        files[0].clone(),
+                        towavue_runtime_windows::RecentKind::File,
+                        expected
+                    ))
+                );
+                for label in ["Menu", "Open Recent"] {
+                    let output = frame(vec![]).0;
+                    frame(vec![action(node(&output, label), Action::Click)]);
+                    frame(vec![]);
+                }
+                let output = frame(vec![]).0;
+                assert_eq!(
+                    frame(vec![action(
+                        node(&output, "Clear Recently Opened"),
+                        Action::Click
+                    )])
+                    .1,
+                    Some(RecentAction::Clear)
+                );
+            }
+        }
+    }
+
+    #[test]
     fn keyboard_stays_in_menu_tree_and_scrolls_to_enabled_items() {
         let context = egui::Context::default();
         let shortcuts = ShortcutBindings::default();
@@ -500,6 +819,7 @@ mod tests {
         navigate(egui::Key::ArrowRight, false, "Open file");
         navigate(egui::Key::ArrowDown, false, "Open folder");
         navigate(egui::Key::ArrowDown, false, "Open Gallery");
+        navigate(egui::Key::ArrowDown, false, "Open Recent");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
@@ -826,7 +1146,7 @@ mod tests {
                 }]);
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
-            for _ in 0..leading + usize::from(category == "File") {
+            for _ in 0..leading + 2 * usize::from(category == "File") {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             for (index, definition) in command_definitions()

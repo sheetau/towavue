@@ -60,13 +60,14 @@ fn direction(delta: egui::Vec2) -> Option<Section> {
     }
 }
 
-pub(super) fn show(
+pub(super) fn show_with_recent(
     ui: &mut egui::Ui,
     height: f32,
     commands: CommandContext,
     shortcuts: &ShortcutBindings,
     source: Source,
     allowed: bool,
+    recent: &mut menu::RecentMenu<'_>,
 ) -> egui::InnerResponse<Option<Option<CommandId>>> {
     let response = ui.add_enabled(
         allowed,
@@ -252,7 +253,7 @@ pub(super) fn show(
             builder = builder.sizing_pass();
         }
         ui.scope_builder(builder, |ui| {
-            menu::show_section(ui, commands, shortcuts, section)
+            menu::show_section_with_recent(ui, commands, shortcuts, section, recent)
         })
         .inner
     });

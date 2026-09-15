@@ -43,6 +43,8 @@ mod playback_volume;
 mod playlist;
 mod reading_input;
 mod reading_view;
+#[cfg(test)]
+mod recent_tests;
 mod resize;
 mod rotation;
 #[cfg(test)]
@@ -235,6 +237,7 @@ enum UiAction {
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
+    Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
     CloseFilmstrip,
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
@@ -348,6 +351,7 @@ fn keep_accessibility_focus_live(context: &egui::Context, output: &mut egui::Pla
 
 enum FolderIntent {
     Open,
+    OpenReplacing(Option<TabId>, u64),
     Refresh(PathBuf),
 }
 
@@ -370,6 +374,7 @@ enum GuardedAction {
     CloseTabs(Vec<TabId>),
     DetachTab(TabId),
     Navigate(PathBuf),
+    NavigateFromFolder(PathBuf, PathBuf),
     Exit,
 }
 
@@ -840,6 +845,8 @@ struct Application<N> {
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     recent_paths: Vec<PathBuf>,
+    recent_folders: Vec<PathBuf>,
+    pending_window_launches: Vec<PathBuf>,
     recent_months: BTreeMap<PathBuf, (u16, u16)>,
     gallery_search: String,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
@@ -1078,6 +1085,8 @@ where
             closed_tabs: VecDeque::new(),
             recent_files: None,
             recent_paths: Vec::new(),
+            recent_folders: Vec::new(),
+            pending_window_launches: Vec::new(),
             recent_months: BTreeMap::new(),
             gallery_search: String::new(),
             image_copy: None,
@@ -1440,6 +1449,75 @@ where
     fn open_folder_path(&mut self, folder: PathBuf) {
         let generation = self.folder_order.request(Some(folder));
         self.pending_folder = Some((generation, FolderIntent::Open));
+        self.request_redraw();
+    }
+
+    fn handle_recent_action(&mut self, action: menu::RecentAction) {
+        if self.modal_input_blocked() {
+            return;
+        }
+        match action {
+            menu::RecentAction::Clear => {
+                if let Some(recent) = &self.recent_files {
+                    recent.clear();
+                }
+                self.recent_paths.clear();
+                self.recent_folders.clear();
+                self.recent_months.clear();
+            }
+            menu::RecentAction::Open(path, kind, target) => {
+                if target == menu::OpenTarget::Tab
+                    && kind == towavue_runtime_windows::RecentKind::File
+                    && let Some(id) = self
+                        .tabs
+                        .tabs()
+                        .iter()
+                        .find(|tab| tab.target.current_path() == path)
+                        .map(|tab| tab.id)
+                {
+                    // Loaded tabs remain usable even after their source is moved or removed.
+                    self.activate_tab(id);
+                    return;
+                }
+                let path = match canonical_shell_path(&path) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        self.set_status(format!("Could not open {}: {error}", path.display()));
+                        return;
+                    }
+                };
+                match target {
+                    menu::OpenTarget::Window => self.pending_window_launches.push(path),
+                    _ if kind == towavue_runtime_windows::RecentKind::Folder => {
+                        self.open_folder_path(path);
+                        if target == menu::OpenTarget::Replace
+                            && let Some((_, intent)) = &mut self.pending_folder
+                        {
+                            *intent = FolderIntent::OpenReplacing(
+                                self.tabs.active_id(),
+                                self.media_generation,
+                            );
+                        }
+                    }
+                    menu::OpenTarget::Replace if self.tabs.active().is_some() => {
+                        self.request_guarded(GuardedAction::Navigate(path));
+                    }
+                    _ => {
+                        let existing = self
+                            .tabs
+                            .tabs()
+                            .iter()
+                            .find(|tab| tab.target.current_path() == path)
+                            .map(|tab| tab.id);
+                        if let Some(id) = existing {
+                            self.activate_tab(id);
+                        } else {
+                            self.open_external(path, false);
+                        }
+                    }
+                }
+            }
+        }
         self.request_redraw();
     }
 
@@ -1958,7 +2036,10 @@ where
     }
 
     fn refresh_folder_snapshot(&mut self) {
-        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+        if matches!(
+            self.pending_folder,
+            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+        ) {
             return;
         }
         let Some(path) = self.path.clone() else {
@@ -1997,11 +2078,30 @@ where
         }
         let (_, intent) = self.pending_folder.take().expect("current folder request");
         match intent {
-            FolderIntent::Open => {
+            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
+                if let FolderIntent::OpenReplacing(tab, generation) = &intent
+                    && (*tab != self.tabs.active_id() || *generation != self.media_generation)
+                {
+                    self.refresh_folder_snapshot();
+                    self.request_redraw();
+                    return;
+                }
                 if let Some(first) = snapshot.items.first() {
                     let path = first.path.clone();
-                    self.open_external(path.clone(), false);
+                    let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _))
+                        && self.tabs.active().is_some();
+                    if replacing {
+                        self.request_guarded(GuardedAction::NavigateFromFolder(
+                            path.clone(),
+                            snapshot.folder_path.clone(),
+                        ));
+                    } else {
+                        self.open_external(path.clone(), false);
+                    }
                     if self.path.as_ref() == Some(&path) {
+                        if !replacing && let Some(recent) = &self.recent_files {
+                            recent.record_folder(snapshot.folder_path.clone());
+                        }
                         self.folder_order.request(None);
                         self.pending_folder = None;
                         self.apply_folder_snapshot(snapshot);
@@ -2671,14 +2771,25 @@ where
                     self.recent_months = update
                         .entries
                         .iter()
+                        .filter(|entry| entry.kind == towavue_runtime_windows::RecentKind::File)
                         .filter_map(|entry| {
                             entry
                                 .opened_month()
                                 .map(|month| (entry.path.clone(), month))
                         })
                         .collect();
-                    self.recent_paths =
-                        update.entries.into_iter().map(|entry| entry.path).collect();
+                    self.recent_paths.clear();
+                    self.recent_folders.clear();
+                    for entry in update.entries {
+                        match entry.kind {
+                            towavue_runtime_windows::RecentKind::File => {
+                                self.recent_paths.push(entry.path)
+                            }
+                            towavue_runtime_windows::RecentKind::Folder => {
+                                self.recent_folders.push(entry.path)
+                            }
+                        }
+                    }
                     if let Some(error) = update.error {
                         self.set_status(error);
                     }
@@ -4643,7 +4754,12 @@ where
                     ui.add_space(ui.spacing().item_spacing.x);
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                    let menu = logo_menu::show(
+                    let mut recent = menu::RecentMenu {
+                        folders: &self.recent_folders,
+                        files: &self.recent_paths,
+                        action: None,
+                    };
+                    let menu = logo_menu::show_with_recent(
                         ui,
                         layout.tab_height,
                         self.command_context(),
@@ -4657,7 +4773,11 @@ where
                             && !self.palette_open
                             && !self.grid_open
                             && !self.filmstrip_open,
+                        &mut recent,
                     );
+                    if let Some(action) = recent.action {
+                        actions.push(UiAction::Recent(action));
+                    }
                     if return_to_tab && self.tabs.active().is_none() {
                         menu.response.request_focus();
                     }
@@ -6070,6 +6190,7 @@ where
                     self.request_guarded(GuardedAction::Navigate(path));
                 }
             }
+            UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::OpenFilmstripMedia(path, background) => {
                 if !self.filmstrip_open
                     || self.palette_open
@@ -7118,7 +7239,10 @@ where
             self.set_status("The file dialog's owner window is unavailable.".into());
             return false;
         };
-        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+        if matches!(
+            self.pending_folder,
+            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+        ) {
             self.folder_order.request(None);
             self.pending_folder = None;
         }
@@ -7650,7 +7774,10 @@ where
             self.set_status("Close the file dialog before leaving.".into());
             return;
         }
-        if matches!(self.pending_folder, Some((_, FolderIntent::Open))) {
+        if matches!(
+            self.pending_folder,
+            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+        ) {
             self.folder_order.request(None);
             self.pending_folder = None;
         }
@@ -7658,7 +7785,7 @@ where
             let affects_export = match &action {
                 GuardedAction::CloseTab(id) | GuardedAction::DetachTab(id) => *id == export.tab,
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
-                GuardedAction::Navigate(_) => {
+                GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
                 GuardedAction::Exit => true,
@@ -7689,12 +7816,14 @@ where
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
                 .then_some(id),
-            GuardedAction::Navigate(_) => self.tabs.active().and_then(|tab| {
-                self.edits
-                    .get(&tab.id)
-                    .is_some_and(EditHistory::is_dirty)
-                    .then_some(tab.id)
-            }),
+            GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
+                self.tabs.active().and_then(|tab| {
+                    self.edits
+                        .get(&tab.id)
+                        .is_some_and(EditHistory::is_dirty)
+                        .then_some(tab.id)
+                })
+            }
             GuardedAction::Exit => self
                 .edits
                 .iter()
@@ -7756,6 +7885,12 @@ where
             }
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
+            GuardedAction::NavigateFromFolder(path, folder) => {
+                self.navigate_to_unchecked(path);
+                if let Some(recent) = &self.recent_files {
+                    recent.record_folder(folder);
+                }
+            }
             GuardedAction::Exit => {
                 self.exit_requested = true;
                 self.request_redraw();
@@ -8924,7 +9059,7 @@ where
         self.pending_folder
             .as_ref()
             .map(|(_, intent)| match intent {
-                FolderIntent::Open => "Opening folder…".into(),
+                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => "Opening folder…".into(),
                 FolderIntent::Refresh(_) => "Loading order…".into(),
             })
     }

@@ -7,12 +7,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const LIMIT: usize = 40;
 const MAX_BYTES: u64 = 1024 * 1024;
-const HEADER: &str = "towavue recent files v2";
+const HEADER: &str = "towavue recent files v3";
+const TIMESTAMP_HEADER: &str = "towavue recent files v2";
 const LEGACY_HEADER: &str = "towavue recent files v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecentKind {
+    File,
+    Folder,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecentEntry {
     pub path: PathBuf,
+    pub kind: RecentKind,
     /// Last open in UTC milliseconds since Unix epoch; legacy entries stay unknown.
     pub opened_at: Option<u64>,
 }
@@ -36,6 +44,7 @@ pub struct RecentUpdate {
 #[derive(Default)]
 struct Mailbox {
     pending: Vec<RecentEntry>,
+    clear: bool,
     completed: Option<RecentUpdate>,
     closed: bool,
 }
@@ -55,40 +64,52 @@ impl RecentFiles {
                 let (mutex, ready) = &*worker_shared;
                 let mut paths = Vec::new();
                 let mut pending = Vec::new();
+                let mut clear = false;
                 loop {
-                    let error = match update(&path, &pending) {
+                    let error = match update(&path, &pending, clear) {
                         Ok(loaded) => {
                             paths = loaded;
                             pending.clear();
+                            clear = false;
                             None
                         }
                         Err(error) => {
+                            if clear {
+                                paths.clear();
+                            }
                             for item in &pending {
                                 remember(&mut paths, item.clone());
                             }
                             Some(format!("Recent files unavailable: {error}"))
                         }
                     };
-                    mutex.lock().expect("recent mailbox").completed = Some(RecentUpdate {
-                        entries: paths.clone(),
-                        error,
-                    });
+                    {
+                        let mut mailbox = mutex.lock().expect("recent mailbox");
+                        if !mailbox.clear {
+                            mailbox.completed = Some(RecentUpdate {
+                                entries: paths.clone(),
+                                error,
+                            });
+                        }
+                    }
                     notify();
                     let mut mailbox = ready
                         .wait_while(mutex.lock().expect("recent mailbox"), |mailbox| {
-                            !mailbox.closed && mailbox.pending.is_empty()
+                            !mailbox.closed && mailbox.pending.is_empty() && !mailbox.clear
                         })
                         .expect("recent mailbox");
-                    if mailbox.pending.is_empty() && mailbox.closed {
+                    if mailbox.pending.is_empty() && !mailbox.clear && mailbox.closed {
                         break;
+                    }
+                    if std::mem::take(&mut mailbox.clear) {
+                        pending.clear();
+                        clear = true;
                     }
                     for item in std::mem::take(&mut mailbox.pending) {
                         pending.retain(|old| old.path != item.path);
                         pending.push(item);
                     }
-                    if pending.len() > LIMIT {
-                        pending.drain(..pending.len() - LIMIT);
-                    }
+                    trim_pending(&mut pending);
                 }
             })?;
         Ok(Self {
@@ -98,8 +119,28 @@ impl RecentFiles {
     }
 
     pub fn record(&self, path: PathBuf) {
+        self.record_kind(path, RecentKind::File);
+    }
+
+    pub fn record_folder(&self, path: PathBuf) {
+        self.record_kind(path, RecentKind::Folder);
+    }
+
+    /// Clear both history groups at the next serialized write, not the source media.
+    /// Opens queued after this request are retained; earlier pending opens are discarded.
+    pub fn clear(&self) {
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("recent mailbox");
+        mailbox.pending.clear();
+        mailbox.completed = None;
+        mailbox.clear = true;
+        ready.notify_one();
+    }
+
+    fn record_kind(&self, path: PathBuf, kind: RecentKind) {
         let entry = RecentEntry {
             path,
+            kind,
             opened_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .ok()
@@ -109,9 +150,7 @@ impl RecentFiles {
         let mut mailbox = mutex.lock().expect("recent mailbox");
         mailbox.pending.retain(|old| old.path != entry.path);
         mailbox.pending.push(entry);
-        if mailbox.pending.len() > LIMIT {
-            mailbox.pending.remove(0);
-        }
+        trim_pending(&mut mailbox.pending);
         ready.notify_one();
     }
 
@@ -136,6 +175,26 @@ impl Drop for RecentFiles {
     }
 }
 
+fn trim_pending(pending: &mut Vec<RecentEntry>) {
+    // Pending opens are oldest first; keep each group's newest bounded set.
+    pending.reverse();
+    trim_entries(pending);
+    pending.reverse();
+}
+
+fn trim_entries(entries: &mut Vec<RecentEntry>) {
+    let mut files = 0;
+    let mut folders = 0;
+    entries.retain(|entry| {
+        let count = match entry.kind {
+            RecentKind::File => &mut files,
+            RecentKind::Folder => &mut folders,
+        };
+        *count += 1;
+        *count <= LIMIT
+    });
+}
+
 fn remember(paths: &mut Vec<RecentEntry>, entry: RecentEntry) {
     if paths
         .iter()
@@ -147,7 +206,7 @@ fn remember(paths: &mut Vec<RecentEntry>, entry: RecentEntry) {
     paths.insert(0, entry);
     // A delayed worker must not put older opens ahead of newer persisted records.
     paths.sort_by_key(|entry| std::cmp::Reverse(entry.opened_at));
-    paths.truncate(LIMIT);
+    trim_entries(paths);
 }
 
 fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
@@ -165,13 +224,26 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
     }
     let mut lines = text.lines();
     let header = lines.next();
-    if !matches!(header, Some(HEADER | LEGACY_HEADER)) {
+    if !matches!(header, Some(HEADER | TIMESTAMP_HEADER | LEGACY_HEADER)) {
         return Err(std::io::Error::other(
             "Unrecognized recent files format; existing file was retained.",
         ));
     }
     let mut paths = Vec::new();
     for line in lines {
+        let (kind, line) = if header == Some(HEADER) {
+            match line.split_once('\t') {
+                Some(("F", rest)) => (RecentKind::File, rest),
+                Some(("D", rest)) => (RecentKind::Folder, rest),
+                _ => {
+                    return Err(std::io::Error::other(
+                        "Invalid recent entry kind; existing file was retained.",
+                    ));
+                }
+            }
+        } else {
+            (RecentKind::File, line)
+        };
         let (opened_at, value) = if header == Some(LEGACY_HEADER) {
             (None, line)
         } else {
@@ -196,19 +268,30 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
             (stamp, value)
         };
         let path = PathBuf::from(value);
-        if !path.is_absolute() || line.contains('\0') || paths.len() == LIMIT {
+        if !path.is_absolute()
+            || line.contains('\0')
+            || paths
+                .iter()
+                .filter(|entry: &&RecentEntry| entry.kind == kind)
+                .count()
+                == LIMIT
+        {
             return Err(std::io::Error::other(
                 "Invalid recent files entry; existing file was retained.",
             ));
         }
         if !paths.iter().any(|entry: &RecentEntry| entry.path == path) {
-            paths.push(RecentEntry { path, opened_at });
+            paths.push(RecentEntry {
+                path,
+                kind,
+                opened_at,
+            });
         }
     }
     Ok(paths)
 }
 
-fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEntry>> {
+fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<Vec<RecentEntry>> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("Recent files path has no parent."))?;
@@ -220,8 +303,8 @@ fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEnt
         .truncate(false)
         .open(path.with_extension("lock"))?;
     lock.lock()?;
-    let mut paths = read(path)?;
-    if pending.is_empty() {
+    let mut paths = if clear { Vec::new() } else { read(path)? };
+    if pending.is_empty() && !clear {
         return Ok(paths);
     }
     for item in pending {
@@ -245,6 +328,10 @@ fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEnt
             .ok_or_else(|| {
                 std::io::Error::other("Recent path cannot be represented in the history file.")
             })?;
+        text.push_str(match item.kind {
+            RecentKind::File => "F\t",
+            RecentKind::Folder => "D\t",
+        });
         if let Some(stamp) = item.opened_at {
             text.push_str(&stamp.to_string());
         } else {
@@ -285,6 +372,10 @@ fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEnt
 mod tests {
     use super::*;
 
+    fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEntry>> {
+        super::update(path, pending, false)
+    }
+
     fn fixture(name: &str) -> PathBuf {
         let root =
             std::env::temp_dir().join(format!("towavue-recent-{name}-{}", std::process::id()));
@@ -301,6 +392,136 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_history_migrates_without_inferring_folder_kind_from_paths() {
+        let path = fixture("typed-migration");
+        let source = path.parent().expect("parent").join("old.png");
+        let original = format!("{TIMESTAMP_HEADER}\n12345\t{}\n", source.display());
+        fs::write(&path, &original).expect("v2 fixture");
+        let loaded = update(&path, &[]).expect("load v2");
+        assert_eq!(loaded[0].kind, RecentKind::File);
+        assert_eq!(loaded[0].opened_at, Some(12_345));
+        assert_eq!(fs::read(&path).expect("unchanged"), original.as_bytes());
+        let folder = RecentEntry {
+            path: path.parent().expect("parent").join("folder.mp4"),
+            kind: RecentKind::Folder,
+            opened_at: Some(20_000),
+        };
+        let migrated = update(&path, std::slice::from_ref(&folder)).expect("record folder");
+        assert_eq!(migrated, [folder, loaded[0].clone()]);
+        assert_eq!(read(&path).expect("v3 round trip"), migrated);
+        clean(&path);
+    }
+
+    #[test]
+    fn file_and_folder_limits_are_independent_in_storage_and_pending_batches() {
+        let path = fixture("groups");
+        let mut pending = Vec::new();
+        for index in 0..55 {
+            for kind in [RecentKind::File, RecentKind::Folder] {
+                pending.push(RecentEntry {
+                    path: path
+                        .parent()
+                        .expect("parent")
+                        .join(format!("{kind:?}-{index}")),
+                    kind,
+                    opened_at: Some(index),
+                });
+            }
+        }
+        trim_pending(&mut pending);
+        assert_eq!(pending.len(), LIMIT * 2);
+        let stored = update(&path, &pending).expect("store both groups");
+        assert_eq!(stored.len(), LIMIT * 2);
+        for kind in [RecentKind::File, RecentKind::Folder] {
+            let group: Vec<_> = stored.iter().filter(|entry| entry.kind == kind).collect();
+            assert_eq!(group.len(), LIMIT);
+            assert_eq!(group[0].opened_at, Some(54));
+            assert_eq!(group[LIMIT - 1].opened_at, Some(15));
+        }
+        assert_eq!(read(&path).expect("reload"), stored);
+        clean(&path);
+    }
+
+    #[test]
+    fn queued_clear_discards_earlier_opens_but_flushes_later_groups_without_touching_sources() {
+        let path = fixture("clear-queue");
+        let source = path.parent().expect("parent").join("source.png");
+        fs::write(&source, b"untouched source").expect("owned source");
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))
+            .expect("owned lock");
+        lock.lock().expect("hold initial worker read");
+        let recent = RecentFiles::new(path.clone(), || {}).expect("worker");
+        recent.record(source.clone());
+        recent.record_folder(path.parent().expect("parent").join("old-folder"));
+        recent.clear();
+        let file = path.parent().expect("parent").join("new.png");
+        let folder = path.parent().expect("parent").join("new-folder");
+        recent.record(file.clone());
+        recent.record_folder(folder.clone());
+        drop(lock);
+        drop(recent);
+        let stored = read(&path).expect("flushed");
+        assert_eq!(stored.len(), 2);
+        assert!(
+            stored
+                .iter()
+                .any(|entry| entry.path == file && entry.kind == RecentKind::File)
+        );
+        assert!(
+            stored
+                .iter()
+                .any(|entry| entry.path == folder && entry.kind == RecentKind::Folder)
+        );
+        assert_eq!(
+            fs::read(&source).expect("source survives"),
+            b"untouched source"
+        );
+        fs::remove_file(source).expect("remove owned source");
+        clean(&path);
+    }
+
+    #[test]
+    fn explicit_clear_can_replace_corrupt_history_and_an_idle_worker_does_not_restore_it() {
+        let path = fixture("clear-workers");
+        fs::write(&path, b"invalid history").expect("corrupt fixture");
+        assert!(
+            super::update(&path, &[], true)
+                .expect("explicit clear")
+                .is_empty()
+        );
+        let old = RecentEntry {
+            path: path.parent().expect("parent").join("old.png"),
+            kind: RecentKind::File,
+            opened_at: Some(1),
+        };
+        update(&path, &[old]).expect("old record");
+        let (sent, events) = std::sync::mpsc::channel();
+        let idle = RecentFiles::new(path.clone(), move || {
+            let _ = sent.send(());
+        })
+        .expect("idle worker");
+        events
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("old history loaded");
+        let clearing = RecentFiles::new(path.clone(), || {}).expect("clearing worker");
+        clearing.clear();
+        drop(clearing);
+        assert!(read(&path).expect("cleared").is_empty());
+        let new = path.parent().expect("parent").join("new.png");
+        idle.record(new.clone());
+        drop(idle);
+        let stored = read(&path).expect("new record only");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].path, new);
+        clean(&path);
+    }
+
+    #[test]
     fn legacy_history_stays_unchanged_until_an_open_records_a_real_timestamp() {
         let path = fixture("migration");
         let source = path.parent().expect("directory").join("legacy.png");
@@ -310,12 +531,14 @@ mod tests {
         assert_eq!(
             loaded,
             [RecentEntry {
+                kind: RecentKind::File,
                 path: source.clone(),
                 opened_at: None
             }]
         );
         assert_eq!(fs::read(&path).expect("original"), original.as_bytes());
         let fresh = RecentEntry {
+            kind: RecentKind::File,
             path: path.parent().expect("directory").join("fresh.png"),
             opened_at: Some(12_345),
         };
@@ -324,7 +547,7 @@ mod tests {
         assert_eq!(read(&path).expect("reload"), migrated);
         assert!(
             fs::read_to_string(&path)
-                .expect("v2 file")
+                .expect("v3 file")
                 .starts_with(HEADER)
         );
         assert!(
@@ -340,16 +563,19 @@ mod tests {
         let a = path.parent().expect("directory").join("a.png");
         let b = path.parent().expect("directory").join("b.png");
         let recent = RecentEntry {
+            kind: RecentKind::File,
             path: a.clone(),
             opened_at: Some(300),
         };
         update(&path, std::slice::from_ref(&recent)).expect("newer worker");
         let older = [
             RecentEntry {
+                kind: RecentKind::File,
                 path: b,
                 opened_at: Some(200),
             },
             RecentEntry {
+                kind: RecentKind::File,
                 path: a,
                 opened_at: Some(100),
             },
@@ -366,6 +592,7 @@ mod tests {
         let path = fixture("timestamps");
         let source = path.parent().expect("directory").join("source.png");
         let fresh = RecentEntry {
+            kind: RecentKind::File,
             path: source.clone(),
             opened_at: Some(100),
         };
@@ -376,7 +603,7 @@ mod tests {
             "18446744073709551616",
             "253402300800000",
         ] {
-            let original = format!("{HEADER}\n{stamp}\t{}\n", source.display());
+            let original = format!("{HEADER}\nF\t{stamp}\t{}\n", source.display());
             fs::write(&path, &original).expect("invalid fixture");
             assert!(update(&path, std::slice::from_ref(&fresh)).is_err());
             assert_eq!(fs::read(&path).expect("preserved"), original.as_bytes());
@@ -384,6 +611,7 @@ mod tests {
         let original = format!("{LEGACY_HEADER}\n{}\n", source.display());
         fs::write(&path, &original).expect("valid legacy fixture");
         let invalid = RecentEntry {
+            kind: RecentKind::File,
             path: source,
             opened_at: Some(u64::MAX),
         };
@@ -395,6 +623,7 @@ mod tests {
     #[test]
     fn known_and_unknown_open_times_have_safe_local_months() {
         let mut entry = RecentEntry {
+            kind: RecentKind::File,
             path: "unused.png".into(),
             opened_at: None,
         };
@@ -415,6 +644,7 @@ mod tests {
                     .expect("fixture parent")
                     .join(format!("日本語 & media {index}.png"));
                 RecentEntry {
+                    kind: RecentKind::File,
                     path,
                     opened_at: Some(index),
                 }

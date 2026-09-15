@@ -275,23 +275,50 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .canonicalize()
         .expect("sender canonical path");
     let root = path.parent().expect("fixture folder").to_owned();
-    for requested in [Some(path), Some(root), None] {
-        let client_path = requested.clone();
-        let client = std::thread::spawn(move || {
-            matches!(
-                LaunchServer::start_or_forward(client_path.as_deref(), |_| {}),
-                Ok(LaunchRole::Forwarded)
-            )
-        });
-        let request = received
-            .recv_timeout(Duration::from_secs(5))
-            .expect("real local IPC");
-        assert_eq!(request.path, requested);
+    for (requested, local) in [
+        (Some(path.clone()), true),
+        (Some(root.clone()), true),
+        (Some(path), false),
+        (Some(root), false),
+        (None, false),
+    ] {
         let keys: Vec<_> = host.windows.keys().copied().collect();
-        host.route(Event::Launch(request));
-        assert_eq!(host.pending_launches.len(), 1);
+        let client = if local {
+            let path = requested.clone().expect("local target");
+            let kind = if path.is_dir() {
+                towavue_runtime_windows::RecentKind::Folder
+            } else {
+                towavue_runtime_windows::RecentKind::File
+            };
+            host.windows
+                .get_mut(&source)
+                .expect("source")
+                .handle_recent_action(menu::RecentAction::Open(
+                    path,
+                    kind,
+                    menu::OpenTarget::Window,
+                ));
+            None
+        } else {
+            let client_path = requested.clone();
+            let client = std::thread::spawn(move || {
+                matches!(
+                    LaunchServer::start_or_forward(client_path.as_deref(), |_| {}),
+                    Ok(LaunchRole::Forwarded)
+                )
+            });
+            let request = received
+                .recv_timeout(Duration::from_secs(5))
+                .expect("real local IPC");
+            assert_eq!(request.path, requested);
+            host.route(Event::Launch(request));
+            assert_eq!(host.pending_launches.len(), 1);
+            Some(client)
+        };
         host.open_pending_launches(event_loop, false);
-        assert!(client.join().expect("client"), "startup was acknowledged");
+        if let Some(client) = client {
+            assert!(client.join().expect("client"), "startup was acknowledged");
+        }
         let child = *host
             .windows
             .keys()
@@ -368,6 +395,6 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert_eq!(host.windows.len(), count);
     drop(server);
     eprintln!(
-        "PASS hosted launch: real local receiver/ack opens file, folder and Welcome in hidden shared-device HWNDs; original tabs/edits/session/clock untouched, hardware cross-draw CPU transfers 0; pre/post-start failures leave no child; receiver joined on shutdown"
+        "PASS hosted launch: Recent Ctrl actions and real local receiver/ack open file, folder and Gallery in hidden shared-device HWNDs; original tabs/edits/session/clock untouched, hardware cross-draw CPU transfers 0; pre/post-start failures leave no child; receiver joined on shutdown"
     );
 }

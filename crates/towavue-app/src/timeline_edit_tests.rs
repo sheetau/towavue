@@ -10,6 +10,126 @@ fn range(a: i64, b: i64) -> TimeRange {
     TimeRange::new(time(a), time(b)).expect("range")
 }
 
+fn verify_changed_playback_selection<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+) {
+    let tab = app.tabs.active().expect("tab").id;
+    let history = app.edits[&tab].clone();
+    app.timeline_open = true;
+    for active in [false, true] {
+        for playing in [false, true] {
+            for repeat in [false, true] {
+                for updated in [range(800, 1200), range(400, 750), range(1200, 1700)] {
+                    app.session
+                        .as_mut()
+                        .expect("session")
+                        .set_paused(true)
+                        .expect("pause");
+                    app.state = PlaybackState::Paused;
+                    app.set_time_selection(None);
+                    app.seek_to(time(1000));
+                    app.set_time_selection(Some(range(200, 1500)));
+                    if active {
+                        app.toggle_pause();
+                        app.toggle_pause();
+                    }
+                    // Ordinary playback can explicitly leave selection mode.
+                    if playing {
+                        app.session
+                            .as_mut()
+                            .expect("session")
+                            .set_paused(false)
+                            .expect("play");
+                        app.state = PlaybackState::Playing;
+                    }
+                    app.video_repeat = repeat;
+                    app.clock = Some(PlaybackClock::paused(time(1000), 1.0));
+                    let generation = app.generation;
+                    app.handle_ui_action(UiAction::TimeSelection(tab, generation, Some(updated)));
+                    let selected = active
+                        || (playing && updated.start() <= time(1000) && time(1000) < updated.end());
+                    assert_eq!(app.playback_selection, selected.then_some(updated));
+                    let target = if selected {
+                        if playing && repeat && time(1000) >= updated.end() {
+                            updated.start()
+                        } else {
+                            time(1000).max(updated.start()).min(updated.end())
+                        }
+                    } else {
+                        time(1000)
+                    };
+                    assert_eq!(app.current_position(), target);
+                    assert_eq!(
+                        app.session.as_ref().expect("session").range().end,
+                        selected.then_some(updated.end())
+                    );
+                    assert_eq!(
+                        app.state,
+                        if playing && !(selected && !repeat && time(1000) >= updated.end()) {
+                            PlaybackState::Playing
+                        } else {
+                            PlaybackState::Paused
+                        }
+                    );
+                    let unchanged = app.generation;
+                    app.set_time_selection(Some(updated));
+                    assert_eq!(
+                        app.generation, unchanged,
+                        "same selection does not restart decoding"
+                    );
+                    assert_eq!(app.edits[&tab], history);
+                }
+            }
+        }
+    }
+    // The ordinary worker/clock must reach the newly selected end, not the old one.
+    for repeat in [false, true] {
+        app.video_repeat = repeat;
+        app.state = PlaybackState::Paused;
+        app.session
+            .as_mut()
+            .expect("session")
+            .set_paused(true)
+            .expect("pause");
+        app.set_time_selection(None);
+        app.seek_to(time(500));
+        app.set_time_selection(Some(range(400, 1500)));
+        app.toggle_pause();
+        app.set_time_selection(Some(range(400, 750)));
+        let generation = app.generation;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while if repeat {
+            app.generation == generation
+        } else {
+            app.state != PlaybackState::Ended
+        } {
+            app.load_next_frame();
+            app.advance_media();
+            app.decode_finished = app.session.as_ref().expect("session").decode_finished();
+            app.check_eof();
+            assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+            assert!(Instant::now() < deadline, "changed selection EOF");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(app.playback_selection, Some(range(400, 750)));
+        if repeat {
+            assert_eq!(app.session.as_ref().expect("session").target(), time(400));
+        } else {
+            assert_eq!(app.current_position(), time(750));
+        }
+    }
+    app.video_repeat = false;
+    app.session
+        .as_mut()
+        .expect("session")
+        .set_paused(true)
+        .expect("pause");
+    app.state = PlaybackState::Paused;
+    app.set_time_selection(None);
+    app.seek_to(time(0));
+    assert_eq!(app.edits[&tab], history);
+}
+
 fn verify_video_repeat<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
     let tab = app.tabs.active().expect("video tab").id;
     let history = app.edits[&tab].clone();
@@ -185,7 +305,20 @@ fn verify_selection_press<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut App
     let previous_context = app.ui_context.replace(context.clone());
     let tab = app.tabs.active().expect("tab").id;
     let history = app.edits[&tab].clone();
-    for (reverse, cancel) in [(false, false), (true, false), (false, true), (true, true)] {
+    for (playing, reverse, cancel) in [false, true].into_iter().flat_map(|playing| {
+        [(false, false), (true, false), (false, true), (true, true)]
+            .map(move |(reverse, cancel)| (playing, reverse, cancel))
+    }) {
+        app.session
+            .as_mut()
+            .expect("session")
+            .set_paused(!playing)
+            .expect("transport");
+        app.state = if playing {
+            PlaybackState::Playing
+        } else {
+            PlaybackState::Paused
+        };
         app.set_time_selection(None);
         app.seek_to(time(1200));
         let original = Some(range(100, 200));
@@ -266,9 +399,26 @@ fn verify_selection_press<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut App
                 "cancel keeps the press seek without starting another pipeline"
             );
         }
-        assert_eq!(app.state, PlaybackState::Paused);
+        assert_eq!(
+            app.state,
+            if playing {
+                PlaybackState::Playing
+            } else {
+                PlaybackState::Paused
+            }
+        );
+        assert_eq!(
+            app.playback_selection,
+            (playing && !cancel).then_some(range(500, 1500))
+        );
         assert_eq!(app.edits[&tab], history);
     }
+    app.session
+        .as_mut()
+        .expect("session")
+        .set_paused(true)
+        .expect("pause");
+    app.state = PlaybackState::Paused;
     app.set_time_selection(None);
     app.seek_to(time(1200));
     app.ui_context = previous_context;
@@ -810,6 +960,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 .expect("pause");
             app.state = PlaybackState::Paused;
             if !self.audio {
+                verify_changed_playback_selection(&mut app);
                 verify_video_repeat(&mut app);
             }
             app.seek_to(time(1200));

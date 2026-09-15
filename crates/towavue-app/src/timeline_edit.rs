@@ -69,9 +69,32 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn set_time_selection(&mut self, selection: Option<towavue_core::TimeRange>) {
         if self.time_selection != selection {
             let position = self.current_position();
+            let previous = self.playback_selection;
             self.time_selection = selection;
-            if self.playback_selection.take().is_some() {
-                self.seek_to(position);
+            self.playback_selection = selection.filter(|range| {
+                self.playback_duration()
+                    .is_some_and(|duration| range.end() <= media_time(duration))
+                    && (previous.is_some()
+                        || (self.state == PlaybackState::Playing
+                            && position >= range.start()
+                            && position < range.end()))
+            });
+            if self.playback_selection != previous {
+                let target = self.playback_selection.map_or(position, |range| {
+                    let repeat = match self.media_kind {
+                        Some(MediaKind::Video) => self.video_repeat,
+                        Some(MediaKind::Audio) => {
+                            self.audio_mode().0 != towavue_core::RepeatMode::Off
+                        }
+                        _ => false,
+                    };
+                    if self.state == PlaybackState::Playing && repeat && position >= range.end() {
+                        range.start()
+                    } else {
+                        position.max(range.start()).min(range.end())
+                    }
+                });
+                self.seek_to(target);
             }
         }
         self.request_redraw();

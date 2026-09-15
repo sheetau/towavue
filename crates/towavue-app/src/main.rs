@@ -8136,6 +8136,15 @@ where
         {
             self.playback_selection = None;
         }
+        if self.state == PlaybackState::Playing && self.playback_selection.is_none() {
+            self.playback_selection = self.time_selection.filter(|range| {
+                target >= range.start()
+                    && target < range.end()
+                    && self
+                        .playback_duration()
+                        .is_some_and(|duration| range.end() <= media_time(duration))
+            });
+        }
         let plan = match self.history_timeline() {
             Ok(plan) => plan,
             Err(error) => {

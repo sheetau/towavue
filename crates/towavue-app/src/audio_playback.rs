@@ -807,7 +807,19 @@ mod tests {
                 app.set_time_selection(Some(selected));
                 for repeat in [RepeatMode::Off, RepeatMode::All, RepeatMode::One] {
                     assert_eq!(app.audio_mode().0, repeat);
+                    app.set_time_selection(Some(selected));
                     app.process_shortcut("Shift+Space".parse().expect("play selected time"));
+                    let changed = towavue_core::TimeRange::new(
+                        selected.start(),
+                        media_time(Duration::from_millis(90)),
+                    )
+                    .expect("changed selection");
+                    app.set_time_selection(Some(changed));
+                    assert_eq!(app.playback_selection, Some(changed));
+                    assert_eq!(
+                        app.session.as_ref().expect("session").range().end,
+                        Some(changed.end())
+                    );
                     wait(&mut app, &events, |app| app.state == PlaybackState::Ended);
                     let generation = app.generation;
                     advance(&mut app, &events);
@@ -818,7 +830,7 @@ mod tests {
                     assert_eq!(app.media_generation, audition_instance);
                     if repeat == RepeatMode::Off {
                         assert_eq!(app.state, PlaybackState::Ended);
-                        assert_eq!(app.current_position(), selected.end());
+                        assert_eq!(app.current_position(), changed.end());
                         assert_eq!(app.generation, generation);
                     } else {
                         assert_eq!(app.state, PlaybackState::Playing);

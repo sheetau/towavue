@@ -4,6 +4,8 @@ use std::io::Read;
 
 const BINS_PER_COLUMN: usize = 1024;
 
+#[cfg(test)]
+mod contention_tests;
 pub(crate) mod native;
 
 /// Mean absolute stereo envelope of the edited playback samples, one value per

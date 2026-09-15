@@ -62,7 +62,7 @@ pub use file_details::FileDetails;
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
-pub use image_color::premultiplied_color_image;
+pub use image_color::{premultiplied_color_image, premultiplied_rgba_image};
 pub use image_edits::{compare_image_edits, compare_rendered_image_edits, render_image_edits};
 #[cfg(feature = "render-verification")]
 pub use image_loader::verification::{

@@ -2219,10 +2219,7 @@ where
         if image.width as usize > limit || image.height as usize > limit {
             return;
         }
-        let pixels = Arc::new(egui::ColorImage::from_rgba_unmultiplied(
-            [image.width as usize, image.height as usize],
-            &image.rgba,
-        ));
+        let pixels = Arc::new(image_color::preview_color_image(&image));
         self.image_previews.insert(
             path.clone(),
             ImagePreviewPresentation {
@@ -2675,10 +2672,7 @@ where
                 match result {
                     Ok(preview) => {
                         if let Some(context) = self.ui_context.as_ref() {
-                            let image = egui::ColorImage::from_rgba_unmultiplied(
-                                [preview.width as usize, preview.height as usize],
-                                &preview.rgba,
-                            );
+                            let image = image_color::preview_color_image(&preview);
                             self.waveform = Some(context.load_texture(
                                 format!("waveform:{}", path.display()),
                                 image,
@@ -2708,10 +2702,7 @@ where
                 if let Ok(preview) = result
                     && let Some(context) = self.ui_context.as_ref()
                 {
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [preview.width as usize, preview.height as usize],
-                        &preview.rgba,
-                    );
+                    let image = image_color::preview_color_image(&preview);
                     self.hover_thumbnail = Some((
                         bucket,
                         context.load_texture(

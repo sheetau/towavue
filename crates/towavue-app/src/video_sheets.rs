@@ -103,10 +103,7 @@ impl VideoSheets {
                     target.path.display(),
                     target.layout.index()
                 ),
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [sheet.image.width as usize, sheet.image.height as usize],
-                    &sheet.image.rgba,
-                ),
+                crate::image_color::preview_color_image(&sheet.image),
                 TextureOptions::LINEAR,
             ))
         });

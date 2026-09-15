@@ -16,6 +16,18 @@ thread_local! {
     pub(crate) static COLOR_IMAGE_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     pub(crate) static COLOR_IMAGE_CONVERSION_TIME: std::cell::Cell<Duration> = const { std::cell::Cell::new(Duration::ZERO) };
     pub(crate) static COLOR_IMAGE_CPU_TIME: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+    pub(crate) static PACKED_PREVIEW_COLORS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+pub(crate) fn preview_color_image(
+    image: &towavue_runtime_windows::PreviewImage,
+) -> egui::ColorImage {
+    let size = [image.width as usize, image.height as usize];
+    #[cfg(test)]
+    if !PACKED_PREVIEW_COLORS.get() {
+        return egui::ColorImage::from_rgba_unmultiplied(size, &image.rgba);
+    }
+    towavue_runtime_windows::premultiplied_rgba_image(size, &image.rgba)
 }
 
 pub(crate) fn color_image(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorImage {
@@ -54,6 +66,31 @@ fn convert(frame: &towavue_runtime_windows::DecodedImageFrame) -> egui::ColorIma
         }
     }
     towavue_runtime_windows::premultiplied_color_image(frame)
+}
+
+#[test]
+fn preview_colors_preserve_dimensions_alpha_and_original_bytes() {
+    for (width, height) in [(0, 0), (1, 1), (31, 3), (240, 160), (960, 640)] {
+        let image = towavue_runtime_windows::PreviewImage {
+            width,
+            height,
+            rgba: (0..width * height)
+                .flat_map(|n| [n as u8, (n / 3) as u8, (n / 7) as u8, n as u8])
+                .collect(),
+        };
+        let original = image.rgba.clone();
+        let expected =
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &original);
+        for packed in [false, true] {
+            PACKED_PREVIEW_COLORS.set(packed);
+            assert!(
+                preview_color_image(&image) == expected,
+                "exact preview colors"
+            );
+            assert!(image.rgba == original, "borrowed input remains unchanged");
+        }
+    }
+    PACKED_PREVIEW_COLORS.set(true);
 }
 
 #[test]

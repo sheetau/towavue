@@ -263,10 +263,7 @@ impl Filmstrip {
                 let image = media.image;
                 let texture = context.load_texture(
                     format!("filmstrip:{}", preview.path.display()),
-                    egui::ColorImage::from_rgba_unmultiplied(
-                        [image.width as usize, image.height as usize],
-                        &image.rgba,
-                    ),
+                    crate::image_color::preview_color_image(&image),
                     egui::TextureOptions::LINEAR,
                 );
                 (texture, media.duration)

@@ -342,10 +342,7 @@ impl TabPreview {
             }
             Ok(context.load_texture(
                 format!("tab-preview:{}", target.path.display()),
-                egui::ColorImage::from_rgba_unmultiplied(
-                    [image.width as usize, image.height as usize],
-                    &image.rgba,
-                ),
+                crate::image_color::preview_color_image(&image),
                 TextureOptions::LINEAR,
             ))
         }));
@@ -469,6 +466,84 @@ fn sample_time(position: Duration, duration: Option<Duration>) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "preview acceptance cost; run in Release without concurrent builds"]
+    fn preview_acceptance_reports_packed_color_cost() -> Result<(), &'static str> {
+        if cfg!(debug_assertions) {
+            return Err("use Release");
+        }
+        let mut tabs = TabSet::default();
+        tabs.open_new("generated-preview.mp4".into(), MediaKind::Video);
+        let mut preview = TabPreview::new().expect("worker");
+        let target = preview.target(tabs.active().expect("tab"));
+        let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
+            Duration::from_secs(100),
+            Duration::ZERO,
+        )
+        .expect("layout");
+        for (width, height) in [(240, 160), (960, 640)] {
+            for opaque in [true, false] {
+                let source = PreviewImage {
+                    width,
+                    height,
+                    rgba: (0..width * height)
+                        .flat_map(|n| {
+                            [
+                                n as u8,
+                                (n / 3) as u8,
+                                (n / 7) as u8,
+                                if opaque { 255 } else { n as u8 },
+                            ]
+                        })
+                        .collect(),
+                };
+                let expected =
+                    egui::ImageData::Color(Arc::new(egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &source.rgba,
+                    )));
+                for packed in [false, true, true, false] {
+                    crate::image_color::PACKED_PREVIEW_COLORS.set(packed);
+                    let mut times = Vec::new();
+                    for _ in 0..15 {
+                        preview.clear();
+                        let context = egui::Context::default();
+                        let _ = context.tex_manager().write().take_delta();
+                        preview.target = Some(target.clone());
+                        let input = source.clone();
+                        let started = std::time::Instant::now();
+                        if width == 960 {
+                            preview.finish_sheet(
+                                &context,
+                                target.clone(),
+                                preview.generation,
+                                Ok(towavue_runtime_windows::VideoPreviewSheet {
+                                    layout,
+                                    image: input,
+                                }),
+                            );
+                        } else {
+                            preview.finish(&context, target.clone(), preview.generation, Ok(input));
+                        }
+                        times.push(started.elapsed());
+                        let delta = context.tex_manager().write().take_delta();
+                        assert_eq!(delta.set.len(), 1, "one queued texture");
+                        assert!(delta.set[0].1.image == expected, "all queued pixels match");
+                        assert_eq!(preview.sheet_layout.is_some(), width == 960);
+                        assert!(matches!(preview.texture, Some(Ok(_))));
+                    }
+                    times.sort();
+                    eprintln!(
+                        "PREVIEW_ACCEPT width={width} height={height} opaque={opaque} packed={packed} median_ms={:.4}",
+                        times[7].as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        }
+        crate::image_color::PACKED_PREVIEW_COLORS.set(true);
+        Ok(())
+    }
 
     #[test]
     fn video_targets_use_seek_buckets_and_last_observed_tab_identity() {

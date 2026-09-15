@@ -3,12 +3,15 @@
 use egui::{Color32, ColorImage};
 
 pub fn premultiplied_color_image(frame: &crate::DecodedImageFrame) -> ColorImage {
-    let size = [frame.width as usize, frame.height as usize];
+    premultiplied_rgba_image([frame.width as usize, frame.height as usize], &frame.rgba)
+}
+
+pub fn premultiplied_rgba_image(size: [usize; 2], rgba: &[u8]) -> ColorImage {
     assert_eq!(
         size[0].checked_mul(size[1]).and_then(|n| n.checked_mul(4)),
-        Some(frame.rgba.len())
+        Some(rgba.len())
     );
-    ColorImage::new(size, pixels(&frame.rgba))
+    ColorImage::new(size, pixels(rgba))
 }
 
 fn pixels(rgba: &[u8]) -> Vec<Color32> {

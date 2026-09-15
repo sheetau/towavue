@@ -2,6 +2,10 @@
 #![forbid(unsafe_code)]
 
 #[path = "../src/image_color.rs"]
+#[allow(
+    dead_code,
+    reason = "This original-image benchmark does not call the shared module's preview entry point."
+)]
 mod image_color;
 #[cfg(test)]
 use image_color::parallel_trial;

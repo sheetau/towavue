@@ -96,6 +96,66 @@ pub(super) fn application() -> (
 }
 
 #[test]
+fn opposite_free_rotations_preserve_raster_changes_but_undo_restores_original_pixels() {
+    for angle in [50, 317, -450, 900] {
+        let (mut app, events) = application();
+        let tab = app.tabs.active_id().expect("tab");
+        let original = app.image.as_ref().expect("source").decoded.clone();
+        let finish = |app: &mut Application<_>| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while app.image_edit_pending
+                || (app.image_edit_baseline.is_some()
+                    && app.image_edit_compared.is_none()
+                    && app.edits.get(&tab).is_some_and(EditHistory::is_dirty))
+            {
+                app.handle_app_event(
+                    events
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("materialized rotation"),
+                );
+            }
+            assert!(app.image_error.is_none());
+        };
+        for tenths in [angle, -angle] {
+            app.dispatch(CommandId::FreeRotateImage);
+            let dialog = app.rotation_dialog.as_mut().expect("rotation dialog");
+            dialog.angle = format!("{:.1}", f64::from(tenths) / 10.0);
+            let token = dialog.token;
+            let rotation = dialog.value().expect("rotation geometry");
+            app.handle_ui_action(UiAction::FinishRotation(token, Some(rotation)));
+            finish(&mut app);
+        }
+        let restored = app.image.as_ref().expect("two raster edits");
+        if angle == 900 {
+            assert_eq!(restored.dimensions(), (8, 6));
+            assert_eq!(restored.decoded.frames[0].rgba, original.frames[0].rgba);
+            assert!(!app.edits[&tab].is_dirty());
+        } else {
+            assert_ne!(restored.dimensions(), (8, 6));
+            assert_ne!(restored.decoded.frames[0].rgba, original.frames[0].rgba);
+            assert!(app.edits[&tab].is_dirty());
+            assert!(app.title().contains(" *"));
+            eprintln!(
+                "Opposite free rotations {angle}/{} tenths: 8x6 -> {:?}; still changed",
+                -angle,
+                restored.dimensions()
+            );
+        }
+        for _ in 0..2 {
+            app.process_shortcut("Ctrl+Z".parse().expect("Undo shortcut"));
+            finish(&mut app);
+        }
+        assert_eq!(app.image.as_ref().expect("original").dimensions(), (8, 6));
+        assert_eq!(
+            app.image.as_ref().expect("original").decoded.frames[0].rgba,
+            original.frames[0].rgba
+        );
+        assert!(!app.edits[&tab].is_dirty());
+        assert!(!app.title().contains(" *"));
+    }
+}
+
+#[test]
 fn numeric_rotation_dialog_validates_accessible_input_apply_and_escape_without_mutating_the_app() {
     let (mut app, _) = application();
     app.dispatch(CommandId::FreeRotateImage);

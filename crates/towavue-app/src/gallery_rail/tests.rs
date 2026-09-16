@@ -30,6 +30,24 @@ fn frame(
     enabled: bool,
     events: Vec<egui::Event>,
 ) -> Frame {
+    let months: Vec<_> = offsets
+        .iter()
+        .enumerate()
+        .map(|(index, offset)| Month {
+            date: Some((2026, 12 - index as u16)),
+            offset: *offset,
+        })
+        .collect();
+    frame_months(context, &months, rail(), enabled, events)
+}
+
+fn frame_months(
+    context: &egui::Context,
+    months: &[Month],
+    rect: egui::Rect,
+    enabled: bool,
+    events: Vec<egui::Event>,
+) -> Frame {
     let mut offset = 0.0;
     let mut maximum = 0.0;
     let mut id = egui::Id::NULL;
@@ -43,25 +61,24 @@ fn frame(
             ..Default::default()
         },
         |ui| {
-            ui.add_space(40.0);
+            ui.add_space(rect.top());
             ui.add_enabled_ui(enabled, |ui| {
                 let mut output = egui::ScrollArea::vertical()
                     .id_salt("rail-test")
-                    .max_height(320.0)
+                    .max_height(rect.height())
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.set_min_height(1200.0);
-                        offsets
+                        months
                             .iter()
-                            .enumerate()
-                            .map(|(index, offset)| Month {
-                                date: Some((2026, 12 - index as u16)),
-                                offset: *offset,
+                            .map(|month| Month {
+                                date: month.date,
+                                offset: month.offset,
                             })
                             .collect()
                     });
-                show(ui, &mut output, rail());
+                show(ui, &mut output, rect);
                 offset = output.state.offset.y;
                 maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
                 id = output.id;
@@ -100,6 +117,102 @@ fn label(frame: &Frame, expected: &str) -> egui::Rect {
             _ => None,
         })
         .expect("immediate month label")
+}
+
+#[test]
+fn year_labels_mark_the_oldest_boundary_instead_of_the_newest_month_center() {
+    for density in [1.0, 1.25, 2.0] {
+        for dates in [
+            vec![Some((2026, 9))],
+            vec![Some((2026, 9)), Some((2026, 6)), Some((2026, 2))],
+            vec![
+                Some((2026, 9)),
+                Some((2026, 6)),
+                Some((2025, 11)),
+                Some((2025, 1)),
+                None,
+            ],
+            vec![None],
+        ] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            context.global_style_mut(chrome::style);
+            let months: Vec<_> = dates
+                .iter()
+                .enumerate()
+                .map(|(index, date)| Month {
+                    date: *date,
+                    offset: index as f32 * 200.0,
+                })
+                .collect();
+            frame_months(&context, &months, rail(), true, vec![]);
+            let output = frame_months(&context, &months, rail(), true, vec![]);
+            for (index, month) in months.iter().enumerate() {
+                let year = month.date.map(|date| date.0);
+                if months
+                    .get(index + 1)
+                    .is_some_and(|next| next.date.map(|date| date.0) == year)
+                {
+                    continue;
+                }
+                let text = year.map_or_else(|| "?".into(), |year| year.to_string());
+                let bounds = label(&output, &text);
+                let boundary = point((index + 1) as f32 / months.len() as f32).y;
+                assert!(
+                    (bounds.bottom() - boundary).abs() <= 1.0 / density,
+                    "{text} bottom {} must mark chronological start {boundary}",
+                    bounds.bottom()
+                );
+                assert!(rail().contains_rect(bounds));
+            }
+            let tree = output
+                .output
+                .platform_output
+                .accesskit_update
+                .expect("month tree");
+            for month in &months {
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, node)| node.role() == egui::accesskit::Role::Button
+                            && node.label() == Some(month.label().as_str()))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn crowded_year_boundaries_do_not_overlap_or_escape_the_rail() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        let months: Vec<_> = (0..12)
+            .map(|index| Month {
+                date: Some((2026 - index, 1)),
+                offset: f32::from(index) * 100.0,
+            })
+            .collect();
+        let rect = egui::Rect::from_min_size(rail().min, egui::vec2(32.0, 48.0));
+        let output = frame_months(&context, &months, rect, true, vec![]);
+        let mut previous_bottom = rect.top();
+        let mut count = 0;
+        for shape in output.output.shapes {
+            if let egui::Shape::Text(text) = shape.shape {
+                let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                assert!(rect.contains_rect(bounds));
+                assert!(bounds.top() >= previous_bottom);
+                previous_bottom = bounds.bottom();
+                count += 1;
+            }
+        }
+        assert!(
+            count > 0 && count < months.len(),
+            "show only labels that fit"
+        );
+    }
 }
 
 #[test]

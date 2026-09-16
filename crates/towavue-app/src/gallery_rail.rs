@@ -97,18 +97,29 @@ pub(super) fn show(
             target = Some(pointer_fraction(pointer));
             dragging = true;
         }
-        let y = band.center().y;
         let year = month.date.map(|date| date.0);
-        let new_year = index == 0 || months[index - 1].date.map(|date| date.0) != year;
-        if new_year && y - 7.0 >= last_label_bottom.max(rect.top()) && y + 7.0 <= rect.bottom() {
-            painter.text(
-                band.center(),
-                egui::Align2::CENTER_CENTER,
+        // Newest months are above older ones. A year's chronological start is
+        // the lower boundary of its oldest populated month, not its first row.
+        let year_start = months
+            .get(index + 1)
+            .is_none_or(|next| next.date.map(|date| date.0) != year);
+        let bottom = egui::lerp(travel.clone(), (index + 1) as f32 / months.len() as f32);
+        let label = year_start.then(|| {
+            painter.layout_no_wrap(
                 year.map_or_else(|| "?".into(), |year| year.to_string()),
                 egui::FontId::proportional(11.0),
                 chrome::MUTED,
+            )
+        });
+        if let Some(label) =
+            label.filter(|label| bottom - label.size().y >= last_label_bottom.max(rect.top()))
+        {
+            let origin = egui::pos2(
+                band.center().x - label.size().x * 0.5,
+                bottom - label.size().y,
             );
-            last_label_bottom = y + 9.0;
+            painter.galley(origin, label, chrome::MUTED);
+            last_label_bottom = bottom + 2.0;
         } else {
             painter.circle_filled(band.center(), 1.5, chrome::MUTED);
         }

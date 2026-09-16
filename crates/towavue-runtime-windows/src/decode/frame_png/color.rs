@@ -20,6 +20,15 @@ pub(super) fn convert(
     full: bool,
     subsampled: (bool, bool),
 ) -> Result<frame::Video, DecodeError> {
+    // The legacy slice API has no frame flags and would interpolate vertical
+    // chroma across temporal fields. Use the native field-aware frame API only
+    // when this input actually has vertically subsampled interlaced chroma.
+    // SAFETY: read one scalar from the borrowed, live decoded frame.
+    if subsampled.1
+        && unsafe { (*source.as_ptr()).flags & ffmpeg::ffi::AV_FRAME_FLAG_INTERLACED != 0 }
+    {
+        return convert_interlaced(source, pixel, full);
+    }
     use ffmpeg::ffi::*;
     // SAFETY: native allocation has no borrowed inputs. The guard immediately
     // owns its result and also handles null/all initialization failure paths.
@@ -102,6 +111,68 @@ pub(super) fn convert(
     }
     if rows != source.height() as i32 {
         return Err(invalid("incomplete frame color conversion"));
+    }
+    Ok(output)
+}
+
+fn convert_interlaced(
+    source: &frame::Video,
+    pixel: Pixel,
+    full: bool,
+) -> Result<frame::Video, DecodeError> {
+    use ffmpeg::ffi::*;
+    // SAFETY: the guard owns the allocation even on initialization failure.
+    let scaler = Scaler(unsafe { sws_alloc_context() });
+    if scaler.0.is_null() {
+        return Err(invalid("cannot allocate interlaced frame color converter"));
+    }
+    let mut input = frame::Video::empty();
+    // SAFETY: retain the borrowed pixels in a separate frame header. Changes to
+    // scalar metadata below must not change the decoder's source frame.
+    let result = unsafe { av_frame_ref(input.as_mut_ptr(), source.as_ptr()) };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    if matches!(
+        input.color_space(),
+        ffmpeg::color::Space::RGB | ffmpeg::color::Space::Unspecified
+    ) {
+        input.set_color_space(ffmpeg::color::Space::SMPTE170M);
+    }
+    input.set_color_range(if full {
+        ffmpeg::color::Range::JPEG
+    } else {
+        ffmpeg::color::Range::MPEG
+    });
+    let mut output = frame::Video::new(pixel, source.width(), source.height());
+    // SAFETY: copy only properties; output owns distinct writable pixels. Equal
+    // primaries/transfer/alpha mode avoid adding tone mapping or alpha conversion.
+    // Both headers retain interlaced flags so native conversion processes each
+    // field separately and writes back to its original alternating rows.
+    let result = unsafe { av_frame_copy_props(output.as_mut_ptr(), input.as_ptr()) };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    output.set_color_space(ffmpeg::color::Space::RGB);
+    output.set_color_range(ffmpeg::color::Range::JPEG);
+    // SAFETY: the dynamic API consumes frame properties, including field-specific
+    // chroma siting. Do not call sws_init_context (legacy mode), which loses this
+    // behavior. Frames and the sole-owned context remain alive until it returns;
+    // this synchronous native call does not retain Rust references.
+    let result = unsafe {
+        (*scaler.0).flags =
+            (Flags::BILINEAR | Flags::ACCURATE_RND | Flags::FULL_CHR_H_INT).bits() as u32;
+        sws_scale_frame(scaler.0, output.as_mut_ptr(), input.as_ptr())
+    };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    // SAFETY: these are private property copies, not the borrowed source's array.
+    // The caller attaches the original metadata after orientation; do not leave
+    // a second copy of each side-data item on the unrotated return path.
+    unsafe {
+        let header = &mut *output.as_mut_ptr();
+        av_frame_side_data_free(&mut header.side_data, &mut header.nb_side_data);
     }
     Ok(output)
 }

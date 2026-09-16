@@ -4,6 +4,7 @@ mod alpha;
 mod chroma;
 mod exif;
 mod grayscale;
+mod interlaced;
 mod webm_alpha;
 use std::{fs, io::Cursor, process::Command};
 

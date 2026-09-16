@@ -1,5 +1,7 @@
 use super::*;
 
+mod native;
+
 #[test]
 fn held_seek_keys_respect_bindings_prefixes_media_state_and_overlays() {
     let Some(_root) = tests::isolated_test_root(

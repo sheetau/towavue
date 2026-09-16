@@ -9938,6 +9938,18 @@ where
             match command {
                 CommandId::PreviousVideoFrame => self.repeat_video_frame(false),
                 CommandId::NextVideoFrame => self.repeat_video_frame(true),
+                CommandId::SeekBackward | CommandId::SeekForward
+                    if self.media_kind == Some(MediaKind::Video)
+                        && (self.pending_seek_started.is_some()
+                            || self
+                                .session
+                                .as_ref()
+                                .is_none_or(PlaybackSession::video_refresh_pending)) =>
+                {
+                    // A held seek must not cancel its own result before Present.
+                    // The seek timestamp clears only after a fresh frame is drawn
+                    // and successfully presented. No repeats remain after release.
+                }
                 _ => self.dispatch(command),
             }
         }
@@ -23297,7 +23309,12 @@ mod tests {
                     for index in 0..100 {
                         let generation = app.generation;
                         let key = if index % 8 < 4 { "Right" } else { "Left" };
-                        app.repeat_media_shortcut(key.parse().expect("held seek"));
+                        if kind == MediaKind::Audio {
+                            app.repeat_media_shortcut(key.parse().expect("held audio seek"));
+                        } else {
+                            // Discrete video presses remain immediately replaceable.
+                            app.process_shortcut(key.parse().expect("discrete video seek"));
+                        }
                         assert_eq!(app.generation, generation.next());
                         assert_eq!(
                             app.current_position(),
@@ -23355,6 +23372,21 @@ mod tests {
                 assert_eq!(app.current_position(), MediaTime::ZERO);
                 app.seek_to(MediaTime::from_nanoseconds(-1));
                 assert_eq!(app.current_position(), MediaTime::ZERO);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.pending_time.is_none() && Instant::now() < deadline {
+                    app.load_next_frame();
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert!(app.pending_time.is_some(), "first seek playback frame");
+                assert_eq!(
+                    app.session
+                        .as_mut()
+                        .expect("session")
+                        .drop_video_before(time(1)),
+                    0,
+                    "the first seek frame must be shown before ordinary late dropping"
+                );
+                app.advance_media();
                 let deadline = Instant::now() + Duration::from_secs(5);
                 while app.pending_time.is_none() && Instant::now() < deadline {
                     app.load_next_frame();

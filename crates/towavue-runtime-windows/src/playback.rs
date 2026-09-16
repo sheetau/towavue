@@ -871,8 +871,9 @@ impl PlaybackSession {
     pub fn drop_video_before(&mut self, cutoff: MediaTime) -> u64 {
         let mut dropped = 0;
         while let Some(time) = self.pending_video_time() {
-            // Only terminal source preview may precede the seek target.
-            if time >= cutoff || (time < self.video_target && self.video_refresh_pending) {
+            // Show the first fresh seek/visibility result once, even if audio
+            // advanced during preroll. Normal late dropping resumes on advance.
+            if time >= cutoff || self.video_refresh_pending {
                 break;
             }
             self.pending_video.take();
@@ -1377,8 +1378,19 @@ mod tests {
         assert!(session.video_geometry().is_some() && session.video_refresh_pending());
         assert_eq!(session.current_video_time(), Some(terminal_time));
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        assert_eq!(
+            session.drop_video_before(end),
+            0,
+            "the first fresh seek frame must survive a late audio clock"
+        );
+        assert_eq!(session.pending_video_time(), Some(MediaTime::ZERO));
         assert!(session.advance_pending());
         assert!(!session.video_refresh_pending());
+        assert!(wait_for_video(&mut session) < end);
+        assert!(
+            session.drop_video_before(end) > 0,
+            "ordinary late-frame dropping resumes after the refresh"
+        );
         drop(session);
         std::fs::remove_file(path).expect("remove owned video-only fixture");
     }

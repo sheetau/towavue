@@ -3122,9 +3122,12 @@ where
                 .session
                 .as_ref()
                 .map_or(presentation_time, PlaybackSession::target);
-            let mut clock = PlaybackClock::new(presentation_time.max(target), self.playback_rate());
-            clock.set_paused(self.state != PlaybackState::Playing);
-            self.clock = Some(clock);
+            let position = presentation_time.max(target);
+            self.clock = Some(if self.state == PlaybackState::Playing {
+                PlaybackClock::new(position, self.playback_rate())
+            } else {
+                PlaybackClock::paused(position, self.playback_rate())
+            });
         }
         self.pending_time = Some(presentation_time);
     }
@@ -9059,9 +9062,11 @@ where
                     .as_ref()
                     .and_then(PlaybackSession::audio_position)
                 {
-                    let mut clock = PlaybackClock::new(position, self.playback_rate());
-                    clock.set_paused(self.state != PlaybackState::Playing);
-                    self.clock = Some(clock);
+                    self.clock = Some(if self.state == PlaybackState::Playing {
+                        PlaybackClock::new(position, self.playback_rate())
+                    } else {
+                        PlaybackClock::paused(position, self.playback_rate())
+                    });
                 }
                 self.audio_drained = true;
                 self.check_eof();

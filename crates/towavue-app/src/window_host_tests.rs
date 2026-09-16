@@ -1,5 +1,18 @@
 use super::*;
 
+pub(super) fn drain_captured(host: &mut WindowHost) {
+    loop {
+        let event = host
+            .captured_events
+            .lock()
+            .expect("test events")
+            .as_mut()
+            .and_then(VecDeque::pop_front);
+        let Some(event) = event else { return };
+        host.route(event);
+    }
+}
+
 fn marker(text: &str) -> AppEvent {
     AppEvent::FileRevealed(Err(std::io::Error::other(text)))
 }
@@ -239,6 +252,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
         path: PathBuf,
         received: BTreeSet<WindowKey>,
         closed: Option<WindowKey>,
+        background_prepared: bool,
         deadline: Instant,
         completed: bool,
         skipped: bool,
@@ -366,6 +380,19 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
                         app.toggle_pause();
                     }
                 }
+                if !self.background_prepared {
+                    // Return to the real event loop for asynchronous resume lookups
+                    // before the synchronous recovery/transfer exercise starts.
+                    for app in self.host.windows.values_mut() {
+                        app.media_duration = Some(Duration::from_secs(3));
+                        let path = app.path.clone().expect("generated source");
+                        app.tabs.open_new(path.clone(), MediaKind::Video);
+                        app.load_path(path, MediaKind::Video);
+                    }
+                    self.background_prepared = true;
+                    event_loop.set_control_flow(ControlFlow::Poll);
+                    return;
+                }
                 let first = keys[0];
                 let second = keys[1];
                 assert_eq!(
@@ -379,9 +406,23 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
                 );
                 graphics_tests::exercise(&mut self.host);
                 transfer_tests::exercise(&mut self.host, event_loop);
+                // Synchronous fixture helpers cannot pump winit reentrantly.
+                // Drain real resume results through route; leave other events
+                // queued normally so scripted Shell snapshots stay controlled.
+                *self.host.captured_events.lock().expect("test events") = Some(VecDeque::new());
                 opening_tests::exercise(&mut self.host, event_loop);
                 dropping::tests::exercise(&mut self.host, event_loop);
                 launch_tests::exercise(&mut self.host, event_loop);
+                let pending = self
+                    .host
+                    .captured_events
+                    .lock()
+                    .expect("test events")
+                    .take()
+                    .expect("captured events");
+                for event in pending {
+                    self.host.route(event);
+                }
                 let first_id = self.host.windows[&first]
                     .window
                     .as_ref()
@@ -538,6 +579,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
         path,
         received: BTreeSet::new(),
         closed: None,
+        background_prepared: false,
         deadline: Instant::now() + Duration::from_secs(15),
         completed: false,
         skipped: false,

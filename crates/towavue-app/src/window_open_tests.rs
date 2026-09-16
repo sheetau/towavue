@@ -192,9 +192,11 @@ fn queued_filmstrip_windows_validate_source_identity_and_coalesce_duplicate_acti
     );
 }
 
-pub(super) fn finish_child(app: &mut WindowApplication) {
+pub(super) fn finish_child(host: &mut WindowHost, key: WindowKey) -> &mut WindowApplication {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        tests::drain_captured(host);
+        let app = host.windows.get_mut(&key).expect("child");
         app.finish_image_load();
         app.poll_audio();
         app.load_next_frame();
@@ -212,7 +214,7 @@ pub(super) fn finish_child(app: &mut WindowApplication) {
                 .is_some_and(|position| position > MediaTime::ZERO),
         };
         if ready || app.state == PlaybackState::Faulted {
-            return;
+            break;
         }
         assert!(
             Instant::now() < deadline,
@@ -222,6 +224,7 @@ pub(super) fn finish_child(app: &mut WindowApplication) {
         );
         std::thread::sleep(Duration::from_millis(2));
     }
+    host.windows.get_mut(&key).expect("child")
 }
 
 fn drag_frame(
@@ -381,7 +384,7 @@ fn exercise_tab_drops(
             !app.edits[&added].is_dirty(),
             "open original without source edits"
         );
-        finish_child(app);
+        let app = finish_child(host, target);
         assert_eq!(
             app.image.as_ref().expect("loaded original").dimensions(),
             (2, 1)
@@ -477,9 +480,8 @@ fn exercise_edge_placement(host: &mut WindowHost, event_loop: &ActiveEventLoop) 
 
 pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let source = *host.windows.keys().next().expect("source");
-    let app = host.windows.get_mut(&source).expect("source");
     // The preceding image exercise has just reactivated this paused video.
-    finish_child(app);
+    let app = finish_child(host, source);
     let source_path = app.path.clone().expect("silent video");
     let image_path = source_path.with_file_name("filmstrip [new] 日本語.bmp");
     let bad_image = source_path.with_file_name("filmstrip-corrupt.bmp");
@@ -582,7 +584,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         );
         assert_eq!(app.tabs.tabs().len(), 1);
         assert!(!app.command_context().has_unsaved_edits && app.export_paths.is_empty());
-        finish_child(app);
+        let app = finish_child(host, child);
         if path == &bad_image {
             assert!(app.image_error.is_some() && app.state == PlaybackState::Faulted);
         } else if path == &audio_path

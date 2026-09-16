@@ -252,7 +252,6 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                 wait(&mut app, &events, |app| app.media_duration.is_some());
                 tab_focus::tests::hardware_focus(&mut app, "Repeat off", true);
                 let instance = app.media_generation;
-                let generation = app.session.as_ref().expect("audio session").generation();
                 let focus = app
                     .ui_context
                     .as_ref()
@@ -268,6 +267,9 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                     if (app.state == PlaybackState::Paused) != paused {
                         app.toggle_pause();
                     }
+                    // Play may re-arm the selected range; reopening the same tab
+                    // must preserve the session after that intentional seek.
+                    let generation = app.session.as_ref().expect("audio session").generation();
                     let state = app.state;
                     let position = app.current_position();
                     app.open_external(self.root.join("tone.wav"), false);
@@ -551,6 +553,15 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
                         .paused_at
                         .is_some(),
                     "late audio completion must not restart the failed clock"
+                );
+                assert_eq!(
+                    app.clock.as_ref().expect("drained clock").position(),
+                    app.session
+                        .as_ref()
+                        .expect("audio session")
+                        .audio_position()
+                        .expect("drained position"),
+                    "constructing a stopped clock must not advance its source position"
                 );
                 let stopped = app.current_position();
                 assert_eq!(app.current_position(), stopped);

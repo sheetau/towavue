@@ -163,13 +163,6 @@ pub(super) fn exercise(host: &mut WindowHost) {
     for (index, key) in keys.iter().enumerate() {
         let app = host.windows.get_mut(key).expect("window");
         app.media_duration = Some(Duration::from_secs(3));
-        let path = app.path.clone().expect("generated source");
-        app.tabs.open_new(path.clone(), MediaKind::Video);
-        app.load_path(path, MediaKind::Video);
-        draw_ready(app);
-        if app.state == PlaybackState::Playing {
-            app.toggle_pause();
-        }
         app.seek_to(MediaTime::from_nanoseconds(
             (index as i64 + 1) * 300_000_000,
         ));

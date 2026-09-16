@@ -16,6 +16,10 @@ mod graphics_tests;
 mod transfer_tests;
 
 #[cfg(test)]
+#[path = "resume/host_tests.rs"]
+mod resume_tests;
+
+#[cfg(test)]
 #[path = "window_open_tests.rs"]
 mod opening_tests;
 
@@ -50,6 +54,9 @@ impl From<accesskit_winit::Event> for Event {
 
 type WindowApplication = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 
+#[cfg(test)]
+type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
+
 pub(crate) struct WindowHost {
     windows: BTreeMap<WindowKey, WindowApplication>,
     proxy: Option<EventLoopProxy<Event>>,
@@ -58,6 +65,8 @@ pub(crate) struct WindowHost {
     preview_cache: PreviewCache,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
+    #[cfg(test)]
+    captured_events: CapturedEvents,
 }
 
 impl WindowHost {
@@ -73,6 +82,8 @@ impl WindowHost {
             preview_cache: PreviewCache::local()?,
             idle_graphics: None,
             tab_cursor_owner: None,
+            #[cfg(test)]
+            captured_events: Arc::default(),
         };
         host.add_application(initial_path)?;
         Ok(host)
@@ -88,7 +99,16 @@ impl WindowHost {
             .checked_add(1)
             .expect("window identity exhausted");
         let proxy = self.proxy.clone();
+        #[cfg(test)]
+        let captured_events = self.captured_events.clone();
         let notify: Box<dyn Fn(AppEvent) + Send + Sync> = Box::new(move |event| {
+            #[cfg(test)]
+            if matches!(event, AppEvent::VideoResume(_))
+                && let Some(queue) = captured_events.lock().expect("test events").as_mut()
+            {
+                queue.push_back(Event::Window(key, event));
+                return;
+            }
             if let Some(proxy) = &proxy {
                 let _ = proxy.send_event(Event::Window(key, event));
             }

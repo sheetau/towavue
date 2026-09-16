@@ -262,8 +262,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     .expect("receiver");
     assert!(matches!(server, LaunchRole::Primary(_)));
     let source = *host.windows.keys().next().expect("source");
-    let app = host.windows.get_mut(&source).expect("source");
-    opening_tests::finish_child(app);
+    let app = opening_tests::finish_child(host, source);
     let original_tabs = app.tabs.clone();
     let original_edits = app.edits.clone();
     let generation = app.generation;
@@ -328,7 +327,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         assert_eq!(app.window.as_ref().expect("HWND").is_visible(), Some(false));
         assert!(!app.command_context().has_unsaved_edits);
         if requested.as_ref().is_some_and(|path| path.is_file()) {
-            opening_tests::finish_child(app);
+            let app = opening_tests::finish_child(host, child);
             assert!(app.playback_error.is_none());
             assert_eq!(
                 app.session

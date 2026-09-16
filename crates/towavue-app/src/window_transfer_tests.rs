@@ -59,6 +59,10 @@ fn assert_frame(
     generation: PlaybackGeneration,
 ) {
     assert_eq!(app.state, PlaybackState::Paused);
+    assert!(
+        app.resume_owner.is_some(),
+        "resume ownership follows live playback"
+    );
     assert_eq!(app.current_position(), position);
     assert_eq!(app.generation, generation, "live session was not reopened");
     assert_eq!(
@@ -312,6 +316,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .tab_detach_request(returned)
         .expect("background request");
     assert!(app.retained_playback[&returned].video_suspended);
+    assert!(app.retained_playback[&returned].resume.is_some());
     let moved = host
         .move_tab(source, target, &request, 0)
         .expect("move background video");

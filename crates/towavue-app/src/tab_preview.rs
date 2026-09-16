@@ -8,6 +8,9 @@ use towavue_core::{MediaKind, Tab, TabId, TabSet};
 use towavue_runtime_windows::{LatestTask, PreviewCache, PreviewImage};
 
 #[cfg(test)]
+mod navigation_tests;
+
+#[cfg(test)]
 mod reading_tests;
 
 pub(super) enum RetainedPreview {
@@ -437,6 +440,12 @@ impl TabPreview {
                     } else {
                         size.y
                     };
+                    let height = if target.kind == MediaKind::Audio && transport.is_some() {
+                        audio_card_height(response, height)
+                    } else {
+                        height
+                    };
+                    let size = size * (height / size.y).min(1.0);
                     let (bounds, _) =
                         ui.allocate_exact_size(egui::vec2(240.0, height), egui::Sense::hover());
                     thumbnail = Some(bounds);
@@ -457,7 +466,7 @@ impl TabPreview {
                             egui::vec2(
                                 240.0,
                                 if target.kind == MediaKind::Audio {
-                                    40.0
+                                    audio_card_height(response, 40.0)
                                 } else {
                                     160.0
                                 },
@@ -491,6 +500,34 @@ impl TabPreview {
             })
             .and_then(|output| output.inner)
     }
+}
+
+#[derive(Clone, Copy)]
+struct AudioCardHeight {
+    frame: u64,
+    height: f32,
+}
+
+fn audio_card_height(response: &egui::Response, natural: f32) -> f32 {
+    let context = &response.ctx;
+    let id = response.id.with("audio-card-height");
+    let frame = context.cumulative_frame_nr();
+    let inside_card = context
+        .pointer_hover_pos()
+        .is_some_and(|point| !response.interact_rect.contains(point));
+    // Preview::tab has already validated this card's hover/captured-seek owner.
+    // Keep its controls stationary across a track/artwork replacement while the
+    // pointer is off the source tab; otherwise a shorter placeholder can remove
+    // the card from beneath the pointer. Reopening or returning to the tab allows
+    // the natural artwork size again. Only geometry is retained, never old pixels.
+    context.data_mut(|data| {
+        let previous = data.get_temp::<AudioCardHeight>(id);
+        let height = previous
+            .filter(|previous| inside_card && previous.frame.saturating_add(1) >= frame)
+            .map_or(natural, |previous| previous.height);
+        data.insert_temp(id, AudioCardHeight { frame, height });
+        height
+    })
 }
 
 fn source_sample_time(

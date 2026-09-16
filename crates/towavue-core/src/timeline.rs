@@ -397,7 +397,7 @@ mod tests {
             TimelineEdit::SetVolume(range(0, 1000), f32::NAN),
             TimelineEdit::SetVolume(range(0, 1000), f32::INFINITY),
             TimelineEdit::SetVolume(range(0, 1000), -1.0),
-            TimelineEdit::SetVolume(range(0, 1000), 3.001),
+            TimelineEdit::SetVolume(range(0, 1000), 2.001),
             TimelineEdit::Stretch(range(0, 1000), time(0)),
             TimelineEdit::Stretch(range(0, 1000), time(249)),
             TimelineEdit::Stretch(range(0, 1000), time(4001)),
@@ -407,8 +407,8 @@ mod tests {
         }
         assert!(TimeRange::new(time(-1), time(0)).is_none());
         assert!(TimeRange::new(time(1), time(1)).is_none());
-        assert!(plan.apply(TimelineEdit::SetVolume(range(0, 1000), 3.0)));
-        assert_eq!(plan.spans()[0].volume(), 3.0);
+        assert!(plan.apply(TimelineEdit::SetVolume(range(0, 1000), 2.0)));
+        assert_eq!(plan.spans()[0].volume(), 2.0);
     }
 
     #[test]

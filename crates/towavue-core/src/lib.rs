@@ -43,7 +43,7 @@ pub use video_resize::VideoResize;
 pub use video_rotation::VideoRotation;
 
 /// Maximum linear level of each independent listening or saved-gain control.
-pub const MAX_VOLUME: f32 = 3.0;
+pub const MAX_VOLUME: f32 = 2.0;
 
 /// A signed media timestamp stored as nanoseconds.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

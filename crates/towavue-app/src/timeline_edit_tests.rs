@@ -692,7 +692,7 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
                     .map(|vertex| vertex.pos)
                     .collect::<Vec<_>>(),
             );
-            assert!((selected.height() / rect.height() - 3.0).abs() < 0.001);
+            assert!((selected.height() / rect.height() - 2.0).abs() < 0.001);
             assert!(
                 output
                     .textures_delta
@@ -725,7 +725,7 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
                         _,
                         _,
                         _,
-                        TimelineEdit::SetVolume(_, 3.0)
+                        TimelineEdit::SetVolume(_, 2.0)
                     )]
                 ));
             }
@@ -783,20 +783,20 @@ fn waveform_gain_preview_matches_committed_geometry_across_edits() {
             source_duration,
             None,
             1.0,
-            Some((range(500, 2500), 3.0))
+            Some((range(500, 2500), 2.0))
         ),
         waveform_regions(
             rect,
             source_duration,
             Some(&plan),
             1.0,
-            Some((range(500, 2500), 3.0))
+            Some((range(500, 2500), 2.0))
         )
     );
     assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));
     assert!(plan.apply(TimelineEdit::Stretch(range(1000, 2000), time(2000))));
     assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
-    for gain in [0.0, 0.5, 3.0] {
+    for gain in [0.0, 0.5, 2.0] {
         let selection = range(500, 2500);
         let preview = waveform_regions(
             rect,

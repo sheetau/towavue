@@ -47,9 +47,10 @@ pub(super) fn gain_range_at(bands: &[(TimeRange, f32)], time: MediaTime) -> Opti
 }
 
 pub(super) fn gain_height(rect: Rect) -> f32 {
-    // Points per linear gain unit: unity at center, maximum at the top edge,
-    // silence one quarter above the bottom. Hit testing and dragging share it.
-    rect.height().max(1.0) / (2.0 * (towavue_core::MAX_VOLUME - 1.0))
+    // Unity stays centered; 75% of either half reaches 200% or silence.
+    // This is 1.5 times the former quarter-height travel per gain unit.
+    // Painting, hit testing and dragging share the same scale.
+    rect.height().max(1.0) * 0.375
 }
 
 pub(super) fn gain_y(rect: Rect, gain: f32) -> f32 {
@@ -285,12 +286,18 @@ mod tests {
     }
 
     #[test]
-    fn gain_travel_uses_the_top_edge_and_keeps_unity_centered() {
+    fn gain_travel_uses_three_quarters_of_each_half_and_keeps_unity_centered() {
         for top in [0.0, 30.0] {
             for height in [80.0, 100.0, 180.0] {
                 let rect = Rect::from_min_size(egui::pos2(20.0, top), egui::vec2(400.0, height));
-                assert_eq!(gain_height(rect), height / 4.0);
-                for (gain, fraction) in [(0.0, 0.75), (1.0, 0.5), (2.0, 0.25), (3.0, 0.0)] {
+                assert_eq!(gain_height(rect), height * 0.375);
+                for (gain, fraction) in [
+                    (0.0, 0.875),
+                    (0.5, 0.6875),
+                    (1.0, 0.5),
+                    (1.5, 0.3125),
+                    (2.0, 0.125),
+                ] {
                     assert_eq!(gain_y(rect, gain), top + height * fraction);
                 }
             }
@@ -495,7 +502,7 @@ mod tests {
                 .expect("volume")
                 .1
                 .max_numeric_value(),
-            Some(300.0)
+            Some(200.0)
         );
         let event = |value| {
             egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
@@ -510,10 +517,10 @@ mod tests {
             draw(vec![event(100.0)], true, false).1,
             Some(TimelineEdit::SetVolume(range(0, 10), 1.0))
         );
-        for value in [300.0, 400.0] {
+        for value in [200.0, 300.0, 400.0] {
             assert_eq!(
                 draw(vec![event(value)], true, false).1,
-                Some(TimelineEdit::SetVolume(range(0, 10), 3.0))
+                Some(TimelineEdit::SetVolume(range(0, 10), 2.0))
             );
         }
         let key = egui::Event::Key {

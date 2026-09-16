@@ -16440,7 +16440,7 @@ mod tests {
                     (
                         vec![normal(100.0), normal(-1.0)],
                         egui::Modifiers::NONE,
-                        Some(2.9),
+                        Some(1.9),
                     ),
                     (
                         vec![normal(-100.0), normal(1.0)],

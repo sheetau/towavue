@@ -164,7 +164,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
         kind: MediaKind::Audio,
         operations: vec![
             EditOperation::SetVolume(0.5),
-            EditOperation::Timeline(TimelineEdit::SetVolume(range(500, 1500), 3.0)),
+            EditOperation::Timeline(TimelineEdit::SetVolume(range(500, 1500), 2.0)),
         ],
         hardware_encode: false,
     })
@@ -181,7 +181,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
         let actual = f32::from_le_bytes(*actual);
         let original = f32::from_le_bytes(*original);
         let gain = if (24000 * 2..72000 * 2).contains(&index) {
-            1.5
+            1.0
         } else {
             0.5
         };

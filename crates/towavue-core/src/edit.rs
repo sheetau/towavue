@@ -678,7 +678,7 @@ mod tests {
         );
         let mut clamped = EditHistory::default();
         clamped.push(EditOperation::SetVolume(3.0), MediaKind::Audio);
-        assert_eq!(clamped.state().volume, 3.0);
+        assert_eq!(clamped.state().volume, 2.0);
         clamped.mark_saved();
         clamped.push(EditOperation::SetVolume(4.0), MediaKind::Audio);
         assert!(!clamped.is_dirty(), "use the same clamp as playback/export");

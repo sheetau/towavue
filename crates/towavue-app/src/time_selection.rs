@@ -1343,7 +1343,7 @@ mod tests {
                         rect.left() + rect.width() * at / 10.0,
                         adjustment::gain_y(rect, gain),
                     );
-                    let end = start - egui::vec2(0.0, adjustment::gain_height(rect) * 0.5);
+                    let end = start - egui::vec2(0.0, rect.height() * 0.1875);
                     let button = |pos, pressed| egui::Event::PointerButton {
                         pos,
                         button: egui::PointerButton::Primary,
@@ -1396,12 +1396,16 @@ mod tests {
     fn gain_and_stretch_commit_once_and_keep_press_modifiers() {
         let selected = TimeRange::new(time(2.5), time(7.5));
         for batched in [false, true] {
-            for (selection, stretch, gain) in [
-                (None, false, 0.0),
-                (selected, false, 0.0),
-                (None, false, 3.0),
-                (selected, false, 3.0),
-                (selected, true, 0.0),
+            for (selection, stretch, gain, travel) in [
+                (None, false, 0.0, 37.5),
+                (selected, false, 0.0, 37.5),
+                (None, false, 0.5, 18.75),
+                (selected, false, 1.5, -18.75),
+                (None, false, 2.0, -37.5),
+                (selected, false, 2.0, -37.5),
+                (None, false, 0.0, 80.0),
+                (selected, false, 2.0, -80.0),
+                (selected, true, 0.0, 40.0),
             ] {
                 let context = egui::Context::default();
                 frame(&context, vec![], true, selection);
@@ -1409,7 +1413,7 @@ mod tests {
                 let end = if stretch {
                     origin + egui::vec2(80.0, 40.0)
                 } else {
-                    origin + egui::vec2(10.0, if gain == 0.0 { 80.0 } else { -80.0 })
+                    origin + egui::vec2(10.0, travel)
                 };
                 let press = egui::Event::PointerButton {
                     pos: origin,
@@ -1841,7 +1845,7 @@ mod tests {
             let context = egui::Context::default();
             frame(&context, vec![], true, None);
             let origin = egui::pos2(120.0, 80.0);
-            let end = egui::pos2(320.0, 108.0);
+            let end = egui::pos2(320.0, 117.5);
             let results = frame(
                 &context,
                 vec![

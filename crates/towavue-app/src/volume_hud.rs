@@ -128,7 +128,7 @@ mod tests {
                         size.y > 120.0,
                     ),
                 ] {
-                    for volume in [0.0, 0.5, 1.0, 2.0, 3.0] {
+                    for volume in [0.0, 0.5, 1.0, 1.5, 2.0] {
                         let (track, fill) = geometry(viewport, media, volume);
                         assert!(viewport.contains_rect(track));
                         assert!(track.contains_rect(fill));
@@ -137,7 +137,7 @@ mod tests {
                         } else {
                             fill.height() / track.height()
                         };
-                        assert!((fraction - volume / 3.0).abs() < 0.001);
+                        assert!((fraction - volume / 2.0).abs() < 0.001);
                         if size.y > 50.0 {
                             assert_eq!(track.width() > track.height(), horizontal);
                         }

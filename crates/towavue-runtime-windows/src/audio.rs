@@ -871,15 +871,15 @@ mod tests {
         assert_eq!(normalized_volume(f32::NAN), 0.0);
         assert_eq!(normalized_volume(-1.0), 0.0);
         assert_eq!(normalized_volume(3.0), 3.0);
-        assert_eq!(normalized_volume(9.0), 9.0);
-        assert_eq!(normalized_volume(10.0), 9.0);
-        let mut gain = VolumeRamp::new(normalized_volume(9.0), 48_000);
+        assert_eq!(normalized_volume(4.0), 4.0);
+        assert_eq!(normalized_volume(9.0), 4.0);
+        let mut gain = VolumeRamp::new(normalized_volume(4.0), 48_000);
         let mut samples = [0.01_f32, -0.01]
             .iter()
             .flat_map(|value| value.to_le_bytes())
             .collect::<Vec<_>>();
-        gain.apply(&mut samples, 9.0);
-        for (sample, expected) in samples.as_chunks::<4>().0.iter().zip([0.09_f32, -0.09]) {
+        gain.apply(&mut samples, 4.0);
+        for (sample, expected) in samples.as_chunks::<4>().0.iter().zip([0.04_f32, -0.04]) {
             assert!((f32::from_le_bytes(*sample) - expected).abs() < 0.000001);
         }
     }

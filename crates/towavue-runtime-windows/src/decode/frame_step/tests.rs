@@ -5,6 +5,59 @@ fn time(ns: i64) -> MediaTime {
     MediaTime::from_nanoseconds(ns)
 }
 
+#[test]
+#[ignore = "Release 100 backward queries on explicit read-only TOWAVUE_SEEK_REFERENCE_SOURCE"]
+fn reference_cache_reports_hundred_backward_steps() {
+    if cfg!(debug_assertions) {
+        panic!("Release timing only");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let stamp = || {
+        crate::export::frame::SourceLease::open(&path)
+            .expect("identity")
+            .source
+    };
+    let original = stamp();
+    let mut expected = None;
+    for cached in [false, true, true, false] {
+        let mut cache = FrameStepCache::default();
+        let mut target = time(60_550_000_000);
+        let mut selected = Vec::new();
+        let mut costs = Vec::new();
+        for _ in 0..100 {
+            let start = std::time::Instant::now();
+            let next = if cached {
+                cache.adjacent(&path, target, false, None, &|| false)
+            } else {
+                adjacent_video_frame(&path, target, false, None, &|| false)
+            }
+            .expect("adjacent query")
+            .expect("reference contains enough frames");
+            costs.push(start.elapsed().as_secs_f64() * 1000.0);
+            assert!(next < target);
+            selected.push(next);
+            target = next;
+        }
+        if let Some(expected) = &expected {
+            assert_eq!(&selected, expected, "all 100 distinct PTS match");
+        } else {
+            expected = Some(selected);
+        }
+        let total: f64 = costs.iter().sum();
+        costs.sort_by(f64::total_cmp);
+        println!(
+            "FRAME_CACHE_BURST cached={cached} queries=100 scans={} total_ms={total:.3} median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
+            if cached { cache.misses } else { 100 },
+            costs[50],
+            costs[94],
+            costs[99]
+        );
+        assert_eq!(stamp(), original, "source remains unchanged");
+    }
+}
+
 fn with_mode<T>(mode: u8, run: impl FnOnce() -> T) -> T {
     struct Restore(u8);
     impl Drop for Restore {
@@ -371,6 +424,7 @@ fn frame_query_uses_the_selected_stream_and_handles_empty_edits() {
 }
 
 fn verify(path: &Path, reference: &[MediaTime], plan: Option<&EditTimeline>) {
+    let mut cache = FrameStepCache::default();
     let mut targets = vec![MediaTime::ZERO, time(1_999_999_999)];
     for pts in reference {
         targets.extend([*pts, time(pts.as_nanoseconds() + 1)]);
@@ -395,6 +449,13 @@ fn verify(path: &Path, reference: &[MediaTime], plan: Option<&EditTimeline>) {
                 expected,
                 "{}: target={target:?} forward={forward}",
                 path.display()
+            );
+            assert_eq!(
+                cache
+                    .adjacent(path, target, forward, plan, &|| false)
+                    .expect("cached adjacent frame"),
+                expected,
+                "cache target={target:?} forward={forward}"
             );
         }
     }

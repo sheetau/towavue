@@ -1,6 +1,9 @@
 use super::*;
 use towavue_core::EditTimeline;
 
+mod cache;
+pub use cache::FrameStepCache;
+
 #[cfg(test)]
 thread_local! {
     static PIXEL_MODE: std::cell::Cell<u8> = const { std::cell::Cell::new(2) };
@@ -15,6 +18,17 @@ pub fn adjacent_video_frame(
     forward: bool,
     timeline: Option<&EditTimeline>,
     cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Option<MediaTime>, DecodeError> {
+    query(path, target, forward, timeline, cancelled, None)
+}
+
+fn query(
+    path: &Path,
+    target: MediaTime,
+    forward: bool,
+    timeline: Option<&EditTimeline>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    mut observed: Option<&mut cache::Window>,
 ) -> Result<Option<MediaTime>, DecodeError> {
     check_cancelled(cancelled)?;
     ffmpeg::init()?;
@@ -57,7 +71,20 @@ pub fn adjacent_video_frame(
             let seek =
                 MediaTime::from_nanoseconds(anchor.as_nanoseconds().saturating_sub(lookback))
                     .max(start);
-            let candidate = scan(path, seek, start, end, target, forward, timeline, cancelled)?;
+            if let Some(window) = observed.as_deref_mut() {
+                window.clear();
+            }
+            let candidate = scan(
+                path,
+                seek,
+                start,
+                end,
+                target,
+                forward,
+                timeline,
+                cancelled,
+                observed.as_deref_mut(),
+            )?;
             if candidate.is_some() {
                 return Ok(candidate);
             }
@@ -80,6 +107,7 @@ fn scan(
     forward: bool,
     timeline: Option<&EditTimeline>,
     cancelled: &(dyn Fn() -> bool + Sync),
+    mut observed: Option<&mut cache::Window>,
 ) -> Result<Option<MediaTime>, DecodeError> {
     check_cancelled(cancelled)?;
     let mut input = format::input(path)?;
@@ -135,6 +163,9 @@ fn scan(
                     else {
                         continue;
                     };
+                    if let Some(window) = observed.as_deref_mut() {
+                        window.observe(time);
+                    }
                     if forward {
                         if time > target {
                             candidate = Some(time);

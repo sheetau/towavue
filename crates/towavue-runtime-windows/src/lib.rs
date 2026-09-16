@@ -59,7 +59,7 @@ pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};
 pub use cancellation::Cancellation;
 pub use caption::{CaptionAction, CaptionButton, NativeCaption};
 pub use decode::{
-    AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame,
+    AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, FrameStepCache, VideoFrame,
     adjacent_video_frame, edited_video_frame_png, source_video_frame_png,
 };
 pub use dialog::{

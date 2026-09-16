@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use towavue_core::{MediaKind, MediaTime, PlaybackGeneration, PlaybackState, TabId};
-use towavue_runtime_windows::{LatestTask, adjacent_video_frame};
+use towavue_runtime_windows::{FrameStepCache, LatestTask};
 
 use crate::{AppEvent, Application};
 
@@ -14,6 +14,8 @@ mod tests;
 
 pub(super) struct FrameSteps {
     worker: LatestTask,
+    // Only the existing worker locks this scalar cache; UI cancellation never waits.
+    cache: Arc<Mutex<FrameStepCache>>,
     serial: u64,
     pending: Option<Request>,
     queued: VecDeque<bool>,
@@ -38,6 +40,7 @@ impl FrameSteps {
     pub(super) fn new() -> std::io::Result<Self> {
         Ok(Self {
             worker: LatestTask::new("towavue-frame-step")?,
+            cache: Arc::new(Mutex::new(FrameStepCache::default())),
             serial: 0,
             pending: None,
             queued: VecDeque::new(),
@@ -188,11 +191,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         let notify = Arc::clone(&self.notify);
+        let cache = Arc::clone(&self.frame_steps.cache);
         self.frame_steps.worker.submit(move |cancellation| {
-            let result = adjacent_video_frame(&path, base, forward, plan.as_ref(), &|| {
-                cancellation.is_cancelled()
-            })
-            .map_err(|error| error.to_string());
+            let result = cache
+                .lock()
+                .expect("frame timestamp cache")
+                .adjacent(&path, base, forward, plan.as_ref(), &|| {
+                    cancellation.is_cancelled()
+                })
+                .map_err(|error| error.to_string());
             if !cancellation.is_cancelled() {
                 notify(AppEvent::FrameStep(serial, result));
             }

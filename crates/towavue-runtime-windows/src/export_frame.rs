@@ -26,7 +26,7 @@ impl VideoFrameSnapshot {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct FrameSource {
     path: PathBuf,
     stamp: Stamp,

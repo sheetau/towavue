@@ -638,6 +638,7 @@ fn reference_session_reports_hundred_hardware_seek_replacements() {
         (metadata.len(), metadata.modified().expect("mtime"))
     };
     let before = stamp();
+    let paused = std::env::var_os("TOWAVUE_SEEK_REFERENCE_PLAYING").is_none();
     let device = GraphicsDevice::hardware_for_test().expect("windowless device");
     for reverse in [false, true] {
         let targets: Vec<_> = (0..100)
@@ -671,10 +672,11 @@ fn reference_session_reports_hundred_hardware_seek_replacements() {
         )
         .expect("muted session including normal audio setup");
         session
-            .set_paused(true)
-            .expect("pause before timed commands");
+            .set_paused(paused)
+            .expect("transport state before timed commands");
         let start = Instant::now();
         let mut command_costs = Vec::new();
+        let mut stage_costs = Vec::new();
         let mut selected = 0;
         let mut final_start = start;
         for (index, &target) in targets.iter().enumerate() {
@@ -682,6 +684,21 @@ fn reference_session_reports_hundred_hardware_seek_replacements() {
             let command = Instant::now();
             session.seek(target).expect("superseding seek");
             command_costs.push(command.elapsed().as_secs_f64() * 1000.0);
+            stage_costs.push(session.seek_stage_ms());
+            assert!(session.has_audio());
+            if paused {
+                assert_eq!(
+                    session.audio_position(),
+                    Some(target),
+                    "pending audio retains its seek anchor"
+                );
+            }
+            if let Some(event) = session.try_audio_event() {
+                assert!(
+                    matches!(event, crate::AudioOutputEvent::Drained),
+                    "audio failure: {event:?}"
+                );
+            }
             assert_ne!(generation, session.generation());
             assert!(
                 session.video_refresh_pending(),
@@ -731,11 +748,28 @@ fn reference_session_reports_hundred_hardware_seek_replacements() {
         let final_ms = final_start.elapsed().as_secs_f64() * 1000.0;
         let total_ms = start.elapsed().as_secs_f64() * 1000.0;
         let raw = command_costs.clone();
+        for (index, name) in [
+            "audio_stop",
+            "video_stop",
+            "audio_feed_join",
+            "audio_start",
+            "worker_start",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut times: Vec<_> = stage_costs.iter().map(|sample| sample[index]).collect();
+            times.sort_by(f64::total_cmp);
+            println!(
+                "HARDWARE_SESSION_STAGE reverse={reverse} stage={name} median_ms={:.4} p95_ms={:.4} max_ms={:.4}",
+                times[50], times[94], times[99]
+            );
+        }
         command_costs.sort_by(f64::total_cmp);
         let close = Instant::now();
         drop(session);
         println!(
-            "HARDWARE_SESSION reverse={reverse} commands=100 interval_ms=33 selected={selected} final_ms={final_ms:.4} total_ms={total_ms:.4} call_median_ms={:.4} call_p95_ms={:.4} call_max_ms={:.4} close_ms={:.4} raw_call_ms={raw:?}",
+            "HARDWARE_SESSION reverse={reverse} paused={paused} commands=100 interval_ms=33 selected={selected} final_ms={final_ms:.4} total_ms={total_ms:.4} call_median_ms={:.4} call_p95_ms={:.4} call_max_ms={:.4} close_ms={:.4} raw_call_ms={raw:?}",
             command_costs[50],
             command_costs[94],
             command_costs[99],
@@ -744,7 +778,7 @@ fn reference_session_reports_hundred_hardware_seek_replacements() {
     }
     assert_eq!(stamp(), before);
     println!(
-        "HARDWARE_SESSION_CHECKS commands=200 source_stamps=true final_pts_equal=true hardware_only=true muted_paused_audio=true no_pixel_access=true"
+        "HARDWARE_SESSION_CHECKS commands=200 source_stamps=true final_pts_equal=true hardware_only=true muted_audio=true paused={paused} no_pixel_access=true"
     );
 }
 

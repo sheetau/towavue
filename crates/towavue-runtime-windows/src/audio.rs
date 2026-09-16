@@ -20,6 +20,17 @@ const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const EVENT_WAIT_MILLISECONDS: u32 = 20;
 const BUFFERED_AUDIO_SECONDS: usize = 2;
 
+#[cfg(test)]
+type StartupTestHook = Box<dyn FnOnce() -> Result<(), AudioOutputError> + Send>;
+#[cfg(test)]
+thread_local! {
+    static STARTUP_TEST_HOOK: std::cell::RefCell<Option<StartupTestHook>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+#[path = "audio_startup_tests.rs"]
+mod startup_tests;
+
 /// Notifications produced by the event-driven audio thread.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AudioOutputEvent {
@@ -29,7 +40,7 @@ pub enum AudioOutputEvent {
 }
 
 /// A failure while starting or controlling WASAPI output.
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum AudioOutputError {
     #[error("audio tempo processing failed: {0}")]
     Tempo(#[from] ffmpeg_next::Error),
@@ -131,6 +142,39 @@ impl AudioOutput {
         tempo_rate: f32,
         notify: impl Fn() + Send + 'static,
     ) -> Result<Self, AudioOutputError> {
+        Self::start_with_rates_mode(format, media_anchor, volume, rate, tempo_rate, notify, true)
+    }
+
+    /// Queue controls and bounded PCM while WASAPI initializes on its owning thread.
+    /// Initialization failures use the same event/notification path as later failures.
+    pub(crate) fn start_queued_with_rates(
+        format: AudioFormat,
+        media_anchor: MediaTime,
+        volume: f32,
+        rate: f32,
+        tempo_rate: f32,
+        notify: impl Fn() + Send + 'static,
+    ) -> Result<Self, AudioOutputError> {
+        Self::start_with_rates_mode(
+            format,
+            media_anchor,
+            volume,
+            rate,
+            tempo_rate,
+            notify,
+            false,
+        )
+    }
+
+    fn start_with_rates_mode(
+        format: AudioFormat,
+        media_anchor: MediaTime,
+        volume: f32,
+        rate: f32,
+        tempo_rate: f32,
+        notify: impl Fn() + Send + 'static,
+        wait_ready: bool,
+    ) -> Result<Self, AudioOutputError> {
         if format.sample_rate == 0 || format.channels != 2 {
             return Err(AudioOutputError::UnsupportedFormat(
                 format.sample_rate,
@@ -148,17 +192,22 @@ impl AudioOutput {
         let thread_volume = Arc::clone(&volume);
         let drained = Arc::new(AtomicBool::new(false));
         let thread_drained = Arc::clone(&drained);
+        #[cfg(test)]
+        let startup_hook = STARTUP_TEST_HOOK.take();
         let thread = thread::Builder::new()
             .name("towavue-wasapi".to_owned())
             .spawn(move || {
                 let initialization = wasapi::initialize_mta()
                     .ok()
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| AudioOutputError::Wasapi(error.to_string()));
                 if let Err(error) = initialization {
-                    let _ = ready_tx.send(Err(AudioOutputError::Wasapi(error)));
+                    let _ = ready_tx.send(Err(error.clone()));
+                    let _ = event_tx.send(AudioOutputEvent::Failed(error.to_string()));
+                    notify();
                     return;
                 }
 
+                let mut initialized = false;
                 let result = run_audio_thread(
                     format,
                     media_anchor,
@@ -169,6 +218,9 @@ impl AudioOutput {
                     audio_rx,
                     &control_rx,
                     &ready_tx,
+                    &mut initialized,
+                    #[cfg(test)]
+                    startup_hook,
                 );
                 wasapi::deinitialize();
                 match result {
@@ -178,7 +230,7 @@ impl AudioOutput {
                         thread_drained.store(true, Ordering::Release);
                         let _ = event_tx.send(AudioOutputEvent::Drained);
                     }
-                    Err(AudioOutputError::EndpointChanged) => {
+                    Err(AudioOutputError::EndpointChanged) if initialized => {
                         let _ = event_tx.send(AudioOutputEvent::EndpointChanged);
                     }
                     Err(error) => {
@@ -189,26 +241,29 @@ impl AudioOutput {
             })
             .map_err(|error| AudioOutputError::Wasapi(error.to_string()))?;
 
-        match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Self {
-                format,
-                audio_tx,
-                control_tx,
-                event_rx,
-                position_nanoseconds,
-                volume,
-                drained,
-                thread: Some(thread),
-            }),
-            Ok(Err(error)) => {
-                let _ = thread.join();
-                Err(error)
-            }
-            Err(_) => {
-                let _ = thread.join();
-                Err(AudioOutputError::Closed)
+        if wait_ready {
+            match ready_rx.recv() {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    let _ = thread.join();
+                    return Err(error);
+                }
+                Err(_) => {
+                    let _ = thread.join();
+                    return Err(AudioOutputError::Closed);
+                }
             }
         }
+        Ok(Self {
+            format,
+            audio_tx,
+            control_tx,
+            event_rx,
+            position_nanoseconds,
+            volume,
+            drained,
+            thread: Some(thread),
+        })
     }
 
     pub fn push(&self, chunk: AudioChunk) -> Result<(), AudioOutputError> {
@@ -277,9 +332,15 @@ fn run_audio_thread(
     audio_rx: Receiver<AudioMessage>,
     control_rx: &Receiver<AudioControl>,
     ready_tx: &SyncSender<Result<(), AudioOutputError>>,
+    initialized: &mut bool,
+    #[cfg(test)] startup_hook: Option<StartupTestHook>,
 ) -> Result<(), AudioOutputError> {
     let (endpoint_tx, endpoint_rx) = mpsc::channel();
     let setup = (|| {
+        #[cfg(test)]
+        if let Some(hook) = startup_hook {
+            hook()?;
+        }
         let enumerator = DeviceEnumerator::new().map_err(wasapi_error)?;
         let device = enumerator
             .get_default_device(&Direction::Render)
@@ -344,13 +405,14 @@ fn run_audio_thread(
         match setup {
             Ok(resources) => resources,
             Err(error) => {
-                let _ = ready_tx.send(Err(error));
-                return Err(AudioOutputError::Closed);
+                let _ = ready_tx.send(Err(error.clone()));
+                return Err(error);
             }
         };
-    ready_tx
-        .send(Ok(()))
-        .map_err(|_| AudioOutputError::Closed)?;
+    // Queued startup deliberately drops the synchronous handshake receiver.
+    // Shutdown still arrives through control_rx and is joined by AudioOutput.
+    *initialized = true;
+    let _ = ready_tx.send(Ok(()));
 
     render_audio_loop(
         format,

@@ -167,6 +167,8 @@ pub struct PlaybackSession {
     rate: f32,
     range: PlaybackRange,
     timeline: Option<Arc<EditTimeline>>,
+    #[cfg(test)]
+    seek_stage_ms: [f64; 5],
 }
 
 impl PlaybackSession {
@@ -219,6 +221,8 @@ impl PlaybackSession {
             rate: rate.clamp(0.25, 4.0).max(0.25),
             range,
             timeline: None,
+            #[cfg(test)]
+            seek_stage_ms: [0.0; 5],
         };
         session.start_pipeline()?;
         Ok(session)
@@ -226,6 +230,11 @@ impl PlaybackSession {
 
     pub fn generation(&self) -> PlaybackGeneration {
         self.generation
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seek_stage_ms(&self) -> [f64; 5] {
+        self.seek_stage_ms
     }
 
     /// Check this session's stream generation after the caller checks session identity.
@@ -410,6 +419,8 @@ impl PlaybackSession {
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
+        #[cfg(test)]
+        let stage = std::time::Instant::now();
         if self
             .timeline
             .as_ref()
@@ -427,7 +438,7 @@ impl PlaybackSession {
             .map(|format| {
                 let notify = Arc::clone(&self.notify);
                 let generation = self.generation;
-                AudioOutput::start_with_rates(
+                AudioOutput::start_queued_with_rates(
                     format,
                     self.target,
                     self.volume,
@@ -449,6 +460,12 @@ impl PlaybackSession {
             audio.set_paused(true)?;
         }
         self.audio = audio;
+        #[cfg(test)]
+        {
+            self.seek_stage_ms[3] = stage.elapsed().as_secs_f64() * 1000.0;
+        }
+        #[cfg(test)]
+        let stage = std::time::Instant::now();
         self.decode_cancel = Arc::new(AtomicBool::new(false));
         self.completion = Arc::new(DecodeCompletion::default());
         if self.audio.is_none() {
@@ -512,6 +529,10 @@ impl PlaybackSession {
                     return Err(error.into());
                 }
             }
+        }
+        #[cfg(test)]
+        {
+            self.seek_stage_ms[4] = stage.elapsed().as_secs_f64() * 1000.0;
         }
         Ok(())
     }
@@ -608,13 +629,35 @@ impl PlaybackSession {
     }
 
     fn stop_pipeline(&mut self) {
+        #[cfg(test)]
+        let stage = std::time::Instant::now();
         self.recovery_frame = None;
         self.decode_cancel.store(true, Ordering::Relaxed);
+        // Stop both producers before joining either side. Dropping the bounded
+        // video receiver releases a blocked sender while WASAPI shuts down.
+        self.video_cancel.store(true, Ordering::Relaxed);
+        self.video_rx.take();
         // Release the bounded audio receiver before joining its producer.
         self.audio.take();
+        #[cfg(test)]
+        {
+            self.seek_stage_ms[0] = stage.elapsed().as_secs_f64() * 1000.0;
+        }
+        #[cfg(test)]
+        let stage = std::time::Instant::now();
         self.stop_video(false);
+        #[cfg(test)]
+        {
+            self.seek_stage_ms[1] = stage.elapsed().as_secs_f64() * 1000.0;
+        }
+        #[cfg(test)]
+        let stage = std::time::Instant::now();
         if let Some(thread) = self.audio_thread.take() {
             let _ = thread.join();
+        }
+        #[cfg(test)]
+        {
+            self.seek_stage_ms[2] = stage.elapsed().as_secs_f64() * 1000.0;
         }
     }
 

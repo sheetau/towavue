@@ -87,6 +87,8 @@ mod welcome;
 mod wheel_input;
 mod window_host;
 mod window_open;
+#[cfg(test)]
+mod window_resize_tests;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
@@ -835,6 +837,7 @@ struct Application<N> {
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
+    window_size: Option<winit::dpi::PhysicalSize<u32>>,
     native_caption: Option<NativeCaption>,
     native_taskbar: Option<NativeTaskbar>,
     taskbar_ui: taskbar::State,
@@ -1094,6 +1097,7 @@ where
             hosted_graphics: false,
             graphics_recovery_request: None,
             window: None,
+            window_size: None,
             native_caption: None,
             native_taskbar: None,
             taskbar_ui: taskbar::State::default(),
@@ -1332,6 +1336,7 @@ where
         };
         let size = window.inner_size();
         renderer.resize_surface(size.width, size.height)?;
+        self.window_size = Some(size);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(12);
         let context = egui::Context::default();
@@ -9515,16 +9520,35 @@ where
                 .is_some_and(|export| export.continuation.is_some())
     }
 
+    fn resize_window(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        // Minimize and duplicate notifications must not discard the current view.
+        if size.width != 0 && size.height != 0 {
+            if self.window_size.is_some_and(|previous| previous != size) {
+                self.cancel_view_drag();
+                self.image_view.fit();
+            }
+            self.window_size = Some(size);
+        }
+        if let Some(renderer) = self.renderer.as_mut()
+            && let Err(error) = renderer.resize_surface(size.width, size.height)
+        {
+            self.handle_render_error(error);
+        }
+        self.request_redraw();
+    }
+
     fn set_fullscreen(&mut self, enabled: bool) {
         if enabled == self.fullscreen {
             return;
         }
         self.fullscreen = enabled;
-        if !self.visual_selection_enabled() {
-            self.cancel_view_drag();
-            if let Some(context) = &self.ui_context {
-                selection::release_focus(context);
-            }
+        // Fit even when the transition does not produce a different client size.
+        self.cancel_view_drag();
+        self.image_view.fit();
+        if !self.visual_selection_enabled()
+            && let Some(context) = &self.ui_context
+        {
+            selection::release_focus(context);
         }
         self.fullscreen_controls_visible = false;
         self.viewing_cursor.activity();
@@ -10800,14 +10824,7 @@ where
                 self.request_redraw();
             }
             WindowEvent::DroppedFile(path) => self.open_dropped_path(path),
-            WindowEvent::Resized(size) => {
-                if let Some(renderer) = self.renderer.as_mut()
-                    && let Err(error) = renderer.resize_surface(size.width, size.height)
-                {
-                    self.handle_render_error(error);
-                }
-                self.request_redraw();
-            }
+            WindowEvent::Resized(size) => self.resize_window(size),
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
                 self.rotation_modifiers_changed();
@@ -14460,10 +14477,18 @@ mod tests {
                 )
                 .expect("mapped Enter");
             assert_eq!(stroke.to_string(), "Enter");
+            app.image_view.zoom = ZoomMode::Actual;
+            app.image_view.pan = (20.0, -10.0);
             app.process_shortcut(stroke.clone());
             assert!(app.fullscreen);
+            assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+            assert_eq!(app.image_view.pan, (0.0, 0.0));
+            app.image_view.zoom = ZoomMode::Cover;
+            app.image_view.pan = (-10.0, 20.0);
             app.process_shortcut(stroke);
             assert!(!app.fullscreen);
+            assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+            assert_eq!(app.image_view.pan, (0.0, 0.0));
             assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
             assert_eq!(app.state, PlaybackState::Paused);
             assert_eq!(app.generation, generation);
@@ -23902,6 +23927,8 @@ mod tests {
                 app.image_view.pan,
                 if interruption == 0 {
                     (90.0, 110.0)
+                } else if interruption == 4 {
+                    (0.0, 0.0) // A fullscreen transition now resets the view to Fit.
                 } else {
                     (10.0, 20.0)
                 }

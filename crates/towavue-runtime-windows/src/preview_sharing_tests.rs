@@ -1598,6 +1598,7 @@ fn avif_thumbnail_revision_leaves_other_format_cache_keys_unchanged() {
                 "filmstrip-avif-v1",
                 "filmstrip-avif-v2",
                 "filmstrip-avif-v3",
+                "filmstrip-avif-v4",
             ] {
                 let mut prior = prior_avif.clone();
                 version.hash(&mut prior);

@@ -945,7 +945,7 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
     metadata.len().hash(&mut hasher);
     modified.hash(&mut hasher);
     // Old AVIF thumbnails can contain unmerged alpha, untransformed pixels or
-    // colors expanded with the wrong input range/matrix, or omitted tile alpha.
+    // colors expanded with the wrong range/matrix/chroma siting, or omitted tile alpha.
     // Invalidate only this format, retaining warm caches for other images.
     let variant = if variant == IMAGE_PREVIEW_VARIANT
         && source
@@ -953,7 +953,7 @@ fn cache_key(source: &Path, variant: &str) -> Result<String, PreviewError> {
             .and_then(|value| value.to_str())
             .is_some_and(|value| value.eq_ignore_ascii_case("avif"))
     {
-        "filmstrip-avif-v4"
+        "filmstrip-avif-v5"
     } else {
         variant
     };

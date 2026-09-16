@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "export_avif_chroma_tests.rs"]
+mod chroma_tests;
+
 #[path = "export_avif_orientation_tests.rs"]
 mod orientation_tests;
 
@@ -1899,6 +1902,7 @@ fn avif_control_validation_rejects_wrong_alpha_and_edit_lists() {
         index: 0,
         id: 1,
         size: (1, 1),
+        chroma: ffmpeg::util::chroma::Location::Unspecified,
         time_base: ffmpeg::Rational(1, 1000),
         times: vec![(i64::MIN + 1, 500), (i64::MAX, 500)],
         orientation: None,

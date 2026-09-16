@@ -108,6 +108,7 @@ struct Samples {
     index: usize,
     id: u32,
     size: (u32, u32),
+    chroma: ffmpeg::util::chroma::Location,
     time_base: ffmpeg::Rational,
     times: Vec<(i64, i64)>,
     orientation: Option<crate::VideoOrientation>,
@@ -225,6 +226,7 @@ impl Animation {
                 index: stream.index(),
                 id,
                 size,
+                chroma: decoder.chroma_location(),
                 time_base: stream.time_base(),
                 times: Vec::new(),
                 orientation,
@@ -424,16 +426,18 @@ impl Animation {
                 .operations
                 .iter()
                 .any(|operation| matches!(operation, EditOperation::RotateImage(_)));
+        // The pinned scale filter defaults to unspecified input siting, so pass
+        // the selected color track's declaration explicitly, before alpha merge
+        // and raster edits. Alpha is full-resolution gray and needs no offset.
+        let chroma: ffmpeg::ffi::AVChromaLocation = self.samples[0].chroma.into();
+        let scale = format!("scale=flags=bilinear:in_chroma_loc={}", chroma as i32);
         let mut filters = if let Some(alpha) = source_alpha {
             format!(
-                "[0:{}]scale=flags=bilinear,format=rgba[color];[0:{}]format=gray[alpha];[color][alpha]alphamerge",
+                "[0:{}]{scale},format=rgba[color];[0:{}]format=gray[alpha];[color][alpha]alphamerge",
                 self.samples[0].index, alpha.index
             )
         } else {
-            format!(
-                "[0:{}]scale=flags=bilinear,format=rgba",
-                self.samples[0].index
-            )
+            format!("[0:{}]{scale},format=rgba", self.samples[0].index)
         };
         if self.color().premultiplied_with.is_some() {
             // Match the display decoder's RGBA8 rounding and zero-alpha rule.

@@ -5,6 +5,7 @@ use ffmpeg_next as ffmpeg;
 use std::path::PathBuf;
 
 mod grid;
+mod scaler;
 
 impl From<container::Error> for ImageDecodeError {
     fn from(error: container::Error) -> Self {
@@ -366,7 +367,7 @@ struct PlaneDecoder {
     time_base: ffmpeg::Rational,
     timed: bool,
     pixel: Pixel,
-    scaler: Option<ffmpeg::software::scaling::Context>,
+    scaler: Option<scaler::Scaler>,
     eof: bool,
     byte_limit: usize,
     orientation: Option<crate::VideoOrientation>,
@@ -451,53 +452,7 @@ impl PlaneDecoder {
                 Ok(()) => {
                     let size = (frame.width(), frame.height());
                     check_size(size, self.byte_limit)?;
-                    if self.scaler.as_ref().is_none_or(|scaler| {
-                        scaler.input().format != frame.format()
-                            || scaler.input().width != size.0
-                            || scaler.input().height != size.1
-                    }) {
-                        self.scaler = Some(
-                            ffmpeg::software::scaling::Context::get(
-                                frame.format(),
-                                size.0,
-                                size.1,
-                                self.pixel,
-                                size.0,
-                                size.1,
-                                ffmpeg::software::scaling::flag::Flags::BILINEAR,
-                            )
-                            .map_err(ffmpeg_error)?,
-                        );
-                    }
-                    let scaler = self.scaler.as_mut().expect("scaler");
-                    let space: ffmpeg::ffi::AVColorSpace = frame.color_space().into();
-                    let space = match space {
-                        ffmpeg::ffi::AVColorSpace::AVCOL_SPC_UNSPECIFIED
-                        | ffmpeg::ffi::AVColorSpace::AVCOL_SPC_RGB => ffmpeg::ffi::SWS_CS_DEFAULT,
-                        _ => space as i32,
-                    };
-                    let full_range = i32::from(frame.color_range() == ffmpeg::color::Range::JPEG);
-                    // SAFETY: this worker exclusively owns the scaler; coefficient
-                    // tables are immutable FFmpeg storage. Update before scaling,
-                    // including when consecutive frames change color metadata.
-                    let configured = unsafe {
-                        let coefficients = ffmpeg::ffi::sws_getCoefficients(space);
-                        ffmpeg::ffi::sws_setColorspaceDetails(
-                            scaler.as_mut_ptr(),
-                            coefficients,
-                            full_range,
-                            coefficients,
-                            1,
-                            0,
-                            1 << 16,
-                            1 << 16,
-                        )
-                    };
-                    if configured < 0 {
-                        return Err(ffmpeg_error(ffmpeg::Error::from(configured)));
-                    }
-                    let mut converted = ffmpeg::frame::Video::empty();
-                    scaler.run(&frame, &mut converted).map_err(ffmpeg_error)?;
+                    let converted = scaler::convert(&mut self.scaler, &frame, self.pixel)?;
                     let row_bytes = size.0 as usize * if self.pixel == Pixel::RGBA { 4 } else { 1 };
                     let mut pixels = Vec::with_capacity(row_bytes * size.1 as usize);
                     for row in converted

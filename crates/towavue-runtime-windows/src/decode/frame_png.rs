@@ -39,8 +39,25 @@ pub fn edited_video_frame_png(
     let mut options = ffmpeg::Dictionary::new();
     options.set("max_pixels", &MAX_PIXELS.to_string());
     options.set("err_detect", "explode");
-    let codec =
-        codec::decoder::find(config.parameters.id()).ok_or(ffmpeg::Error::DecoderNotFound)?;
+    // WebM carries VP8/VP9 alpha in Matroska BlockAdditional packets. The
+    // default native decoders ignore that plane; the bundled libvpx decoders
+    // consume it. Scope this choice to the selected stream's alpha declaration.
+    let alpha_decoder = match config.parameters.id() {
+        codec::Id::VP8 => Some("libvpx"),
+        codec::Id::VP9 => Some("libvpx-vp9"),
+        _ => None,
+    }
+    .filter(|_| {
+        input
+            .stream(config.index)
+            .is_some_and(|stream| stream.metadata().get("alpha_mode") == Some("1"))
+    });
+    let codec = if let Some(name) = alpha_decoder {
+        codec::decoder::find_by_name(name)
+            .ok_or_else(|| invalid("alpha-capable WebM decoder is unavailable"))?
+    } else {
+        codec::decoder::find(config.parameters.id()).ok_or(ffmpeg::Error::DecoderNotFound)?
+    };
     let context = codec::context::Context::from_parameters(config.parameters)?;
     let mut decoder = context.decoder().open_as_with(codec, options)?.video()?;
     let origin = input_origin(&input);
@@ -102,6 +119,19 @@ pub fn edited_video_frame_png(
         receive(&mut decoder)?;
     }
     let selected = selected.ok_or_else(|| invalid("no frame at the requested source timestamp"))?;
+    if alpha_decoder.is_some() {
+        // SAFETY: immutable FFmpeg descriptor for the selected owned frame;
+        // no pointer is retained. Do not silently publish an opaque substitute
+        // when the container promises an alpha plane that decoding did not yield.
+        let has_alpha = unsafe {
+            ffmpeg::ffi::av_pix_fmt_desc_get(selected.format().into())
+                .as_ref()
+                .is_some_and(|desc| desc.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0)
+        };
+        if !has_alpha {
+            return Err(invalid("declared WebM alpha plane was not decoded"));
+        }
+    }
     encode(&selected, orientation, operations, cancelled)
 }
 

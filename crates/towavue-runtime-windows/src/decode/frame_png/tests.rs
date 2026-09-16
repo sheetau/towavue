@@ -3,6 +3,7 @@ use super::*;
 mod alpha;
 mod exif;
 mod grayscale;
+mod webm_alpha;
 use std::{fs, io::Cursor, process::Command};
 
 mod edits;

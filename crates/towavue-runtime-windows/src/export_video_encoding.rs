@@ -109,6 +109,32 @@ impl HighDepth {
         }))
     }
 
+    pub(super) fn visual_filters(&self, operations: &[EditOperation]) -> Vec<String> {
+        let mut filters = visual_filters_with_depth(operations, true);
+        if let Some(chroma) = self.chroma
+            && !filters.is_empty()
+        {
+            let location: ffmpeg::ffi::AVChromaLocation = chroma.into();
+            // Transform luma and chroma on the same pixel grid. Flipping/cropping
+            // subsampled planes directly changes their phase relative to luma,
+            // especially at odd crop origins. Resolve the declared positions
+            // before edits, then subsample once onto the declared output grid.
+            filters.insert(
+                0,
+                format!(
+                    "scale=flags=bilinear+accurate_rnd:in_chroma_loc={},format=yuv444p16le",
+                    location as i32
+                ),
+            );
+            filters.push(format!(
+                "scale=flags=bilinear+accurate_rnd:out_chroma_loc={},format={}",
+                location as i32,
+                self.pixel.descriptor().expect("known AV1 format").name()
+            ));
+        }
+        filters
+    }
+
     pub(super) fn arguments(&self, target: &Path) -> Vec<String> {
         let encoder: &[&str] = if self.svt {
             &[

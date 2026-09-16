@@ -1123,7 +1123,10 @@ impl ExportStreams {
     }
 
     fn visual_filters(&self, operations: &[EditOperation]) -> Vec<String> {
-        visual_filters_with_depth(operations, self.video_encoding.is_some())
+        self.video_encoding.as_ref().map_or_else(
+            || visual_filters_with_depth(operations, false),
+            |encoding| encoding.visual_filters(operations),
+        )
     }
 
     fn probe(request: &ExportRequest) -> Result<Self, ExportError> {

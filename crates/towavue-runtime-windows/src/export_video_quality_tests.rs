@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "export_video_chroma_tests.rs"]
+mod chroma_geometry;
 use std::os::windows::process::CommandExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -257,7 +260,7 @@ fn assert_video_fields(path: &Path, fields: &[&str]) {
             "v:0",
             "-count_frames",
             "-show_entries",
-            "stream=codec_name,pix_fmt,width,height,nb_read_frames,color_range,color_space,color_transfer,color_primaries",
+            "stream=codec_name,pix_fmt,width,height,nb_read_frames,color_range,color_space,color_transfer,color_primaries,chroma_location",
             "-of",
             "default=noprint_wrappers=1",
             path.to_str().expect("path"),
@@ -292,8 +295,13 @@ fn high_depth_exports_preserve_precision_edits_color_and_container_with_hardware
             "bt709",
             "-color_primaries",
             "bt709",
+            "-chroma_sample_location",
+            "left",
+            "-bsf:v",
+            "av1_metadata=chroma_sample_position=vertical",
         ],
     );
+    assert_video_fields(&source, &["chroma_location=left"]);
     let source_bytes = fs::read(&source).expect("source");
     let modified = fs::metadata(&source)
         .expect("source metadata")
@@ -367,6 +375,7 @@ fn high_depth_exports_preserve_precision_edits_color_and_container_with_hardware
                     "color_space=bt709",
                     "color_transfer=bt709",
                     "color_primaries=bt709",
+                    "chroma_location=left",
                 ],
             );
             let audio = run(

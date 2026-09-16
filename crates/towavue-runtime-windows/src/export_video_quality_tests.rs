@@ -815,3 +815,202 @@ fn live_high_depth_export_cancellation_preserves_targets_cleans_staging_and_allo
     }
     fs::remove_dir_all(root).expect("remove owned cancellation fixtures");
 }
+
+/// Opt-in real-source continuation. Retain uniquely owned outputs for a later
+/// visual review; numeric quality and matching timestamps are not visual approval.
+#[test]
+#[ignore = "requires an explicitly selected 10-bit source and a trim start in seconds"]
+fn reference_high_depth_minute_trim_matches_independent_frames_and_reports_quality() {
+    let source = PathBuf::from(
+        std::env::var_os("TOWAVUE_EXPORT_TRIM_REFERENCE").expect("explicit reference source"),
+    );
+    let start: i64 = std::env::var("TOWAVUE_EXPORT_TRIM_START_SECONDS")
+        .expect("explicit trim start")
+        .parse()
+        .expect("whole seconds");
+    assert!((0..=24 * 60 * 60).contains(&start), "bounded trim position");
+    let end = start + 60;
+    let root = depth_directory();
+    eprintln!("EXPORT_MINUTE_ROOT={}", root.display());
+    let stamp = fs::metadata(&source).expect("source metadata");
+    let modified = stamp.modified().expect("source mtime");
+    let reference = root.join("reference.mkv");
+    let target = root.join("av1.mkv");
+    let baseline = root.join("h264.mkv");
+    // Independent input seek ten seconds earlier, retaining absolute source PTS
+    // for trim. This does not call the app's seek/filter/encoder argument builder.
+    let filter = format!("trim=start={start}:end={end},setpts=PTS-STARTPTS");
+    run(
+        "ffmpeg.exe",
+        &[
+            "-v",
+            "error",
+            "-copyts",
+            "-ss",
+            &(start - 10).max(0).to_string(),
+            "-i",
+            source.to_str().expect("source path"),
+            "-map",
+            "0:v:0",
+            "-an",
+            "-sn",
+            "-vf",
+            &filter,
+            "-fps_mode",
+            "passthrough",
+            "-enc_time_base",
+            "demux",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            reference.to_str().expect("reference path"),
+        ],
+    );
+    fs::write(&target, b"previous target").expect("old target");
+    let outcome = export_media(&ExportRequest {
+        source: source.clone(),
+        target: target.clone(),
+        kind: MediaKind::Video,
+        operations: vec![
+            EditOperation::SetTrimStart(towavue_core::MediaTime::from_nanoseconds(
+                start * 1_000_000_000,
+            )),
+            EditOperation::SetTrimEnd(towavue_core::MediaTime::from_nanoseconds(
+                end * 1_000_000_000,
+            )),
+        ],
+        hardware_encode: true,
+    })
+    .expect("public minute trim export");
+    assert!(!outcome.used_hardware_encoder);
+    assert_video_fields(&target, &["codec_name=av1", "pix_fmt=yuv420p10le"]);
+    run(
+        "ffmpeg.exe",
+        &[
+            "-v",
+            "error",
+            "-i",
+            reference.to_str().expect("reference path"),
+            "-an",
+            "-c:v",
+            "libopenh264",
+            "-profile:v",
+            "high",
+            "-qmin:v",
+            "1",
+            "-qmax:v",
+            "20",
+            baseline.to_str().expect("baseline path"),
+        ],
+    );
+    let timestamps = |path: &Path| {
+        let output = run(
+            "ffprobe.exe",
+            &[
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_frames",
+                "-show_entries",
+                "frame=best_effort_timestamp_time",
+                "-of",
+                "csv=p=0",
+                path.to_str().expect("video path"),
+            ],
+        );
+        String::from_utf8(output.stdout)
+            .expect("timestamp output")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                line.trim_end_matches(',')
+                    .parse::<f64>()
+                    .expect("timestamp")
+            })
+            .collect::<Vec<_>>()
+    };
+    let fields = |path: &Path| {
+        run("ffprobe.exe", &[
+        "-v", "error", "-select_streams", "v:0", "-show_entries",
+        "stream=width,height,pix_fmt,color_range,color_space,color_transfer,color_primaries,sample_aspect_ratio",
+        "-of", "default=noprint_wrappers=1", path.to_str().expect("video path"),
+    ]).stdout
+    };
+    let reference_fields = fields(&reference);
+    let target_fields = fields(&target);
+    fs::write(root.join("reference-video.txt"), &reference_fields).expect("reference fields");
+    fs::write(root.join("av1-video.txt"), &target_fields).expect("output fields");
+    assert_eq!(
+        target_fields, reference_fields,
+        "precision, geometry and known color tags"
+    );
+    let expected = timestamps(&reference);
+    assert!(!expected.is_empty() && expected[0] == 0.0);
+    assert!(expected.last().expect("last frame") < &60.0);
+    assert_eq!(
+        timestamps(&target),
+        expected,
+        "every exported frame timestamp"
+    );
+    assert_eq!(
+        timestamps(&baseline),
+        expected,
+        "historical comparison alignment"
+    );
+    // Native PSNR emits one record per paired frame; retain those records for
+    // localized artifacts, instead of relying only on a whole-clip mean.
+    let quality = |path: &Path, name: &str| {
+        let output = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+            .creation_flags(0x0800_0000).current_dir(&root)
+            .args(["-hide_banner", "-i"]).arg(&reference).arg("-i").arg(path)
+            .args(["-filter_complex", &format!("[0:v]format=yuv420p10le[r];[1:v]format=yuv420p10le[e];[r][e]psnr=stats_file={name}-frames.log"),
+                "-an", "-f", "null", "-"])
+            .output().expect("quality comparison");
+        fs::write(root.join(format!("{name}-quality.log")), &output.stderr).expect("quality log");
+        assert!(output.status.success(), "quality helper failed");
+        let stats =
+            fs::read_to_string(root.join(format!("{name}-frames.log"))).expect("frame scores");
+        assert_eq!(stats.lines().count(), expected.len(), "one score per frame");
+        let text = String::from_utf8_lossy(&output.stderr);
+        let summary = text
+            .lines()
+            .find(|line| line.contains("PSNR y:"))
+            .expect("PSNR summary");
+        eprintln!("EXPORT_MINUTE_{name} {summary}");
+        summary
+            .split("average:")
+            .nth(1)
+            .expect("average")
+            .split_whitespace()
+            .next()
+            .expect("score")
+            .parse::<f64>()
+            .expect("numeric score")
+    };
+    let old_score = quality(&baseline, "h264");
+    let score = quality(&target, "av1");
+    assert!(score.is_finite() && score >= 45.0, "reference PSNR {score}");
+    eprintln!(
+        "EXPORT_MINUTE start={start} end={end} frames={} av1_psnr={score:.3} h264_psnr={old_score:.3} av1_bytes={} h264_bytes={}",
+        expected.len(),
+        fs::metadata(&target).expect("output").len(),
+        fs::metadata(&baseline).expect("baseline").len()
+    );
+    assert_eq!(fs::metadata(&source).expect("source").len(), stamp.len());
+    assert_eq!(
+        fs::metadata(&source)
+            .expect("source")
+            .modified()
+            .expect("mtime"),
+        modified
+    );
+    assert!(fs::read_dir(&root).expect("artifacts").all(|entry| {
+        !entry
+            .expect("entry")
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".towavue-export-")
+    }));
+}

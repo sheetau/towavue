@@ -29,8 +29,10 @@ fn with_style<R>(
     let widgets = &mut ui.visuals_mut().widgets;
     // egui's opacity states refer to the entire track, but widget visuals
     // distinguish the thumb itself. Keep track hover at the idle thumb color.
-    widgets.hovered.fg_stroke.color = widgets.inactive.fg_stroke.color;
-    widgets.inactive.fg_stroke.color = widgets.inactive.fg_stroke.color.gamma_multiply(0.6);
+    let handle_color = egui::Color32::from_gray(0xcc);
+    widgets.inactive.fg_stroke.color = handle_color.gamma_multiply(0.6);
+    widgets.hovered.fg_stroke.color = handle_color;
+    widgets.active.fg_stroke.color = handle_color;
     for visual in [
         &mut widgets.inactive,
         &mut widgets.hovered,
@@ -191,7 +193,8 @@ mod tests {
                 }
                 let idle = bars(&render(None, false));
                 assert_eq!(idle[0].fill.a(), 0);
-                assert!(idle[1].fill.a() > 0, "idle handle stays visible");
+                let handle_color = egui::Color32::from_gray(0xcc);
+                assert_eq!(idle[1].fill, handle_color.gamma_multiply(0.6));
                 assert!(
                     f32::from(idle[1].corner_radius.nw) >= idle[1].rect.size().min_elem() / 2.0
                 );
@@ -228,9 +231,9 @@ mod tests {
                         "interacting with the bar shows its track"
                     );
                     let handle = &shapes[1];
-                    assert_ne!(
-                        handle.fill, idle[1].fill,
-                        "only handle interaction is highlighted"
+                    assert_eq!(
+                        handle.fill, handle_color,
+                        "hover and press share the same opaque #ccc"
                     );
                     assert_eq!(output.pixels_per_point, density);
                     assert!(
@@ -238,6 +241,16 @@ mod tests {
                         "handle has pill ends while hovered or dragged: {handle:?}"
                     );
                 }
+                render(Some(handle.center()), true);
+                let outside = egui::pos2(80.0, 80.0);
+                let dragging = bars(&render(Some(outside), true));
+                assert_eq!(dragging[1].fill, handle_color, "captured drag stays opaque");
+                render(Some(outside), false);
+                let released = bars(&render(Some(outside), false));
+                assert_eq!(
+                    released[1].fill, idle[1].fill,
+                    "release restores idle opacity"
+                );
             }
         }
     }

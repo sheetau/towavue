@@ -12,18 +12,7 @@ fn fixture(root: &Path) -> (App, egui::Context, TabId, Vec<PathBuf>) {
         .map(|name| root.join(name))
         .into();
     for (index, path) in paths.iter().enumerate() {
-        // 2x2 uncompressed BGRA BMPs, with distinct source pixels and no helper process.
-        let mut bytes = vec![0_u8; 70];
-        bytes[..2].copy_from_slice(b"BM");
-        bytes[2..6].copy_from_slice(&70_u32.to_le_bytes());
-        bytes[10..14].copy_from_slice(&54_u32.to_le_bytes());
-        bytes[14..18].copy_from_slice(&40_u32.to_le_bytes());
-        bytes[18..22].copy_from_slice(&2_i32.to_le_bytes());
-        bytes[22..26].copy_from_slice(&2_i32.to_le_bytes());
-        bytes[26..28].copy_from_slice(&1_u16.to_le_bytes());
-        bytes[28..30].copy_from_slice(&32_u16.to_le_bytes());
-        bytes[54..].copy_from_slice(&[10, 20, 40 + index as u8 * 30, 255].repeat(4));
-        std::fs::write(path, bytes).expect("BMP");
+        write_bitmap(path, 2, 2, [10, 20, 40 + index as u8 * 30, 255]);
     }
     let id = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
     app.path = Some(paths[0].clone());
@@ -61,6 +50,22 @@ fn fixture(root: &Path) -> (App, egui::Context, TabId, Vec<PathBuf>) {
         captured_at: std::time::SystemTime::UNIX_EPOCH,
     });
     (app, context, id, paths)
+}
+
+fn write_bitmap(path: &Path, width: i32, height: i32, bgra: [u8; 4]) {
+    let pixels = (width * height) as usize;
+    let length = 54 + pixels * 4;
+    let mut bytes = vec![0_u8; length];
+    bytes[..2].copy_from_slice(b"BM");
+    bytes[2..6].copy_from_slice(&(length as u32).to_le_bytes());
+    bytes[10..14].copy_from_slice(&54_u32.to_le_bytes());
+    bytes[14..18].copy_from_slice(&40_u32.to_le_bytes());
+    bytes[18..22].copy_from_slice(&width.to_le_bytes());
+    bytes[22..26].copy_from_slice(&height.to_le_bytes());
+    bytes[26..28].copy_from_slice(&1_u16.to_le_bytes());
+    bytes[28..30].copy_from_slice(&32_u16.to_le_bytes());
+    bytes[54..].copy_from_slice(&bgra.repeat(pixels));
+    std::fs::write(path, bytes).expect("BMP");
 }
 
 fn wait_image(app: &mut App) {
@@ -415,12 +420,28 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
     ) else {
         return;
     };
-    for density in [1.0, 1.25, 2.0] {
+    for (density, grow) in [1.0, 1.25, 2.0]
+        .into_iter()
+        .flat_map(|density| [false, true].map(move |grow| (density, grow)))
+    {
         for reading in [false, true] {
             for background in [false, true] {
                 let (mut app, context, id, paths) = fixture(&root);
                 context.set_pixels_per_point(density);
-                let mut animated = (*app.image.as_ref().expect("image").decoded).clone();
+                let (source_size, destination_size) = if grow {
+                    ((200, 20), (120, 160))
+                } else {
+                    ((120, 160), (200, 20))
+                };
+                write_bitmap(&paths[0], source_size.0, source_size.1, [10, 20, 40, 255]);
+                write_bitmap(
+                    &paths[3],
+                    destination_size.0,
+                    destination_size.1,
+                    [10, 20, 130, 255],
+                );
+                let mut animated =
+                    towavue_runtime_windows::decode_image(&paths[0]).expect("source");
                 animated.frames.push(animated.frames[0].clone());
                 for frame in &mut animated.frames {
                     frame.delay = Duration::from_millis(20);
@@ -527,18 +548,74 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                 );
                 let (output, actions) = frame(&mut app, vec![]);
                 assert!(actions.is_empty());
-                assert!(
-                    output
-                        .platform_output
-                        .accesskit_update
-                        .expect("tree")
-                        .nodes
-                        .iter()
-                        .any(|(_, node)| node.label() == Some("Preview image position")),
-                    "card stays open after navigation"
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                let seek = &tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Preview image position"))
+                    .expect("card stays open after navigation")
+                    .1;
+                assert_eq!(
+                    seek.bounds(),
+                    Some(bounds),
+                    "pending destination retains the operated seek position"
                 );
                 if !background {
                     wait_image(&mut app);
+                    let decoded = &app
+                        .image
+                        .as_ref()
+                        .expect("destination original")
+                        .decoded
+                        .frames[0];
+                    assert_eq!(
+                        (decoded.width, decoded.height),
+                        (destination_size.0 as u32, destination_size.1 as u32)
+                    );
+                    for _ in 0..3 {
+                        let (output, actions) = frame(&mut app, vec![]);
+                        assert!(actions.is_empty());
+                        let tree = output
+                            .platform_output
+                            .accesskit_update
+                            .expect("loaded tree");
+                        let seek = &tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some("Preview image position"))
+                            .expect("card stays open when the destination finishes loading")
+                            .1;
+                        assert_eq!(seek.numeric_value(), Some(4.0));
+                        assert_eq!(
+                            seek.bounds(),
+                            Some(bounds),
+                            "destination aspect ratio must not move the operated seek bar"
+                        );
+                    }
+                    frame(
+                        &mut app,
+                        vec![egui::Event::PointerMoved(egui::pos2(5.0, 500.0))],
+                    );
+                    for _ in 0..3 {
+                        frame(&mut app, vec![egui::Event::PointerMoved(hover)]);
+                    }
+                    let (output, _) = frame(&mut app, vec![]);
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .expect("reopened tree");
+                    let reopened = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some("Preview image position"))
+                        .expect("reopened seek")
+                        .1
+                        .bounds()
+                        .expect("reopened bounds");
+                    assert!(
+                        (reopened.y0 - bounds.y0).abs() > 20.0,
+                        "reopening restores natural destination geometry"
+                    );
                 }
             }
         }

@@ -25,7 +25,7 @@ mod frame_step;
 mod packet_samples;
 mod video_preroll;
 use audio_checkpoints::AudioCheckpoints;
-pub use frame_png::source_video_frame_png;
+pub use frame_png::{edited_video_frame_png, source_video_frame_png};
 pub use frame_step::adjacent_video_frame;
 use packet_samples::PacketSamples;
 use video_preroll::PrerollVideoFrame;

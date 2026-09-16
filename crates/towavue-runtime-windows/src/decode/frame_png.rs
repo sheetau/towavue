@@ -1,4 +1,7 @@
 use super::*;
+use towavue_core::EditOperation;
+
+mod edits;
 
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
@@ -14,6 +17,18 @@ fn invalid(message: &str) -> DecodeError {
 pub fn source_video_frame_png(
     path: &Path,
     target: MediaTime,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<u8>, DecodeError> {
+    edited_video_frame_png(path, target, &[], cancelled)
+}
+
+/// Decode an original-source PTS and apply ordered video raster edits before PNG
+/// encoding. Time/audio edits do not modify the selected picture. Display zoom
+/// is excluded. Source identity must be validated by the publishing caller.
+pub fn edited_video_frame_png(
+    path: &Path,
+    target: MediaTime,
+    operations: &[EditOperation],
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<u8>, DecodeError> {
     check_cancelled(cancelled)?;
@@ -87,12 +102,13 @@ pub fn source_video_frame_png(
         receive(&mut decoder)?;
     }
     let selected = selected.ok_or_else(|| invalid("no frame at the requested source timestamp"))?;
-    encode(&selected, orientation, cancelled)
+    encode(&selected, orientation, operations, cancelled)
 }
 
 fn encode(
     source: &frame::Video,
     orientation: VideoOrientation,
+    operations: &[EditOperation],
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<u8>, DecodeError> {
     check_cancelled(cancelled)?;
@@ -193,13 +209,15 @@ fn encode(
         );
     }
     output.set_pts(Some(0));
+    let output = edits::apply(output, operations, cancelled)?;
+    let aspect = output.aspect_ratio();
     let codec = ffmpeg::encoder::find(codec::Id::PNG).ok_or(ffmpeg::Error::EncoderNotFound)?;
     let mut encoder = codec::context::Context::new_with_codec(codec)
         .encoder()
         .video()?;
     encoder.set_width(output.width());
     encoder.set_height(output.height());
-    encoder.set_format(pixel);
+    encoder.set_format(output.format());
     encoder.set_time_base(Rational(1, 1));
     // The pinned PNG encoder writes this pair directly into pHYs. PNG stores
     // pixels per unit, whose ratio is the inverse of sample width/height.

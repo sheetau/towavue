@@ -1,6 +1,8 @@
 use super::*;
 use std::{fs, io::Cursor, process::Command};
 
+mod edits;
+
 fn unpack(bytes: &[u8]) -> (png::OutputInfo, Vec<u8>) {
     let mut decoder = png::Decoder::new(Cursor::new(bytes))
         .read_info()
@@ -86,7 +88,8 @@ fn packed_rgb_png_preserves_full_depth_hidden_alpha_and_all_source_orientations(
             .collect();
             let orientation =
                 VideoOrientation::from_bytes(Some(&matrix)).expect("frame PNG fixture");
-            let encoded = encode(&source, orientation, &|| false).expect("encode full precision");
+            let encoded =
+                encode(&source, orientation, &[], &|| false).expect("encode full precision");
             let (info, actual) = unpack(&encoded);
             assert_eq!(info.bit_depth, depth);
             let (w, h) = if orientation.swaps_axes() {
@@ -121,6 +124,26 @@ fn packed_rgb_png_preserves_full_depth_hidden_alpha_and_all_source_orientations(
                 vec![phys],
                 "PNG uses inverse pixel densities"
             );
+            let edited = encode(
+                &source,
+                orientation,
+                &[EditOperation::Crop(towavue_core::PixelCrop {
+                    x: 1,
+                    y: 1,
+                    width: w - 2,
+                    height: h - 2,
+                })],
+                &|| false,
+            )
+            .expect("crop after source orientation");
+            let (edited_info, edited_pixels) = unpack(&edited);
+            assert_eq!((edited_info.width, edited_info.height), (w - 2, h - 2));
+            for y in 0..(h - 2) as usize {
+                let from = ((y + 1) * w as usize + 1) * bytes;
+                let to = y * (w - 2) as usize * bytes;
+                let count = (w - 2) as usize * bytes;
+                assert_eq!(&edited_pixels[to..to + count], &actual[from..from + count]);
+            }
         }
     }
 }
@@ -130,17 +153,17 @@ fn frame_png_rejects_precision_matrix_missing_targets_and_cancellation() {
     ffmpeg::init().expect("frame PNG fixture");
     let source = frame::Video::new(Pixel::GBRPF32LE, 4, 4);
     assert!(matches!(
-        encode(&source, VideoOrientation::default(), &|| false),
+        encode(&source, VideoOrientation::default(), &[], &|| false),
         Err(DecodeError::FrameImage(_))
     ));
     let mut source = frame::Video::new(Pixel::YUV444P10LE, 4, 4);
     source.set_color_space(ffmpeg::color::Space::BT2020CL);
     assert!(matches!(
-        encode(&source, VideoOrientation::default(), &|| false),
+        encode(&source, VideoOrientation::default(), &[], &|| false),
         Err(DecodeError::FrameImage(_))
     ));
     assert!(matches!(
-        encode(&source, VideoOrientation::default(), &|| true),
+        encode(&source, VideoOrientation::default(), &[], &|| true),
         Err(DecodeError::ConsumerClosed)
     ));
     assert!(matches!(
@@ -187,6 +210,29 @@ fn high_depth_source_png_matches_explicit_color_conversion_without_touching_sour
             String::from_utf8_lossy(&reference.stderr)
         );
         assert_eq!(actual, reference.stdout);
+        let operations = [
+            EditOperation::Crop(towavue_core::PixelCrop {
+                x: 2,
+                y: 4,
+                width: 18,
+                height: 10,
+            }),
+            EditOperation::RotateClockwise,
+        ];
+        let edited = edited_video_frame_png(&path, target, &operations, &|| false)
+            .expect("edited source frame");
+        let (edited_info, edited_pixels) = unpack(&edited);
+        assert_eq!((edited_info.width, edited_info.height), (10, 18));
+        for y in 0..10 {
+            for x in 0..18 {
+                let original_offset = ((y + 4) * 32 + x + 2) * 6;
+                let edited_offset = (x * 10 + 9 - y) * 6;
+                assert_eq!(
+                    &edited_pixels[edited_offset..edited_offset + 6],
+                    &reference.stdout[original_offset..original_offset + 6]
+                );
+            }
+        }
         assert!(
             actual
                 .as_chunks::<2>()
@@ -353,7 +399,21 @@ fn frame_png_retains_icc_bytes_without_overriding_them_with_cicp() {
         std::ptr::copy_nonoverlapping(profile.as_ptr(), (*side.as_mut_ptr()).data, profile.len());
     }
     let encoded =
-        encode(&source, VideoOrientation::default(), &|| false).expect("frame PNG fixture");
+        encode(&source, VideoOrientation::default(), &[], &|| false).expect("frame PNG fixture");
+    let edited = encode(
+        &source,
+        VideoOrientation::default(),
+        &[
+            EditOperation::FlipHorizontal,
+            EditOperation::RotateVideo(
+                towavue_core::VideoRotation::new(123, (2, 2), 1.0).expect("ICC rotation"),
+            ),
+        ],
+        &|| false,
+    )
+    .expect("edited ICC PNG");
+    assert_eq!(chunks(&edited, b"iCCP"), chunks(&encoded, b"iCCP"));
+    assert!(chunks(&edited, b"cICP").is_empty());
     let iccp = chunks(&encoded, b"iCCP");
     assert_eq!(iccp.len(), 1);
     let offset = iccp[0]

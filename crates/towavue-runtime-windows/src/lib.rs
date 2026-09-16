@@ -60,7 +60,7 @@ pub use cancellation::Cancellation;
 pub use caption::{CaptionAction, CaptionButton, NativeCaption};
 pub use decode::{
     AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, VideoFrame,
-    adjacent_video_frame, source_video_frame_png,
+    adjacent_video_frame, edited_video_frame_png, source_video_frame_png,
 };
 pub use dialog::{
     DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,

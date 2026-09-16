@@ -134,6 +134,10 @@ fn encode(
         return Err(invalid("PNG requires integer samples of at most 16 bits"));
     }
     let alpha = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0;
+    let grayscale = descriptor.nb_components <= 2
+        && descriptor.flags
+            & (ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB | ffmpeg::ffi::AV_PIX_FMT_FLAG_PAL) as u64
+            == 0;
     let (pixel, bytes) = match (depth > 8, alpha) {
         (false, false) => (Pixel::RGB24, 3),
         (false, true) => (Pixel::RGBA, 4),
@@ -211,6 +215,11 @@ fn encode(
     }
     output.set_pts(Some(0));
     let output = edits::apply(output, operations, cancelled)?;
+    let output = if grayscale {
+        pack_grayscale(output, depth > 8, alpha, cancelled)?
+    } else {
+        output
+    };
     let aspect = output.aspect_ratio();
     let codec = ffmpeg::encoder::find(codec::Id::PNG).ok_or(ffmpeg::Error::EncoderNotFound)?;
     let mut encoder = codec::context::Context::new_with_codec(codec)
@@ -238,6 +247,50 @@ fn encode(
         .data()
         .ok_or_else(|| invalid("empty PNG packet"))?
         .to_vec())
+}
+
+fn pack_grayscale(
+    source: frame::Video,
+    high_depth: bool,
+    alpha: bool,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<frame::Video, DecodeError> {
+    let pixel = match (high_depth, alpha) {
+        (false, false) => Pixel::GRAY8,
+        (false, true) => Pixel::YA8,
+        (true, false) => Pixel::GRAY16BE,
+        (true, true) => Pixel::YA16BE,
+    };
+    let sample = if high_depth { 2 } else { 1 };
+    let input_bytes = sample * if alpha { 4 } else { 3 };
+    let output_bytes = sample * if alpha { 2 } else { 1 };
+    let mut output = frame::Video::new(pixel, source.width(), source.height());
+    let stride = output.stride(0);
+    // Grayscale starts as equal RGB channels; raster edits remain achromatic
+    // except for native interpolation's per-channel rounding. Repack the first
+    // full-depth channel without another matrix/rounding pass; retain alpha and
+    // hidden samples for orthogonal/nearest edits, as on the RGB path.
+    // PNG's color type must also agree with a retained GRAY ICC profile.
+    for y in 0..source.height() as usize {
+        check_cancelled(cancelled)?;
+        for x in 0..source.width() as usize {
+            let from = y * source.stride(0) + x * input_bytes;
+            let to = y * stride + x * output_bytes;
+            output.data_mut(0)[to..to + sample]
+                .copy_from_slice(&source.data(0)[from..from + sample]);
+            if alpha {
+                output.data_mut(0)[to + sample..to + output_bytes]
+                    .copy_from_slice(&source.data(0)[from + 3 * sample..from + 4 * sample]);
+            }
+        }
+    }
+    // SAFETY: both frames are owned here. Copying properties retains side-data
+    // references without changing the new grayscale format, geometry or pixels.
+    let result = unsafe { ffmpeg::ffi::av_frame_copy_props(output.as_mut_ptr(), source.as_ptr()) };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    Ok(output)
 }
 
 fn orient(

@@ -1,4 +1,6 @@
 use super::*;
+
+mod grayscale;
 use std::{fs, io::Cursor, process::Command};
 
 mod edits;

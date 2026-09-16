@@ -7,6 +7,9 @@ pub(super) struct HighDepth {
     pixel: Pixel,
     svt: bool,
     colors: [i32; 4],
+    // AV1 sequence headers explicitly represent left/top-left 4:2:0 siting.
+    // Other declarations are not interchangeable with these positions.
+    chroma: Option<ffmpeg::util::chroma::Location>,
 }
 
 impl HighDepth {
@@ -27,9 +30,10 @@ impl HighDepth {
                 decoder.format(),
                 (decoder.width(), decoder.height()),
                 colors(&decoder),
+                decoder.chroma_location(),
             ))
         };
-        let (source, mut size, colors) = inspect().map_err(|error| {
+        let (source, mut size, colors, source_chroma) = inspect().map_err(|error| {
             ExportError::Failed(format!("could not inspect video precision: {error}"))
         })?;
         // SAFETY: descriptors are immutable FFmpeg storage. No native pointer
@@ -89,7 +93,20 @@ impl HighDepth {
             && size.1 >= 64
             && size.0.is_multiple_of(2)
             && size.1.is_multiple_of(2);
-        Ok(Some(Self { pixel, svt, colors }))
+        let chroma = matches!(pixel, Pixel::YUV420P10LE | Pixel::YUV420P12LE)
+            .then_some(source_chroma)
+            .filter(|location| {
+                matches!(
+                    location,
+                    ffmpeg::util::chroma::Location::Left | ffmpeg::util::chroma::Location::TopLeft
+                )
+            });
+        Ok(Some(Self {
+            pixel,
+            svt,
+            colors,
+            chroma,
+        }))
     }
 
     pub(super) fn arguments(&self, target: &Path) -> Vec<String> {
@@ -148,6 +165,23 @@ impl HighDepth {
         {
             arguments.extend([option.into(), value.to_string()]);
         }
+        if let Some(chroma) = self.chroma {
+            let position = match chroma {
+                ffmpeg::util::chroma::Location::Left => "vertical",
+                ffmpeg::util::chroma::Location::TopLeft => "colocated",
+                _ => unreachable!("only AV1-representable declarations enter the plan"),
+            };
+            let location: ffmpeg::ffi::AVChromaLocation = chroma.into();
+            // The native AOM/SVT wrappers do not reliably propagate the frame
+            // declaration into the AV1 sequence header. Set both muxer/encoder
+            // metadata and the actual bitstream; packet pixels are not rewritten.
+            arguments.extend([
+                "-chroma_sample_location".into(),
+                (location as i32).to_string(),
+                "-bsf:v".into(),
+                format!("av1_metadata=chroma_sample_position={position}"),
+            ]);
+        }
         arguments
     }
 
@@ -171,7 +205,10 @@ impl HighDepth {
                 });
             Ok(decoder.id() == ffmpeg::codec::Id::AV1
                 && decoder.format() == self.pixel
-                && preserved_colors)
+                && preserved_colors
+                && self
+                    .chroma
+                    .is_none_or(|expected| decoder.chroma_location() == expected))
         };
         match verify() {
             Ok(true) => Ok(()),

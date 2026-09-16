@@ -1014,3 +1014,163 @@ fn reference_high_depth_minute_trim_matches_independent_frames_and_reports_quali
             .starts_with(".towavue-export-")
     }));
 }
+
+#[test]
+fn high_depth_trim_preserves_declared_chroma_location() {
+    use towavue_core::{MediaTime, TimeRange, TimelineEdit};
+    let root = depth_directory();
+    for (size, pixel) in [
+        ("32x24", "yuv420p10le"),
+        ("96x64", "yuv420p10le"),
+        ("32x24", "yuv420p12le"),
+    ] {
+        for location in ["left", "topleft"] {
+            let source = root.join(format!("source-{size}-{pixel}-{location}.mkv"));
+            run(
+                "ffmpeg.exe",
+                &[
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("testsrc2=size={size}:rate=8:duration=0.5,format={pixel}"),
+                    "-c:v",
+                    "ffv1",
+                    "-color_range",
+                    "tv",
+                    "-colorspace",
+                    "bt709",
+                    "-chroma_sample_location",
+                    location,
+                    source.to_str().expect("path"),
+                ],
+            );
+            let source_bytes = fs::read(&source).expect("source bytes");
+            let modified = fs::metadata(&source)
+                .expect("source metadata")
+                .modified()
+                .expect("source time");
+            let start = MediaTime::from_nanoseconds(125_000_000);
+            let end = MediaTime::from_nanoseconds(375_000_000);
+            for (name, operations) in [
+                (
+                    "trim",
+                    vec![
+                        EditOperation::SetTrimStart(start),
+                        EditOperation::SetTrimEnd(end),
+                    ],
+                ),
+                (
+                    "keep",
+                    vec![EditOperation::Timeline(TimelineEdit::Keep(
+                        TimeRange::new(start, end).expect("range"),
+                    ))],
+                ),
+            ] {
+                for extension in ["mp4", "mkv", "webm"] {
+                    let target = root.join(format!(
+                        "output-{size}-{pixel}-{location}-{name}.{extension}"
+                    ));
+                    fs::write(&target, b"existing target").expect("target to replace");
+                    let request = ExportRequest {
+                        source: source.clone(),
+                        target: target.clone(),
+                        kind: MediaKind::Video,
+                        operations: operations.clone(),
+                        hardware_encode: true,
+                    };
+                    let plan = video_encoding::HighDepth::probe(&request)
+                        .expect("plan")
+                        .expect("high depth");
+                    export_media(&request).expect("high-depth trimmed export");
+                    let probe = run(
+                        "ffprobe.exe",
+                        &[
+                            "-v",
+                            "error",
+                            "-select_streams",
+                            "v:0",
+                            "-show_entries",
+                            "frame=chroma_location",
+                            "-of",
+                            "csv=p=0",
+                            target.to_str().expect("path"),
+                        ],
+                    );
+                    let tags = String::from_utf8(probe.stdout).expect("chroma tags");
+                    assert_eq!(
+                        tags.lines().collect::<Vec<_>>(),
+                        vec![location; 2],
+                        "{size}, {pixel}, {location}, {name}, {extension}"
+                    );
+                    plan.verify(&target)
+                        .expect("precision/color/siting verification");
+                    if name == "trim" && extension == "mp4" {
+                        let bad = root.join(format!("stripped-{size}-{pixel}-{location}.mp4"));
+                        run(
+                            "ffmpeg.exe",
+                            &[
+                                "-v",
+                                "error",
+                                "-i",
+                                target.to_str().expect("target path"),
+                                "-c:v",
+                                "copy",
+                                "-chroma_sample_location",
+                                "unspecified",
+                                "-bsf:v",
+                                "av1_metadata=chroma_sample_position=unknown",
+                                bad.to_str().expect("bad path"),
+                            ],
+                        );
+                        assert!(
+                            plan.verify(&bad).is_err(),
+                            "missing bitstream siting must fail the publication gate"
+                        );
+                        let pixels = |path: &Path| {
+                            run(
+                                "ffmpeg.exe",
+                                &[
+                                    "-v",
+                                    "error",
+                                    "-i",
+                                    path.to_str().expect("pixels path"),
+                                    "-c:v",
+                                    "rawvideo",
+                                    "-pix_fmt",
+                                    pixel,
+                                    "-f",
+                                    "rawvideo",
+                                    "-",
+                                ],
+                            )
+                            .stdout
+                        };
+                        assert_eq!(
+                            pixels(&target),
+                            pixels(&bad),
+                            "metadata-only corruption must retain coded samples"
+                        );
+                    }
+                    assert_eq!(fs::read(&source).expect("unchanged source"), source_bytes);
+                    assert_eq!(
+                        fs::metadata(&source)
+                            .expect("source metadata")
+                            .modified()
+                            .expect("source time"),
+                        modified
+                    );
+                    assert!(fs::read_dir(&root).expect("fixture entries").all(|entry| {
+                        !entry
+                            .expect("entry")
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".towavue-export-")
+                    }));
+                }
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}

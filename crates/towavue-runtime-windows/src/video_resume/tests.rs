@@ -14,6 +14,155 @@ fn root() -> PathBuf {
 }
 
 #[test]
+fn resume_clear_failure_reports_without_removing_existing_data() {
+    let root = root();
+    let history = root.join("not-a-history-file");
+    fs::create_dir(&history).expect("owned obstruction");
+    fs::write(history.join("keep.txt"), b"keep").expect("owned data");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = VideoResumeHistory::new(history.clone(), move |event| {
+        tx.send(event).expect("clear error");
+    })
+    .expect("worker");
+    worker.clear(SystemTime::now());
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("clear error event"),
+        VideoResumeEvent::ClearFailed(_)
+    ));
+    drop(worker);
+    assert_eq!(
+        fs::read(history.join("keep.txt")).expect("retained data"),
+        b"keep"
+    );
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+#[test]
+fn resume_clear_migrates_legacy_and_rejects_delayed_writes_across_restarts() {
+    let root = root();
+    let media = root.join("source.mkv");
+    let history = root.join("resume.txt");
+    fs::write(&media, b"owned video").expect("fixture");
+    let source = VideoResumeSource::capture(&media).expect("source");
+    let legacy = format!(
+        "{LEGACY_HEADER}\n100\t{}\t{}\t5000000000\t{}\n",
+        source.length,
+        source.modified,
+        media.display()
+    );
+    fs::write(&history, &legacy).expect("legacy fixture");
+    assert_eq!(
+        load_video_resume(&history, &media)
+            .expect("legacy read")
+            .position,
+        Some(Duration::from_secs(5))
+    );
+    assert_eq!(
+        fs::read_to_string(&history).expect("unchanged legacy"),
+        legacy
+    );
+    let at = |n| UNIX_EPOCH + Duration::from_nanos(n);
+    clear_video_resume(&history, at(200)).expect("clear");
+    let cleared = fs::read_to_string(&history).expect("cleared file");
+    assert_eq!(cleared, format!("{HEADER}\ncleared\t200\n"));
+    for time in [100, 199, 200] {
+        remember_video_resume(&history, &source, Duration::from_secs(8), at(time))
+            .expect("stale writer");
+        assert_eq!(
+            fs::read_to_string(&history).expect("cutoff persists"),
+            cleared
+        );
+    }
+    remember_video_resume(&history, &source, Duration::from_secs(9), at(300))
+        .expect("new activity");
+    clear_video_resume(&history, at(150)).expect("older delayed clear");
+    assert_eq!(
+        load_video_resume(&history, &media)
+            .expect("new activity survives")
+            .position,
+        Some(Duration::from_secs(9))
+    );
+    assert_eq!(read(&history).expect("cutoff").cleared, 200);
+    // Explicit clearing repairs corrupt history; ordinary writes must not.
+    fs::write(&history, b"invalid resume data").expect("corrupt fixture");
+    assert!(remember_video_resume(&history, &source, Duration::ZERO, at(400)).is_err());
+    clear_video_resume(&history, at(400)).expect("explicit repair");
+    assert_eq!(
+        load_video_resume(&history, &media)
+            .expect("cleared corrupt history")
+            .position,
+        None
+    );
+    assert_eq!(
+        VideoResumeSource::capture(&media).expect("unchanged source"),
+        source
+    );
+    assert_eq!(fs::read(&media).expect("source bytes"), b"owned video");
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+#[test]
+fn resume_worker_clear_orders_pending_loads_writes_drop_and_other_workers() {
+    let root = root();
+    let media = root.join("source.mkv");
+    let history = root.join("resume.txt");
+    fs::write(&media, b"owned source").expect("fixture");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let worker = VideoResumeHistory::new(history.clone(), move |event| {
+        let first = matches!(event, VideoResumeEvent::Loaded { token: 1, .. });
+        tx.send(event).expect("event");
+        if first {
+            release_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release");
+        }
+    })
+    .expect("worker");
+    worker.load(1, media.clone());
+    let VideoResumeEvent::Loaded { result, .. } =
+        rx.recv_timeout(Duration::from_secs(5)).expect("load")
+    else {
+        panic!("loaded event")
+    };
+    let source = result.expect("source").source;
+    let at = |n| UNIX_EPOCH + Duration::from_secs(n);
+    worker.remember(source.clone(), Duration::from_secs(10), at(10));
+    worker.clear(at(20));
+    worker.remember(source.clone(), Duration::from_secs(15), at(15));
+    worker.load(2, media.clone());
+    release_tx.send(()).expect("continue");
+    let VideoResumeEvent::Loaded { token, result, .. } = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("post-clear load")
+    else {
+        panic!("loaded event")
+    };
+    assert_eq!(token, 2);
+    assert_eq!(result.expect("post-clear result").position, None);
+    let other = VideoResumeHistory::new(history.clone(), |_| {}).expect("other worker");
+    other.remember(source.clone(), Duration::from_secs(19), at(19));
+    drop(other);
+    assert_eq!(
+        load_video_resume(&history, &media)
+            .expect("other worker cannot resurrect")
+            .position,
+        None
+    );
+    worker.remember(source, Duration::from_secs(30), at(30));
+    worker.clear(at(25));
+    drop(worker); // Clear and later writes drain even without another lookup.
+    assert_eq!(
+        load_video_resume(&history, &media)
+            .expect("new write survives clear")
+            .position,
+        Some(Duration::from_secs(30))
+    );
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+#[test]
 fn resume_round_trip_resets_reject_stale_writers_and_preserve_source_bytes() {
     let root = root();
     let media = root.join("日本語 ' video.mkv");
@@ -73,7 +222,10 @@ fn resume_round_trip_resets_reject_stale_writers_and_preserve_source_bytes() {
             .position,
         None
     );
-    assert_eq!(read(&history).expect("record")[0].source, initial.source);
+    assert_eq!(
+        read(&history).expect("record").entries[0].source,
+        initial.source
+    );
     fs::remove_dir_all(root).expect("remove owned fixtures");
 }
 
@@ -97,7 +249,14 @@ fn concurrent_resume_writers_merge_and_keep_only_the_newest_two_hundred() {
             }
         })
         .collect();
-    write(&history, &entries).expect("bounded initial history");
+    write(
+        &history,
+        &History {
+            entries,
+            cleared: 0,
+        },
+    )
+    .expect("bounded initial history");
     std::thread::scope(|scope| {
         for stamp in [400, 300, 500, 200] {
             let history = &history;
@@ -119,7 +278,7 @@ fn concurrent_resume_writers_merge_and_keep_only_the_newest_two_hundred() {
             .position,
         Some(Duration::from_secs(500))
     );
-    let entries = read(&history).expect("bounded history");
+    let entries = read(&history).expect("bounded history").entries;
     assert_eq!(entries.len(), LIMIT);
     assert!(
         !entries
@@ -145,7 +304,7 @@ fn malformed_history_and_invalid_positions_never_overwrite_existing_data() {
         "unknown version".to_owned(),
         format!("{HEADER}\ninvalid\n"),
         format!(
-            "{HEADER}\n1\t1\t1\t9223372036854775808\t{}\n",
+            "{HEADER}\ncleared\t0\n1\t1\t1\t9223372036854775808\t{}\n",
             media.display()
         ),
         "x".repeat(MAX_BYTES as usize + 1),
@@ -161,7 +320,7 @@ fn malformed_history_and_invalid_positions_never_overwrite_existing_data() {
             contents
         );
     }
-    write(&history, &[]).expect("valid empty history");
+    write(&history, &History::default()).expect("valid empty history");
     let bytes = fs::read(&history).expect("history");
     assert!(remember_video_resume(&history, &source, Duration::MAX, SystemTime::now()).is_err());
     assert_eq!(fs::read(&history).expect("unchanged history"), bytes);

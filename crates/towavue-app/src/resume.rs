@@ -112,12 +112,38 @@ pub(super) fn record<N>(app: &mut Application<N>, force: bool) {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn clear_video_resume(&mut self) {
+        if self.resume_history.is_none() {
+            self.set_status(
+                "Could not clear video positions: resume history is unavailable".into(),
+            );
+            return;
+        }
+        // Snapshot unchanged active/retained owners before clearing: closing a
+        // paused tab afterward must not recreate its pre-clear position. These
+        // writes precede the cutoff and are discarded by the serialized clear.
+        record(self, true);
+        if let Some(history) = &self.resume_history {
+            history.clear(std::time::SystemTime::now());
+        }
+        self.resume_revision = self.resume_revision.wrapping_add(1);
+        self.resume_open = None;
+        if self.state == PlaybackState::Loading
+            && self.media_kind == Some(MediaKind::Video)
+            && self.session.is_none()
+            && let Some(path) = self.path.clone()
+        {
+            self.request_resume_or_open(path);
+        }
+    }
+
     pub(super) fn request_resume_or_open(&mut self, path: PathBuf) {
         if self.media_kind == Some(MediaKind::Video)
             && let Some(history) = &self.resume_history
         {
             self.state = PlaybackState::Loading;
-            history.load(self.media_generation, path);
+            self.resume_revision = self.resume_revision.wrapping_add(1);
+            history.load(self.resume_revision, path);
             self.refresh_title();
             self.request_redraw();
         } else {
@@ -131,7 +157,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 path,
                 result,
             } => {
-                if token != self.media_generation
+                if token != self.resume_revision
                     || self.path.as_ref() != Some(&path)
                     || self.media_kind != Some(MediaKind::Video)
                     || self.state != PlaybackState::Loading
@@ -156,6 +182,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             VideoResumeEvent::SaveFailed(error) => {
                 self.set_status(format!("Could not save video position: {error}"))
+            }
+            VideoResumeEvent::ClearFailed(error) => {
+                self.set_status(format!("Could not clear video positions: {error}"))
             }
         }
     }

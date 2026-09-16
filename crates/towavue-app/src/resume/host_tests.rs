@@ -5,7 +5,7 @@ const TEST: &str = "window_host::resume_tests::hosted_resume_process_restart_and
 const PHASE: &str = "TOWAVUE_RESUME_PROCESS_PHASE";
 
 #[test]
-#[ignore = "three visible owned-window processes; generated video, isolated settings and hardware D3D11"]
+#[ignore = "four visible owned-window processes; generated video, isolated settings and hardware D3D11"]
 fn hosted_resume_process_restart_and_transfer() {
     let Some(root) = crate::tests::isolated_test_root(TEST) else {
         return;
@@ -46,7 +46,7 @@ fn hosted_resume_process_restart_and_transfer() {
         .expect("mtime");
     // Each child creates the production WindowHost with the same isolated APPDATA.
     // The normal window close must drain its writes before the next process opens.
-    for phase in 0..3 {
+    for phase in 0..4 {
         let result = std::process::Command::new(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
@@ -75,7 +75,7 @@ fn hosted_resume_process_restart_and_transfer() {
         modified
     );
     eprintln!(
-        "PASS visible resume: pending/live host transfer, normal close, three process launches and source preservation"
+        "PASS visible resume: pending/live host transfer, normal close, four process launches, clear persistence and source preservation"
     );
 }
 
@@ -93,7 +93,9 @@ struct Trial {
 
 impl Trial {
     fn target(&self) -> MediaTime {
-        MediaTime::from_nanoseconds(if self.phase == 0 {
+        MediaTime::from_nanoseconds(if self.phase == 3 {
+            0
+        } else if self.phase == 0 {
             1_000_000_000
         } else {
             2_000_000_000
@@ -105,6 +107,11 @@ impl Trial {
             return Err(format!("resume phase {} timed out", self.phase));
         }
         let target = self.target();
+        let expected = MediaTime::from_nanoseconds(if self.phase == 3 {
+            0
+        } else {
+            i64::from(self.phase) * 1_000_000_000
+        });
         let app = self
             .host
             .windows
@@ -117,7 +124,6 @@ impl Trial {
             return Ok(false);
         };
         if !self.opened {
-            let expected = MediaTime::from_nanoseconds(i64::from(self.phase) * 1_000_000_000);
             if session.target() != expected || app.resume_owner.is_none() {
                 return Err(format!(
                     "phase {} restored {:?}, expected {expected:?}",
@@ -175,6 +181,16 @@ impl Trial {
             self.moved = true;
             return Ok(false);
         }
+        if self.phase == 2 {
+            let generation = app.generation;
+            app.handle_recent_action(menu::RecentAction::Clear);
+            if app.current_position() != target
+                || app.generation != generation
+                || app.state != PlaybackState::Paused
+            {
+                return Err("clearing resume history changed live playback".into());
+            }
+        }
         let ids: Vec<_> = self
             .host
             .windows
@@ -193,7 +209,7 @@ impl Trial {
             "PASS resume process phase={} pid={} restored={}s closed={}s",
             self.phase,
             std::process::id(),
-            self.phase,
+            expected.as_seconds_f64(),
             target.as_seconds_f64()
         );
         Ok(true)
@@ -258,7 +274,7 @@ impl ApplicationHandler<Event> for Trial {
 }
 
 fn run_process(path: PathBuf, phase: u32) {
-    assert!(phase < 3);
+    assert!(phase < 4);
     let mut builder = EventLoop::<Event>::with_user_event();
     builder.with_any_thread(true);
     let event_loop = builder.build().expect("event loop");

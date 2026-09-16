@@ -401,10 +401,8 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
                     ui.separator();
                 }
             }
-            let response = ui.add_enabled(
-                !recent.files.is_empty() || !recent.folders.is_empty(),
-                egui::Button::new("Clear Recently Opened"),
-            );
+            // Resume positions can outlive the shorter recent-path lists.
+            let response = ui.button("Clear Recently Opened");
             if response.enabled() {
                 items.push(response.id);
             }
@@ -604,12 +602,13 @@ mod tests {
                 let files: Vec<_> = (0..12)
                     .map(|i| std::path::PathBuf::from(format!("C:/files/{i:02}.png")))
                     .collect();
+                let empty = std::cell::Cell::new(false);
                 let mut time = 0.0;
                 let mut frame = |events| {
                     time += 0.1;
                     let mut recent = RecentMenu {
-                        folders: &folders,
-                        files: &files,
+                        folders: if empty.get() { &[] } else { &folders },
+                        files: if empty.get() { &[] } else { &files },
                         action: None,
                     };
                     let output = context.run_ui(
@@ -749,6 +748,22 @@ mod tests {
                     )])
                     .1,
                     Some(RecentAction::Clear)
+                );
+                empty.set(true);
+                for label in ["Menu", "Open Recent"] {
+                    let output = frame(vec![]).0;
+                    frame(vec![action(node(&output, label), Action::Click)]);
+                    frame(vec![]);
+                }
+                let output = frame(vec![]).0;
+                assert_eq!(
+                    frame(vec![action(
+                        node(&output, "Clear Recently Opened"),
+                        Action::Click
+                    )])
+                    .1,
+                    Some(RecentAction::Clear),
+                    "empty path lists may still have resume positions"
                 );
             }
         }

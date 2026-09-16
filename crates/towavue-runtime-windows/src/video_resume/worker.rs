@@ -10,6 +10,7 @@ pub enum VideoResumeEvent {
         result: Result<VideoResume, String>,
     },
     SaveFailed(String),
+    ClearFailed(String),
 }
 
 struct PendingWrite {
@@ -21,6 +22,7 @@ struct PendingWrite {
 #[derive(Default)]
 struct Mailbox {
     lookup: Option<(u64, PathBuf)>,
+    clear: Option<SystemTime>,
     writes: Vec<PendingWrite>,
     closed: bool,
 }
@@ -44,20 +46,27 @@ impl VideoResumeHistory {
             .spawn(move || {
                 let (mutex, ready) = &*worker_shared;
                 loop {
-                    let (writes, lookup, closed) = {
+                    let (writes, lookup, clear, closed) = {
                         let mut mailbox = ready
                             .wait_while(mutex.lock().expect("resume mailbox"), |mailbox| {
                                 !mailbox.closed
                                     && mailbox.lookup.is_none()
+                                    && mailbox.clear.is_none()
                                     && mailbox.writes.is_empty()
                             })
                             .expect("resume mailbox");
                         (
                             std::mem::take(&mut mailbox.writes),
                             mailbox.lookup.take(),
+                            mailbox.clear.take(),
                             mailbox.closed,
                         )
                     };
+                    if let Some(observed) = clear
+                        && let Err(error) = clear_video_resume(&path, observed)
+                    {
+                        notify(VideoResumeEvent::ClearFailed(error.to_string()));
+                    }
                     // A same-window reopen must observe its preceding close/save.
                     for write in writes {
                         if let Err(error) = remember_video_resume(
@@ -91,6 +100,18 @@ impl VideoResumeHistory {
 
     pub fn load(&self, token: u64, path: PathBuf) {
         self.shared.0.lock().expect("resume mailbox").lookup = Some((token, path));
+        self.shared.1.notify_one();
+    }
+
+    /// Clear observations at or before this instant, including older writes in
+    /// other workers. Subsequent loads on this worker observe the clear first.
+    pub fn clear(&self, observed: SystemTime) {
+        let mut mailbox = self.shared.0.lock().expect("resume mailbox");
+        let observed = mailbox
+            .clear
+            .map_or(observed, |previous| previous.max(observed));
+        mailbox.clear = Some(observed);
+        mailbox.writes.retain(|write| write.observed > observed);
         self.shared.1.notify_one();
     }
 

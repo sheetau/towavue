@@ -6,7 +6,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const HEADER: &str = "towavue video resume v1";
+const LEGACY_HEADER: &str = "towavue video resume v1";
+const HEADER: &str = "towavue video resume v2";
 const LIMIT: usize = 200;
 const MAX_BYTES: u64 = 1024 * 1024;
 
@@ -30,6 +31,12 @@ struct Entry {
     source: VideoResumeSource,
     position: u64,
     observed: u128,
+}
+
+#[derive(Default)]
+struct History {
+    cleared: u128,
+    entries: Vec<Entry>,
 }
 
 fn invalid(message: &str) -> io::Error {
@@ -68,6 +75,7 @@ impl VideoResumeSource {
 fn load_video_resume(history: &Path, media: &Path) -> io::Result<VideoResume> {
     let source = VideoResumeSource::capture(media)?;
     let position = read(history)?
+        .entries
         .iter()
         .find(|entry| entry.source == source)
         .filter(|entry| entry.position != 0)
@@ -92,22 +100,16 @@ fn remember_video_resume(
         .duration_since(UNIX_EPOCH)
         .map_err(|_| invalid("Invalid resume observation time"))?
         .as_nanos();
-    let parent = history
-        .parent()
-        .ok_or_else(|| invalid("Resume history has no parent"))?;
-    fs::create_dir_all(parent)?;
-    let lock = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(history.with_extension("lock"))?;
-    lock.lock()?;
+    let _lock = lock_history(history)?;
+    let mut data = read(history)?;
+    if data.cleared != 0 && observed <= data.cleared {
+        return Ok(());
+    }
     // Validate after a possibly contended lock wait, not before it.
     if VideoResumeSource::capture(&source.path)? != *source {
         return Ok(());
     }
-    let mut entries = read(history)?;
+    let entries = &mut data.entries;
     if entries
         .iter()
         .any(|entry| entry.source.path == source.path && entry.observed > observed)
@@ -122,13 +124,50 @@ fn remember_video_resume(
     });
     entries.sort_by_key(|entry| std::cmp::Reverse(entry.observed));
     entries.truncate(LIMIT);
-    write(history, &entries)
+    write(history, &data)
 }
 
-fn read(path: &Path) -> io::Result<Vec<Entry>> {
+fn lock_history(history: &Path) -> io::Result<File> {
+    let parent = history
+        .parent()
+        .ok_or_else(|| invalid("Resume history has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(history.with_extension("lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
+
+/// Keep the cutoff even when all entries are gone: an older queued write in
+/// another process must not resurrect a cleared path. Later observations survive
+/// a delayed clear. Only this explicit operation may replace malformed history.
+fn clear_video_resume(history: &Path, observed: SystemTime) -> io::Result<()> {
+    let cutoff = observed
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| invalid("Invalid resume clear time"))?
+        .as_nanos();
+    if cutoff == 0 {
+        return Err(invalid("Resume clear time must follow Unix epoch"));
+    }
+    let _lock = lock_history(history)?;
+    let mut data = match read(history) {
+        Ok(data) => data,
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => History::default(),
+        Err(error) => return Err(error),
+    };
+    data.cleared = data.cleared.max(cutoff);
+    data.entries.retain(|entry| entry.observed > data.cleared);
+    write(history, &data)
+}
+
+fn read(path: &Path) -> io::Result<History> {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(History::default()),
         Err(error) => return Err(error),
     };
     let mut text = String::new();
@@ -137,11 +176,19 @@ fn read(path: &Path) -> io::Result<Vec<Entry>> {
         return Err(invalid("Resume history exceeds its size limit"));
     }
     let mut lines = text.lines();
-    if lines.next() != Some(HEADER) {
-        return Err(invalid(
-            "Unknown resume history format; existing file retained",
-        ));
-    }
+    let cleared = match lines.next() {
+        Some(LEGACY_HEADER) => 0,
+        Some(HEADER) => lines
+            .next()
+            .and_then(|line| line.strip_prefix("cleared\t"))
+            .and_then(|value| value.parse().ok())
+            .ok_or_else(|| invalid("Invalid resume clear boundary"))?,
+        _ => {
+            return Err(invalid(
+                "Unknown resume history format; existing file retained",
+            ));
+        }
+    };
     let mut entries: Vec<Entry> = Vec::new();
     for line in lines {
         let mut fields = line.splitn(5, '\t');
@@ -183,12 +230,15 @@ fn read(path: &Path) -> io::Result<Vec<Entry>> {
             observed,
         });
     }
-    Ok(entries)
+    if cleared != 0 && entries.iter().any(|entry| entry.observed <= cleared) {
+        return Err(invalid("Resume entry precedes its clear boundary"));
+    }
+    Ok(History { cleared, entries })
 }
 
-fn write(path: &Path, entries: &[Entry]) -> io::Result<()> {
-    let mut text = format!("{HEADER}\n");
-    for entry in entries {
+fn write(path: &Path, data: &History) -> io::Result<()> {
+    let mut text = format!("{HEADER}\ncleared\t{}\n", data.cleared);
+    for entry in &data.entries {
         let source = &entry.source;
         text.push_str(&format!(
             "{}\t{}\t{}\t{}\t{}\n",

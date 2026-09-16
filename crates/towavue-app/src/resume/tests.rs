@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn unavailable_resume_history_reports_clear_failure_without_opening_pending_media() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "resume::tests::unavailable_resume_history_reports_clear_failure_without_opening_pending_media",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.path = Some(root.join("not-opened.mkv"));
+    app.media_kind = Some(MediaKind::Video);
+    app.state = PlaybackState::Loading;
+    let generation = app.media_generation;
+    app.handle_recent_action(menu::RecentAction::Clear);
+    assert_eq!(app.state, PlaybackState::Loading);
+    assert_eq!(app.media_generation, generation);
+    assert!(app.session.is_none());
+    assert!(
+        app.status_message
+            .as_ref()
+            .expect("clear failure")
+            .0
+            .contains("resume history is unavailable")
+    );
+}
+
+#[test]
 fn video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery() {
     let Some(root) = crate::tests::isolated_test_root(
         "resume::tests::video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery",
@@ -107,7 +132,7 @@ fn video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery() 
                 Duration::from_millis(1250)
             );
             let source = self.source.take().expect("source stamp");
-            let generation = app.media_generation;
+            let generation = app.resume_revision;
             app.handle_video_resume(VideoResumeEvent::Loaded {
                 token: generation,
                 path: self.path.clone(),
@@ -271,6 +296,91 @@ fn video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery() 
                 app.session.as_ref().expect("EOF reopen").target(),
                 MediaTime::ZERO,
                 "original EOF persists a reset"
+            );
+            if app.state == PlaybackState::Playing {
+                app.toggle_pause();
+            }
+            app.seek_to(media_time(Duration::from_millis(1500)));
+            let retained_target = app.session.as_ref().expect("first session").target();
+            let second_tab = app.tabs.open_new(self.second.clone(), MediaKind::Video);
+            app.load_path(self.second.clone(), MediaKind::Video);
+            finish_open(&mut app, &rx);
+            if app.state == PlaybackState::Playing {
+                app.toggle_pause();
+            }
+            app.seek_to(media_time(Duration::from_secs(2)));
+            let generation = app.session.as_ref().expect("second session").generation();
+            let target = app.session.as_ref().expect("second session").target();
+            app.handle_recent_action(menu::RecentAction::Clear);
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert_eq!(
+                app.session
+                    .as_ref()
+                    .expect("same live session")
+                    .generation(),
+                generation
+            );
+            assert_eq!(
+                app.session.as_ref().expect("same position").target(),
+                target
+            );
+            assert_eq!(
+                app.retained_playback[&tab]
+                    .session
+                    .as_ref()
+                    .expect("retained session")
+                    .target(),
+                retained_target
+            );
+            app.remove_tab(second_tab, true);
+            app.remove_tab(tab, true);
+            // Closing unchanged paused owners after Clear must not resurrect
+            // either the active or retained pre-clear position.
+            let second_tab = app.tabs.open_new(self.second.clone(), MediaKind::Video);
+            app.load_path(self.second.clone(), MediaKind::Video);
+            finish_open(&mut app, &rx);
+            assert_eq!(
+                app.session.as_ref().expect("cleared second").target(),
+                MediaTime::ZERO
+            );
+            app.remove_tab(second_tab, true);
+            let tab = app.tabs.open_new(self.path.clone(), MediaKind::Video);
+            app.load_path(self.path.clone(), MediaKind::Video);
+            finish_open(&mut app, &rx);
+            assert_eq!(
+                app.session.as_ref().expect("cleared first").target(),
+                MediaTime::ZERO
+            );
+            app.remove_tab(tab, true);
+            app.resume_history.as_ref().expect("worker").remember(
+                source.clone(),
+                Duration::from_secs(4),
+                std::time::SystemTime::now(),
+            );
+            let tab = app.tabs.open_new(self.path.clone(), MediaKind::Video);
+            app.load_path(self.path.clone(), MediaKind::Video);
+            let stale = loop {
+                let event = rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("pending lookup");
+                if let AppEvent::VideoResume(VideoResumeEvent::Loaded { token, .. }) = &event
+                    && *token == app.resume_revision
+                {
+                    break event;
+                }
+                app.handle_app_event(event);
+            };
+            assert!(app.session.is_none());
+            app.handle_recent_action(menu::RecentAction::Clear);
+            app.handle_app_event(stale);
+            assert!(
+                app.session.is_none(),
+                "pre-clear result is obsolete even for the same media"
+            );
+            finish_open(&mut app, &rx);
+            assert_eq!(
+                app.session.as_ref().expect("cleared pending open").target(),
+                MediaTime::ZERO
             );
             app.remove_tab(tab, true);
             app.resume_history.take();

@@ -864,6 +864,7 @@ struct Application<N> {
     resume_history: Option<towavue_runtime_windows::VideoResumeHistory>,
     resume_owner: Option<resume::Owner>,
     resume_open: Option<towavue_runtime_windows::VideoResume>,
+    resume_revision: u64,
     recent_paths: Vec<PathBuf>,
     recent_folders: Vec<PathBuf>,
     pending_window_launches: Vec<PathBuf>,
@@ -1118,6 +1119,7 @@ where
             resume_history: None,
             resume_owner: None,
             resume_open: None,
+            resume_revision: 0,
             recent_paths: Vec::new(),
             recent_folders: Vec::new(),
             pending_window_launches: Vec::new(),
@@ -1518,6 +1520,7 @@ where
         }
         match action {
             menu::RecentAction::Clear => {
+                self.clear_video_resume();
                 if let Some(recent) = &self.recent_files {
                     recent.clear();
                 }

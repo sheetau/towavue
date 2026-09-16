@@ -98,6 +98,8 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[
                 RotateClockwise,
                 RotateCounterclockwise,
+                RotateFineClockwise,
+                RotateFineCounterclockwise,
                 FlipHorizontal,
                 FlipVertical,
             ],

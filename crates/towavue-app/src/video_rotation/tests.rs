@@ -247,7 +247,40 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             app.timeline_open = false;
             app.process_shortcut("Ctrl+Shift+R".parse().expect("shortcut"));
             assert!(app.video_rotation_dialog.is_none());
+            app.process_shortcut("Alt+R".parse().expect("fine rotation"));
+            assert!(app.video_operations().is_empty(), "timeline-hidden guard");
             app.timeline_open = true;
+            for (key, tenths) in [("Alt+R", 50), ("Alt+L", -50)] {
+                let position = app.current_position();
+                let generation = app.generation;
+                let geometry = app.validate_video_operations(&[]).expect("source geometry");
+                let rotation = VideoRotation::new(tenths, (geometry.0, geometry.1), geometry.2)
+                    .expect("step geometry");
+                app.process_shortcut(key.parse().expect("fine rotation"));
+                assert!(app.video_rotation_dialog.is_none());
+                assert_eq!(
+                    app.video_operations(),
+                    &[EditOperation::RotateVideo(rotation)]
+                );
+                frame(&mut app, vec![]);
+                assert!(app.video_raster_operations.is_some() && app.playback_error.is_none());
+                assert_eq!(
+                    (app.current_position(), app.generation),
+                    (position, generation)
+                );
+                app.process_shortcut("Ctrl+Z".parse().expect("Undo"));
+                frame(&mut app, vec![]);
+                assert!(app.video_operations().is_empty());
+                app.process_shortcut("Ctrl+Shift+Z".parse().expect("Redo"));
+                frame(&mut app, vec![]);
+                assert_eq!(
+                    app.video_operations(),
+                    &[EditOperation::RotateVideo(rotation)]
+                );
+                app.process_shortcut("Ctrl+Z".parse().expect("Undo"));
+                frame(&mut app, vec![]);
+                assert!(app.video_operations().is_empty());
+            }
             app.dispatch(CommandId::RotateClockwise);
             app.image_view.selection = Some(UnitRect::FULL);
             let view = app.image_view;

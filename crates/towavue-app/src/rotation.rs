@@ -169,6 +169,23 @@ fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn step_rotation(&mut self, clockwise: bool) {
+        if self.media_kind == Some(MediaKind::Video) {
+            self.step_video_rotation(clockwise);
+            return;
+        }
+        let Some(mut dialog) = self.capture_rotation() else {
+            self.set_status("Wait for the full image to load before rotating".into());
+            return;
+        };
+        dialog.angle = if clockwise { "5.0" } else { "-5.0" }.into();
+        let Some(value) = dialog.value() else {
+            self.set_status("The rotated canvas exceeds the image size limit".into());
+            return;
+        };
+        self.commit_rotation(dialog, Some(value));
+    }
+
     pub(super) fn open_rotation(&mut self) {
         let Some(dialog) = self.capture_rotation() else {
             self.set_status("Wait for the full image to load before rotating".into());

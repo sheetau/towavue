@@ -95,6 +95,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::ToggleVideoRepeat, "Ctrl+Alt+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
+        (CommandId::RotateFineClockwise, "Alt+R"),
+        (CommandId::RotateFineCounterclockwise, "Alt+L"),
         (CommandId::FlipHorizontal, "H"),
         (CommandId::FlipVertical, "V"),
         (CommandId::SetTrimStart, "I"),
@@ -290,6 +292,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                     definition.id,
                     CommandId::FreeRotateImage
                         | CommandId::FreeRotateVideo
+                        | CommandId::RotateFineClockwise
+                        | CommandId::RotateFineCounterclockwise
                         | CommandId::ToggleVideoRepeat
                         | CommandId::GoToFile
                         | CommandId::OpenRecentFolder
@@ -362,6 +366,47 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 mod tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn fine_rotation_defaults_respect_declared_keys_prefixes_and_custom_replacements() {
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        let bindings = defaults();
+        for (command, key) in [
+            (CommandId::RotateFineClockwise, "Alt+R"),
+            (CommandId::RotateFineCounterclockwise, "Alt+L"),
+        ] {
+            let key: KeySequence = key.parse().expect("key");
+            assert_eq!(
+                bindings.resolve(key.strokes(), context),
+                ShortcutMatch::Command(command)
+            );
+            for value in [key.to_string(), format!("{key} Q")] {
+                let custom = parse(&format!("rotate_clockwise = {value}\n"), defaults())
+                    .expect("custom binding");
+                assert!(
+                    custom.all(command).is_empty(),
+                    "do not shadow a declared shortcut or prefix"
+                );
+            }
+            let custom = parse(&format!("{} = Ctrl+K Q\n", command.as_str()), defaults())
+                .expect("custom replacement");
+            assert_eq!(
+                custom.get(command).expect("custom key").to_string(),
+                "Ctrl+K Q"
+            );
+            assert_eq!(
+                parse(&serialize(&custom), defaults()).expect("round trip"),
+                custom
+            );
+        }
+        assert_eq!(
+            parse(&serialize(&bindings), defaults()).expect("round trip"),
+            bindings
+        );
+    }
 
     #[test]
     fn free_rotation_binding_is_contextual_and_preserves_custom_keys_and_prefixes() {

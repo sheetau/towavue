@@ -96,6 +96,62 @@ pub(super) fn application() -> (
 }
 
 #[test]
+fn fine_rotation_shortcuts_apply_one_raster_edit_and_preserve_undo_and_guards() {
+    for (key, tenths) in [("Alt+R", 50), ("Alt+L", -50)] {
+        let (mut app, events) = application();
+        let tab = app.tabs.active_id().expect("tab");
+        let source = app.image.as_ref().expect("source").decoded.clone();
+        for guard in 0..3 {
+            app.reading_mode = guard == 0;
+            app.image_edit_pending = guard == 1;
+            app.pending_guard = (guard == 2).then_some(GuardedAction::Exit);
+            app.process_shortcut(key.parse().expect("fine rotation"));
+            assert!(app.edits.is_empty());
+        }
+        app.reading_mode = false;
+        app.image_edit_pending = false;
+        app.pending_guard = None;
+        app.process_shortcut(key.parse().expect("fine rotation"));
+        let rotation = ImageRotation::new(tenths, (8, 6)).expect("rotation");
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::RotateImage(rotation)]
+        );
+        assert!(app.rotation_dialog.is_none() && app.image_edit_pending);
+        app.process_shortcut(key.parse().expect("pending rotation"));
+        assert_eq!(
+            app.edits[&tab].operations().len(),
+            1,
+            "no queued resampling backlog"
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.image_edit_pending {
+            app.handle_app_event(
+                events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("materialized step"),
+            );
+        }
+        assert!(app.image_error.is_none());
+        assert_eq!(
+            app.image.as_ref().expect("rotated").dimensions(),
+            rotation.size()
+        );
+        app.process_shortcut("Ctrl+Z".parse().expect("Undo"));
+        assert_eq!(
+            app.image.as_ref().expect("original").decoded.frames[0].rgba,
+            source.frames[0].rgba
+        );
+        assert!(!app.edits[&tab].is_dirty());
+        app.process_shortcut("Ctrl+Shift+Z".parse().expect("Redo"));
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::RotateImage(rotation)]
+        );
+    }
+}
+
+#[test]
 fn opposite_free_rotations_preserve_raster_changes_but_undo_restores_original_pixels() {
     for angle in [50, 317, -450, 900] {
         let (mut app, events) = application();

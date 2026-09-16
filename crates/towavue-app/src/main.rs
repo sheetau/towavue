@@ -6492,6 +6492,8 @@ where
                 command,
                 CommandId::ResizeImage
                     | CommandId::FreeRotateImage
+                    | CommandId::RotateFineClockwise
+                    | CommandId::RotateFineCounterclockwise
                     | CommandId::SelectAll
                     | CommandId::SelectAspectSquare
                     | CommandId::SelectAspectFourThree
@@ -6776,6 +6778,8 @@ where
             }
             CommandId::FreeRotateImage => self.open_rotation(),
             CommandId::FreeRotateVideo => self.open_video_rotation(),
+            CommandId::RotateFineClockwise => self.step_rotation(true),
+            CommandId::RotateFineCounterclockwise => self.step_rotation(false),
             CommandId::ResizeVideo => self.open_video_resize(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
@@ -11753,7 +11757,15 @@ mod tests {
                     &mut app,
                     vec![key(egui::Key::ArrowRight, egui::Modifiers::NONE)],
                 );
-                invoke(&mut app, command);
+                // Distinguish the quarter-turn command from the fine rotation.
+                invoke(
+                    &mut app,
+                    if command == "Rotate clockwise" {
+                        "Rotate clockwise R"
+                    } else {
+                        command
+                    },
+                );
                 assert_eq!(app.edits[&tab].is_dirty(), command == "Rotate clockwise");
                 if command == "Rotate clockwise" {
                     let tree = invoke(&mut app, "towavue menu");

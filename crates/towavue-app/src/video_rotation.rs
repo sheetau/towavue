@@ -189,6 +189,21 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
+    pub(super) fn step_video_rotation(&mut self, clockwise: bool) {
+        let mut dialog = match self.capture_video_rotation() {
+            Ok(dialog) => dialog,
+            Err(error) => {
+                self.set_status(error);
+                return;
+            }
+        };
+        dialog.angle = if clockwise { "5.0" } else { "-5.0" }.into();
+        match dialog.value() {
+            Ok(value) => self.commit_video_rotation(dialog, Some(value)),
+            Err(error) => self.set_status(error),
+        }
+    }
+
     fn capture_video_rotation(&mut self) -> Result<VideoRotationDialog, String> {
         let snapshot = self.capture_video_edit()?;
         self.rotation_generation = self.rotation_generation.wrapping_add(1);

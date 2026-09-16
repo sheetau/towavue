@@ -45,6 +45,8 @@ pub enum CommandId {
     PlayTimeSelection,
     RotateClockwise,
     RotateCounterclockwise,
+    RotateFineClockwise,
+    RotateFineCounterclockwise,
     FlipHorizontal,
     FlipVertical,
     SetTrimStart,
@@ -174,6 +176,8 @@ impl CommandId {
             Self::PlayTimeSelection => "play_time_selection",
             Self::RotateClockwise => "rotate_clockwise",
             Self::RotateCounterclockwise => "rotate_counterclockwise",
+            Self::RotateFineClockwise => "rotate_fine_clockwise",
+            Self::RotateFineCounterclockwise => "rotate_fine_counterclockwise",
             Self::FlipHorizontal => "flip_horizontal",
             Self::FlipVertical => "flip_vertical",
             Self::SetTrimStart => "set_trim_start",
@@ -455,6 +459,8 @@ impl CommandDefinition {
                     | CommandId::ApplyCrop
                     | CommandId::RotateClockwise
                     | CommandId::RotateCounterclockwise
+                    | CommandId::RotateFineClockwise
+                    | CommandId::RotateFineCounterclockwise
                     | CommandId::FlipHorizontal
                     | CommandId::FlipVertical
                     | CommandId::ResizeImage
@@ -503,6 +509,8 @@ impl CommandDefinition {
                         | CommandId::ApplyCrop
                         | CommandId::RotateClockwise
                         | CommandId::RotateCounterclockwise
+                        | CommandId::RotateFineClockwise
+                        | CommandId::RotateFineCounterclockwise
                         | CommandId::FlipHorizontal
                         | CommandId::FlipVertical
                         | CommandId::FreeRotateVideo
@@ -538,6 +546,8 @@ impl CommandDefinition {
                         | CommandId::ApplyCrop
                         | CommandId::RotateClockwise
                         | CommandId::RotateCounterclockwise
+                        | CommandId::RotateFineClockwise
+                        | CommandId::RotateFineCounterclockwise
                         | CommandId::FlipHorizontal
                         | CommandId::FlipVertical
                         | CommandId::Undo
@@ -658,6 +668,16 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::RotateCounterclockwise,
         "Rotate counterclockwise",
         &[MediaKind::Image, MediaKind::Video],
+    ),
+    command(
+        CommandId::RotateFineClockwise,
+        "Rotate clockwise by 5 degrees",
+        VISUAL_MEDIA,
+    ),
+    command(
+        CommandId::RotateFineCounterclockwise,
+        "Rotate counterclockwise by 5 degrees",
+        VISUAL_MEDIA,
     ),
     command(
         CommandId::FlipHorizontal,
@@ -1078,6 +1098,49 @@ impl ShortcutBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fine_rotations_follow_visual_media_reading_transition_and_timeline_guards() {
+        for id in [
+            CommandId::RotateFineClockwise,
+            CommandId::RotateFineCounterclockwise,
+        ] {
+            let definition = command_definitions()
+                .iter()
+                .find(|definition| definition.id == id)
+                .expect("command");
+            for media_kind in [
+                None,
+                Some(MediaKind::Image),
+                Some(MediaKind::Video),
+                Some(MediaKind::Audio),
+            ] {
+                for reading_mode in [false, true] {
+                    for timeline_open in [false, true] {
+                        for image_transition in [false, true] {
+                            let context = CommandContext {
+                                media_kind,
+                                reading_mode,
+                                timeline_open,
+                                image_transition,
+                                ..Default::default()
+                            };
+                            assert_eq!(
+                                definition.is_enabled(context),
+                                !image_transition
+                                    && match media_kind {
+                                        Some(MediaKind::Image) => !reading_mode,
+                                        Some(MediaKind::Video) => timeline_open,
+                                        _ => false,
+                                    },
+                                "{id:?}: {context:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn frame_export_requires_a_video_picture_but_not_the_editing_timeline() {

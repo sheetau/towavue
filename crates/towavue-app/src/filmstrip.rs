@@ -27,6 +27,9 @@ mod drag;
 #[cfg(test)]
 pub(crate) mod drag_tests;
 
+#[cfg(test)]
+mod duration_tests;
+
 #[derive(Default)]
 pub struct View {
     focus: Option<PathBuf>,
@@ -679,22 +682,13 @@ impl Filmstrip {
                                     Color32::WHITE,
                                 );
                                 if let Some(duration) = duration {
-                                    let label = format_time(media_time(*duration));
-                                    let galley = ui.painter().layout_no_wrap(
-                                        label,
-                                        FontId::proportional(10.0),
-                                        Color32::WHITE,
+                                    draw_preview_duration(
+                                        ui,
+                                        rect,
+                                        *duration,
+                                        10.0,
+                                        Vec2::splat(3.0),
                                     );
-                                    let label_rect = Rect::from_min_size(
-                                        rect.right_bottom() - galley.size() - Vec2::splat(3.0),
-                                        galley.size(),
-                                    );
-                                    ui.painter().rect_filled(
-                                        label_rect.expand(1.0),
-                                        1.0,
-                                        Color32::from_black_alpha(210),
-                                    );
-                                    ui.painter().galley(label_rect.min, galley, Color32::WHITE);
                                 }
                             }
                             Some(Err(_)) => {
@@ -859,12 +853,12 @@ impl Filmstrip {
                                 Color32::WHITE,
                             );
                             if let Some(duration) = duration {
-                                ui.painter().text(
-                                    image_rect.right_bottom() - egui::vec2(4.0, 3.0),
-                                    Align2::RIGHT_BOTTOM,
-                                    format_time(media_time(*duration)),
-                                    FontId::proportional(11.0),
-                                    Color32::WHITE,
+                                draw_preview_duration(
+                                    ui,
+                                    image_rect,
+                                    *duration,
+                                    11.0,
+                                    egui::vec2(4.0, 3.0),
                                 );
                             }
                         }
@@ -963,6 +957,25 @@ impl Filmstrip {
             self.visible = visible;
         }
     }
+}
+
+fn draw_preview_duration(
+    ui: &egui::Ui,
+    rect: Rect,
+    duration: Duration,
+    font_size: f32,
+    inset: Vec2,
+) {
+    let galley = ui.painter().layout_no_wrap(
+        format_time(media_time(duration)),
+        FontId::proportional(font_size),
+        Color32::WHITE,
+    );
+    let label_rect =
+        Rect::from_min_size(rect.right_bottom() - galley.size() - inset, galley.size());
+    ui.painter()
+        .rect_filled(label_rect.expand(1.0), 1.0, Color32::from_black_alpha(210));
+    ui.painter().galley(label_rect.min, galley, Color32::WHITE);
 }
 
 fn recent_rows(

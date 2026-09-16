@@ -65,6 +65,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicitly_described_truncated_labels_show_only_one_tooltip() {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let label = "A long exported file name that must be truncated in its compact control";
+        let mut descriptions = 0;
+        for frame in 0..6 {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(600.0, 300.0),
+                    )),
+                    time: Some(f64::from(frame)),
+                    events: vec![egui::Event::PointerMoved(egui::pos2(40.0, 60.0))],
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.put(
+                        egui::Rect::from_min_size(egui::pos2(20.0, 50.0), egui::vec2(100.0, 20.0)),
+                        egui::Label::new(label)
+                            .truncate()
+                            .show_tooltip_when_elided(false),
+                    )
+                    .help_text(label);
+                },
+            );
+            descriptions = output
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape,
+                egui::Shape::Text(text) if !text.galley.elided && text.galley.text() == label)
+                })
+                .count();
+        }
+        assert_eq!(descriptions, 1);
+    }
+
+    #[test]
     fn oversized_help_stays_only_while_over_its_source() {
         let context = crate::fonts::test_context();
         let source = egui::Rect::from_min_size(egui::pos2(180.0, 120.0), egui::vec2(60.0, 20.0));

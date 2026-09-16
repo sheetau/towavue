@@ -429,13 +429,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         ui.put(
-            egui::Rect::from_min_size(
-                rect.left_bottom() + egui::vec2(6.0, -18.0),
-                egui::vec2((rect.width() - 12.0).max(0.0), 16.0),
+            egui::Rect::from_center_size(
+                rect.center(),
+                egui::vec2((rect.width() - 48.0).max(0.0), 20.0_f32.min(rect.height())),
             ),
-            egui::Label::new(egui::RichText::new(label).small().color(chrome::FOREGROUND))
-                .truncate()
-                .selectable(false),
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .size(time_selection::LABEL_SIZE)
+                    .color(chrome::FOREGROUND)
+                    .background_color(chrome::BORDER),
+            )
+            .truncate()
+            .show_tooltip_when_elided(false)
+            .selectable(false),
         );
     }
 

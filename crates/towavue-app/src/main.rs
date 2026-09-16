@@ -3830,8 +3830,12 @@ where
         };
         let mut contents = |ui: &mut egui::Ui| {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
-            ui.add(egui::Label::new(display_name(&export.request.target)).truncate())
-                .help_text(export.request.target.display().to_string());
+            ui.add(
+                egui::Label::new(display_name(&export.request.target))
+                    .truncate()
+                    .show_tooltip_when_elided(false),
+            )
+            .help_text(export.request.target.display().to_string());
             if export.options.audio != AudioExportOptions::default() {
                 ui.label(audio_export::summary(export.options.audio));
             }
@@ -3884,7 +3888,12 @@ where
             chrome::modal_heading(ui, "Unsaved edits");
             ui.separator();
             ui.label("Export edits before continuing?");
-            ui.add(egui::Label::new(&name).truncate()).help_text(&name);
+            ui.add(
+                egui::Label::new(&name)
+                    .truncate()
+                    .show_tooltip_when_elided(false),
+            )
+            .help_text(&name);
             ui.label("Source file unchanged.");
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -5445,7 +5454,8 @@ where
                             egui::RichText::new(format!("Edit {}", self.grid_path.display()))
                                 .weak(),
                         )
-                        .truncate(),
+                        .truncate()
+                        .show_tooltip_when_elided(false),
                     )
                     .help_text(self.grid_path.display().to_string());
                 });
@@ -5662,7 +5672,7 @@ where
                                 egui::vec2(time_width, 24.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.add(egui::Label::new(time_text).truncate())
+                                    ui.add(egui::Label::new(time_text).truncate().show_tooltip_when_elided(false))
                                 },
                             ).inner.help_text(full_time);
                         } else { ui.label(time_text); }
@@ -6094,8 +6104,7 @@ where
                 // Reserve the waveform's layer below selection and gain controls.
                 let waveform_painter = ui.painter().with_clip_rect(rect);
                 let waveform_slot = waveform_painter.add(egui::Shape::Noop);
-                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag())
-                    .help_text("Drag to select time · Shift+Space plays selection · drag playhead to seek · drag volume line up/down · Alt+drag selection to stretch · Delete removes · Ctrl+Y keeps");
+                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
                 let duration = self.playback_duration().unwrap_or_default();
                 if duration.is_zero() {
                     self.clear_detailed_waveform();

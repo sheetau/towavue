@@ -128,12 +128,12 @@ pub(super) fn paint(
             );
         }
     }
-    if let Some((range, gain)) = preview {
+    if let Some((_, gain)) = preview {
         painter.text(
-            egui::pos2(x_at(range.start()), rect.top() + 2.0),
-            egui::Align2::LEFT_TOP,
+            rect.left_top() + egui::vec2(LABEL_INSET, 10.0),
+            egui::Align2::LEFT_CENTER,
             format!("Volume {:.0}%", gain * 100.0),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
     }
@@ -241,10 +241,18 @@ pub(super) fn values(
                 format!("Volume {value:.0}%")
             };
             ui.painter().with_clip_rect(rect).text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
+                if stretch {
+                    rect.right_center() - egui::vec2(LABEL_INSET, 0.0)
+                } else {
+                    rect.left_center() + egui::vec2(LABEL_INSET, 0.0)
+                },
+                if stretch {
+                    egui::Align2::RIGHT_CENTER
+                } else {
+                    egui::Align2::LEFT_CENTER
+                },
                 label,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(LABEL_SIZE),
                 crate::chrome::FOREGROUND,
             );
         }

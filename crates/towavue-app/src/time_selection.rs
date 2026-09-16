@@ -2,6 +2,11 @@ use egui::{Rect, Response, Ui};
 use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
+#[cfg(test)]
+mod presentation_tests;
+
+pub(super) const LABEL_SIZE: f32 = 11.0;
+const LABEL_INSET: f32 = 24.0;
 
 pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
     let (id, text) = context
@@ -129,6 +134,70 @@ pub(super) fn show(
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
         Gesture::Select => egui::CursorIcon::Text,
     };
+    if enabled
+        && drag.origin.is_none()
+        && let Some(pointer) = ui
+            .ctx()
+            .pointer_hover_pos()
+            .filter(|point| rect.contains(*point))
+    {
+        use crate::hover_help::HoverHelp;
+        let help = match choose(pointer, egui::Modifiers::NONE) {
+            Gesture::Seek => Some((
+                playhead_rect(rect, cti_x(rect, x_at(position), pixel)),
+                "head",
+                "Playback position · drag the playhead to seek",
+            )),
+            Gesture::Resize(range, start) => {
+                let x = x_at(if start { range.start() } else { range.end() });
+                Some((
+                    Rect::from_x_y_ranges(x - 6.0..=x + 6.0, rect.y_range()),
+                    if start { "start" } else { "end" },
+                    if start {
+                        "Selection start · drag to adjust"
+                    } else {
+                        "Selection end · drag to adjust"
+                    },
+                ))
+            }
+            Gesture::Band(range, gain) => {
+                let y = adjustment::gain_y(rect, gain);
+                Some((
+                    Rect::from_x_y_ranges(
+                        x_at(range.start())..=x_at(range.end()),
+                        y - 4.0..=y + 4.0,
+                    ),
+                    "gain",
+                    "Volume line · drag up/down to change the local gain (also affects export)",
+                ))
+            }
+            Gesture::Select
+                if selection.is_some_and(|range| {
+                    at(pointer.x) >= range.start() && at(pointer.x) <= range.end()
+                }) =>
+            {
+                selection.map(|range| {
+                    (
+                        Rect::from_x_y_ranges(
+                            x_at(range.start())..=x_at(range.end()),
+                            rect.y_range(),
+                        ),
+                        "selection",
+                        "Time selection · drag to replace · Alt+drag to stretch",
+                    )
+                })
+            }
+            _ => None,
+        };
+        if let Some((bounds, part, text)) = help {
+            ui.interact(
+                bounds.intersect(response.interact_rect),
+                response.id.with(("part-help", part)),
+                egui::Sense::hover(),
+            )
+            .help_text(text);
+        }
+    }
     if enabled
         && response.hovered()
         && let Some(pointer) = response.hover_pos()
@@ -307,7 +376,7 @@ pub(super) fn show(
             rect.center_top() + egui::vec2(0.0, 2.0),
             egui::Align2::CENTER_TOP,
             format!("Length {:.3}s", range.duration().as_seconds_f64()),
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
     }
@@ -354,14 +423,22 @@ pub(super) fn show(
         );
         if selection.is_some() || control.has_focus() {
             painter.text(
-                bounds.center(),
-                egui::Align2::CENTER_CENTER,
+                if start {
+                    bounds.left_center() + egui::vec2(LABEL_INSET, 0.0)
+                } else {
+                    bounds.right_center() - egui::vec2(LABEL_INSET, 0.0)
+                },
+                if start {
+                    egui::Align2::LEFT_CENTER
+                } else {
+                    egui::Align2::RIGHT_CENTER
+                },
                 format!(
                     "{} {:.3}s",
                     if start { "In" } else { "Out" },
                     current.as_seconds_f64()
                 ),
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(LABEL_SIZE),
                 crate::chrome::FOREGROUND,
             );
         }

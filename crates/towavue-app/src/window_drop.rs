@@ -236,7 +236,7 @@ impl WindowHost {
                 self.merge_tab_drop(source, &request, target, point)
                     .map(|_| {
                         if visible && let Some(window) = &self.windows[&target].window {
-                            window.focus_window();
+                            let _ = towavue_runtime_windows::activate_window(window.as_ref());
                         }
                     })
             } else {

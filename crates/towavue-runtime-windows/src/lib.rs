@@ -50,9 +50,11 @@ pub use recent::{RecentEntry, RecentFiles, RecentKind, RecentUpdate};
 mod tempo;
 mod watch;
 mod waveform;
+mod window_activation;
 mod window_point;
 
 pub use launch::{LaunchRequest, LaunchRole, LaunchServer};
+pub use window_activation::activate_window;
 pub use window_point::{monitor_work_area, unobscured_window_point};
 
 pub use audio::{AudioOutput, AudioOutputError, AudioOutputEvent};

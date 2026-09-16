@@ -221,7 +221,7 @@ impl WindowHost {
         #[cfg(feature = "presentation-verification")]
         let shown = Instant::now();
         if visible {
-            window.focus_window();
+            let _ = towavue_runtime_windows::activate_window(window.as_ref());
         }
         #[cfg(feature = "presentation-verification")]
         {
@@ -403,7 +403,7 @@ impl WindowHost {
                                 .get(&target)
                                 .and_then(|app| app.window.as_ref())
                         {
-                            window.focus_window();
+                            let _ = towavue_runtime_windows::activate_window(window.as_ref());
                         }
                     })
             } else {

@@ -1,6 +1,6 @@
 use crate::scroll_style::ScrollAreaStyle;
 use egui::RichText;
-use towavue_core::{CommandId, ShortcutBindings};
+use towavue_core::{CommandId, MediaKind, ShortcutBindings};
 
 use crate::chrome;
 use crate::hover_help::HoverHelp;
@@ -20,6 +20,11 @@ pub(super) fn tab(
             chrome::BACKGROUND
         },
     );
+    let hover_background = ui.painter().add(egui::Shape::Noop);
+    ui.spacing_mut().button_padding = egui::vec2(chrome::TAB_PADDING, 0.0);
+    ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+    ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+    ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
     let response = ui.put(
@@ -27,6 +32,7 @@ pub(super) fn tab(
         egui::Button::new(chrome::tab_label("Gallery".into(), active))
             .fill(egui::Color32::TRANSPARENT)
             .stroke(egui::Stroke::NONE)
+            .gap(0.0)
             .truncate()
             .sense(egui::Sense::click_and_drag()),
     );
@@ -48,6 +54,12 @@ pub(super) fn tab(
     crate::tab_focus::release_pointer_focus(&response);
     crate::tab_focus::release_pointer_button_focus(&response, egui::PointerButton::Middle);
     crate::tab_focus::release_pointer_focus(&close);
+    if response.hovered() || close.hovered() {
+        ui.painter().set(
+            hover_background,
+            egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
+        );
+    }
     if response.has_focus() || close.has_focus() {
         ui.painter().rect_stroke(
             rect,
@@ -63,36 +75,79 @@ pub fn show(
     ui: &mut egui::Ui,
     shortcuts: &ShortcutBindings,
     query: &mut String,
-    has_recent: bool,
+    filter: &mut Option<MediaKind>,
+    paths: &[std::path::PathBuf],
     enabled: bool,
-    recent: impl FnOnce(&mut egui::Ui, &str) -> Vec<crate::gallery_rail::Month>,
+    recent: impl FnOnce(&mut egui::Ui, &str, Option<MediaKind>) -> Vec<crate::gallery_rail::Month>,
 ) -> Option<CommandId> {
+    let previous_filter = *filter;
     let viewport = ui.available_rect_before_wrap();
     let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inset));
     ui.advance_cursor_after_rect(viewport);
     let ui = &mut content;
-    if !enabled {
+    if !enabled || egui::Popup::is_any_open(ui.ctx()) {
         let opacity = ui.opacity();
         ui.disable();
         ui.set_opacity(opacity);
     }
     let width = (ui.available_width() - 40.0).clamp(0.0, 660.0);
-    let top = (ui.available_height() * 0.08).clamp(12.0, 40.0);
+    let top = (ui.available_height() * 0.04).clamp(6.0, 20.0);
     let mut chosen = None;
     ui.add_space(top);
     let search_changed = ui
         .horizontal(|ui| {
-            let gap = (ui.available_width() - width).max(0.0);
-            ui.add_space((gap / 2.0).min((gap - 40.0).max(0.0)));
-            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.spacing_mut().button_padding = egui::vec2(4.0, 0.0);
             let search = ui
-                .allocate_ui_with_layout(
-                    egui::vec2((width - 64.0).max(1.0), 24.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| crate::resize::text_input(ui, "Search Gallery", query),
-                )
+                .scope(|ui| {
+                    ui.visuals_mut().widgets.inactive.bg_stroke =
+                        ui.visuals().widgets.hovered.bg_stroke;
+                    ui.spacing_mut().text_edit_width = f32::INFINITY;
+                    ui.add_sized(
+                        [(ui.available_width() - 84.0).max(24.0), 24.0],
+                        |ui: &mut egui::Ui| crate::resize::text_input(ui, "Search Gallery", query),
+                    )
+                })
                 .inner;
+            let filter_button = ui
+                .add_sized(
+                    [24.0, 24.0],
+                    egui::Button::new(chrome::Icon::Filter.text())
+                        .stroke(egui::Stroke::NONE)
+                        .frame_when_inactive(false),
+                )
+                .help_text("Filter media types");
+            filter_button.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    filter_button.enabled(),
+                    "Filter media types",
+                )
+            });
+            if enabled {
+                egui::Popup::menu(&filter_button).show(|ui| {
+                    for (kind, label) in [
+                        (None, "All"),
+                        (Some(MediaKind::Image), "Images"),
+                        (Some(MediaKind::Video), "Videos"),
+                        (Some(MediaKind::Audio), "Audio"),
+                    ] {
+                        let available = kind.is_none()
+                            || paths.iter().any(|path| MediaKind::from_path(path) == kind);
+                        if ui
+                            .add_enabled(
+                                available,
+                                egui::Button::selectable(*filter == kind, label),
+                            )
+                            .clicked()
+                        {
+                            *filter = kind;
+                            ui.close();
+                        }
+                    }
+                });
+            }
             for (command, label, icon) in [
                 (CommandId::OpenFile, "Open File…", chrome::Icon::OpenFile),
                 (
@@ -104,7 +159,9 @@ pub fn show(
                 let response = ui
                     .add_sized(
                         [24.0, 24.0],
-                        egui::Button::new(icon.text()).frame_when_inactive(false),
+                        egui::Button::new(icon.text())
+                            .stroke(egui::Stroke::NONE)
+                            .frame_when_inactive(false),
                     )
                     .help_text(format!(
                         "{label}  {}",
@@ -120,7 +177,12 @@ pub fn show(
             search.changed()
         })
         .inner;
-    ui.add_space(32.0);
+    ui.add_space(16.0);
+    if ui.is_enabled() && egui::Popup::is_any_open(ui.ctx()) {
+        let opacity = ui.opacity();
+        ui.disable();
+        ui.set_opacity(opacity);
+    }
     let content_style = ui.style().clone();
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
@@ -142,7 +204,7 @@ pub fn show(
         .id_salt("welcome")
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .auto_shrink([false, false]);
-    if search_changed {
+    if search_changed || previous_filter != *filter {
         scroll = scroll.vertical_scroll_offset(0.0);
     }
     let mut output = scroll.show_styled(ui, |ui| {
@@ -161,8 +223,8 @@ pub fn show(
                 egui::vec2(width, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    let months = recent(ui, query);
-                    if !has_recent {
+                    let months = recent(ui, query, *filter);
+                    if paths.is_empty() {
                         ui.add(
                             egui::Label::new(
                                 RichText::new("Drop media files or a folder here to begin.")
@@ -196,6 +258,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn gallery_tab_hover_preserves_text_origin_and_fills_the_whole_tab() {
+        for density in [1.0, 1.25, 2.0] {
+            for active in [false, true] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(chrome::style);
+                let rect = egui::Rect::from_min_size(egui::pos2(8.0, 8.0), egui::vec2(160.0, 28.0));
+                let frame = |position| {
+                    context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(400.0, 100.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(position)],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            tab(ui, rect, active, true);
+                        },
+                    )
+                };
+                let outside = egui::pos2(300.0, 80.0);
+                frame(outside);
+                let idle = frame(outside);
+                let text = text_rect(&idle, "Gallery").expect("label");
+                for position in [rect.center(), rect.right_center() - egui::vec2(8.0, 0.0)] {
+                    frame(position);
+                    let hovered = frame(position);
+                    assert_eq!(text_rect(&hovered, "Gallery").expect("label"), text);
+                    assert!(hovered.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Rect(background) if background.rect == rect && background.fill == chrome::HOVER
+                    )));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn gallery_search_matches_all_words_in_names_and_paths_without_case_or_separator_sensitivity() {
         let path = std::path::Path::new("C:\\Photos\\日本\\My IMAGE.PNG");
         for query in [
@@ -218,13 +319,21 @@ mod tests {
         shortcuts: &ShortcutBindings,
         recent: impl FnOnce(&mut egui::Ui),
     ) -> Option<CommandId> {
-        super::show(ui, shortcuts, &mut String::new(), false, true, |ui, _| {
-            recent(ui);
-            vec![crate::gallery_rail::Month {
-                date: None,
-                offset: 0.0,
-            }]
-        })
+        super::show(
+            ui,
+            shortcuts,
+            &mut String::new(),
+            &mut None,
+            &[],
+            true,
+            |ui, _, _| {
+                recent(ui);
+                vec![crate::gallery_rail::Month {
+                    date: None,
+                    offset: 0.0,
+                }]
+            },
+        )
     }
 
     #[test]
@@ -275,9 +384,8 @@ mod tests {
             }
             let idle = frame(vec![]);
             let track = node_rect(&idle, "Date unknown");
-            assert!(
-                track.top() > text_rect(&idle, "Search Gallery").expect("header").bottom() + 24.0
-            );
+            let gap = track.top() - node_rect(&idle, "Search Gallery").bottom();
+            assert!((16.0..=24.0).contains(&gap), "compact header gap: {gap}");
             assert!((track.right() - 472.0).abs() <= 1.0 / density);
             assert!((track.bottom() - 292.0).abs() <= 1.0 / density);
             let button = |pos, pressed| egui::Event::PointerButton {
@@ -418,12 +526,17 @@ mod tests {
 
     #[test]
     fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
-        for size in [
+        for (size, density) in [
             egui::vec2(960.0, 514.0),
             egui::vec2(480.0, 238.0),
             egui::vec2(240.0, 119.0),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|size| [1.0, 1.25, 2.0].map(|density| (size, density)))
+        {
             let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
             let mut shortcuts = ShortcutBindings::default();
             context.enable_accesskit();
             shortcuts.set(
@@ -451,9 +564,42 @@ mod tests {
             }
             let (output, _) = frame(vec![]);
             let search = node_rect(&output, "Search Gallery");
+            let filter = node_rect(&output, "Filter media types");
             let open = node_rect(&output, "Open File…");
             let folder = node_rect(&output, "Open Folder…");
-            assert!(search.right() < open.left() && open.right() < folder.left());
+            assert!(
+                search.right() < filter.left()
+                    && filter.right() < open.left()
+                    && open.right() < folder.left()
+            );
+            for rect in [filter, open, folder] {
+                assert!((rect.width() - 24.0).abs() <= 1.0 / density);
+                assert!((rect.height() - 24.0).abs() <= 1.0 / density);
+                assert!((rect.center().y - search.center().y).abs() <= 1.0 / density);
+            }
+            assert!((search.height() - 24.0).abs() <= 1.0 / density);
+            assert!((search.left() - 8.0).abs() <= 1.0 / density);
+            assert!((folder.right() - (size.x - 8.0)).abs() <= 1.0 / density);
+            let border = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.rect.min.distance(search.min) <= 1.0 / density
+                                && rect.rect.max.distance(search.max) <= 1.0 / density =>
+                        {
+                            Some(rect.stroke)
+                        }
+                        _ => None,
+                    })
+                    .expect("search field border")
+            };
+            let idle_border = border(&output);
+            frame(vec![egui::Event::PointerMoved(search.center())]);
+            let hovered = frame(vec![egui::Event::PointerMoved(search.center())]).0;
+            assert_eq!(border(&hovered), idle_border);
+            assert_eq!(idle_border, egui::Stroke::new(1.0, chrome::BORDER));
             assert!((open.center().y - folder.center().y).abs() < 1.0);
             assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(folder));
             for (label, command) in [
@@ -522,6 +668,8 @@ mod tests {
         );
         // Enter finishes a single-line edit; Tab re-enters the first field.
         frame(key(egui::Key::Tab));
+        frame(key(egui::Key::Tab));
+        // The type-filter button precedes Open File.
         frame(key(egui::Key::Tab));
         assert_eq!(frame(key(egui::Key::Enter)), [CommandId::OpenFile]);
         frame(key(egui::Key::Tab));

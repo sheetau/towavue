@@ -4,6 +4,33 @@ use towavue_runtime_windows::DecodedImageFrame;
 
 type App = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 
+#[test]
+fn gallery_transfer_preserves_query_and_filter_when_reusing_the_destination() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::gallery_transfer_preserves_query_and_filter_when_reusing_the_destination",
+    ) else {
+        return;
+    };
+    let (mut source, _) = app();
+    let (mut target, _) = app();
+    source.gallery_search = "moving query".into();
+    source.gallery_filter = Some(MediaKind::Video);
+    let gallery = source.tabs.gallery().expect("source Gallery");
+    let existing = target.tabs.gallery().expect("target Gallery");
+    // Exercise the transfer payload, leaving native graphics/readiness gates unchanged.
+    let request = DetachRequest {
+        tab: gallery,
+        path: None,
+        instance: 0,
+    };
+    let transfer = source.take_tab_transfer(&request, None);
+    assert!(source.gallery_search.is_empty() && source.gallery_filter.is_none());
+    assert_eq!(target.accept_tab_transfer(transfer, 0), existing);
+    assert_eq!(target.gallery_search, "moving query");
+    assert_eq!(target.gallery_filter, Some(MediaKind::Video));
+    assert_eq!(target.tabs.len(), 1);
+}
+
 fn app() -> (App, mpsc::Receiver<AppEvent>) {
     let (sent, received) = mpsc::channel();
     let notify: Box<dyn Fn(AppEvent) + Send + Sync> = Box::new(move |event| {

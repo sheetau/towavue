@@ -874,6 +874,7 @@ struct Application<N> {
     pending_window_launches: Vec<PathBuf>,
     recent_months: BTreeMap<PathBuf, (u16, u16)>,
     gallery_search: String,
+    gallery_filter: Option<MediaKind>,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
     image_edit_worker: towavue_runtime_windows::LatestTask,
     image_edit_source: Option<Arc<DecodedImage>>,
@@ -1130,6 +1131,7 @@ where
             pending_window_launches: Vec::new(),
             recent_months: BTreeMap::new(),
             gallery_search: String::new(),
+            gallery_filter: None,
             image_copy: None,
             image_edit_worker: towavue_runtime_windows::LatestTask::new("towavue-image-edits")
                 .map_err(|error| error.to_string())?,
@@ -3642,10 +3644,7 @@ where
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
                 if self.path.is_none() {
-                    let enabled = !modal_blocked
-                        && !self.palette_open
-                        && !self.grid_open
-                        && !egui::Popup::is_any_open(&context);
+                    let enabled = !modal_blocked && !self.palette_open && !self.grid_open;
                     let gallery = self.tabs.gallery();
                     if let Some(command) = ui
                         .push_id(("gallery", gallery), |ui| {
@@ -3653,17 +3652,23 @@ where
                                 ui,
                                 &self.shortcuts,
                                 &mut self.gallery_search,
-                                !self.recent_paths.is_empty(),
+                                &mut self.gallery_filter,
+                                &self.recent_paths,
                                 enabled,
-                                |ui, query| {
+                                |ui, query, filter| {
                                     let filtered;
-                                    let paths = if query.trim().is_empty() {
+                                    let paths = if query.trim().is_empty() && filter.is_none() {
                                         &self.recent_paths
                                     } else {
                                         filtered = self
                                             .recent_paths
                                             .iter()
-                                            .filter(|path| welcome::matches(path, query))
+                                            .filter(|path| {
+                                                welcome::matches(path, query)
+                                                    && filter.is_none_or(|kind| {
+                                                        MediaKind::from_path(path) == Some(kind)
+                                                    })
+                                            })
                                             .cloned()
                                             .collect::<Vec<_>>();
                                         &filtered
@@ -3671,8 +3676,12 @@ where
                                     if paths.is_empty() && !self.recent_paths.is_empty() {
                                         ui.label("No matching files.");
                                     }
-                                    let offsets =
-                                        self.filmstrip.show_recent(ui, paths, enabled, actions);
+                                    let offsets = self.filmstrip.show_recent(
+                                        ui,
+                                        paths,
+                                        ui.is_enabled(),
+                                        actions,
+                                    );
                                     let mut months: Vec<gallery_rail::Month> = Vec::new();
                                     for (path, offset) in paths.iter().zip(offsets) {
                                         let date = self.recent_months.get(path).copied();
@@ -6400,6 +6409,9 @@ where
                         .is_some_and(egui::Popup::is_any_open)
                     || !self.recent_paths.contains(&path)
                     || !welcome::matches(&path, &self.gallery_search)
+                    || self
+                        .gallery_filter
+                        .is_some_and(|kind| MediaKind::from_path(&path) != Some(kind))
                 {
                     return;
                 }
@@ -8201,6 +8213,7 @@ where
             };
             if removed {
                 self.gallery_search.clear();
+                self.gallery_filter = None;
                 if !remember && self.tabs.is_empty() {
                     self.exit_requested = true;
                 }
@@ -11352,9 +11365,10 @@ mod tests {
                         ui,
                         &ShortcutBindings::default(),
                         &mut String::new(),
-                        false,
+                        &mut None,
+                        &[],
                         true,
-                        |_, _| Vec::new(),
+                        |_, _, _| Vec::new(),
                     ) {
                         chosen.push(command);
                     }

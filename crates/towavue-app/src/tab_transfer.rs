@@ -12,7 +12,7 @@ pub(super) struct DetachRequest {
 }
 
 pub(super) enum TabTransfer {
-    Gallery(String),
+    Gallery(String, Option<MediaKind>),
     Media(Box<MediaTabTransfer>),
 }
 
@@ -208,8 +208,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let id = request.tab;
         if self.tabs.gallery() == Some(id) {
             let query = std::mem::take(&mut self.gallery_search);
+            let filter = self.gallery_filter.take();
             self.remove_tab(id, false);
-            return TabTransfer::Gallery(query);
+            return TabTransfer::Gallery(query, filter);
         }
         let target = self
             .tabs
@@ -277,8 +278,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn accept_tab_transfer(&mut self, transfer: TabTransfer, gap: usize) -> TabId {
         let mut transfer = match transfer {
             TabTransfer::Media(transfer) => transfer,
-            TabTransfer::Gallery(query) => {
+            TabTransfer::Gallery(query, filter) => {
                 self.gallery_search = query;
+                self.gallery_filter = filter;
                 self.dispatch(CommandId::OpenGallery);
                 let id = self.tabs.gallery().expect("opened Gallery");
                 self.tabs.reorder(id, gap);

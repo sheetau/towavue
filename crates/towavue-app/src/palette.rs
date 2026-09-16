@@ -208,6 +208,9 @@ impl CommandPalette {
             .show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
                 let previous_query = self.query.clone();
+                let inactive_stroke = ui.visuals().widgets.inactive.bg_stroke;
+                ui.visuals_mut().widgets.inactive.bg_stroke =
+                    ui.visuals().widgets.hovered.bg_stroke;
                 ui.memory_mut(|memory| {
                     if !memory.has_focus(query_id) {
                         memory.request_focus(query_id);
@@ -228,6 +231,7 @@ impl CommandPalette {
                         }),
                 )
                 .help_text("Up / Down: select   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
+                ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.query.starts_with('>');
                 if command_mode {
                     self.folders = false;

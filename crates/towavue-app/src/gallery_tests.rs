@@ -1,6 +1,155 @@
 use crate::*;
 
 #[test]
+fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_state() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_state",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        app.ui_context = Some(context.clone());
+        let image = root.join("image.png");
+        let video = root.join("video.mp4");
+        app.recent_paths = vec![image.clone(), video.clone()];
+        app.recent_months.insert(image.clone(), (2026, 9));
+        app.recent_months.insert(video.clone(), (2026, 7));
+        let size = egui::vec2(480.0, 400.0);
+        let click = |output: &egui::FullOutput, label| {
+            egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: video_rotation::tests::node(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree"),
+                    label,
+                ),
+                data: None,
+            })
+        };
+        let has = |output: &egui::FullOutput, label| {
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree");
+            let header_bottom = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Search Gallery"))
+                .expect("search field")
+                .1
+                .bounds()
+                .expect("header bounds")
+                .y1;
+            // A retained media tab can have the same filename as a filtered-out card.
+            tree.nodes.iter().any(|(_, node)| {
+                node.label() == Some(label)
+                    && node
+                        .bounds()
+                        .is_some_and(|bounds| bounds.y0 >= header_bottom)
+            })
+        };
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        assert!(app.gallery_filter.is_none());
+        frame(&mut app, size, vec![click(&output, "Filter media types")]);
+        let menu = frame(&mut app, size, vec![]);
+        for label in ["All", "Images", "Videos", "Audio"] {
+            let node = &menu
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .expect("filter option")
+                .1;
+            assert_eq!(node.is_disabled(), label == "Audio");
+        }
+        frame(&mut app, size, vec![click(&menu, "Audio")]);
+        assert!(
+            app.gallery_filter.is_none(),
+            "disabled kind cannot activate"
+        );
+        let menu = frame(&mut app, size, vec![]);
+        frame(&mut app, size, vec![click(&menu, "Videos")]);
+        let output = frame(&mut app, size, vec![]);
+        assert_eq!(app.gallery_filter, Some(MediaKind::Video));
+        assert!(has(&output, "video.mp4") && has(&output, "July 2026"));
+        assert!(!has(&output, "image.png") && !has(&output, "September 2026"));
+        app.handle_ui_action(UiAction::OpenGalleryBackground(image.clone()));
+        assert!(
+            app.tabs.tabs().is_empty(),
+            "filtered-out card cannot open a background tab"
+        );
+        app.gallery_search = "image".into();
+        let output = frame(&mut app, size, vec![]);
+        assert!(!has(&output, "video.mp4") && !has(&output, "image.png"));
+        frame(&mut app, size, vec![click(&output, "Filter media types")]);
+        let menu = frame(&mut app, size, vec![]);
+        frame(&mut app, size, vec![click(&menu, "All")]);
+        let output = frame(&mut app, size, vec![]);
+        assert!(has(&output, "image.png") && !has(&output, "video.mp4"));
+        app.gallery_filter = Some(MediaKind::Image);
+        let gallery = app.tabs.gallery().expect("Gallery");
+        let retained = tab_transfer::tests::install(
+            &mut app,
+            image.clone(),
+            tab_transfer::tests::decoded(false),
+        );
+        app.activate_tab(gallery);
+        assert_eq!(app.gallery_filter, Some(MediaKind::Image));
+        assert_eq!(app.gallery_search, "image");
+        app.dispatch(CommandId::CloseTab);
+        assert_eq!(app.tabs.active_id(), Some(retained));
+        app.dispatch(CommandId::OpenGallery);
+        assert!(app.gallery_filter.is_none() && app.gallery_search.is_empty());
+        app.gallery_filter = Some(MediaKind::Video);
+        app.recent_paths = vec![image];
+        frame(&mut app, size, vec![]);
+        assert_eq!(
+            app.gallery_filter,
+            Some(MediaKind::Video),
+            "history refresh does not silently change a selected filter"
+        );
+        app.recent_paths.push(root.join("audio.wav"));
+        for (label, kind, name) in [
+            ("Images", MediaKind::Image, "image.png"),
+            ("Audio", MediaKind::Audio, "audio.wav"),
+        ] {
+            let output = frame(&mut app, size, vec![]);
+            frame(&mut app, size, vec![click(&output, "Filter media types")]);
+            let menu = frame(&mut app, size, vec![]);
+            frame(&mut app, size, vec![click(&menu, label)]);
+            let output = frame(&mut app, size, vec![]);
+            assert_eq!(app.gallery_filter, Some(kind));
+            assert!(has(&output, name));
+            assert!(!has(
+                &output,
+                if kind == MediaKind::Image {
+                    "audio.wav"
+                } else {
+                    "image.png"
+                }
+            ));
+        }
+    }
+}
+
+#[test]
 fn gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(

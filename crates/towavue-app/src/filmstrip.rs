@@ -1344,9 +1344,10 @@ mod tests {
                         ui,
                         &towavue_core::ShortcutBindings::default(),
                         &mut String::new(),
-                        true,
+                        &mut None,
+                        &paths,
                         enabled,
-                        |ui, _| {
+                        |ui, _, _| {
                             filmstrip.show_recent(ui, &paths, enabled, &mut actions);
                             Vec::new()
                         },

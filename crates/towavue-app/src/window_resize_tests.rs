@@ -2,10 +2,10 @@ use super::*;
 use winit::dpi::PhysicalSize;
 
 #[test]
-fn native_resize_burst_preserves_back_buffer_until_the_next_draw() {
+fn native_resize_coalesces_transitions_and_draws_interactive_changes() {
     use winit::platform::windows::EventLoopBuilderExtWindows;
     let Some(_) = tests::isolated_test_root(
-        "window_resize_tests::native_resize_burst_preserves_back_buffer_until_the_next_draw",
+        "window_resize_tests::native_resize_coalesces_transitions_and_draws_interactive_changes",
     ) else {
         return;
     };
@@ -43,6 +43,61 @@ fn native_resize_burst_preserves_back_buffer_until_the_next_draw() {
             app.renderer = Some(renderer);
             app.ui_context = Some(context);
             app.ui_state = Some(state);
+            for (interactive, delta) in [(false, 32), (true, 32), (true, -16), (false, -16)] {
+                app.native_caption
+                    .as_ref()
+                    .expect("caption")
+                    .verification_size_move(interactive);
+                let old_size = window.inner_size();
+                app.render_frame();
+                let target = PhysicalSize::new(
+                    old_size.width.checked_add_signed(delta).expect("width"),
+                    old_size
+                        .height
+                        .checked_add_signed(delta / 2)
+                        .expect("height"),
+                );
+                let _ = window.request_inner_size(target);
+                let actual = window.inner_size();
+                assert_ne!(actual, old_size);
+                app.window_event(event_loop, window.id(), WindowEvent::Resized(actual));
+                let held = app
+                    .renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .verification_surface_rgba()
+                    .expect("resize surface");
+                let expected = if interactive { actual } else { old_size };
+                assert_eq!(
+                    held.len(),
+                    (expected.width * expected.height * 4) as usize,
+                    "interactive resize must draw the new client before returning; ordinary notifications stay coalesced"
+                );
+                assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+                app.renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .clear([0.25, 0.5, 0.75, 1.0])
+                    .expect("sentinel");
+                let sentinel = app
+                    .renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .verification_surface_rgba()
+                    .expect("sentinel pixels");
+                for size in [actual, PhysicalSize::new(0, 0)] {
+                    app.window_event(event_loop, window.id(), WindowEvent::Resized(size));
+                    assert!(
+                        app.renderer
+                            .as_mut()
+                            .expect("renderer")
+                            .verification_surface_rgba()
+                            .expect("unchanged pixels")
+                            == sentinel,
+                        "duplicate and zero sizes must not draw synchronously"
+                    );
+                }
+            }
             for fullscreen in [false, true, false] {
                 app.renderer
                     .as_mut()
@@ -96,7 +151,7 @@ fn native_resize_burst_preserves_back_buffer_until_the_next_draw() {
                 assert_eq!(app.window_size, Some(actual));
             }
             eprintln!(
-                "PASS resize coalescing: old GPU buffer survives intermediate/zero/duplicate size notifications; redraw uses the final native client across normal/fullscreen/restore. Hidden window, not compositor capture."
+                "PASS interactive resize draws the actual new client before returning; old GPU buffer otherwise survives intermediate/zero/duplicate size notifications; redraw uses the final native client across normal/fullscreen/restore. Hidden window, not compositor capture."
             );
             event_loop.exit();
         }

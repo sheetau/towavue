@@ -41,6 +41,9 @@ pub struct CaptionButton {
 
 struct CaptionState {
     fullscreen: Cell<bool>,
+    sizing: Cell<bool>,
+    changing_dpi: Cell<bool>,
+    resize_frame: Cell<bool>,
     drag: Cell<Option<egui::Rect>>,
     dpi: Cell<u32>,
     fullscreen_dpi_bounds: Cell<Option<RECT>>,
@@ -58,6 +61,47 @@ pub struct NativeCaption {
 }
 
 impl NativeCaption {
+    /// Permit one synchronous frame in the native move/size loop. The owned
+    /// guard prevents recursive drawing across reentrant native callbacks.
+    /// Fullscreen and DPI placement changes still coalesce until a normal redraw.
+    pub fn begin_resize_frame(&self) -> Option<impl Drop + use<>> {
+        if !self.state.sizing.get()
+            || self.state.fullscreen.get()
+            || self.state.changing_dpi.get()
+            || self.state.resize_frame.replace(true)
+        {
+            return None;
+        }
+        // Own only thread-local state: dropping the guard never touches an HWND,
+        // even if a nested callback removes the caption before this frame ends.
+        struct ResizeFrame(Rc<CaptionState>);
+        impl Drop for ResizeFrame {
+            fn drop(&mut self) {
+                self.0.resize_frame.set(false);
+            }
+        }
+        Some(ResizeFrame(self.state.clone()))
+    }
+
+    /// Drive only the owned window's native lifecycle callback for verification;
+    /// this does not perform an OS pointer gesture or enter its modal resize loop.
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_size_move(&self, active: bool) {
+        // SAFETY: retained same-thread HWND, scalar message, no borrowed pointers.
+        unsafe {
+            SendMessageW(
+                self.handle,
+                if active {
+                    WM_ENTERSIZEMOVE
+                } else {
+                    WM_EXITSIZEMOVE
+                },
+                None,
+                None,
+            );
+        }
+    }
+
     /// Suppress this window's DWM animations for a synchronous fullscreen change,
     /// restoring the previous suppression state when the guard is dropped.
     pub fn suppress_transitions(&self) -> Option<impl Drop + '_> {
@@ -113,6 +157,9 @@ impl NativeCaption {
         }
         let state = Rc::new(CaptionState {
             fullscreen: Cell::new(false),
+            sizing: Cell::new(false),
+            changing_dpi: Cell::new(false),
+            resize_frame: Cell::new(false),
             drag: Cell::new(None),
             // SAFETY: live, same-thread window checked above; scalar query only.
             dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
@@ -495,6 +542,8 @@ unsafe extern "system" fn caption_proc(
             if RemoveWindowSubclass(handle, Some(caption_proc), SUBCLASS_ID).as_bool() {
                 drop(Rc::from_raw(data as *const CaptionState));
             }
+        } else if matches!(message, WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE | WM_CANCELMODE) {
+            state.sizing.set(message == WM_ENTERSIZEMOVE);
         } else if message == WM_WINDOWPOSCHANGING
             && state.fullscreen.get()
             && let Some(bounds) = state.fullscreen_dpi_bounds.get()
@@ -513,6 +562,7 @@ unsafe extern "system" fn caption_proc(
             // alive even if a callback removes the subclass before we restore it.
             Rc::increment_strong_count(data as *const CaptionState);
             let state = Rc::from_raw(data as *const CaptionState);
+            let changing_dpi = state.changing_dpi.replace(true);
             let dpi = u32::from(wparam.0 as u16);
             let previous_dpi = state.dpi.replace(dpi);
             let fullscreen = state.fullscreen.get();
@@ -563,6 +613,7 @@ unsafe extern "system" fn caption_proc(
                 }
             }
             extend_frame(handle, fullscreen);
+            state.changing_dpi.set(changing_dpi);
             return result;
         } else if message == WM_ERASEBKGND {
             let mut client = RECT::default();
@@ -902,6 +953,37 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                assert!(caption.begin_resize_frame().is_none());
+                for end_message in [WM_EXITSIZEMOVE, WM_CANCELMODE] {
+                    caption.verification_size_move(true);
+                    let frame = caption.begin_resize_frame().expect("interactive frame");
+                    assert!(caption.begin_resize_frame().is_none(), "no recursive draw");
+                    drop(frame);
+                    assert!(
+                        caption.begin_resize_frame().is_some(),
+                        "guard releases draw"
+                    );
+                    caption.state.fullscreen.set(true);
+                    assert!(
+                        caption.begin_resize_frame().is_none(),
+                        "coalesce fullscreen"
+                    );
+                    caption.state.fullscreen.set(false);
+                    caption.state.changing_dpi.set(true);
+                    assert!(
+                        caption.begin_resize_frame().is_none(),
+                        "coalesce DPI changes"
+                    );
+                    caption.state.changing_dpi.set(false);
+                    assert!(
+                        caption.begin_resize_frame().is_some(),
+                        "suppression releases draw"
+                    );
+                    // SAFETY: this test owns the same-thread hidden window; these
+                    // lifecycle messages contain no pointers or global input.
+                    unsafe { SendMessageW(handle, end_message, None, None) };
+                    assert!(caption.begin_resize_frame().is_none(), "native loop ended");
+                }
                 let transitions_disabled = || i32::from(caption.transitions_suppressed.get());
                 let previous = transitions_disabled();
                 {

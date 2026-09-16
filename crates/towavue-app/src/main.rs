@@ -9604,14 +9604,28 @@ where
 
     fn resize_window(&mut self, size: winit::dpi::PhysicalSize<u32>) {
         // Minimize and duplicate notifications must not discard the current view.
+        let changed = size.width != 0
+            && size.height != 0
+            && self.window_size.is_some_and(|previous| previous != size);
         if size.width != 0 && size.height != 0 {
-            if self.window_size.is_some_and(|previous| previous != size) {
+            if changed {
                 self.cancel_view_drag();
                 self.image_view.fit();
             }
             self.window_size = Some(size);
         }
         self.surface_resize_pending = true;
+        if changed
+            && let Some(_frame) = self
+                .native_caption
+                .as_ref()
+                .and_then(NativeCaption::begin_resize_frame)
+        {
+            // Finish the new layout during interactive sizing instead of leaving
+            // the old-width surface attached to the moving left window edge.
+            self.render_frame();
+            return;
+        }
         self.request_redraw();
     }
 
@@ -10902,8 +10916,13 @@ where
             self.finish_queued_media_release();
             self.cancel_hold_speed();
         }
-        // This event already renders below; re-queuing it would keep an idle window spinning.
-        if repaint && !matches!(event, WindowEvent::RedrawRequested) {
+        // Redraw renders below; resize owns its synchronous or queued repaint.
+        if repaint
+            && !matches!(
+                event,
+                WindowEvent::RedrawRequested | WindowEvent::Resized(_)
+            )
+        {
             self.request_redraw();
         }
         match event {

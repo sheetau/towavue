@@ -126,6 +126,73 @@ fn verify_metadata(png: &[u8], size: (u32, u32)) {
     assert_eq!(&tiff.0[start..start + 8], b"towavue\0");
 }
 
+fn thumbnail_exif(mut metadata: Vec<u8>, little: bool) -> (Vec<u8>, Vec<u8>) {
+    let short = |value: u16| {
+        if little {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        }
+    };
+    let long = |value: u32| {
+        if little {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        }
+    };
+    let mut thumbnail = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut thumbnail, 95)
+        .encode_image(&DynamicImage::ImageRgb8(RgbImage::from_fn(4, 3, |x, y| {
+            Rgb([(x * 56 + y * 18) as u8, (y * 66) as u8, (x * 24) as u8])
+        })))
+        .expect("thumbnail JPEG");
+    assert_eq!(metadata.len(), 124);
+    metadata[70..74].copy_from_slice(&long(124));
+    metadata.extend(short(6));
+    for (tag, kind, value) in [
+        (0x0100_u16, 4_u16, 4_u32),
+        (0x0101, 4, 3),
+        (0x0103, 3, 6),
+        (0x0112, 3, 1),
+        (0x0201, 4, 202),
+        (0x0202, 4, thumbnail.len() as u32),
+    ] {
+        metadata.extend(short(tag));
+        metadata.extend(short(kind));
+        metadata.extend(long(1));
+        if kind == 3 {
+            metadata.extend(short(value as u16));
+            metadata.extend([0, 0]);
+        } else {
+            metadata.extend(long(value));
+        }
+    }
+    metadata.extend(long(0));
+    assert_eq!(metadata.len(), 202);
+    metadata.extend(&thumbnail);
+    (metadata, thumbnail)
+}
+
+fn verify_no_thumbnail(png: &[u8], thumbnail: &[u8]) {
+    let blocks = chunks(png, b"eXIf");
+    assert_eq!(blocks.len(), 1);
+    let tiff = Tiff(&blocks[0]);
+    let root = tiff.long(4) as usize;
+    let next = root + 2 + usize::from(tiff.short(root)) * 12;
+    assert_eq!(
+        tiff.long(next),
+        0,
+        "do not point to a stale source thumbnail"
+    );
+    assert!(
+        !blocks[0]
+            .windows(thumbnail.len())
+            .any(|bytes| bytes == thumbnail),
+        "do not retain orphaned thumbnail bytes"
+    );
+}
+
 #[test]
 fn mjpeg_frame_png_bakes_all_exif_orientations_and_updates_edited_dimensions() {
     let root = std::env::temp_dir().join(format!("towavue-frame-exif-{}", std::process::id()));
@@ -146,7 +213,8 @@ fn mjpeg_frame_png_bakes_all_exif_orientations_and_updates_edited_dimensions() {
         DynamicImage::ImageRgb8(RgbImage::from_raw(info.width, info.height, pixels).expect("RGB"));
     for index in 0..32 {
         let orientation = (index % 8 + 1) as u16;
-        let metadata = exif(orientation, (index / 8) % 2 == 0, index >= 16);
+        let little = (index / 8) % 2 == 0;
+        let (metadata, _) = thumbnail_exif(exif(orientation, little, index >= 16), little);
         let mut encoded = jpeg[..2].to_vec();
         encoded.extend([0xff, 0xe1]);
         encoded.extend(((metadata.len() + 8) as u16).to_be_bytes());
@@ -226,6 +294,8 @@ fn mjpeg_frame_png_bakes_all_exif_orientations_and_updates_edited_dimensions() {
                 "frame {index}, edited {edited}"
             );
             verify_metadata(&png, (info.width, info.height));
+            let (_, thumbnail) = thumbnail_exif(exif(1, true, false), true);
+            verify_no_thumbnail(&png, &thumbnail);
         }
     }
     assert_eq!(fs::read(&video).expect("unchanged video"), original);
@@ -237,4 +307,108 @@ fn mjpeg_frame_png_bakes_all_exif_orientations_and_updates_edited_dimensions() {
         modified
     );
     fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
+#[test]
+fn frame_png_does_not_retain_a_source_thumbnail_after_same_size_edits() {
+    use ffmpeg::util::frame::side_data::Type;
+    ffmpeg::init().expect("FFmpeg");
+    let mut source = frame::Video::new(Pixel::RGB24, 32, 18);
+    let stride = source.stride(0);
+    for y in 0..18 {
+        for x in 0..32 {
+            source.data_mut(0)[y * stride + x * 3..y * stride + x * 3 + 3].copy_from_slice(&[
+                (x * 7 + y * 3) as u8,
+                (y * 11) as u8,
+                (x * 3) as u8,
+            ]);
+        }
+    }
+    let original_pixels = source.data(0).to_vec();
+    let reference = DynamicImage::ImageRgb8(RgbImage::from_fn(32, 18, |x, y| {
+        Rgb([(x * 7 + y * 3) as u8, (y * 11) as u8, (x * 3) as u8])
+    }));
+    for little in [true, false] {
+        let (metadata, thumbnail) = thumbnail_exif(exif(1, little, false), little);
+        source.remove_side_data(Type::EXIF);
+        {
+            let mut side = source
+                .new_side_data(Type::EXIF, metadata.len())
+                .expect("EXIF");
+            // SAFETY: the generated frame exclusively owns this newly allocated region.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    metadata.as_ptr(),
+                    (*side.as_mut_ptr()).data,
+                    metadata.len(),
+                );
+            }
+        }
+        for (operations, expected) in [
+            (vec![], reference.clone()),
+            (vec![EditOperation::FlipHorizontal], reference.fliph()),
+            (vec![EditOperation::FlipVertical], reference.flipv()),
+            (
+                vec![
+                    EditOperation::RotateClockwise,
+                    EditOperation::RotateClockwise,
+                ],
+                reference.rotate180(),
+            ),
+        ] {
+            let encoded = encode(&source, VideoOrientation::default(), &operations, &|| false)
+                .expect("edited PNG");
+            verify_metadata(&encoded, (32, 18));
+            verify_no_thumbnail(&encoded, &thumbnail);
+            assert_eq!(unpack(&encoded).1, expected.to_rgb8().into_raw());
+        }
+        assert_eq!(
+            source.side_data(Type::EXIF).expect("source EXIF").data(),
+            metadata
+        );
+        assert_eq!(source.data(0), original_pixels);
+    }
+}
+
+#[test]
+fn frame_png_thumbnail_normalization_preserves_profiles_without_a_chain() {
+    use ffmpeg::util::frame::side_data::Type;
+    // Absent, valid thumbnail-free, and truncated/unrecognized profiles retain
+    // their previous encoder policy. Bounds checks must not panic on bad offsets.
+    let mut profiles = vec![
+        vec![],
+        b"bad metadata".to_vec(),
+        b"II\x2a\0\xff\xff\xff\xff".to_vec(),
+    ];
+    for little in [true, false] {
+        let valid = exif(1, little, false);
+        for size in 0..74 {
+            profiles.push(valid[..size].to_vec());
+        }
+        profiles.push(valid);
+    }
+    let mut frame = frame::Video::new(Pixel::RGB24, 32, 18);
+    metadata::remove_thumbnail(&mut frame).expect("absent EXIF");
+    assert!(frame.side_data(Type::EXIF).is_none());
+    for profile in profiles {
+        frame.remove_side_data(Type::EXIF);
+        let mut side = frame
+            .new_side_data(Type::EXIF, profile.len())
+            .expect("EXIF");
+        if !profile.is_empty() {
+            // SAFETY: the generated frame exclusively owns this nonempty region.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    profile.as_ptr(),
+                    (*side.as_mut_ptr()).data,
+                    profile.len(),
+                );
+            }
+        }
+        metadata::remove_thumbnail(&mut frame).expect("unchanged profile");
+        assert_eq!(
+            frame.side_data(Type::EXIF).expect("retained EXIF").data(),
+            profile
+        );
+    }
 }

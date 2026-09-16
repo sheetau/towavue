@@ -3,6 +3,7 @@ use towavue_core::EditOperation;
 
 mod color;
 mod edits;
+mod metadata;
 
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
@@ -238,11 +239,13 @@ fn encode(
     }
     output.set_pts(Some(0));
     let output = edits::apply(output, operations, cancelled)?;
-    let output = if grayscale {
+    let mut output = if grayscale {
         pack_grayscale(output, depth > 8, alpha, cancelled)?
     } else {
         output
     };
+    check_cancelled(cancelled)?;
+    metadata::remove_thumbnail(&mut output)?;
     let aspect = output.aspect_ratio();
     let codec = ffmpeg::encoder::find(codec::Id::PNG).ok_or(ffmpeg::Error::EncoderNotFound)?;
     let mut encoder = codec::context::Context::new_with_codec(codec)

@@ -4925,6 +4925,7 @@ where
                     let width = chrome::tab_width(strip_width, self.tabs.len());
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
+                    ui.spacing_mut().scroll.dormant_handle_opacity = 0.0;
                     let strip_scroll = egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)

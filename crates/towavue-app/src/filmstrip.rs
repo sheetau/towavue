@@ -501,7 +501,6 @@ impl Filmstrip {
                 };
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
-                ui.spacing_mut().scroll.dormant_handle_opacity = 0.6;
                 let inset = screen.shrink(8.0_f32.min(screen.size().min_elem().max(0.0) * 0.25));
                 // Keep wheel ownership across the full dimmed panel, including
                 // the gutter outside the inset scroll area's hit regions.

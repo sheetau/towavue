@@ -554,7 +554,6 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
     {
         let mut app = setup(&root);
         let context = app.ui_context.clone().expect("context");
-        context.set_pixels_per_point(density);
         let value_id = egui::Id::new("tab-scrollbar-numeric-focus");
         let frame = |app: &mut Application<fn(AppEvent)>, size, focused, events| {
             let mut actions = Vec::new();
@@ -564,6 +563,15 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     focused,
                     events,
+                    viewports: [(
+                        egui::ViewportId::ROOT,
+                        egui::ViewportInfo {
+                            native_pixels_per_point: Some(density),
+                            ..Default::default()
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
                     ..Default::default()
                 },
                 |ui| {
@@ -617,6 +625,19 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
         let grab = egui::pos2(
             bounds.x0 as f32 + 5.0,
             ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        let painted_bar = |output: &egui::FullOutput| {
+            output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::Shape::Rect(rect) if rect.rect.width() > 10.0
+                    && rect.rect.height() <= 2.01 && rect.fill.a() > 0
+                    && rect.rect.top() >= bounds.y0 as f32 - 0.01
+                    && rect.rect.bottom() <= bounds.y1 as f32 + 0.01)
+            })
+        };
+        assert!(
+            !painted_bar(&output),
+            "tab scrollbar is hidden outside the strip"
         );
         let initial = state(&app).widgets;
         context.memory_mut(|memory| memory.request_focus(value_id));
@@ -680,10 +701,26 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
                 .expect("visible scrollbar")
         };
         let hovered_height = bar_height(&hovered);
+        assert!(painted_bar(&hovered));
         assert!(
             hovered_height <= 2.01,
             "tab scrollbar stays thin: {hovered_height}"
         );
+        frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::PointerMoved(egui::pos2(320.0, 200.0))],
+        );
+        for _ in 0..30 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let (outside, _) = frame(&mut app, size, true, vec![]);
+        assert!(
+            !painted_bar(&outside),
+            "leaving the strip hides its scrollbar again"
+        );
+        assert_eq!(outside.pixels_per_point, density);
         let strip = state(&app).strip.expect("strip");
         let wheel = strip.center();
         context.memory_mut(|memory| memory.request_focus(value_id));

@@ -37,76 +37,76 @@ pub fn bars(
         return false;
     }
     let bars = bar_viewport(viewport);
-    // Scale the virtual content with the inset tracks so thumb fractions and
-    // pan limits still describe the full image viewport, not the smaller UI.
-    let ratio = bars.size() / viewport.size();
     let overflow = (displayed - viewport.size()).max(egui::Vec2::ZERO);
-    let offset = (overflow * 0.5 - egui::vec2(view.pan.0, view.pan.1)) * ratio;
-    let output = ui.scope_builder(egui::UiBuilder::new().max_rect(bars), |ui| {
-        if !enabled {
-            ui.disable();
-        }
-        ui.style_mut().animation_time = 0.0;
-        let style = &mut ui.style_mut().spacing.scroll;
-        style.floating = true;
-        style.floating_allocated_width = 0.0;
-        style.dormant_handle_opacity = 1.0;
-        egui::ScrollArea::new([overflow.x > 0.0, overflow.y > 0.0])
-            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
-            .id_salt("image-scroll")
-            .auto_shrink([false, false])
-            .content_margin(0)
-            .animated(false)
-            .scroll_offset(offset)
-            .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
-            .show_styled(ui, |ui| {
-                ui.set_min_size(displayed.max(viewport.size()) * ratio);
-            })
-    });
-    let output = output.inner;
-    let maximum = (output.content_size - output.inner_rect.size()).max(egui::Vec2::ZERO);
     let mut pan = egui::Vec2::from(view.pan);
-    for axis in 0..2 {
-        // Layout rounds virtual content. Ignore that idle clamp and map actual
-        // bar movement through its measured range so both endpoints stay exact.
-        if maximum[axis] > 0.0
-            && output.state.offset[axis] != offset[axis].clamp(0.0, maximum[axis])
-        {
-            pan[axis] = overflow[axis] * (0.5 - output.state.offset[axis] / maximum[axis]);
-        }
-    }
-    view.pan = pan.into();
-    clamp(view, displayed, viewport.size());
-    // egui 0.35 identifies each bar by the ScrollArea ID plus its usize axis.
-    // Inspect its response, not offset changes: a thumb press can leave the view
-    // stationary, and rounded layout clamps are not pointer interactions.
-    // Response methods may lock the context again; release the input borrow first.
     let (pressed, released) = ui.input(|input| {
         (
             input.pointer.primary_pressed(),
             input.pointer.primary_released(),
         )
     });
-    enabled
-        && (pressed || released)
-        && (0..2_usize).any(|axis| {
-            overflow[axis] > 0.0
-                && ui
-                    .ctx()
-                    .read_response(output.id.with(axis))
-                    .is_some_and(|response| {
-                        let owned = response.enabled()
-                            && ((pressed && response.is_pointer_button_down_on())
-                                || (released
-                                    && (response.clicked_by(egui::PointerButton::Primary)
-                                        || response
-                                            .drag_stopped_by(egui::PointerButton::Primary))));
-                        if owned {
-                            response.surrender_focus();
-                        }
-                        owned
-                    })
-        })
+    let mut accepted = false;
+    for axis in 0..2_usize {
+        if overflow[axis] <= 0.0 {
+            continue;
+        }
+        // Separate axis viewports shorten both painting and hit regions. A
+        // paint-only scroll_bar_rect would leave an invisible corner target.
+        let mut track = bars;
+        track.max[axis] -= (ui.spacing().scroll.bar_width + 3.0).min(track.size()[axis] * 0.25);
+        let ratio = track.size()[axis] / viewport.size()[axis];
+        let mut offset = egui::Vec2::ZERO;
+        offset[axis] = (overflow[axis] * 0.5 - pan[axis]) * ratio;
+        let mut content = track.size();
+        content[axis] = displayed[axis] * ratio;
+        let output = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(track), |ui| {
+                if !enabled {
+                    ui.disable();
+                }
+                ui.style_mut().animation_time = 0.0;
+                let style = &mut ui.style_mut().spacing.scroll;
+                style.floating = true;
+                style.floating_allocated_width = 0.0;
+                style.handle_min_length = style.handle_min_length.min(track.size()[axis]);
+                egui::ScrollArea::new([axis == 0, axis == 1])
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .id_salt(("image-scroll", axis))
+                    .auto_shrink([false, false])
+                    .content_margin(0)
+                    .animated(false)
+                    .scroll_offset(offset)
+                    .scroll_source(egui::scroll_area::ScrollSource::SCROLL_BAR)
+                    .show_styled(ui, |ui| ui.set_min_size(content))
+            })
+            .inner;
+        // Layout rounds virtual content. Ignore that idle clamp and map actual
+        // bar movement through its measured range so both endpoints stay exact.
+        let maximum = (output.content_size[axis] - output.inner_rect.size()[axis]).max(0.0);
+        if maximum > 0.0 && output.state.offset[axis] != offset[axis].clamp(0.0, maximum) {
+            pan[axis] = overflow[axis] * (0.5 - output.state.offset[axis] / maximum);
+        }
+        // A stationary thumb press still owns input; rounded clamps do not.
+        if enabled && (pressed || released) {
+            accepted |= ui
+                .ctx()
+                .read_response(output.id.with(axis))
+                .is_some_and(|response| {
+                    let owned = response.enabled()
+                        && ((pressed && response.is_pointer_button_down_on())
+                            || (released
+                                && (response.clicked_by(egui::PointerButton::Primary)
+                                    || response.drag_stopped_by(egui::PointerButton::Primary))));
+                    if owned {
+                        response.surrender_focus();
+                    }
+                    owned
+                });
+        }
+    }
+    view.pan = pan.into();
+    clamp(view, displayed, viewport.size());
+    accepted
 }
 
 pub fn held_bars(
@@ -120,7 +120,6 @@ pub fn held_bars(
     // Keep normal IDs and suppress content-hover fading as well as disabled dimming.
     let original = ui.style().clone();
     ui.visuals_mut().disabled_alpha = 1.0;
-    ui.style_mut().spacing.scroll.active_handle_opacity = 1.0;
     bars(ui, viewport, displayed, &mut view, false);
     ui.set_style(original);
 }

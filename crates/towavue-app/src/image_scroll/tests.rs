@@ -52,6 +52,7 @@ fn inset_scrollbar_gutters_do_not_capture_background_drags() {
             egui::pos2(389.5, 299.0),
             egui::pos2(1.0, 289.5),
             egui::pos2(399.0, 289.5),
+            egui::pos2(389.5, 289.5),
         ] {
             let button = |pressed| egui::Event::PointerButton {
                 pos: point,
@@ -421,6 +422,19 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         }
         let output = frame(&mut app, vec![], density, size);
         assert_eq!(bars(&output).len(), 2);
+        let regions = bars(&output);
+        let horizontal = regions
+            .iter()
+            .find(|bar| bar.width() > bar.height())
+            .expect("horizontal");
+        let vertical = regions
+            .iter()
+            .find(|bar| bar.width() < bar.height())
+            .expect("vertical");
+        assert!(
+            horizontal.x1 < vertical.x0 && vertical.y1 < horizontal.y0,
+            "tracks and hit regions leave a separated corner: {regions:?}"
+        );
         for bar in bars(&output) {
             assert!(bar.x0 >= 8.0 && bar.y0 >= 8.0, "inset start: {bar:?}");
             assert!(

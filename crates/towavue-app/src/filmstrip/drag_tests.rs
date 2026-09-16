@@ -1511,6 +1511,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
         return;
     };
     let context = crate::fonts::test_context();
+    context.global_style_mut(crate::chrome::style);
     context.enable_accesskit();
     let snapshot = snapshot(&root);
     let current = &snapshot.items[1].path;

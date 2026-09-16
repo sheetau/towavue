@@ -27,6 +27,10 @@ fn with_style<R>(
     // egui paints bars with the parent's widget visuals after laying out content.
     // Restore the content's style separately, without adding a scope or changing IDs.
     let widgets = &mut ui.visuals_mut().widgets;
+    // egui's opacity states refer to the entire track, but widget visuals
+    // distinguish the thumb itself. Keep track hover at the idle thumb color.
+    widgets.hovered.fg_stroke.color = widgets.inactive.fg_stroke.color;
+    widgets.inactive.fg_stroke.color = widgets.inactive.fg_stroke.color.gamma_multiply(0.6);
     for visual in [
         &mut widgets.inactive,
         &mut widgets.hovered,
@@ -92,7 +96,6 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             for (kind, horizontal) in [(0, false), (0, true), (1, false), (2, false), (2, true)] {
                 let context = egui::Context::default();
-                context.set_pixels_per_point(density);
                 context.global_style_mut(crate::chrome::style);
                 context.global_style_mut(|style| style.animation_time = 0.0);
                 let mut pointer = None;
@@ -121,6 +124,15 @@ mod tests {
                                 egui::vec2(240.0, 180.0),
                             )),
                             events,
+                            viewports: [(
+                                egui::ViewportId::ROOT,
+                                egui::ViewportInfo {
+                                    native_pixels_per_point: Some(density),
+                                    ..Default::default()
+                                },
+                            )]
+                            .into_iter()
+                            .collect(),
                             ..Default::default()
                         },
                         |ui| {
@@ -180,6 +192,9 @@ mod tests {
                 let idle = bars(&render(None, false));
                 assert_eq!(idle[0].fill.a(), 0);
                 assert!(idle[1].fill.a() > 0, "idle handle stays visible");
+                assert!(
+                    f32::from(idle[1].corner_radius.nw) >= idle[1].rect.size().min_elem() / 2.0
+                );
                 let output = render(Some(egui::pos2(80.0, 80.0)), false);
                 let shapes = bars(&output);
                 assert_eq!(shapes.len(), 2, "track and handle are painted");
@@ -189,6 +204,22 @@ mod tests {
                     "hovering content does not show a track"
                 );
                 let handle = shapes[1].rect;
+                let track = shapes[0].rect;
+                let track_point = if horizontal {
+                    egui::pos2(track.right() - 2.0, track.center().y)
+                } else {
+                    egui::pos2(track.center().x, track.bottom() - 2.0)
+                };
+                assert!(!handle.contains(track_point));
+                let track_hover = bars(&render(Some(track_point), false));
+                assert_eq!(
+                    track_hover[1].fill, idle[1].fill,
+                    "track hover does not brighten the handle"
+                );
+                assert!(
+                    track_hover[0].fill.a() > 0 && track_hover[0].fill.a() <= 64,
+                    "track stays translucent"
+                );
                 for down in [false, true, false] {
                     let output = render(Some(handle.center()), down);
                     let shapes = bars(&output);
@@ -197,6 +228,11 @@ mod tests {
                         "interacting with the bar shows its track"
                     );
                     let handle = &shapes[1];
+                    assert_ne!(
+                        handle.fill, idle[1].fill,
+                        "only handle interaction is highlighted"
+                    );
+                    assert_eq!(output.pixels_per_point, density);
                     assert!(
                         f32::from(handle.corner_radius.nw) >= handle.rect.size().min_elem() / 2.0,
                         "handle has pill ends while hovered or dragged: {handle:?}"

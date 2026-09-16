@@ -246,6 +246,7 @@ enum UiAction {
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
+    OpenGalleryBackground(PathBuf),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
     CloseFilmstrip,
@@ -6386,6 +6387,33 @@ where
                 }
             }
             UiAction::Recent(action) => self.handle_recent_action(action),
+            UiAction::OpenGalleryBackground(path) => {
+                let Some(gallery) = self.tabs.gallery() else {
+                    return;
+                };
+                if self.tabs.active_id() != Some(gallery)
+                    || self.palette_open
+                    || self.grid_open
+                    || self
+                        .ui_context
+                        .as_ref()
+                        .is_some_and(egui::Popup::is_any_open)
+                    || !self.recent_paths.contains(&path)
+                    || !welcome::matches(&path, &self.gallery_search)
+                {
+                    return;
+                }
+                let Some(kind) = MediaKind::from_path(&path) else {
+                    return;
+                };
+                // Match filmstrip middle-click: register a fresh tab, without loading
+                // or activating media and without changing Gallery's view or focus.
+                let added = self.tabs.open_new(path, kind);
+                self.seed_playback_volume(added);
+                self.edits.entry(added).or_default();
+                self.tabs.activate(gallery);
+                self.request_redraw();
+            }
             UiAction::OpenFilmstripMedia(path, background) => {
                 if !self.filmstrip_open
                     || self.palette_open

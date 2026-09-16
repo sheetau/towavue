@@ -73,7 +73,9 @@ pub fn show(
     ui.advance_cursor_after_rect(viewport);
     let ui = &mut content;
     if !enabled {
+        let opacity = ui.opacity();
         ui.disable();
+        ui.set_opacity(opacity);
     }
     let width = (ui.available_width() - 40.0).clamp(0.0, 660.0);
     let top = (ui.available_height() * 0.08).clamp(12.0, 40.0);

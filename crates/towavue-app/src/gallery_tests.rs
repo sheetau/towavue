@@ -1,6 +1,125 @@
 use crate::*;
 
 #[test]
+fn gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        app.ui_context = Some(context.clone());
+        let gallery = app.tabs.gallery().expect("Gallery");
+        let image = tab_transfer::tests::install(
+            &mut app,
+            root.join("retained.png"),
+            tab_transfer::tests::decoded(false),
+        );
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        let edits = app.edits[&image].clone();
+        app.activate_tab(gallery);
+        app.gallery_search = "item".into();
+        let paths = ["item.png", "item.mp4", "item.wav"].map(|name| root.join(name));
+        app.recent_paths = paths.to_vec();
+        let size = egui::vec2(960.0, 576.0);
+        let generation = app.media_generation;
+        let image_generation = app.image_generation;
+        for path in &paths {
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label() == Some(display_name(path).as_str())
+                        && node.role() == egui::accesskit::Role::Button
+                })
+                .expect("card")
+                .1
+                .bounds()
+                .expect("bounds");
+            let pos = egui::pos2((bounds.x0 + 20.0) as f32, (bounds.y0 + 20.0) as f32);
+            let count = app.tabs.len();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Middle,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            assert_eq!(app.tabs.len(), count + 1, "one new tab at {density}x");
+            assert_eq!(app.tabs.active_id(), Some(gallery));
+            assert_eq!(app.gallery_search, "item");
+            assert!(app.path.is_none() && app.image.is_none() && app.session.is_none());
+            assert_eq!(app.media_generation, generation);
+            assert_eq!(app.image_generation, image_generation);
+            assert_eq!(app.edits[&image], edits);
+            assert!(app.retained_images.contains_key(&image));
+            let added = app.tabs.tabs().last().expect("background tab").id;
+            assert!(!app.edits[&added].is_dirty());
+            if MediaKind::from_path(path) != Some(MediaKind::Image) {
+                assert!(app.playback_volumes.contains_key(&added));
+                app.tabs.activate(added);
+                assert_eq!(app.playback_volume(), 0.5);
+                app.tabs.activate(gallery);
+            }
+        }
+        let count = app.tabs.len();
+        app.handle_ui_action(UiAction::OpenGalleryBackground(paths[0].clone()));
+        assert_eq!(
+            app.tabs.len(),
+            count + 1,
+            "middle-click always creates a new tab"
+        );
+        let count = app.tabs.len();
+        for blocked in 0..5 {
+            app.palette_open = blocked == 0;
+            app.grid_open = blocked == 1;
+            if blocked == 2 {
+                egui::Popup::open_id(&context, egui::Id::new("gallery-test-menu"));
+            }
+            if blocked == 3 {
+                app.gallery_search = "not-matching".into();
+            }
+            if blocked == 4 {
+                app.activate_tab(image);
+            }
+            app.handle_ui_action(UiAction::OpenGalleryBackground(paths[0].clone()));
+            assert_eq!(app.tabs.len(), count, "stale action blocked: {blocked}");
+            app.palette_open = false;
+            app.grid_open = false;
+            egui::Popup::close_all(&context);
+            app.gallery_search = "item".into();
+        }
+        app.activate_tab(gallery);
+        app.recent_paths.clear();
+        app.handle_ui_action(UiAction::OpenGalleryBackground(paths[0].clone()));
+        assert_eq!(
+            app.tabs.len(),
+            count,
+            "removed history card cannot open a tab"
+        );
+    }
+}
+
+#[test]
 fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media() {
     use crate::audio_export::tests::frame;
     use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};

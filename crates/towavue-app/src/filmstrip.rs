@@ -734,7 +734,10 @@ impl Filmstrip {
         let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
         let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
         let mut focused_card = None;
+        let opacity = ui.opacity();
         ui.add_enabled_ui(enabled, |ui| {
+            // Covered cards keep their appearance; only their input is disabled.
+            ui.set_opacity(opacity);
             for row in paths.chunks(columns) {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
@@ -765,8 +768,7 @@ impl Filmstrip {
                             if !ui.is_rect_visible(rect) {
                                 return;
                             }
-                            if enabled
-                                && wanted.len() < VISIBLE_PREVIEW_LIMIT
+                            if wanted.len() < VISIBLE_PREVIEW_LIMIT
                                 && let Some(kind) = MediaKind::from_path(path)
                                 && !wanted.iter().any(|(existing, _)| existing == path)
                             {
@@ -841,7 +843,9 @@ impl Filmstrip {
                                     egui::StrokeKind::Inside,
                                 );
                             }
-                            if response.clicked() || response.middle_clicked() {
+                            if response.middle_clicked() {
+                                actions.push(UiAction::OpenGalleryBackground(path.clone()));
+                            } else if response.clicked() {
                                 actions.push(UiAction::OpenMedia(path.clone(), true));
                             }
                             if enabled {
@@ -854,17 +858,15 @@ impl Filmstrip {
             }
         });
         self.focused_card = focused_card;
-        // Prepare the rest of the recent list after visible cards, using the same bounded worker.
-        if enabled {
-            for path in paths {
-                if wanted.len() == VISIBLE_PREVIEW_LIMIT {
-                    break;
-                }
-                if let Some(kind) = MediaKind::from_path(path)
-                    && !wanted.iter().any(|(existing, _)| existing == path)
-                {
-                    wanted.push((path.clone(), kind));
-                }
+        // Keep the same bounded preparation set while a menu or picker covers the grid.
+        for path in paths {
+            if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+                break;
+            }
+            if let Some(kind) = MediaKind::from_path(path)
+                && !wanted.iter().any(|(existing, _)| existing == path)
+            {
+                wanted.push((path.clone(), kind));
             }
         }
         self.set_visible(wanted);
@@ -1338,9 +1340,17 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    egui::ScrollArea::vertical().show_styled(ui, |ui| {
-                        filmstrip.show_recent(ui, &paths, enabled, &mut actions)
-                    });
+                    crate::welcome::show(
+                        ui,
+                        &towavue_core::ShortcutBindings::default(),
+                        &mut String::new(),
+                        true,
+                        enabled,
+                        |ui, _| {
+                            filmstrip.show_recent(ui, &paths, enabled, &mut actions);
+                            Vec::new()
+                        },
+                    );
                 },
             );
             (output, actions)
@@ -1418,6 +1428,20 @@ mod tests {
                 vec![egui::Event::PointerMoved(position)],
             );
             assert!(actions.is_empty());
+            let mesh = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => Some(mesh),
+                    _ => None,
+                })
+                .expect("covered Gallery retains ready thumbnails");
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .all(|vertex| vertex.color == Color32::WHITE),
+                "overlay input guards must not dim the Gallery"
+            );
             assert_eq!(
                 output.platform_output.cursor_icon,
                 if enabled {
@@ -1438,9 +1462,88 @@ mod tests {
         assert!(actions == [UiAction::OpenMedia(paths[0].clone(), true)]);
         let (_, actions) = frame(&mut filmstrip, false, vec![event]);
         assert!(actions.is_empty());
-        assert!(filmstrip.visible.is_empty() && filmstrip.previews.is_empty());
+        assert_eq!(filmstrip.visible, paths);
+        assert!(filmstrip.previews.contains_key(&paths[0]));
         drop(filmstrip);
         std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn gallery_overlays_keep_ready_thumbnail_geometry_color_and_requests() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::gallery_overlays_keep_ready_thumbnail_geometry_color_and_requests",
+        ) else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = crate::Application::new(None, |_| {}).expect("app");
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(crate::chrome::style);
+            app.ui_context = Some(context.clone());
+            let path = root.join("gallery-overlay.png");
+            app.recent_paths.push(path.clone());
+            let size = egui::vec2(640.0, 480.0);
+            for _ in 0..3 {
+                crate::audio_export::tests::frame(&mut app, size, vec![]);
+            }
+            let texture = context.load_texture(
+                "gallery-overlay-fixture",
+                egui::ColorImage::filled([2, 1], Color32::RED),
+                egui::TextureOptions::LINEAR,
+            );
+            let texture_id = texture.id();
+            app.filmstrip
+                .previews
+                .insert(path.clone(), Ok((texture, None)));
+            let generation = app.filmstrip.generation;
+            let mut bounds = None;
+            for overlay in 0..4 {
+                app.palette_open = overlay == 1;
+                app.grid_open = overlay == 2;
+                for _ in 0..3 {
+                    if overlay == 3 {
+                        // No real menu widget keeps this synthetic popup open between frames.
+                        egui::Popup::open_id(&context, egui::Id::new("gallery-overlay-menu"));
+                    }
+                    let output = crate::audio_export::tests::frame(&mut app, size, vec![]);
+                    let mesh = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => Some(mesh),
+                            _ => None,
+                        })
+                        .expect("covered Gallery still paints the prepared texture");
+                    assert!(
+                        mesh.vertices
+                            .iter()
+                            .all(|vertex| vertex.color == Color32::WHITE)
+                    );
+                    assert_eq!(
+                        *bounds.get_or_insert(mesh.calc_bounds()),
+                        mesh.calc_bounds()
+                    );
+                    assert_eq!(app.filmstrip.generation, generation, "no request restart");
+                    assert_eq!(app.filmstrip.visible, std::slice::from_ref(&path));
+                    let tree = output.platform_output.accesskit_update.expect("tree");
+                    let card = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.role() == egui::accesskit::Role::Button
+                                && node.label() == Some("gallery-overlay.png")
+                        })
+                        .expect("card remains in accessibility tree");
+                    assert_eq!(card.1.is_disabled(), overlay != 0, "overlay {overlay}");
+                    assert!(app.tabs.tabs().is_empty() && app.path.is_none());
+                }
+                app.palette_open = false;
+                app.grid_open = false;
+                egui::Popup::close_all(&context);
+            }
+        }
     }
 
     #[test]

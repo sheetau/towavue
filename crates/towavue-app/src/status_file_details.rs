@@ -315,6 +315,7 @@ mod tests {
                 for base in [480.0, 960.0] {
                     let mut baseline = None;
                     let mut baseline_vertices = None;
+                    let mut previous_text = String::new();
                     for delta in (0..40).chain((0..40).rev()) {
                         let width = base * density + delta as f32;
                         let mut raw = egui::RawInput {
@@ -337,13 +338,18 @@ mod tests {
                             .iter()
                             .find_map(|shape| match &shape.shape {
                                 egui::Shape::Text(text)
-                                    if text.galley.text().contains("Modified (local)") =>
+                                    if text.galley.text().contains("4.1 KB") =>
                                 {
                                     Some((shape, text))
                                 }
                                 _ => None,
                             })
                             .expect("right status label");
+                        if text.galley.text() != previous_text {
+                            previous_text = text.galley.text().to_owned();
+                            baseline = None;
+                            baseline_vertices = None;
+                        }
                         // epaint snaps this anchor to physical pixels before tessellation.
                         let anchor = (text.pos * density).round() - egui::vec2(width, 0.0);
                         let baseline = *baseline.get_or_insert(anchor);
@@ -352,10 +358,7 @@ mod tests {
                             "right anchor drift: kind={kind:?}, density={density}, width={width}, baseline={baseline:?}, actual={anchor:?}"
                         );
                         if base == 960.0 {
-                            assert!(
-                                !text.galley.elided,
-                                "compare unchanged glyphs, not changing ellipsis"
-                            );
+                            assert!(!text.galley.elided, "status fields must never be elided");
                             let primitives =
                                 context.tessellate(vec![shape.clone()], output.pixels_per_point);
                             let vertices: Vec<_> = primitives
@@ -388,6 +391,114 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn status_fields_expand_by_priority_without_elision_or_static_animation_details() {
+        use crate::*;
+        let Some(root) = tests::isolated_test_root(
+            "status_file_details::tests::status_fields_expand_by_priority_without_elision_or_static_animation_details",
+        ) else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            for frames in [1, 2] {
+                let context = fonts::test_context();
+                context.global_style_mut(chrome::style);
+                let mut app = Application::new(None, |_| {}).expect("app");
+                let path = root.join("source.png");
+                let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.path = Some(path.clone());
+                app.media_kind = Some(MediaKind::Image);
+                app.image = Some(
+                    ImagePresentation::from_decoded(
+                        &context,
+                        &path,
+                        Arc::new(DecodedImage {
+                            animation_plays: 0,
+                            format: "png",
+                            frames: (0..frames)
+                                .map(|_| towavue_runtime_windows::DecodedImageFrame {
+                                    width: 4,
+                                    height: 2,
+                                    rgba: vec![255; 32],
+                                    delay: Duration::from_millis(100),
+                                })
+                                .collect(),
+                        }),
+                    )
+                    .expect("image"),
+                );
+                app.edits
+                    .entry(tab)
+                    .or_default()
+                    .push(EditOperation::RotateClockwise, MediaKind::Image);
+                app.refresh_status_file_details();
+                assert!(app.status_file_details.finish(
+                    app.status_file_details.ticket,
+                    Some(FileDetails {
+                        bytes: 12_345_678,
+                        modified_local: Some("2024-02-29 12:34:56".into()),
+                    })
+                ));
+                let details = app.status_details();
+                assert_eq!(details[0], "Fit");
+                assert_eq!(details[1], if frames == 1 { "Unsaved" } else { "1.00×" });
+                assert_eq!(
+                    details.iter().any(|field| field.contains("frames")),
+                    frames > 1
+                );
+                assert_eq!(details.iter().any(|field| field == "1.00×"), frames > 1);
+                assert!(details.iter().any(|field| field == "4×2"));
+                let full = details.join("   ");
+                let mut previous = String::new();
+                let mut final_width = 0.0;
+                for width in [240.0, 320.0, 480.0, 640.0, 960.0, 1920.0] {
+                    let mut raw = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 320.0),
+                        )),
+                        ..Default::default()
+                    };
+                    raw.viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("viewport")
+                        .native_pixels_per_point = Some(density);
+                    let output = context.run_ui(raw, |ui| {
+                        app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                    });
+                    let (shape, text) = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text().starts_with("Fit") => {
+                                Some((shape, text))
+                            }
+                            _ => None,
+                        })
+                        .expect("right status label");
+                    let shown = text.galley.text();
+                    assert!(!text.galley.elided);
+                    assert!(
+                        shown.starts_with(&previous),
+                        "widening must only add fields"
+                    );
+                    assert!(full.starts_with(shown));
+                    assert!(
+                        details.iter().any(|field| shown.ends_with(field)),
+                        "no partial fields"
+                    );
+                    let bounds = text.visual_bounding_rect();
+                    assert!(bounds.left() >= shape.clip_rect.left() - 1.0);
+                    assert!(bounds.right() <= width + 1.0);
+                    final_width = text.galley.size().x;
+                    previous = shown.to_owned();
+                }
+                assert_eq!(previous, full, "wide windows reveal all available fields");
+                assert!(final_width > 410.0, "the old fixed ceiling must not return");
             }
         }
     }
@@ -438,27 +549,20 @@ mod tests {
                             app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
                         },
                     );
-                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text().contains("Modified (local): 2024-02-29 12:34:56"))), "{kind:?}, {density}, {width}");
+                    let visible_date = output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().contains("2024-02-29 12:34:56")));
+                    assert_eq!(visible_date, width == 960.0, "{kind:?}, {density}, {width}");
                     {
+                        let full_info = app.status_details().join("   ");
                         let position = output
                             .shapes
                             .iter()
                             .find_map(|shape| match &shape.shape {
                                 egui::Shape::Text(text)
-                                    if text.galley.text().contains("Modified (local)") =>
+                                    if !text.galley.text().is_empty()
+                                        && full_info.starts_with(text.galley.text()) =>
                                 {
-                                    if width == 320.0 {
-                                        assert!(
-                                            text.galley.elided,
-                                            "exercise automatic truncation help"
-                                        );
-                                    } else if width == 960.0 {
-                                        assert!(
-                                            !text.galley.elided,
-                                            "also exercise untruncated help"
-                                        );
-                                    }
+                                    assert!(!text.galley.elided, "whole status fields only");
                                     Some(
                                         text.visual_bounding_rect()
                                             .intersect(shape.clip_rect)
@@ -491,7 +595,11 @@ mod tests {
                             copies = hovered.shapes.iter().filter(|shape| matches!(&shape.shape,
                                 egui::Shape::Text(text) if text.galley.text().contains("2024-02-29 12:34:56"))).count();
                         }
-                        assert_eq!(copies, 2, "one status label and one complete tooltip");
+                        assert_eq!(
+                            copies,
+                            1 + usize::from(visible_date),
+                            "one complete tooltip, even when the date is hidden"
+                        );
                     }
                 }
             }

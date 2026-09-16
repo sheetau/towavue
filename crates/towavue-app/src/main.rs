@@ -62,6 +62,7 @@ mod selection;
 mod selection_aspect;
 mod shortcuts;
 mod status_file_details;
+mod status_info;
 mod tab_drag;
 mod tab_focus;
 mod tab_menu;
@@ -5724,59 +5725,13 @@ where
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
                         }).disabled_help_text("Save or undo unsaved edits before entering reading mode");
                     }
-                    let mut details = Vec::new();
-                    if self.media_kind == Some(MediaKind::Image) && self.reading_mode && self.reading_drag.is_none() {
-                        details.push(self.reading_status());
-                    }
-                    if matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
-                    {
-                        let zoom = match self.image_handoff.as_ref().map_or(self.image_view.zoom, |held| held.view.zoom) {
-                            ZoomMode::Fit => "Fit".into(),
-                            ZoomMode::Cover => "Cover".into(),
-                            ZoomMode::Actual => "100%".into(),
-                            ZoomMode::Custom(scale) => {
-                                format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0)
-                            }
-                        };
-                        details.push(zoom);
-                    }
-                    if let Some(image) = self.image_handoff.as_ref().map(|held| &held.image).or(self.image.as_ref()) {
-                        let (width, height) = image.dimensions();
-                        details.push(format!("{} {width}×{height} · {} frame(s) · {}", image.decoded.format, image.decoded.frames.len(), if self.nearest_images { "Nearest" } else { "Smooth" }));
-                    } else if self.session.is_some() {
-                        let edit = self.edit_state();
-                        details.push(if self.held_speed.is_some() { "2× while held".into() } else { format!("{:.2}×", edit.rate) });
-                        if edit.trim_start.is_some() || edit.trim_end.is_some() {
-                            details.push("Trim (T)".into());
-                        }
-                    }
-                    if let Some(path) = self.displayed_image_path() {
-                        if let Some(snapshot) = &self.folder_snapshot
-                            && let Some(index) = snapshot.item_index(path)
-                        {
-                            details.push(format!("{} / {}", index + 1, snapshot.items.len()));
-                            if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
-                                details.push("Name fallback".into());
-                            }
-                        }
-                        if let Some(file) = self.image_handoff.as_ref().map_or_else(|| self.status_file_details.get(self.status_file_source()), |held| held.file_details.as_ref()) {
-                            details.push(format_size(file.bytes));
-                            if let Some(modified) = &file.modified_local {
-                                details.push(format!("Modified (local): {modified}"));
-                            }
-                        }
-                    }
-                    if self.tabs.active().is_some_and(|tab| {
-                        self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
-                    }) {
-                        details.push("Unsaved".into());
-                    }
-                    let info = details.join("   ");
+                    let details = self.status_details();
+                    let full_info = details.join("   ");
                     let remaining = ui.available_width();
-                    let info_width = if info.is_empty() {
+                    let info_width = if details.is_empty() {
                         0.0
                     } else {
-                        (remaining * 0.52).min(410.0)
+                        remaining * 0.52
                     };
                     let path_width = (remaining - info_width - 6.0).max(0.0);
                     ui.allocate_ui_with_layout(
@@ -5838,25 +5793,30 @@ where
                         },
                     );
                     let info_width = (info_right - ui.next_widget_position().x).max(0.0);
-                    ui.allocate_ui_with_layout(
+                    let info_response = ui.allocate_ui_with_layout(
                         egui::vec2(info_width, 24.0),
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(info_width);
-                            let source = self
-                                .folder_snapshot
-                                .as_ref()
-                                .map_or("", |snapshot| snapshot_source(snapshot.source));
+                            // Leave one physical pixel for text/layout rounding at the boundary.
+                            let info = status_info::fitting_text(ui, &details, (info_width - 1.0 / density).max(0.0));
+                            if info.is_empty() {
+                                return ui.allocate_response(egui::vec2(info_width, 24.0), egui::Sense::hover());
+                            }
                             ui.add(
                                 egui::Label::new(
                                     RichText::new(&info).size(12.0).color(chrome::MUTED),
                                 )
-                                .truncate()
+                                .extend()
                                 .show_tooltip_when_elided(false),
                             )
-                            .help_text(format!("{info}\n{source}"));
                         },
                     );
+                    if !full_info.is_empty() {
+                        let source = self.folder_snapshot.as_ref()
+                            .map_or("", |snapshot| snapshot_source(snapshot.source));
+                        info_response.inner.help_text(format!("{full_info}\n{source}"));
+                    }
                 });
             })
             .response
@@ -15136,7 +15096,9 @@ mod tests {
         );
         assert!(texts.iter().any(|(pos, text)| pos.y > 540.0
             && pos.x > 480.0
-            && text.contains("fixture 5×3 · 2 frame(s)")));
+            && text.contains("PNG")
+            && text.contains("5×3")
+            && text.contains("2 frames")));
         app.set_status("Copied fixture".into());
         assert_eq!(app.status_notice().as_deref(), Some("Copied fixture"));
         app.status_message.as_mut().expect("notice").1 = Instant::now() - STATUS_MESSAGE_DURATION;

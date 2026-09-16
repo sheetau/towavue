@@ -1137,9 +1137,25 @@ fn transferred_pending_image_edit_restarts_from_shared_source_and_undo_restores_
     ));
     let stale = source.image_edit_generation;
     assert!(source.image_edit_pending);
+    assert!(
+        source
+            .image
+            .as_ref()
+            .expect("source pixels")
+            .held_edit_view
+            .is_some()
+    );
     let history = source.edits[&id].clone();
     let moved = transfer(&mut source, &mut destination, id);
     assert!(destination.image_edit_pending);
+    assert!(
+        destination
+            .image
+            .as_ref()
+            .expect("rebound pixels")
+            .held_edit_view
+            .is_some()
+    );
     assert!(Arc::ptr_eq(
         destination.image_edit_source.as_ref().expect("original"),
         &original
@@ -1148,6 +1164,14 @@ fn transferred_pending_image_edit_restarts_from_shared_source_and_undo_restores_
     assert!(source.image_error.is_none());
     finish(&mut destination, &events);
     assert!(destination.image_materialized && destination.image_error.is_none());
+    assert!(
+        destination
+            .image
+            .as_ref()
+            .expect("edited pixels")
+            .held_edit_view
+            .is_none()
+    );
     assert_eq!(destination.edits[&moved], history);
     assert_eq!(
         destination.image.as_ref().expect("resized").dimensions(),

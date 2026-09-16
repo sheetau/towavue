@@ -79,12 +79,33 @@ fn held_alt_rotation_previews_without_editing_then_commits_once_and_undo_restore
         assert!(
             !app.image_edit_pending && app.rotation_dialog.is_none() && app.view_drag.is_none()
         );
-        frame(
+        let released = frame(
             &mut app,
             egui::Modifiers::ALT,
             vec![button(false, end, egui::Modifiers::ALT)],
         );
         assert!(app.rotation_drag.is_none() && app.image_edit_pending);
+        let texture = app.image.as_ref().expect("held source").texture.id();
+        let meshes = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let preview = meshes(&released);
+        assert!(!preview.is_empty());
+        for _ in 0..3 {
+            let pending = frame(&mut app, egui::Modifiers::NONE, vec![]);
+            assert_eq!(
+                meshes(&pending),
+                preview,
+                "release must not flash back to the unrotated image"
+            );
+        }
         let rotation = ImageRotation::new(300, (6, 8)).expect("rotation");
         assert_eq!(
             app.edits[&tab].operations(),

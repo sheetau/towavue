@@ -204,6 +204,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     );
                 }
                 self.commit_rotation(drag.preview, value);
+                if self.image_edit_pending
+                    && let Some(held) = self
+                        .image
+                        .as_mut()
+                        .and_then(|image| image.held_edit_view.as_mut())
+                {
+                    // Keep the released live preview until its resampled pixels arrive.
+                    held.rotation_tenths = drag.tenths;
+                }
             } else {
                 self.request_redraw();
             }

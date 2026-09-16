@@ -1,6 +1,82 @@
 use super::*;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+#[test]
+fn gpu_pending_rotation_keeps_the_previous_image_instead_of_a_blank_surface() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::gpu::gpu_pending_rotation_keeps_the_previous_image_instead_of_a_blank_surface",
+    ) else {
+        return;
+    };
+    struct Trial {
+        root: PathBuf,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden owned window");
+            let mut renderer = match FrameRenderer::new(&window) {
+                Ok(renderer) => renderer,
+                Err(error) => {
+                    eprintln!("SKIP pending rotation GPU: hardware D3D11 unavailable: {error}");
+                    event_loop.exit();
+                    return;
+                }
+            };
+            for density in [1.0, 1.25, 2.0] {
+                let (mut app, context, _) = fixture(&self.root);
+                app.fullscreen = true;
+                context.set_pixels_per_point(density);
+                for _ in 0..3 {
+                    draw(&mut app, &context, &mut renderer, false);
+                }
+                let before = draw(&mut app, &context, &mut renderer, false);
+                assert!(
+                    before
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .any(|pixel| pixel[..3] != [0, 0, 0])
+                );
+                app.push_visual_edit(EditOperation::RotateImage(
+                    towavue_core::ImageRotation::new(50, (160, 90)).expect("rotation"),
+                ));
+                app.image_edit_worker.clear();
+                assert!(app.image_edit_pending);
+                for _ in 0..3 {
+                    assert_eq!(draw(&mut app, &context, &mut renderer, false), before);
+                }
+                // Negative control reproduces the previous production path's blank frame.
+                let held = app.image.as_mut().expect("image").held_edit_view.take();
+                assert_ne!(draw(&mut app, &context, &mut renderer, false), before);
+                app.image.as_mut().expect("image").held_edit_view = held;
+                assert_eq!(draw(&mut app, &context, &mut renderer, false), before);
+                app.finish_image_edits(app.image_edit_generation, Err("controlled failure".into()));
+                assert_eq!(draw(&mut app, &context, &mut renderer, false), before);
+                app.undo_edit(false);
+                assert_eq!(draw(&mut app, &context, &mut renderer, false), before);
+                let device = renderer.graphics_device();
+                renderer.release_surface();
+                renderer =
+                    FrameRenderer::with_graphics_device(&window, device).expect("next fixture");
+            }
+            eprintln!(
+                "PASS pending rotation GPU: previous central image pixels survive wait/failure/Undo at 1/1.25/2x; blank-frame negative controls differ. Hidden window, not physical input."
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut Trial { root })
+        .expect("trial");
+}
+
 fn draw(
     app: &mut App,
     context: &egui::Context,

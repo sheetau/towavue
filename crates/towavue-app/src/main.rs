@@ -443,6 +443,7 @@ struct ImagePresentation {
     next_frame_at: Option<Instant>,
     plays_left: u32,
     sampling: std::rc::Rc<std::cell::Cell<TextureOptions>>,
+    held_edit_view: Option<image_handoff::ImageEditView>,
 }
 
 struct ImagePreviewPresentation {
@@ -537,6 +538,7 @@ impl ImageTextureCache {
                 frame_index: 0,
                 next_frame_at: None,
                 sampling: cached.sampling.clone(),
+                held_edit_view: None,
             };
             image.update_sampling(options);
             self.entries.push_back(cached);
@@ -611,6 +613,7 @@ impl ImagePresentation {
             frame_index,
             next_frame_at,
             sampling: std::rc::Rc::new(std::cell::Cell::new(options)),
+            held_edit_view: None,
         })
     }
 
@@ -3888,10 +3891,13 @@ where
         }
         self.cancel_stale_rotation_drag();
         self.update_image_sampling();
-        if self.image_edit_pending {
-            return;
-        }
-        if self.image_edit_source.is_some() && self.image_error.is_some() {
+        if self.image_edit_pending || self.image_edit_source.is_some() && self.image_error.is_some()
+        {
+            if let Some(image) = &self.image
+                && let Some(held) = image.held_edit_view
+            {
+                held.draw(ui, image.texture.id());
+            }
             return;
         }
         if self.reading_mode {
@@ -7077,6 +7083,9 @@ where
     }
 
     fn reset_image_edits(&mut self) {
+        if let Some(image) = &mut self.image {
+            image.held_edit_view = None;
+        }
         self.image_edit_worker.clear();
         self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
         self.image_edit_source = None;
@@ -7142,6 +7151,9 @@ where
             )
         });
         if !materialize {
+            if let Some(image) = &mut self.image {
+                image.held_edit_view = None;
+            }
             if let Some(source) = self.image_edit_source.take() {
                 self.image_edit_worker.clear();
                 self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
@@ -7194,6 +7206,9 @@ where
         self.image_edit_generation = self.image_edit_generation.wrapping_add(1);
         let generation = self.image_edit_generation;
         self.image_edit_pending = render;
+        if !render && let Some(image) = &mut self.image {
+            image.held_edit_view = None;
+        }
         self.image_error = None;
         let notify = Arc::clone(&self.notify);
         let instance = self.media_generation;
@@ -7340,9 +7355,13 @@ where
             return;
         };
         let id = tab.id;
+        let held = self.capture_image_edit_view();
         let history = self.edits.entry(id).or_default();
         history.set_source_duration(self.media_duration.map(media_time));
         if history.push(operation, kind) {
+            if let Some(image) = &mut self.image {
+                image.held_edit_view = held;
+            }
             let retained_selection = match (operation, self.time_selection) {
                 (
                     EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(_, _)),
@@ -7461,11 +7480,15 @@ where
             }
         }
         let previous = self.edit_state();
+        let held = self.capture_image_edit_view();
         let changed = self
             .edits
             .get_mut(&id)
             .is_some_and(|history| if redo { history.redo() } else { history.undo() });
         if changed {
+            if let Some(image) = &mut self.image {
+                image.held_edit_view = held;
+            }
             self.refresh_image_edits();
             self.sync_playback_edits();
             let next = self.edit_state();
@@ -22288,6 +22311,7 @@ mod tests {
             plays_left: decoded.animation_plays,
             decoded: Arc::clone(&decoded),
             sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),
+            held_edit_view: None,
             frame_index: 1,
             next_frame_at: None,
             texture: context.load_texture(

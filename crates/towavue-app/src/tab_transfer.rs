@@ -65,6 +65,7 @@ impl ImagePresentation {
             next_frame_at: self.next_frame_at,
             plays_left: self.plays_left,
             sampling: std::rc::Rc::new(std::cell::Cell::new(sampling)),
+            held_edit_view: self.held_edit_view,
         })
     }
 }

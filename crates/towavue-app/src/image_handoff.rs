@@ -26,6 +26,25 @@ impl ImageHandoff {
             reading.draw(ui, self.view);
             return;
         }
+        ImageEditView {
+            transform: self.transform,
+            view: self.view,
+            rotation_tenths: 0,
+        }
+        .draw(ui, self.image.texture.id());
+    }
+}
+
+/// Geometry only: pending edits keep drawing the existing presentation's texture.
+#[derive(Clone, Copy)]
+pub(super) struct ImageEditView {
+    transform: ImageTransform,
+    view: ImageViewState,
+    pub(super) rotation_tenths: i16,
+}
+
+impl ImageEditView {
+    pub fn draw(self, ui: &mut egui::Ui, texture: egui::TextureId) {
         let viewport = ui.max_rect();
         let density = ui.ctx().pixels_per_point();
         let mut view = self.view;
@@ -38,11 +57,13 @@ impl ImageHandoff {
             displayed,
         );
         let painter = ui.painter_at(viewport);
-        painter.add(transformed_image_mesh(
-            self.image.texture.id(),
-            rect,
-            self.transform,
-        ));
+        if self.rotation_tenths != 0 {
+            let mesh = rotation::rotated_mesh(texture, rect, self.transform, self.rotation_tenths);
+            rotation::paint_checkerboard(&painter, mesh.calc_bounds());
+            painter.add(mesh);
+            return;
+        }
+        painter.add(transformed_image_mesh(texture, rect, self.transform));
         image_scroll::held_bars(ui, viewport, displayed, view);
         if let Some(selection) = view.selection {
             paint_selection(&painter, rect, selection);
@@ -51,6 +72,23 @@ impl ImageHandoff {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn capture_image_edit_view(&self) -> Option<ImageEditView> {
+        if self.media_kind != Some(MediaKind::Image) || self.reading_mode {
+            return None;
+        }
+        let image = self.image.as_ref()?;
+        Some(image.held_edit_view.unwrap_or_else(|| {
+            let mut view = self.image_view;
+            // Applying a visual edit clears selection, even while pixels are held.
+            view.selection = None;
+            ImageEditView {
+                transform: self.visual_transform(image.dimensions()),
+                view,
+                rotation_tenths: 0,
+            }
+        }))
+    }
+
     pub(super) fn take_navigation_handoff(&mut self, kind: MediaKind) -> Option<ImageHandoff> {
         if kind != MediaKind::Image
             || self.media_kind != Some(MediaKind::Image)

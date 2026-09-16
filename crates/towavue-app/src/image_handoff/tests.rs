@@ -1,5 +1,6 @@
 use super::*;
 
+mod edit;
 mod gpu;
 mod release;
 

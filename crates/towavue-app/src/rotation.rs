@@ -122,7 +122,7 @@ fn preview_mesh(
     rotated_mesh(texture, source, transform, rotation.tenths())
 }
 
-fn rotated_mesh(
+pub(super) fn rotated_mesh(
     texture: egui::TextureId,
     source: egui::Rect,
     transform: ImageTransform,
@@ -148,7 +148,7 @@ fn paint_preview(
     painter.add(preview_mesh(rect, texture, transform, rotation));
 }
 
-fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
+pub(super) fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
     let rect = rect.intersect(painter.clip_rect());
     let painter = painter.with_clip_rect(rect);
     painter.rect_filled(rect, 0.0, Color32::from_gray(32));

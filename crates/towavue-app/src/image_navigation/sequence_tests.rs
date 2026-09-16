@@ -79,6 +79,234 @@ fn complete(app: &mut App) {
     });
 }
 
+fn scrub_frame(app: &mut App, density: f32, events: Vec<egui::Event>) -> Vec<UiAction> {
+    let context = app.ui_context.clone().expect("context");
+    let mut actions = Vec::new();
+    let _ = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(500.0, 300.0),
+            )),
+            events,
+            viewports: [(
+                egui::ViewportId::ROOT,
+                egui::ViewportInfo {
+                    native_pixels_per_point: Some(density),
+                    ..Default::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        },
+        |_| {
+            app.draw_seek_bar(
+                &context,
+                egui::Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0)),
+                None,
+                &mut actions,
+            )
+        },
+    );
+    actions
+}
+
+fn scrub_point(index: usize) -> egui::Pos2 {
+    egui::pos2(4.0 + 492.0 * index as f32 / 99.0, 270.0)
+}
+
+fn scrub_button(index: usize, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: scrub_point(index),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::held_image_scrub_replaces_pending_targets_and_displays_before_release",
+    ) else {
+        return;
+    };
+    for (density, reading) in [(1.0, false), (1.25, true), (2.0, false)] {
+        let (mut app, context, paths) = fixture(&root);
+        for (index, path) in paths.iter().enumerate() {
+            tab_transfer::tests::bitmap(path);
+            let mut bytes = std::fs::read(path).expect("generated bitmap");
+            bytes[56] = index as u8;
+            std::fs::write(path, bytes).expect("distinct source pixels");
+        }
+        app.reading_mode = reading;
+        let tab = app.tabs.active_id();
+        let loaded = |app: &mut App, target: usize| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while app.image_loading && Instant::now() < deadline {
+                app.finish_image_load();
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(!app.image_loading && app.image_error.is_none());
+            assert_eq!(
+                app.image.as_ref().expect("original").decoded.frames[0].rgba,
+                [target as u8, 0, 0, 255, 0, 255, 0, 255]
+            );
+        };
+        for _ in 0..3 {
+            scrub_frame(&mut app, density, vec![]);
+        }
+        assert!(
+            scrub_frame(
+                &mut app,
+                density,
+                vec![
+                    egui::Event::PointerMoved(scrub_point(0)),
+                    scrub_button(0, true)
+                ]
+            )
+            .is_empty()
+        );
+        let mut stale = None;
+        for step in 0..100 {
+            let target = (step * 37 + 20) % paths.len();
+            let actions = scrub_frame(
+                &mut app,
+                density,
+                vec![egui::Event::PointerMoved(scrub_point(target))],
+            );
+            assert_eq!(actions.len(), 1, "one latest target per frame");
+            assert!(
+                matches!(&actions[0], UiAction::ScrubImage(path, ..) if path == &paths[target])
+            );
+            let duplicate = actions[0].clone();
+            app.handle_ui_action(actions[0].clone());
+            assert_eq!(app.path.as_ref(), Some(&paths[target]));
+            assert_eq!(app.tabs.active_id(), tab);
+            assert_eq!(app.reading_mode, reading);
+            assert!(
+                timeline_input::is_active(&context),
+                "navigation must retain its own drag"
+            );
+            assert!(
+                app.image_sequence.steps.is_empty(),
+                "scrubbing never queues arrow steps"
+            );
+            let generation = app.media_generation;
+            app.handle_ui_action(duplicate);
+            assert_eq!(
+                app.media_generation, generation,
+                "stale duplicate action is ignored"
+            );
+            if step == 0 {
+                stale = Some((app.image_generation, paths[target].clone()));
+            }
+            if step == 20 {
+                loaded(&mut app, target);
+                assert!(
+                    timeline_input::is_active(&context),
+                    "pixels arrive while still held"
+                );
+            }
+        }
+        let generation = app.image_generation;
+        assert!(scrub_frame(&mut app, density, vec![]).is_empty());
+        assert_eq!(
+            app.image_generation, generation,
+            "stationary pointer does not restart decoding"
+        );
+        let (old, path) = stale.expect("old target");
+        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            generation: old,
+            first_index: 0,
+            total: 1,
+            images: vec![(
+                path,
+                Err(towavue_runtime_windows::ImageDecodeError::UnknownFormat),
+            )],
+        });
+        assert!(
+            app.image_error.is_none(),
+            "old completion cannot overwrite the latest target"
+        );
+        let actions = scrub_frame(&mut app, density, vec![scrub_button(99, false)]);
+        assert_eq!(actions.len(), 1);
+        app.handle_ui_action(actions[0].clone());
+        assert_eq!(app.path.as_ref(), Some(&paths[99]));
+        assert!(!timeline_input::is_active(&context));
+        loaded(&mut app, 99);
+        assert!(app.image_handoff.is_none());
+        assert!(app.edits.values().all(|history| !history.is_dirty()));
+        assert_eq!(context.pixels_per_point(), density);
+    }
+}
+
+#[test]
+fn image_scrub_cancellation_and_dirty_guard_do_not_resume_an_old_drag() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::image_scrub_cancellation_and_dirty_guard_do_not_resume_an_old_drag",
+    ) else {
+        return;
+    };
+    for cause in 0..5 {
+        let (mut app, context, paths) = fixture(&root);
+        if cause == 0 {
+            app.edits
+                .entry(app.tabs.active_id().expect("tab"))
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+        }
+        for _ in 0..3 {
+            scrub_frame(&mut app, 1.0, vec![]);
+        }
+        scrub_frame(
+            &mut app,
+            1.0,
+            vec![
+                egui::Event::PointerMoved(scrub_point(0)),
+                scrub_button(0, true),
+            ],
+        );
+        let action = scrub_frame(
+            &mut app,
+            1.0,
+            vec![egui::Event::PointerMoved(scrub_point(50))],
+        )
+        .remove(0);
+        let mut expected = &paths[0];
+        if cause == 0 {
+            app.handle_ui_action(action.clone());
+            assert!(app.pending_guard.is_some());
+        } else if cause == 4 {
+            let previous = app.tabs.active_id().expect("original tab");
+            let tab = app.tabs.open_new(paths[1].clone(), MediaKind::Image);
+            app.tabs.activate(previous);
+            app.activate_tab(tab);
+            expected = &paths[1];
+        } else {
+            let events = if cause == 1 {
+                vec![egui::Event::WindowFocused(false)]
+            } else if cause == 3 {
+                egui::Popup::open_id(&context, "scrub-blocker".into());
+                vec![]
+            } else {
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]
+            };
+            assert!(scrub_frame(&mut app, 1.0, events).is_empty());
+        }
+        assert!(!timeline_input::is_active(&context));
+        app.handle_ui_action(action);
+        assert_eq!(app.path.as_ref(), Some(expected));
+    }
+}
+
 fn draw(app: &mut App, context: &egui::Context) -> Option<u64> {
     let mut output = context.run_ui(
         egui::RawInput {

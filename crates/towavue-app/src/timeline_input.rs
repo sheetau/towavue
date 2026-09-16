@@ -80,6 +80,33 @@ pub fn cancel(context: &Context) -> bool {
     active.is_some()
 }
 
+/// Preserve only the owning seek gesture across an accepted image navigation.
+pub struct SeekContinuation {
+    active: Active,
+    captured: bool,
+}
+
+impl SeekContinuation {
+    pub fn capture(context: &Context, id: Id) -> Option<Self> {
+        let active = context
+            .data(|data| data.get_temp::<State>(state_id()))?
+            .active?;
+        (active.id == id && active.kind == Kind::Seek && active.dragging).then(|| Self {
+            active,
+            captured: context.dragged_id() == Some(id),
+        })
+    }
+
+    pub fn resume(self, context: &Context) {
+        context.data_mut(|data| {
+            data.get_temp_mut_or_default::<State>(state_id()).active = Some(self.active);
+        });
+        if self.captured {
+            context.set_dragged_id(self.active.id);
+        }
+    }
+}
+
 #[cfg(test)]
 pub fn seek_commit(response: &Response) -> Option<Pos2> {
     let drag = seek_drag(response);

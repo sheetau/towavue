@@ -252,6 +252,7 @@ enum UiAction {
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
     OpenMedia(PathBuf, bool),
+    ScrubImage(PathBuf, u64, egui::Id),
     OpenGalleryBackground(PathBuf),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
@@ -5808,8 +5809,9 @@ where
             } else {
                 0.0
             };
-            let (response, commit, _) =
-                seekbar::show(context, status, progress, parent, enabled, false);
+            let (response, drag) =
+                seekbar::show_drag(context, status, progress, parent, enabled, false);
+            let commit = drag.released.then_some(drag.position).flatten();
             let value = seekbar::value_input(
                 &response,
                 "Image position",
@@ -5864,16 +5866,27 @@ where
                     );
                 }
             }
+            let live = drag.dragging && !drag.released;
+            // A discarded layout pass can observe the held pointer again.
+            // Keep only this frame's latest scrub destination before dispatch.
+            actions.retain(|action| !matches!(action, UiAction::ScrubImage(..)));
             if let Some(target) = value.map(|value| value.round() as usize - 1).or_else(|| {
-                commit.map(|pointer| {
-                    seekbar::item_index(
-                        seekbar::compact_ratio(response.rect, pointer.x),
-                        images.len(),
-                    )
-                })
+                commit
+                    .or_else(|| live.then_some(drag.position).flatten())
+                    .map(|pointer| {
+                        seekbar::item_index(
+                            seekbar::compact_ratio(response.rect, pointer.x),
+                            images.len(),
+                        )
+                    })
             }) && target != index
             {
-                actions.push(UiAction::OpenMedia(images[target].path.clone(), false));
+                let path = images[target].path.clone();
+                actions.push(if live && value.is_none() {
+                    UiAction::ScrubImage(path, self.media_generation, response.id)
+                } else {
+                    UiAction::OpenMedia(path, false)
+                });
             }
             return;
         }
@@ -6358,6 +6371,9 @@ where
                 } else {
                     self.request_guarded(GuardedAction::Navigate(path));
                 }
+            }
+            UiAction::ScrubImage(path, generation, owner) => {
+                self.scrub_image(path, generation, owner);
             }
             UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::RevealExport(shown) => {
@@ -12925,7 +12941,14 @@ mod tests {
                     } else {
                         assert!(press.is_empty());
                     }
-                    assert!(frame(vec![egui::Event::PointerMoved(end)]).is_empty());
+                    let moved = frame(vec![egui::Event::PointerMoved(end)]);
+                    if !timeline && drag && button == egui::PointerButton::Primary {
+                        assert!(
+                            matches!(moved.as_slice(), [UiAction::ScrubImage(path, ..)] if *path == root.join("2.png"))
+                        );
+                    } else {
+                        assert!(moved.is_empty());
+                    }
                     let actions = frame(vec![
                         event(end, false),
                         egui::Event::PointerMoved(egui::pos2(50.0, end.y)),
@@ -18174,7 +18197,10 @@ mod tests {
         let seek = egui::pos2(480.0, 543.0);
         frame(&mut app, vec![egui::Event::PointerMoved(seek)], true);
         frame(&mut app, vec![button(seek, true)], true);
-        assert!(frame(&mut app, vec![egui::Event::PointerMoved(center)], true).is_empty());
+        let moved = frame(&mut app, vec![egui::Event::PointerMoved(center)], true);
+        assert!(
+            matches!(moved.as_slice(), [UiAction::ScrubImage(path, ..)] if *path == root.join("3.png"))
+        );
         assert!(app.fullscreen_controls_visible);
         let actions = frame(&mut app, vec![button(center, false)], true);
         assert!(

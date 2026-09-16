@@ -1,6 +1,7 @@
 use crate::timeline_input;
 use egui::{Context, Rect, Response};
 
+#[cfg(test)]
 pub fn show(
     context: &Context,
     status: Rect,

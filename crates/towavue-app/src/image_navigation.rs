@@ -9,6 +9,38 @@ pub(crate) mod performance_tests;
 mod sequence_tests;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn scrub_image(&mut self, path: PathBuf, generation: u64, owner: egui::Id) {
+        if self.media_kind != Some(MediaKind::Image)
+            || generation != self.media_generation
+            || self.path.as_ref() == Some(&path)
+            || self.modal_input_blocked()
+            || self.filmstrip_open
+            || self.palette_open
+            || self.grid_open
+            || !self.folder_snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot
+                    .items_of_kind(MediaKind::Image)
+                    .any(|item| item.path == path)
+            })
+        {
+            return;
+        }
+        let Some(context) = self.ui_context.clone() else {
+            return;
+        };
+        let Some(continuation) = timeline_input::SeekContinuation::capture(&context, owner) else {
+            return;
+        };
+        let tab = self.tabs.active_id();
+        self.request_guarded(GuardedAction::Navigate(path.clone()));
+        if self.path.as_ref() == Some(&path)
+            && self.tabs.active_id() == tab
+            && !self.modal_input_blocked()
+        {
+            continuation.resume(&context);
+        }
+    }
+
     #[cfg(feature = "presentation-verification")]
     pub(super) fn trace_burst(&self, event: towavue_runtime_windows::BurstEvent, value: u64) {
         let state = u64::from(self.image_loading)

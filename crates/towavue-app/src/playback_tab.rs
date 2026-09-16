@@ -10,6 +10,7 @@ pub(super) struct RetainedPlaybackTab {
     pub kind: MediaKind,
     pub instance: u64,
     pub origin: Option<(crate::window_host::WindowKey, u64)>,
+    pub resume: Option<crate::resume::Owner>,
     pub session: Option<PlaybackSession>,
     pub clock: Option<PlaybackClock>,
     pub state: PlaybackState,
@@ -133,6 +134,9 @@ impl RetainedPlaybackTab {
             .and_then(|_| session.set_paused(false).map_err(Into::into))
         {
             Ok(()) => {
+                if let Some(owner) = &mut self.resume {
+                    owner.natural_end = false;
+                }
                 self.clock = Some(PlaybackClock::new(target, session.rate()));
                 self.state = PlaybackState::Playing;
                 self.audio_drained = !session.has_audio();
@@ -234,6 +238,9 @@ impl RetainedPlaybackTab {
             }
             self.anchor(self.end().unwrap_or(position), true);
             self.state = PlaybackState::Ended;
+            if let Some(owner) = &mut self.resume {
+                owner.natural_end = true;
+            }
             if self.playback_selection.is_some() {
                 self.status = Some((
                     "Selection ended · Shift+Space restarts · Escape returns to full range".into(),

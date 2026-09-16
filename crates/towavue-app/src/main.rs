@@ -46,6 +46,7 @@ mod reading_view;
 #[cfg(test)]
 mod recent_tests;
 mod resize;
+mod resume;
 mod rotation;
 #[cfg(test)]
 mod rotation_tests;
@@ -293,6 +294,7 @@ enum AppEvent {
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
+    VideoResume(towavue_runtime_windows::VideoResumeEvent),
     FileSearchReady,
     ImageCopied(Result<(u32, u32), String>),
     ImageEdited(u64, Result<Arc<DecodedImage>, String>),
@@ -859,6 +861,9 @@ struct Application<N> {
     restored_reading_pages: bool,
     closed_tabs: VecDeque<PathBuf>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
+    resume_history: Option<towavue_runtime_windows::VideoResumeHistory>,
+    resume_owner: Option<resume::Owner>,
+    resume_open: Option<towavue_runtime_windows::VideoResume>,
     recent_paths: Vec<PathBuf>,
     recent_folders: Vec<PathBuf>,
     pending_window_launches: Vec<PathBuf>,
@@ -1005,6 +1010,7 @@ struct Application<N> {
 
 impl<N> Drop for Application<N> {
     fn drop(&mut self) {
+        resume::record(self, true);
         // Join every media pipeline before releasing the shared renderer/device surface.
         self.session.take();
         self.retained_playback.clear();
@@ -1109,6 +1115,9 @@ where
             restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
             recent_files: None,
+            resume_history: None,
+            resume_owner: None,
+            resume_open: None,
             recent_paths: Vec::new(),
             recent_folders: Vec::new(),
             pending_window_launches: Vec::new(),
@@ -1358,6 +1367,14 @@ where
         match recent_result {
             Ok(recent) => self.recent_files = Some(recent),
             Err(error) => self.set_status(format!("Recent files unavailable: {error}")),
+        }
+        let notify = Arc::clone(&self.notify);
+        match towavue_runtime_windows::VideoResumeHistory::new(
+            self.shortcut_path.with_file_name("video-resume.txt"),
+            move |event| notify(AppEvent::VideoResume(event)),
+        ) {
+            Ok(history) => self.resume_history = Some(history),
+            Err(error) => self.set_status(format!("Video resume unavailable: {error}")),
         }
         if let Some(path) = self.initial_path.take() {
             if path.is_dir() {
@@ -1679,6 +1696,7 @@ where
     }
 
     fn take_playback_tab_state(&mut self) -> playback_tab::RetainedPlaybackTab {
+        resume::record(self, true);
         let position = self.current_position();
         self.cancel_view_drag();
         self.playlist.suspend();
@@ -1695,6 +1713,7 @@ where
             kind: self.media_kind.expect("displayed playback kind"),
             instance: self.media_generation,
             origin: self.playback_origin.take(),
+            resume: self.resume_owner.take(),
             session: self.session.take(),
             clock: Some(clock),
             state: self.state,
@@ -1729,6 +1748,10 @@ where
         mut saved: playback_tab::RetainedPlaybackTab,
         transferred: bool,
     ) {
+        if saved.state == PlaybackState::Loading && saved.session.is_none() {
+            self.request_resume_or_open(saved.path);
+            return;
+        }
         if !transferred || saved.video_suspended {
             saved.poll();
         }
@@ -1749,6 +1772,7 @@ where
             self.generation = session.generation();
         }
         self.clock = saved.clock;
+        self.resume_owner = saved.resume;
         self.state = saved.state;
         self.audio_drained = saved.audio_drained;
         self.decode_finished = saved.decode_finished;
@@ -1804,6 +1828,8 @@ where
         transferred: bool,
         handoff: Option<image_handoff::ImageHandoff>,
     ) {
+        resume::record(self, true);
+        self.resume_open = None;
         self.relative_seek_notice = None;
         let video_repeat = kind == MediaKind::Video
             && self
@@ -1889,6 +1915,7 @@ where
         self.image_error = None;
         self.session.take();
         self.playback_origin = None;
+        self.resume_owner = None;
         self.image = None;
         self.reading_pages.clear();
         self.timeline_open = kind == MediaKind::Audio;
@@ -1950,6 +1977,14 @@ where
             self.request_redraw();
             return;
         }
+        self.request_resume_or_open(path);
+    }
+
+    fn open_playback_path(
+        &mut self,
+        path: PathBuf,
+        resume: Option<towavue_runtime_windows::VideoResume>,
+    ) {
         let Some(renderer) = self.renderer.as_ref() else {
             self.fail("renderer is unavailable".to_owned());
             return;
@@ -1974,7 +2009,14 @@ where
             }
             Err(error) => self.fail(error.to_string()),
         }
-        self.load_duration(path.clone());
+        if self.state == PlaybackState::Playing
+            && let Some(resume) = resume
+        {
+            self.install_resume(resume);
+        }
+        if self.media_duration.is_none() {
+            self.load_duration(path.clone());
+        }
         if self.timeline_open {
             self.load_waveform();
         }
@@ -2881,6 +2923,7 @@ where
                     self.handle_background_playback(generation, event);
                 }
             }
+            AppEvent::VideoResume(event) => self.handle_video_resume(event),
             AppEvent::Duration(path, generation, result) => {
                 self.duration_workers.remove(&generation);
                 if self.path.as_ref() == Some(&path) && generation == self.media_generation {
@@ -2894,10 +2937,19 @@ where
                             {
                                 history.set_source_duration(Some(media_time(duration)));
                             }
-                            self.sync_playback_edits();
+                            if let Some(resume) = self.resume_open.take() {
+                                self.open_playback_path(path, Some(resume));
+                            } else {
+                                self.sync_playback_edits();
+                            }
                             self.request_redraw();
                         }
-                        Err(error) => self.set_status(format!("Duration unavailable: {error}")),
+                        Err(error) => {
+                            if self.resume_open.take().is_some() {
+                                self.open_playback_path(path, None);
+                            }
+                            self.set_status(format!("Duration unavailable: {error}"));
+                        }
                     }
                 } else if let Some((id, saved)) = self
                     .retained_playback
@@ -3098,6 +3150,7 @@ where
     }
 
     fn advance_media(&mut self) {
+        resume::record(self, false);
         self.discard_late_video_frames();
         let due = self.frame_is_due();
         if due {
@@ -8089,6 +8142,7 @@ where
     }
 
     fn remove_tab(&mut self, id: TabId, remember: bool) {
+        resume::record(self, true);
         if self.tabs.gallery() == Some(id) {
             let was_active = self.tabs.active_id() == Some(id);
             let removed = if remember {
@@ -8177,6 +8231,9 @@ where
     }
 
     fn clear_active_media(&mut self) {
+        resume::record(self, true);
+        self.resume_open = None;
+        self.resume_owner = None;
         self.relative_seek_notice = None;
         self.close_filmstrip();
         self.reading_mode = false;
@@ -8651,6 +8708,9 @@ where
                 if pause {
                     self.state = PlaybackState::Paused;
                 }
+                if let Some(owner) = &mut self.resume_owner {
+                    owner.natural_end = false;
+                }
                 self.generation = generation;
                 self.pending_time = None;
                 self.clock = None;
@@ -9059,6 +9119,9 @@ where
                 clock.set_paused(true);
             }
             self.state = PlaybackState::Ended;
+            if let Some(owner) = &mut self.resume_owner {
+                owner.natural_end = was_playing;
+            }
             self.cancel_hold_speed();
             if was_playing && self.media_kind == Some(MediaKind::Video) && self.video_repeat {
                 self.toggle_pause();

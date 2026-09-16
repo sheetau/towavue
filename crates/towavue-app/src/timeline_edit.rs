@@ -243,7 +243,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 }
 
 // Preserve source identity through edits; a removed position lands at the next surviving join.
-fn remap_position(
+pub(super) fn remap_position(
     old: Option<&EditTimeline>,
     new: Option<&EditTimeline>,
     position: MediaTime,

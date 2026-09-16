@@ -420,13 +420,10 @@ impl TabPreview {
                     }
                     ui.add(image);
                 }
-                result => {
-                    ui.label(if result.is_some() {
-                        "No preview"
-                    } else {
-                        "Loading preview…"
-                    });
+                Some(Err(_)) => {
+                    ui.label("No preview");
                 }
+                None => {}
             }
             if target.kind == MediaKind::Video {
                 ui.label(format!(
@@ -941,6 +938,76 @@ mod tests {
             [true, false, true, true, false],
             "native control/current completions wake; egui-only/stale remain idle"
         );
+    }
+
+    #[test]
+    fn pending_tab_preview_is_quiet_and_retains_identity_time_and_failures() {
+        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            let mut tabs = TabSet::default();
+            tabs.open_new("fixture-media".into(), kind);
+            let mut preview = TabPreview::new().expect("worker");
+            let target = preview.target(tabs.active().expect("tab"));
+            preview.target = Some(target.clone());
+            let texture = context.load_texture(
+                "ready",
+                egui::ColorImage::filled([2, 1], egui::Color32::RED),
+                TextureOptions::LINEAR,
+            );
+            for state in 0..3 {
+                preview.texture = match state {
+                    1 => Some(Err("fixture failure".into())),
+                    2 => Some(Ok(texture.clone())),
+                    _ => None,
+                };
+                for pass in 0..4 {
+                    let rect =
+                        egui::Rect::from_min_size(egui::pos2(40.0, 20.0), egui::vec2(140.0, 24.0));
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(480.0, 300.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(rect.center())],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.allocate_rect(rect, egui::Sense::hover());
+                            preview.show(&response, &target, None);
+                        },
+                    );
+                    if pass < 3 {
+                        continue;
+                    }
+                    let text: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) => Some(text.galley.text()),
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(
+                        !text
+                            .iter()
+                            .any(|text| matches!(*text, "…" | "Loading preview…"))
+                    );
+                    assert!(text.contains(&"fixture-media"));
+                    assert_eq!(text.contains(&"No preview"), state == 1);
+                    assert_eq!(
+                        text.iter().any(|text| text.starts_with("Preview near ")),
+                        kind == MediaKind::Video
+                    );
+                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id())), state == 2);
+                }
+            }
+        }
     }
 
     #[test]

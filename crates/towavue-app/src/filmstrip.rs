@@ -323,19 +323,16 @@ impl Filmstrip {
                             Color32::WHITE,
                         );
                     }
-                    preview => {
+                    Some(Err(_)) => {
                         ui.painter().with_clip_rect(cell).text(
                             cell.center(),
                             Align2::CENTER_CENTER,
-                            if preview.is_some() {
-                                "No preview"
-                            } else {
-                                "…"
-                            },
+                            "No preview",
                             FontId::proportional(11.0),
                             Color32::GRAY,
                         );
                     }
+                    None => {}
                 }
             }
             ui.add(egui::Label::new(caption).truncate());
@@ -675,15 +672,16 @@ impl Filmstrip {
                                     ui.painter().galley(label_rect.min, galley, Color32::WHITE);
                                 }
                             }
-                            value => {
+                            Some(Err(_)) => {
                                 ui.painter().text(
                                     rect.center(),
                                     Align2::CENTER_CENTER,
-                                    if value.is_some() { "No preview" } else { "…" },
+                                    "No preview",
                                     FontId::proportional(12.0),
                                     Color32::GRAY,
                                 );
                             }
+                            None => {}
                         }
                         if highlighted == Some(index) {
                             ui.painter().rect_stroke(
@@ -2942,6 +2940,134 @@ mod tests {
         snapshot.items.remove(0);
         frame(&snapshot, &first, vec![]);
         assert!(frame(&snapshot, &first, vec![click()]).1.is_empty());
+    }
+
+    #[test]
+    fn pending_preview_cards_are_quiet_but_failures_and_ready_pixels_remain() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-preview-placeholder-{}",
+            std::process::id()
+        ));
+        let path = root.join("fixture.png");
+        let paths = [path.clone()];
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(Vec::new()),
+            folder_path: root.clone(),
+            items: vec![FolderMediaItem {
+                identity: ShellIdentity::new(Vec::new()),
+                path: path.clone(),
+                kind: MediaKind::Image,
+            }],
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::NaturalNameFallback,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {}).expect("worker");
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            let texture = context.load_texture(
+                "ready",
+                egui::ColorImage::filled([2, 1], Color32::RED),
+                egui::TextureOptions::LINEAR,
+            );
+            for mode in 0..3 {
+                for state in 0..3 {
+                    strip.previews.clear();
+                    match state {
+                        1 => {
+                            strip
+                                .previews
+                                .insert(path.clone(), Err("fixture failure".into()));
+                        }
+                        2 => {
+                            strip
+                                .previews
+                                .insert(path.clone(), Ok((texture.clone(), None)));
+                        }
+                        _ => {}
+                    }
+                    let track =
+                        Rect::from_min_size(egui::pos2(20.0, 260.0), egui::vec2(440.0, 20.0));
+                    for pass in 0..4 {
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(480.0, 300.0),
+                                )),
+                                viewports: [(
+                                    egui::ViewportId::ROOT,
+                                    egui::ViewportInfo {
+                                        native_pixels_per_point: Some(density),
+                                        ..Default::default()
+                                    },
+                                )]
+                                .into_iter()
+                                .collect(),
+                                events: vec![egui::Event::PointerMoved(track.center())],
+                                ..Default::default()
+                            },
+                            |ui| match mode {
+                                0 => strip.show(
+                                    &context,
+                                    context.content_rect(),
+                                    Some(&snapshot),
+                                    Some(&path),
+                                    true,
+                                    &mut vec![],
+                                ),
+                                1 => {
+                                    let response = ui.allocate_rect(track, egui::Sense::hover());
+                                    strip.show_seek_preview(
+                                        &response,
+                                        0.5,
+                                        &paths,
+                                        "1 / 1  fixture.png",
+                                        ReadingAxis::Horizontal,
+                                    );
+                                }
+                                _ => {
+                                    strip.show_recent(ui, &paths, true, &mut vec![]);
+                                }
+                            },
+                        );
+                        if pass < 3 {
+                            continue;
+                        }
+                        let text: Vec<_> = output
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text) => Some(text.galley.text()),
+                                _ => None,
+                            })
+                            .collect();
+                        assert!(
+                            !text
+                                .iter()
+                                .any(|text| matches!(*text, "…" | "Loading preview…")),
+                            "mode {mode}, state {state}"
+                        );
+                        assert_eq!(text.contains(&"No preview"), state == 1, "mode {mode}");
+                        assert!(
+                            text.iter().any(|text| text.contains("fixture.png")),
+                            "caption remains: mode {mode}"
+                        );
+                        assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
+                        assert_eq!(output.pixels_per_point, density);
+                    }
+                }
+            }
+        }
+        drop(strip);
+        std::fs::remove_dir(root).expect("remove owned empty cache");
     }
 
     #[test]

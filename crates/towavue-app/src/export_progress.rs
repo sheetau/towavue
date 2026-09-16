@@ -1,5 +1,7 @@
 use crate::*;
 
+const LOADING_DELAY: Duration = Duration::from_millis(200);
+
 #[derive(Clone, Copy, PartialEq)]
 enum LoadingOwner {
     Media(Option<TabId>, u64),
@@ -13,6 +15,15 @@ pub(super) struct LoadingProgress {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn folder_notice_delay(&self, now: Instant) -> Option<Duration> {
+        if !matches!(self.pending_folder, Some((_, FolderIntent::Refresh(_)))) {
+            return None;
+        }
+        LOADING_DELAY
+            .checked_sub(now.saturating_duration_since(self.folder_refresh_started))
+            .filter(|remaining| !remaining.is_zero())
+    }
+
     pub(super) fn sync_taskbar_progress(&mut self) {
         let progress = taskbar_progress(self.active_export.as_ref());
         if let Some(taskbar) = &mut self.native_taskbar
@@ -71,12 +82,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         // Do not flash a completed cached navigation, inherit another tab's
         // animation, or pretend an unknown amount of decode work is a percentage.
         let elapsed = (now - progress.started).max(0.0);
-        const DELAY: f64 = 0.2;
-        if elapsed < DELAY {
-            context.request_repaint_after(Duration::from_secs_f64(DELAY - elapsed));
+        let delay = LOADING_DELAY.as_secs_f64();
+        if elapsed < delay {
+            context.request_repaint_after(Duration::from_secs_f64(delay - elapsed));
             None
         } else {
-            Some((label, elapsed - DELAY))
+            Some((label, elapsed - delay))
         }
     }
 }

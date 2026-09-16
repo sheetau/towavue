@@ -858,6 +858,7 @@ struct Application<N> {
     native_ime_composing: bool,
     folder_order: FolderOrderProvider,
     pending_folder: Option<(u64, FolderIntent)>,
+    folder_refresh_started: Instant,
     folder_snapshot: Option<FolderSnapshot>,
     folder_watcher: Option<(PathBuf, FolderWatcher)>,
     tabs: TabSet,
@@ -1119,6 +1120,7 @@ where
             native_ime_composing: false,
             folder_order,
             pending_folder: None,
+            folder_refresh_started: Instant::now(),
             folder_snapshot: None,
             folder_watcher: None,
             tabs: TabSet::default(),
@@ -2176,6 +2178,7 @@ where
             generation,
         );
         self.pending_folder = Some((generation, FolderIntent::Refresh(path)));
+        self.folder_refresh_started = Instant::now();
         self.request_redraw();
     }
 
@@ -3545,6 +3548,9 @@ where
         self.video_scrub_seen = false;
         self.video_scrub_surface = None;
         let context = root.ctx().clone();
+        if let Some(delay) = self.folder_notice_delay(Instant::now()) {
+            context.request_repaint_after(delay);
+        }
         if egui::Popup::is_any_open(&context) {
             // Closing a menu must not reuse its batched click for a media gesture,
             // including another layout pass in this same input frame.
@@ -9308,6 +9314,7 @@ where
         }
         self.pending_folder
             .as_ref()
+            .filter(|_| self.folder_notice_delay(Instant::now()).is_none())
             .map(|(_, intent)| match intent {
                 FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => "Opening folder…".into(),
                 FolderIntent::Refresh(_) => "Loading order…".into(),

@@ -98,6 +98,67 @@ fn loading_indicator(output: &egui::FullOutput) -> Option<&egui::accesskit::Node
 }
 
 #[test]
+fn folder_order_notice_waits_for_its_request_and_preserves_explicit_feedback() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::folder_order_notice_waits_for_its_request_and_preserves_explicit_feedback",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    context(&mut app);
+    app.path = Some(root.join("fixture.png"));
+    app.fullscreen = true;
+    let size = egui::vec2(480.0, 300.0);
+    for time in [0.0, 0.1, 0.2] {
+        paint(&mut app, size, 1.0, time, vec![]);
+    }
+    app.folder_refresh_started = Instant::now() - Duration::from_secs(1);
+    app.refresh_folder_snapshot();
+    let first = app.pending_folder.as_ref().expect("request").0;
+    let started = app.folder_refresh_started;
+    assert_eq!(app.folder_notice_delay(started), Some(LOADING_DELAY));
+    assert_eq!(
+        app.folder_notice_delay(started + Duration::from_millis(199)),
+        Some(Duration::from_millis(1))
+    );
+    assert_eq!(app.folder_notice_delay(started + LOADING_DELAY), None);
+    assert!(
+        app.status_notice().is_none(),
+        "brief background refresh stays quiet"
+    );
+    let output = paint(&mut app, size, 1.0, 0.3, vec![]);
+    assert!(
+        output.viewport_output[&egui::ViewportId::ROOT].repaint_delay <= LOADING_DELAY,
+        "slow refresh must wake even without a fullscreen toolbar"
+    );
+    assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("Loading order"))));
+    app.pending_folder = None;
+    assert!(
+        app.status_notice().is_none() && app.folder_notice_delay(started + LOADING_DELAY).is_none(),
+        "fast completion has no delayed notice"
+    );
+    app.refresh_folder_snapshot();
+    assert_ne!(app.pending_folder.as_ref().expect("new request").0, first);
+    app.folder_refresh_started = Instant::now() - LOADING_DELAY;
+    assert_eq!(app.status_notice().as_deref(), Some("Loading order…"));
+    app.refresh_folder_snapshot();
+    assert!(
+        app.status_notice().is_none(),
+        "replacement request cannot inherit the expired delay"
+    );
+    app.set_status("Folder diagnostic".into());
+    assert_eq!(app.status_notice().as_deref(), Some("Folder diagnostic"));
+    app.status_message = None;
+    app.pending_folder = Some((999, FolderIntent::Open));
+    assert_eq!(
+        app.status_notice().as_deref(),
+        Some("Opening folder…"),
+        "explicit open still has immediate feedback"
+    );
+    assert!(app.folder_notice_delay(Instant::now()).is_none());
+}
+
+#[test]
 fn toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashes() {
     let Some(root) = crate::tests::isolated_test_root(
         "export_progress::tests::toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashes",

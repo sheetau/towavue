@@ -35,6 +35,8 @@ pub use presentation_verification::{
     towavue_original_ready, towavue_original_submitted, towavue_presentation_stage,
 };
 mod recent;
+mod video_resume;
+pub use video_resume::{VideoResume, VideoResumeEvent, VideoResumeHistory, VideoResumeSource};
 mod renderer;
 mod selection_outline;
 mod shell;

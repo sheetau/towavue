@@ -13,6 +13,9 @@ use towavue_core::{EditOperation, EditState, MediaKind};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[path = "export_video_encoding.rs"]
+mod video_encoding;
+
 #[path = "export_rotation.rs"]
 mod rotation;
 
@@ -399,7 +402,8 @@ fn export_audio_cancellable(
             "GIF metadata editing is not supported yet".into(),
         ));
     }
-    let source_stamp = (options.normalize_peak
+    let source_stamp = (request.kind == MediaKind::Video
+        || options.normalize_peak
         || (request.kind != MediaKind::Image && state.rate != 1.0)
         || image_metadata
         || png_source
@@ -491,6 +495,7 @@ fn export_audio_cancellable(
     .transpose()?
     .flatten();
     let mut streams = ExportStreams::probe(request)?;
+    streams.video_encoding = video_encoding::HighDepth::probe(request)?;
     streams.gif_animation = gif_animation.is_some();
     streams.png_animation = png_metadata
         .as_ref()
@@ -748,7 +753,10 @@ fn export_audio_cancellable(
             .audio_post_filters
             .push(format!("volume={gain:.17e}:precision=double"));
     }
-    if request.hardware_encode && hardware_encode_supported_target(request) {
+    if request.hardware_encode
+        && streams.video_encoding.is_none()
+        && hardware_encode_supported_target(request)
+    {
         let hardware = run_ffmpeg(
             &executable,
             staging.arguments(&staged_request, true, &streams)?,
@@ -831,6 +839,9 @@ fn export_audio_cancellable(
         stamp.verify(&request.source)?;
     }
     check_cancelled(cancelled)?;
+    if let Some(encoding) = &streams.video_encoding {
+        encoding.verify(&staging.output)?;
+    }
     staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
         used_hardware_encoder: false,
@@ -1093,6 +1104,7 @@ struct ExportStreams {
     png_animation: bool,
     png_image_sequence: bool,
     video: Option<(usize, ffmpeg::Rational)>,
+    video_encoding: Option<video_encoding::HighDepth>,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
     audio_output_samples: Option<u64>,
@@ -1103,6 +1115,17 @@ struct ExportStreams {
 }
 
 impl ExportStreams {
+    fn codec_arguments(&self, request: &ExportRequest, hardware: bool) -> Vec<String> {
+        self.video_encoding.as_ref().map_or_else(
+            || codec_arguments(request, hardware),
+            |encoding| encoding.arguments(&request.target),
+        )
+    }
+
+    fn visual_filters(&self, operations: &[EditOperation]) -> Vec<String> {
+        visual_filters_with_depth(operations, self.video_encoding.is_some())
+    }
+
     fn probe(request: &ExportRequest) -> Result<Self, ExportError> {
         if request.kind == MediaKind::Image {
             return Ok(Self::default());
@@ -1149,6 +1172,7 @@ impl ExportStreams {
                 gif_animation: false,
                 png_image_sequence: false,
                 video,
+                video_encoding: None,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
                 audio_channels: audio.map(|(_, _, channels)| channels),
                 audio_output_samples: None,
@@ -1247,7 +1271,7 @@ fn ffmpeg_arguments(
         if streams.audio.is_some() {
             arguments.extend(["-map".into(), "[outa]".into()]);
         }
-        arguments.extend(codec_arguments(request, hardware));
+        arguments.extend(streams.codec_arguments(request, hardware));
         arguments.push(request.target.display().to_string());
         return arguments;
     }
@@ -1262,7 +1286,7 @@ fn ffmpeg_arguments(
             }
         }
     }
-    let mut visual = visual_filters(&request.operations);
+    let mut visual = streams.visual_filters(&request.operations);
     let codecs = if streams.png_animation || streams.gif_animation {
         [
             "-c:v",
@@ -1279,7 +1303,7 @@ fn ffmpeg_arguments(
         .map(String::from)
         .to_vec()
     } else {
-        codec_arguments(request, hardware)
+        streams.codec_arguments(request, hardware)
     };
     match request.kind {
         MediaKind::Image => {
@@ -1300,8 +1324,12 @@ fn ffmpeg_arguments(
                 &state,
                 streams.video.map(|(_, time_base)| time_base),
             );
-            if codecs.iter().any(|codec| codec == "libopenh264") {
-                // Autorotate/vflip can expose negative strides rejected by OpenH264.
+            if codecs
+                .iter()
+                .any(|codec| matches!(codec.as_str(), "libopenh264" | "libsvtav1" | "libaom-av1"))
+            {
+                // Autorotate/vflip expose negative strides rejected by OpenH264
+                // and capable of crashing the native AOM encoder.
                 video.push("copy".into());
             }
             if !video.is_empty() {
@@ -1454,10 +1482,11 @@ fn timeline_filters(
         ));
     }
     if video == 1 {
-        let mut visual = visual_filters(&request.operations);
-        if codec_arguments(request, hardware)
+        let mut visual = streams.visual_filters(&request.operations);
+        if streams
+            .codec_arguments(request, hardware)
             .iter()
-            .any(|codec| codec == "libopenh264")
+            .any(|codec| matches!(codec.as_str(), "libopenh264" | "libsvtav1" | "libaom-av1"))
         {
             visual.push("copy".into());
         }
@@ -1514,6 +1543,14 @@ fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
 }
 
 pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
+    visual_filters_with_depth(operations, false)
+}
+
+fn visual_filters_with_depth(operations: &[EditOperation], high_depth: bool) -> Vec<String> {
+    let rgb = if high_depth { "gbrp16le" } else { "gbrp" };
+    // The rotate filter accepts full-depth planar YUV, but only 8-bit planar RGB.
+    // Use unsubsampled 16-bit YUV throughout high-depth rotation and padding.
+    let rotation_format = if high_depth { "yuv444p16le" } else { "gbrp" };
     operations
         .iter()
         .filter_map(|operation| match *operation {
@@ -1528,7 +1565,7 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
                 };
                 // Preserve full RGB input; the scaler otherwise subsamples color
                 // for even-width sources reduced by at least half, even in GBRP.
-                Some(format!("format=gbrp,scale={width}:{height}:flags={flags}+full_chroma_inp,format=gbrp,setsar=1"))
+                Some(format!("format={rgb},scale={width}:{height}:flags={flags}+full_chroma_inp,format={rgb},setsar=1"))
             }
             EditOperation::RotateVideo(rotation) => {
                 if rotation.tenths() == 0 { return None; }
@@ -1541,7 +1578,7 @@ pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
                     -1800 | 1800 => "hflip,vflip".into(),
                     tenths => format!("rotate={tenths}*PI/1800:ow={raster_width}:oh={raster_height}:c=black:bilinear=1"),
                 };
-                Some(format!("format=gbrp,scale={square_width}:{square_height}:flags=bilinear,format=gbrp,setsar=1,{rotate},pad={width}:{height}:0:0:color=black,setsar=1"))
+                Some(format!("format={rotation_format},scale={square_width}:{square_height}:flags=bilinear,format={rotation_format},setsar=1,{rotate},pad={width}:{height}:0:0:color=black,setsar=1"))
             }
             EditOperation::RotateImage(rotation) => Some(match rotation.tenths() {
                 0 => "null".into(),

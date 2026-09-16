@@ -316,11 +316,12 @@ impl Filmstrip {
             for (path, cell) in paths.iter().zip(cells) {
                 match self.previews.get(path) {
                     Some(Ok((texture, _))) => {
-                        ui.painter().image(
+                        crate::media_preview::image(
+                            ui,
                             texture.id(),
                             cell,
                             Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            Color32::WHITE,
+                            rect,
                         );
                     }
                     Some(Err(_)) => {
@@ -335,7 +336,9 @@ impl Filmstrip {
                     None => {}
                 }
             }
-            ui.add(egui::Label::new(caption).truncate());
+            crate::media_preview::caption(ui, |ui| {
+                ui.add(egui::Label::new(caption).truncate());
+            });
         });
     }
 

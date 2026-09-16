@@ -5994,8 +5994,16 @@ where
             let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
             if let Some(image) = image {
                 let image = image.max_size(rect.size());
-                if let Some(size) = image.load_and_calc_size(ui, rect.size()) {
-                    image.paint_at(ui, egui::Rect::from_center_size(rect.center(), size));
+                if let Some(size) = image.load_and_calc_size(ui, rect.size())
+                    && let egui::ImageSource::Texture(texture) = image.source(ui.ctx())
+                {
+                    media_preview::image(
+                        ui,
+                        texture.id,
+                        egui::Rect::from_center_size(rect.center(), size),
+                        image.image_options().uv,
+                        rect,
+                    );
                 }
             }
             let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
@@ -6003,7 +6011,9 @@ where
             } else {
                 format_time(media_time(position))
             };
-            ui.add(egui::Label::new(caption).truncate());
+            media_preview::caption(ui, |ui| {
+                ui.add(egui::Label::new(caption).truncate());
+            });
         });
     }
 
@@ -15357,8 +15367,8 @@ mod tests {
                     .shapes
                     .iter()
                     .find_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id() => {
-                            Some(rect.rect)
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                            Some(mesh.calc_bounds())
                         }
                         _ => None,
                     })
@@ -15430,12 +15440,8 @@ mod tests {
                             .shapes
                             .iter()
                             .find_map(|shape| match &shape.shape {
-                                egui::Shape::Rect(rect)
-                                    if rect.brush.as_ref().is_some_and(|brush| {
-                                        brush.fill_texture_id == texture.id()
-                                    }) =>
-                                {
-                                    Some(rect.rect)
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                                    Some(mesh.calc_bounds())
                                 }
                                 _ => None,
                             })

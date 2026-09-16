@@ -5,6 +5,64 @@ pub struct Preview {
     seek: Option<f32>,
 }
 
+pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
+    egui::Frame::NONE.inner_margin(6).show(ui, content).inner
+}
+
+pub fn image(
+    ui: &Ui,
+    texture: egui::TextureId,
+    rect: egui::Rect,
+    uv: egui::Rect,
+    bounds: egui::Rect,
+) {
+    let radius = ui.visuals().menu_corner_radius;
+    let corners = egui::CornerRadius {
+        nw: radius.nw,
+        ne: radius.ne,
+        sw: 0,
+        se: 0,
+    };
+    let left = egui::Rect::from_min_size(bounds.min, egui::Vec2::splat(f32::from(corners.nw)));
+    let right = egui::Rect::from_min_max(
+        bounds.right_top() - egui::vec2(f32::from(corners.ne), 0.0),
+        bounds.right_top() + egui::vec2(0.0, f32::from(corners.ne)),
+    );
+    if !rect.intersects(left) && !rect.intersects(right) {
+        ui.painter().image(texture, rect, uv, egui::Color32::WHITE);
+        return;
+    }
+    // Clip the card's rounded silhouette to each fitted image/page, including
+    // letterboxing narrower than the corner radius. No composite texture is needed.
+    let map_uv = |point: egui::Pos2| {
+        egui::pos2(
+            egui::remap(point.x, rect.x_range(), uv.x_range()),
+            egui::remap(point.y, rect.y_range(), uv.y_range()),
+        )
+    };
+    let shape = egui::epaint::RectShape::filled(bounds, corners, egui::Color32::WHITE)
+        .with_texture(
+            texture,
+            egui::Rect::from_min_max(map_uv(bounds.min), map_uv(bounds.max)),
+        );
+    for primitive in ui.ctx().tessellate(
+        vec![egui::epaint::ClippedShape {
+            clip_rect: ui.clip_rect(),
+            shape: shape.into(),
+        }],
+        ui.ctx().pixels_per_point(),
+    ) {
+        if let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive {
+            for vertex in &mut mesh.vertices {
+                vertex.pos = rect.clamp(vertex.pos);
+                // Antialiasing extrapolates UVs; never sample an adjacent sheet cell.
+                vertex.uv = uv.clamp(map_uv(vertex.pos));
+            }
+            ui.painter().with_clip_rect(rect).add(mesh);
+        }
+    }
+}
+
 pub fn hover_pos(response: &Response) -> Option<egui::Pos2> {
     // The drop overlay owns this hover even though it is painted without hit testing.
     if response
@@ -79,8 +137,11 @@ impl Preview {
             .show(context, |ui| {
                 ui.style_mut().interaction.selectable_labels = false;
                 egui::Frame::popup(ui.style())
+                    .inner_margin(0)
+                    .stroke(egui::Stroke::NONE)
                     .show(ui, |ui| {
-                        ui.set_max_width(width);
+                        ui.set_width(width);
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), content)
                             .inner
                     })
@@ -97,6 +158,158 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fitted_images_and_pages_keep_geometry_and_uv_mapping_near_card_corners() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let bounds =
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(240.0, 160.0));
+            let uv = egui::Rect::from_min_max(egui::pos2(0.25, 0.5), egui::pos2(0.5, 0.75));
+            for rect in [
+                bounds.shrink(2.0),
+                egui::Rect::from_min_size(bounds.min, egui::vec2(80.0, 160.0)),
+                egui::Rect::from_min_size(
+                    bounds.min + egui::vec2(80.0, 0.0),
+                    egui::vec2(160.0, 160.0),
+                ),
+            ] {
+                let mut radius = 0.0;
+                let output = context.run_ui(egui::RawInput::default(), |ui| {
+                    radius = f32::from(ui.visuals().menu_corner_radius.nw);
+                    image(ui, egui::TextureId::User(42), rect, uv, bounds);
+                });
+                let mesh = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == egui::TextureId::User(42) => {
+                            Some(mesh)
+                        }
+                        _ => None,
+                    })
+                    .expect("fitted mesh");
+                assert_eq!(mesh.calc_bounds(), rect);
+                for vertex in &mesh.vertices {
+                    assert!(rect.contains(vertex.pos));
+                    assert!(uv.contains(vertex.uv));
+                    let expected = egui::pos2(
+                        egui::remap(vertex.pos.x, rect.x_range(), uv.x_range()),
+                        egui::remap(vertex.pos.y, rect.y_range(), uv.y_range()),
+                    );
+                    assert!(
+                        vertex.uv.distance(expected) < 0.000001,
+                        "fitting must not stretch a sheet cell"
+                    );
+                    let center = bounds.min + egui::Vec2::splat(radius);
+                    if vertex.color.a() > 0 && vertex.pos.x < center.x && vertex.pos.y < center.y {
+                        assert!(
+                            vertex.pos.distance(center) <= radius,
+                            "image must stay inside the card corner"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cards_have_flush_rounded_images_padded_captions_and_bounded_sheet_uvs() {
+        for density in [1.0, 1.25, 2.0] {
+            for seek in [false, true] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                let texture = context.load_texture(
+                    "preview-sheet",
+                    egui::ColorImage::filled([8, 8], egui::Color32::WHITE),
+                    egui::TextureOptions::LINEAR,
+                );
+                let uv = egui::Rect::from_min_max(egui::pos2(0.25, 0.25), egui::pos2(0.5, 0.5));
+                let source =
+                    egui::Rect::from_min_size(egui::pos2(200.0, 250.0), egui::vec2(100.0, 20.0));
+                let mut card = egui::Rect::NOTHING;
+                let mut pixels = egui::Rect::NOTHING;
+                let mut label = egui::Rect::NOTHING;
+                let mut output = egui::FullOutput::default();
+                for frame in 0..3 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            time: Some(f64::from(frame)),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(600.0, 500.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(source.center())],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response =
+                                ui.interact(source, "source".into(), egui::Sense::hover());
+                            let preview = if seek {
+                                Preview::seek(&response, 0.5)
+                            } else {
+                                Preview::tab(&response)
+                            };
+                            card = preview
+                                .show(|ui| {
+                                    let size = if seek {
+                                        egui::vec2(160.0, 108.0)
+                                    } else {
+                                        egui::vec2(240.0, 160.0)
+                                    };
+                                    pixels = ui.allocate_exact_size(size, egui::Sense::hover()).0;
+                                    image(ui, texture.id(), pixels, uv, pixels);
+                                    caption(ui, |ui| {
+                                        label = ui.label("Caption").rect;
+                                    });
+                                })
+                                .expect("preview")
+                                .response
+                                .rect;
+                        },
+                    );
+                }
+                let tolerance = 1.0 / density;
+                assert!((card.top() - pixels.top()).abs() <= tolerance);
+                assert!((card.left() - pixels.left()).abs() <= tolerance);
+                assert!((card.right() - pixels.right()).abs() <= tolerance);
+                assert!(label.top() >= pixels.bottom() + 5.0);
+                assert!(label.left() >= card.left() + 5.0);
+                assert!(card.bottom() >= label.bottom() + 5.0);
+                let meshes: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => Some(mesh),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(meshes.len(), 1);
+                let mesh = meshes[0];
+                assert!(mesh.vertices.len() > 4, "rounded outline, not a plain quad");
+                assert!(mesh.vertices.iter().all(|vertex| uv.contains(vertex.uv)));
+                assert!(
+                    mesh.vertices
+                        .iter()
+                        .any(|vertex| vertex.color == egui::Color32::TRANSPARENT)
+                );
+                assert!(
+                    mesh.vertices
+                        .iter()
+                        .filter(|vertex| vertex.color.a() > 0)
+                        .all(|vertex| {
+                            vertex.pos.distance(pixels.left_top()) > 1.0
+                                && vertex.pos.distance(pixels.right_top()) > 1.0
+                        })
+                );
+                assert!(
+                    context.tex_manager().write().take_delta().set.len() <= 2,
+                    "rounding must not upload a cropped/composite image"
+                );
+            }
+        }
+    }
 
     #[test]
     fn external_file_drag_suppresses_hover_content_until_it_leaves() {

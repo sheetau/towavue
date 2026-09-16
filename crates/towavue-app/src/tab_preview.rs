@@ -42,14 +42,17 @@ impl RetainedPreview {
             .copied()
             .reduce(egui::Rect::union)
             .expect("reading pages");
-        let (rect, _) = ui.allocate_exact_size(spread.size(), egui::Sense::hover());
+        let (bounds, _) =
+            ui.allocate_exact_size(egui::vec2(240.0, spread.height()), egui::Sense::hover());
+        let rect = egui::Rect::from_center_size(bounds.center(), spread.size());
         for ((texture, _), page) in pages.iter().zip(rects) {
             if let Some(texture) = texture {
-                ui.painter().image(
+                crate::media_preview::image(
+                    ui,
                     texture.id(),
                     page.translate(rect.min - spread.min),
                     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
+                    bounds,
                 );
             }
         }
@@ -390,7 +393,9 @@ impl TabPreview {
         crate::media_preview::Preview::tab(response).show(|ui| {
             ui.set_max_width(240.0);
             if retained.is_some_and(|preview| preview.show_reading(ui)) {
-                ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                crate::media_preview::caption(ui, |ui| {
+                    ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                });
                 return;
             }
             let cached = (self.target.as_ref() == Some(target))
@@ -405,33 +410,36 @@ impl TabPreview {
             } else {
                 self.sheet_uv
             };
-            match texture {
-                Some(Ok(texture)) => {
-                    let size =
-                        sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
-                    let mut image = egui::Image::new((texture.id(), size))
-                        .uv(sheet_uv.unwrap_or(egui::Rect::from_min_max(
-                            egui::Pos2::ZERO,
-                            egui::pos2(1.0, 1.0),
-                        )))
-                        .max_size(egui::vec2(240.0, 160.0));
-                    if sheet_uv.is_some() {
-                        image = image.rotate(0.0, egui::vec2(0.5, 0.5));
-                    }
-                    ui.add(image);
-                }
-                Some(Err(_)) => {
+            if let Some(Ok(texture)) = texture {
+                let size =
+                    sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
+                let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
+                let size = size * scale;
+                let (bounds, _) =
+                    ui.allocate_exact_size(egui::vec2(240.0, size.y), egui::Sense::hover());
+                crate::media_preview::image(
+                    ui,
+                    texture.id(),
+                    egui::Rect::from_center_size(bounds.center(), size),
+                    sheet_uv.unwrap_or(egui::Rect::from_min_max(
+                        egui::Pos2::ZERO,
+                        egui::pos2(1.0, 1.0),
+                    )),
+                    bounds,
+                );
+            }
+            crate::media_preview::caption(ui, |ui| {
+                if texture.is_some_and(|texture| texture.is_err()) {
                     ui.label("No preview");
                 }
-                None => {}
-            }
-            if target.kind == MediaKind::Video {
-                ui.label(format!(
-                    "Preview near {}",
-                    crate::format_time(crate::media_time(target.position))
-                ));
-            }
-            ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                if target.kind == MediaKind::Video {
+                    ui.label(format!(
+                        "Preview near {}",
+                        crate::format_time(crate::media_time(target.position))
+                    ));
+                }
+                ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+            });
         });
     }
 }
@@ -1004,7 +1012,7 @@ mod tests {
                         text.iter().any(|text| text.starts_with("Preview near ")),
                         kind == MediaKind::Video
                     );
-                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture.id())), state == 2);
+                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
                 }
             }
         }
@@ -1282,7 +1290,7 @@ mod tests {
             frame(&mut app, pointer);
         }
         let painted = |output: &egui::FullOutput, texture| {
-            output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture))
+            output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture))
         };
         let _ = context.tex_manager().write().take_delta();
         assert!(
@@ -1522,7 +1530,9 @@ mod tests {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect) if rect.fill_texture_id() == texture_id => Some(rect.rect),
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
+                    Some(mesh.calc_bounds())
+                }
                 _ => None,
             })
             .expect("tab thumbnail shown");
@@ -1538,7 +1548,7 @@ mod tests {
         let generation = app.tab_preview.generation;
         let output = frame(&mut app, egui::pos2(90.0, 16.0), 0.8, true);
         assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
-        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill_texture_id() == texture_id)), "drop overlay must release the displayed preview");
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)), "drop overlay must release the displayed preview");
         app.tab_preview
             .finish(&context, target, generation, Err("stale result".into()));
         assert!(

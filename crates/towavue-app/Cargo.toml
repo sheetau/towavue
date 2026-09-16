@@ -25,5 +25,8 @@ winit = "=0.30.13"
 [dev-dependencies]
 towavue-runtime-windows = { path = "../towavue-runtime-windows", features = ["render-verification"] }
 
+[build-dependencies]
+find-msvc-tools = "=0.1.12"
+
 [lints]
 workspace = true

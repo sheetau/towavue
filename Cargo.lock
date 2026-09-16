@@ -2644,6 +2644,7 @@ version = "0.0.0"
 dependencies = [
  "egui",
  "egui-winit",
+ "find-msvc-tools",
  "towavue-core",
  "towavue-runtime-windows",
  "winit",

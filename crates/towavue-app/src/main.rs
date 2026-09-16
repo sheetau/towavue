@@ -88,6 +88,7 @@ mod waveform_detail;
 mod welcome;
 mod wheel_input;
 mod window_host;
+mod window_icon;
 mod window_open;
 #[cfg(test)]
 mod window_resize_tests;
@@ -1316,6 +1317,7 @@ where
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(10);
         let window = Arc::new(event_loop.create_window(attributes)?);
+        window_icon::apply(&window, window.scale_factor());
         self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
         let notify = Arc::clone(&self.notify);
@@ -10513,6 +10515,9 @@ where
         }
         if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
             self.media_cursors = Some(cursor::MediaCursors::new(event_loop, *scale_factor));
+            if let Some(window) = &self.window {
+                window_icon::apply(window, *scale_factor);
+            }
         }
         if matches!(event, WindowEvent::Focused(false)) {
             self.finish_queued_media_release();

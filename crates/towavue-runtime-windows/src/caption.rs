@@ -1633,3 +1633,7 @@ mod tests {
         assert!(trial.close_received);
     }
 }
+
+#[cfg(test)]
+#[path = "caption_geometry_tests.rs"]
+mod geometry_tests;

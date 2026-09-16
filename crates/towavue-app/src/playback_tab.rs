@@ -149,6 +149,87 @@ impl RetainedPlaybackTab {
         }
     }
 
+    pub fn toggle_pause(&mut self) {
+        let Some(next) = self.state.after_play_pause() else {
+            return;
+        };
+        if self.session.is_none()
+            || self.recovery_position.is_some()
+            || self.end() == Some(MediaTime::ZERO)
+        {
+            return;
+        }
+        let position = self.position();
+        let duration = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::timeline)
+            .map(|plan| plan.duration())
+            .or(self.duration.map(media_time));
+        if next == PlaybackState::Playing
+            && self.playback_selection.is_none()
+            && let Some(selection) = self.time_selection.filter(|range| {
+                position >= range.start()
+                    && position < range.end()
+                    && duration.is_some_and(|duration| range.end() <= duration)
+            })
+        {
+            let target = if self.state == PlaybackState::Ended {
+                selection.start()
+            } else {
+                position
+            };
+            let session = self.session.as_mut().expect("session");
+            let result = if let Some(plan) = session.timeline().cloned() {
+                session.seek_with_timeline_selection(
+                    target,
+                    session.rate(),
+                    plan,
+                    Some(selection),
+                    false,
+                )
+            } else {
+                session.seek_with_edits(
+                    target,
+                    session.rate(),
+                    towavue_core::PlaybackRange {
+                        start: selection.start(),
+                        end: Some(selection.end()),
+                    },
+                    false,
+                )
+            };
+            if let Err(error) = result.and_then(|_| session.set_paused(false).map_err(Into::into)) {
+                self.fail(error.to_string());
+                return;
+            }
+            self.audio_drained = !session.has_audio();
+            self.pending_time = None;
+            self.decode_finished = false;
+            self.metrics_recorded = false;
+            self.playback_selection = Some(selection);
+            self.anchor(target, false);
+            self.state = next;
+            if let Some(owner) = &mut self.resume {
+                owner.natural_end = false;
+            }
+            return;
+        }
+        if next == PlaybackState::Playing
+            && (self.state == PlaybackState::Ended || self.end().is_some_and(|end| position >= end))
+        {
+            self.restart();
+            return;
+        }
+        let paused = next == PlaybackState::Paused;
+        if let Err(error) = self.session.as_mut().expect("session").set_paused(paused) {
+            self.fail(error.to_string());
+            return;
+        }
+        self.anchor(position, paused);
+        self.state = next;
+    }
+
     pub fn suspend_video_if_bounded(&mut self) {
         if self.kind != MediaKind::Video || self.video_suspended || self.end().is_none() {
             return;

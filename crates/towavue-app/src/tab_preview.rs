@@ -384,63 +384,103 @@ impl TabPreview {
         }
     }
 
+    #[cfg(test)]
     pub fn show(
         &self,
         response: &egui::Response,
         target: &Target,
         retained: Option<&RetainedPreview>,
     ) {
-        crate::media_preview::Preview::tab(response).show(|ui| {
-            ui.set_max_width(240.0);
-            if retained.is_some_and(|preview| preview.show_reading(ui)) {
+        self.show_with_transport(response, target, retained, None);
+    }
+
+    pub fn show_with_transport(
+        &self,
+        response: &egui::Response,
+        target: &Target,
+        retained: Option<&RetainedPreview>,
+        transport: Option<&crate::preview_transport::Transport>,
+    ) -> Option<towavue_core::CommandId> {
+        crate::media_preview::Preview::tab(response)
+            .show(|ui| {
+                ui.set_max_width(240.0);
+                if retained.is_some_and(|preview| preview.show_reading(ui)) {
+                    crate::media_preview::caption(ui, |ui| {
+                        ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                    });
+                    return None;
+                }
+                let cached = (self.target.as_ref() == Some(target))
+                    .then_some(self.texture.as_ref())
+                    .flatten();
+                let texture = retained
+                    .and_then(RetainedPreview::image)
+                    .map(Ok)
+                    .or_else(|| cached.map(Result::as_ref));
+                let sheet_uv = if retained.is_some() {
+                    None
+                } else {
+                    self.sheet_uv
+                };
+                let mut thumbnail = None;
+                if let Some(Ok(texture)) = texture {
+                    let size =
+                        sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
+                    let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
+                    let size = size * scale;
+                    let height = if transport.is_some() {
+                        size.y.max(40.0)
+                    } else {
+                        size.y
+                    };
+                    let (bounds, _) =
+                        ui.allocate_exact_size(egui::vec2(240.0, height), egui::Sense::hover());
+                    thumbnail = Some(bounds);
+                    crate::media_preview::image(
+                        ui,
+                        texture.id(),
+                        egui::Rect::from_center_size(bounds.center(), size),
+                        sheet_uv.unwrap_or(egui::Rect::from_min_max(
+                            egui::Pos2::ZERO,
+                            egui::pos2(1.0, 1.0),
+                        )),
+                        bounds,
+                    );
+                }
+                if thumbnail.is_none() && transport.is_some() {
+                    thumbnail = Some(
+                        ui.allocate_exact_size(
+                            egui::vec2(
+                                240.0,
+                                if target.kind == MediaKind::Audio {
+                                    40.0
+                                } else {
+                                    160.0
+                                },
+                            ),
+                            egui::Sense::hover(),
+                        )
+                        .0,
+                    );
+                }
+                let action = transport
+                    .zip(thumbnail)
+                    .and_then(|(transport, thumbnail)| transport.show(ui, thumbnail));
                 crate::media_preview::caption(ui, |ui| {
+                    if texture.is_some_and(|texture| texture.is_err()) {
+                        ui.label("No preview");
+                    }
+                    if target.kind == MediaKind::Video {
+                        ui.label(format!(
+                            "Preview near {}",
+                            crate::format_time(crate::media_time(target.position))
+                        ));
+                    }
                     ui.add(egui::Label::new(target.path.display().to_string()).wrap());
                 });
-                return;
-            }
-            let cached = (self.target.as_ref() == Some(target))
-                .then_some(self.texture.as_ref())
-                .flatten();
-            let texture = retained
-                .and_then(RetainedPreview::image)
-                .map(Ok)
-                .or_else(|| cached.map(Result::as_ref));
-            let sheet_uv = if retained.is_some() {
-                None
-            } else {
-                self.sheet_uv
-            };
-            if let Some(Ok(texture)) = texture {
-                let size =
-                    sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
-                let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
-                let size = size * scale;
-                let (bounds, _) =
-                    ui.allocate_exact_size(egui::vec2(240.0, size.y), egui::Sense::hover());
-                crate::media_preview::image(
-                    ui,
-                    texture.id(),
-                    egui::Rect::from_center_size(bounds.center(), size),
-                    sheet_uv.unwrap_or(egui::Rect::from_min_max(
-                        egui::Pos2::ZERO,
-                        egui::pos2(1.0, 1.0),
-                    )),
-                    bounds,
-                );
-            }
-            crate::media_preview::caption(ui, |ui| {
-                if texture.is_some_and(|texture| texture.is_err()) {
-                    ui.label("No preview");
-                }
-                if target.kind == MediaKind::Video {
-                    ui.label(format!(
-                        "Preview near {}",
-                        crate::format_time(crate::media_time(target.position))
-                    ));
-                }
-                ui.add(egui::Label::new(target.path.display().to_string()).wrap());
-            });
-        });
+                action
+            })
+            .and_then(|output| output.inner)
     }
 }
 

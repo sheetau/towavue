@@ -44,6 +44,7 @@ mod playback_tab;
 mod playback_tab_tests;
 mod playback_volume;
 mod playlist;
+mod preview_transport;
 mod reading_input;
 mod reading_view;
 #[cfg(test)]
@@ -239,6 +240,7 @@ enum UiAction {
     NativeCaption(CaptionAction),
     ActivateTab(TabId),
     TabCommand(TabId, CommandId),
+    PreviewTransport(TabId, u64, PathBuf, CommandId),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     TimeAdjustment(
@@ -398,6 +400,7 @@ enum GuardedAction {
     DetachTab(TabId),
     Navigate(PathBuf),
     NavigateFromFolder(PathBuf, PathBuf),
+    NavigateAudioTab(TabId, PathBuf, PathBuf),
     Exit,
 }
 
@@ -4812,11 +4815,11 @@ where
             .filter(|_| self.accepts_tab_drop());
         let mut preview_target = None;
         let preview_allowed = !self.modal_input_blocked()
+            && self.incoming_tab_pointer.is_none()
             && !self.palette_open
             && !self.grid_open
             && !self.filmstrip_open
-            && !egui::Popup::is_any_open(root.ctx())
-            && root.input(|input| !input.pointer.any_down());
+            && !egui::Popup::is_any_open(root.ctx());
         let tab_menu_focus = (!self.modal_input_blocked()
             && self.active_export.is_none()
             && !self.palette_open
@@ -5224,7 +5227,7 @@ where
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
                                     if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
-                                        let hovered = media_preview::hover_pos(&response).is_some();
+                                        let hovered = media_preview::tab_hovered(&response);
                                         let background = hovered
                                             .then(|| self.retained_playback.get(&tab.id))
                                             .flatten()
@@ -5261,11 +5264,23 @@ where
                                                 );
                                             }
                                         }
-                                        self.tab_preview.show(
+                                        let transport = hovered
+                                            .then(|| self.preview_transport(tab.id, &target.path))
+                                            .flatten();
+                                        if let Some(command) = self.tab_preview.show_with_transport(
                                             &response,
                                             &target,
                                             retained_image.as_ref(),
-                                        );
+                                            transport.as_ref(),
+                                        ) && let Some(transport) = transport
+                                        {
+                                            actions.push(UiAction::PreviewTransport(
+                                                tab.id,
+                                                transport.instance,
+                                                target.path.clone(),
+                                                command,
+                                            ));
+                                        }
                                     }
                                     if let Some((target, focus)) = tab_menu_focus
                                         && target == tab.id
@@ -6006,6 +6021,12 @@ where
                     );
                 }
             }
+            preview_transport::progress(
+                ui,
+                rect,
+                self.current_position(),
+                Some(media_time(duration)),
+            );
             let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
                 format!("{} · No preview", format_time(media_time(position)))
             } else {
@@ -6318,6 +6339,9 @@ where
                 self.handle_hold_speed(media, generation, action)
             }
             UiAction::ActivateTab(id) => self.activate_tab(id),
+            UiAction::PreviewTransport(id, instance, path, command) => {
+                self.handle_preview_transport(id, instance, path, command)
+            }
             UiAction::TabCommand(id, command) => {
                 let focus = self
                     .ui_context
@@ -8042,7 +8066,9 @@ where
         }
         if let Some(export) = &self.active_export {
             let affects_export = match &action {
-                GuardedAction::CloseTab(id) | GuardedAction::DetachTab(id) => *id == export.tab,
+                GuardedAction::CloseTab(id)
+                | GuardedAction::DetachTab(id)
+                | GuardedAction::NavigateAudioTab(id, _, _) => *id == export.tab,
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
@@ -8065,7 +8091,7 @@ where
                 self.tabs.tabs().iter().any(|tab| tab.id == *id)
                     && self.edits.get(id).is_some_and(EditHistory::is_dirty)
             }),
-            GuardedAction::CloseTab(id) => self
+            GuardedAction::CloseTab(id) | GuardedAction::NavigateAudioTab(id, _, _) => self
                 .edits
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
@@ -8144,6 +8170,19 @@ where
             }
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
+            GuardedAction::NavigateAudioTab(id, source, path) => {
+                if self.tabs.tabs().iter().any(|tab| {
+                    tab.id == id
+                        && tab.target.current_path() == source
+                        && tab.target.media_kind() == MediaKind::Audio
+                }) {
+                    if self.displayed_tab == Some(id) {
+                        self.navigate_to_unchecked(path);
+                    } else {
+                        self.advance_background_audio(id, path);
+                    }
+                }
+            }
             GuardedAction::NavigateFromFolder(path, folder) => {
                 self.navigate_to_unchecked(path);
                 if let Some(recent) = &self.recent_files {

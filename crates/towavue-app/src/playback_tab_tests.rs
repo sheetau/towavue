@@ -362,6 +362,98 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             });
             assert_eq!(app.tabs.active().expect("still image").id, image);
             assert!(app.background_wakeup(Instant::now()).is_none());
+            let preview_path = app.retained_playback[&second].path.clone();
+            app.handle_ui_action(UiAction::PreviewTransport(
+                second,
+                second_instance.wrapping_add(1),
+                preview_path.clone(),
+                CommandId::TogglePause,
+            ));
+            assert_eq!(app.retained_playback[&second].state, PlaybackState::Ended);
+            app.handle_ui_action(UiAction::PreviewTransport(
+                second,
+                second_instance,
+                preview_path.clone(),
+                CommandId::TogglePause,
+            ));
+            assert_eq!(app.retained_playback[&second].state, PlaybackState::Playing);
+            wait(&mut app, &events, |app| {
+                app.retained_playback[&second].position() > media_time(Duration::from_millis(40))
+            });
+            app.handle_ui_action(UiAction::PreviewTransport(
+                second,
+                second_instance,
+                preview_path,
+                CommandId::TogglePause,
+            ));
+            assert_eq!(app.retained_playback[&second].state, PlaybackState::Paused);
+            // WASAPI pause is queued, not acknowledged synchronously. Match the
+            // native pause control's settling interval before checking a held clock.
+            let requested_pause = app.retained_playback[&second].position();
+            if self.audio {
+                std::thread::sleep(Duration::from_millis(100));
+                service(&mut app, &events);
+            }
+            let preview_paused = app.retained_playback[&second].position();
+            assert!(
+                preview_paused >= requested_pause
+                    && preview_paused <= requested_pause.saturating_add(Duration::from_millis(100))
+            );
+            std::thread::sleep(Duration::from_millis(40));
+            service(&mut app, &events);
+            assert_eq!(app.retained_playback[&second].position(), preview_paused);
+            if !self.unknown_duration {
+                let selection = towavue_core::TimeRange::new(
+                    preview_paused,
+                    preview_paused.saturating_add(Duration::from_millis(80)),
+                )
+                .expect("preview selection");
+                app.retained_playback
+                    .get_mut(&second)
+                    .expect("background video")
+                    .time_selection = Some(selection);
+                let path = app.retained_playback[&second].path.clone();
+                app.handle_ui_action(UiAction::PreviewTransport(
+                    second,
+                    second_instance,
+                    path.clone(),
+                    CommandId::TogglePause,
+                ));
+                assert_eq!(
+                    app.retained_playback[&second].playback_selection,
+                    Some(selection)
+                );
+                wait(&mut app, &events, |app| {
+                    app.retained_playback[&second].state == PlaybackState::Ended
+                });
+                assert!(app.retained_playback[&second].position() >= selection.end());
+                app.handle_ui_action(UiAction::PreviewTransport(
+                    second,
+                    second_instance,
+                    path.clone(),
+                    CommandId::TogglePause,
+                ));
+                assert_eq!(
+                    app.retained_playback[&second]
+                        .session
+                        .as_ref()
+                        .expect("selection session")
+                        .target(),
+                    selection.start()
+                );
+                app.handle_ui_action(UiAction::PreviewTransport(
+                    second,
+                    second_instance,
+                    path,
+                    CommandId::TogglePause,
+                ));
+                assert_eq!(app.retained_playback[&second].state, PlaybackState::Paused);
+            }
+            assert_eq!(
+                app.tabs.active().expect("preview keeps active image").id,
+                image
+            );
+            assert_eq!(app.retained_playback[&first].position(), paused_position);
             let background_generation = app.retained_playback[&second]
                 .session
                 .as_ref()

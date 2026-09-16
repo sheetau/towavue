@@ -339,7 +339,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
-    fn advance_background_audio(&mut self, id: TabId, path: PathBuf) {
+    pub(super) fn advance_background_audio(&mut self, id: TabId, path: PathBuf) {
         let Some(mut saved) = self.retained_playback.remove(&id) else {
             return;
         };
@@ -987,6 +987,38 @@ mod tests {
                 assert!(!app.metadata_export_settings.contains_key(&audio));
                 assert_eq!(app.tabs.active().expect("image stays active").id, image);
                 assert_eq!(app.media_generation, image_instance);
+                for (command, expected) in [
+                    (CommandId::PreviousMedia, &paths[0]),
+                    (CommandId::NextMedia, &paths[1]),
+                ] {
+                    let instance = app.retained_playback[&audio].instance;
+                    let source = app.retained_playback[&audio].path.clone();
+                    for blocked in 0..4 {
+                        app.palette_open = blocked == 0;
+                        app.grid_open = blocked == 1;
+                        app.filmstrip_open = blocked == 2;
+                        app.handle_ui_action(UiAction::PreviewTransport(
+                            audio,
+                            if blocked == 3 {
+                                instance.wrapping_add(1)
+                            } else {
+                                instance
+                            },
+                            source.clone(),
+                            command,
+                        ));
+                        assert_eq!(app.retained_playback[&audio].path, source);
+                    }
+                    app.handle_ui_action(UiAction::PreviewTransport(
+                        audio, instance, source, command,
+                    ));
+                    assert_eq!(&app.retained_playback[&audio].path, expected);
+                    assert_eq!(app.tabs.active_id(), Some(image));
+                    assert_eq!(app.media_generation, image_instance);
+                    wait(&mut app, &events, |app| {
+                        app.retained_playback[&audio].state == PlaybackState::Ended
+                    });
+                }
                 assert_eq!(
                     app.tabs
                         .tabs()
@@ -1010,6 +1042,26 @@ mod tests {
                     "background edits block automatic navigation"
                 );
                 assert!(app.edits[&audio].is_dirty());
+                let preview_source = app.retained_playback[&audio].path.clone();
+                let preview_instance = app.retained_playback[&audio].instance;
+                app.handle_ui_action(UiAction::PreviewTransport(
+                    audio,
+                    preview_instance,
+                    preview_source.clone(),
+                    CommandId::NextMedia,
+                ));
+                assert_eq!(
+                    app.tabs.active_id(),
+                    Some(audio),
+                    "only the dirty target activates for its existing save confirmation"
+                );
+                assert!(
+                    matches!(&app.pending_guard, Some(GuardedAction::NavigateAudioTab(id, source, next)) if *id == audio && source == &preview_source && next == &paths[2])
+                );
+                app.resolve_guard(GuardDecision::Cancel);
+                assert_eq!(app.path.as_ref(), Some(&preview_source));
+                assert!(app.edits[&audio].is_dirty());
+                app.activate_tab(image);
                 app.edits.insert(audio, EditHistory::default());
                 app.audio_queues.get_mut(&audio).expect("queue").handled_eof = None;
                 advance(&mut app, &events);

@@ -5,6 +5,62 @@ pub struct Preview {
     seek: Option<f32>,
 }
 
+#[derive(Clone)]
+struct TabHover {
+    source: egui::Id,
+    source_rect: egui::Rect,
+    card: egui::Rect,
+    frame: u64,
+}
+
+fn tab_hover_id() -> egui::Id {
+    egui::Id::new("open-tab-preview")
+}
+
+pub fn tab_hovered(response: &Response) -> bool {
+    let context = &response.ctx;
+    if !response.enabled()
+        || egui::Popup::is_any_open(context)
+        || context.input(|input| !input.raw.hovered_files.is_empty())
+    {
+        return false;
+    }
+    if hover_pos(response).is_some() && !context.input(|input| input.pointer.any_down()) {
+        return true;
+    }
+    let Some(pointer) = context.pointer_hover_pos() else {
+        return false;
+    };
+    let Some(open) = context.data(|data| data.get_temp::<TabHover>(tab_hover_id())) else {
+        return false;
+    };
+    if open.source != response.id
+        || open.source_rect != response.interact_rect
+        || open.frame.saturating_add(1) < context.cumulative_frame_nr()
+    {
+        return false;
+    }
+    let layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("media-preview"));
+    if open.card.contains(pointer) {
+        return context.layer_id_at(pointer) == Some(layer);
+    }
+    let bridge = egui::Rect::from_min_max(
+        egui::pos2(
+            open.card.left().max(response.rect.left()),
+            response.rect.bottom(),
+        ),
+        egui::pos2(
+            open.card.right().min(response.rect.right()),
+            open.card.top(),
+        ),
+    );
+    bridge.contains(pointer)
+        && !context.input(|input| input.pointer.any_down())
+        && context
+            .layer_id_at(pointer)
+            .is_none_or(|top| top == layer || top == response.layer_id)
+}
+
 pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::NONE.inner_margin(6).show(ui, content).inner
 }
@@ -103,9 +159,23 @@ impl Preview {
             || egui::Popup::is_any_open(context)
             || context.input(|input| !input.raw.hovered_files.is_empty())
             || !(dragging
-                || (hover_pos(&response).is_some()
-                    && !context.input(|input| input.pointer.any_down())))
+                || if self.seek.is_none() {
+                    tab_hovered(&response)
+                } else {
+                    hover_pos(&response).is_some()
+                        && !context.input(|input| input.pointer.any_down())
+                })
         {
+            if self.seek.is_none() {
+                context.data_mut(|data| {
+                    if data
+                        .get_temp::<TabHover>(tab_hover_id())
+                        .is_some_and(|open| open.source == response.id)
+                    {
+                        data.remove::<TabHover>(tab_hover_id());
+                    }
+                });
+            }
             return None;
         }
         let (anchor, pivot, width) = if let Some(ratio) = self.seek {
@@ -128,7 +198,7 @@ impl Preview {
         let previous = egui::AreaState::load(context, id).and_then(|state| state.size);
         let output = egui::Area::new(id)
             .order(egui::Order::Tooltip)
-            .interactable(false)
+            .interactable(self.seek.is_none())
             .movable(false)
             .fade_in(false)
             .pivot(pivot)
@@ -147,6 +217,20 @@ impl Preview {
                     })
                     .inner
             });
+        if self.seek.is_none() {
+            let frame = context.cumulative_frame_nr();
+            context.data_mut(|data| {
+                data.insert_temp(
+                    tab_hover_id(),
+                    TabHover {
+                        source: response.id,
+                        source_rect: response.interact_rect,
+                        card: output.response.rect,
+                        frame,
+                    },
+                )
+            });
+        }
         // Resolve initial sizing and asynchronous content changes before presenting the frame.
         if previous.is_none_or(|size| (size - output.response.rect.size()).length() > 0.1) {
             context.request_discard("media preview size changed");

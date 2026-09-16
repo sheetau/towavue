@@ -415,11 +415,25 @@ impl CommandPalette {
         if !self.folders {
             if let Some(result) = search {
                 if let Some(error) = &result.error {
-                    ui.weak(error);
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(error).weak())
+                            .truncate()
+                            .show_tooltip_when_elided(false),
+                    )
+                    .help_text(error);
                 } else if result.matches > result.paths.len() as u64 || result.skipped != 0 {
-                    ui.weak(format!("Showing {} of {} matches; {} entries skipped",
-                        result.paths.len(), result.matches, result.skipped))
-                        .help_text("Unreadable entries, links/junctions and folders deeper than 128 levels are skipped. Refine the query to narrow results.");
+                    let summary = format!(
+                        "Showing {} of {} matches; {} entries skipped",
+                        result.paths.len(),
+                        result.matches,
+                        result.skipped,
+                    );
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(&summary).weak())
+                            .truncate()
+                            .show_tooltip_when_elided(false),
+                    )
+                    .help_text(format!("{summary}\nUnreadable entries, links/junctions and folders deeper than 128 levels are skipped. Refine the query to narrow results."));
                 }
             } else if sources.searching && !query.is_empty() {
                 ui.weak("Searching subfolders...");

@@ -5,6 +5,151 @@ fn time(ns: i64) -> MediaTime {
     MediaTime::from_nanoseconds(ns)
 }
 
+fn with_mode<T>(mode: u8, run: impl FnOnce() -> T) -> T {
+    struct Restore(u8);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PIXEL_MODE.set(self.0);
+        }
+    }
+    let _restore = Restore(PIXEL_MODE.replace(mode));
+    run()
+}
+
+#[test]
+fn h264_hevc_probe_modes_preserve_full_decode_pts() {
+    for file in ["h264-aac.mp4", "hevc-aac.mkv"] {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/generated/m1")
+            .join(file);
+        let mut reference = Vec::new();
+        decode_file(&path, |item| {
+            if let DecodeOutput::Video(frame) = item {
+                reference.push(frame.presentation_time);
+            }
+            true
+        })
+        .expect("unmodified full decoder");
+        assert!(reference.len() > 20);
+        let mut plan = EditTimeline::new(
+            reference
+                .last()
+                .expect("last PTS")
+                .saturating_add(Duration::from_secs(1)),
+            PlaybackRange::default(),
+        )
+        .expect("plan");
+        assert!(plan.apply(TimelineEdit::Delete(
+            TimeRange::new(time(350_000_000), time(910_000_000)).expect("cut")
+        )));
+        assert!(plan.apply(TimelineEdit::Stretch(
+            TimeRange::new(time(200_000_000), time(700_000_000)).expect("stretch"),
+            time(800_000_000)
+        )));
+        let edited: Vec<_> = reference
+            .iter()
+            .filter_map(|source| plan.edited_time(*source))
+            .collect();
+        for mode in [0, 1, 2] {
+            with_mode(mode, || verify(&path, &reference, None));
+            with_mode(mode, || verify(&path, &edited, Some(&plan)));
+        }
+    }
+}
+
+#[test]
+#[ignore = "Release explicit read-only TOWAVUE_SEEK_REFERENCE_SOURCE; timestamp-only, no pixel output"]
+fn reference_probe_reports_pixel_work_cost() {
+    if cfg!(debug_assertions) {
+        panic!("use Release");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit source"),
+    );
+    let stamp = || {
+        let m = std::fs::metadata(&path).expect("metadata");
+        (m.len(), m.modified().expect("mtime"))
+    };
+    let original = stamp();
+    for target_ms in [60_550, 64_550, 300_550] {
+        for forward in [false, true] {
+            let mut expected = None;
+            for mode in [0, 1, 2, 2, 1, 0] {
+                let start = std::time::Instant::now();
+                let actual = with_mode(mode, || {
+                    adjacent_video_frame(&path, time(target_ms * 1_000_000), forward, None, &|| {
+                        false
+                    })
+                })
+                .expect("reference PTS query");
+                let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                assert!(actual.is_some());
+                if let Some(expected) = expected {
+                    assert_eq!(actual, expected);
+                } else {
+                    expected = Some(actual);
+                }
+                println!(
+                    "FRAME_PROBE target_ms={target_ms} forward={forward} mode={mode} elapsed_ms={elapsed_ms:.4}"
+                );
+            }
+        }
+    }
+    assert_eq!(stamp(), original);
+}
+
+#[test]
+#[ignore = "Release 100 adjacent queries/direction on explicit read-only TOWAVUE_SEEK_REFERENCE_SOURCE"]
+fn reference_probe_reports_hundred_consecutive_steps() {
+    if cfg!(debug_assertions) {
+        panic!("use Release");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit source"),
+    );
+    let stamp = || {
+        let m = std::fs::metadata(&path).expect("metadata");
+        (m.len(), m.modified().expect("mtime"))
+    };
+    let original = stamp();
+    for forward in [true, false] {
+        let mut expected = Vec::new();
+        for mode in [0, 2] {
+            let mut target = time(60_550_000_000);
+            let mut selected = Vec::new();
+            let mut costs = Vec::new();
+            for _ in 0..100 {
+                let start = std::time::Instant::now();
+                let next = with_mode(mode, || {
+                    adjacent_video_frame(&path, target, forward, None, &|| false)
+                })
+                .expect("adjacent query")
+                .expect("reference contains enough frames");
+                costs.push(start.elapsed().as_secs_f64() * 1000.0);
+                assert!(if forward {
+                    next > target
+                } else {
+                    next < target
+                });
+                selected.push(next);
+                target = next;
+            }
+            if mode == 0 {
+                expected = selected;
+            } else {
+                assert_eq!(selected, expected, "all 100 distinct PTS match");
+            }
+            let total: f64 = costs.iter().sum();
+            costs.sort_by(f64::total_cmp);
+            println!(
+                "FRAME_PROBE_BURST forward={forward} mode={mode} queries=100 total_ms={total:.3} median_ms={:.3} p95_ms={:.3} max_ms={:.3}",
+                costs[50], costs[94], costs[99]
+            );
+        }
+    }
+    assert_eq!(stamp(), original);
+}
+
 #[test]
 fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
     let unique = std::time::SystemTime::now()

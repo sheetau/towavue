@@ -174,6 +174,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             generation: self.generation,
             forward,
         });
+        // The sequential playback queue already proves the next distinct PTS.
+        // Do not use a seek placeholder, a queued logical cursor, or duplicates.
+        if forward
+            && let Some(target) = self.session.as_mut().and_then(|session| {
+                (!session.video_refresh_pending() && session.current_video_time() == Some(base))
+                    .then(|| session.pending_video_time())
+                    .flatten()
+                    .filter(|target| *target > base)
+            })
+        {
+            (self.notify)(AppEvent::FrameStep(serial, Ok(Some(target))));
+            return;
+        }
         let notify = Arc::clone(&self.notify);
         self.frame_steps.worker.submit(move |cancellation| {
             let result = adjacent_video_frame(&path, base, forward, plan.as_ref(), &|| {

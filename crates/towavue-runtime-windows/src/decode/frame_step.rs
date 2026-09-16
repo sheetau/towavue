@@ -1,6 +1,11 @@
 use super::*;
 use towavue_core::EditTimeline;
 
+#[cfg(test)]
+thread_local! {
+    static PIXEL_MODE: std::cell::Cell<u8> = const { std::cell::Cell::new(2) };
+}
+
 /// Find the adjacent distinct video PTS on the source or edited timeline.
 /// Run on a worker: seeking and codec calls can block. Only scalar timestamps
 /// leave this query; playback keeps its own input, device and presentation path.
@@ -80,9 +85,26 @@ fn scan(
     let mut input = format::input(path)?;
     check_cancelled(cancelled)?;
     let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
-    let mut decoder = codec::context::Context::from_parameters(config.parameters)?
-        .decoder()
-        .video()?;
+    let mut context = codec::context::Context::from_parameters(config.parameters)?;
+    #[cfg(test)]
+    let mode = PIXEL_MODE.get();
+    #[cfg(not(test))]
+    let mode = 2;
+    // This private decoder emits only timestamps. Keep every frame/reordering
+    // decision, but omit pixel loop filtering and bound native frame workers to
+    // two for the measured codecs. Never share these pixels with display/export.
+    let supported = matches!(context.id(), codec::Id::H264 | codec::Id::HEVC);
+    if supported && mode == 2 {
+        context.set_threading(codec::threading::Config {
+            kind: codec::threading::Type::Frame,
+            count: 2,
+        });
+    }
+    let mut decoder = context.decoder();
+    if supported && mode != 0 {
+        decoder.skip_loop_filter(ffmpeg::Discard::All);
+    }
+    let mut decoder = decoder.video()?;
     let origin = input_origin(&input);
     seek_video_stream(
         &mut input,

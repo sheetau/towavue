@@ -134,9 +134,34 @@ fn asynchronous_steps_present_actual_vfr_pts_and_reject_obsolete_results() {
                     .expect("frame")
             };
             assert_eq!(displayed(&app), self.reference[0]);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.session.as_mut().expect("session").pending_video_time()
+                != Some(self.reference[1])
+            {
+                assert!(Instant::now() < deadline, "decoded successor becomes ready");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            // An already decoded successor must not wait for another software probe.
+            let (entered, started) = mpsc::channel();
+            let (release, gate) = mpsc::channel();
+            app.frame_steps.worker.submit(move |_| {
+                entered.send(()).expect("probe worker held");
+                gate.recv_timeout(Duration::from_secs(5))
+                    .expect("release worker");
+            });
+            started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("worker entered");
             app.toggle_pause();
             app.process_shortcut(".".parse().expect("next"));
             assert_eq!(app.state, PlaybackState::Paused, "stepping pauses playback");
+            let ready = rx
+                .try_iter()
+                .find(|event| matches!(event, AppEvent::FrameStep(..)));
+            release.send(()).expect("release unrelated probe work");
+            app.handle_app_event(
+                ready.expect("queued successor resolves without the probe worker"),
+            );
             settle(&mut app, &rx);
             assert_eq!(displayed(&app), self.reference[1]);
             let pending = app.pending_time.replace(self.reference[2]);

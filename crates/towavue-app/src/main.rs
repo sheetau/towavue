@@ -5617,6 +5617,22 @@ where
     }
 
     fn refresh_status_file_details(&mut self) {
+        if self
+            .native_caption
+            .as_ref()
+            .is_some_and(NativeCaption::take_time_settings_changed)
+        {
+            self.status_file_details.invalidate();
+            // A handoff describes the previously displayed file. Keep its size,
+            // but do not show a date formatted with the old system settings.
+            if let Some(details) = self
+                .image_handoff
+                .as_mut()
+                .and_then(|held| held.file_details.as_mut())
+            {
+                details.modified_local = None;
+            }
+        }
         self.status_file_details
             .update(self.status_file_source(), self.notify.clone());
     }

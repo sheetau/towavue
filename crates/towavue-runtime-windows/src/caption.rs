@@ -40,10 +40,12 @@ pub struct CaptionButton {
 }
 
 struct CaptionState {
+    window: std::sync::Weak<Window>,
     fullscreen: Cell<bool>,
     sizing: Cell<bool>,
     changing_dpi: Cell<bool>,
     resize_frame: Cell<bool>,
+    time_settings_changed: Cell<bool>,
     drag: Cell<Option<egui::Rect>>,
     dpi: Cell<u32>,
     fullscreen_dpi_bounds: Cell<Option<RECT>>,
@@ -61,6 +63,20 @@ pub struct NativeCaption {
 }
 
 impl NativeCaption {
+    /// Consume coalesced system time/settings notifications on the window thread.
+    /// The native callback only marks state and schedules paint, never queries files.
+    pub fn take_time_settings_changed(&self) -> bool {
+        self.state.time_settings_changed.replace(false)
+    }
+
+    /// Deliver a time-change notification only to this owned window for tests.
+    /// This neither changes OS settings nor broadcasts to other applications.
+    #[cfg(any(test, feature = "render-verification"))]
+    pub fn verification_time_settings_changed(&self) {
+        // SAFETY: retained same-thread HWND and scalar message parameters.
+        unsafe { SendMessageW(self.handle, WM_TIMECHANGE, None, None) };
+    }
+
     /// Permit one synchronous frame in the native move/size loop. The owned
     /// guard prevents recursive drawing across reentrant native callbacks.
     /// Fullscreen and DPI placement changes still coalesce until a normal redraw.
@@ -156,10 +172,12 @@ impl NativeCaption {
             return Err("Native caption must be installed on its window thread".into());
         }
         let state = Rc::new(CaptionState {
+            window: Arc::downgrade(&window),
             fullscreen: Cell::new(false),
             sizing: Cell::new(false),
             changing_dpi: Cell::new(false),
             resize_frame: Cell::new(false),
+            time_settings_changed: Cell::new(false),
             drag: Cell::new(None),
             // SAFETY: live, same-thread window checked above; scalar query only.
             dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
@@ -542,6 +560,16 @@ unsafe extern "system" fn caption_proc(
             if RemoveWindowSubclass(handle, Some(caption_proc), SUBCLASS_ID).as_bool() {
                 drop(Rc::from_raw(data as *const CaptionState));
             }
+        } else if matches!(message, WM_TIMECHANGE | WM_SETTINGCHANGE) {
+            state.time_settings_changed.set(true);
+            // Settings messages need not identify a specific parameter and may
+            // have a null lParam. Refresh conservatively without reading it.
+            // Use winit's redraw bookkeeping, including notifications delivered
+            // during painting. A weak reference avoids tying HWND lifetime to its
+            // subclass registration. No state borrow survives a native callback.
+            if let Some(window) = state.window.upgrade() {
+                window.request_redraw();
+            }
         } else if matches!(message, WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE | WM_CANCELMODE) {
             state.sizing.set(message == WM_ENTERSIZEMOVE);
         } else if message == WM_WINDOWPOSCHANGING
@@ -856,6 +884,7 @@ unsafe extern "system" fn surface_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::Graphics::Gdi::{RDW_NOINTERNALPAINT, RDW_VALIDATE, RedrawWindow};
     use winit::application::ApplicationHandler;
     use winit::event::WindowEvent;
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -953,6 +982,62 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                assert!(!caption.take_time_settings_changed());
+                let visible_time_trial =
+                    std::env::var_os("TOWAVUE_TIME_SETTINGS_VISIBLE").is_some();
+                // SAFETY: optionally show only the owned test window without activation.
+                if visible_time_trial {
+                    let _ = unsafe { ShowWindow(handle, SW_SHOWNOACTIVATE) };
+                }
+                for message in [WM_TIMECHANGE, WM_SETTINGCHANGE] {
+                    // SAFETY: owned HWND; clear paint then deliver only a
+                    // synthetic notification, without changing any system setting.
+                    unsafe {
+                        let _ = RedrawWindow(
+                            Some(handle),
+                            None,
+                            None,
+                            RDW_VALIDATE | RDW_NOINTERNALPAINT,
+                        );
+                        let mut paint = MSG::default();
+                        assert!(
+                            !PeekMessageW(
+                                &mut paint,
+                                Some(handle),
+                                WM_PAINT,
+                                WM_PAINT,
+                                PM_NOREMOVE
+                            )
+                            .as_bool(),
+                            "no pre-existing paint"
+                        );
+                        for _ in 0..3 {
+                            SendMessageW(handle, message, None, None);
+                        }
+                        if visible_time_trial {
+                            assert!(
+                                PeekMessageW(
+                                    &mut paint,
+                                    Some(handle),
+                                    WM_PAINT,
+                                    WM_PAINT,
+                                    PM_NOREMOVE
+                                )
+                                .as_bool(),
+                                "wake idle paint even without an invalid pixel region"
+                            );
+                        }
+                    }
+                    assert!(caption.take_time_settings_changed());
+                    assert!(
+                        !caption.take_time_settings_changed(),
+                        "coalesced notification"
+                    );
+                }
+                if visible_time_trial {
+                    // SAFETY: restore the original hidden test state before geometry checks.
+                    let _ = unsafe { ShowWindow(handle, SW_HIDE) };
+                }
                 assert!(caption.begin_resize_frame().is_none());
                 for end_message in [WM_EXITSIZEMOVE, WM_CANCELMODE] {
                     caption.verification_size_move(true);

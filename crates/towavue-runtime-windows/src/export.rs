@@ -1469,6 +1469,11 @@ fn timeline_filters(
     filters.join(";")
 }
 
+// OpenH264 otherwise targets a fixed 2 Mbps at every resolution. Bound its
+// quantizer instead of allowing that budget to erase detail. This is lossy
+// 8-bit output, not source-depth preservation; complex footage can be much larger.
+const SOFTWARE_H264_QUALITY: &[&str] = &["-profile:v", "high", "-qmin:v", "1", "-qmax:v", "20"];
+
 fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
     let extension = request
         .target
@@ -1497,7 +1502,15 @@ fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
         (MediaKind::Image, "bmp", _) => &["-c:v", "bmp"],
         (MediaKind::Image, _, _) => &[],
     };
-    codecs.iter().map(|argument| (*argument).into()).collect()
+    let mut arguments: Vec<String> = codecs.iter().map(|argument| (*argument).into()).collect();
+    if codecs.contains(&"libopenh264") {
+        arguments.extend(
+            SOFTWARE_H264_QUALITY
+                .iter()
+                .map(|argument| (*argument).into()),
+        );
+    }
+    arguments
 }
 
 pub(crate) fn visual_filters(operations: &[EditOperation]) -> Vec<String> {
@@ -1666,6 +1679,9 @@ mod seek_tests;
 #[cfg(test)]
 #[path = "export_timeline_tests.rs"]
 mod timeline_tests;
+#[cfg(test)]
+#[path = "export_video_quality_tests.rs"]
+mod video_quality_tests;
 
 #[cfg(test)]
 mod tests {

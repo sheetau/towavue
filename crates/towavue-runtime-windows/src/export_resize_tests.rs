@@ -102,7 +102,10 @@ fn video_resize_exports_all_filters_exact_dimensions_sar_and_identity() {
                 &executable,
                 &["-v", "error", "-i"],
                 Some(&source),
-                &["-vf", &filter, "-c:v", "libopenh264"],
+                &["-vf", &filter, "-c:v", "libopenh264"]
+                    .into_iter()
+                    .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                    .collect::<Vec<_>>(),
                 &reference,
             );
             same_frames(&request.target, &reference, output, 4);
@@ -174,7 +177,10 @@ fn video_resize_composes_with_rotation_crop_and_refuses_stale_or_wrong_media_bef
         &executable,
         &["-v", "error", "-i"],
         Some(&source),
-        &["-vf", filter, "-c:v", "libopenh264"],
+        &["-vf", filter, "-c:v", "libopenh264"]
+            .into_iter()
+            .chain(SOFTWARE_H264_QUALITY.iter().copied())
+            .collect::<Vec<_>>(),
         &reference,
     );
     same_frames(&request.target, &reference, (60, 80), 4);

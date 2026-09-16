@@ -314,7 +314,10 @@ mod tests {
                 &executable,
                 &["-v", "error", "-i"],
                 Some(&source),
-                &["-vf", &filter, "-c:v", "libopenh264"],
+                &["-vf", &filter, "-c:v", "libopenh264"]
+                    .into_iter()
+                    .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                    .collect::<Vec<_>>(),
                 &reference,
             );
             let actual = video(&target);
@@ -427,7 +430,10 @@ mod tests {
             &executable,
             &["-v", "error", "-i"],
             Some(&source),
-            &["-vf", filter, "-c:v", "libopenh264"],
+            &["-vf", filter, "-c:v", "libopenh264"]
+                .into_iter()
+                .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                .collect::<Vec<_>>(),
             &reference,
         );
         let actual = video(&request.target);

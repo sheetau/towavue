@@ -68,6 +68,161 @@ fn open_muted<N: Fn(AppEvent) + Send + Sync + 'static>(
     id
 }
 
+fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    tab: TabId,
+) {
+    let active = app.tabs.active().expect("foreground tab").id;
+    let path = app
+        .tabs
+        .tabs()
+        .iter()
+        .find(|item| item.id == tab)
+        .expect("preview tab")
+        .target
+        .current_path()
+        .to_owned();
+    let history = app.edits[&tab].clone();
+    assert_eq!(
+        app.preview_transport(tab, &path)
+            .expect("loaded transport")
+            .state,
+        PlaybackState::Paused
+    );
+    let previous_context = app.ui_context.take();
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        app.ui_context = Some(context.clone());
+        let mut time = 0.0;
+        let mut frame = |app: &mut Application<N>, point, pressed: Option<bool>| {
+            time += 0.01;
+            let mut events = vec![egui::Event::PointerMoved(point)];
+            if let Some(pressed) = pressed {
+                events.push(egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                });
+            }
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    time: Some(time),
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_top_bar(ui, &mut actions);
+                },
+            );
+            let mut count = 0;
+            for (index, action) in actions.iter().enumerate() {
+                if !actions[..index].contains(action) {
+                    app.handle_ui_action(action.clone());
+                    count += 1;
+                }
+            }
+            (output, count)
+        };
+        let node_center = |output: &egui::FullOutput, label: &str| {
+            let bounds = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .unwrap_or_else(|| panic!("missing control: {label}"))
+                .1
+                .bounds()
+                .expect("control bounds");
+            egui::pos2(
+                (bounds.x0 + bounds.x1) as f32 / 2.0,
+                (bounds.y0 + bounds.y1) as f32 / 2.0,
+            )
+        };
+        let card = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .flat_map(|shape| match &shape.shape {
+                    egui::Shape::Vec(shapes) => shapes.as_slice(),
+                    shape => std::slice::from_ref(shape),
+                })
+                .find_map(|shape| match shape {
+                    egui::Shape::Rect(rect)
+                        if (240.0..245.0).contains(&rect.rect.width())
+                            && rect.rect.height() > 50.0
+                            && rect.fill == chrome::FLOATING_BACKGROUND =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("tab card remains open")
+        };
+        // Let the active tab's automatic scroll-to-visible animation settle
+        // before hovering another tab; actual source movement closes its card.
+        for _ in 0..50 {
+            frame(app, egui::pos2(900.0, 400.0), None);
+        }
+        let (output, _) = frame(app, egui::pos2(900.0, 400.0), None);
+        let source = node_center(&output, &display_name(&path));
+        frame(app, source, None);
+        let (output, _) = frame(app, source, None);
+        let bounds = card(&output);
+        let caption_top = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text)
+                    if text.galley.text().starts_with("Preview near ")
+                        || text.galley.text() == path.display().to_string() =>
+                {
+                    Some(text.pos.y)
+                }
+                _ => None,
+            })
+            .expect("caption below the fitted thumbnail");
+        let point = egui::pos2(bounds.center().x, (bounds.top() + caption_top - 6.0) * 0.5);
+        frame(app, point, None);
+        let (output, _) = frame(app, point, None);
+        let mut button = node_center(&output, "Play");
+        for (label, state) in [
+            ("Pause", PlaybackState::Playing),
+            ("Play", PlaybackState::Paused),
+        ] {
+            frame(app, button, None);
+            assert_eq!(frame(app, button, Some(true)).1, 0);
+            assert_eq!(
+                frame(app, button, Some(false)).1,
+                1,
+                "preview click: density={density}, next={label}, point={button:?}, active={}",
+                active == tab
+            );
+            let transport = app.preview_transport(tab, &path).expect("same media");
+            assert_eq!(transport.state, state);
+            let (output, count) = frame(app, button, None);
+            assert_eq!(count, 0);
+            assert_eq!(card(&output), bounds, "transport must not move its card");
+            button = node_center(&output, label);
+            assert_eq!(app.tabs.active().expect("unchanged foreground").id, active);
+            assert_eq!(app.edits[&tab], history);
+        }
+    }
+    app.ui_context = previous_context;
+}
+
 fn recover_failed_playback<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: &mpsc::Receiver<AppEvent>,
@@ -118,7 +273,7 @@ fn recover_failed_playback<N: Fn(AppEvent) + Send + Sync + 'static>(
     );
 }
 
-fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
+fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_controls: bool) {
     let source =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
     let video = root.join("first.mp4");
@@ -171,6 +326,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
         root: PathBuf,
         audio: bool,
         unknown_duration: bool,
+        preview_controls: bool,
     }
     impl ApplicationHandler for Trial {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -222,6 +378,25 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             assert!(app.frame_is_due());
             app.advance_media();
             draw_video(&mut app);
+            if self.preview_controls {
+                click_preview_transport(&mut app, first);
+                app.open_external(self.root.join("image.bmp"), true);
+                wait(&mut app, &events, |app| {
+                    !app.image_loading && app.image.is_some()
+                });
+                click_preview_transport(&mut app, first);
+                let music = open_muted(&mut app, self.root.join("tone.wav"), MediaKind::Audio);
+                wait(&mut app, &events, |app| app.media_duration.is_some());
+                app.toggle_pause();
+                click_preview_transport(&mut app, music);
+                app.open_external(self.root.join("image.bmp"), false);
+                wait(&mut app, &events, |app| {
+                    !app.image_loading && app.image.is_some()
+                });
+                click_preview_transport(&mut app, music);
+                event_loop.exit();
+                return;
+            }
             let first_geometry = app.session.as_ref().expect("first video").video_geometry();
             let first_presented = app
                 .session
@@ -696,6 +871,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool) {
             root,
             audio,
             unknown_duration,
+            preview_controls,
         })
         .expect("retained playback trial");
 }
@@ -705,7 +881,7 @@ fn video_tabs_keep_paused_state_and_end_in_background() {
     if let Some(root) = tests::isolated_test_root(
         "playback_tab_tests::video_tabs_keep_paused_state_and_end_in_background",
     ) {
-        run_trial(root, false, false);
+        run_trial(root, false, false, false);
     }
 }
 
@@ -715,7 +891,7 @@ fn audio_video_tabs_continue_behind_images_and_recover_the_shared_device() {
     if let Some(root) = tests::isolated_test_root(
         "playback_tab_tests::audio_video_tabs_continue_behind_images_and_recover_the_shared_device",
     ) {
-        run_trial(root, true, false);
+        run_trial(root, true, false, false);
     }
 }
 
@@ -724,6 +900,16 @@ fn unknown_duration_video_reaches_real_eof_in_background() {
     if let Some(root) = tests::isolated_test_root(
         "playback_tab_tests::unknown_duration_video_reaches_real_eof_in_background",
     ) {
-        run_trial(root, false, true);
+        run_trial(root, false, true, false);
+    }
+}
+
+#[test]
+#[ignore = "requires Windows D3D11 and a live shared WASAPI endpoint; owned media is muted"]
+fn tab_preview_play_pause_keeps_active_and_background_cards_open() {
+    if let Some(root) = tests::isolated_test_root(
+        "playback_tab_tests::tab_preview_play_pause_keeps_active_and_background_cards_open",
+    ) {
+        run_trial(root, true, false, true);
     }
 }

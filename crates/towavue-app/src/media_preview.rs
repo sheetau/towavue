@@ -208,7 +208,6 @@ impl Preview {
                 ui.style_mut().interaction.selectable_labels = false;
                 egui::Frame::popup(ui.style())
                     .inner_margin(0)
-                    .stroke(egui::Stroke::NONE)
                     .show(ui, |ui| {
                         ui.set_width(width);
                         ui.spacing_mut().item_spacing.y = 0.0;
@@ -299,11 +298,12 @@ mod tests {
     }
 
     #[test]
-    fn cards_have_flush_rounded_images_padded_captions_and_bounded_sheet_uvs() {
+    fn cards_have_tooltip_borders_flush_images_padded_captions_and_bounded_sheet_uvs() {
         for density in [1.0, 1.25, 2.0] {
             for seek in [false, true] {
                 let context = crate::fonts::test_context();
                 context.set_pixels_per_point(density);
+                context.global_style_mut(crate::chrome::style);
                 let texture = context.load_texture(
                     "preview-sheet",
                     egui::ColorImage::filled([8, 8], egui::Color32::WHITE),
@@ -355,9 +355,22 @@ mod tests {
                     );
                 }
                 let tolerance = 1.0 / density;
-                assert!((card.top() - pixels.top()).abs() <= tolerance);
-                assert!((card.left() - pixels.left()).abs() <= tolerance);
-                assert!((card.right() - pixels.right()).abs() <= tolerance);
+                let border = context.global_style().visuals.window_stroke();
+                assert!((pixels.top() - card.top() - border.width).abs() <= tolerance);
+                assert!((pixels.left() - card.left() - border.width).abs() <= tolerance);
+                assert!((card.right() - pixels.right() - border.width).abs() <= tolerance);
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .flat_map(|shape| match &shape.shape {
+                            egui::Shape::Vec(shapes) => shapes.as_slice(),
+                            shape => std::slice::from_ref(shape),
+                        })
+                        .any(|shape| matches!(shape, egui::Shape::Rect(rect)
+                    if rect.rect == card && rect.stroke == border)),
+                    "use the same border as ordinary tooltips"
+                );
                 assert!(label.top() >= pixels.bottom() + 5.0);
                 assert!(label.left() >= card.left() + 5.0);
                 assert!(card.bottom() >= label.bottom() + 5.0);

@@ -5243,6 +5243,11 @@ where
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
                                     if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
+                                        // Playing audio changes the label's leading inset, not
+                                        // the tab's location or its hover-card ownership.
+                                        let mut response = response.clone();
+                                        response.rect.min.x = rect.min.x;
+                                        response.interact_rect = response.rect.intersect(clip);
                                         let hovered = media_preview::tab_hovered(&response);
                                         let background = hovered
                                             .then(|| self.retained_playback.get(&tab.id))
@@ -6037,12 +6042,6 @@ where
                     );
                 }
             }
-            preview_transport::progress(
-                ui,
-                rect,
-                self.current_position(),
-                Some(media_time(duration)),
-            );
             let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
                 format!("{} · No preview", format_time(media_time(position)))
             } else {
@@ -15403,6 +15402,16 @@ mod tests {
                 app.failed_thumbnails.insert(10);
             }
             let output = frame(&mut app, true);
+            assert!(
+                !output.shapes.iter().any(|shape| matches!(
+                    &shape.shape,
+                    egui::Shape::Rect(rect)
+                        if (rect.rect.width() - 160.0).abs() < 0.01
+                            && (rect.rect.height() * context.pixels_per_point() - 1.0).abs() < 0.01
+                            && rect.fill == chrome::MUTED
+                )),
+                "seek previews must not contain a playback progress line"
+            );
             let caption = output
                 .shapes
                 .iter()

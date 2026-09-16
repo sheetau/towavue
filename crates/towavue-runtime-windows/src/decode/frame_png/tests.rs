@@ -1,6 +1,7 @@
 use super::*;
 
 mod alpha;
+mod exif;
 mod grayscale;
 use std::{fs, io::Cursor, process::Command};
 

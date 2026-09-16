@@ -105,10 +105,24 @@ pub fn edited_video_frame_png(
         }
     };
     let mut finished = false;
+    let mut started = false;
     for (stream, mut packet) in input.packets() {
         check_cancelled(cancelled)?;
         if stream.index() == config.index {
             normalize_packet_time(&mut packet, stream.time_base(), origin);
+            if !started
+                && !packet.is_key()
+                && packet.pts().is_some_and(|pts| {
+                    timestamp_to_media_time(Some(pts), config.time_base) < target
+                })
+            {
+                // Matroska may resume at a non-key packet sharing the indexed
+                // keyframe's timestamp. A fresh strict decoder cannot use that
+                // leading preroll. Skip only known pre-target packets; never
+                // discard a target-time packet and hide an ambiguous picture.
+                continue;
+            }
+            started = true;
             decoder.send_packet(&packet)?;
             if receive(&mut decoder)? {
                 finished = true;

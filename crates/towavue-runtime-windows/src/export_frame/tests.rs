@@ -244,3 +244,140 @@ fn frame_export_cancellation_decode_and_publish_failures_preserve_targets() {
     assert!(export_video_frame(&snapshot, &fixture.root.join("wrong.jpg"), &[]).is_err());
     fixture.assert_no_staging();
 }
+
+#[test]
+fn duplicate_frame_times_across_keyframes_and_at_eof_never_replace_targets() {
+    use std::os::windows::process::CommandExt;
+    for gop in [1, 2, 12] {
+        for origin in [0, 3] {
+            for duplicate_count in [2, 3] {
+                let fixture = Fixture::new();
+                let filter = format!(
+                    "setpts=if(lt(N\\,3)\\,N\\,if(lt(N\\,{})\\,3\\,if(lt(N\\,20)\\,N-{}\\,{})))+{origin}/TB",
+                    3 + duplicate_count,
+                    duplicate_count - 1,
+                    21 - duplicate_count
+                );
+                let output =
+                    Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+                        .creation_flags(0x0800_0000)
+                        .args([
+                            "-v",
+                            "error",
+                            "-y",
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            "testsrc=size=32x24:rate=8:duration=3",
+                            "-vf",
+                            &filter,
+                            "-fps_mode",
+                            "passthrough",
+                            "-c:v",
+                            "ffv1",
+                            "-g",
+                            &gop.to_string(),
+                        ])
+                        .arg(&fixture.source)
+                        .output()
+                        .expect("duplicate PTS fixture");
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                let original = fs::read(&fixture.source).expect("source bytes");
+                let mut snapshot = fixture.snapshot();
+                let stamp = fixture.snapshot();
+                let target = fixture.root.join("output.png");
+                let mut frames = Vec::new();
+                crate::decode::decode_file(&fixture.source, |output| {
+                    if let crate::DecodeOutput::Video(frame) = output {
+                        frames.push(frame);
+                    }
+                    true
+                })
+                .expect("sequential reference");
+                assert_eq!(frames.len(), 24);
+                for group in [&frames[3..3 + duplicate_count], &frames[20..24]] {
+                    assert!(
+                        group
+                            .iter()
+                            .all(|frame| frame.presentation_time == group[0].presentation_time)
+                    );
+                    assert!(
+                        group.windows(2).any(|pair| pair[0].rgba != pair[1].rgba),
+                        "distinct images share a timestamp"
+                    );
+                    snapshot.time = group[0].presentation_time;
+                    for existing in [false, true] {
+                        if existing {
+                            fs::write(&target, b"preserve existing output").expect("target");
+                        }
+                        let before = existing.then(|| {
+                            fs::metadata(&target)
+                                .expect("target metadata")
+                                .modified()
+                                .expect("mtime")
+                        });
+                        let (tx, rx) = mpsc::channel();
+                        let job = ExportJob::start_video_frame(
+                            snapshot.clone(),
+                            target.clone(),
+                            vec![],
+                            move |event| {
+                                tx.send(event).expect("export event");
+                            },
+                        )
+                        .expect("frame export worker");
+                        let result = rx
+                            .recv_timeout(Duration::from_secs(10))
+                            .expect("terminal export event");
+                        assert!(
+                            matches!(result, ExportEvent::Finished(Err(ExportError::Failed(ref error))) if error.contains("ambiguous duplicate")),
+                            "gop={gop} origin={origin} time={:?}: {result:?}",
+                            snapshot.time
+                        );
+                        drop(job);
+                        assert!(rx.try_recv().is_err(), "one terminal event");
+                        if let Some(before) = before {
+                            assert_eq!(
+                                fs::read(&target).expect("target"),
+                                b"preserve existing output"
+                            );
+                            assert_eq!(
+                                fs::metadata(&target)
+                                    .expect("target metadata")
+                                    .modified()
+                                    .expect("mtime"),
+                                before
+                            );
+                            fs::remove_file(&target).expect("remove owned target for next case");
+                        } else {
+                            assert!(!target.exists(), "failure cannot create a PNG");
+                        }
+                        fixture.assert_no_staging();
+                    }
+                }
+                // Nearby unique timestamps must still save their own exact image.
+                for index in [0, 2, 6, 19] {
+                    snapshot.time = frames[index].presentation_time;
+                    export_video_frame(&snapshot, &target, &[]).unwrap_or_else(|error| {
+                        panic!(
+                            "gop={gop} origin={origin} frame={index} time={:?}: {error}",
+                            snapshot.time
+                        )
+                    });
+                    assert_eq!(
+                        image::open(&target).expect("PNG").to_rgba8().as_raw(),
+                        &frames[index].rgba,
+                        "gop={gop} origin={origin} frame={index}"
+                    );
+                }
+                assert_eq!(fs::read(&fixture.source).expect("source"), original);
+                assert_eq!(fixture.snapshot().source.stamp, stamp.source.stamp);
+                fixture.assert_no_staging();
+            }
+        }
+    }
+}

@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "export_video_chroma_tests.rs"]
 mod chroma_geometry;
+#[path = "export_video_orientation_tests.rs"]
+mod chroma_orientation;
 use std::os::windows::process::CommandExt;
 use std::time::{SystemTime, UNIX_EPOCH};
 

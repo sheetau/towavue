@@ -10,6 +10,7 @@ pub(super) struct HighDepth {
     // AV1 sequence headers explicitly represent left/top-left 4:2:0 siting.
     // Other declarations are not interchangeable with these positions.
     chroma: Option<ffmpeg::util::chroma::Location>,
+    orientation: crate::VideoOrientation,
 }
 
 impl HighDepth {
@@ -31,9 +32,15 @@ impl HighDepth {
                 (decoder.width(), decoder.height()),
                 colors(&decoder),
                 decoder.chroma_location(),
+                stream
+                    .side_data()
+                    .find(|data| {
+                        data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix
+                    })
+                    .map(|data| data.data().to_vec()),
             ))
         };
-        let (source, mut size, colors, source_chroma) = inspect().map_err(|error| {
+        let (source, mut size, colors, source_chroma, matrix) = inspect().map_err(|error| {
             ExportError::Failed(format!("could not inspect video precision: {error}"))
         })?;
         // SAFETY: descriptors are immutable FFmpeg storage. No native pointer
@@ -74,6 +81,24 @@ impl HighDepth {
                     .into(),
             ));
         }
+        let chroma = matches!(pixel, Pixel::YUV420P10LE | Pixel::YUV420P12LE)
+            .then_some(source_chroma)
+            .filter(|location| {
+                matches!(
+                    location,
+                    ffmpeg::util::chroma::Location::Left | ffmpeg::util::chroma::Location::TopLeft
+                )
+            });
+        let orientation = if chroma.is_some() {
+            crate::VideoOrientation::from_bytes(matrix.as_deref()).map_err(|error| {
+                ExportError::Failed(format!("Unsupported high-depth video orientation: {error}"))
+            })?
+        } else {
+            crate::VideoOrientation::default()
+        };
+        if orientation.swaps_axes() {
+            size = (size.1, size.0);
+        }
         for operation in &request.operations {
             match *operation {
                 EditOperation::Crop(crop) => size = (crop.width, crop.height),
@@ -93,24 +118,38 @@ impl HighDepth {
             && size.1 >= 64
             && size.0.is_multiple_of(2)
             && size.1.is_multiple_of(2);
-        let chroma = matches!(pixel, Pixel::YUV420P10LE | Pixel::YUV420P12LE)
-            .then_some(source_chroma)
-            .filter(|location| {
-                matches!(
-                    location,
-                    ffmpeg::util::chroma::Location::Left | ffmpeg::util::chroma::Location::TopLeft
-                )
-            });
         Ok(Some(Self {
             pixel,
             svt,
             colors,
             chroma,
+            orientation,
         }))
+    }
+
+    pub(super) fn input_arguments(&self) -> &'static [&'static str] {
+        if self.orientation == crate::VideoOrientation::default() {
+            &[]
+        } else {
+            // Apply the captured stream matrix after chroma reconstruction.
+            // Clear its input declaration as well as disabling autorotation:
+            // otherwise the baked output can inherit it and rotate twice.
+            &[
+                "-noautorotate",
+                "-display_rotation",
+                "0",
+                "-nodisplay_hflip",
+                "-nodisplay_vflip",
+            ]
+        }
     }
 
     pub(super) fn visual_filters(&self, operations: &[EditOperation]) -> Vec<String> {
         let mut filters = visual_filters_with_depth(operations, true);
+        let orientation = self.orientation.ffmpeg_filter().trim_end_matches(',');
+        if !orientation.is_empty() {
+            filters.insert(0, orientation.into());
+        }
         if let Some(chroma) = self.chroma
             && !filters.is_empty()
         {
@@ -229,8 +268,15 @@ impl HighDepth {
                 .all(|(index, (expected, actual))| {
                     expected == if index == 0 { 0 } else { 2 } || expected == actual
                 });
+            let matrix = stream
+                .side_data()
+                .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix);
+            let orientation_cleared = self.orientation == crate::VideoOrientation::default()
+                || crate::VideoOrientation::from_bytes(matrix.as_ref().map(|data| data.data()))
+                    .is_ok_and(|orientation| orientation == crate::VideoOrientation::default());
             Ok(decoder.id() == ffmpeg::codec::Id::AV1
                 && decoder.format() == self.pixel
+                && orientation_cleared
                 && preserved_colors
                 && self
                     .chroma
@@ -239,7 +285,7 @@ impl HighDepth {
         match verify() {
             Ok(true) => Ok(()),
             _ => Err(ExportError::Failed(
-                "Encoded video did not retain the requested sample precision or color tags; existing output was not replaced".into(),
+                "Encoded video did not retain the requested sample precision, color tags or baked orientation; existing output was not replaced".into(),
             )),
         }
     }

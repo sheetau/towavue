@@ -1229,6 +1229,14 @@ fn ffmpeg_arguments(
             arguments.push("-an".into());
         }
     }
+    if let Some(encoding) = &streams.video_encoding {
+        arguments.extend(
+            encoding
+                .input_arguments()
+                .iter()
+                .map(|argument| (*argument).into()),
+        );
+    }
     arguments.extend([
         "-i".into(),
         request.source.display().to_string(),

@@ -805,6 +805,118 @@ fn finish_comparison(app: &mut App, events: &mpsc::Receiver<AppEvent>) {
 }
 
 #[test]
+fn restored_image_commands_clear_every_dirty_indicator_without_discarding_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::restored_image_commands_clear_every_dirty_indicator_without_discarding_history",
+    ) else {
+        return;
+    };
+    let sequences: &[&[CommandId]] = &[
+        &[CommandId::RotateClockwise; 4],
+        &[CommandId::RotateCounterclockwise; 4],
+        &[CommandId::FlipHorizontal; 2],
+        &[CommandId::FlipVertical; 2],
+        &[
+            CommandId::RotateClockwise,
+            CommandId::FlipHorizontal,
+            CommandId::RotateCounterclockwise,
+            CommandId::FlipVertical,
+        ],
+    ];
+    let check = |app: &mut App, id, dirty| {
+        assert_eq!(app.edits[&id].is_dirty(), dirty);
+        assert_eq!(app.command_context().has_unsaved_edits, dirty);
+        assert_eq!(app.title().contains(" *"), dirty);
+        assert_eq!(
+            app.status_details().iter().any(|field| field == "Unsaved"),
+            dirty
+        );
+        let context = app.ui_context.clone().expect("context");
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_top_bar(ui, &mut Vec::new()),
+            ));
+        }
+        assert_eq!(
+            output
+                .expect("painted")
+                .shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "\u{ea71}")),
+            dirty,
+            "the painted tab dot must follow the same saved state"
+        );
+    };
+    for animated in [false, true] {
+        for sequence in sequences {
+            let (mut app, events) = app();
+            let mut original = decoded(animated);
+            // Asymmetric pixels ensure the first flip/turn is a real change.
+            Arc::make_mut(&mut original).frames[0].rgba[..4].copy_from_slice(&[255, 10, 20, 127]);
+            let id = install(&mut app, root.join("restored.png"), Arc::clone(&original));
+            app.ui_context
+                .as_ref()
+                .expect("context")
+                .global_style_mut(chrome::style);
+            app.dispatch(sequence[0]);
+            check(&mut app, id, true);
+            for command in &sequence[1..] {
+                app.dispatch(*command);
+            }
+            check(&mut app, id, false);
+            assert_eq!(app.edits[&id].operations().len(), sequence.len());
+            while let Ok(event) = events.try_recv() {
+                if matches!(
+                    event,
+                    AppEvent::ImageEdited(..) | AppEvent::ImageContentCompared(..)
+                ) {
+                    app.handle_app_event(event);
+                }
+            }
+            check(&mut app, id, false);
+            for _ in 0..sequence.len() + 1 {
+                app.process_shortcut("Ctrl+Z".parse().expect("Undo shortcut"));
+            }
+            assert!(app.edits[&id].operations().is_empty());
+            check(&mut app, id, false);
+            for _ in 0..sequence.len() {
+                app.dispatch(CommandId::Redo);
+            }
+            check(&mut app, id, false);
+            assert!(Arc::ptr_eq(
+                &app.image.as_ref().expect("original pixels").decoded,
+                &original
+            ));
+            app.dispatch(CommandId::RotateClockwise);
+            let exported = app.edits[&id].operations().to_vec();
+            app.edits
+                .get_mut(&id)
+                .expect("history")
+                .mark_exported(&exported);
+            check(&mut app, id, false);
+            for _ in 0..sequence.len() + 1 {
+                app.process_shortcut("Ctrl+Z".parse().expect("Undo shortcut"));
+            }
+            check(&mut app, id, true);
+            app.request_guarded(GuardedAction::CloseTab(id));
+            assert!(
+                app.pending_guard.is_some(),
+                "the saved rotated image must still be protected"
+            );
+        }
+    }
+}
+
+#[test]
 fn final_image_transfer_clears_source_cache_without_dropping_destination_pixels() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::final_image_transfer_clears_source_cache_without_dropping_destination_pixels",

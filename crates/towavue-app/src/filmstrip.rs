@@ -33,6 +33,17 @@ pub struct View {
     offset: f32,
 }
 
+pub struct RecentGrid {
+    columns: usize,
+    row_height: f32,
+}
+
+impl RecentGrid {
+    pub fn offset(&self, index: usize) -> f32 {
+        (index / self.columns) as f32 * self.row_height
+    }
+}
+
 pub struct Filmstrip {
     loader: PreviewLoader,
     generation: u64,
@@ -45,6 +56,7 @@ pub struct Filmstrip {
     focus: Option<PathBuf>,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
+    recent_focus: Option<PathBuf>,
     pointer_position: Option<egui::Pos2>,
     card_paths: Vec<(egui::Id, PathBuf, usize)>,
     tab_navigation: Option<(u64, usize)>,
@@ -66,6 +78,7 @@ impl Filmstrip {
             focus: None,
             focus_requested: false,
             focused_card: None,
+            recent_focus: None,
             pointer_position: None,
             card_paths: Vec::new(),
             tab_navigation: None,
@@ -726,138 +739,164 @@ impl Filmstrip {
         paths: &[PathBuf],
         enabled: bool,
         actions: &mut Vec<UiAction>,
-    ) -> Vec<f32> {
+    ) -> RecentGrid {
         let mut wanted = Vec::new();
-        let mut offsets = Vec::with_capacity(paths.len());
         let origin = ui.cursor().top();
         let width = ui.available_width();
         let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
         let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
+        let cell_height = cell_width * 2.0 / 3.0 + 24.0;
+        let row_height = cell_height + 8.0 + ui.spacing().item_spacing.y;
+        let row_count = paths.len().div_ceil(columns);
+        let focus = self
+            .recent_focus
+            .as_ref()
+            .and_then(|path| paths.iter().position(|candidate| candidate == path));
+        let rows = recent_rows(
+            ui.clip_rect(),
+            origin,
+            row_height,
+            row_count,
+            focus.map(|i| i / columns),
+        );
         let mut focused_card = None;
+        let mut recent_focus = None;
         let opacity = ui.opacity();
         ui.add_enabled_ui(enabled, |ui| {
             // Covered cards keep their appearance; only their input is disabled.
             ui.set_opacity(opacity);
-            for row in paths.chunks(columns) {
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    for path in row {
-                        ui.push_id(path, |ui| {
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(cell_width, cell_width * 2.0 / 3.0 + 24.0),
-                                egui::Sense::click(),
+            let (grid, _) = ui.allocate_exact_size(
+                egui::vec2(width, row_count as f32 * row_height),
+                egui::Sense::hover(),
+            );
+            // Only visible rows and the focused row's neighbors need widgets. Keeping
+            // those neighbors lets egui's normal arrow/Tab navigation cross viewports.
+            for row in rows.into_iter().flatten() {
+                let start = row * columns;
+                for (column, path) in paths[start..(start + columns).min(paths.len())]
+                    .iter()
+                    .enumerate()
+                {
+                    let rect = Rect::from_min_size(
+                        grid.min
+                            + egui::vec2(
+                                column as f32 * (cell_width + 8.0),
+                                row as f32 * row_height,
+                            ),
+                        egui::vec2(cell_width, cell_height),
+                    );
+                    let mut card_ui =
+                        ui.new_child(egui::UiBuilder::new().id_salt(path).max_rect(rect));
+                    let ui = &mut card_ui;
+                    let response = ui.interact(rect, ui.id().with("card"), egui::Sense::click());
+                    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            enabled,
+                            display_name(path),
+                        )
+                    });
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_description(path.display().to_string())
+                    });
+                    if response.has_focus() {
+                        focused_card = Some(response.id);
+                        recent_focus = Some(path.clone());
+                        if self.focused_card != focused_card {
+                            response.scroll_to_me(None);
+                        }
+                    }
+                    if !ui.is_rect_visible(rect) {
+                        continue;
+                    }
+                    if wanted.len() < VISIBLE_PREVIEW_LIMIT
+                        && let Some(kind) = MediaKind::from_path(path)
+                        && !wanted.iter().any(|(existing, _)| existing == path)
+                    {
+                        wanted.push((path.clone(), kind));
+                    }
+                    let image_rect = Rect::from_min_size(
+                        rect.min,
+                        egui::vec2(cell_width, cell_width * 2.0 / 3.0),
+                    );
+                    ui.painter()
+                        .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
+                    match self.previews.get(path) {
+                        Some(Ok((texture, duration))) => {
+                            let scale = (image_rect.size() / texture.size_vec2()).min_elem();
+                            let target = Rect::from_center_size(
+                                image_rect.center(),
+                                texture.size_vec2() * scale,
                             );
-                            offsets.push(rect.top() - origin);
-                            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    enabled,
-                                    display_name(path),
-                                )
-                            });
-                            ui.ctx().accesskit_node_builder(response.id, |node| {
-                                node.set_description(path.display().to_string())
-                            });
-                            if response.has_focus() {
-                                focused_card = Some(response.id);
-                                if self.focused_card != focused_card {
-                                    response.scroll_to_me(None);
-                                }
-                            }
-                            if !ui.is_rect_visible(rect) {
-                                return;
-                            }
-                            if wanted.len() < VISIBLE_PREVIEW_LIMIT
-                                && let Some(kind) = MediaKind::from_path(path)
-                                && !wanted.iter().any(|(existing, _)| existing == path)
-                            {
-                                wanted.push((path.clone(), kind));
-                            }
-                            let image_rect = Rect::from_min_size(
-                                rect.min,
-                                egui::vec2(cell_width, cell_width * 2.0 / 3.0),
+                            ui.painter().image(
+                                texture.id(),
+                                target,
+                                Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                                Color32::WHITE,
                             );
-                            ui.painter()
-                                .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
-                            match self.previews.get(path) {
-                                Some(Ok((texture, duration))) => {
-                                    let scale =
-                                        (image_rect.size() / texture.size_vec2()).min_elem();
-                                    let target = Rect::from_center_size(
-                                        image_rect.center(),
-                                        texture.size_vec2() * scale,
-                                    );
-                                    ui.painter().image(
-                                        texture.id(),
-                                        target,
-                                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                                        Color32::WHITE,
-                                    );
-                                    if let Some(duration) = duration {
-                                        ui.painter().text(
-                                            image_rect.right_bottom() - egui::vec2(4.0, 3.0),
-                                            Align2::RIGHT_BOTTOM,
-                                            format_time(media_time(*duration)),
-                                            FontId::proportional(11.0),
-                                            Color32::WHITE,
-                                        );
-                                    }
-                                }
-                                Some(Err(_)) => {
-                                    ui.painter().text(
-                                        image_rect.center(),
-                                        Align2::CENTER_CENTER,
-                                        "No preview",
-                                        FontId::proportional(12.0),
-                                        crate::chrome::MUTED,
-                                    );
-                                }
-                                None => {}
-                            }
-                            let name_rect = Rect::from_min_max(
-                                egui::pos2(rect.left(), image_rect.bottom() + 4.0),
-                                rect.max,
-                            );
-                            ui.scope_builder(
-                                egui::UiBuilder::new()
-                                    .max_rect(name_rect)
-                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                                |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(display_name(path))
-                                                .color(crate::chrome::FOREGROUND)
-                                                .size(12.0),
-                                        )
-                                        .halign(egui::Align::Min)
-                                        .truncate(),
-                                    );
-                                },
-                            );
-                            if response.hovered() || response.has_focus() {
-                                ui.painter().rect_stroke(
-                                    image_rect,
-                                    3.0,
-                                    egui::Stroke::new(1.0, crate::chrome::FOREGROUND),
-                                    egui::StrokeKind::Inside,
+                            if let Some(duration) = duration {
+                                ui.painter().text(
+                                    image_rect.right_bottom() - egui::vec2(4.0, 3.0),
+                                    Align2::RIGHT_BOTTOM,
+                                    format_time(media_time(*duration)),
+                                    FontId::proportional(11.0),
+                                    Color32::WHITE,
                                 );
                             }
-                            if response.middle_clicked() {
-                                actions.push(UiAction::OpenGalleryBackground(path.clone()));
-                            } else if response.clicked() {
-                                actions.push(UiAction::OpenMedia(path.clone(), true));
-                            }
-                            if enabled {
-                                response.help_text(path.display().to_string());
-                            }
-                        });
+                        }
+                        Some(Err(_)) => {
+                            ui.painter().text(
+                                image_rect.center(),
+                                Align2::CENTER_CENTER,
+                                "No preview",
+                                FontId::proportional(12.0),
+                                crate::chrome::MUTED,
+                            );
+                        }
+                        None => {}
                     }
-                });
-                ui.add_space(8.0);
+                    let name_rect = Rect::from_min_max(
+                        egui::pos2(rect.left(), image_rect.bottom() + 4.0),
+                        rect.max,
+                    );
+                    ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(name_rect)
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(display_name(path))
+                                        .color(crate::chrome::FOREGROUND)
+                                        .size(12.0),
+                                )
+                                .halign(egui::Align::Min)
+                                .truncate(),
+                            );
+                        },
+                    );
+                    if response.hovered() || response.has_focus() {
+                        ui.painter().rect_stroke(
+                            image_rect,
+                            3.0,
+                            egui::Stroke::new(1.0, crate::chrome::FOREGROUND),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if response.middle_clicked() {
+                        actions.push(UiAction::OpenGalleryBackground(path.clone()));
+                    } else if response.clicked() {
+                        actions.push(UiAction::OpenMedia(path.clone(), true));
+                    }
+                    if enabled {
+                        response.help_text(path.display().to_string());
+                    }
+                }
             }
         });
         self.focused_card = focused_card;
+        self.recent_focus = recent_focus;
         // Keep the same bounded preparation set while a menu or picker covers the grid.
         for path in paths {
             if wanted.len() == VISIBLE_PREVIEW_LIMIT {
@@ -870,7 +909,10 @@ impl Filmstrip {
             }
         }
         self.set_visible(wanted);
-        offsets
+        RecentGrid {
+            columns,
+            row_height,
+        }
     }
 
     fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
@@ -898,6 +940,31 @@ impl Filmstrip {
             self.visible = visible;
         }
     }
+}
+
+fn recent_rows(
+    clip: Rect,
+    origin: f32,
+    height: f32,
+    count: usize,
+    focused: Option<usize>,
+) -> [Range<usize>; 2] {
+    let start = (((clip.top() - origin) / height).floor().max(0.0) as usize)
+        .saturating_sub(1)
+        .min(count);
+    let end = ((((clip.bottom() - origin) / height).ceil().max(0.0) as usize) + 1).min(count);
+    let mut ranges = [start..end, 0..0];
+    if let Some(row) = focused {
+        let focus = row.saturating_sub(1)..(row + 2).min(count);
+        if focus.start <= end && focus.end >= start {
+            ranges[0] = start.min(focus.start)..end.max(focus.end);
+        } else if focus.start < start {
+            ranges = [focus, start..end];
+        } else {
+            ranges[1] = focus;
+        }
+    }
+    ranges
 }
 
 // Exact current, previous, next ordering, with O(1) access even in large folders.
@@ -1594,6 +1661,109 @@ mod tests {
             strip.visible.contains(&paths[3]),
             "prepare earlier offscreen entries too"
         );
+        drop(strip);
+        std::fs::remove_dir(root).expect("remove empty owned cache");
+    }
+
+    #[test]
+    fn large_recent_grid_virtualizes_top_middle_and_last_rows() {
+        let root =
+            std::env::temp_dir().join(format!("towavue-recent-archive-{}", std::process::id()));
+        let paths: Vec<_> = (0..10_000)
+            .map(|index| root.join(format!("{index:05}.png")))
+            .collect();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {}).expect("worker");
+        for density in [1.0, 1.5, 2.0] {
+            for width in [240.0, 660.0] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                let mut max_offset = 0.0;
+                for fraction in [0.0, 0.5, 1.0] {
+                    let mut first = None;
+                    let mut last = None;
+                    for _ in 0..3 {
+                        let mut grid = None;
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 400.0),
+                                )),
+                                // Supply native DPI from the first frame. Changing egui
+                                // zoom before any frame rescales its default 10k viewport
+                                // and deliberately replaces this frame's screen rectangle.
+                                viewports: [(
+                                    egui::ViewportId::ROOT,
+                                    egui::ViewportInfo {
+                                        native_pixels_per_point: Some(density),
+                                        ..Default::default()
+                                    },
+                                )]
+                                .into_iter()
+                                .collect(),
+                                ..Default::default()
+                            },
+                            |ui| {
+                                let scroll = egui::ScrollArea::vertical()
+                                    .vertical_scroll_offset(max_offset * fraction)
+                                    .show_styled(ui, |ui| {
+                                        grid =
+                                            Some(strip.show_recent(ui, &paths, true, &mut vec![]));
+                                    });
+                                max_offset =
+                                    (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
+                            },
+                        );
+                        let grid = grid.expect("grid");
+                        assert_eq!(grid.offset(0), 0.0);
+                        assert!(
+                            grid.offset(9999) > max_offset - 400.0,
+                            "last row matches the scroll extent at {width}/{density}: {} vs {max_offset}",
+                            grid.offset(9999)
+                        );
+                        let tree = output.platform_output.accesskit_update.expect("tree");
+                        let mut cards: Vec<_> = tree
+                            .nodes
+                            .iter()
+                            .filter_map(|(_, node)| {
+                                (node.role() == egui::accesskit::Role::Button)
+                                    .then(|| node.label())
+                                    .flatten()
+                            })
+                            .collect();
+                        cards.sort_unstable();
+                        assert!(
+                            (1..=32).contains(&cards.len()),
+                            "widget bound at {width}/{density}/{fraction}: {}",
+                            cards.len()
+                        );
+                        first = cards.first().map(|name| name.to_string());
+                        last = cards.last().map(|name| name.to_string());
+                        assert_eq!(strip.visible.len(), VISIBLE_PREVIEW_LIMIT);
+                    }
+                    if fraction == 0.0 {
+                        assert_eq!(first.as_deref(), Some("00000.png"));
+                    } else if fraction == 1.0 {
+                        assert_eq!(last.as_deref(), Some("09999.png"));
+                        assert!(
+                            strip.visible[0]
+                                .file_name()
+                                .expect("name")
+                                .to_string_lossy()
+                                .starts_with("099")
+                        );
+                    } else {
+                        let first = first.expect("middle row");
+                        let index: usize = first.trim_end_matches(".png").parse().expect("index");
+                        assert!(
+                            (4900..5100).contains(&index),
+                            "middle at {width}/{density}: {first}"
+                        );
+                    }
+                }
+            }
+        }
         drop(strip);
         std::fs::remove_dir(root).expect("remove empty owned cache");
     }

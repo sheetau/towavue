@@ -36,13 +36,14 @@ pub(crate) fn recent_folders(
     let mut ordered: Vec<_> = entries.iter().collect();
     ordered.sort_by_key(|entry| std::cmp::Reverse(entry.opened_at));
     let mut folders = Vec::new();
+    let mut seen = std::collections::HashSet::with_capacity(entries.len());
     for entry in ordered {
         let folder = match entry.kind {
             RecentKind::File => entry.path.parent(),
             RecentKind::Folder => Some(entry.path.as_path()),
         };
         if let Some(folder) = folder.filter(|path| !path.as_os_str().is_empty())
-            && !folders.iter().any(|old| old == folder)
+            && seen.insert(folder)
         {
             folders.push(folder.to_path_buf());
         }

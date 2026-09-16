@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -5,8 +6,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const LIMIT: usize = 40;
-const MAX_BYTES: u64 = 1024 * 1024;
+const FILE_LIMIT: usize = 10_000;
+const FOLDER_LIMIT: usize = 40;
+const MAX_BYTES: u64 = 16 * 1024 * 1024;
 const HEADER: &str = "towavue recent files v3";
 const TIMESTAMP_HEADER: &str = "towavue recent files v2";
 const LEGACY_HEADER: &str = "towavue recent files v1";
@@ -72,12 +74,11 @@ impl RecentFiles {
                 let mut missing_files = Vec::new();
                 loop {
                     // A successfully opened source must not retain an older missing mark.
-                    missing_files.retain(|path| {
-                        !clear
-                            && !pending
-                                .iter()
-                                .any(|entry: &RecentEntry| &entry.path == path)
-                    });
+                    let opened: HashSet<_> = pending
+                        .iter()
+                        .map(|entry: &RecentEntry| &entry.path)
+                        .collect();
+                    missing_files.retain(|path| !clear && !opened.contains(path));
                     let error = match update(&path, &pending, clear) {
                         Ok(loaded) => {
                             paths = loaded;
@@ -89,24 +90,21 @@ impl RecentFiles {
                             if clear {
                                 paths.clear();
                             }
-                            for item in &pending {
-                                remember(&mut paths, item.clone());
-                            }
+                            remember(&mut paths, &pending);
                             Some(format!("Recent files unavailable: {error}"))
                         }
                     };
                     if refresh_gallery {
-                        missing_files = paths
-                            .iter()
-                            .filter(|entry| {
-                                entry.kind == RecentKind::File
-                                    && matches!(entry.path.try_exists(), Ok(false))
-                            })
-                            .map(|entry| entry.path.clone())
-                            .collect();
-                        refresh_gallery = false;
+                        if let Some(missing) = missing_paths(&paths, || {
+                            let mailbox = mutex.lock().expect("recent mailbox");
+                            mailbox.closed || mailbox.clear || !mailbox.pending.is_empty()
+                        }) {
+                            missing_files = missing;
+                            refresh_gallery = false;
+                        }
                     } else {
-                        missing_files.retain(|path| paths.iter().any(|entry| &entry.path == path));
+                        let retained: HashSet<_> = paths.iter().map(|entry| &entry.path).collect();
+                        missing_files.retain(|path| retained.contains(path));
                     }
                     {
                         let mut mailbox = mutex.lock().expect("recent mailbox");
@@ -230,22 +228,44 @@ fn trim_entries(entries: &mut Vec<RecentEntry>) {
             RecentKind::Folder => &mut folders,
         };
         *count += 1;
-        *count <= LIMIT
+        *count <= entry_limit(entry.kind)
     });
 }
 
-fn remember(paths: &mut Vec<RecentEntry>, entry: RecentEntry) {
-    if paths
-        .iter()
-        .any(|old| old.path == entry.path && old.opened_at > entry.opened_at)
-    {
-        return;
+fn entry_limit(kind: RecentKind) -> usize {
+    match kind {
+        RecentKind::File => FILE_LIMIT,
+        RecentKind::Folder => FOLDER_LIMIT,
     }
-    paths.retain(|old| old.path != entry.path);
-    paths.insert(0, entry);
-    // A delayed worker must not put older opens ahead of newer persisted records.
+}
+
+fn remember(paths: &mut Vec<RecentEntry>, pending: &[RecentEntry]) {
+    let previous = std::mem::take(paths);
+    // Later queued opens win ties; existing unknown-date order remains stable.
+    paths.extend(pending.iter().rev().cloned());
+    paths.extend(previous);
     paths.sort_by_key(|entry| std::cmp::Reverse(entry.opened_at));
+    let mut seen = HashSet::with_capacity(paths.len());
+    paths.retain(|entry| seen.insert(entry.path.clone()));
     trim_entries(paths);
+}
+
+fn missing_paths(
+    paths: &[RecentEntry],
+    mut interrupted: impl FnMut() -> bool,
+) -> Option<Vec<PathBuf>> {
+    let mut missing = Vec::new();
+    for entry in paths.iter().filter(|entry| entry.kind == RecentKind::File) {
+        // Do not make an open, clear or shutdown wait for the entire archive.
+        // An individual synchronous filesystem query can still block on Windows.
+        if interrupted() {
+            return None;
+        }
+        if matches!(entry.path.try_exists(), Ok(false)) {
+            missing.push(entry.path.clone());
+        }
+    }
+    Some(missing)
 }
 
 fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
@@ -269,6 +289,9 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
         ));
     }
     let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    let mut files = 0;
+    let mut folders = 0;
     for line in lines {
         let (kind, line) = if header == Some(HEADER) {
             match line.split_once('\t') {
@@ -307,19 +330,17 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
             (stamp, value)
         };
         let path = PathBuf::from(value);
-        if !path.is_absolute()
-            || line.contains('\0')
-            || paths
-                .iter()
-                .filter(|entry: &&RecentEntry| entry.kind == kind)
-                .count()
-                == LIMIT
-        {
+        let count = match kind {
+            RecentKind::File => &mut files,
+            RecentKind::Folder => &mut folders,
+        };
+        if !path.is_absolute() || line.contains('\0') || *count == entry_limit(kind) {
             return Err(std::io::Error::other(
                 "Invalid recent files entry; existing file was retained.",
             ));
         }
-        if !paths.iter().any(|entry: &RecentEntry| entry.path == path) {
+        if seen.insert(path.clone()) {
+            *count += 1;
             paths.push(RecentEntry {
                 path,
                 kind,
@@ -346,9 +367,7 @@ fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<
     if pending.is_empty() && !clear {
         return Ok(paths);
     }
-    for item in pending {
-        remember(&mut paths, item.clone());
-    }
+    remember(&mut paths, pending);
     let mut text = format!("{HEADER}\n");
     for item in &paths {
         if item
@@ -526,27 +545,28 @@ mod tests {
     fn file_and_folder_limits_are_independent_in_storage_and_pending_batches() {
         let path = fixture("groups");
         let mut pending = Vec::new();
-        for index in 0..55 {
-            for kind in [RecentKind::File, RecentKind::Folder] {
+        for kind in [RecentKind::File, RecentKind::Folder] {
+            for index in 0..entry_limit(kind) + 15 {
                 pending.push(RecentEntry {
                     path: path
                         .parent()
                         .expect("parent")
                         .join(format!("{kind:?}-{index}")),
                     kind,
-                    opened_at: Some(index),
+                    opened_at: Some(index as u64),
                 });
             }
         }
         trim_pending(&mut pending);
-        assert_eq!(pending.len(), LIMIT * 2);
+        assert_eq!(pending.len(), FILE_LIMIT + FOLDER_LIMIT);
         let stored = update(&path, &pending).expect("store both groups");
-        assert_eq!(stored.len(), LIMIT * 2);
+        assert_eq!(stored.len(), FILE_LIMIT + FOLDER_LIMIT);
         for kind in [RecentKind::File, RecentKind::Folder] {
             let group: Vec<_> = stored.iter().filter(|entry| entry.kind == kind).collect();
-            assert_eq!(group.len(), LIMIT);
-            assert_eq!(group[0].opened_at, Some(54));
-            assert_eq!(group[LIMIT - 1].opened_at, Some(15));
+            let limit = entry_limit(kind);
+            assert_eq!(group.len(), limit);
+            assert_eq!(group[0].opened_at, Some(limit as u64 + 14));
+            assert_eq!(group[limit - 1].opened_at, Some(15));
         }
         assert_eq!(read(&path).expect("reload"), stored);
         clean(&path);
@@ -698,6 +718,106 @@ mod tests {
     }
 
     #[test]
+    fn batched_revisits_keep_newest_kind_timestamp_and_stable_unknown_order() {
+        let entry = |name, kind, opened_at| RecentEntry {
+            path: PathBuf::from(name),
+            kind,
+            opened_at,
+        };
+        let mut stored = vec![
+            entry("a", RecentKind::File, Some(30)),
+            entry("b", RecentKind::Folder, Some(20)),
+            entry("c", RecentKind::File, None),
+            entry("d", RecentKind::File, None),
+        ];
+        let pending = vec![
+            entry("a", RecentKind::Folder, Some(10)),
+            entry("e", RecentKind::File, Some(30)),
+            entry("b", RecentKind::File, Some(30)),
+            entry("c", RecentKind::Folder, None),
+            entry("e", RecentKind::Folder, Some(30)),
+        ];
+        remember(&mut stored, &pending);
+        assert_eq!(
+            stored,
+            [
+                pending[4].clone(),
+                pending[2].clone(),
+                entry("a", RecentKind::File, Some(30)),
+                pending[3].clone(),
+                entry("d", RecentKind::File, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn large_archive_round_trip_presence_and_interrupt_costs() {
+        let path = fixture("large-archive");
+        // Daily opens spanning decades, with ordinary UTF-8 paths longer than 100 bytes.
+        let entries: Vec<_> = (0..FILE_LIMIT)
+            .map(|index| RecentEntry {
+                path: path.parent().expect("parent").join(format!(
+                    "long archive 日本語 folder name for history scale testing/{index:05}.png"
+                )),
+                kind: RecentKind::File,
+                opened_at: Some(946_684_800_000 + index as u64 * 86_400_000),
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let stored = update(&path, &entries).expect("seed full archive");
+        let write_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(stored.len(), FILE_LIMIT);
+        assert!(fs::metadata(&path).expect("history").len() > 1024 * 1024);
+        let started = std::time::Instant::now();
+        assert_eq!(read(&path).expect("reload archive"), stored);
+        let read_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = std::time::Instant::now();
+        assert_eq!(
+            stored.iter().filter_map(RecentEntry::opened_month).count(),
+            FILE_LIMIT
+        );
+        let months_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = std::time::Instant::now();
+        assert_eq!(
+            missing_paths(&stored, || false)
+                .expect("presence scan")
+                .len(),
+            FILE_LIMIT
+        );
+        let presence_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let mut queries = 0;
+        assert!(
+            missing_paths(&stored, || {
+                queries += 1;
+                queries == 17
+            })
+            .is_none()
+        );
+        assert_eq!(
+            queries, 17,
+            "pending work stops a scan before walking the archive"
+        );
+        let mut revisit = entries[0].clone();
+        revisit.opened_at = Some(entries.last().expect("last").opened_at.expect("date") + 1);
+        let started = std::time::Instant::now();
+        let revised = update(&path, std::slice::from_ref(&revisit)).expect("single revisit");
+        let revisit_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(revised.len(), FILE_LIMIT);
+        assert_eq!(revised[0], revisit);
+        assert!(revised.last().expect("old date").opened_at < Some(978_307_200_000));
+        assert!(
+            super::update(&path, &[], true)
+                .expect("clear archive")
+                .is_empty()
+        );
+        assert!(read(&path).expect("cleared persisted file").is_empty());
+        eprintln!(
+            "RECENT_ARCHIVE entries={FILE_LIMIT} write_ms={write_ms:.3} read_ms={read_ms:.3} months_ms={months_ms:.3} presence_ms={presence_ms:.3} revisit_ms={revisit_ms:.3}; generated absent local paths, warm filesystem, no cold/network-device claim"
+        );
+        clean(&path);
+    }
+
+    #[test]
     fn invalid_timestamp_records_preserve_the_existing_file() {
         let path = fixture("timestamps");
         let source = path.parent().expect("directory").join("source.png");
@@ -747,7 +867,7 @@ mod tests {
     #[test]
     fn recent_order_is_bounded_and_unicode_round_trips_without_statting_sources() {
         let path = fixture("order");
-        let entries: Vec<_> = (0..45)
+        let entries: Vec<_> = (0..FILE_LIMIT + 5)
             .map(|index| {
                 let path = path
                     .parent()
@@ -756,16 +876,16 @@ mod tests {
                 RecentEntry {
                     kind: RecentKind::File,
                     path,
-                    opened_at: Some(index),
+                    opened_at: Some(index as u64),
                 }
             })
             .collect();
         let result = update(&path, &entries).expect("store");
-        assert_eq!(result.len(), LIMIT);
-        assert_eq!(result[0], entries[44]);
-        assert_eq!(result[39], entries[5]);
+        assert_eq!(result.len(), FILE_LIMIT);
+        assert_eq!(result[0], entries[FILE_LIMIT + 4]);
+        assert_eq!(result[FILE_LIMIT - 1], entries[5]);
         let mut revisited = entries[10].clone();
-        revisited.opened_at = Some(100);
+        revisited.opened_at = Some(FILE_LIMIT as u64 + 100);
         let result = update(&path, &[revisited.clone()]).expect("revisit");
         assert_eq!(result[0], revisited);
         assert_eq!(read(&path).expect("reload"), result);

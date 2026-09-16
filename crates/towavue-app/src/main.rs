@@ -17,6 +17,7 @@ mod filmstrip;
 mod fonts;
 mod frame_export;
 mod frame_step;
+mod gallery;
 mod gallery_rail;
 #[cfg(test)]
 mod gallery_tests;
@@ -878,6 +879,7 @@ struct Application<N> {
     resume_revision: u64,
     recent_paths: Vec<PathBuf>,
     gallery_missing_files: Vec<PathBuf>,
+    gallery_listing: gallery::Listing,
     recent_folders: Vec<PathBuf>,
     pending_window_launches: Vec<PathBuf>,
     recent_months: BTreeMap<PathBuf, (u16, u16)>,
@@ -1138,6 +1140,7 @@ where
             resume_revision: 0,
             recent_paths: Vec::new(),
             gallery_missing_files: Vec::new(),
+            gallery_listing: gallery::Listing::default(),
             recent_folders: Vec::new(),
             pending_window_launches: Vec::new(),
             recent_months: BTreeMap::new(),
@@ -1547,6 +1550,7 @@ where
                 }
                 self.recent_paths.clear();
                 self.gallery_missing_files.clear();
+                self.gallery_listing.invalidate();
                 self.recent_folders.clear();
                 self.recent_months.clear();
             }
@@ -2893,6 +2897,7 @@ where
                     .and_then(|recent| recent.take_completed())
                 {
                     self.gallery_missing_files = update.missing_files;
+                    self.gallery_listing.invalidate();
                     self.recent_months = update
                         .entries
                         .iter()
@@ -3662,63 +3667,7 @@ where
             .show(root, |ui| {
                 if self.path.is_none() {
                     let enabled = !modal_blocked && !self.palette_open && !self.grid_open;
-                    let gallery = self.tabs.gallery();
-                    let gallery_paths: Vec<_> = self
-                        .recent_paths
-                        .iter()
-                        .filter(|path| !self.gallery_missing_files.contains(path))
-                        .cloned()
-                        .collect();
-                    if let Some(command) = ui
-                        .push_id(("gallery", gallery), |ui| {
-                            welcome::show(
-                                ui,
-                                &self.shortcuts,
-                                &mut self.gallery_search,
-                                &mut self.gallery_filter,
-                                &gallery_paths,
-                                enabled,
-                                |ui, query, filter| {
-                                    let filtered;
-                                    let paths = if query.trim().is_empty() && filter.is_none() {
-                                        &gallery_paths
-                                    } else {
-                                        filtered = gallery_paths
-                                            .iter()
-                                            .filter(|path| {
-                                                welcome::matches(path, query)
-                                                    && filter.is_none_or(|kind| {
-                                                        MediaKind::from_path(path) == Some(kind)
-                                                    })
-                                            })
-                                            .cloned()
-                                            .collect::<Vec<_>>();
-                                        &filtered
-                                    };
-                                    if paths.is_empty() && !gallery_paths.is_empty() {
-                                        ui.label("No matching files.");
-                                    }
-                                    let offsets = self.filmstrip.show_recent(
-                                        ui,
-                                        paths,
-                                        ui.is_enabled(),
-                                        actions,
-                                    );
-                                    let mut months: Vec<gallery_rail::Month> = Vec::new();
-                                    for (path, offset) in paths.iter().zip(offsets) {
-                                        let date = self.recent_months.get(path).copied();
-                                        if !months.iter().any(|month| month.date == date) {
-                                            months.push(gallery_rail::Month { date, offset });
-                                        }
-                                    }
-                                    months
-                                },
-                            )
-                        })
-                        .inner
-                    {
-                        actions.push(UiAction::Command(command));
-                    }
+                    self.draw_gallery(ui, enabled, actions);
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
                 } else if self.media_kind == Some(MediaKind::Image) {

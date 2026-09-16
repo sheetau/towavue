@@ -1,6 +1,84 @@
 use crate::*;
 
 #[test]
+fn large_gallery_keeps_widgets_bounded_and_searches_the_oldest_history() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::large_gallery_keeps_widgets_bounded_and_searches_the_oldest_history",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    context.global_style_mut(chrome::style);
+    app.ui_context = Some(context);
+    for index in 0..10_000 {
+        let path = root.join(format!("archive-{index:05}.png"));
+        app.recent_months.insert(
+            path.clone(),
+            (
+                2026 - (index / 1200) as u16,
+                12 - ((index / 100) % 12) as u16,
+            ),
+        );
+        app.recent_paths.push(path);
+    }
+    let size = egui::vec2(660.0, 500.0);
+    for _ in 0..3 {
+        frame(&mut app, size, vec![]);
+    }
+    let start = Instant::now();
+    for _ in 0..10 {
+        let output = frame(&mut app, size, vec![]);
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let cards = tree
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node
+                        .label()
+                        .is_some_and(|label| label.starts_with("archive-"))
+            })
+            .count();
+        assert!(
+            (1..=32).contains(&cards),
+            "visible and adjacent cards only: {cards}"
+        );
+    }
+    eprintln!(
+        "GALLERY_ARCHIVE entries=10000 idle_frame_mean_ms={:.3}; synthetic egui/AccessKit, no GPU or physical input measurement",
+        start.elapsed().as_secs_f64() * 100.0
+    );
+    app.gallery_search = "archive-09999".into();
+    for _ in 0..3 {
+        frame(&mut app, size, vec![]);
+    }
+    let output = frame(&mut app, size, vec![]);
+    let tree = output.platform_output.accesskit_update.expect("tree");
+    let cards: Vec<_> = tree
+        .nodes
+        .iter()
+        .filter_map(|(_, node)| {
+            (node.role() == egui::accesskit::Role::Button)
+                .then(|| node.label())
+                .flatten()
+                .filter(|label| label.starts_with("archive-"))
+        })
+        .collect();
+    assert_eq!(cards, ["archive-09999.png"]);
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("September 2018")),
+        "oldest filtered month remains navigable"
+    );
+    app.handle_recent_action(menu::RecentAction::Clear);
+    assert!(app.recent_paths.is_empty() && app.recent_months.is_empty());
+}
+
+#[test]
 fn gallery_activation_refreshes_missing_cards_but_preserves_history_and_loaded_tabs() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(
@@ -231,6 +309,7 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         assert!(app.gallery_filter.is_none() && app.gallery_search.is_empty());
         app.gallery_filter = Some(MediaKind::Video);
         app.recent_paths = vec![image];
+        app.gallery_listing.invalidate();
         frame(&mut app, size, vec![]);
         assert_eq!(
             app.gallery_filter,
@@ -238,6 +317,7 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
             "history refresh does not silently change a selected filter"
         );
         app.recent_paths.push(root.join("audio.wav"));
+        app.gallery_listing.invalidate();
         for (label, kind, name) in [
             ("Images", MediaKind::Image, "image.png"),
             ("Audio", MediaKind::Audio, "audio.wav"),
@@ -371,6 +451,7 @@ fn gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions(
         }
         app.activate_tab(gallery);
         app.recent_paths.clear();
+        app.gallery_listing.invalidate();
         app.handle_ui_action(UiAction::OpenGalleryBackground(paths[0].clone()));
         assert_eq!(
             app.tabs.len(),
@@ -552,6 +633,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         app.recent_paths = [0, 10, 20, 30]
             .map(|index| app.recent_paths[index].clone())
             .into();
+        app.gallery_listing.invalidate();
         frame(&mut app, size, vec![set("")]);
         for width in [240.0, 960.0] {
             let output = frame(&mut app, egui::vec2(width, 576.0), vec![]);
@@ -732,6 +814,7 @@ fn gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_in
         assert_eq!(app.gallery_search, "missing-result");
         app.palette_open = false;
         app.recent_paths.clear();
+        app.gallery_listing.invalidate();
         let empty = frame(&mut app, size, vec![]);
         assert!(text(&empty, "Drop media files or a folder here to begin."));
         assert!(!text(&empty, "No matching files."));

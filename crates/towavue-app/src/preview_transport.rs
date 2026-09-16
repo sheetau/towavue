@@ -18,6 +18,7 @@ pub(super) struct Transport {
 pub(super) enum Action {
     Command(CommandId),
     Seek(MediaTime),
+    ImageSeek(usize),
 }
 
 impl Transport {
@@ -287,16 +288,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         instance: u64,
         path: &Path,
     ) -> Option<Transport> {
-        if self.modal_input_blocked()
-            || self.palette_open
-            || self.grid_open
-            || self.filmstrip_open
-            || self.incoming_tab_pointer.is_some()
-            || self.ui_context.as_ref().is_some_and(|context| {
-                egui::Popup::is_any_open(context)
-                    || context.input(|input| !input.raw.hovered_files.is_empty())
-            })
-        {
+        if self.preview_input_blocked() {
             return None;
         }
         let transport = self
@@ -312,5 +304,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return None;
         }
         Some(transport)
+    }
+
+    pub(super) fn preview_input_blocked(&self) -> bool {
+        self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || self.incoming_tab_pointer.is_some()
+            || self.ui_context.as_ref().is_some_and(|context| {
+                egui::Popup::is_any_open(context)
+                    || context.input(|input| !input.raw.hovered_files.is_empty())
+            })
     }
 }

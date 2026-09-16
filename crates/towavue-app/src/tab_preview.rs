@@ -26,9 +26,9 @@ impl RetainedPreview {
         }
     }
 
-    fn show_reading(&self, ui: &mut egui::Ui) -> bool {
+    fn show_reading(&self, ui: &mut egui::Ui) -> Option<egui::Rect> {
         let Self::Reading { pages, settings } = self else {
-            return false;
+            return None;
         };
         let sizes: Vec<_> = pages.iter().map(|page| page.1).collect();
         let rects = crate::reading_page_rects(
@@ -42,8 +42,10 @@ impl RetainedPreview {
             .copied()
             .reduce(egui::Rect::union)
             .expect("reading pages");
-        let (bounds, _) =
-            ui.allocate_exact_size(egui::vec2(240.0, spread.height()), egui::Sense::hover());
+        let (bounds, _) = ui.allocate_exact_size(
+            egui::vec2(240.0, spread.height().max(40.0)),
+            egui::Sense::hover(),
+        );
         let rect = egui::Rect::from_center_size(bounds.center(), spread.size());
         for ((texture, _), page) in pages.iter().zip(rects) {
             if let Some(texture) = texture {
@@ -56,7 +58,7 @@ impl RetainedPreview {
                 );
             }
         }
-        true
+        Some(bounds)
     }
 }
 
@@ -391,7 +393,7 @@ impl TabPreview {
         target: &Target,
         retained: Option<&RetainedPreview>,
     ) {
-        self.show_with_transport(response, target, retained, None);
+        self.show_with_transport(response, target, retained, None, None);
     }
 
     pub fn show_with_transport(
@@ -400,15 +402,17 @@ impl TabPreview {
         target: &Target,
         retained: Option<&RetainedPreview>,
         transport: Option<&crate::preview_transport::Transport>,
+        folder: Option<&crate::image_tab_preview::FolderPosition>,
     ) -> Option<crate::preview_transport::Action> {
         crate::media_preview::Preview::tab(response)
             .show(|ui| {
                 ui.set_max_width(240.0);
-                if retained.is_some_and(|preview| preview.show_reading(ui)) {
+                if let Some(thumbnail) = retained.and_then(|preview| preview.show_reading(ui)) {
+                    let action = folder.and_then(|folder| folder.show(ui, thumbnail));
                     crate::media_preview::caption(ui, |ui| {
                         ui.add(egui::Label::new(target.path.display().to_string()).wrap());
                     });
-                    return None;
+                    return action;
                 }
                 let cached = (self.target.as_ref() == Some(target))
                     .then_some(self.texture.as_ref())
@@ -428,7 +432,7 @@ impl TabPreview {
                         sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
                     let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
                     let size = size * scale;
-                    let height = if transport.is_some() {
+                    let height = if transport.is_some() || folder.is_some() {
                         size.y.max(40.0)
                     } else {
                         size.y
@@ -447,7 +451,7 @@ impl TabPreview {
                         bounds,
                     );
                 }
-                if thumbnail.is_none() && transport.is_some() {
+                if thumbnail.is_none() && (transport.is_some() || folder.is_some()) {
                     thumbnail = Some(
                         ui.allocate_exact_size(
                             egui::vec2(
@@ -465,7 +469,12 @@ impl TabPreview {
                 }
                 let action = transport
                     .zip(thumbnail)
-                    .and_then(|(transport, thumbnail)| transport.show(ui, thumbnail));
+                    .and_then(|(transport, thumbnail)| transport.show(ui, thumbnail))
+                    .or_else(|| {
+                        folder
+                            .zip(thumbnail)
+                            .and_then(|(folder, thumbnail)| folder.show(ui, thumbnail))
+                    });
                 crate::media_preview::caption(ui, |ui| {
                     if texture.is_some_and(|texture| texture.is_err()) {
                         ui.label("No preview");

@@ -182,7 +182,14 @@ fn reading_tab_hover_joins_retained_pages_without_decoding_uploading_or_activati
             !painted(&frame(&mut app), ids[2]),
             "stale device textures must not be shown"
         );
-        assert!(app.tab_preview.target.is_some());
+        assert!(
+            app.tab_preview.target.is_none(),
+            "reading fallback uses shared page previews"
+        );
+        assert!(
+            app.image_seek_preview_active,
+            "page completions must wake the visible card"
+        );
         app.tab_preview.clear();
     }
 }

@@ -1,0 +1,631 @@
+use super::*;
+
+type App = Application<fn(AppEvent)>;
+
+fn fixture(root: &Path) -> (App, egui::Context, TabId, Vec<PathBuf>) {
+    let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+    let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
+    context.enable_accesskit();
+    app.ui_context = Some(context.clone());
+    let paths: Vec<_> = ["z.bmp", "a.bmp", "m.bmp", "b.bmp"]
+        .map(|name| root.join(name))
+        .into();
+    for (index, path) in paths.iter().enumerate() {
+        // 2x2 uncompressed BGRA BMPs, with distinct source pixels and no helper process.
+        let mut bytes = vec![0_u8; 70];
+        bytes[..2].copy_from_slice(b"BM");
+        bytes[2..6].copy_from_slice(&70_u32.to_le_bytes());
+        bytes[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bytes[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bytes[18..22].copy_from_slice(&2_i32.to_le_bytes());
+        bytes[22..26].copy_from_slice(&2_i32.to_le_bytes());
+        bytes[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bytes[28..30].copy_from_slice(&32_u16.to_le_bytes());
+        bytes[54..].copy_from_slice(&[10, 20, 40 + index as u8 * 30, 255].repeat(4));
+        std::fs::write(path, bytes).expect("BMP");
+    }
+    let id = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+    app.path = Some(paths[0].clone());
+    app.displayed_tab = Some(id);
+    app.media_kind = Some(MediaKind::Image);
+    app.state = PlaybackState::Paused;
+    app.media_generation = 7;
+    app.media_sequence = 7;
+    let decoded = Arc::new(towavue_runtime_windows::decode_image(&paths[0]).expect("decode"));
+    app.image =
+        Some(ImagePresentation::from_decoded(&context, &paths[0], decoded).expect("pixels"));
+    let mut items: Vec<_> = paths
+        .iter()
+        .map(|path| towavue_core::FolderMediaItem {
+            identity: towavue_core::ShellIdentity::new(vec![]),
+            path: path.clone(),
+            kind: MediaKind::Image,
+        })
+        .collect();
+    items.insert(
+        1,
+        towavue_core::FolderMediaItem {
+            identity: towavue_core::ShellIdentity::new(vec![]),
+            path: root.join("excluded.wav"),
+            kind: MediaKind::Audio,
+        },
+    );
+    app.folder_snapshot = Some(FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![]),
+        folder_path: root.to_owned(),
+        items,
+        sort_columns: vec![],
+        source: FolderSnapshotSource::LiveExplorerView,
+        generation: 11,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    });
+    (app, context, id, paths)
+}
+
+fn wait_image(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.image_loading {
+        app.finish_image_load();
+        assert!(Instant::now() < deadline, "original image completion");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.image_error.is_none(), "{:?}", app.image_error);
+}
+
+#[test]
+fn folder_card_navigation_preserves_background_owner_and_reading_activation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::folder_card_navigation_preserves_background_owner_and_reading_activation",
+    ) else {
+        return;
+    };
+    for reading in [false, true] {
+        let (mut app, context, id, paths) = fixture(&root);
+        app.reading_mode = reading;
+        app.reading_settings.page_count = 2;
+        app.reading_settings.first_page_count = 2;
+        app.reading_settings.reversed = true;
+        app.reading_settings.axis = towavue_core::ReadingAxis::Vertical;
+        let settings = app.reading_settings;
+        let position = app.preview_folder(id, &paths[0]).expect("folder");
+        assert_eq!(position.count, paths.len());
+        for (index, path) in paths.iter().enumerate() {
+            assert_eq!(
+                app.preview_image_path(id, &paths[0], index).as_ref(),
+                Some(path),
+                "Shell order"
+            );
+        }
+        let foreground = app
+            .tabs
+            .open_new(root.join("foreground.bmp"), MediaKind::Image);
+        app.retain_image_tab();
+        app.displayed_tab = Some(foreground);
+        app.path = Some(root.join("foreground.bmp"));
+        app.media_generation = 8;
+        app.media_sequence = 8;
+        app.image_generation = 123;
+        app.image_view.pan = (11.0, -9.0);
+        app.prefix_started = Some(Instant::now());
+        let active = (
+            app.path.clone(),
+            app.media_generation,
+            app.image_generation,
+            app.image_view,
+            app.prefix_started,
+        );
+        app.handle_preview_image_seek(id, position.instance, paths[0].clone(), paths[2].clone());
+        assert_eq!(app.tabs.active_id(), Some(foreground));
+        assert_eq!(
+            (
+                app.path.clone(),
+                app.media_generation,
+                app.image_generation,
+                app.image_view,
+                app.prefix_started
+            ),
+            active
+        );
+        let saved = &app.retained_images[&id];
+        assert_eq!(saved.path, paths[2]);
+        assert!(saved.resume_loading && saved.image.is_none());
+        assert_eq!(saved.reading_mode, reading);
+        assert_eq!(saved.reading_settings, settings);
+        let new_instance = saved.instance;
+        assert_ne!(new_instance, position.instance);
+        let new_position = app.preview_folder(id, &paths[2]).expect("new folder");
+        assert_eq!(new_position.index, 2);
+        if reading {
+            assert_eq!(new_position.reading_paths(), Some(paths[2..].to_vec()));
+            let pages = new_position.reading_paths().expect("spread");
+            app.filmstrip.image_tab_preview(&pages, settings);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                app.filmstrip.finish(&context);
+                let preview = app.filmstrip.image_tab_preview(&pages, settings);
+                let tab_preview::RetainedPreview::Reading {
+                    pages,
+                    settings: actual,
+                } = preview
+                else {
+                    panic!("reading preview");
+                };
+                assert_eq!(actual, settings);
+                if pages.iter().all(|page| page.0.is_some()) {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "shared reading previews");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        // Delayed A-to-B results and actions cannot replace the new owner.
+        app.handle_preview_image_seek(id, position.instance, paths[0].clone(), paths[1].clone());
+        assert_eq!(app.retained_images[&id].path, paths[2]);
+        app.activate_tab(id);
+        wait_image(&mut app);
+        assert_eq!(app.media_generation, new_instance);
+        assert_eq!(app.reading_mode, reading);
+        assert_eq!(app.reading_settings, settings);
+        assert_eq!(
+            app.image.as_ref().expect("new original").decoded.frames[0].rgba[0],
+            100
+        );
+        assert_eq!(app.reading_pages.len(), usize::from(reading));
+        assert!(app.edits[&id].operations().is_empty());
+        // The active path uses normal original loading and retains its old pixels.
+        let instance = app.media_generation;
+        app.prefix_started = None;
+        app.handle_preview_image_seek(id, instance, paths[2].clone(), paths[1].clone());
+        assert_eq!(app.path.as_ref(), Some(&paths[1]));
+        assert!(app.image_handoff.is_some());
+        wait_image(&mut app);
+        assert_eq!(
+            app.image.as_ref().expect("active original").decoded.frames[0].rgba[0],
+            70
+        );
+        assert_eq!(app.reading_mode, reading);
+    }
+}
+
+#[test]
+fn folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources",
+    ) else {
+        return;
+    };
+    let (mut app, _, id, paths) = fixture(&root);
+    let instance = app.media_generation;
+    app.edits
+        .entry(id)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    let history = app.edits[&id].clone();
+    for blocked in 0..5 {
+        app.palette_open = blocked == 0;
+        app.grid_open = blocked == 1;
+        app.filmstrip_open = blocked == 2;
+        app.incoming_tab_pointer = (blocked == 3).then_some(egui::Pos2::ZERO);
+        let token = if blocked == 4 { instance + 1 } else { instance };
+        app.handle_preview_image_seek(id, token, paths[0].clone(), paths[1].clone());
+        assert!(app.pending_guard.is_none());
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+    }
+    app.incoming_tab_pointer = None;
+    for path in [
+        paths[0].clone(),
+        root.join("excluded.wav"),
+        root.join("not-in-folder.bmp"),
+    ] {
+        app.handle_preview_image_seek(id, instance, paths[0].clone(), path);
+        assert!(app.pending_guard.is_none());
+    }
+    app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
+    assert!(matches!(
+        app.pending_guard,
+        Some(GuardedAction::NavigateImageTab(..))
+    ));
+    app.resolve_guard(GuardDecision::Cancel);
+    assert_eq!(app.edits[&id], history);
+    assert_eq!(app.path.as_ref(), Some(&paths[0]));
+    app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
+    app.folder_snapshot
+        .as_mut()
+        .expect("snapshot")
+        .items
+        .retain(|item| item.path != paths[1]);
+    app.resolve_guard(GuardDecision::Discard);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&paths[0]),
+        "revalidate after confirmation"
+    );
+    assert_eq!(app.edits[&id], history);
+}
+
+#[test]
+fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let thumbnail = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(240.0, 80.0));
+        let folder = FolderPosition {
+            instance: 1,
+            count: 5,
+            pages: None,
+            index: 1,
+            revision: 2,
+            reading: None,
+        };
+        let frame = |events, instance, revision, count, enabled, focused| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    events,
+                    focused,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(600.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.add_enabled_ui(enabled, |ui| {
+                        let position = FolderPosition {
+                            instance,
+                            revision,
+                            count,
+                            pages: None,
+                            ..folder
+                        };
+                        actions.extend(position.show(ui, thumbnail));
+                        if context.current_pass_index() == 0 {
+                            context.request_discard("seek action once");
+                        }
+                    });
+                },
+            );
+            (output, actions)
+        };
+        frame(vec![], 1, 2, 5, true, true);
+        let (output, _) = frame(vec![], 1, 2, 5, true, true);
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let (node_id, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Preview image position"))
+            .expect("image position");
+        assert_eq!(node.numeric_value(), Some(2.0));
+        assert_eq!(node.min_numeric_value(), Some(1.0));
+        assert_eq!(node.max_numeric_value(), Some(5.0));
+        let bounds = node.bounds().expect("bounds");
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        );
+        let point = rect.center();
+        let button = |pos, pressed, button| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for button_kind in [
+            egui::PointerButton::Secondary,
+            egui::PointerButton::Middle,
+            egui::PointerButton::Primary,
+        ] {
+            frame(vec![egui::Event::PointerMoved(point)], 1, 2, 5, true, true);
+            assert!(
+                frame(vec![button(point, true, button_kind)], 1, 2, 5, true, true)
+                    .1
+                    .is_empty()
+            );
+            let actions = frame(vec![button(point, false, button_kind)], 1, 2, 5, true, true).1;
+            assert_eq!(
+                actions,
+                if button_kind == egui::PointerButton::Primary {
+                    vec![preview_transport::Action::ImageSeek(2)]
+                } else {
+                    vec![]
+                }
+            );
+        }
+        for (instance, revision, count, enabled, focused, escape) in [
+            (1, 2, 5, true, true, false),
+            (2, 2, 5, true, true, false),
+            (1, 3, 5, true, true, false),
+            (1, 2, 1, true, true, false),
+            (1, 2, 5, false, true, false),
+            (1, 2, 5, true, false, false),
+            (1, 2, 5, true, true, true),
+        ] {
+            frame(vec![egui::Event::PointerMoved(point)], 1, 2, 5, true, true);
+            frame(
+                vec![button(point, true, egui::PointerButton::Primary)],
+                1,
+                2,
+                5,
+                true,
+                true,
+            );
+            let outside = rect.right_bottom() + egui::vec2(100.0, 100.0);
+            let mut events = vec![egui::Event::PointerMoved(outside)];
+            if escape {
+                events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            if !focused {
+                events.push(egui::Event::WindowFocused(false));
+            }
+            frame(events, instance, revision, count, enabled, focused);
+            let actions = frame(
+                vec![button(outside, false, egui::PointerButton::Primary)],
+                instance,
+                revision,
+                count,
+                enabled,
+                focused,
+            )
+            .1;
+            assert_eq!(
+                actions,
+                if instance == 1 && revision == 2 && count == 5 && enabled && focused && !escape {
+                    vec![preview_transport::Action::ImageSeek(4)]
+                } else {
+                    vec![]
+                }
+            );
+            timeline_input::cancel(&context);
+        }
+        for (value, expected) in [
+            (1.0, Some(0)),
+            (2.0, None),
+            (4.0, Some(3)),
+            (100.0, Some(4)),
+        ] {
+            let event = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::SetValue,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *node_id,
+                data: Some(egui::accesskit::ActionData::NumericValue(value)),
+            });
+            assert_eq!(
+                frame(vec![event], 1, 2, 5, true, true).1,
+                expected
+                    .map(preview_transport::Action::ImageSeek)
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+}
+
+#[test]
+fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::image_tab_card_clicks_keep_card_open_for_animation_reading_and_background",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for reading in [false, true] {
+            for background in [false, true] {
+                let (mut app, context, id, paths) = fixture(&root);
+                context.set_pixels_per_point(density);
+                let mut animated = (*app.image.as_ref().expect("image").decoded).clone();
+                animated.frames.push(animated.frames[0].clone());
+                for frame in &mut animated.frames {
+                    frame.delay = Duration::from_millis(20);
+                }
+                app.image = Some(
+                    ImagePresentation::from_decoded(&context, &paths[0], Arc::new(animated))
+                        .expect("animation"),
+                );
+                app.reading_mode = reading;
+                app.reading_settings.page_count = 2;
+                app.reading_settings.first_page_count = 2;
+                if reading {
+                    app.reading_pages.push(Ok(ImagePresentation::from_decoded(
+                        &context,
+                        &paths[1],
+                        Arc::new(towavue_runtime_windows::decode_image(&paths[1]).expect("page")),
+                    )
+                    .expect("texture")));
+                }
+                app.tabs.close_gallery(app.tabs.gallery().expect("Gallery"));
+                if background {
+                    app.tabs
+                        .open_new(root.join("foreground.bmp"), MediaKind::Image);
+                    app.retain_image_tab();
+                    app.path = Some(root.join("foreground.bmp"));
+                    app.displayed_tab = app.tabs.active_id();
+                    app.media_generation = 8;
+                    app.media_sequence = 8;
+                }
+                let foreground = app.tabs.active_id();
+                let mut time = 0.0;
+                let mut frame = |app: &mut App, events| {
+                    time += 0.05;
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            time: Some(time),
+                            focused: true,
+                            events,
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 576.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| app.draw_top_bar(ui, &mut actions),
+                    );
+                    let mut accepted = Vec::new();
+                    for action in actions {
+                        if !accepted.contains(&action) {
+                            app.handle_ui_action(action.clone());
+                            accepted.push(action);
+                        }
+                    }
+                    (output, accepted)
+                };
+                for _ in 0..5 {
+                    frame(&mut app, vec![]);
+                }
+                let hover = egui::pos2(100.0, 15.0);
+                for _ in 0..3 {
+                    frame(&mut app, vec![egui::Event::PointerMoved(hover)]);
+                }
+                let (output, _) = frame(&mut app, vec![]);
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                let node = &tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Preview image position"))
+                    .expect("folder seek in actual tab card")
+                    .1;
+                assert_eq!(node.numeric_value(), Some(1.0));
+                assert_eq!(
+                    node.max_numeric_value(),
+                    Some(4.0),
+                    "animation length is not folder position"
+                );
+                let bounds = node.bounds().expect("seek bounds");
+                let point =
+                    egui::pos2(bounds.x1 as f32 - 1.0, (bounds.y0 + bounds.y1) as f32 * 0.5);
+                frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                };
+                assert!(frame(&mut app, vec![button(true)]).1.is_empty());
+                let (_, actions) = frame(&mut app, vec![button(false)]);
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::PreviewImageSeek(tab, _, source, path)] if *tab == id && source == &paths[0] && path == &paths[3]),
+                    "one image navigation action"
+                );
+                assert_eq!(app.tabs.active_id(), foreground);
+                assert_eq!(
+                    app.tabs
+                        .tabs()
+                        .iter()
+                        .find(|tab| tab.id == id)
+                        .expect("image tab")
+                        .target
+                        .current_path(),
+                    paths[3]
+                );
+                let (output, actions) = frame(&mut app, vec![]);
+                assert!(actions.is_empty());
+                assert!(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.label() == Some("Preview image position")),
+                    "card stays open after navigation"
+                );
+                if !background {
+                    wait_image(&mut app);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn image_card_export_and_background_dirty_guards_keep_source_ownership() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::image_card_export_and_background_dirty_guards_keep_source_ownership",
+    ) else {
+        return;
+    };
+    for background in [false, true] {
+        let (mut app, _, id, paths) = fixture(&root);
+        let original: Vec<_> = paths
+            .iter()
+            .map(|path| std::fs::read(path).expect("source bytes"))
+            .collect();
+        let instance = app.media_generation;
+        // Same-source publication is rejected by the real worker; keep the app's
+        // export slot until its event is handled, without creating an output.
+        assert!(app.start_export(
+            id,
+            paths[0].clone(),
+            MediaKind::Image,
+            paths[0].clone(),
+            None,
+            ExportOutput::Media
+        ));
+        if background {
+            app.tabs
+                .open_new(root.join("foreground.bmp"), MediaKind::Image);
+            app.retain_image_tab();
+            app.path = Some(root.join("foreground.bmp"));
+            app.displayed_tab = app.tabs.active_id();
+            app.media_generation = 8;
+            app.media_sequence = 8;
+        }
+        let foreground = app.tabs.active_id();
+        app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
+        assert_eq!(app.tabs.active_id(), foreground);
+        assert_eq!(
+            app.tabs
+                .tabs()
+                .iter()
+                .find(|tab| tab.id == id)
+                .expect("tab")
+                .target
+                .current_path(),
+            paths[0]
+        );
+        assert!(app.pending_guard.is_none());
+        assert!(app.active_export.is_some());
+        assert!(
+            app.status_message
+                .as_ref()
+                .expect("busy notice")
+                .0
+                .contains("Export is in progress")
+        );
+        app.active_export.take();
+        app.edits
+            .entry(id)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        let history = app.edits[&id].clone();
+        app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
+        assert_eq!(
+            app.tabs.active_id(),
+            Some(id),
+            "show the actual dirty owner for confirmation"
+        );
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+        assert!(matches!(
+            app.pending_guard,
+            Some(GuardedAction::NavigateImageTab(..))
+        ));
+        app.resolve_guard(GuardDecision::Cancel);
+        assert_eq!(app.edits[&id], history);
+        app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
+        app.resolve_guard(GuardDecision::Discard);
+        assert_eq!(app.path.as_ref(), Some(&paths[1]));
+        wait_image(&mut app);
+        assert!(app.edits[&id].operations().is_empty());
+        for (path, bytes) in paths.iter().zip(original) {
+            assert_eq!(std::fs::read(path).expect("unchanged source"), bytes);
+        }
+    }
+}

@@ -28,6 +28,7 @@ mod image_color;
 mod image_handoff;
 mod image_navigation;
 mod image_scroll;
+mod image_tab_preview;
 #[cfg(test)]
 mod image_visibility_tests;
 #[cfg(test)]
@@ -242,6 +243,7 @@ enum UiAction {
     TabCommand(TabId, CommandId),
     PreviewTransport(TabId, u64, PathBuf, CommandId),
     PreviewSeek(TabId, u64, PathBuf, MediaTime),
+    PreviewImageSeek(TabId, u64, PathBuf, PathBuf),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     TimeAdjustment(
@@ -402,6 +404,7 @@ enum GuardedAction {
     Navigate(PathBuf),
     NavigateFromFolder(PathBuf, PathBuf),
     NavigateAudioTab(TabId, PathBuf, PathBuf),
+    NavigateImageTab(TabId, u64, PathBuf, PathBuf),
     Exit,
 }
 
@@ -5259,12 +5262,26 @@ where
                                             });
                                         let target =
                                             self.tab_preview.target_with_playback(tab, background);
-                                        let retained_image =
+                                        let folder = hovered
+                                            .then(|| self.preview_folder(tab.id, &target.path))
+                                            .flatten();
+                                        let mut retained_image =
                                             if hovered && target.kind == MediaKind::Image {
                                                 self.retained_tab_preview(tab.id, &target.path)
                                             } else {
                                                 None
                                             };
+                                        if retained_image.is_none()
+                                            && let Some(folder) = &folder
+                                            && let Some(paths) = folder.reading_paths()
+                                        {
+                                            self.image_seek_preview_active = true;
+                                            retained_image =
+                                                Some(self.filmstrip.image_tab_preview(
+                                                    &paths,
+                                                    folder.reading.expect("reading settings"),
+                                                ));
+                                        }
                                         if hovered {
                                             if background.is_some_and(|saved| {
                                                 saved.state == PlaybackState::Playing
@@ -5294,21 +5311,43 @@ where
                                             &target,
                                             retained_image.as_ref(),
                                             transport.as_ref(),
-                                        ) && let Some(transport) = transport
-                                        {
+                                            folder.as_ref(),
+                                        ) {
                                             actions.push(match action {
                                                 preview_transport::Action::Command(command) => {
                                                     UiAction::PreviewTransport(
                                                         tab.id,
-                                                        transport.instance,
+                                                        transport
+                                                            .as_ref()
+                                                            .expect("playback transport")
+                                                            .instance,
                                                         target.path.clone(),
                                                         command,
+                                                    )
+                                                }
+                                                preview_transport::Action::ImageSeek(index) => {
+                                                    UiAction::PreviewImageSeek(
+                                                        tab.id,
+                                                        folder
+                                                            .as_ref()
+                                                            .expect("image folder")
+                                                            .instance,
+                                                        target.path.clone(),
+                                                        self.preview_image_path(
+                                                            tab.id,
+                                                            &target.path,
+                                                            index,
+                                                        )
+                                                        .expect("rendered image position"),
                                                     )
                                                 }
                                                 preview_transport::Action::Seek(position) => {
                                                     UiAction::PreviewSeek(
                                                         tab.id,
-                                                        transport.instance,
+                                                        transport
+                                                            .as_ref()
+                                                            .expect("playback transport")
+                                                            .instance,
                                                         target.path.clone(),
                                                         position,
                                                     )
@@ -6369,6 +6408,9 @@ where
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::PreviewTransport(id, instance, path, command) => {
                 self.handle_preview_transport(id, instance, path, command)
+            }
+            UiAction::PreviewImageSeek(id, instance, source, path) => {
+                self.handle_preview_image_seek(id, instance, source, path)
             }
             UiAction::PreviewSeek(id, instance, path, target) => {
                 self.handle_preview_seek(id, instance, &path, target)
@@ -8069,9 +8111,12 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
-        self.image_sequence = image_navigation::ImageSequence::default();
-        self.cancel_hold_speed();
-        self.cancel_frame_steps();
+        let background_image = matches!(&action, GuardedAction::NavigateImageTab(id, ..) if self.displayed_tab != Some(*id));
+        if !background_image {
+            self.image_sequence = image_navigation::ImageSequence::default();
+            self.cancel_hold_speed();
+            self.cancel_frame_steps();
+        }
         if self.metadata_dialog.is_some() {
             self.set_status("Apply or cancel metadata options before leaving.".into());
             return;
@@ -8099,16 +8144,20 @@ where
         if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
             return;
         }
-        self.cancel_shortcut_prefix();
-        self.cancel_view_drag();
+        if !background_image {
+            self.cancel_shortcut_prefix();
+            self.cancel_view_drag();
+        }
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             self.set_status("Close the file dialog before leaving.".into());
             return;
         }
-        if matches!(
-            self.pending_folder,
-            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
-        ) {
+        if !background_image
+            && matches!(
+                self.pending_folder,
+                Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+            )
+        {
             self.folder_order.request(None);
             self.pending_folder = None;
         }
@@ -8116,7 +8165,8 @@ where
             let affects_export = match &action {
                 GuardedAction::CloseTab(id)
                 | GuardedAction::DetachTab(id)
-                | GuardedAction::NavigateAudioTab(id, _, _) => *id == export.tab,
+                | GuardedAction::NavigateAudioTab(id, _, _)
+                | GuardedAction::NavigateImageTab(id, _, _, _) => *id == export.tab,
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
@@ -8139,7 +8189,9 @@ where
                 self.tabs.tabs().iter().any(|tab| tab.id == *id)
                     && self.edits.get(id).is_some_and(EditHistory::is_dirty)
             }),
-            GuardedAction::CloseTab(id) | GuardedAction::NavigateAudioTab(id, _, _) => self
+            GuardedAction::CloseTab(id)
+            | GuardedAction::NavigateAudioTab(id, _, _)
+            | GuardedAction::NavigateImageTab(id, _, _, _) => self
                 .edits
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
@@ -8230,6 +8282,9 @@ where
                         self.advance_background_audio(id, path);
                     }
                 }
+            }
+            GuardedAction::NavigateImageTab(id, instance, source, path) => {
+                self.navigate_image_tab(id, instance, source, path);
             }
             GuardedAction::NavigateFromFolder(path, folder) => {
                 self.navigate_to_unchecked(path);

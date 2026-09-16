@@ -287,6 +287,29 @@ impl Filmstrip {
         changed
     }
 
+    pub(super) fn image_tab_preview(
+        &mut self,
+        paths: &[PathBuf],
+        settings: towavue_core::ReadingSettings,
+    ) -> crate::tab_preview::RetainedPreview {
+        self.set_visible(
+            paths
+                .iter()
+                .map(|path| (path.clone(), MediaKind::Image))
+                .collect(),
+        );
+        crate::tab_preview::RetainedPreview::Reading {
+            pages: paths
+                .iter()
+                .map(|path| match self.previews.get(path) {
+                    Some(Ok((texture, _))) => (Some(texture.clone()), texture.size_vec2()),
+                    _ => (None, Vec2::splat(1.0)),
+                })
+                .collect(),
+            settings,
+        }
+    }
+
     pub fn show_seek_preview(
         &mut self,
         response: &egui::Response,

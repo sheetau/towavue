@@ -1,5 +1,6 @@
 use super::*;
 
+mod alpha;
 mod grayscale;
 use std::{fs, io::Cursor, process::Command};
 

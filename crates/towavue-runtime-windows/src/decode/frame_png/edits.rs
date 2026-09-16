@@ -207,11 +207,14 @@ fn filtered(
         (*graph.as_mut_ptr()).nb_threads = 1;
     }
     let (format, _, _) = packed(source.format());
+    // SAFETY: scalar metadata from the borrowed input; configure the graph to
+    // match it before submitting KEEP_REF frames, without a mid-stream change.
+    let alpha_mode = unsafe { (*source.as_ptr()).alpha_mode } as i32;
     graph.add(
         &ffmpeg::filter::find("buffer").ok_or(ffmpeg::Error::FilterNotFound)?,
         "in",
         &format!(
-            "video_size={}x{}:pix_fmt={format}:time_base=1/1:pixel_aspect={}/{}:colorspace=0:range=2",
+            "video_size={}x{}:pix_fmt={format}:time_base=1/1:pixel_aspect={}/{}:colorspace=0:range=2:alpha_mode={alpha_mode}",
             source.width(),
             source.height(),
             source.aspect_ratio().numerator(),

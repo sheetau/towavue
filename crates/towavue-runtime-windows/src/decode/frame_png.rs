@@ -186,6 +186,14 @@ fn encode(
     }
     let mut rgb = frame::Video::empty();
     scaler.run(source, &mut rgb)?;
+    // SAFETY: immutable scalar metadata on the borrowed decoded frame. Legacy
+    // sws_scale converts channels/ranges but does not interpret AVFrame alpha_mode.
+    let premultiplied = alpha
+        && unsafe { (*source.as_ptr()).alpha_mode }
+            == ffmpeg::ffi::AVAlphaMode::AVALPHA_MODE_PREMULTIPLIED;
+    if premultiplied {
+        restore_straight_alpha(&mut rgb, depth > 8, cancelled)?;
+    }
     let mut output = orient(rgb, orientation, bytes, cancelled)?;
     // Preserve color/ICC/HDR frame properties without carrying codec pixels.
     // SAFETY: both AVFrames are owned in this call; copy_props retains side-data
@@ -208,6 +216,11 @@ fn encode(
     // pixels. Remove its old display matrix to prevent another transformation.
     unsafe {
         (*output.as_mut_ptr()).sample_aspect_ratio = aspect.into();
+        if premultiplied {
+            // copy_props above copied the source interpretation as well. Edits
+            // and PNG must now see straight samples, including before interpolation.
+            (*output.as_mut_ptr()).alpha_mode = ffmpeg::ffi::AVAlphaMode::AVALPHA_MODE_STRAIGHT;
+        }
         ffmpeg::ffi::av_frame_remove_side_data(
             output.as_mut_ptr(),
             ffmpeg::ffi::AVFrameSideDataType::AV_FRAME_DATA_DISPLAYMATRIX,
@@ -247,6 +260,49 @@ fn encode(
         .data()
         .ok_or_else(|| invalid("empty PNG packet"))?
         .to_vec())
+}
+
+fn restore_straight_alpha(
+    frame: &mut frame::Video,
+    high_depth: bool,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(), DecodeError> {
+    let sample_bytes = if high_depth { 2 } else { 1 };
+    let maximum = if high_depth { 65535_u32 } else { 255 };
+    let width = frame.width() as usize;
+    let stride = frame.stride(0);
+    for y in 0..frame.height() as usize {
+        check_cancelled(cancelled)?;
+        let row = &mut frame.data_mut(0)[y * stride..y * stride + width * 4 * sample_bytes];
+        for pixel in row.chunks_exact_mut(4 * sample_bytes) {
+            let alpha = if high_depth {
+                u32::from(u16::from_be_bytes([pixel[6], pixel[7]]))
+            } else {
+                u32::from(pixel[3])
+            };
+            for channel in pixel[..3 * sample_bytes].chunks_exact_mut(sample_bytes) {
+                let value = if high_depth {
+                    u32::from(u16::from_be_bytes([channel[0], channel[1]]))
+                } else {
+                    u32::from(channel[0])
+                };
+                // Round to the nearest representable straight sample; the
+                // original multiplication's quantization cannot be reversed.
+                // Alpha zero has no recoverable color. Clamp malformed over-alpha
+                // values; the largest 16-bit product plus half-alpha fits u32.
+                let straight = (value * maximum + alpha / 2)
+                    .checked_div(alpha)
+                    .unwrap_or(0)
+                    .min(maximum);
+                if high_depth {
+                    channel.copy_from_slice(&(straight as u16).to_be_bytes());
+                } else {
+                    channel[0] = straight as u8;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn pack_grayscale(

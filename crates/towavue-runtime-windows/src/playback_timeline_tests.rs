@@ -110,6 +110,7 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
     )
     .expect("playback");
     assert_eq!(session.current_source_video_time(), None);
+    assert!(session.current_video_snapshot().is_none());
     session
         .seek_with_timeline(MediaTime::ZERO, 1.0, plan.clone(), true)
         .expect("retime");
@@ -123,9 +124,20 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
                 previous,
                 "pending is not displayed"
             );
+            assert_eq!(
+                session
+                    .current_video_snapshot()
+                    .map(|frame| frame.source_time()),
+                previous
+            );
             assert!(session.advance_pending());
             let (source, pixels) = &original[count];
             assert_eq!(session.current_source_video_time(), Some(*source));
+            let snapshot = session
+                .current_video_snapshot()
+                .expect("current frame identity");
+            assert_eq!(snapshot.source_time(), *source);
+            assert_eq!(snapshot.source_path(), path);
             assert_eq!(session.current_video_time(), plan.edited_time(*source));
             let Some(PresentationFrame::Software(frame)) = &session.current_video else {
                 panic!("software fixture");
@@ -134,6 +146,18 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
                 &frame.rgba == pixels,
                 "retimed pixels retain their original PTS"
             );
+            if count == 0 || count + 1 == original.len() {
+                let target = directory.join(format!("frame-{count}.png"));
+                crate::export_video_frame(&snapshot, &target, &[])
+                    .expect("export current retimed frame");
+                assert_eq!(
+                    &image::open(target)
+                        .expect("exported PNG")
+                        .to_rgba8()
+                        .into_raw(),
+                    pixels
+                );
+            }
             count += 1;
         } else {
             assert!(Instant::now() < deadline, "source frame deadline");
@@ -146,6 +170,12 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
         .set_video_visible(false, shown)
         .expect("retain pixels");
     assert_eq!(session.current_source_video_time(), source);
+    assert_eq!(
+        session
+            .current_video_snapshot()
+            .map(|frame| frame.source_time()),
+        source
+    );
     session
         .set_video_visible(true, shown)
         .expect("resume video");
@@ -161,6 +191,12 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
         source,
         "a new target is not a new frame"
     );
+    assert_eq!(
+        session
+            .current_video_snapshot()
+            .map(|frame| frame.source_time()),
+        source
+    );
     let mut empty = plan.clone();
     assert!(empty.apply(TimelineEdit::Delete(
         TimeRange::new(MediaTime::ZERO, empty.duration()).expect("all time")
@@ -173,6 +209,7 @@ fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
         None,
         "cleared pixels have no source PTS"
     );
+    assert!(session.current_video_snapshot().is_none());
     drop(session);
     fs::remove_dir_all(directory).expect("remove owned fixture");
 }

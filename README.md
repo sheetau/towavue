@@ -11,6 +11,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
 - **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
 - **Undo and export.** Keep the source unchanged while editing, then export the result.
+- **Video frame images.** Export the current edited frame to PNG, without window zoom or changing the video's save state.
 - **Keyboard-friendly controls.** Use menus, the command palette, or customizable shortcuts.
 - **Multiple windows.** Move tabs between windows while retaining their edits and playback state.
 

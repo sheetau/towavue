@@ -69,8 +69,8 @@ pub use dialog::{
 pub use export::{
     AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
     ExportOutcome, ExportOutput, ExportRequest, ImageMetadataFormat, MetadataExportOptions,
-    MetadataField, MetadataSourceValue, export_media, export_media_with_options,
-    export_media_with_output, read_export_metadata,
+    MetadataField, MetadataSourceValue, VideoFrameSnapshot, export_media,
+    export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
 };
 pub use file_details::FileDetails;
 pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};

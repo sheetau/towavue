@@ -112,6 +112,7 @@ fn encode(
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<Vec<u8>, DecodeError> {
     check_cancelled(cancelled)?;
+    let orientation = frame_orientation(source, orientation)?;
     let (width, height) = (source.width(), source.height());
     if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
         return Err(DecodeError::FrameTooLarge);

@@ -37,6 +37,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 Save,
                 ExportAs,
                 ExportAudio,
+                ExportFrame,
                 AudioExportOptions,
                 MetadataExportOptions,
                 ToggleHardwareEncode,
@@ -1078,6 +1079,14 @@ mod tests {
                 "File",
                 0,
                 5,
+                "export_frame",
+                ExportFrame,
+                towavue_core::MediaKind::Video,
+            ),
+            (
+                "File",
+                0,
+                5,
                 "audio_export_options",
                 AudioExportOptions,
                 towavue_core::MediaKind::Video,
@@ -1136,6 +1145,7 @@ mod tests {
                                 ui,
                                 CommandContext {
                                     media_kind: Some(kind),
+                                    has_video_frame: expected == ExportFrame,
                                     timeline_open: kind == towavue_core::MediaKind::Video,
                                     ..Default::default()
                                 },

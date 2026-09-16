@@ -14,6 +14,7 @@ mod export_progress;
 mod file_drop;
 mod filmstrip;
 mod fonts;
+mod frame_export;
 mod frame_step;
 mod gallery_rail;
 #[cfg(test)]
@@ -370,6 +371,7 @@ enum FolderIntent {
 enum DialogIntent {
     OpenFile,
     OpenFolder,
+    ExportFrame(frame_export::PendingFrameExport),
     Export {
         tab: TabId,
         source: PathBuf,
@@ -6904,6 +6906,9 @@ where
             CommandId::ExportAudio => {
                 self.export_current_output(true, None, ExportOutput::AudioOnly);
             }
+            CommandId::ExportFrame => {
+                self.export_current_frame();
+            }
             CommandId::AudioExportOptions => self.open_audio_export_options(),
             CommandId::MetadataExportOptions => self.open_metadata_export_options(),
             CommandId::ToggleTimeline => {
@@ -7506,6 +7511,7 @@ where
         };
         let cancelled_or_failed = !matches!(&result, Ok(Some(_)));
         match intent {
+            DialogIntent::ExportFrame(intent) => intent.finish(self, result),
             DialogIntent::OpenFile => match result {
                 Ok(Some(path)) => self.open_external(path, false),
                 Ok(None) => {}
@@ -7737,6 +7743,8 @@ where
                                 "Export completed before cancellation; automatic leaving cancelled:"
                             } else if export.options.output == ExportOutput::AudioOnly {
                                 "Exported audio (video save state unchanged):"
+                            } else if export.options.output == ExportOutput::VideoFrame {
+                                "Exported frame (video save state unchanged):"
                             } else {
                                 "Exported"
                             },
@@ -9373,6 +9381,10 @@ where
 
     fn command_context(&self) -> CommandContext {
         CommandContext {
+            has_video_frame: self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.current_video_snapshot().is_some()),
             image_transition: self.image_handoff.is_some(),
             playback_blocked: self.state.after_play_pause().is_none()
                 || self.playback_duration() == Some(Duration::ZERO),

@@ -740,11 +740,27 @@ pub(crate) fn discard_other_streams(input: &mut format::context::Input, selected
 /// Decoders and packet queues are per run; no stream borrow escapes a run.
 pub(crate) struct ParallelInput {
     input: format::context::Input,
+    pub(crate) frame_source: Option<std::sync::Arc<crate::export::frame::FrameSource>>,
     started: bool,
     audio_checkpoints: AudioCheckpoints,
 }
 
 impl ParallelInput {
+    /// Only playback video needs frame-export identity. Other decode consumers
+    /// retain their existing open path and do not acquire an extra file lease.
+    pub(crate) fn open_tracked_video(
+        path: &Path,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self, DecodeError> {
+        check_cancelled(cancelled)?;
+        let lease = crate::export::frame::SourceLease::open(path).ok();
+        let mut input = Self::open(path, cancelled)?;
+        if let Some(lease) = lease.filter(|lease| lease.verify_path().is_ok()) {
+            input.frame_source = Some(std::sync::Arc::clone(&lease.source));
+        }
+        Ok(input)
+    }
+
     pub(crate) fn open(
         path: &Path,
         cancelled: &(dyn Fn() -> bool + Sync),
@@ -755,6 +771,7 @@ impl ParallelInput {
         check_cancelled(cancelled)?;
         Ok(Self {
             input,
+            frame_source: None,
             started: false,
             audio_checkpoints: AudioCheckpoints::new(path),
         })

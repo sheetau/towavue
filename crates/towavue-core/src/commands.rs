@@ -59,6 +59,7 @@ pub enum CommandId {
     Save,
     ExportAs,
     ExportAudio,
+    ExportFrame,
     AudioExportOptions,
     MetadataExportOptions,
     ToggleTimeline,
@@ -187,6 +188,7 @@ impl CommandId {
             Self::Save => "save",
             Self::ExportAs => "export_as",
             Self::ExportAudio => "export_audio",
+            Self::ExportFrame => "export_frame",
             Self::AudioExportOptions => "audio_export_options",
             Self::MetadataExportOptions => "metadata_export_options",
             Self::ToggleTimeline => "toggle_timeline",
@@ -417,6 +419,7 @@ impl FromStr for KeyStroke {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CommandContext {
+    pub has_video_frame: bool,
     pub image_transition: bool,
     pub playback_blocked: bool,
     pub timeline_open: bool,
@@ -438,6 +441,9 @@ pub struct CommandDefinition {
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if self.id == CommandId::ExportFrame && !context.has_video_frame {
+            return false;
+        }
         if self.id == CommandId::TogglePause && context.playback_blocked {
             return false;
         }
@@ -713,6 +719,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::ExportAudio,
         "Export audio only",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::ExportFrame,
+        "Export current frame (PNG)",
         &[MediaKind::Video],
     ),
     command(
@@ -1067,6 +1078,38 @@ impl ShortcutBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_export_requires_a_video_picture_but_not_the_editing_timeline() {
+        let definition = command_definitions()
+            .iter()
+            .find(|command| command.id == CommandId::ExportFrame)
+            .expect("frame command");
+        assert_eq!(
+            CommandId::from_str("export_frame"),
+            Ok(CommandId::ExportFrame)
+        );
+        for kind in [
+            None,
+            Some(MediaKind::Image),
+            Some(MediaKind::Audio),
+            Some(MediaKind::Video),
+        ] {
+            for has_video_frame in [false, true] {
+                for timeline_open in [false, true] {
+                    assert_eq!(
+                        definition.is_enabled(CommandContext {
+                            media_kind: kind,
+                            has_video_frame,
+                            timeline_open,
+                            ..Default::default()
+                        }),
+                        kind == Some(MediaKind::Video) && has_video_frame
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn license_guide_is_available_without_media_and_in_every_media_context() {

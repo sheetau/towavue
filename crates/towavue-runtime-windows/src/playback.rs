@@ -108,6 +108,7 @@ enum PresentationFrame {
 struct QueuedVideoFrame {
     frame: PresentationFrame,
     source_time: MediaTime,
+    source: Option<Arc<crate::export::frame::FrameSource>>,
 }
 
 impl PresentationFrame {
@@ -142,6 +143,7 @@ pub struct PlaybackSession {
     // Updated together in advance_pending; retaining the current pixels keeps this
     // original PTS even when their presentation time has been retimed by edits.
     current_video_source_time: MediaTime,
+    current_video_source: Option<Arc<crate::export::frame::FrameSource>>,
     current_video_unpresented: bool,
     video_refresh_pending: bool,
     retained_video_position: Option<MediaTime>,
@@ -193,6 +195,7 @@ impl PlaybackSession {
             pending_video: None,
             current_video: None,
             current_video_source_time: MediaTime::ZERO,
+            current_video_source: None,
             current_video_unpresented: false,
             video_refresh_pending: true,
             retained_video_position: None,
@@ -543,7 +546,7 @@ impl PlaybackSession {
             .spawn(move || {
                 let result = (|| {
                     if input.is_none() {
-                        input = Some(decode::ParallelInput::open(&path, &|| {
+                        input = Some(decode::ParallelInput::open_tracked_video(&path, &|| {
                             cancelled.load(Ordering::Relaxed)
                         })?);
                     }
@@ -706,6 +709,7 @@ impl PlaybackSession {
         };
         self.current_video = Some(queued.frame);
         self.current_video_source_time = queued.source_time;
+        self.current_video_source = queued.source;
         self.current_video_unpresented = true;
         self.video_refresh_pending = false;
         true
@@ -729,6 +733,16 @@ impl PlaybackSession {
         self.current_video
             .as_ref()
             .map(|_| self.current_video_source_time)
+    }
+
+    /// Capture the current pixels' source identity without IO or retaining native
+    /// frames. A held seek preview retains its old identity, just like its PTS.
+    /// Unverifiable sources remain playable but cannot be exported by timestamp.
+    pub fn current_video_snapshot(&self) -> Option<crate::VideoFrameSnapshot> {
+        Some(crate::VideoFrameSnapshot {
+            time: self.current_source_video_time()?,
+            source: Arc::clone(self.current_video_source.as_ref()?),
+        })
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {
@@ -921,6 +935,7 @@ fn run_video_decode(
     notify: &(impl Fn(PlaybackEvent) + Sync + ?Sized),
 ) -> Result<(), decode::DecodeError> {
     let mut hardware_output_seen = false;
+    let source = input.frame_source.clone();
     let hardware_result = input.decode_hardware(
         graphics_device,
         target,
@@ -945,6 +960,7 @@ fn run_video_decode(
                         cancelled,
                         notify,
                         timeline,
+                        source.clone(),
                     )
                 }
             }
@@ -975,6 +991,7 @@ fn run_video_decode(
                                 cancelled,
                                 notify,
                                 timeline,
+                                source.clone(),
                             )
                         }
                         _ => unreachable!("video-only decoder emitted audio"),
@@ -993,6 +1010,7 @@ fn send_video_frame(
     cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + ?Sized),
     timeline: Option<timeline::Segment>,
+    source: Option<Arc<crate::export::frame::FrameSource>>,
 ) -> bool {
     let source_time = frame.presentation_time();
     if let Some(segment) = timeline {
@@ -1007,7 +1025,11 @@ fn send_video_frame(
     // stop_video drops the receiver before joining this bounded producer.
     if cancelled.load(Ordering::Relaxed)
         || video_tx
-            .send(QueuedVideoFrame { frame, source_time })
+            .send(QueuedVideoFrame {
+                frame,
+                source_time,
+                source,
+            })
             .is_err()
     {
         return false;

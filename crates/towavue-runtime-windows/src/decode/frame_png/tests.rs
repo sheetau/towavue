@@ -3,6 +3,50 @@ use std::{fs, io::Cursor, process::Command};
 
 mod edits;
 
+#[test]
+fn frame_level_orientation_overrides_stream_orientation_before_edits() {
+    use ffmpeg::util::frame::side_data::Type;
+    ffmpeg::init().expect("FFmpeg");
+    let mut source = frame::Video::new(Pixel::RGB24, 7, 5);
+    let stride = source.stride(0);
+    for y in 0..5 {
+        for x in 0..21 {
+            source.data_mut(0)[y * stride + x] = (y * 29 + x * 3) as u8;
+        }
+    }
+    let matrix: Vec<u8> = [0_i32, 65536, 0, -65536, 0, 0, 0, 0, 1 << 30]
+        .into_iter()
+        .flat_map(i32::to_ne_bytes)
+        .collect();
+    let rotated = VideoOrientation::from_bytes(Some(&matrix)).expect("frame rotation");
+    let operations = [EditOperation::Crop(towavue_core::PixelCrop {
+        x: 1,
+        y: 2,
+        width: 2,
+        height: 3,
+    })];
+    let expected = encode(&source, rotated, &operations, &|| false).expect("rotated reference");
+    let unrotated = encode(&source, VideoOrientation::default(), &operations, &|| false)
+        .expect("unrotated control");
+    assert_ne!(
+        unpack(&expected).1,
+        unpack(&unrotated).1,
+        "fixture distinguishes the wrong fallback"
+    );
+    {
+        let mut side = source
+            .new_side_data(Type::DisplayMatrix, matrix.len())
+            .expect("frame matrix");
+        // SAFETY: the generated frame exclusively owns this new side-data region.
+        unsafe {
+            std::ptr::copy_nonoverlapping(matrix.as_ptr(), (*side.as_mut_ptr()).data, matrix.len());
+        }
+    }
+    let actual = encode(&source, VideoOrientation::default(), &operations, &|| false)
+        .expect("frame-local orientation");
+    assert_eq!(actual, expected);
+}
+
 fn unpack(bytes: &[u8]) -> (png::OutputInfo, Vec<u8>) {
     let mut decoder = png::Decoder::new(Cursor::new(bytes))
         .read_info()

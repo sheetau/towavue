@@ -23,6 +23,10 @@ mod gif_animation;
 mod audio_options;
 pub use audio_options::{AudioChannels, AudioExportOptions};
 
+#[path = "export_frame.rs"]
+pub(crate) mod frame;
+pub use frame::{VideoFrameSnapshot, export_video_frame};
+
 #[path = "export_avif.rs"]
 mod avif;
 #[path = "export_jpeg_metadata.rs"]
@@ -50,6 +54,8 @@ pub enum ExportOutput {
     Media,
     /// A derivative with time/audio edits only; the request still describes the source media.
     AudioOnly,
+    /// A derivative produced by start_video_frame with a verified frame snapshot.
+    VideoFrame,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -87,6 +93,32 @@ pub struct ExportJob {
 }
 
 impl ExportJob {
+    /// Export a derivative PNG without changing the source or its edit history.
+    pub fn start_video_frame(
+        frame: VideoFrameSnapshot,
+        target: PathBuf,
+        operations: Vec<EditOperation>,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let thread = thread::Builder::new()
+            .name("towavue-frame-export".into())
+            .spawn(move || {
+                notify(ExportEvent::Finished(frame::export_cancellable(
+                    &frame,
+                    &target,
+                    &operations,
+                    &worker_cancelled,
+                )));
+            })
+            .map_err(ExportError::Start)?;
+        Ok(Self {
+            cancelled,
+            thread: Some(thread),
+        })
+    }
+
     pub fn start(
         request: ExportRequest,
         notify: impl Fn(ExportEvent) + Send + Sync + 'static,
@@ -214,6 +246,11 @@ fn export_options_cancellable(
     progress: &(impl Fn(Duration) + Sync),
     analyzing: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
+    if options.output == ExportOutput::VideoFrame {
+        return Err(ExportError::Failed(
+            "Frame export requires a playback frame snapshot".into(),
+        ));
+    }
     if options.output == ExportOutput::Media {
         return export_audio_cancellable(
             request,

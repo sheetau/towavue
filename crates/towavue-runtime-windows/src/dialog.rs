@@ -46,6 +46,7 @@ pub enum FileDialogKind {
     OpenFolder,
     SaveFile { suggested_name: String },
     SaveAudio { suggested_name: String },
+    SaveFrame { suggested_name: String },
 }
 
 /// Keeps the owner alive until its modal dialog closes, without blocking the caller.
@@ -248,10 +249,13 @@ fn dialog_thread(
             FileDialogKind::OpenFile => show_initialized_dialog(false, owner_handle),
             FileDialogKind::OpenFolder => show_initialized_dialog(true, owner_handle),
             FileDialogKind::SaveFile { suggested_name } => {
-                show_initialized_save_dialog(&suggested_name, owner_handle, false)
+                show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Media)
             }
             FileDialogKind::SaveAudio { suggested_name } => {
-                show_initialized_save_dialog(&suggested_name, owner_handle, true)
+                show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Audio)
+            }
+            FileDialogKind::SaveFrame { suggested_name } => {
+                show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Frame)
             }
         }
     }
@@ -283,14 +287,20 @@ unsafe fn show_initialized_dialog(
     }
 }
 
+enum SaveFilter {
+    Media,
+    Audio,
+    Frame,
+}
+
 unsafe fn show_initialized_save_dialog(
     suggested_name: &str,
     owner: HWND,
-    audio_only: bool,
+    filter: SaveFilter,
 ) -> Result<Option<PathBuf>, DialogError> {
     // The caller owns the STA until this function returns; interfaces never cross threads.
     unsafe {
-        let dialog = prepare_save_dialog(suggested_name, audio_only)?;
+        let dialog = prepare_save_dialog(suggested_name, filter)?;
         if let Err(error) = dialog.Show(Some(owner)) {
             if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
                 return Ok(None);
@@ -308,17 +318,26 @@ unsafe fn show_initialized_save_dialog(
 // The caller keeps its initialized STA alive and drops the returned interface on that thread.
 unsafe fn prepare_save_dialog(
     suggested_name: &str,
-    audio_only: bool,
+    filter: SaveFilter,
 ) -> Result<IFileSaveDialog, DialogError> {
     unsafe {
         let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL)?;
         dialog.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_OVERWRITEPROMPT)?;
-        if audio_only {
+        if matches!(filter, SaveFilter::Audio) {
             // Static UTF-16 filter strings outlive this STA-owned dialog and its Show call.
             dialog.SetTitle(w!("Export audio only (video edits remain unchanged)"))?;
             dialog.SetFileTypes(&audio_file_types())?;
             dialog.SetFileTypeIndex(1)?;
             dialog.SetDefaultExtension(w!("wav"))?;
+        }
+        if matches!(filter, SaveFilter::Frame) {
+            dialog.SetTitle(w!("Export current edited frame"))?;
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC {
+                pszName: w!("PNG image (*.png)"),
+                pszSpec: w!("*.png"),
+            }])?;
+            dialog.SetFileTypeIndex(1)?;
+            dialog.SetDefaultExtension(w!("png"))?;
         }
         let wide = suggested_name
             .encode_utf16()
@@ -405,8 +424,8 @@ mod tests {
             unsafe {
                 OleInitialize(None).expect("STA");
                 let _apartment = DialogApartment;
-                let dialog =
-                    prepare_save_dialog("動画.final-audio.wav", true).expect("audio save dialog");
+                let dialog = prepare_save_dialog("動画.final-audio.wav", SaveFilter::Audio)
+                    .expect("audio save dialog");
                 let options = dialog.GetOptions().expect("options");
                 assert_eq!(options & FOS_OVERWRITEPROMPT, FOS_OVERWRITEPROMPT);
                 assert_eq!(options & FOS_PATHMUSTEXIST, FOS_PATHMUSTEXIST);
@@ -419,12 +438,23 @@ mod tests {
                 let text = name.to_string();
                 CoTaskMemFree(Some(name.0.cast()));
                 assert_eq!(text.expect("UTF-16"), "動画.final-audio.wav");
-                let regular =
-                    prepare_save_dialog("image-export.png", false).expect("regular save dialog");
+                let regular = prepare_save_dialog("image-export.png", SaveFilter::Media)
+                    .expect("regular save dialog");
                 assert_eq!(
                     regular.GetOptions().expect("regular options") & FOS_OVERWRITEPROMPT,
                     FOS_OVERWRITEPROMPT
                 );
+                let frame = prepare_save_dialog("video-frame-0ns.png", SaveFilter::Frame)
+                    .expect("frame save dialog");
+                assert_eq!(frame.GetFileTypeIndex().expect("PNG type"), 1);
+                assert_eq!(
+                    frame.GetOptions().expect("frame options") & FOS_OVERWRITEPROMPT,
+                    FOS_OVERWRITEPROMPT
+                );
+                let name = frame.GetFileName().expect("frame name");
+                let text = name.to_string();
+                CoTaskMemFree(Some(name.0.cast()));
+                assert_eq!(text.expect("frame UTF-16"), "video-frame-0ns.png");
             }
         })
         .join()

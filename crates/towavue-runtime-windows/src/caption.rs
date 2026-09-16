@@ -202,6 +202,8 @@ impl NativeCaption {
         if fullscreen == self.state.fullscreen.get() {
             return;
         }
+        #[cfg(test)]
+        let started = std::time::Instant::now();
         if fullscreen {
             self.windowed_size.set(Some(
                 self.window
@@ -213,14 +215,27 @@ impl NativeCaption {
         self.state.drag.set(None);
         // SAFETY: same-thread, retained window; DWM copies the stack margins.
         unsafe { extend_frame(self.handle, fullscreen) };
+        #[cfg(test)]
+        let margins_changed = started.elapsed();
         self.window.set_fullscreen(
             fullscreen
                 .then(|| winit::window::Fullscreen::Borderless(self.window.current_monitor())),
         );
+        #[cfg(test)]
+        let placement_changed = started.elapsed();
         if !fullscreen && let Some(size) = self.windowed_size.take() {
             // SetWindowPlacement can cross DPI while restoring an already scaled
             // rectangle. Restore the saved logical client size once, after that call.
             let _ = self.resize_client(size.to_physical(self.window.scale_factor()));
+        }
+        #[cfg(test)]
+        if std::env::var_os("TOWAVUE_CAPTION_VISIBLE_GEOMETRY").is_some() {
+            eprintln!(
+                "FULLSCREEN native stages: enabled={fullscreen} margins_ms={:.3} placement_ms={:.3} restore_client_ms={:.3}",
+                margins_changed.as_secs_f64() * 1000.0,
+                (placement_changed - margins_changed).as_secs_f64() * 1000.0,
+                (started.elapsed() - placement_changed).as_secs_f64() * 1000.0
+            );
         }
     }
 
@@ -1303,24 +1318,44 @@ mod tests {
                                 }
                                 caption.state.resize_trace.set(Some(Vec::new()));
                                 {
-                                    let _transition = caption
+                                    let started = std::time::Instant::now();
+                                    let transition = caption
                                         .suppress_transitions()
                                         .expect("fullscreen entry suppression");
+                                    let suppressed = started.elapsed();
                                     caption.set_fullscreen(true);
+                                    let changed = started.elapsed();
                                     assert_eq!(transitions_disabled(), 1);
                                     assert_eq!(window.inner_size(), monitor.size());
                                     assert_eq!(
                                         window.outer_position().expect("position"),
                                         monitor.position()
                                     );
+                                    drop(transition);
+                                    eprintln!(
+                                        "FULLSCREEN native entry: maximized={maximized} scale={scale} suppress_ms={:.3} change_ms={:.3} total_ms={:.3}",
+                                        suppressed.as_secs_f64() * 1000.0,
+                                        (changed - suppressed).as_secs_f64() * 1000.0,
+                                        started.elapsed().as_secs_f64() * 1000.0
+                                    );
                                 }
                                 assert_eq!(transitions_disabled(), previous);
                                 {
-                                    let _transition = caption
+                                    let started = std::time::Instant::now();
+                                    let transition = caption
                                         .suppress_transitions()
                                         .expect("fullscreen exit suppression");
+                                    let suppressed = started.elapsed();
                                     caption.set_fullscreen(false);
+                                    let changed = started.elapsed();
                                     assert_eq!(transitions_disabled(), 1);
+                                    drop(transition);
+                                    eprintln!(
+                                        "FULLSCREEN native exit: maximized={maximized} scale={scale} suppress_ms={:.3} change_ms={:.3} total_ms={:.3}",
+                                        suppressed.as_secs_f64() * 1000.0,
+                                        (changed - suppressed).as_secs_f64() * 1000.0,
+                                        started.elapsed().as_secs_f64() * 1000.0
+                                    );
                                 }
                                 assert_eq!(transitions_disabled(), previous);
                                 let sizes =

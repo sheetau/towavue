@@ -165,6 +165,7 @@ fn measure_retained_surface(name: &str) {
         assert_eq!(frame.pixel_aspect, 4.0 / 3.0);
     }
     let time = frame.presentation_time;
+    assert_eq!(session.current_source_video_time(), Some(time));
     let metadata = (
         frame.width,
         frame.height,
@@ -244,6 +245,7 @@ fn measure_retained_surface(name: &str) {
     );
     assert_eq!(session.pending_video_time(), Some(time));
     assert_eq!(session.current_video_time(), Some(time));
+    assert_eq!(session.current_source_video_time(), Some(time));
     assert!(session.video_refresh_pending());
     assert!(session.advance_pending());
     assert!(!session.video_refresh_pending());
@@ -280,6 +282,7 @@ fn measure_retained_surface(name: &str) {
         };
         assert_eq!(frame.texture_and_slice(), identity, "no extra surface copy");
         assert_eq!(frame.presentation_time, time);
+        assert_eq!(session.current_source_video_time(), Some(time));
         assert_eq!(pixels(frame), expected, "old decoder surface remains valid");
         assert_eq!(session.video_geometry(), geometry);
         assert!(session.video_refresh_pending() && !session.current_video_unpresented);

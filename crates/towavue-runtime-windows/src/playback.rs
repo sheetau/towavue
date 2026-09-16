@@ -105,6 +105,11 @@ enum PresentationFrame {
     Hardware(HardwareVideoFrame),
 }
 
+struct QueuedVideoFrame {
+    frame: PresentationFrame,
+    source_time: MediaTime,
+}
+
 impl PresentationFrame {
     fn presentation_time(&self) -> MediaTime {
         match self {
@@ -131,9 +136,12 @@ pub struct PlaybackSession {
     graphics_device: GraphicsDevice,
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
-    video_rx: Option<Receiver<PresentationFrame>>,
-    pending_video: Option<PresentationFrame>,
+    video_rx: Option<Receiver<QueuedVideoFrame>>,
+    pending_video: Option<QueuedVideoFrame>,
     current_video: Option<PresentationFrame>,
+    // Updated together in advance_pending; retaining the current pixels keeps this
+    // original PTS even when their presentation time has been retimed by edits.
+    current_video_source_time: MediaTime,
     current_video_unpresented: bool,
     video_refresh_pending: bool,
     retained_video_position: Option<MediaTime>,
@@ -184,6 +192,7 @@ impl PlaybackSession {
             video_rx: None,
             pending_video: None,
             current_video: None,
+            current_video_source_time: MediaTime::ZERO,
             current_video_unpresented: false,
             video_refresh_pending: true,
             retained_video_position: None,
@@ -688,14 +697,15 @@ impl PlaybackSession {
         }
         self.pending_video
             .as_ref()
-            .map(PresentationFrame::presentation_time)
+            .map(|queued| queued.frame.presentation_time())
     }
 
     pub fn advance_pending(&mut self) -> bool {
-        let Some(frame) = self.pending_video.take() else {
+        let Some(queued) = self.pending_video.take() else {
             return false;
         };
-        self.current_video = Some(frame);
+        self.current_video = Some(queued.frame);
+        self.current_video_source_time = queued.source_time;
         self.current_video_unpresented = true;
         self.video_refresh_pending = false;
         true
@@ -710,6 +720,15 @@ impl PlaybackSession {
         self.current_video
             .as_ref()
             .map(PresentationFrame::presentation_time)
+    }
+
+    /// Original-source PTS of the current pixels, not the playback clock or an
+    /// inverse mapping of rounded edited time. A held seek preview keeps its PTS;
+    /// consult video_refresh_pending when a caller requires the new seek result.
+    pub fn current_source_video_time(&self) -> Option<MediaTime> {
+        self.current_video
+            .as_ref()
+            .map(|_| self.current_video_source_time)
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {
@@ -892,7 +911,7 @@ fn run_audio_decode(
 fn run_video_decode(
     input: &mut decode::ParallelInput,
     graphics_device: &GraphicsDevice,
-    video_tx: &SyncSender<PresentationFrame>,
+    video_tx: &SyncSender<QueuedVideoFrame>,
     metrics: &SharedMetrics,
     generation: PlaybackGeneration,
     target: MediaTime,
@@ -969,12 +988,13 @@ fn run_video_decode(
 
 fn send_video_frame(
     mut frame: PresentationFrame,
-    video_tx: &SyncSender<PresentationFrame>,
+    video_tx: &SyncSender<QueuedVideoFrame>,
     generation: PlaybackGeneration,
     cancelled: &AtomicBool,
     notify: &(impl Fn(PlaybackEvent) + ?Sized),
     timeline: Option<timeline::Segment>,
 ) -> bool {
+    let source_time = frame.presentation_time();
     if let Some(segment) = timeline {
         let Some(time) = segment.edited_time(frame.presentation_time()) else {
             return true;
@@ -985,7 +1005,11 @@ fn send_video_frame(
         }
     }
     // stop_video drops the receiver before joining this bounded producer.
-    if cancelled.load(Ordering::Relaxed) || video_tx.send(frame).is_err() {
+    if cancelled.load(Ordering::Relaxed)
+        || video_tx
+            .send(QueuedVideoFrame { frame, source_time })
+            .is_err()
+    {
         return false;
     }
     if !cancelled.load(Ordering::Relaxed) {

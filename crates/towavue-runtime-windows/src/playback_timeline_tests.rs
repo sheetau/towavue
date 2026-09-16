@@ -76,6 +76,108 @@ fn drain_video(session: &mut PlaybackSession) -> Vec<(MediaTime, Vec<u8>)> {
 }
 
 #[test]
+fn source_frame_pts_survives_noninvertible_retiming_and_held_previews() {
+    let (directory, path) = fixture(false);
+    let mut original = Vec::new();
+    decode::decode_file(&path, |output| {
+        if let DecodeOutput::Video(frame) = output {
+            original.push((frame.presentation_time, frame.rgba));
+        }
+        true
+    })
+    .expect("reference source");
+    let plan = EditTimeline::from_operations(
+        time(2000),
+        &[EditOperation::Timeline(TimelineEdit::Stretch(
+            range(0, 2000),
+            MediaTime::from_nanoseconds(701_000_003),
+        ))],
+    )
+    .expect("fractional retiming");
+    assert!(
+        original.iter().any(|(source, _)| {
+            plan.source_time(plan.edited_time(*source).expect("edited time")) != Some(*source)
+        }),
+        "the fixture must expose inverse-rounding loss"
+    );
+    let mut session = PlaybackSession::open(
+        &path,
+        GraphicsDevice::warp_for_test().expect("WARP"),
+        0.0,
+        1.0,
+        PlaybackRange::default(),
+        |_| {},
+    )
+    .expect("playback");
+    assert_eq!(session.current_source_video_time(), None);
+    session
+        .seek_with_timeline(MediaTime::ZERO, 1.0, plan.clone(), true)
+        .expect("retime");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut count = 0;
+    while count < original.len() {
+        if session.pending_video_time().is_some() {
+            let previous = count.checked_sub(1).map(|index| original[index].0);
+            assert_eq!(
+                session.current_source_video_time(),
+                previous,
+                "pending is not displayed"
+            );
+            assert!(session.advance_pending());
+            let (source, pixels) = &original[count];
+            assert_eq!(session.current_source_video_time(), Some(*source));
+            assert_eq!(session.current_video_time(), plan.edited_time(*source));
+            let Some(PresentationFrame::Software(frame)) = &session.current_video else {
+                panic!("software fixture");
+            };
+            assert!(
+                &frame.rgba == pixels,
+                "retimed pixels retain their original PTS"
+            );
+            count += 1;
+        } else {
+            assert!(Instant::now() < deadline, "source frame deadline");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let source = session.current_source_video_time();
+    let shown = session.current_video_time().expect("current frame");
+    session
+        .set_video_visible(false, shown)
+        .expect("retain pixels");
+    assert_eq!(session.current_source_video_time(), source);
+    session
+        .set_video_visible(true, shown)
+        .expect("resume video");
+    assert_eq!(
+        session.current_source_video_time(),
+        source,
+        "held pixels retain source identity"
+    );
+    session.seek(time(100)).expect("new seek");
+    assert!(session.video_refresh_pending());
+    assert_eq!(
+        session.current_source_video_time(),
+        source,
+        "a new target is not a new frame"
+    );
+    let mut empty = plan.clone();
+    assert!(empty.apply(TimelineEdit::Delete(
+        TimeRange::new(MediaTime::ZERO, empty.duration()).expect("all time")
+    )));
+    session
+        .seek_with_timeline(MediaTime::ZERO, 1.0, empty, true)
+        .expect("empty plan");
+    assert_eq!(
+        session.current_source_video_time(),
+        None,
+        "cleared pixels have no source PTS"
+    );
+    drop(session);
+    fs::remove_dir_all(directory).expect("remove owned fixture");
+}
+
+#[test]
 fn edited_video_retimes_original_frames_across_seek_visibility_recovery_and_empty_undo() {
     let (directory, path) = fixture(false);
     let plan = plan();

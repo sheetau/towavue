@@ -1,6 +1,7 @@
 use super::*;
 
 mod alpha;
+mod chroma;
 mod exif;
 mod grayscale;
 mod webm_alpha;
@@ -374,10 +375,12 @@ fn native_frame_png_selects_vfr_b_frames_transport_origins_and_rejects_duplicate
                 .expect("frame PNG fixture");
             let (info, actual) = unpack(&png);
             assert_eq!((info.width, info.height), (frame.width, frame.height));
-            // Independent sequential selection, explicit high-quality color
-            // conversion (the display path uses different swscale flags).
+            // Independent sequential selection and explicit left chroma siting
+            // declared by these MPEG4/MPEG2 decoders. The CLI's automatic scale
+            // path currently uses centered chroma even when ffprobe reports left,
+            // so it must not define the expected source-color geometry implicitly.
             let reference = Command::new(&ffmpeg).args(["-v","error","-i"]).arg(&path)
-                .args(["-vf", &format!("select=eq(n\\,{index}),scale=flags=bilinear+accurate_rnd+full_chroma_int:in_color_matrix=bt601:in_range=limited:out_range=full"),
+                .args(["-vf", &format!("select=eq(n\\,{index}),scale=flags=bilinear+accurate_rnd+full_chroma_int:in_color_matrix=bt601:in_range=limited:out_range=full:in_h_chr_pos=0:in_v_chr_pos=128"),
                     "-frames:v","1","-pix_fmt","rgb24","-f","rawvideo","-"]).output().expect("frame PNG fixture");
             assert!(reference.status.success());
             assert_eq!(actual, reference.stdout, "{extension} frame {index}");

@@ -1,6 +1,7 @@
 use super::*;
 use towavue_core::EditOperation;
 
+mod color;
 mod edits;
 
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
@@ -174,15 +175,6 @@ fn encode(
         (true, false) => (Pixel::RGB48BE, 6),
         (true, true) => (Pixel::RGBA64BE, 8),
     };
-    let mut scaler = scaling::Context::get(
-        source.format(),
-        width,
-        height,
-        pixel,
-        width,
-        height,
-        Flags::BILINEAR | Flags::ACCURATE_RND | Flags::FULL_CHR_H_INT,
-    )?;
     use ffmpeg::ffi::AVColorSpace::*;
     let matrix = match source.color_space().into() {
         AVCOL_SPC_RGB | AVCOL_SPC_UNSPECIFIED | AVCOL_SPC_BT470BG | AVCOL_SPC_SMPTE170M => {
@@ -197,25 +189,13 @@ fn encode(
     let full = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0
         || (descriptor.nb_components <= 2 && source.color_range() != ffmpeg::color::Range::MPEG)
         || source.color_range() == ffmpeg::color::Range::JPEG;
-    // SAFETY: exclusively owned scaler; immutable FFmpeg coefficient tables.
-    let result = unsafe {
-        let coefficients = ffmpeg::ffi::sws_getCoefficients(matrix);
-        ffmpeg::ffi::sws_setColorspaceDetails(
-            scaler.as_mut_ptr(),
-            coefficients,
-            i32::from(full),
-            coefficients,
-            1,
-            0,
-            1 << 16,
-            1 << 16,
-        )
-    };
-    if result < 0 {
-        return Err(ffmpeg::Error::from(result).into());
-    }
-    let mut rgb = frame::Video::empty();
-    scaler.run(source, &mut rgb)?;
+    let yuv = descriptor.nb_components >= 3
+        && descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64 == 0;
+    let subsampled = (
+        yuv && descriptor.log2_chroma_w != 0,
+        yuv && descriptor.log2_chroma_h != 0,
+    );
+    let mut rgb = color::convert(source, pixel, matrix, full, subsampled)?;
     // SAFETY: immutable scalar metadata on the borrowed decoded frame. Legacy
     // sws_scale converts channels/ranges but does not interpret AVFrame alpha_mode.
     let premultiplied = alpha

@@ -220,7 +220,7 @@ pub(crate) fn show_section_with_recent(
 ) -> Option<CommandId> {
     let mut chosen = None;
     if let Some(section) = initial {
-        return show_items(ui, section.title(), context, shortcuts, recent).0;
+        return show_items(ui, section.title(), context, shortcuts, recent, None).0;
     }
     let keyboard = MenuKeyboard::begin(ui);
     let requested_category = keyboard
@@ -252,8 +252,10 @@ fn submenu(
         egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(submenu));
     }
+    let root = egui::containers::menu::find_menu_root(ui);
+    let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
     let menu = ui.menu_button(title, |ui| {
-        show_items(ui, title, context, shortcuts, recent)
+        show_items(ui, title, context, shortcuts, recent, Some(parent))
     });
     let (chosen, back) = menu.inner.unwrap_or_default();
     if back {
@@ -269,6 +271,7 @@ fn show_items(
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     recent: &mut RecentMenu<'_>,
+    ancestor: Option<egui::Rect>,
 ) -> (Option<CommandId>, bool) {
     let groups = MENUS
         .iter()
@@ -325,7 +328,23 @@ fn show_items(
                             state.open_item = Some(id)
                         });
                     }
-                    let menu = ui.menu_button("Open Recent", |ui| show_recent(ui, recent));
+                    let root = egui::containers::menu::find_menu_root(ui);
+                    let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
+                    let screen = ui.ctx().content_rect();
+                    // Match the submenu's two-point gap outside the parent's frame.
+                    // Constraining against the whole viewport makes egui slide a wide
+                    // child back over its parent instead of placing it alongside.
+                    let right = screen.right() - parent.right();
+                    let left = parent.left() - screen.left();
+                    // Keep the normal left-to-right cascade away from its root menu.
+                    let side_width = if ancestor.is_some_and(|root| root.right() <= parent.left()) {
+                        right
+                    } else {
+                        right.max(left)
+                    };
+                    let available_width = side_width - 2.0 - 1.0 / ui.ctx().pixels_per_point();
+                    let menu = ui
+                        .menu_button("Open Recent", |ui| show_recent(ui, recent, available_width));
                     if menu.response.enabled() {
                         items.push(menu.response.id);
                     }
@@ -357,7 +376,7 @@ fn show_items(
     (chosen, back)
 }
 
-fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
+fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>, available_width: f32) -> bool {
     use crate::hover_help::HoverHelp;
     use towavue_runtime_windows::RecentKind;
     let keyboard = MenuKeyboard::begin(ui);
@@ -386,7 +405,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
         })
         .fold(0.0, f32::max);
     let width = text_width + 2.0 * ui.spacing().button_padding.x + ui.spacing().scroll.bar_width;
-    ui.set_max_width(width.min((ui.ctx().content_rect().width() - frame_width).max(1.0)));
+    ui.set_max_width(width.min((available_width - frame_width).max(1.0)));
     egui::ScrollArea::vertical()
         .max_height((ui.ctx().content_rect().height() - 64.0).max(80.0))
         .show_styled(ui, |ui| {
@@ -449,7 +468,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
                 }
             }
             // Resume positions can outlive the shorter recent-path lists.
-            let response = ui.button("Clear Recently Opened");
+            let response = ui.add(egui::Button::new("Clear Recently Opened").truncate());
             if response.enabled() {
                 items.push(response.id);
             }
@@ -683,90 +702,156 @@ mod tests {
     }
 
     #[test]
-    fn recent_menu_width_follows_path_text_up_to_the_viewport_edge() {
+    fn recent_menu_width_follows_path_text_without_overlapping_its_parent() {
         use egui::accesskit::{Action, ActionRequest, TreeId};
         for density in [1.0, 1.25, 2.0] {
-            for width in [320.0, 1200.0] {
-                for long in [false, true] {
-                    let context = crate::fonts::test_context();
-                    context.enable_accesskit();
-                    context.set_pixels_per_point(density);
-                    context.global_style_mut(crate::chrome::style);
-                    let path = std::path::PathBuf::from(if long {
-                        format!("C:/{}/image.png", "a long folder description ".repeat(6))
-                    } else {
-                        "C:/short.png".into()
-                    });
-                    let files = [path.clone()];
-                    let frame = |events| {
-                        context.run_ui(
-                            egui::RawInput {
-                                screen_rect: Some(egui::Rect::from_min_size(
-                                    egui::Pos2::ZERO,
-                                    egui::vec2(width, 480.0),
-                                )),
-                                events,
-                                ..Default::default()
-                            },
-                            |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(width - 120.0);
-                                    ui.menu_button("Recent", |ui| {
-                                        show_recent(
-                                            ui,
-                                            &mut RecentMenu {
-                                                files: &files,
-                                                ..Default::default()
-                                            },
-                                        )
-                                    });
-                                });
-                            },
-                        )
-                    };
-                    let first = frame(vec![]);
-                    let trigger = first
-                        .platform_output
-                        .accesskit_update
-                        .expect("tree")
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| {
-                            node.label()
-                                .is_some_and(|label| label.starts_with("Recent"))
-                        })
-                        .expect("menu trigger")
-                        .0;
-                    frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
-                        action: Action::Click,
-                        target_tree: TreeId::ROOT,
-                        target_node: trigger,
-                        data: None,
-                    })]);
-                    for _ in 0..4 {
-                        frame(vec![]);
+            for width in [320.0, 480.0, 1200.0] {
+                for (right_edge, nested) in [(false, false), (true, false), (false, true)] {
+                    if nested && width < 480.0 {
+                        continue; // The native application has a 480-point minimum width.
                     }
-                    let output = frame(vec![]);
-                    let tree = output.platform_output.accesskit_update.expect("menu tree");
-                    let bounds = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| node.label() == Some(path.to_string_lossy().as_ref()))
-                        .expect("path button")
-                        .1
-                        .bounds()
-                        .expect("path bounds");
-                    assert!(
-                        bounds.x0 >= 0.0
-                            && bounds.x1 <= f64::from(width) + 1.0 / f64::from(density),
-                        "path must fit viewport {width}: {bounds:?}"
-                    );
-                    if width > 520.0 {
-                        assert_eq!(
-                            bounds.width() > 520.0,
-                            long,
-                            "size follows content, not a fixed ceiling"
-                        );
+                    for long in [false, true] {
+                        let context = crate::fonts::test_context();
+                        context.enable_accesskit();
+                        context.set_pixels_per_point(density);
+                        context.global_style_mut(crate::chrome::style);
+                        let path = std::path::PathBuf::from(if long {
+                            format!("C:/{}/image.png", "a long folder description ".repeat(6))
+                        } else {
+                            "C:/short.png".into()
+                        });
+                        let files = [path.clone()];
+                        let parent = std::cell::Cell::new(egui::Rect::NOTHING);
+                        let ancestor = std::cell::Cell::new(egui::Rect::NOTHING);
+                        let frame = |events| {
+                            context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(egui::Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(width, 480.0),
+                                    )),
+                                    events,
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    ui.horizontal(|ui| {
+                                        if right_edge {
+                                            ui.add_space(width - 120.0);
+                                        }
+                                        let file_menu = |ui: &mut egui::Ui| {
+                                            let root = egui::containers::menu::find_menu_root(ui);
+                                            parent.set(
+                                                ui.ctx()
+                                                    .read_response(root.id)
+                                                    .expect("parent menu")
+                                                    .rect,
+                                            );
+                                            show_items(
+                                                ui,
+                                                "File",
+                                                CommandContext::default(),
+                                                &crate::shortcuts::defaults(),
+                                                &mut RecentMenu {
+                                                    files: &files,
+                                                    ..Default::default()
+                                                },
+                                                nested.then(|| ancestor.get()),
+                                            );
+                                        };
+                                        ui.menu_button("Menu", |ui| {
+                                            if nested {
+                                                ui.set_min_width(110.0);
+                                                let root =
+                                                    egui::containers::menu::find_menu_root(ui);
+                                                ancestor.set(
+                                                    ui.ctx()
+                                                        .read_response(root.id)
+                                                        .expect("root menu")
+                                                        .rect,
+                                                );
+                                                ui.menu_button("File", file_menu);
+                                                for title in ["Edit", "View", "Help"] {
+                                                    let _ = ui.button(title);
+                                                }
+                                            } else {
+                                                file_menu(ui);
+                                            }
+                                        });
+                                    });
+                                },
+                            )
+                        };
+                        let labels: &[&str] = if nested {
+                            &["Menu", "File", "Open Recent"]
+                        } else {
+                            &["Menu", "Open Recent"]
+                        };
+                        for label in labels {
+                            for _ in 0..4 {
+                                frame(vec![]);
+                            }
+                            let output = frame(vec![]);
+                            let trigger = output
+                                .platform_output
+                                .accesskit_update
+                                .expect("tree")
+                                .nodes
+                                .iter()
+                                .find(|(_, node)| {
+                                    node.label().is_some_and(|text| {
+                                        text.trim_end_matches('⏵').trim() == *label
+                                    })
+                                })
+                                .expect("menu trigger")
+                                .0;
+                            frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                                action: Action::Click,
+                                target_tree: TreeId::ROOT,
+                                target_node: trigger,
+                                data: None,
+                            })]);
+                        }
+                        for _ in 0..4 {
+                            frame(vec![]);
+                        }
+                        let output = frame(vec![]);
+                        let tree = output.platform_output.accesskit_update.expect("menu tree");
+                        for label in [path.to_string_lossy().as_ref(), "Clear Recently Opened"] {
+                            let bounds = tree
+                                .nodes
+                                .iter()
+                                .find(|(_, node)| node.label() == Some(label))
+                                .expect("recent button")
+                                .1
+                                .bounds()
+                                .expect("button bounds");
+                            assert!(
+                                bounds.x0 >= 0.0
+                                    && bounds.x1 <= f64::from(width) + 1.0 / f64::from(density),
+                                "viewport: {width}, {density}, {right_edge}, {long}: {bounds:?}"
+                            );
+                            let parent = parent.get();
+                            assert!(
+                                bounds.x0 >= f64::from(parent.right())
+                                    || bounds.x1 <= f64::from(parent.left()),
+                                "overlap: {width}, {density}, {right_edge}, {long}: parent={parent:?}, child={bounds:?}"
+                            );
+                            if nested {
+                                let ancestor = ancestor.get();
+                                assert!(
+                                    bounds.x0 >= f64::from(ancestor.right())
+                                        || bounds.x1 <= f64::from(ancestor.left()),
+                                    "ancestor overlap: {width}, {density}, {long}: ancestor={ancestor:?}, parent={parent:?}, child={bounds:?}"
+                                );
+                            }
+                            if label != "Clear Recently Opened" && width == 1200.0 {
+                                assert_eq!(
+                                    bounds.width() > 520.0,
+                                    long,
+                                    "content-sized, not viewport-sized"
+                                );
+                            }
+                        }
                     }
                 }
             }

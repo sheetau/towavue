@@ -10378,7 +10378,16 @@ fn export_audio_name(path: &Path) -> String {
 
 fn format_time(time: MediaTime) -> String {
     let seconds = time.as_nanoseconds().max(0) as u64 / 1_000_000_000;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+    if seconds >= 3_600 {
+        format!(
+            "{:02}:{:02}:{:02}",
+            seconds / 3_600,
+            seconds / 60 % 60,
+            seconds % 60
+        )
+    } else {
+        format!("{:02}:{:02}", seconds / 60, seconds % 60)
+    }
 }
 
 fn media_time(duration: Duration) -> MediaTime {
@@ -14598,7 +14607,7 @@ mod tests {
                 );
                 app.zoom_image(1.25);
                 assert!((render(&mut app, density) - fitted * 1.25).length() < 0.1);
-                for (start, delta) in [(0.9, 100.0), (1.1, -100.0)] {
+                for (start, delta) in [(0.9, 100.0), (1.1, -100.0), (0.9, 18.0), (1.1, -18.0)] {
                     app.image_view.zoom = ZoomMode::Custom(2.0 * start);
                     render(&mut app, density);
                     for stop in [true, false] {
@@ -21899,10 +21908,18 @@ mod tests {
 
     #[test]
     fn formats_compact_status_values() {
-        assert_eq!(
-            format_time(MediaTime::from_nanoseconds(125_000_000_000)),
-            "02:05"
-        );
+        for (ns, expected) in [
+            (-1, "00:00"),
+            (0, "00:00"),
+            (125_000_000_000, "02:05"),
+            (3_599_999_999_999, "59:59"),
+            (3_600_000_000_000, "01:00:00"),
+            (3_661_999_999_999, "01:01:01"),
+            (360_001_000_000_000, "100:00:01"),
+            (i64::MAX, "2562047:47:16"),
+        ] {
+            assert_eq!(format_time(MediaTime::from_nanoseconds(ns)), expected);
+        }
         assert_eq!(format_size(1_500_000), "1.5 MB");
     }
 

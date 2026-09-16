@@ -144,7 +144,13 @@ impl ImageViewState {
         fitted: f32,
     ) {
         let next = (current * factor).clamp(minimum_zoom(image_size), 64.0);
-        self.zoom = if (current < fitted && next >= fitted) || (current > fitted && next <= fitted)
+        // Absorb a nearly-Fit stop into this input, but never stick when leaving Fit.
+        let approaches =
+            (current < fitted && next > current) || (current > fitted && next < current);
+        let near_fit = approaches && (next - fitted).abs() <= fitted * 0.03;
+        self.zoom = if near_fit
+            || (current < fitted && next >= fitted)
+            || (current > fitted && next <= fitted)
         {
             ZoomMode::Fit
         } else {
@@ -402,6 +408,37 @@ mod tests {
                     assert_eq!(view.selection, Some(UnitRect::FULL));
                     view.zoom_by(factor, size, viewport);
                     assert_eq!(view.zoom, ZoomMode::Custom(fitted * factor));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn relative_zoom_snaps_near_fit_only_when_approaching() {
+        for fitted in [0.013, 0.5, 1.0, 2.375, 32.0] {
+            for (start, next, snaps) in [
+                (0.8, 0.98, true),
+                (1.2, 1.02, true),
+                (0.8, 0.969, false),
+                (1.2, 1.031, false),
+                (0.99, 0.98, false),
+                (1.01, 1.02, false),
+                (0.99, 0.99, false),
+                (1.0, 1.01, false),
+                (1.0, 0.99, false),
+            ] {
+                let mut view = ImageViewState {
+                    zoom: ZoomMode::Custom(fitted * start),
+                    ..Default::default()
+                };
+                view.zoom_by_from_scale(next / start, (512, 16_384), fitted * start, fitted);
+                assert_eq!(view.zoom == ZoomMode::Fit, snaps, "{fitted} {start} {next}");
+                if snaps {
+                    view.zoom_by_from_scale(next / start, (512, 16_384), fitted, fitted);
+                    assert!(
+                        matches!(view.zoom, ZoomMode::Custom(_)),
+                        "leave Fit immediately"
+                    );
                 }
             }
         }

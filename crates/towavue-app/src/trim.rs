@@ -13,12 +13,7 @@ pub fn label(state: &EditState, duration: MediaTime) -> Option<String> {
 
 fn timestamp(time: MediaTime) -> String {
     let millis = time.as_nanoseconds().max(0) / 1_000_000;
-    format!(
-        "{:02}:{:02}.{:03}",
-        millis / 60_000,
-        millis / 1_000 % 60,
-        millis % 1_000
-    )
+    format!("{}.{:03}", crate::format_time(time), millis % 1_000)
 }
 
 #[cfg(test)]
@@ -39,6 +34,11 @@ mod tests {
         assert_eq!(
             label(&state, duration).as_deref(),
             Some("Trim 00:02.833 – 00:30.000 · playback and export")
+        );
+        state.trim_start = Some(MediaTime::from_nanoseconds(3_600_123_999_999));
+        assert_eq!(
+            label(&state, MediaTime::from_nanoseconds(7_205_987_000_000)).as_deref(),
+            Some("Trim 01:00:00.123 – 02:00:05.987 · playback and export")
         );
     }
 }

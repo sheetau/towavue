@@ -236,7 +236,7 @@ fn reading_zoom_stops_at_exact_fractional_fit_then_continues() {
         for extent in [egui::vec2(1234.375, 721.625), egui::vec2(83.125, 19_123.75)] {
             let viewport = egui::vec2(681.25, 432.75);
             let fitted = scale(ImageViewState::default(), extent, viewport, density);
-            for (start, factor) in [(0.9, 1.25), (1.1, 0.8)] {
+            for (start, factor) in [(0.9, 1.25), (1.1, 0.8), (0.8, 1.225), (1.2, 0.85)] {
                 let mut view = ImageViewState {
                     zoom: ZoomMode::Custom(fitted * density * start),
                     ..Default::default()

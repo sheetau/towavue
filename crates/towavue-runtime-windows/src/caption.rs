@@ -1119,6 +1119,59 @@ mod tests {
                                     caption.top_inset(),
                                     caption.controls_bounds()
                                 );
+                                let scale = window.scale_factor() as f32;
+                                let top = caption.top_inset();
+                                let drag = egui::Rect::from_min_max(
+                                    egui::pos2(250.0 * scale, top),
+                                    egui::pos2(700.0 * scale, top + 32.0 * scale),
+                                );
+                                caption.set_drag_region(Some(drag));
+                                // Query only our owned HWND; no pointer input is injected.
+                                let hit = |x: i32, y: i32| {
+                                    let packed = u32::from((origin.x + x) as u16)
+                                        | (u32::from((origin.y + y) as u16) << 16);
+                                    SendMessageW(
+                                        handle,
+                                        WM_NCHITTEST,
+                                        None,
+                                        Some(LPARAM(packed as isize)),
+                                    )
+                                    .0
+                                };
+                                if maximized {
+                                    let mut old_row = drag;
+                                    old_row.min.y += 1.0 + 3.0 * scale;
+                                    caption.set_drag_region(Some(old_row));
+                                    assert_eq!(
+                                        hit((300.0 * scale) as i32, top as i32),
+                                        HTCLIENT as isize,
+                                        "the previous tab-row-only region left the visible top undraggable"
+                                    );
+                                    caption.set_drag_region(Some(drag));
+                                }
+                                for y in top as i32..=top as i32 + (3.0 * scale) as i32 {
+                                    assert_eq!(
+                                        hit((300.0 * scale) as i32, y),
+                                        if maximized { HTCAPTION } else { HTTOP } as isize,
+                                        "top-edge hit: maximized={maximized}, scale={scale}, y={y}"
+                                    );
+                                    if maximized {
+                                        assert_eq!(
+                                            hit((100.0 * scale) as i32, y),
+                                            HTCLIENT as isize,
+                                            "the top strip must not steal adjacent tab/control input"
+                                        );
+                                    }
+                                }
+                                if maximized {
+                                    caption.set_drag_region(None);
+                                    assert_eq!(
+                                        hit((300.0 * scale) as i32, top as i32),
+                                        HTCLIENT as isize,
+                                        "disabled caption dragging must remain disabled at the top"
+                                    );
+                                    caption.set_drag_region(Some(drag));
+                                }
                                 for button in buttons {
                                     eprintln!("  {:?}: {:?}", button.action, button.bounds);
                                     assert!(

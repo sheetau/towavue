@@ -5343,13 +5343,16 @@ where
                     {
                         tab_focus::observe_pointer_control(&response, "tab-strip-scrollbar");
                     }
-                    let (drag_rect, _) = ui.allocate_exact_size(
+                    let (mut drag_rect, _) = ui.allocate_exact_size(
                         egui::vec2(
                             (ui.available_width() - controls_width).max(20.0),
                             layout.tab_height,
                         ),
                         egui::Sense::hover(),
                     );
+                    // The empty caption also owns the space above the inset tab row.
+                    // Native hit testing still gives normal-window resize edges priority.
+                    drag_rect.min.y = layout.drag_top;
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
                             chrome::caption_accessibility(ui, &caption.accessible_buttons())

@@ -77,6 +77,7 @@ pub struct TitleLayout {
     pub height: f32,
     pub top_padding: f32,
     pub tab_height: f32,
+    pub drag_top: f32,
 }
 
 pub fn title_layout(top_inset: f32, top: f32, density: f32) -> TitleLayout {
@@ -92,6 +93,7 @@ pub fn title_layout(top_inset: f32, top: f32, density: f32) -> TitleLayout {
         height,
         top_padding: top_padding + gap,
         tab_height,
+        drag_top: top + hidden,
     }
 }
 
@@ -839,6 +841,8 @@ mod tests {
                 let row_top = (top + layout.top_padding) * density;
                 let row_bottom = row_top + layout.tab_height * density;
                 let visible_top = (inset / density).max(top);
+                assert_eq!(layout.drag_top, visible_top);
+                assert!(layout.drag_top * density < row_top);
                 assert!((top + layout.height - visible_top - super::TITLE_HEIGHT).abs() < 0.001);
                 assert!(row_top >= inset - 0.001);
                 assert!((row_top - visible_top * density - 1.0 - 3.0 * density).abs() < 0.001);

@@ -3804,19 +3804,10 @@ where
             if !export.options.metadata.is_empty() {
                 ui.label("Metadata changes: verified before replacing the target");
             }
-            ui.label(if export.cancelling {
-                "Cancelling export…".to_owned()
-            } else {
-                format!(
-                    "{} {}",
-                    if export.analyzing_audio {
-                        "Analyzing audio"
-                    } else {
-                        "Encoded"
-                    },
-                    format_time(media_time(export.encoded))
-                )
-            });
+            ui.label(export_progress::status(export, Instant::now()));
+            if !export.cancelling && export.encoded.is_zero() {
+                context.request_repaint_after(Duration::from_secs(1));
+            }
             if ui
                 .add_enabled(!export.cancelling, egui::Button::new("Cancel export"))
                 .clicked()

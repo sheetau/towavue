@@ -281,6 +281,77 @@ fn context<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
 }
 
 #[test]
+fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::export_preparation_shows_elapsed_time_and_animates_until_output_advances",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for normalized in [false, true] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            context(&mut app);
+            let path = root.join("source.mp4");
+            let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+            app.active_export = Some(active(
+                &path,
+                tab,
+                MediaKind::Video,
+                Some(Duration::from_secs(20)),
+                normalized,
+            ));
+            let export = app.active_export.as_ref().expect("job");
+            let started = export.progress.started;
+            assert_eq!(
+                status(export, started + Duration::from_secs(65)),
+                format!("{} · elapsed 01:05", preparation_label(normalized))
+            );
+            assert_eq!(
+                taskbar_progress(Some(export)),
+                towavue_runtime_windows::TaskbarProgress::Indeterminate
+            );
+            let size = egui::vec2(480.0, 360.0);
+            let mut positions = Vec::new();
+            for time in [0.0, 0.1, 0.4] {
+                let output = paint(&mut app, size, density, time, vec![]);
+                let node = indicator(&output).expect("preparation indicator");
+                assert_eq!(node.value(), Some(preparation_label(normalized)));
+                assert!(node.numeric_value().is_none());
+                positions.push(fill(&output).expect("moving segment").left());
+            }
+            assert!(positions.windows(2).any(|pair| pair[0] != pair[1]));
+            app.handle_export_event(ExportEvent::Progress(Duration::from_secs(2)));
+            let output = paint(&mut app, size, density, 0.5, vec![]);
+            let fraction = indicator(&output)
+                .expect("encoding indicator")
+                .numeric_value()
+                .expect("fraction");
+            assert!((fraction - if normalized { 55.0 } else { 10.0 }).abs() < 0.001);
+            assert_eq!(
+                status(app.active_export.as_ref().expect("job"), started),
+                "Encoded 00:02"
+            );
+            // A fallback encoder restarts its own output clock, not the job clock.
+            app.handle_export_event(ExportEvent::Progress(Duration::ZERO));
+            assert_eq!(
+                status(
+                    app.active_export.as_ref().expect("job"),
+                    started + Duration::from_secs(70)
+                ),
+                "Preparing output · elapsed 01:10"
+            );
+            app.handle_ui_action(UiAction::CancelExport);
+            assert_eq!(
+                status(app.active_export.as_ref().expect("job"), started),
+                "Cancelling export…"
+            );
+            app.handle_export_event(ExportEvent::Finished(Err(ExportError::Cancelled)));
+            assert!(app.active_export.is_none());
+        }
+    }
+}
+
+#[test]
 fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
     let Some(root) = crate::tests::isolated_test_root(
         "export_progress::tests::export_progress_only_unknown_running_jobs_request_animation_repaints",
@@ -292,7 +363,7 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
     let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
     let context = fonts::test_context();
     let mut time = 0.0;
-    for mode in 0..6 {
+    for mode in 0..7 {
         let mut export = active(
             &path,
             tab,
@@ -300,7 +371,10 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
             (mode == 1 || mode >= 4).then_some(Duration::from_secs(10)),
             false,
         );
-        if mode >= 4 {
+        if mode == 1 {
+            export.encoded = Duration::from_secs(1);
+        }
+        if mode == 4 || mode == 5 {
             export.request.operations.push(EditOperation::SetRate(4.0));
             export.progress = ExportProgress::new(
                 &export.request,
@@ -329,10 +403,10 @@ fn export_progress_only_unknown_running_jobs_request_animation_repaints() {
             delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
             time += 0.1;
         }
-        if mode == 2 || mode == 4 {
+        if mode == 2 || mode == 4 || mode == 6 {
             assert!(
                 delay <= Duration::from_millis(60),
-                "running unknown duration"
+                "running unknown amount of work"
             );
         } else {
             assert!(
@@ -360,10 +434,10 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         true,
     ));
     for (analyzing, time, expected) in [
-        (true, 2, 12.5),
-        (false, 2, 62.5),
-        (false, 8, 99.0),
-        (false, 0, 50.0),
+        (true, 2, Some(12.5)),
+        (false, 2, Some(62.5)),
+        (false, 8, Some(99.0)),
+        (false, 0, None),
     ] {
         app.handle_export_event(if analyzing {
             ExportEvent::AnalyzingAudio(Duration::from_secs(time))
@@ -378,7 +452,12 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
             .find(|(_, node)| node.label() == Some("Export progress"))
             .expect("hardware toolbar progress")
             .1;
-        assert!((node.numeric_value().expect("fraction") - expected).abs() < 0.001);
+        match expected {
+            Some(expected) => {
+                assert!((node.numeric_value().expect("fraction") - expected).abs() < 0.001)
+            }
+            None => assert!(node.numeric_value().is_none()),
+        }
         assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
     }
     app.active_export.as_mut().expect("job").progress.duration = None;
@@ -474,7 +553,7 @@ fn export_progress_uses_snapshot_trim_timeline_rate_and_two_pass_estimates() {
             progress.fraction(Duration::from_secs(80), false),
             Some(0.99)
         );
-        assert_eq!(progress.fraction(Duration::ZERO, normalized), Some(0.0));
+        assert_eq!(progress.fraction(Duration::ZERO, normalized), None);
         assert!(
             ExportProgress::new(&request, &options, None)
                 .duration
@@ -731,8 +810,11 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
                 assert_eq!(export.tab, tab);
                 assert_eq!(export.progress.duration, Some(Duration::from_millis(500)));
                 let value = indicator(&output).expect("job progress").numeric_value();
-                if export.analyzing_audio {
-                    assert!(value.is_none(), "count/normalize are indeterminate");
+                if export.analyzing_audio || export.encoded.is_zero() {
+                    assert!(
+                        value.is_none(),
+                        "preparation/count/normalize are indeterminate"
+                    );
                 } else {
                     assert!(value.expect("encoding estimate") < 100.0);
                 }

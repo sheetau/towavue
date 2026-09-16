@@ -239,6 +239,7 @@ mod taskbar_tests {
 }
 
 pub(super) struct ExportProgress {
+    started: Instant,
     duration: Option<Duration>,
     normalized: bool,
     counts_audio_samples: bool,
@@ -271,6 +272,7 @@ impl ExportProgress {
             })
             .filter(|duration| !duration.is_zero());
         Self {
+            started: Instant::now(),
             duration,
             normalized: options.audio.normalize_peak,
             counts_audio_samples: request.kind != MediaKind::Image
@@ -285,6 +287,11 @@ impl ExportProgress {
     }
 
     fn fraction(&self, time: Duration, analyzing: bool) -> Option<f32> {
+        // No output timestamp yet: source probing, preroll and encoder startup
+        // have no measurable fraction, even when the output duration is known.
+        if time.is_zero() {
+            return None;
+        }
         // Counting precedes tempo; normalization, if enabled, then restarts on the
         // final output time axis. Do not present both passes as one percentage.
         if analyzing && self.counts_audio_samples {
@@ -299,6 +306,38 @@ impl ExportProgress {
             };
             fraction.min(0.99) as f32
         })
+    }
+}
+
+fn preparation_label(analyzing: bool) -> &'static str {
+    if analyzing {
+        "Preparing audio analysis"
+    } else {
+        "Preparing output"
+    }
+}
+
+pub(super) fn status(export: &ActiveExport, now: Instant) -> String {
+    if export.cancelling {
+        "Cancelling export…".to_owned()
+    } else if export.encoded.is_zero() {
+        format!(
+            "{} · elapsed {}",
+            preparation_label(export.analyzing_audio),
+            format_time(media_time(
+                now.saturating_duration_since(export.progress.started)
+            ))
+        )
+    } else {
+        format!(
+            "{} {}",
+            if export.analyzing_audio {
+                "Analyzing audio"
+            } else {
+                "Encoded"
+            },
+            format_time(media_time(export.encoded))
+        )
     }
 }
 
@@ -359,6 +398,8 @@ pub(super) fn draw(
         "Export progress",
         if export.cancelling {
             "Cancelling export"
+        } else if export.encoded.is_zero() {
+            preparation_label(export.analyzing_audio)
         } else if export.analyzing_audio {
             "Analyzing audio (estimated progress)"
         } else {

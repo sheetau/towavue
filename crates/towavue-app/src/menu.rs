@@ -27,6 +27,29 @@ pub(crate) struct RecentMenu<'a> {
     pub action: Option<RecentAction>,
 }
 
+/// Project folder history at delivery, without filesystem work or new persisted
+/// entries. A file revisit also advances its parent's position in both pickers.
+pub(crate) fn recent_folders(
+    entries: &[towavue_runtime_windows::RecentEntry],
+) -> Vec<std::path::PathBuf> {
+    use towavue_runtime_windows::RecentKind;
+    let mut ordered: Vec<_> = entries.iter().collect();
+    ordered.sort_by_key(|entry| std::cmp::Reverse(entry.opened_at));
+    let mut folders = Vec::new();
+    for entry in ordered {
+        let folder = match entry.kind {
+            RecentKind::File => entry.path.parent(),
+            RecentKind::Folder => Some(entry.path.as_path()),
+        };
+        if let Some(folder) = folder.filter(|path| !path.as_os_str().is_empty())
+            && !folders.iter().any(|old| old == folder)
+        {
+            folders.push(folder.to_path_buf());
+        }
+    }
+    folders
+}
+
 const MENUS: &[(&str, &[&[CommandId]])] = &[
     (
         "File",
@@ -340,7 +363,30 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>) -> bool {
     let keyboard = MenuKeyboard::begin(ui);
     let back = keyboard.left;
     let mut items = Vec::new();
-    ui.set_max_width((ui.ctx().content_rect().width() - 32.0).clamp(120.0, 520.0));
+    let frame_width = egui::Frame::popup(ui.style()).total_margin().sum().x;
+    // Menu rows are justified. Measure their untruncated labels before setting
+    // the limit so short lists do not stretch to the entire viewport.
+    let text_width = recent
+        .folders
+        .iter()
+        .take(10)
+        .chain(recent.files.iter().take(10))
+        .map(|path| path.display().to_string())
+        .chain(std::iter::once("Clear Recently Opened".into()))
+        .map(|text| {
+            egui::WidgetText::from(text)
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    let width = text_width + 2.0 * ui.spacing().button_padding.x + ui.spacing().scroll.bar_width;
+    ui.set_max_width(width.min((ui.ctx().content_rect().width() - frame_width).max(1.0)));
     egui::ScrollArea::vertical()
         .max_height((ui.ctx().content_rect().height() - 64.0).max(80.0))
         .show_styled(ui, |ui| {
@@ -581,6 +627,151 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+
+    #[test]
+    fn recent_folder_projection_merges_parents_and_explicit_opens_by_recency() {
+        use towavue_runtime_windows::{RecentEntry, RecentKind};
+        let entries = vec![
+            RecentEntry {
+                path: "C:/album".into(),
+                kind: RecentKind::Folder,
+                opened_at: Some(10),
+            },
+            RecentEntry {
+                path: "C:/legacy/old.png".into(),
+                kind: RecentKind::File,
+                opened_at: None,
+            },
+            RecentEntry {
+                path: "C:/other".into(),
+                kind: RecentKind::Folder,
+                opened_at: Some(20),
+            },
+            RecentEntry {
+                path: "C:/album/new.png".into(),
+                kind: RecentKind::File,
+                opened_at: Some(30),
+            },
+            RecentEntry {
+                path: "C:/album/second.png".into(),
+                kind: RecentKind::File,
+                opened_at: Some(25),
+            },
+            RecentEntry {
+                path: "C:/legacy/second.png".into(),
+                kind: RecentKind::File,
+                opened_at: None,
+            },
+            RecentEntry {
+                path: "C:/root.png".into(),
+                kind: RecentKind::File,
+                opened_at: Some(5),
+            },
+            RecentEntry {
+                path: "bare.png".into(),
+                kind: RecentKind::File,
+                opened_at: None,
+            },
+        ];
+        let original = entries.clone();
+        assert_eq!(
+            recent_folders(&entries),
+            ["C:/album", "C:/other", "C:/", "C:/legacy"].map(std::path::PathBuf::from)
+        );
+        assert_eq!(entries, original);
+        assert!(recent_folders(&[]).is_empty());
+    }
+
+    #[test]
+    fn recent_menu_width_follows_path_text_up_to_the_viewport_edge() {
+        use egui::accesskit::{Action, ActionRequest, TreeId};
+        for density in [1.0, 1.25, 2.0] {
+            for width in [320.0, 1200.0] {
+                for long in [false, true] {
+                    let context = crate::fonts::test_context();
+                    context.enable_accesskit();
+                    context.set_pixels_per_point(density);
+                    context.global_style_mut(crate::chrome::style);
+                    let path = std::path::PathBuf::from(if long {
+                        format!("C:/{}/image.png", "a long folder description ".repeat(6))
+                    } else {
+                        "C:/short.png".into()
+                    });
+                    let files = [path.clone()];
+                    let frame = |events| {
+                        context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 480.0),
+                                )),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(width - 120.0);
+                                    ui.menu_button("Recent", |ui| {
+                                        show_recent(
+                                            ui,
+                                            &mut RecentMenu {
+                                                files: &files,
+                                                ..Default::default()
+                                            },
+                                        )
+                                    });
+                                });
+                            },
+                        )
+                    };
+                    let first = frame(vec![]);
+                    let trigger = first
+                        .platform_output
+                        .accesskit_update
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.label()
+                                .is_some_and(|label| label.starts_with("Recent"))
+                        })
+                        .expect("menu trigger")
+                        .0;
+                    frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                        action: Action::Click,
+                        target_tree: TreeId::ROOT,
+                        target_node: trigger,
+                        data: None,
+                    })]);
+                    for _ in 0..4 {
+                        frame(vec![]);
+                    }
+                    let output = frame(vec![]);
+                    let tree = output.platform_output.accesskit_update.expect("menu tree");
+                    let bounds = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(path.to_string_lossy().as_ref()))
+                        .expect("path button")
+                        .1
+                        .bounds()
+                        .expect("path bounds");
+                    assert!(
+                        bounds.x0 >= 0.0
+                            && bounds.x1 <= f64::from(width) + 1.0 / f64::from(density),
+                        "path must fit viewport {width}: {bounds:?}"
+                    );
+                    if width > 520.0 {
+                        assert_eq!(
+                            bounds.width() > 520.0,
+                            long,
+                            "size follows content, not a fixed ceiling"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn recent_menu_groups_bounds_and_modified_keyboard_activation() {

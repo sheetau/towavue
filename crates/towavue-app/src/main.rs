@@ -2898,15 +2898,13 @@ where
                         })
                         .collect();
                     self.recent_paths.clear();
-                    self.recent_folders.clear();
+                    self.recent_folders = menu::recent_folders(&update.entries);
                     for entry in update.entries {
                         match entry.kind {
                             towavue_runtime_windows::RecentKind::File => {
                                 self.recent_paths.push(entry.path)
                             }
-                            towavue_runtime_windows::RecentKind::Folder => {
-                                self.recent_folders.push(entry.path)
-                            }
+                            towavue_runtime_windows::RecentKind::Folder => {}
                         }
                     }
                     if let Some(error) = update.error {

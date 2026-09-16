@@ -345,9 +345,9 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
 }
 
 #[test]
-fn recent_delivery_separates_gallery_files_from_explicit_folders_and_clear_persists() {
+fn recent_delivery_projects_parent_folders_without_persisting_them_and_clear_persists() {
     let Some(root) = tests::isolated_test_root(
-        "recent_tests::recent_delivery_separates_gallery_files_from_explicit_folders_and_clear_persists",
+        "recent_tests::recent_delivery_projects_parent_folders_without_persisting_them_and_clear_persists",
     ) else {
         return;
     };
@@ -362,13 +362,22 @@ fn recent_delivery_separates_gallery_files_from_explicit_folders_and_clear_persi
     recent.record(file.clone());
     recent.record_folder(folder.clone());
     let deadline = Instant::now() + Duration::from_secs(5);
-    while app.recent_paths.is_empty() || app.recent_folders.is_empty() {
+    while app.recent_paths.is_empty() || !app.recent_folders.contains(&folder) {
         app.handle_app_event(AppEvent::RecentFilesReady);
         assert!(Instant::now() < deadline, "recent delivery");
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(app.recent_paths, std::slice::from_ref(&file));
-    assert_eq!(app.recent_folders, std::slice::from_ref(&folder));
+    assert_eq!(app.recent_folders, vec![folder.clone(), root.clone()]);
+    let persisted = std::fs::read_to_string(&history).expect("stored history");
+    assert_eq!(
+        persisted
+            .lines()
+            .filter(|line| line.starts_with("D\t"))
+            .count(),
+        1,
+        "derived parents are not extra folder records"
+    );
     assert!(app.recent_months.contains_key(&file));
     assert!(!app.recent_months.contains_key(&folder));
     app.handle_recent_action(RecentAction::Clear);

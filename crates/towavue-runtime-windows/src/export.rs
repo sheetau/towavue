@@ -1170,6 +1170,8 @@ fn ffmpeg_arguments(
     streams: &ExportStreams,
 ) -> Vec<String> {
     let state = EditState::from_operations(&request.operations);
+    let video_seek = video_input_seek(request, streams);
+    let video_input = usize::from(video_seek.is_some() && streams.audio.is_some());
     let mut arguments = vec![
         "-hide_banner".into(),
         "-loglevel".into(),
@@ -1179,11 +1181,33 @@ fn ffmpeg_arguments(
         "-nostats".into(),
         "-progress".into(),
         "pipe:1".into(),
+    ];
+    if video_input == 1 {
+        // Audio retains sequential decoder priming and its exact sample axis.
+        // A shared input seek changes coarse-timestamp PCM alignment and AAC
+        // samples, even with preroll. The second input decodes only video.
+        arguments.extend([
+            "-vn".into(),
+            "-i".into(),
+            request.source.display().to_string(),
+        ]);
+    }
+    if let Some(seek) = video_seek {
+        let ns = seek.as_nanoseconds();
+        arguments.extend([
+            "-ss".into(),
+            format!("{}.{:06}", ns / 1_000_000_000, ns % 1_000_000_000 / 1000),
+        ]);
+        if video_input == 1 {
+            arguments.push("-an".into());
+        }
+    }
+    arguments.extend([
         "-i".into(),
         request.source.display().to_string(),
         "-map_metadata".into(),
         "0".into(),
-    ];
+    ]);
     if streams.png_animation {
         let input = arguments
             .iter()
@@ -1215,7 +1239,7 @@ fn ffmpeg_arguments(
             "-copyts".into(),
             "-start_at_zero".into(),
             "-filter_complex".into(),
-            timeline_filters(request, streams, timeline, hardware),
+            timeline_filters(request, streams, timeline, hardware, video_input),
         ]);
         if streams.video.is_some() {
             arguments.extend(["-map".into(), "[outv]".into()]);
@@ -1232,8 +1256,10 @@ fn ffmpeg_arguments(
             arguments.push("-copyts".into());
             arguments.push("-start_at_zero".into());
         }
-        for (index, _) in streams.video.iter().chain(streams.audio.iter()) {
-            arguments.extend(["-map".into(), format!("0:{index}")]);
+        for (stream, input) in [(streams.video, video_input), (streams.audio, 0)] {
+            if let Some((index, _)) = stream {
+                arguments.extend(["-map".into(), format!("{input}:{index}")]);
+            }
         }
     }
     let mut visual = visual_filters(&request.operations);
@@ -1308,24 +1334,48 @@ fn ffmpeg_arguments(
     arguments
 }
 
+// Seek video only before the earliest retained source interval. Keep a second
+// of preroll and the original timestamp axis (-copyts/-start_at_zero); existing
+// trim filters still determine exact frame inclusion. Interior gaps are unchanged.
+fn video_input_seek(
+    request: &ExportRequest,
+    streams: &ExportStreams,
+) -> Option<towavue_core::MediaTime> {
+    if request.kind != MediaKind::Video || streams.video.is_none() {
+        return None;
+    }
+    let start = if let Some(timeline) = &streams.timeline {
+        timeline
+            .spans()
+            .iter()
+            .map(|span| span.source().start())
+            .min()?
+    } else {
+        EditState::from_operations(&request.operations).trim_start?
+    };
+    let nanoseconds = start.as_nanoseconds().saturating_sub(1_000_000_000) / 1000 * 1000;
+    (nanoseconds > 0).then(|| towavue_core::MediaTime::from_nanoseconds(nanoseconds))
+}
+
 fn timeline_filters(
     request: &ExportRequest,
     streams: &ExportStreams,
     timeline: &towavue_core::EditTimeline,
     hardware: bool,
+    video_input: usize,
 ) -> String {
     let master = EditState::from_operations(&request.operations);
     let count = timeline.spans().len();
     let mut filters = Vec::new();
-    for (stream, prefix, split) in [
-        (streams.video, "v", "split"),
-        (streams.audio, "a", "asplit"),
+    for (stream, prefix, split, input) in [
+        (streams.video, "v", "split", video_input),
+        (streams.audio, "a", "asplit", 0),
     ] {
         if let Some((index, _)) = stream {
             let outputs = (0..count)
                 .map(|part| format!("[{prefix}s{part}]"))
                 .collect::<String>();
-            filters.push(format!("[0:{index}]{split}={count}{outputs}"));
+            filters.push(format!("[{input}:{index}]{split}={count}{outputs}"));
         }
     }
     let mut inputs = String::new();
@@ -1610,6 +1660,9 @@ fn same_path(left: &Path, right: &Path) -> bool {
     normalize(left) == normalize(right)
 }
 
+#[cfg(test)]
+#[path = "export_seek_tests.rs"]
+mod seek_tests;
 #[cfg(test)]
 #[path = "export_timeline_tests.rs"]
 mod timeline_tests;
@@ -2067,7 +2120,7 @@ mod tests {
             arguments.contains("trim=start_pts=2000:end_pts=5000,setpts=(PTS-STARTPTS)/4.0000")
         );
         assert!(arguments.contains("atrim=start_pts=96000:end_pts=240000,asetpts=PTS-STARTPTS,atempo=2.0000,atempo=2.0000,volume=0.5000"));
-        assert!(arguments.contains("-copyts -start_at_zero -map 0:0 -map 0:1"));
+        assert!(arguments.contains("-copyts -start_at_zero -map 1:0 -map 0:1"));
     }
 
     #[test]

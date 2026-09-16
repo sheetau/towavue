@@ -1,0 +1,261 @@
+use super::*;
+
+const MAX_PIXELS: u64 = 64 * 1024 * 1024;
+
+fn invalid(message: &str) -> DecodeError {
+    DecodeError::FrameImage(message.into())
+}
+
+/// Decode an original-source PTS into an original-resolution PNG on a worker.
+/// No UI scaling or user edits are applied. Orthogonal source orientation and
+/// pixel aspect are retained. PNG is lossless after YUV-to-RGB conversion, not
+/// a reversible representation of arbitrary YUV samples. Float/>16bit input is
+/// rejected. The caller must validate source identity before publishing bytes.
+pub fn source_video_frame_png(
+    path: &Path,
+    target: MediaTime,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<u8>, DecodeError> {
+    check_cancelled(cancelled)?;
+    ffmpeg::init()?;
+    let mut input = format::input(path)?;
+    let config = best_stream_config(&input, Type::Video).ok_or(DecodeError::NoMediaStream)?;
+    let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
+    let mut options = ffmpeg::Dictionary::new();
+    options.set("max_pixels", &MAX_PIXELS.to_string());
+    options.set("err_detect", "explode");
+    let codec =
+        codec::decoder::find(config.parameters.id()).ok_or(ffmpeg::Error::DecoderNotFound)?;
+    let context = codec::context::Context::from_parameters(config.parameters)?;
+    let mut decoder = context.decoder().open_as_with(codec, options)?.video()?;
+    let origin = input_origin(&input);
+    // Begin before the target tick, including when it is a keyframe, so equal
+    // adjacent PTS cannot silently select one of several different pictures.
+    seek_video_stream(
+        &mut input,
+        config.index,
+        config.time_base,
+        origin,
+        MediaTime::from_nanoseconds(target.as_nanoseconds().saturating_sub(1)),
+        cancelled,
+    )?;
+    let mut selected = None;
+    let mut previous = None;
+    let mut receive = |decoder: &mut codec::decoder::Video| -> Result<bool, DecodeError> {
+        loop {
+            check_cancelled(cancelled)?;
+            let mut decoded = frame::Video::empty();
+            match decoder.receive_frame(&mut decoded) {
+                Ok(()) => {
+                    let timestamp = decoded
+                        .timestamp()
+                        .ok_or(DecodeError::MissingVideoTimestamp)?;
+                    let time = timestamp_to_media_time(Some(timestamp), config.time_base);
+                    if previous.is_some_and(|previous| time < previous) {
+                        return Err(invalid("nonmonotonic source frame timestamps"));
+                    }
+                    previous = Some(time);
+                    if time > target {
+                        return Ok(true);
+                    }
+                    if time == target {
+                        if selected.is_some() {
+                            return Err(invalid("ambiguous duplicate frame timestamp"));
+                        }
+                        selected = Some(decoded);
+                    }
+                }
+                Err(error) if decoder_is_drained(error) => return Ok(false),
+                Err(error) => return Err(error.into()),
+            }
+        }
+    };
+    let mut finished = false;
+    for (stream, mut packet) in input.packets() {
+        check_cancelled(cancelled)?;
+        if stream.index() == config.index {
+            normalize_packet_time(&mut packet, stream.time_base(), origin);
+            decoder.send_packet(&packet)?;
+            if receive(&mut decoder)? {
+                finished = true;
+                break;
+            }
+        }
+    }
+    if !finished {
+        decoder.send_eof()?;
+        receive(&mut decoder)?;
+    }
+    let selected = selected.ok_or_else(|| invalid("no frame at the requested source timestamp"))?;
+    encode(&selected, orientation, cancelled)
+}
+
+fn encode(
+    source: &frame::Video,
+    orientation: VideoOrientation,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<Vec<u8>, DecodeError> {
+    check_cancelled(cancelled)?;
+    let (width, height) = (source.width(), source.height());
+    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
+        return Err(DecodeError::FrameTooLarge);
+    }
+    // SAFETY: the descriptor is immutable FFmpeg storage for the frame's format;
+    // no pointer escapes this call and the borrowed source is never mutated.
+    let descriptor = unsafe { ffmpeg::ffi::av_pix_fmt_desc_get(source.format().into()).as_ref() }
+        .ok_or_else(|| invalid("unknown source pixel format"))?;
+    let depth = descriptor.comp[..usize::from(descriptor.nb_components)]
+        .iter()
+        .map(|component| component.depth)
+        .max()
+        .unwrap_or(0);
+    if !(1..=16).contains(&depth)
+        || descriptor.flags
+            & (ffmpeg::ffi::AV_PIX_FMT_FLAG_FLOAT | ffmpeg::ffi::AV_PIX_FMT_FLAG_HWACCEL) as u64
+            != 0
+    {
+        return Err(invalid("PNG requires integer samples of at most 16 bits"));
+    }
+    let alpha = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0;
+    let (pixel, bytes) = match (depth > 8, alpha) {
+        (false, false) => (Pixel::RGB24, 3),
+        (false, true) => (Pixel::RGBA, 4),
+        (true, false) => (Pixel::RGB48BE, 6),
+        (true, true) => (Pixel::RGBA64BE, 8),
+    };
+    let mut scaler = scaling::Context::get(
+        source.format(),
+        width,
+        height,
+        pixel,
+        width,
+        height,
+        Flags::BILINEAR | Flags::ACCURATE_RND | Flags::FULL_CHR_H_INT,
+    )?;
+    use ffmpeg::ffi::AVColorSpace::*;
+    let matrix = match source.color_space().into() {
+        AVCOL_SPC_RGB | AVCOL_SPC_UNSPECIFIED | AVCOL_SPC_BT470BG | AVCOL_SPC_SMPTE170M => {
+            ffmpeg::ffi::SWS_CS_ITU601
+        }
+        AVCOL_SPC_BT709 => ffmpeg::ffi::SWS_CS_ITU709,
+        AVCOL_SPC_FCC => ffmpeg::ffi::SWS_CS_FCC,
+        AVCOL_SPC_SMPTE240M => ffmpeg::ffi::SWS_CS_SMPTE240M,
+        AVCOL_SPC_BT2020_NCL => ffmpeg::ffi::SWS_CS_BT2020,
+        _ => return Err(invalid("unsupported source color matrix")),
+    };
+    let full = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0
+        || (descriptor.nb_components <= 2 && source.color_range() != ffmpeg::color::Range::MPEG)
+        || source.color_range() == ffmpeg::color::Range::JPEG;
+    // SAFETY: exclusively owned scaler; immutable FFmpeg coefficient tables.
+    let result = unsafe {
+        let coefficients = ffmpeg::ffi::sws_getCoefficients(matrix);
+        ffmpeg::ffi::sws_setColorspaceDetails(
+            scaler.as_mut_ptr(),
+            coefficients,
+            i32::from(full),
+            coefficients,
+            1,
+            0,
+            1 << 16,
+            1 << 16,
+        )
+    };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    let mut rgb = frame::Video::empty();
+    scaler.run(source, &mut rgb)?;
+    let mut output = orient(rgb, orientation, bytes, cancelled)?;
+    // Preserve color/ICC/HDR frame properties without carrying codec pixels.
+    // SAFETY: both AVFrames are owned in this call; copy_props retains side-data
+    // references. Geometry/format/data remain those of the newly converted frame.
+    let result = unsafe { ffmpeg::ffi::av_frame_copy_props(output.as_mut_ptr(), source.as_ptr()) };
+    if result < 0 {
+        return Err(ffmpeg::Error::from(result).into());
+    }
+    output.set_color_space(ffmpeg::color::Space::RGB);
+    output.set_color_range(ffmpeg::color::Range::JPEG);
+    let aspect = source.aspect_ratio();
+    let aspect = if aspect.numerator() <= 0 || aspect.denominator() <= 0 {
+        Rational(1, 1)
+    } else if orientation.swaps_axes() {
+        Rational(aspect.denominator(), aspect.numerator())
+    } else {
+        aspect
+    };
+    // SAFETY: exclusive output ownership; orientation is already baked into its
+    // pixels. Remove its old display matrix to prevent another transformation.
+    unsafe {
+        (*output.as_mut_ptr()).sample_aspect_ratio = aspect.into();
+        ffmpeg::ffi::av_frame_remove_side_data(
+            output.as_mut_ptr(),
+            ffmpeg::ffi::AVFrameSideDataType::AV_FRAME_DATA_DISPLAYMATRIX,
+        );
+    }
+    output.set_pts(Some(0));
+    let codec = ffmpeg::encoder::find(codec::Id::PNG).ok_or(ffmpeg::Error::EncoderNotFound)?;
+    let mut encoder = codec::context::Context::new_with_codec(codec)
+        .encoder()
+        .video()?;
+    encoder.set_width(output.width());
+    encoder.set_height(output.height());
+    encoder.set_format(pixel);
+    encoder.set_time_base(Rational(1, 1));
+    // The pinned PNG encoder writes this pair directly into pHYs. PNG stores
+    // pixels per unit, whose ratio is the inverse of sample width/height.
+    encoder.set_aspect_ratio(Rational(aspect.denominator(), aspect.numerator()));
+    encoder.set_colorspace(output.color_space());
+    encoder.set_color_range(output.color_range());
+    encoder.set_color_primaries(output.color_primaries());
+    encoder.set_color_transfer_characteristic(output.color_transfer_characteristic());
+    let mut encoder = encoder.open_as(codec)?;
+    check_cancelled(cancelled)?;
+    encoder.send_frame(&output)?;
+    encoder.send_eof()?;
+    let mut packet = ffmpeg::Packet::empty();
+    encoder.receive_packet(&mut packet)?;
+    check_cancelled(cancelled)?;
+    Ok(packet
+        .data()
+        .ok_or_else(|| invalid("empty PNG packet"))?
+        .to_vec())
+}
+
+fn orient(
+    source: frame::Video,
+    orientation: VideoOrientation,
+    bytes: usize,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<frame::Video, DecodeError> {
+    if orientation == VideoOrientation::default() {
+        return Ok(source);
+    }
+    let (width, height) = if orientation.swaps_axes() {
+        (source.height(), source.width())
+    } else {
+        (source.width(), source.height())
+    };
+    let mut output = frame::Video::new(source.format(), width, height);
+    let uv = orientation.source_uv();
+    let origin = (
+        uv[0].x as i64 * i64::from(source.width() - 1),
+        uv[0].y as i64 * i64::from(source.height() - 1),
+    );
+    let dx = ((uv[1].x - uv[0].x) as i64, (uv[1].y - uv[0].y) as i64);
+    let dy = ((uv[3].x - uv[0].x) as i64, (uv[3].y - uv[0].y) as i64);
+    let stride = output.stride(0);
+    for y in 0..height as usize {
+        check_cancelled(cancelled)?;
+        for x in 0..width as usize {
+            let sx = (origin.0 + dx.0 * x as i64 + dy.0 * y as i64) as usize;
+            let sy = (origin.1 + dx.1 * x as i64 + dy.1 * y as i64) as usize;
+            let offset = sy * source.stride(0) + sx * bytes;
+            output.data_mut(0)[y * stride + x * bytes..y * stride + (x + 1) * bytes]
+                .copy_from_slice(&source.data(0)[offset..offset + bytes]);
+        }
+    }
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests;

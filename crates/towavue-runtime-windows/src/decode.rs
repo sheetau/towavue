@@ -20,10 +20,12 @@ use windows::core::Interface;
 use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
+mod frame_png;
 mod frame_step;
 mod packet_samples;
 mod video_preroll;
 use audio_checkpoints::AudioCheckpoints;
+pub use frame_png::source_video_frame_png;
 pub use frame_step::adjacent_video_frame;
 use packet_samples::PacketSamples;
 use video_preroll::PrerollVideoFrame;
@@ -160,6 +162,8 @@ pub struct DecodeSummary {
 /// A failure in the M1 software decode path.
 #[derive(Debug, Error)]
 pub enum DecodeError {
+    #[error("could not extract video frame: {0}")]
+    FrameImage(String),
     #[error("frame stepping requires video presentation timestamps")]
     MissingVideoTimestamp,
     #[error("video display matrix is not a supported quarter-turn or reflection")]

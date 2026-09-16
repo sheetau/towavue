@@ -626,3 +626,192 @@ fn reference_high_depth_public_export_preserves_precision_and_reports_quality() 
     );
     fs::remove_dir_all(root).expect("remove owned fixtures");
 }
+
+#[test]
+fn live_high_depth_export_cancellation_preserves_targets_cleans_staging_and_allows_retry() {
+    use std::collections::BTreeSet;
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::sync::mpsc;
+    use std::time::Instant;
+    use towavue_core::MediaTime;
+
+    let root = depth_directory();
+    let entries = || {
+        fs::read_dir(&root)
+            .expect("owned export directory")
+            .map(|entry| entry.expect("directory entry").file_name())
+            .collect::<BTreeSet<_>>()
+    };
+    for (pixel, encoder) in [("yuv420p10le", "libsvtav1"), ("yuv444p10le", "libaom-av1")] {
+        let source = root.join(format!("{pixel}.mkv"));
+        // Video only: positive output time cannot come from an audio packet.
+        // Temporal detail keeps these bounded fixtures encoding beyond the first
+        // progress update on both encoders, without private media or mock helpers.
+        let filter = format!(
+            "nullsrc=size=160x96:rate=30:duration=120,format={pixel},geq=lum=mod(X*Y*17+N*91\\,877)+64:cb=mod(X*31+Y*7+N*23\\,897)+64:cr=mod(X*11+Y*41+N*43\\,897)+64"
+        );
+        run(
+            "ffmpeg.exe",
+            &[
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                &filter,
+                "-c:v",
+                "ffv1",
+                source.to_str().expect("source path"),
+            ],
+        );
+        let original = fs::read(&source).expect("source bytes");
+        let modified = fs::metadata(&source)
+            .expect("source metadata")
+            .modified()
+            .expect("source date");
+        for extension in ["mp4", "mkv", "webm"] {
+            for drop_to_cancel in [false, true] {
+                let target = root.join(format!("{pixel}-{drop_to_cancel}.{extension}"));
+                fs::write(&target, b"previous export must survive").expect("existing target");
+                let target_date = fs::metadata(&target)
+                    .expect("target metadata")
+                    .modified()
+                    .expect("target date");
+                let before = entries();
+                let request = ExportRequest {
+                    source: source.clone(),
+                    target: target.clone(),
+                    kind: MediaKind::Video,
+                    operations: vec![EditOperation::FlipVertical],
+                    hardware_encode: true,
+                };
+                let plan = video_encoding::HighDepth::probe(&request)
+                    .expect("source depth")
+                    .expect("AV1 plan");
+                assert!(
+                    plan.arguments(&target)
+                        .windows(2)
+                        .any(|pair| pair == ["-c:v", encoder])
+                );
+                let (tx, rx) = mpsc::channel();
+                let job = ExportJob::start(request, move |event| {
+                    let _ = tx.send(event);
+                })
+                .expect("public export job");
+                let deadline = Instant::now() + Duration::from_secs(20);
+                let first = loop {
+                    match rx
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .expect("live encoder progress")
+                    {
+                        ExportEvent::Progress(time) if !time.is_zero() => break time,
+                        ExportEvent::Finished(result) => {
+                            panic!("export finished before live cancellation: {result:?}")
+                        }
+                        _ => {}
+                    }
+                };
+                assert!(
+                    first < Duration::from_secs(119),
+                    "cancel before final output time: {first:?}"
+                );
+                assert!(!job.thread.as_ref().expect("worker").is_finished());
+                let stages: Vec<_> = entries().difference(&before).cloned().collect();
+                assert_eq!(stages.len(), 1, "one owned live staging directory");
+                let stage = root.join(&stages[0]).join(format!("output.{extension}"));
+                // A sharing violation proves the staged file still has a live
+                // encoder handle; merely seeing progress or an old file is weaker.
+                let locked = fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&stage)
+                    .expect_err("encoder still owns its output file");
+                assert_eq!(
+                    locked.raw_os_error(),
+                    Some(32),
+                    "live stage sharing violation: {locked}"
+                );
+                assert_eq!(
+                    fs::read(&target).expect("target during encode"),
+                    b"previous export must survive"
+                );
+                let cancelled_at = Instant::now();
+                let mut job = Some(job);
+                if drop_to_cancel {
+                    drop(job.take());
+                } else {
+                    job.as_ref().expect("job").cancel();
+                }
+                loop {
+                    match rx
+                        .recv_timeout(Duration::from_secs(10))
+                        .expect("cancel completion")
+                    {
+                        ExportEvent::Finished(result) => {
+                            assert!(matches!(result, Err(ExportError::Cancelled)), "{result:?}");
+                            break;
+                        }
+                        ExportEvent::Progress(_) => {}
+                        ExportEvent::AnalyzingAudio(_) => {
+                            panic!("video-only fixture cannot analyze audio")
+                        }
+                    }
+                }
+                drop(job);
+                let elapsed = cancelled_at.elapsed();
+                assert!(
+                    elapsed < Duration::from_secs(10),
+                    "bounded job/pipe cleanup: {elapsed:?}"
+                );
+                assert!(
+                    matches!(rx.try_recv(), Err(mpsc::TryRecvError::Disconnected)),
+                    "one terminal event and no retained callback"
+                );
+                assert_eq!(entries(), before, "remove all owned staging on cancel");
+                assert_eq!(
+                    fs::read(&target).expect("target after cancel"),
+                    b"previous export must survive"
+                );
+                assert_eq!(
+                    fs::metadata(&target)
+                        .expect("target metadata")
+                        .modified()
+                        .expect("target date"),
+                    target_date
+                );
+                assert_eq!(fs::read(&source).expect("unchanged source"), original);
+                assert_eq!(
+                    fs::metadata(&source)
+                        .expect("source metadata")
+                        .modified()
+                        .expect("source date"),
+                    modified
+                );
+                eprintln!(
+                    "PASS live {encoder} {extension}: drop={drop_to_cancel}, first={first:?}, cleanup={elapsed:?}"
+                );
+            }
+        }
+        let retry = root.join(format!("{pixel}-retry.mkv"));
+        export_media(&ExportRequest {
+            source: source.clone(),
+            target: retry.clone(),
+            kind: MediaKind::Video,
+            operations: vec![
+                EditOperation::FlipVertical,
+                EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(100_000_000)),
+            ],
+            hardware_encode: true,
+        })
+        .expect("successful export after cancellation");
+        assert_video_fields(
+            &retry,
+            &[
+                "codec_name=av1",
+                &format!("pix_fmt={pixel}"),
+                "nb_read_frames=3",
+            ],
+        );
+    }
+    fs::remove_dir_all(root).expect("remove owned cancellation fixtures");
+}

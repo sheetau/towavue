@@ -2,6 +2,116 @@ use super::*;
 use winit::dpi::PhysicalSize;
 
 #[test]
+fn native_resize_burst_preserves_back_buffer_until_the_next_draw() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(_) = tests::isolated_test_root(
+        "window_resize_tests::native_resize_burst_preserves_back_buffer_until_the_next_draw",
+    ) else {
+        return;
+    };
+    struct Trial;
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = Arc::new(
+                event_loop
+                    .create_window(
+                        Window::default_attributes()
+                            .with_visible(false)
+                            .with_inner_size(PhysicalSize::new(640, 400)),
+                    )
+                    .expect("hidden resize test window"),
+            );
+            let caption = NativeCaption::new(window.clone()).expect("caption");
+            let mut renderer = FrameRenderer::with_native_caption(&caption).expect("D3D11 surface");
+            let initial = window.inner_size();
+            renderer
+                .resize_surface(initial.width, initial.height)
+                .expect("initial size");
+            let context = fonts::test_context();
+            let state = egui_winit::State::new(
+                context.clone(),
+                egui::ViewportId::ROOT,
+                &window,
+                Some(window.scale_factor() as f32),
+                window.theme(),
+                Some(renderer.max_texture_side()),
+            );
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.window = Some(window.clone());
+            app.window_size = Some(initial);
+            app.native_caption = Some(caption);
+            app.renderer = Some(renderer);
+            app.ui_context = Some(context);
+            app.ui_state = Some(state);
+            for fullscreen in [false, true, false] {
+                app.renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .clear([0.25, 0.5, 0.75, 1.0])
+                    .expect("known buffer");
+                let before = app
+                    .renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .verification_surface_rgba()
+                    .expect("readback");
+                // Intermediate restore/work-area/minimize notifications must not
+                // replace the surface before the final native client is drawable.
+                for size in [(480, 300), (0, 0), (800, 600), (800, 600)] {
+                    app.resize_window(PhysicalSize::new(size.0, size.1));
+                    assert!(
+                        app.renderer
+                            .as_mut()
+                            .expect("renderer")
+                            .verification_surface_rgba()
+                            .expect("held buffer")
+                            == before,
+                        "a size notification must not discard the buffer before redraw"
+                    );
+                }
+                if fullscreen != app.fullscreen {
+                    app.set_fullscreen(fullscreen);
+                } else {
+                    let _ = window.request_inner_size(PhysicalSize::new(960, 576));
+                }
+                let actual = window.inner_size();
+                app.resize_window(actual);
+                assert!(
+                    app.renderer
+                        .as_mut()
+                        .expect("renderer")
+                        .verification_surface_rgba()
+                        .expect("held buffer")
+                        == before
+                );
+                app.render_frame();
+                assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
+                let after = app
+                    .renderer
+                    .as_mut()
+                    .expect("renderer")
+                    .verification_surface_rgba()
+                    .expect("new buffer");
+                assert_eq!(after.len(), (actual.width * actual.height * 4) as usize);
+                assert_eq!(app.window_size, Some(actual));
+            }
+            eprintln!(
+                "PASS resize coalescing: old GPU buffer survives intermediate/zero/duplicate size notifications; redraw uses the final native client across normal/fullscreen/restore. Hidden window, not compositor capture."
+            );
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut Trial)
+        .expect("trial");
+}
+
+#[test]
 fn resize_fits_displayed_media_without_changing_edits_transport_or_background_view() {
     let Some(root) = tests::isolated_test_root(
         "window_resize_tests::resize_fits_displayed_media_without_changing_edits_transport_or_background_view",

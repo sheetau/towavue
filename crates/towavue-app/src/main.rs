@@ -848,12 +848,12 @@ struct Application<N> {
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
     window_size: Option<winit::dpi::PhysicalSize<u32>>,
+    surface_resize_pending: bool,
     native_caption: Option<NativeCaption>,
     native_taskbar: Option<NativeTaskbar>,
     taskbar_ui: taskbar::State,
     fullscreen: bool,
     fullscreen_controls_visible: bool,
-    fullscreen_was_maximized: bool,
     viewing_cursor: cursor::ViewingCursor,
     platform_cursor: egui::CursorIcon,
     media_cursors: Option<cursor::MediaCursors>,
@@ -1110,12 +1110,12 @@ where
             graphics_recovery_request: None,
             window: None,
             window_size: None,
+            surface_resize_pending: false,
             native_caption: None,
             native_taskbar: None,
             taskbar_ui: taskbar::State::default(),
             fullscreen: false,
             fullscreen_controls_visible: false,
-            fullscreen_was_maximized: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             platform_cursor: egui::CursorIcon::Default,
             media_cursors: None,
@@ -3268,6 +3268,10 @@ where
         let (Some(window), Some(context)) = (self.window.as_ref(), self.ui_context.clone()) else {
             return;
         };
+        // Match this frame's layout to the final native client, not an intermediate
+        // fullscreen/restore notification. Keep the old buffer until drawing is ready.
+        let surface_size =
+            std::mem::take(&mut self.surface_resize_pending).then(|| window.inner_size());
         let mut input = self
             .ui_state
             .as_mut()
@@ -3311,6 +3315,12 @@ where
             );
         }
         let renderer = self.renderer.as_mut().expect("renderer exists");
+        if let Some(size) = surface_size
+            && let Err(error) = renderer.resize_surface(size.width, size.height)
+        {
+            self.handle_render_error(error);
+            return;
+        }
         let media_result = renderer.clear([0.0, 0.0, 0.0, 1.0]).and_then(|()| {
             if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
                 if let Some(operations) = &self.video_raster_operations {
@@ -9534,11 +9544,7 @@ where
             }
             self.window_size = Some(size);
         }
-        if let Some(renderer) = self.renderer.as_mut()
-            && let Err(error) = renderer.resize_surface(size.width, size.height)
-        {
-            self.handle_render_error(error);
-        }
+        self.surface_resize_pending = true;
         self.request_redraw();
     }
 
@@ -9547,6 +9553,7 @@ where
             return;
         }
         self.fullscreen = enabled;
+        self.surface_resize_pending = true;
         // Fit even when the transition does not produce a different client size.
         self.cancel_view_drag();
         self.image_view.fit();
@@ -9563,21 +9570,12 @@ where
                 .as_ref()
                 .and_then(|caption| caption.suppress_transitions());
             let monitor = window.current_monitor();
-            if enabled {
-                // A maximized Win32 client otherwise retains its work-area inset in fullscreen.
-                self.fullscreen_was_maximized = window.is_maximized();
-                if self.fullscreen_was_maximized {
-                    window.set_maximized(false);
-                }
-            }
+            // Winit restores the saved window placement, including maximization.
+            // Explicitly restoring first exposes the small normal window mid-transition.
             if let Some(caption) = &self.native_caption {
                 caption.set_fullscreen(enabled);
             } else {
                 window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
-            }
-            if !enabled && self.fullscreen_was_maximized {
-                window.set_maximized(true);
-                self.fullscreen_was_maximized = false;
             }
         }
         self.set_status(if enabled {

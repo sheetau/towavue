@@ -44,6 +44,8 @@ struct CaptionState {
     drag: Cell<Option<egui::Rect>>,
     dpi: Cell<u32>,
     fullscreen_dpi_bounds: Cell<Option<RECT>>,
+    #[cfg(test)]
+    resize_trace: Cell<Option<Vec<(u32, u32)>>>,
 }
 
 /// A UI-thread-owned DWM frame whose client title row is drawn by the application.
@@ -57,7 +59,7 @@ pub struct NativeCaption {
 
 impl NativeCaption {
     /// Suppress this window's DWM animations for a synchronous fullscreen change,
-    /// including the caller's intermediate restore and final re-maximize.
+    /// restoring the previous suppression state when the guard is dropped.
     pub fn suppress_transitions(&self) -> Option<impl Drop + '_> {
         struct RestoreTransitions<'a> {
             caption: &'a NativeCaption,
@@ -115,6 +117,8 @@ impl NativeCaption {
             // SAFETY: live, same-thread window checked above; scalar query only.
             dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
             fullscreen_dpi_bounds: Cell::new(None),
+            #[cfg(test)]
+            resize_trace: Cell::new(None),
         });
         let callback_state = Rc::into_raw(state.clone());
         // SAFETY: the subclass owns one Rc reference, released on removal/destruction.
@@ -462,6 +466,13 @@ unsafe extern "system" fn caption_proc(
     // SAFETY: registration holds this Rc until same-thread subclass removal.
     // Only Cell accesses cross reentrant Windows calls; no mutable borrow is retained.
     let state = unsafe { &*(data as *const CaptionState) };
+    #[cfg(test)]
+    if message == WM_SIZE
+        && let Some(mut trace) = state.resize_trace.take()
+    {
+        trace.push((lparam.0 as u16 as u32, (lparam.0 >> 16) as u16 as u32));
+        state.resize_trace.set(Some(trace));
+    }
     // SAFETY: Windows supplies the documented message parameters for this live HWND.
     // Stack pointers are used only synchronously and are not retained by any callee.
     unsafe {
@@ -1274,13 +1285,27 @@ mod tests {
                                 let _ = DeleteObject(region.into());
                                 let windowed_size = window.inner_size();
                                 let windowed_position = window.outer_position().expect("position");
+                                // Capture every synchronous client size, not just the
+                                // final bounds: explicit restore exposed a small window.
+                                if maximized {
+                                    caption.state.resize_trace.set(Some(Vec::new()));
+                                    window.set_maximized(false);
+                                    let old_path =
+                                        caption.state.resize_trace.take().expect("restore trace");
+                                    assert!(
+                                        old_path.iter().any(|&(width, height)| {
+                                            width < windowed_size.width * 9 / 10
+                                                || height < windowed_size.height * 9 / 10
+                                        }),
+                                        "the old restore path must exercise the size oracle: {old_path:?}"
+                                    );
+                                    window.set_maximized(true);
+                                }
+                                caption.state.resize_trace.set(Some(Vec::new()));
                                 {
                                     let _transition = caption
                                         .suppress_transitions()
                                         .expect("fullscreen entry suppression");
-                                    if maximized {
-                                        window.set_maximized(false);
-                                    }
                                     caption.set_fullscreen(true);
                                     assert_eq!(transitions_disabled(), 1);
                                     assert_eq!(window.inner_size(), monitor.size());
@@ -1295,12 +1320,24 @@ mod tests {
                                         .suppress_transitions()
                                         .expect("fullscreen exit suppression");
                                     caption.set_fullscreen(false);
-                                    if maximized {
-                                        window.set_maximized(true);
-                                    }
                                     assert_eq!(transitions_disabled(), 1);
                                 }
                                 assert_eq!(transitions_disabled(), previous);
+                                let sizes =
+                                    caption.state.resize_trace.take().expect("fullscreen trace");
+                                assert!(
+                                    !sizes.is_empty(),
+                                    "fullscreen must generate size messages"
+                                );
+                                if maximized {
+                                    assert!(
+                                        sizes.iter().all(|&(width, height)| {
+                                            width >= windowed_size.width * 9 / 10
+                                                && height >= windowed_size.height * 9 / 10
+                                        }),
+                                        "fullscreen must not expose restored bounds: {sizes:?}"
+                                    );
+                                }
                                 assert_eq!(window.is_maximized(), maximized);
                                 assert_eq!(window.inner_size(), windowed_size);
                                 assert_eq!(
@@ -1308,7 +1345,7 @@ mod tests {
                                     windowed_position
                                 );
                                 eprintln!(
-                                    "PASS fullscreen transition: maximized={maximized} scale={scale}"
+                                    "PASS fullscreen transition: maximized={maximized} scale={scale} sizes={sizes:?}"
                                 );
                             }
                             for show in [SW_HIDE, SW_SHOWMINNOACTIVE] {

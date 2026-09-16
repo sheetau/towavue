@@ -138,12 +138,24 @@ pub(super) fn show(
     }
     if let (Some(origin), Some(pointer)) = (drag.origin, drag.position) {
         if drag.started {
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(mode_id, choose(origin, drag.modifiers)));
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(mode_id, (choose(origin, drag.modifiers), position));
+            });
         }
-        let mut mode = ui.ctx().data_mut(|data| {
-            *data.get_temp_mut_or_insert_with(mode_id, || choose(origin, drag.modifiers))
+        let (mut mode, snap_head) = ui.ctx().data_mut(|data| {
+            *data
+                .get_temp_mut_or_insert_with(mode_id, || (choose(origin, drag.modifiers), position))
         });
+        // A selection press may seek immediately. Keep the original CTI as the
+        // magnet for this gesture, with a small screen-space radius and no latch.
+        let snap_head = snap_head.clamp(MediaTime::ZERO, duration);
+        let snap = |point, x: f32| {
+            if (x - x_at(snap_head)).abs() <= 4.0 {
+                snap_head
+            } else {
+                point
+            }
+        };
         let mut began_selection = drag.started && matches!(mode, Gesture::Select);
         if let Gesture::Band(range, gain) = mode
             && let Some(direction) = drag.direction
@@ -154,7 +166,8 @@ pub(super) fn show(
                 began_selection = true;
                 Gesture::Select
             };
-            ui.ctx().data_mut(|data| data.insert_temp(mode_id, mode));
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(mode_id, (mode, snap_head)));
         }
         ui.ctx().set_cursor_icon(cursor(mode));
         if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
@@ -198,6 +211,7 @@ pub(super) fn show(
                 ((endpoint.as_nanoseconds() as f64 + delta).round() as i64)
                     .clamp(0, duration.as_nanoseconds()),
             );
+            let point = snap(point, x_at(endpoint) + pointer.x - origin.x);
             preview = if start {
                 TimeRange::new(
                     point.min(MediaTime::from_nanoseconds(
@@ -217,8 +231,8 @@ pub(super) fn show(
                 output.selection = Some(preview);
             }
         } else if drag.dragging && matches!(mode, Gesture::Select) {
-            let a = at(origin.x);
-            let b = at(pointer.x);
+            let a = snap(at(origin.x), origin.x);
+            let b = snap(at(pointer.x), pointer.x);
             preview = TimeRange::new(a.min(b), a.max(b));
             head = a.min(b);
             if began_selection || (drag.released && head != a) {
@@ -229,14 +243,18 @@ pub(super) fn show(
             }
         } else if matches!(mode, Gesture::Seek | Gesture::Select | Gesture::Band(..)) {
             head = if matches!(mode, Gesture::Select) {
-                at(origin.x)
+                snap(at(origin.x), origin.x)
             } else {
                 at(pointer.x)
             };
             if began_selection || (drag.released && !matches!(mode, Gesture::Select)) {
                 output.seek = Some(head);
             }
-            if drag.released && !drag.dragging && selection.is_some() {
+            if drag.released
+                && !drag.dragging
+                && selection.is_some()
+                && !matches!(mode, Gesture::Seek)
+            {
                 output.selection = Some(None);
             }
         }
@@ -244,10 +262,12 @@ pub(super) fn show(
         ui.ctx()
             .data_mut(|data| data.insert_temp(preview_id, (frame, head, preview)));
         if drag.released {
-            ui.ctx().data_mut(|data| data.remove::<Gesture>(mode_id));
+            ui.ctx()
+                .data_mut(|data| data.remove::<(Gesture, MediaTime)>(mode_id));
         }
     } else {
-        ui.ctx().data_mut(|data| data.remove::<Gesture>(mode_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<(Gesture, MediaTime)>(mode_id));
     }
     if let Some(value) = crate::seekbar::value_input(
         response,
@@ -618,6 +638,15 @@ mod tests {
         enabled: bool,
         selection: Option<TimeRange>,
     ) -> Vec<Output> {
+        frame_at(context, events, enabled, selection, time(0.0))
+    }
+    fn frame_at(
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+        enabled: bool,
+        selection: Option<TimeRange>,
+        position: MediaTime,
+    ) -> Vec<Output> {
         let mut results = Vec::new();
         let _ = context.run_ui(
             egui::RawInput {
@@ -639,7 +668,7 @@ mod tests {
                     ui,
                     &response,
                     time(10.0),
-                    time(0.0),
+                    position,
                     selection,
                     None,
                     enabled,
@@ -717,6 +746,118 @@ mod tests {
                     );
                 }
                 assert!(frame(&context, vec![], true, None).is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn playhead_clicks_small_moves_and_drags_never_clear_the_selection() {
+        let selected = TimeRange::new(time(2.5), time(7.5));
+        for density in [1.0, 1.25, 2.0] {
+            for batched in [false, true] {
+                for delta in [0.0, 2.0, 200.0] {
+                    let context = egui::Context::default();
+                    context.set_pixels_per_point(density);
+                    frame(&context, vec![], true, selected);
+                    let event = |x, pressed| egui::Event::PointerButton {
+                        pos: egui::pos2(x, 34.0),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    let events = vec![
+                        event(20.0, true),
+                        egui::Event::PointerMoved(egui::pos2(20.0 + delta, 34.0)),
+                        event(20.0 + delta, false),
+                    ];
+                    let mut results = Vec::new();
+                    if batched {
+                        results.extend(frame(&context, events, true, selected));
+                    } else {
+                        for event in events {
+                            results.extend(frame(&context, vec![event], true, selected));
+                        }
+                    }
+                    assert_eq!(results.len(), 1);
+                    assert!(
+                        results[0].selection.is_none(),
+                        "head input preserves selection: delta={delta}"
+                    );
+                    assert!(results[0].edit.is_none());
+                    assert!(
+                        (results[0].seek.expect("seek").as_seconds_f64() - f64::from(delta) / 40.0)
+                            .abs()
+                            < 0.000001
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn selection_endpoints_snap_to_the_original_head_and_release_outside_the_radius() {
+        for density in [1.0, 1.25, 2.0] {
+            for batched in [false, true] {
+                for (start, end, resize, left, right) in [
+                    (223.0, 320.0, false, 5.0, 7.5),
+                    (120.0, 217.0, false, 2.5, 5.0),
+                    (320.0, 223.0, false, 5.0, 7.5),
+                    (225.0, 320.0, false, 5.125, 7.5),
+                    (120.0, 215.0, false, 2.5, 4.875),
+                    (120.0, 230.0, false, 2.5, 5.25),
+                    (120.0, 217.0, true, 5.0, 7.5),
+                    (320.0, 223.0, true, 2.5, 5.0),
+                ] {
+                    let context = egui::Context::default();
+                    context.set_pixels_per_point(density);
+                    let selected = resize
+                        .then(|| TimeRange::new(time(2.5), time(7.5)))
+                        .flatten();
+                    let mut position = time(5.0);
+                    frame_at(&context, vec![], true, selected, position);
+                    let events = vec![
+                        button(start, true),
+                        egui::Event::PointerMoved(egui::pos2(220.0, 70.0)),
+                        egui::Event::PointerMoved(egui::pos2(end, 70.0)),
+                        button(end, false),
+                    ];
+                    let groups = if batched {
+                        vec![events]
+                    } else {
+                        events.into_iter().map(|event| vec![event]).collect()
+                    };
+                    let mut results = Vec::new();
+                    for events in groups {
+                        let output = frame_at(&context, events, true, selected, position);
+                        // The app applies press-time seeks before later frames.
+                        // Snapping must not chase that new playback position.
+                        for seek in output.iter().filter_map(|result| result.seek) {
+                            position = seek;
+                        }
+                        results.extend(output);
+                    }
+                    let selections: Vec<_> = results
+                        .iter()
+                        .filter_map(|result| result.selection)
+                        .collect();
+                    assert_eq!(selections.len(), 1);
+                    let range = selections[0].expect("selected range");
+                    for (actual, expected) in [(range.start(), left), (range.end(), right)] {
+                        // Pointer ratios are f32; snapped endpoints must still
+                        // use the exact stored timestamp, not its pixel inverse.
+                        assert!(
+                            (actual.as_seconds_f64() - expected).abs() < 0.000001,
+                            "density={density} batched={batched} {start}->{end} resize={resize}"
+                        );
+                        if expected == 5.0 {
+                            assert_eq!(actual, time(5.0));
+                        }
+                    }
+                    assert!(results.iter().all(|result| result.edit.is_none()));
+                    if resize {
+                        assert!(results.iter().all(|result| result.seek.is_none()));
+                    }
+                }
             }
         }
     }

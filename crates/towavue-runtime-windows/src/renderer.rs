@@ -321,6 +321,8 @@ pub struct FrameRenderer {
     context: ID3D11DeviceContext,
     swap_chain: IDXGISwapChain,
     buffer_dimensions: Option<(u32, u32)>,
+    #[cfg(any(test, feature = "render-verification"))]
+    transition_background_verification: Option<(u32, bool, std::time::Duration)>,
     video_processor: Option<VideoProcessorState>,
     software_texture: Option<(u32, u32, ID3D11Texture2D)>,
     edit_texture: Option<(u32, u32, ID3D11Texture2D)>,
@@ -474,6 +476,8 @@ impl FrameRenderer {
             context,
             swap_chain,
             buffer_dimensions: None,
+            #[cfg(any(test, feature = "render-verification"))]
+            transition_background_verification: None,
             video_processor: None,
             software_texture: None,
             edit_texture: None,
@@ -952,6 +956,39 @@ impl FrameRenderer {
         }
         // The swap chain and device stay owned for the duration of presentation.
         unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()? };
+        Ok(())
+    }
+
+    /// Replace stale window geometry with black before a native placement change.
+    /// Use only for explicit visible-window transitions, never steady playback.
+    pub fn present_transition_background(&mut self) -> Result<(), RenderError> {
+        self.clear([0.0, 0.0, 0.0, 1.0])?;
+        #[cfg(any(test, feature = "render-verification"))]
+        let verification = if let Some((count, black, _)) = self.transition_background_verification
+        {
+            let pixels = self.verification_surface_rgba()?;
+            Some((
+                count,
+                black
+                    && pixels
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .all(|pixel| *pixel == [0, 0, 0, 255]),
+                std::time::Instant::now(),
+            ))
+        } else {
+            None
+        };
+        self.present_surface()?;
+        // SAFETY: the same UI thread owns this swap chain and its live HWND.
+        // Wait until our queued black surface reaches DWM before changing HWND
+        // geometry; Present alone can leave the previous picture in composition.
+        unsafe { windows::Win32::Graphics::Dwm::DwmFlush()? };
+        #[cfg(any(test, feature = "render-verification"))]
+        if let Some((count, black, started)) = verification {
+            self.transition_background_verification = Some((count + 1, black, started.elapsed()));
+        }
         Ok(())
     }
 

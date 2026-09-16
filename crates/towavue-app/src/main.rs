@@ -858,6 +858,7 @@ struct Application<N> {
     native_taskbar: Option<NativeTaskbar>,
     taskbar_ui: taskbar::State,
     fullscreen: bool,
+    fullscreen_from_maximized: bool,
     fullscreen_controls_visible: bool,
     viewing_cursor: cursor::ViewingCursor,
     platform_cursor: egui::CursorIcon,
@@ -1120,6 +1121,7 @@ where
             native_taskbar: None,
             taskbar_ui: taskbar::State::default(),
             fullscreen: false,
+            fullscreen_from_maximized: false,
             fullscreen_controls_visible: false,
             viewing_cursor: cursor::ViewingCursor::default(),
             platform_cursor: egui::CursorIcon::Default,
@@ -9648,6 +9650,20 @@ where
     fn set_fullscreen(&mut self, enabled: bool) {
         if enabled == self.fullscreen {
             return;
+        }
+        if enabled {
+            self.fullscreen_from_maximized = self.window.as_ref().is_some_and(|w| w.is_maximized());
+        }
+        if !self.fullscreen_from_maximized
+            && self.window.as_ref().is_some_and(|window| {
+                window.is_visible() == Some(true) && window.is_minimized() != Some(true)
+            })
+            && let Some(renderer) = &mut self.renderer
+            && let Err(error) = renderer.present_transition_background()
+        {
+            // The next regular frame retains the existing device-recovery path.
+            // A failed cosmetic transition must not prevent leaving fullscreen.
+            eprintln!("towavue: fullscreen background presentation failed: {error}");
         }
         self.fullscreen = enabled;
         self.surface_resize_pending = true;

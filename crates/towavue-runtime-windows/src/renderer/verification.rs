@@ -73,6 +73,19 @@ impl Drop for MappedSurface<'_> {
 }
 
 impl FrameRenderer {
+    /// Opt into pre-Present pixel checks for explicit black transition frames.
+    /// Readback is disabled until requested and absent from normal builds.
+    pub fn verification_track_transition_background(&mut self) {
+        self.transition_background_verification = Some((0, true, std::time::Duration::ZERO));
+    }
+
+    /// Completed submissions, whether all checked pixels were opaque black, and
+    /// the last Present/DwmFlush duration (excludes the opt-in GPU readback).
+    /// These are not captured compositor frames or an uninstrumented benchmark.
+    pub fn verification_transition_background(&self) -> Option<(u32, bool, std::time::Duration)> {
+        self.transition_background_verification
+    }
+
     /// Calling-thread totals: native texture/SRV creation, source release, pool update.
     /// Creation/release are included in pool update; these are CPU wall times.
     pub fn verification_upload_times(&self) -> [std::time::Duration; 3] {

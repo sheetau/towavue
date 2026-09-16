@@ -12,17 +12,20 @@ fn native_resize_coalesces_transitions_and_draws_interactive_changes() {
     struct Trial;
     impl ApplicationHandler for Trial {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let visible = std::env::var_os("TOWAVUE_FULLSCREEN_BACKGROUND_VISIBLE").is_some();
             let window = Arc::new(
                 event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_visible(false)
+                            .with_visible(visible)
+                            .with_active(false)
                             .with_inner_size(PhysicalSize::new(640, 400)),
                     )
                     .expect("hidden resize test window"),
             );
             let caption = NativeCaption::new(window.clone()).expect("caption");
             let mut renderer = FrameRenderer::with_native_caption(&caption).expect("D3D11 surface");
+            renderer.verification_track_transition_background();
             let initial = window.inner_size();
             renderer
                 .resize_surface(initial.width, initial.height)
@@ -98,7 +101,15 @@ fn native_resize_coalesces_transitions_and_draws_interactive_changes() {
                     );
                 }
             }
-            for fullscreen in [false, true, false] {
+            let mut transitions = vec![(false, false), (false, true), (false, false)];
+            if visible {
+                transitions.extend([(true, true), (true, false), (false, true), (false, false)]);
+            }
+            let mut black_frames = 0;
+            for (maximized, fullscreen) in transitions {
+                if visible && fullscreen && !app.fullscreen {
+                    window.set_maximized(maximized);
+                }
                 app.renderer
                     .as_mut()
                     .expect("renderer")
@@ -124,20 +135,46 @@ fn native_resize_coalesces_transitions_and_draws_interactive_changes() {
                         "a size notification must not discard the buffer before redraw"
                     );
                 }
-                if fullscreen != app.fullscreen {
+                let changed = fullscreen != app.fullscreen;
+                let transition_started = Instant::now();
+                if changed {
                     app.set_fullscreen(fullscreen);
+                    assert_eq!(app.fullscreen_from_maximized, maximized);
                 } else {
+                    app.set_fullscreen(fullscreen);
                     let _ = window.request_inner_size(PhysicalSize::new(960, 576));
                 }
+                let transition_elapsed = transition_started.elapsed();
                 let actual = window.inner_size();
                 app.resize_window(actual);
+                if visible && changed && !maximized {
+                    black_frames += 1;
+                } else {
+                    assert_eq!(
+                        app.renderer
+                            .as_mut()
+                            .expect("renderer")
+                            .verification_surface_rgba()
+                            .expect("unchanged buffer"),
+                        before,
+                        "maximized, hidden and no-op transitions retain pixels"
+                    );
+                }
+                let (submitted, black, present_elapsed) = app
+                    .renderer
+                    .as_ref()
+                    .expect("renderer")
+                    .verification_transition_background()
+                    .expect("tracking");
+                assert_eq!(submitted, black_frames);
                 assert!(
-                    app.renderer
-                        .as_mut()
-                        .expect("renderer")
-                        .verification_surface_rgba()
-                        .expect("held buffer")
-                        == before
+                    black,
+                    "every transition pixel must be opaque black before Present"
+                );
+                eprintln!(
+                    "FULLSCREEN background: visible={visible} maximized={maximized} enabled={fullscreen} changed={changed} black_frames={submitted} transition_ms={:.3} last_present_flush_ms={:.3}",
+                    transition_elapsed.as_secs_f64() * 1000.0,
+                    present_elapsed.as_secs_f64() * 1000.0
                 );
                 app.render_frame();
                 assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
@@ -151,7 +188,7 @@ fn native_resize_coalesces_transitions_and_draws_interactive_changes() {
                 assert_eq!(app.window_size, Some(actual));
             }
             eprintln!(
-                "PASS interactive resize draws the actual new client before returning; old GPU buffer otherwise survives intermediate/zero/duplicate size notifications; redraw uses the final native client across normal/fullscreen/restore. Hidden window, not compositor capture."
+                "PASS interactive resize draws the actual new client before returning; old GPU buffer otherwise survives intermediate/zero/duplicate size notifications; redraw uses the final native client across normal/fullscreen/restore. Visibility is opt-in; buffer readback is not compositor capture."
             );
             event_loop.exit();
         }

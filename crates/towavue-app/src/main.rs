@@ -870,6 +870,7 @@ struct Application<N> {
     resume_open: Option<towavue_runtime_windows::VideoResume>,
     resume_revision: u64,
     recent_paths: Vec<PathBuf>,
+    gallery_missing_files: Vec<PathBuf>,
     recent_folders: Vec<PathBuf>,
     pending_window_launches: Vec<PathBuf>,
     recent_months: BTreeMap<PathBuf, (u16, u16)>,
@@ -1127,6 +1128,7 @@ where
             resume_open: None,
             resume_revision: 0,
             recent_paths: Vec::new(),
+            gallery_missing_files: Vec::new(),
             recent_folders: Vec::new(),
             pending_window_launches: Vec::new(),
             recent_months: BTreeMap::new(),
@@ -1533,6 +1535,7 @@ where
                     recent.clear();
                 }
                 self.recent_paths.clear();
+                self.gallery_missing_files.clear();
                 self.recent_folders.clear();
                 self.recent_months.clear();
             }
@@ -2874,6 +2877,7 @@ where
                     .as_ref()
                     .and_then(|recent| recent.take_completed())
                 {
+                    self.gallery_missing_files = update.missing_files;
                     self.recent_months = update
                         .entries
                         .iter()
@@ -3646,6 +3650,12 @@ where
                 if self.path.is_none() {
                     let enabled = !modal_blocked && !self.palette_open && !self.grid_open;
                     let gallery = self.tabs.gallery();
+                    let gallery_paths: Vec<_> = self
+                        .recent_paths
+                        .iter()
+                        .filter(|path| !self.gallery_missing_files.contains(path))
+                        .cloned()
+                        .collect();
                     if let Some(command) = ui
                         .push_id(("gallery", gallery), |ui| {
                             welcome::show(
@@ -3653,15 +3663,14 @@ where
                                 &self.shortcuts,
                                 &mut self.gallery_search,
                                 &mut self.gallery_filter,
-                                &self.recent_paths,
+                                &gallery_paths,
                                 enabled,
                                 |ui, query, filter| {
                                     let filtered;
                                     let paths = if query.trim().is_empty() && filter.is_none() {
-                                        &self.recent_paths
+                                        &gallery_paths
                                     } else {
-                                        filtered = self
-                                            .recent_paths
+                                        filtered = gallery_paths
                                             .iter()
                                             .filter(|path| {
                                                 welcome::matches(path, query)
@@ -3673,7 +3682,7 @@ where
                                             .collect::<Vec<_>>();
                                         &filtered
                                     };
-                                    if paths.is_empty() && !self.recent_paths.is_empty() {
+                                    if paths.is_empty() && !gallery_paths.is_empty() {
                                         ui.label("No matching files.");
                                     }
                                     let offsets = self.filmstrip.show_recent(
@@ -6408,6 +6417,7 @@ where
                         .as_ref()
                         .is_some_and(egui::Popup::is_any_open)
                     || !self.recent_paths.contains(&path)
+                    || self.gallery_missing_files.contains(&path)
                     || !welcome::matches(&path, &self.gallery_search)
                     || self
                         .gallery_filter
@@ -6592,6 +6602,8 @@ where
                     self.retain_image_tab();
                     self.retain_playback_tab();
                     self.clear_active_media();
+                } else if let Some(recent) = &self.recent_files {
+                    recent.refresh_gallery();
                 }
             }
             CommandId::ShowLicenses => self.show_licenses(),
@@ -8293,6 +8305,9 @@ where
     }
 
     fn clear_active_media(&mut self) {
+        if let Some(recent) = &self.recent_files {
+            recent.refresh_gallery();
+        }
         resume::record(self, true);
         self.resume_open = None;
         self.resume_owner = None;

@@ -1,6 +1,118 @@
 use crate::*;
 
 #[test]
+fn gallery_activation_refreshes_missing_cards_but_preserves_history_and_loaded_tabs() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_activation_refreshes_missing_cards_but_preserves_history_and_loaded_tabs",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    let restored = root.join("restored.bmp");
+    tab_transfer::tests::bitmap(&source);
+    let history = root.join("recent.txt");
+    let seed = towavue_runtime_windows::RecentFiles::new(history.clone(), || {}).expect("seed");
+    seed.record(source.clone());
+    seed.record(restored.clone());
+    drop(seed);
+    let original = std::fs::read(&history).expect("history bytes");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.recent_files =
+        Some(towavue_runtime_windows::RecentFiles::new(history.clone(), || {}).expect("worker"));
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    context.global_style_mut(chrome::style);
+    app.ui_context = Some(context);
+    let wait = |app: &mut Application<_>, missing: &Path| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.gallery_missing_files.iter().any(|path| path == missing) {
+            app.handle_app_event(AppEvent::RecentFilesReady);
+            assert!(Instant::now() < deadline, "Gallery presence delivery");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    wait(&mut app, &restored);
+    let visible_cards = |app: &mut Application<_>| {
+        let size = egui::vec2(480.0, 400.0);
+        for _ in 0..3 {
+            frame(app, size, vec![]);
+        }
+        let output = frame(app, size, vec![]);
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let bottom = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Search Gallery"))
+            .expect("search")
+            .1
+            .bounds()
+            .expect("bounds")
+            .y1;
+        tree.nodes
+            .iter()
+            .filter(|(_, node)| node.bounds().is_some_and(|bounds| bounds.y0 >= bottom))
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect::<Vec<_>>()
+    };
+    let cards = visible_cards(&mut app);
+    assert!(cards.iter().any(|label| label == "source.bmp"));
+    assert!(!cards.iter().any(|label| label == "restored.bmp"));
+    let count = app.tabs.len();
+    app.handle_ui_action(UiAction::OpenGalleryBackground(restored.clone()));
+    assert_eq!(
+        app.tabs.len(),
+        count,
+        "stale missing card cannot open a background tab"
+    );
+
+    // Install retained pixels without recording another explicit open: the byte
+    // comparison below isolates presence refresh from normal history updates.
+    let recent = app.recent_files.take();
+    tab_transfer::tests::install(
+        &mut app,
+        source.clone(),
+        tab_transfer::tests::decoded(false),
+    );
+    app.recent_files = recent;
+    let media = app.tabs.active_id().expect("media tab");
+    let gallery = app.tabs.gallery().expect("Gallery");
+    std::fs::remove_file(&source).expect("remove owned bitmap");
+    tab_transfer::tests::bitmap(&restored);
+    app.activate_tab(gallery);
+    wait(&mut app, &source);
+    assert_eq!(app.gallery_missing_files, std::slice::from_ref(&source));
+    let cards = visible_cards(&mut app);
+    assert!(!cards.iter().any(|label| label == "source.bmp"));
+    assert!(cards.iter().any(|label| label == "restored.bmp"));
+    assert!(app.recent_paths.contains(&source) && app.recent_paths.contains(&restored));
+    assert_eq!(std::fs::read(&history).expect("history retained"), original);
+    app.handle_recent_action(menu::RecentAction::Open(
+        source.clone(),
+        towavue_runtime_windows::RecentKind::File,
+        menu::OpenTarget::Tab,
+    ));
+    assert_eq!(app.tabs.active_id(), Some(media));
+    assert!(
+        app.image.is_some(),
+        "loaded pixels survive missing-source filtering"
+    );
+
+    // Reissuing Open Gallery while already active performs a fresh check too.
+    app.dispatch(CommandId::OpenGallery);
+    std::fs::remove_file(&restored).expect("remove owned path");
+    app.dispatch(CommandId::OpenGallery);
+    wait(&mut app, &restored);
+    assert!(
+        visible_cards(&mut app)
+            .iter()
+            .all(|label| label != "restored.bmp")
+    );
+    app.handle_recent_action(menu::RecentAction::Clear);
+    assert!(app.gallery_missing_files.is_empty());
+}
+
+#[test]
 fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_state() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(

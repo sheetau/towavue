@@ -38,6 +38,8 @@ impl RecentEntry {
 
 pub struct RecentUpdate {
     pub entries: Vec<RecentEntry>,
+    /// Gallery-only omissions. Persisted history and resume positions are untouched.
+    pub missing_files: Vec<PathBuf>,
     pub error: Option<String>,
 }
 
@@ -45,6 +47,7 @@ pub struct RecentUpdate {
 struct Mailbox {
     pending: Vec<RecentEntry>,
     clear: bool,
+    refresh_gallery: bool,
     completed: Option<RecentUpdate>,
     closed: bool,
 }
@@ -65,7 +68,16 @@ impl RecentFiles {
                 let mut paths = Vec::new();
                 let mut pending = Vec::new();
                 let mut clear = false;
+                let mut refresh_gallery = true;
+                let mut missing_files = Vec::new();
                 loop {
+                    // A successfully opened source must not retain an older missing mark.
+                    missing_files.retain(|path| {
+                        !clear
+                            && !pending
+                                .iter()
+                                .any(|entry: &RecentEntry| &entry.path == path)
+                    });
                     let error = match update(&path, &pending, clear) {
                         Ok(loaded) => {
                             paths = loaded;
@@ -83,11 +95,25 @@ impl RecentFiles {
                             Some(format!("Recent files unavailable: {error}"))
                         }
                     };
+                    if refresh_gallery {
+                        missing_files = paths
+                            .iter()
+                            .filter(|entry| {
+                                entry.kind == RecentKind::File
+                                    && matches!(entry.path.try_exists(), Ok(false))
+                            })
+                            .map(|entry| entry.path.clone())
+                            .collect();
+                        refresh_gallery = false;
+                    } else {
+                        missing_files.retain(|path| paths.iter().any(|entry| &entry.path == path));
+                    }
                     {
                         let mut mailbox = mutex.lock().expect("recent mailbox");
                         if !mailbox.clear {
                             mailbox.completed = Some(RecentUpdate {
                                 entries: paths.clone(),
+                                missing_files: missing_files.clone(),
                                 error,
                             });
                         }
@@ -95,12 +121,16 @@ impl RecentFiles {
                     notify();
                     let mut mailbox = ready
                         .wait_while(mutex.lock().expect("recent mailbox"), |mailbox| {
-                            !mailbox.closed && mailbox.pending.is_empty() && !mailbox.clear
+                            !mailbox.closed
+                                && mailbox.pending.is_empty()
+                                && !mailbox.clear
+                                && !mailbox.refresh_gallery
                         })
                         .expect("recent mailbox");
                     if mailbox.pending.is_empty() && !mailbox.clear && mailbox.closed {
                         break;
                     }
+                    refresh_gallery |= std::mem::take(&mut mailbox.refresh_gallery);
                     if std::mem::take(&mut mailbox.clear) {
                         pending.clear();
                         clear = true;
@@ -124,6 +154,15 @@ impl RecentFiles {
 
     pub fn record_folder(&self, path: PathBuf) {
         self.record_kind(path, RecentKind::Folder);
+    }
+
+    /// Recheck Gallery on activation, never on the UI thread or every redraw.
+    /// Only confirmed absence hides a card; IO errors retain it and a later check
+    /// can restore a reconnected or recreated source without losing its history.
+    pub fn refresh_gallery(&self) {
+        let (mutex, ready) = &*self.shared;
+        mutex.lock().expect("recent mailbox").refresh_gallery = true;
+        ready.notify_one();
     }
 
     /// Clear both history groups at the next serialized write, not the source media.
@@ -389,6 +428,77 @@ mod tests {
         }
         fs::remove_file(path.with_extension("lock")).expect("remove owned lock");
         fs::remove_dir(path.parent().expect("directory")).expect("no temporary files left");
+    }
+
+    #[test]
+    fn gallery_refresh_hides_only_absent_files_without_rewriting_history() {
+        let path = fixture("gallery-presence");
+        let root = path.parent().expect("parent");
+        let present = root.join("present.png");
+        let missing = root.join("missing.mp4");
+        let folder = root.join("missing-folder");
+        let unreadable = root.join("invalid?.png");
+        assert!(
+            unreadable.try_exists().is_err(),
+            "invalid Windows path control"
+        );
+        fs::write(&present, b"original source").expect("owned source");
+        let entries: Vec<_> = [&present, &missing, &folder, &unreadable]
+            .into_iter()
+            .enumerate()
+            .map(|(index, path)| RecentEntry {
+                path: path.clone(),
+                kind: if path == &folder {
+                    RecentKind::Folder
+                } else {
+                    RecentKind::File
+                },
+                opened_at: Some(index as u64),
+            })
+            .collect();
+        update(&path, &entries).expect("seed history");
+        let original = fs::read(&path).expect("history bytes");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let recent = RecentFiles::new(path.clone(), move || {
+            let _ = sender.send(());
+        })
+        .expect("worker");
+        let delivered = || {
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("worker notification");
+            let update = recent.take_completed().expect("delivered snapshot");
+            assert!(update.error.is_none());
+            update
+        };
+        let initial = delivered();
+        assert_eq!(initial.missing_files, std::slice::from_ref(&missing));
+        assert_eq!(initial.entries.len(), 4);
+        fs::remove_file(&present).expect("remove owned source");
+        fs::write(&missing, b"restored source").expect("restore owned source");
+        recent.refresh_gallery();
+        let refreshed = delivered();
+        assert_eq!(refreshed.missing_files, std::slice::from_ref(&present));
+        assert_eq!(refreshed.entries, initial.entries);
+        assert_eq!(fs::read(&path).expect("history unchanged"), original);
+
+        // Successful opens clear their stale marks without restatting all history.
+        fs::write(&present, b"original source").expect("restore source");
+        recent.record(present.clone());
+        assert!(delivered().missing_files.is_empty());
+        fs::remove_file(&present).expect("remove owned source");
+        recent.refresh_gallery();
+        assert_eq!(delivered().missing_files, [present]);
+        recent.clear();
+        let cleared = delivered();
+        assert!(cleared.entries.is_empty() && cleared.missing_files.is_empty());
+        drop(recent);
+        assert_eq!(
+            fs::read(&missing).expect("source retained"),
+            b"restored source"
+        );
+        fs::remove_file(missing).expect("remove owned source");
+        clean(&path);
     }
 
     #[test]

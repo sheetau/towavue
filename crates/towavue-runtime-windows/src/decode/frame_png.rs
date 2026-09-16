@@ -4,6 +4,8 @@ use towavue_core::EditOperation;
 mod color;
 mod edits;
 mod metadata;
+#[cfg(test)]
+pub(crate) mod verification;
 
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
@@ -278,10 +280,14 @@ fn encode(
     encoder.set_color_transfer_characteristic(output.color_transfer_characteristic());
     let mut encoder = encoder.open_as(codec)?;
     check_cancelled(cancelled)?;
+    #[cfg(test)]
+    verification::observe(None);
     encoder.send_frame(&output)?;
     encoder.send_eof()?;
     let mut packet = ffmpeg::Packet::empty();
     encoder.receive_packet(&mut packet)?;
+    #[cfg(test)]
+    verification::observe(Some(packet.size()));
     check_cancelled(cancelled)?;
     Ok(packet
         .data()

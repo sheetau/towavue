@@ -381,3 +381,110 @@ fn duplicate_frame_times_across_keyframes_and_at_eof_never_replace_targets() {
         }
     }
 }
+
+#[test]
+fn cancellation_after_the_last_pre_encode_check_discards_png_and_preserves_targets() {
+    use std::{cell::RefCell, rc::Rc};
+    for pixel in ["yuv420p", "yuv420p10le"] {
+        let fixture = Fixture::new();
+        let encoded = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+            .args([
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=32x24:rate=2:duration=1",
+                "-pix_fmt",
+                pixel,
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&fixture.source)
+            .output()
+            .expect("depth fixture");
+        assert!(
+            encoded.status.success(),
+            "{}",
+            String::from_utf8_lossy(&encoded.stderr)
+        );
+        let snapshot = fixture.snapshot();
+        let source_bytes = fs::read(&fixture.source).expect("source bytes");
+        for existing in [false, true] {
+            let target = fixture
+                .root
+                .join(if existing { "existing.png" } else { "new.png" });
+            if existing {
+                fs::write(&target, b"preserve this target").expect("old target");
+            }
+            let old_modified = fs::metadata(&target)
+                .ok()
+                .map(|m| m.modified().expect("target time"));
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let observed = Rc::new(RefCell::new(Vec::new()));
+            let result = crate::decode::with_encoder_observer(
+                {
+                    let cancelled = Arc::clone(&cancelled);
+                    let observed = Rc::clone(&observed);
+                    move |bytes| {
+                        if let Some(bytes) = bytes {
+                            assert!(bytes > 8, "the native encoder really produced a PNG packet");
+                            assert!(cancelled.load(Ordering::Relaxed));
+                        } else {
+                            assert!(!cancelled.swap(true, Ordering::Relaxed));
+                        }
+                        observed.borrow_mut().push(bytes);
+                    }
+                },
+                || {
+                    export_cancellable(
+                        &snapshot,
+                        &target,
+                        &[EditOperation::FlipHorizontal],
+                        &cancelled,
+                    )
+                },
+            );
+            assert!(matches!(result, Err(ExportError::Cancelled)));
+            let observed = observed.borrow();
+            assert_eq!(observed.len(), 2);
+            assert_eq!(observed[0], None);
+            assert!(observed[1].is_some());
+            if existing {
+                assert_eq!(
+                    fs::read(&target).expect("old target"),
+                    b"preserve this target"
+                );
+                assert_eq!(
+                    fs::metadata(&target)
+                        .expect("target metadata")
+                        .modified()
+                        .ok(),
+                    old_modified
+                );
+            } else {
+                assert!(!target.exists());
+            }
+            fixture.assert_no_staging();
+            assert_eq!(
+                fs::read(&fixture.source).expect("source after cancel"),
+                source_bytes
+            );
+            assert_eq!(fixture.snapshot().source.stamp, snapshot.source.stamp);
+            // The observer must have left the thread and all native/file leases
+            // must have been released: the same target can now be published.
+            export_video_frame(&snapshot, &target, &[EditOperation::FlipHorizontal])
+                .expect("retry after late cancellation");
+            let png = fs::read(&target).expect("retry PNG");
+            let image = image::load_from_memory(&png).expect("retry pixel readback");
+            assert_eq!((image.width(), image.height()), (32, 24));
+            assert_eq!(
+                source_bytes,
+                fs::read(&fixture.source).expect("unchanged source")
+            );
+            assert_eq!(fixture.snapshot().source.stamp, snapshot.source.stamp);
+            fixture.assert_no_staging();
+        }
+    }
+}

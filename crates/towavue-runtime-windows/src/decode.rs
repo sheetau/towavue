@@ -21,6 +21,8 @@ use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
 mod frame_png;
+#[cfg(test)]
+pub(crate) use frame_png::verification::with_encoder_observer;
 mod frame_step;
 mod packet_samples;
 mod video_preroll;

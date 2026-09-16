@@ -538,7 +538,7 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
     ) else {
         return;
     };
-    for mode in 0..15 {
+    for mode in 0..16 {
         let (mut app, origin) = setup(&root);
         let size = egui::vec2(640.0, 480.0);
         let target = origin + egui::vec2(24.0, 24.0);
@@ -594,6 +594,10 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
             }
             14 => {
                 cancel(app.ui_context.as_ref().expect("context"));
+                vec![]
+            }
+            15 => {
+                app.dispatch(CommandId::ToggleGridMenu);
                 vec![]
             }
             _ => vec![],

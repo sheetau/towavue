@@ -4904,7 +4904,7 @@ where
                             self.media_generation,
                             self.graphics_epoch,
                         ),
-                        !self.modal_input_blocked() && !self.grid_open && !self.filmstrip_open,
+                        !self.modal_input_blocked() && !self.filmstrip_open,
                         &mut recent,
                     );
                     if let Some(action) = recent.action {
@@ -6763,6 +6763,9 @@ where
                 if self.grid_open {
                     self.cancel_command_overlay();
                 } else {
+                    if let Some(context) = &self.ui_context {
+                        logo_menu::cancel(context);
+                    }
                     self.grid_open = true;
                 }
                 self.request_redraw();

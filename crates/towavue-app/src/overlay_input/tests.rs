@@ -283,3 +283,125 @@ fn menu_outside_press_preserves_nested_hit_regions_and_opener_toggle() {
         "outside button receives the same gesture"
     );
 }
+
+#[test]
+fn grid_keeps_logo_pointer_entry_available_and_escape_dismisses_only_the_top_surface() {
+    let Some(root) = tests::isolated_test_root(
+        "overlay_input::tests::grid_keeps_logo_pointer_entry_available_and_escape_dismisses_only_the_top_surface",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for batched in [false, true] {
+            let context = fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(chrome::style);
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.ui_context = Some(context.clone());
+            let path = root.join("image.png");
+            app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.path = Some(path);
+            app.media_kind = Some(MediaKind::Image);
+            app.state = PlaybackState::Paused;
+            let frame = |app: &mut Application<_>, events| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 360.0),
+                        )),
+                        viewports: [(
+                            egui::ViewportId::ROOT,
+                            egui::ViewportInfo {
+                                native_pixels_per_point: Some(density),
+                                ..Default::default()
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| app.draw_ui(ui, &mut actions),
+                );
+                for action in actions {
+                    app.handle_ui_action(action);
+                }
+                output
+            };
+            let escape = || egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(&mut app, vec![]);
+            app.dispatch(CommandId::ToggleGridMenu);
+            for _ in 0..3 {
+                frame(&mut app, vec![]);
+            }
+            let output = frame(&mut app, vec![]);
+            let (_, logo) = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("towavue menu"))
+                .expect("logo");
+            assert!(!logo.is_disabled(), "grid leaves the logo available");
+            let bounds = logo.bounds().expect("logo bounds");
+            let point = egui::pos2(
+                ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                ((bounds.y0 + bounds.y1) / 2.0) as f32,
+            );
+            let before = app.image_view;
+            frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+            if batched {
+                frame(&mut app, vec![button(point, true), button(point, false)]);
+            } else {
+                frame(&mut app, vec![button(point, true)]);
+                frame(&mut app, vec![button(point, false)]);
+            }
+            frame(&mut app, vec![]);
+            assert!(
+                egui::Popup::is_any_open(&context),
+                "logo click opens above grid"
+            );
+            assert!(app.grid_open);
+            assert_eq!(app.image_view, before);
+            frame(&mut app, vec![escape()]);
+            assert!(!egui::Popup::is_any_open(&context));
+            assert!(app.grid_open, "first Escape leaves the grid open");
+            frame(&mut app, vec![escape()]);
+            assert!(!app.grid_open, "second Escape closes the grid");
+            app.dispatch(CommandId::ToggleGridMenu);
+            app.pending_guard = Some(GuardedAction::Exit);
+            let output = frame(&mut app, vec![]);
+            assert!(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("modal tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("towavue menu") && node.is_disabled()),
+                "confirmation still disables the logo"
+            );
+            frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    button(point, true),
+                    button(point, false),
+                ],
+            );
+            assert!(!egui::Popup::is_any_open(&context));
+            assert!(app.pending_guard.is_some());
+        }
+    }
+}

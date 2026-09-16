@@ -19,6 +19,20 @@ pub(super) struct RotationDialog {
 }
 
 impl RotationDialog {
+    fn result_size(&self, value: ImageRotation) -> (u32, u32) {
+        let Some(EditOperation::RotateImage(previous)) = self.operations.last().copied() else {
+            return value.size();
+        };
+        let composed = towavue_core::compose_rotations(&[
+            EditOperation::RotateImage(previous),
+            EditOperation::RotateImage(value),
+        ]);
+        match composed.last() {
+            Some(EditOperation::RotateImage(value)) => value.size(),
+            _ => previous.source_size(),
+        }
+    }
+
     fn value(&self) -> Option<ImageRotation> {
         let degrees = self.angle.trim().parse::<f64>().ok()?;
         if !degrees.is_finite() || !(-180.0..=180.0).contains(&degrees) {
@@ -63,11 +77,12 @@ impl RotationDialog {
                     }
                     let value = self.value();
                     if let Some(value) = value {
+                        let size = self.result_size(value);
                         ui.label(format!(
                             "{:.1} degrees — {} x {} pixels",
                             f64::from(value.tenths()) / 10.0,
-                            value.size().0,
-                            value.size().1,
+                            size.0,
+                            size.1,
                         ));
                         let preview_height =
                             (context.content_rect().height() - 230.0).clamp(60.0, 240.0);

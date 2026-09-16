@@ -10,6 +10,7 @@ mod file_search;
 mod image;
 mod media;
 mod navigation;
+mod rotation_sequence;
 mod tabs;
 mod timeline;
 mod video_resize;
@@ -37,6 +38,7 @@ pub use navigation::{
     FolderMediaItem, FolderSnapshot, FolderSnapshotSource, PropertyKey, ShellIdentity, SortColumn,
     SortDirection,
 };
+pub use rotation_sequence::compose_rotations;
 pub use tabs::{Tab, TabId, TabSet, TabTarget};
 pub use timeline::{EditTimeline, TimeRange, TimelineEdit, TimelineSpan};
 pub use video_resize::VideoResize;

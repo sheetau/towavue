@@ -124,6 +124,15 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             .value()
             .expect("valid canvas");
         assert_eq!(value.tenths(), -200);
+        let expected = match app.edits[&tab].operations().last() {
+            Some(EditOperation::RotateVideo(previous)) => VideoRotation::new(
+                ((i32::from(previous.tenths()) - 200 + 1800).rem_euclid(3600) - 1800) as i16,
+                previous.source_size(),
+                previous.source_pixel_aspect(),
+            )
+            .expect("combined drag rotation"),
+            _ => value,
+        };
         frame_input(
             app,
             egui::Modifiers::NONE,
@@ -137,7 +146,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
         assert!(app.video_rotation_drag.is_none());
         assert_eq!(
             app.edits[&tab].operations().last(),
-            Some(&EditOperation::RotateVideo(value))
+            Some(&EditOperation::RotateVideo(expected))
         );
         let committed = app.edits.clone();
         if scale == 1.0 {
@@ -154,7 +163,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             let mut frames = 0;
             towavue_runtime_windows::decode_file(&target, |output| {
                 if let towavue_runtime_windows::DecodeOutput::Video(frame) = output {
-                    assert_eq!((frame.width, frame.height), value.size());
+                    assert_eq!((frame.width, frame.height), expected.size());
                     assert_eq!(frame.pixel_aspect, 1.0);
                     frames += 1;
                 }

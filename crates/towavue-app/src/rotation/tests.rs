@@ -96,6 +96,112 @@ pub(super) fn application() -> (
 }
 
 #[test]
+fn repeated_rotation_steps_render_once_from_each_edit_baseline_and_fit_without_growing() {
+    let (mut app, events) = application();
+    let tab = app.tabs.active_id().expect("rotation test fixture");
+    let original = app
+        .image
+        .as_ref()
+        .expect("rotation test fixture")
+        .decoded
+        .clone();
+    let finish = |app: &mut Application<_>| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.image_edit_pending {
+            app.handle_app_event(
+                events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("rotation test fixture"),
+            );
+        }
+        assert!(app.image_error.is_none());
+    };
+    for resized in [false, true] {
+        let prefix = if resized {
+            vec![EditOperation::Resize(
+                towavue_core::ImageResize::new(13, 9, towavue_core::ResampleFilter::Nearest)
+                    .expect("rotation test fixture"),
+            )]
+        } else {
+            vec![]
+        };
+        if let Some(operation) = prefix.first() {
+            app.push_visual_edit(*operation);
+            finish(&mut app);
+        }
+        let size = app
+            .image
+            .as_ref()
+            .expect("rotation test fixture")
+            .dimensions();
+        let baseline = app
+            .image
+            .as_ref()
+            .expect("rotation test fixture")
+            .decoded
+            .clone();
+        let mut expected_steps = Vec::new();
+        for step in 1..=72 {
+            app.image_view.zoom = ZoomMode::Custom(4.0);
+            app.image_view.pan = (12.0, 7.0);
+            if step % 2 == 0 {
+                app.open_rotation();
+                let dialog = app.rotation_dialog.as_mut().expect("rotation test fixture");
+                dialog.angle = "5".into();
+                let (token, value) = (dialog.token, dialog.value().expect("rotation test fixture"));
+                app.finish_rotation(token, Some(value));
+            } else {
+                app.step_rotation(true);
+            }
+            finish(&mut app);
+            let total = ((step * 50 + 1800) % 3600 - 1800) as i16;
+            let mut expected = prefix.clone();
+            if total != 0 {
+                expected.push(EditOperation::RotateImage(
+                    ImageRotation::new(total, size).expect("rotation test fixture"),
+                ));
+            }
+            assert_eq!(app.edits[&tab].operations(), expected);
+            let rendered = towavue_runtime_windows::render_image_edits(
+                &original,
+                &expected,
+                &towavue_runtime_windows::Cancellation::default(),
+            )
+            .expect("rotation test fixture");
+            let actual = &app.image.as_ref().expect("rotation test fixture").decoded;
+            assert_eq!(actual.frames[0].rgba, rendered.frames[0].rgba);
+            assert_eq!(
+                app.image
+                    .as_ref()
+                    .expect("rotation test fixture")
+                    .dimensions(),
+                (rendered.frames[0].width, rendered.frames[0].height)
+            );
+            assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+            assert_eq!(app.image_view.pan, (0.0, 0.0));
+            expected_steps.push(expected);
+        }
+        assert_eq!(
+            app.image
+                .as_ref()
+                .expect("rotation test fixture")
+                .decoded
+                .frames[0]
+                .rgba,
+            baseline.frames[0].rgba
+        );
+        for expected in expected_steps[..71].iter().rev() {
+            app.dispatch(CommandId::Undo);
+            finish(&mut app);
+            assert_eq!(app.edits[&tab].operations(), expected);
+        }
+        app.dispatch(CommandId::Undo);
+        finish(&mut app);
+        assert_eq!(app.edits[&tab].operations(), prefix);
+    }
+}
+
+#[test]
 fn fine_rotation_shortcuts_apply_one_raster_edit_and_preserve_undo_and_guards() {
     for (key, tenths) in [("Alt+R", 50), ("Alt+L", -50)] {
         let (mut app, events) = application();
@@ -152,7 +258,7 @@ fn fine_rotation_shortcuts_apply_one_raster_edit_and_preserve_undo_and_guards() 
 }
 
 #[test]
-fn opposite_free_rotations_preserve_raster_changes_but_undo_restores_original_pixels() {
+fn opposite_free_rotations_restore_original_pixels_and_keep_individual_undo_steps() {
     for angle in [50, 317, -450, 900] {
         let (mut app, events) = application();
         let tab = app.tabs.active_id().expect("tab");
@@ -182,21 +288,10 @@ fn opposite_free_rotations_preserve_raster_changes_but_undo_restores_original_pi
             finish(&mut app);
         }
         let restored = app.image.as_ref().expect("two raster edits");
-        if angle == 900 {
-            assert_eq!(restored.dimensions(), (8, 6));
-            assert_eq!(restored.decoded.frames[0].rgba, original.frames[0].rgba);
-            assert!(!app.edits[&tab].is_dirty());
-        } else {
-            assert_ne!(restored.dimensions(), (8, 6));
-            assert_ne!(restored.decoded.frames[0].rgba, original.frames[0].rgba);
-            assert!(app.edits[&tab].is_dirty());
-            assert!(app.title().contains(" *"));
-            eprintln!(
-                "Opposite free rotations {angle}/{} tenths: 8x6 -> {:?}; still changed",
-                -angle,
-                restored.dimensions()
-            );
-        }
+        assert_eq!(restored.dimensions(), (8, 6));
+        assert_eq!(restored.decoded.frames[0].rgba, original.frames[0].rgba);
+        assert!(!app.edits[&tab].is_dirty());
+        assert!(!app.title().contains(" *"));
         for _ in 0..2 {
             app.process_shortcut("Ctrl+Z".parse().expect("Undo shortcut"));
             finish(&mut app);

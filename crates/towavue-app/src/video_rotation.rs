@@ -87,11 +87,15 @@ impl VideoRotationDialog {
                                 ui.label("0 degrees — no edit or pixel-aspect change");
                             }
                             Ok(value) => {
+                                let size = self
+                                    .snapshot
+                                    .geometry_with(EditOperation::RotateVideo(*value))
+                                    .expect("validated rotation");
                                 ui.label(format!(
-                                    "{:.1} degrees — {} x {} square pixels",
+                                    "{:.1} degrees — {} x {} pixels",
                                     f64::from(value.tenths()) / 10.0,
-                                    value.size().0,
-                                    value.size().1
+                                    size.0,
+                                    size.1
                                 ));
                             }
                             Err(error) => {
@@ -292,6 +296,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && value.tenths() != 0
         {
             operations.push(EditOperation::RotateVideo(value));
+            operations = towavue_core::compose_rotations(&operations);
         }
         let transform = ImageTransform::with_orientation(
             size,

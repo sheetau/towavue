@@ -214,7 +214,8 @@ impl EditState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditHistory {
-    operations: Vec<EditOperation>,
+    steps: Vec<EditOperation>,
+    applied: Vec<EditOperation>,
     cursor: usize,
     saved_cursor: Option<usize>,
     saved_operations: Vec<EditOperation>,
@@ -226,7 +227,8 @@ pub struct EditHistory {
 impl Default for EditHistory {
     fn default() -> Self {
         Self {
-            operations: Vec::new(),
+            steps: Vec::new(),
+            applied: Vec::new(),
             cursor: 0,
             saved_cursor: Some(0),
             saved_operations: Vec::new(),
@@ -264,6 +266,7 @@ impl EditHistory {
     }
 
     fn refresh_timeline_equivalence(&mut self) {
+        self.applied = crate::compose_rotations(&self.steps[..self.cursor]);
         self.image_matches_saved = false;
         self.timeline_matches_saved = false;
         let Some(duration) = self.source_duration else {
@@ -296,13 +299,13 @@ impl EditHistory {
         if !operation.applies_to(kind) {
             return false;
         }
-        if self.cursor < self.operations.len() {
-            self.operations.truncate(self.cursor);
+        if self.cursor < self.steps.len() {
+            self.steps.truncate(self.cursor);
             if self.saved_cursor.is_some_and(|saved| saved > self.cursor) {
                 self.saved_cursor = None;
             }
         }
-        self.operations.push(operation);
+        self.steps.push(operation);
         self.cursor += 1;
         self.refresh_timeline_equivalence();
         true
@@ -318,7 +321,7 @@ impl EditHistory {
     }
 
     pub fn redo(&mut self) -> bool {
-        if self.cursor == self.operations.len() {
+        if self.cursor == self.steps.len() {
             return false;
         }
         self.cursor += 1;
@@ -326,8 +329,9 @@ impl EditHistory {
         true
     }
 
+    /// Render/export plan; rotation steps remain independently undoable.
     pub fn operations(&self) -> &[EditOperation] {
-        &self.operations[..self.cursor]
+        &self.applied
     }
 
     pub fn state(&self) -> EditState {
@@ -350,10 +354,9 @@ impl EditHistory {
 
     pub fn mark_exported(&mut self, operations: &[EditOperation]) {
         self.saved_operations = operations.to_vec();
-        self.saved_cursor = self
-            .operations
-            .starts_with(operations)
-            .then_some(operations.len());
+        // The composed plan length is not an undo cursor. An older exported
+        // snapshot is still compared by content when Undo reaches it.
+        self.saved_cursor = (self.operations() == operations).then_some(self.cursor);
         self.refresh_timeline_equivalence();
     }
 }

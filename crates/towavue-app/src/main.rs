@@ -7389,6 +7389,7 @@ where
                 .map_or(&[][..], EditHistory::operations)
                 .to_vec();
             operations.push(operation);
+            let operations = towavue_core::compose_rotations(&operations);
             if video_rotation::uses_raster(&operations)
                 && let Err(error) = self.validate_video_operations(&operations)
             {

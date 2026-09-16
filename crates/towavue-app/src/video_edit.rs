@@ -15,8 +15,13 @@ pub(super) struct VideoEditSnapshot {
 
 impl VideoEditSnapshot {
     pub fn validate(&self, operation: EditOperation) -> Result<(), String> {
+        self.geometry_with(operation).map(|_| ())
+    }
+
+    pub fn geometry_with(&self, operation: EditOperation) -> Result<(u32, u32, f32), String> {
         let mut edits = self.operations.clone();
         edits.push(operation);
+        let edits = towavue_core::compose_rotations(&edits);
         video_edit_geometry(
             (self.source.0, self.source.1),
             self.source.2,
@@ -24,7 +29,6 @@ impl VideoEditSnapshot {
             &edits,
             self.max_side,
         )
-        .map(|_| ())
         .map_err(|error| error.to_string())
     }
 }

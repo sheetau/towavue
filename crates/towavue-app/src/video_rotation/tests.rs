@@ -168,6 +168,70 @@ pub(crate) fn access(target_node: egui::accesskit::NodeId, value: Option<&str>) 
     })
 }
 
+fn repeated_rotations<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    let geometry = app
+        .validate_video_operations(&[])
+        .expect("rotation test fixture");
+    let transport = (app.current_position(), app.generation);
+    for step in 1..=73 {
+        app.step_video_rotation(true);
+        let total = ((step * 50 + 1800) % 3600 - 1800) as i16;
+        if total == 0 {
+            assert!(app.video_operations().is_empty());
+            assert_eq!(
+                app.validate_video_operations(app.video_operations())
+                    .expect("rotation test fixture"),
+                geometry
+            );
+        } else {
+            let rotation = VideoRotation::new(total, (geometry.0, geometry.1), geometry.2)
+                .expect("rotation test fixture");
+            assert_eq!(
+                app.video_operations(),
+                [EditOperation::RotateVideo(rotation)]
+            );
+            assert_eq!(
+                app.validate_video_operations(app.video_operations())
+                    .expect("rotation test fixture"),
+                (rotation.size().0, rotation.size().1, 1.0)
+            );
+        }
+        if [1, 18, 72, 73].contains(&step) {
+            frame(app, vec![]);
+            assert!(app.playback_error.is_none());
+        }
+        assert_eq!(app.image_view.zoom, ZoomMode::Fit);
+        assert_eq!((app.current_position(), app.generation), transport);
+    }
+    // Preview must use the same composed plan as the committed GPU/export path.
+    app.open_video_rotation();
+    let dialog = app
+        .video_rotation_dialog
+        .as_mut()
+        .expect("rotation test fixture");
+    dialog.angle = "-5".into();
+    let value = dialog.value().expect("rotation test fixture");
+    assert_eq!(
+        dialog
+            .snapshot
+            .geometry_with(EditOperation::RotateVideo(value))
+            .expect("rotation test fixture"),
+        geometry
+    );
+    let token = dialog.token;
+    frame(app, vec![]);
+    assert!(app.video_raster_operations.is_none());
+    app.finish_video_rotation(token, Some(value));
+    frame(app, vec![]);
+    assert!(app.video_operations().is_empty());
+    for _ in 0..74 {
+        app.dispatch(CommandId::Undo);
+    }
+    frame(app, vec![]);
+    assert!(app.video_operations().is_empty());
+    assert_eq!((app.current_position(), app.generation), transport);
+}
+
 #[test]
 fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changing_source_time() {
     let Some(root) = crate::tests::isolated_test_root(
@@ -281,6 +345,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
                 frame(&mut app, vec![]);
                 assert!(app.video_operations().is_empty());
             }
+            repeated_rotations(&mut app);
             app.dispatch(CommandId::RotateClockwise);
             app.image_view.selection = Some(UnitRect::FULL);
             let view = app.image_view;

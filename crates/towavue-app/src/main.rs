@@ -39,6 +39,7 @@ mod menu;
 mod metadata_export;
 #[cfg(test)]
 mod native_input_tests;
+mod overlay_input;
 mod palette;
 mod playback_tab;
 #[cfg(test)]
@@ -3574,13 +3575,11 @@ where
         if let Some(delay) = self.folder_notice_delay(Instant::now()) {
             context.request_repaint_after(delay);
         }
-        if egui::Popup::is_any_open(&context) {
-            // Closing a menu must not reuse its batched click for a media gesture,
-            // including another layout pass in this same input frame.
-            let frame = context.cumulative_frame_nr();
-            context.data_mut(|data| {
-                data.insert_temp(egui::Id::new("menu-input-frame"), frame);
-            });
+        if !self.modal_input_blocked() {
+            overlay_input::dismiss_menu_on_outside_press(&context);
+            if self.palette_open && self.palette.outside_press(&context) {
+                self.cancel_command_overlay();
+            }
         }
         let modal_blocked = self.modal_input_blocked();
         tab_focus::begin(
@@ -3601,6 +3600,7 @@ where
             || egui::Popup::is_any_open(&context)
         {
             self.cancel_hold_speed();
+            self.cancel_view_drag();
             self.finish_reading_drag(true);
             self.finish_track_drag(true);
         }
@@ -3695,7 +3695,7 @@ where
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
                 if self.path.is_none() {
-                    let enabled = !modal_blocked && !self.palette_open && !self.grid_open;
+                    let enabled = !modal_blocked && !self.grid_open;
                     self.draw_gallery(ui, enabled, actions);
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
@@ -3997,7 +3997,7 @@ where
                 return;
             }
         }
-        if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
+        if self.view_wheel_allowed(ui.ctx()) && self.view_drag.is_none() {
             let mut wheel_response = response.clone();
             wheel_response.interact_rect = viewport;
             // Clamp each event in arrival order: combining deltas loses reversals at
@@ -4059,7 +4059,7 @@ where
         } else if !selection_moved && matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
             self.cancel_view_drag();
         }
-        let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
+        let enabled = self.view_wheel_allowed(ui.ctx()) && self.view_drag.is_none();
         image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
         self.update_selection(
             &response,
@@ -4288,10 +4288,8 @@ where
         };
         if !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
             || self.modal_input_blocked()
-            || self.palette_open
             || self.grid_open
             || self.filmstrip_open
-            || egui::Popup::is_any_open(context)
         {
             return;
         }
@@ -4400,13 +4398,14 @@ where
     }
 
     fn view_input_allowed(&self, context: &egui::Context) -> bool {
+        self.view_wheel_allowed(context) && !self.palette_open && !egui::Popup::is_any_open(context)
+    }
+
+    fn view_wheel_allowed(&self, context: &egui::Context) -> bool {
         !self.modal_input_blocked()
-            && !self.palette_open
             && !self.grid_open
             && !self.filmstrip_open
-            && !egui::Popup::is_any_open(context)
-            && context.data(|data| data.get_temp::<u64>(egui::Id::new("menu-input-frame")))
-                != Some(context.cumulative_frame_nr())
+            && context.memory(|memory| memory.top_modal_layer().is_none())
     }
 
     fn view_drag_allowed(&mut self, context: &egui::Context) -> bool {
@@ -4830,6 +4829,10 @@ where
     }
 
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if self.palette_open {
+            logo_menu::cancel(root.ctx());
+            tab_drag::cancel(root.ctx());
+        }
         let incoming_pointer = self
             .incoming_tab_pointer
             .filter(|_| self.accepts_tab_drop());
@@ -4901,10 +4904,7 @@ where
                             self.media_generation,
                             self.graphics_epoch,
                         ),
-                        !self.modal_input_blocked()
-                            && !self.palette_open
-                            && !self.grid_open
-                            && !self.filmstrip_open,
+                        !self.modal_input_blocked() && !self.grid_open && !self.filmstrip_open,
                         &mut recent,
                     );
                     if let Some(action) = recent.action {
@@ -4986,10 +4986,7 @@ where
                                         self.media_generation,
                                         self.graphics_epoch,
                                     ),
-                                    !self.modal_input_blocked()
-                                        && !self.palette_open
-                                        && !self.grid_open
-                                        && !egui::Popup::is_any_open(ui.ctx()),
+                                    !self.modal_input_blocked() && !self.grid_open,
                                 );
                                 for (index, id) in self.tabs.tab_ids().enumerate() {
                                     if self.tabs.gallery() == Some(id) {
@@ -6206,11 +6203,7 @@ where
     }
 
     fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        let enabled = !self.modal_input_blocked()
-            && !self.palette_open
-            && !self.grid_open
-            && !self.filmstrip_open
-            && !egui::Popup::is_any_open(ui.ctx());
+        let enabled = !self.modal_input_blocked() && !self.grid_open && !self.filmstrip_open;
         if !enabled {
             let opacity = ui.opacity();
             ui.disable();
@@ -11223,9 +11216,9 @@ mod tests {
     }
 
     #[test]
-    fn playlist_overlays_block_background_actions_and_hover_without_changing_rows() {
+    fn playlist_transient_overlays_leave_uncovered_rows_interactive() {
         let Some(root) = isolated_test_root(
-            "tests::playlist_overlays_block_background_actions_and_hover_without_changing_rows",
+            "tests::playlist_transient_overlays_leave_uncovered_rows_interactive",
         ) else {
             return;
         };
@@ -11312,20 +11305,39 @@ mod tests {
                 .find(|(candidate, _)| *candidate == id)
                 .expect("same row")
                 .1;
-            assert!(
+            let blocked = !matches!(overlay, 1 | 4);
+            assert_eq!(
                 row.is_disabled(),
-                "background row must be disabled for overlay {overlay}"
+                blocked,
+                "row ownership for overlay {overlay}"
             );
             assert_eq!(row.bounds(), bounds, "overlay must not change row layout");
-            assert!(frame(&mut app, vec![click()]).1.is_empty());
+            assert_eq!(frame(&mut app, vec![click()]).1.is_empty(), blocked);
             let pos = egui::pos2(200.0, 88.0);
+            let mut tooltip_visible = false;
             for _ in 0..3 {
                 let (output, actions) = frame(&mut app, vec![egui::Event::PointerMoved(pos)]);
                 assert!(actions.is_empty());
-                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "003.wav")), "no background tooltip for overlay {overlay}");
+                tooltip_visible |= output.shapes.iter().any(|shape| {
+                    matches!(
+                        &shape.shape, egui::Shape::Text(text) if text.galley.text() == "003.wav"
+                    )
+                });
+                if blocked {
+                    assert!(
+                        !tooltip_visible,
+                        "no background tooltip for modal overlay {overlay}"
+                    );
+                }
+            }
+            if overlay == 1 {
+                assert!(
+                    tooltip_visible,
+                    "uncovered rows keep hover feedback while a palette is open"
+                );
             }
             for pressed in [true, false] {
-                assert!(
+                assert_eq!(
                     frame(
                         &mut app,
                         vec![egui::Event::PointerButton {
@@ -11336,7 +11348,8 @@ mod tests {
                         }]
                     )
                     .1
-                    .is_empty()
+                    .is_empty(),
+                    blocked || pressed
                 );
             }
             app.filmstrip_open = false;
@@ -11464,8 +11477,8 @@ mod tests {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("towavue menu") && node.is_disabled()),
-            "the restored palette still blocks the logo menu"
+                .any(|(_, node)| node.label() == Some("towavue menu") && !node.is_disabled()),
+            "the restored palette leaves the outside logo menu available"
         );
         app.palette_open = false;
         let (tree, _) = frame(&mut app, vec![]);
@@ -11686,9 +11699,9 @@ mod tests {
     }
 
     #[test]
-    fn menu_outside_click_does_not_zoom_the_underlying_selection() {
+    fn menu_outside_press_hands_off_to_the_underlying_selection() {
         let Some(root) =
-            isolated_test_root("tests::menu_outside_click_does_not_zoom_the_underlying_selection")
+            isolated_test_root("tests::menu_outside_press_hands_off_to_the_underlying_selection")
         else {
             return;
         };
@@ -11770,17 +11783,22 @@ mod tests {
                     frame(&mut app, vec![button(point, true), button(point, false)]);
                 } else {
                     frame(&mut app, vec![button(point, true)]);
+                    assert!(!egui::Popup::is_any_open(&context), "close on press");
                     frame(&mut app, vec![button(point, false)]);
                 }
                 frame(&mut app, vec![]);
                 assert!(!egui::Popup::is_any_open(&context));
                 assert_eq!(
-                    app.image_view.selection, original,
-                    "menu dismissal preserves selection: density={density}, batched={batched}, discard={discard}"
+                    app.image_view.selection, None,
+                    "menu press reaches selection: density={density}, batched={batched}, discard={discard}"
                 );
                 assert!(app.view_drag.is_none());
-                frame(&mut app, vec![button(point, true), button(point, false)]);
-                assert!(app.image_view.selection.is_none(), "a later click zooms");
+                let after = app.image_view;
+                frame(&mut app, vec![]);
+                assert_eq!(
+                    app.image_view, after,
+                    "idle passes do not repeat the handoff"
+                );
                 assert!(app.view_drag.is_none());
             }
         }
@@ -16679,9 +16697,10 @@ mod tests {
                     },
                 );
             }
-            assert!(
+            assert_eq!(
                 frame(&mut app, events, blocked != 6, 0.1).is_empty(),
-                "blocked input {blocked}"
+                !matches!(blocked, 2 | 10),
+                "palette/menu state alone does not block an uncovered wheel target: {blocked}"
             );
             frame(
                 &mut app,

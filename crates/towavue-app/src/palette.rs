@@ -48,6 +48,20 @@ pub(crate) enum Choice {
 }
 
 impl CommandPalette {
+    pub fn outside_press(&self, context: &egui::Context) -> bool {
+        !self.fresh
+            && !egui::Popup::is_any_open(context)
+            && context
+                .memory(|memory| memory.area_rect("command-palette"))
+                .is_some_and(|rect| {
+                    context.input(|input| {
+                        input.events.iter().any(|event| matches!(event,
+                    egui::Event::PointerButton { pos, pressed: true, .. } if !rect.contains(*pos)
+                ))
+                    })
+                })
+    }
+
     pub fn file_query(&self) -> Option<String> {
         (!self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
             .then(|| normalized(self.query.trim()))
@@ -182,12 +196,6 @@ impl CommandPalette {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
-        let backdrop = egui::Area::new("command-palette-backdrop".into())
-            .order(egui::Order::Foreground)
-            .fixed_pos(context.content_rect().min)
-            .movable(false)
-            .sense(egui::Sense::CLICK | egui::Sense::DRAG)
-            .show(context, |ui| ui.set_min_size(context.content_rect().size()));
         egui::Window::new("Command palette")
             .id("command-palette".into())
             .order(egui::Order::Foreground)
@@ -228,7 +236,7 @@ impl CommandPalette {
                         } else if previous_query.starts_with('>') {
                             "Type the name of a command to run."
                         } else {
-                            "Search files by name"
+                            "Search files by name (hold Ctrl-key to force new window or Alt-key for same window)"
                         }),
                 )
                 .help_text("Up / Down: select   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
@@ -323,10 +331,7 @@ impl CommandPalette {
                         }
                     });
             });
-        (
-            chosen,
-            close || (!egui::Popup::is_any_open(context) && backdrop.response.clicked()),
-        )
+        (chosen, close || (!opened && self.outside_press(context)))
     }
 
     fn show_files(
@@ -356,7 +361,6 @@ impl CommandPalette {
                 score.is_some() && seen.insert(normalized(&path.to_string_lossy()))
             })
             .collect();
-        let recent_count = paths.len();
         // Empty Go to File shows history immediately, as in the reference picker.
         let search = sources
             .search
@@ -434,13 +438,6 @@ impl CommandPalette {
                     });
                 }
                 for (index, path) in paths.iter().enumerate() {
-                    if index == 0 || index == recent_count {
-                        ui.weak(if index < recent_count {
-                            "recently opened"
-                        } else {
-                            "file results"
-                        });
-                    }
                     let name = path
                         .file_name()
                         .unwrap_or(path.as_os_str())
@@ -584,7 +581,7 @@ mod tests {
                     &output,
                     rect,
                     if query.is_empty() {
-                        "Search files by name"
+                        "Search files by name (hold Ctrl-key to force new window or Alt-key for same window)"
                     } else {
                         query
                     },
@@ -634,6 +631,10 @@ mod tests {
                 choices.extend(choice);
             },
         );
+        assert!(!output.shapes.iter().any(|shape| matches!(
+            &shape.shape,
+            egui::Shape::Text(text) if matches!(text.galley.text(), "recently opened" | "file results")
+        )), "picker results have no redundant headings");
         (output, choices)
     }
 
@@ -1189,7 +1190,7 @@ mod tests {
     }
 
     #[test]
-    fn outside_click_closes_palette_without_activating_the_background() {
+    fn outside_press_closes_palette_and_hands_off_to_the_background() {
         let context = egui::Context::default();
         let mut palette = CommandPalette::default();
         let mut open = true;
@@ -1272,17 +1273,17 @@ mod tests {
         );
         assert_eq!(
             frame(&mut palette, &mut open, vec![button(outside, true)]),
-            (false, false)
+            (false, true)
         );
         assert_eq!(
             frame(&mut palette, &mut open, vec![button(outside, false)]),
-            (false, true)
+            (true, false)
         );
         assert!(!open);
         assert_eq!(
             frame(&mut palette, &mut open, vec![]),
             (false, false),
-            "no click-through after closing"
+            "handoff is not replayed on an idle frame"
         );
         for _ in 0..2 {
             frame(&mut palette, &mut open, vec![]);

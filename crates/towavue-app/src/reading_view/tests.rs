@@ -183,8 +183,12 @@ fn reading_zoom_pan_and_actual_size_preserve_joined_pages_and_read_only_state() 
                 let view = app.image_view;
                 app.palette_open = true;
                 frame(&mut app, wheel(pointer, 50.0, egui::Modifiers::CTRL));
-                assert_eq!(app.image_view, view);
+                assert_ne!(
+                    app.image_view, view,
+                    "uncovered reading view accepts wheel input"
+                );
                 app.palette_open = false;
+                app.image_view = view;
                 frame(
                     &mut app,
                     vec![button(start, egui::PointerButton::Primary, true)],

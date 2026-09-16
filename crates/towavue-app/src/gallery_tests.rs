@@ -552,14 +552,14 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
             (selected_top - first_row_top).abs() <= 1.0 / f64::from(density),
             "selected month aligns its first row at {density}x: {selected_top} vs {first_row_top}"
         );
-        app.palette_open = true;
+        app.pending_guard = Some(GuardedAction::Exit);
         frame(&mut app, size, vec![activate(september)]);
-        app.palette_open = false;
+        app.pending_guard = None;
         let output = frame(&mut app, size, vec![]);
         assert_eq!(
             card_top(&output, "december-20.png"),
             selected_top,
-            "covered month controls cannot scroll the Gallery"
+            "modal confirmation blocks Gallery month navigation"
         );
         frame(
             &mut app,
@@ -809,10 +809,10 @@ fn gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_in
             &no_match,
             "Drop media files or a folder here to begin."
         ));
-        app.palette_open = true;
+        app.pending_guard = Some(GuardedAction::Exit);
         frame(&mut app, size, vec![set("must not replace")]);
         assert_eq!(app.gallery_search, "missing-result");
-        app.palette_open = false;
+        app.pending_guard = None;
         app.recent_paths.clear();
         app.gallery_listing.invalidate();
         let empty = frame(&mut app, size, vec![]);

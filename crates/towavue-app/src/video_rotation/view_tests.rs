@@ -206,7 +206,15 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
                 _ => app.filmstrip_open = true,
             }
             frame_input(app, egui::Modifiers::CTRL, wheel(start));
-            assert_eq!(app.image_view, before, "overlay {overlay}");
+            if overlay == 0 {
+                assert_ne!(
+                    app.image_view, before,
+                    "uncovered video accepts palette-exterior wheel input"
+                );
+                app.image_view = before;
+            } else {
+                assert_eq!(app.image_view, before, "overlay {overlay}");
+            }
             app.palette_open = false;
             app.grid_open = false;
             app.filmstrip_open = false;

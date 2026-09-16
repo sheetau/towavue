@@ -89,7 +89,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let viewport = response.rect;
         let mut displayed = full.size();
         image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
-        if !self.view_input_allowed(ui.ctx()) {
+        if !self.view_wheel_allowed(ui.ctx()) {
             self.cancel_view_drag();
             return;
         }
@@ -105,6 +105,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 // the visible boundary, not an accumulated offscreen position.
                 image_scroll::clamp(&mut self.image_view, displayed, viewport.size());
             }
+        }
+        if !self.view_input_allowed(ui.ctx()) {
+            self.cancel_view_drag();
+            return;
         }
         let pointer = ui.input(|input| input.pointer.hover_pos());
         if !self.visual_selection_enabled()

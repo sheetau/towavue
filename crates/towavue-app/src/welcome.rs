@@ -86,7 +86,7 @@ pub fn show(
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inset));
     ui.advance_cursor_after_rect(viewport);
     let ui = &mut content;
-    if !enabled || egui::Popup::is_any_open(ui.ctx()) {
+    if !enabled {
         let opacity = ui.opacity();
         ui.disable();
         ui.set_opacity(opacity);
@@ -185,11 +185,6 @@ pub fn show(
         .inner;
     ui.advance_cursor_after_rect(header.min_rect());
     ui.add_space(16.0);
-    if ui.is_enabled() && egui::Popup::is_any_open(ui.ctx()) {
-        let opacity = ui.opacity();
-        ui.disable();
-        ui.set_opacity(opacity);
-    }
     let content_style = ui.style().clone();
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
@@ -197,12 +192,14 @@ pub fn show(
     ui.spacing_mut().scroll.interact_background_opacity = 0.3;
     let body = ui.available_rect_before_wrap();
     let gutter_scroll = if ui.is_enabled()
-        && ui.input(|input| {
-            input
-                .pointer
-                .hover_pos()
-                .is_some_and(|p| viewport.contains(p) && p.y >= body.top() && !inset.contains(p))
-        }) {
+        && ui
+            .input(|input| input.pointer.hover_pos())
+            .is_some_and(|p| {
+                viewport.contains(p)
+                    && p.y >= body.top()
+                    && !inset.contains(p)
+                    && ui.ctx().layer_id_at(p) == Some(ui.layer_id())
+            }) {
         ui.input_mut(|input| std::mem::take(&mut input.smooth_scroll_delta.y))
     } else {
         0.0
@@ -351,6 +348,7 @@ mod tests {
             context.global_style_mut(|style| style.animation_time = 0.0);
             let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 300.0));
             let original = context.global_style().visuals.widgets.clone();
+            let overlay = std::cell::Cell::new(false);
             let frame = |events| {
                 context.run_ui(
                     egui::RawInput {
@@ -359,6 +357,18 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
+                        if overlay.get() {
+                            egui::Area::new("gutter-overlay".into())
+                                .order(egui::Order::Foreground)
+                                .fixed_pos(egui::pos2(0.0, 130.0))
+                                .movable(false)
+                                .show(&context, |ui| {
+                                    ui.allocate_exact_size(
+                                        egui::vec2(20.0, 40.0),
+                                        egui::Sense::hover(),
+                                    );
+                                });
+                        }
                         assert!(
                             show(ui, &ShortcutBindings::default(), |ui| {
                                 assert_eq!(ui.visuals().widgets, original, "card style");
@@ -428,6 +438,30 @@ mod tests {
                     assert!(scrolled > after, "body gutter scrolls: {gutter:?}");
                 }
             }
+            overlay.set(true);
+            for _ in 0..3 {
+                frame(vec![]);
+            }
+            let before = marker(&frame(vec![]));
+            frame(vec![
+                egui::Event::PointerMoved(egui::pos2(2.0, 150.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -80.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+            for _ in 0..30 {
+                frame(vec![]);
+            }
+            assert_eq!(
+                marker(&frame(vec![])),
+                before,
+                "covered gutter does not scroll Gallery"
+            );
+            overlay.set(false);
+            frame(vec![]);
             let start = track.center();
             let end = track.center_bottom() + egui::vec2(0.0, 30.0);
             frame(vec![egui::Event::PointerMoved(start), button(start, true)]);

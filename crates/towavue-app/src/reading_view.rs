@@ -181,7 +181,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             ui.id().with("reading-surface"),
             egui::Sense::click_and_drag(),
         );
-        if self.view_input_allowed(ui.ctx()) && self.view_drag.is_none() {
+        if self.view_wheel_allowed(ui.ctx()) && self.view_drag.is_none() {
             for (pointer, event) in wheel_input::image_events(ui.ctx(), &response) {
                 match event {
                     wheel_input::ViewWheel::Zoom(factor) => {
@@ -233,7 +233,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .iter()
             .map(|_| painter.add(egui::Shape::Noop))
             .collect();
-        let enabled = self.view_drag_allowed(ui.ctx()) && self.view_drag.is_none();
+        let enabled = self.view_wheel_allowed(ui.ctx()) && self.view_drag.is_none();
         if image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled) {
             self.forget_pointer_selection_focus(ui.ctx());
         }

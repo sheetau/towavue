@@ -1640,7 +1640,7 @@ mod tests {
                                 && node.label() == Some("gallery-overlay.png")
                         })
                         .expect("card remains in accessibility tree");
-                    assert_eq!(card.1.is_disabled(), overlay != 0, "overlay {overlay}");
+                    assert_eq!(card.1.is_disabled(), overlay == 2, "overlay {overlay}");
                     assert!(app.tabs.tabs().is_empty() && app.path.is_none());
                 }
                 app.palette_open = false;

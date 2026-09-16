@@ -235,7 +235,10 @@ fn image_wheel_reaches_the_rendered_view_without_requiring_window_focus() {
                 ],
                 false,
             );
-            assert_eq!(app.image_view, view, "palette blocks background zoom");
+            assert_ne!(
+                app.image_view, view,
+                "palette state alone does not block an uncovered wheel target"
+            );
         }
     }
 }

@@ -446,6 +446,10 @@ fn run_session_trial(audio: bool, test: &str) {
                                 app.undo_edit(false);
                             } else {
                                 assert_eq!(after, before);
+                                assert!(
+                                    app.status_message.is_none(),
+                                    "release quietly restores playback"
+                                );
                             }
                         }
                     }

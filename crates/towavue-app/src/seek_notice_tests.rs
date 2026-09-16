@@ -54,9 +54,9 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                     .collect();
                 // The 340-point screen still has the bar's inner margins.
                 let expected = if width <= 340.0 {
-                    "09:29(+15s)"
+                    "09:29 +15s"
                 } else {
-                    "09:29(+15s) / 36:17"
+                    "09:29 +15s / 36:17"
                 };
                 let clock = texts
                     .iter()
@@ -74,7 +74,7 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                 assert_eq!(
                     &clock.galley.job.text[clock.galley.job.sections[1].byte_range.start.0
                         ..clock.galley.job.sections[1].byte_range.end.0],
-                    "(+15s)"
+                    " +15s"
                 );
                 assert_eq!(
                     clock.galley.job.sections[1].format.color,

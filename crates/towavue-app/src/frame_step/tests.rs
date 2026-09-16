@@ -184,6 +184,34 @@ fn asynchronous_steps_present_actual_vfr_pts_and_reject_obsolete_results() {
             settle(&mut app, &rx);
             assert_eq!(displayed(&app), self.reference[32]);
 
+            // Repeats never fill the discrete-press queue, in either direction.
+            // Each completed frame permits a new repeat; silence after release
+            // does not consume the many repeats that arrived while work was pending.
+            app.seek_to(self.reference[3]);
+            settle(&mut app, &rx);
+            for (key, expected) in [(".", 4), (".", 5), (",", 4), (",", 3)] {
+                for _ in 0..100 {
+                    app.repeat_media_shortcut(key.parse().expect("held frame key"));
+                }
+                assert!(app.frame_steps.pending.is_some());
+                assert!(app.frame_steps.queued.is_empty(), "repeat backlog");
+                settle(&mut app, &rx);
+                assert_eq!(displayed(&app), self.reference[expected]);
+                let generation = app.generation;
+                settle(&mut app, &rx);
+                assert_eq!(app.generation, generation, "release has no queued movement");
+            }
+
+            // A completed timestamp probe still awaits the replacement picture.
+            app.seek_to(self.reference[7]);
+            for _ in 0..100 {
+                app.repeat_media_shortcut(".".parse().expect("repeat while seeking"));
+            }
+            assert!(app.frame_steps.pending.is_none());
+            assert!(app.frame_steps.queued.is_empty());
+            settle(&mut app, &rx);
+            assert_eq!(displayed(&app), self.reference[7]);
+
             // Both proactive invalidation and callback-side guards leave position/history untouched.
             for mode in 0..9 {
                 app.seek_to(self.reference[3]);

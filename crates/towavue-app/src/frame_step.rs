@@ -128,6 +128,20 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
+    pub(super) fn repeat_video_frame(&mut self, forward: bool) {
+        // A held key advances at the completed-frame rate, without accumulating
+        // repeats that would keep moving after release. Discrete presses retain
+        // their existing ordered queue and are never discarded by this gate.
+        if self.frame_steps.pending.is_none()
+            && self.frame_steps.queued.is_empty()
+            && self.session.as_ref().is_some_and(|session| {
+                !session.video_refresh_pending() && session.current_video_time().is_some()
+            })
+        {
+            self.step_video_frame(forward);
+        }
+    }
+
     fn start_frame_step(&mut self) {
         if self.frame_steps.pending.is_some() {
             return;

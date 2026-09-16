@@ -34,6 +34,14 @@ fn held_seek_keys_respect_bindings_prefixes_media_state_and_overlays() {
             ("F11", None),
             ("Up", None),
             ("Ctrl+S", None),
+            (
+                ",",
+                (kind == MediaKind::Video).then_some(CommandId::PreviousVideoFrame),
+            ),
+            (
+                ".",
+                (kind == MediaKind::Video).then_some(CommandId::NextVideoFrame),
+            ),
         ] {
             assert_eq!(
                 app.repeated_seek_command(&key.parse().expect("key")),
@@ -65,6 +73,10 @@ fn held_seek_keys_respect_bindings_prefixes_media_state_and_overlays() {
                 app.repeated_seek_command(&"Right".parse().expect("key"))
                     .is_none()
             );
+            assert!(
+                app.repeated_seek_command(&".".parse().expect("key"))
+                    .is_none()
+            );
         }
         app.ui_context = None;
     }
@@ -94,6 +106,18 @@ fn held_seek_keys_respect_bindings_prefixes_media_state_and_overlays() {
     assert_eq!(
         app.repeated_seek_command(&"N".parse().expect("key")),
         Some(CommandId::SeekForward)
+    );
+    app.shortcuts.set(
+        CommandId::NextVideoFrame,
+        "F".parse().expect("frame binding"),
+    );
+    assert_eq!(
+        app.repeated_seek_command(&"F".parse().expect("key")),
+        Some(CommandId::NextVideoFrame)
+    );
+    assert!(
+        app.repeated_seek_command(&".".parse().expect("old binding"))
+            .is_none()
     );
 }
 
@@ -127,6 +151,12 @@ fn held_seek_keys_leave_text_and_focused_control_navigation_with_egui() {
             app.repeated_seek_command(&"Right".parse().expect("key"))
                 .is_none()
         );
+        if text_edit {
+            assert!(
+                app.repeated_seek_command(&".".parse().expect("key"))
+                    .is_none()
+            );
+        }
         assert_eq!(
             app.repeated_seek_command(&"J".parse().expect("key")),
             (!text_edit).then_some(CommandId::SeekBackward)

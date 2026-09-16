@@ -402,7 +402,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 if ended {
                     self.state = PlaybackState::Ended;
                 }
-                self.set_status(format!("Playback restored · {:.2}×", held.rate));
+                self.status_message = None;
+                self.request_redraw();
             }
         }
         true

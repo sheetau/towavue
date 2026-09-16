@@ -5611,7 +5611,7 @@ where
                         };
                         time_text.append(&position, 0.0, format.clone());
                         if let Some(delta) = self.relative_seek_text() {
-                            time_text.append(&format!("({delta})"), 0.0, egui::TextFormat {
+                            time_text.append(&format!(" {delta}"), 0.0, egui::TextFormat {
                                 color: chrome::FOREGROUND,
                                 ..format.clone()
                             });
@@ -9736,7 +9736,11 @@ where
             return;
         }
         if let Some(command) = self.repeated_seek_command(&stroke) {
-            self.dispatch(command);
+            match command {
+                CommandId::PreviousVideoFrame => self.repeat_video_frame(false),
+                CommandId::NextVideoFrame => self.repeat_video_frame(true),
+                _ => self.dispatch(command),
+            }
         }
     }
 
@@ -9759,7 +9763,7 @@ where
         {
             return None;
         }
-        // Only resolved standalone seek commands repeat. A rebound toggle or
+        // Only resolved standalone seek/frame commands repeat. A rebound toggle or
         // chord suffix must not acquire repeat semantics from its physical key.
         match self
             .shortcuts
@@ -9768,6 +9772,9 @@ where
             ShortcutMatch::Command(
                 command @ (CommandId::SeekBackward | CommandId::SeekForward),
             ) => Some(command),
+            ShortcutMatch::Command(
+                command @ (CommandId::PreviousVideoFrame | CommandId::NextVideoFrame),
+            ) if self.media_kind == Some(MediaKind::Video) => Some(command),
             _ => None,
         }
     }

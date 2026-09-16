@@ -1,5 +1,91 @@
 use super::*;
 
+#[test]
+fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_existing_tabs() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::tests::new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_existing_tabs",
+    ) else {
+        return;
+    };
+    let paths = ["first.mp4", "second.mp4", "third.mp4", "fourth.mp4"].map(|name| root.join(name));
+    for path in &paths {
+        std::fs::write(path, []).expect("owned unopened media");
+    }
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first_window = *host.windows.keys().next().expect("first window");
+    let first = {
+        let app = host.windows.get_mut(&first_window).expect("first app");
+        app.open_external(paths[0].clone(), true);
+        assert_eq!(app.playback_volume(), 0.5);
+        app.set_playback_volume(0.37);
+        app.tabs.active().expect("first tab").id
+    };
+    let second_window = host.add_application(None).expect("second window");
+    let second = {
+        let app = host.windows.get_mut(&second_window).expect("second app");
+        app.open_external(paths[1].clone(), true);
+        assert_eq!(app.playback_volume(), 0.37);
+        app.set_playback_volume(1.2);
+        app.tabs.active().expect("second tab").id
+    };
+    {
+        let app = host.windows.get_mut(&first_window).expect("first app");
+        assert_eq!(app.playback_volume(), 0.37, "existing tab stays unchanged");
+        app.open_external(paths[2].clone(), true);
+        assert_eq!(app.playback_volume(), 1.2);
+        app.toggle_playback_mute();
+        assert_eq!(app.playback_volume(), 0.0);
+        app.filmstrip_open = true;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: vec![towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![1]),
+                path: paths[3].clone(),
+                kind: MediaKind::Video,
+            }],
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        app.handle_ui_action(UiAction::OpenFilmstripMedia(paths[3].clone(), true));
+        let background = app.tabs.tabs().last().expect("background tab").id;
+        assert_ne!(background, app.tabs.active().expect("active tab").id);
+        app.set_playback_volume(0.8);
+        app.activate_tab(background);
+        assert_eq!(app.playback_volume(), 0.0, "new media remains muted");
+        app.toggle_playback_mute();
+        assert_eq!(
+            app.playback_volume(),
+            1.2,
+            "inherit the nonzero restore level"
+        );
+        app.tabs.activate(first);
+        assert_eq!(app.playback_volume(), 0.37);
+        assert!(app.edits.values().all(|history| !history.is_dirty()));
+        assert_eq!(app.edit_state().volume, 1.0);
+    }
+    {
+        let app = host.windows.get_mut(&second_window).expect("second app");
+        assert_eq!(app.tabs.active().expect("tab").id, second);
+        assert_eq!(app.playback_volume(), 1.2);
+        // Activating an older tab is not a volume adjustment.
+        app.open_external(paths[0].clone(), true);
+        assert_eq!(app.playback_volume(), 1.2);
+    }
+    let fresh_host = WindowHost::new(None, None).expect("independent launch");
+    assert_eq!(
+        fresh_host
+            .windows
+            .values()
+            .next()
+            .expect("app")
+            .playback_volume(),
+        0.5
+    );
+}
+
 pub(super) fn drain_captured(host: &mut WindowHost) {
     loop {
         let event = host

@@ -63,6 +63,7 @@ pub(crate) struct WindowHost {
     next_key: u64,
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
+    last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
     #[cfg(test)]
@@ -80,6 +81,7 @@ impl WindowHost {
             next_key: 1,
             pending_launches: Vec::new(),
             preview_cache: PreviewCache::local()?,
+            last_playback_volume: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
             #[cfg(test)]
@@ -115,6 +117,7 @@ impl WindowHost {
         });
         let mut app =
             Application::new_with_preview_cache(initial_path, notify, self.preview_cache.clone())?;
+        app.last_playback_volume = Arc::clone(&self.last_playback_volume);
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;

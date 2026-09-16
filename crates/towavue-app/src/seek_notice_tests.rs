@@ -85,7 +85,7 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                 }
                 let volume = texts
                     .iter()
-                    .find(|text| text.galley.text() == "100%")
+                    .find(|text| text.galley.text() == "50%")
                     .expect("volume");
                 assert!(
                     volume.pos.x >= 0.0 && volume.pos.x + volume.galley.size().x <= width,

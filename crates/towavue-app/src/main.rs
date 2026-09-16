@@ -857,6 +857,7 @@ struct Application<N> {
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
+    last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     volume_step_percent: u8,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
@@ -1112,6 +1113,7 @@ where
             retained_playback: BTreeMap::new(),
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
+            last_playback_volume: Arc::default(),
             volume_step_percent: 2,
             graphics_epoch: 0,
             idle_graphics_frame: None,
@@ -1478,6 +1480,7 @@ where
         } else {
             self.tabs.open_external(path.clone(), kind)
         };
+        self.seed_playback_volume(id);
         if kind == MediaKind::Audio
             && self.displayed_tab == Some(id)
             && self.path.as_ref() == Some(&path)
@@ -1833,6 +1836,9 @@ where
         transferred: bool,
         handoff: Option<image_handoff::ImageHandoff>,
     ) {
+        if let Some(id) = self.tabs.active().map(|tab| tab.id) {
+            self.seed_playback_volume(id);
+        }
         resume::record(self, true);
         self.resume_open = None;
         self.relative_seek_notice = None;
@@ -6405,6 +6411,7 @@ where
                 };
                 if background {
                     let added = self.tabs.open_new(path, kind);
+                    self.seed_playback_volume(added);
                     self.edits.entry(added).or_default();
                     // Register only the path; activation loads it without interrupting this tab.
                     self.tabs.activate(active);
@@ -16113,6 +16120,7 @@ mod tests {
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
         app.set_status("Existing notice".into());
+        app.set_playback_volume(1.0);
         let notice = app.status_message.clone();
         app.handle_ui_action(UiAction::Volume(tab, 0.5));
         assert_eq!(
@@ -16198,6 +16206,7 @@ mod tests {
         let normal = |delta| wheel(delta, egui::Modifiers::NONE, egui::TouchPhase::Move);
         for kind in [MediaKind::Audio, MediaKind::Video] {
             app.media_kind = Some(kind);
+            app.set_playback_volume(1.0);
             for focused in [true, false] {
                 for _ in 0..3 {
                     frame(
@@ -16284,6 +16293,7 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
+        app.set_playback_volume(1.0);
         let context = fonts::test_context();
         let point = egui::pos2(100.0, 100.0);
         let wheel = |unit, delta, modifiers| egui::Event::MouseWheel {
@@ -16503,7 +16513,7 @@ mod tests {
         }
         app.tabs.open_new(root.join("other.wav"), MediaKind::Audio);
         app.handle_ui_action(UiAction::Volume(tab, 0.4));
-        assert_eq!(app.playback_volume(), 1.0, "ignore stale target tab");
+        assert_eq!(app.playback_volume(), 0.5, "ignore stale target tab");
     }
 
     #[test]
@@ -16524,7 +16534,7 @@ mod tests {
             app.dispatch(CommandId::ToggleMute);
             assert_eq!(app.playback_volume(), 0.0);
             app.dispatch(CommandId::ToggleMute);
-            assert_eq!(app.playback_volume(), 1.0, "initial default volume");
+            assert_eq!(app.playback_volume(), 0.5, "initial default volume");
             for volume in [0.35, 1.6, 0.2] {
                 app.set_playback_volume(volume);
                 app.dispatch(CommandId::ToggleMute);
@@ -16556,7 +16566,8 @@ mod tests {
             let second = app
                 .tabs
                 .open_new(root.join(name).with_file_name("second.wav"), kind);
-            assert_eq!(app.playback_volume(), 1.0);
+            app.seed_playback_volume(second);
+            assert_eq!(app.playback_volume(), 0.0);
             app.set_playback_volume(0.65);
             app.dispatch(CommandId::ToggleMute);
             app.dispatch(CommandId::ToggleMute);

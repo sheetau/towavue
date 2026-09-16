@@ -9,13 +9,28 @@ pub(super) struct PlaybackVolume {
 impl Default for PlaybackVolume {
     fn default() -> Self {
         Self {
-            level: 1.0,
-            unmuted: 1.0,
+            level: 0.5,
+            unmuted: 0.5,
         }
     }
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn seed_playback_volume(&mut self, id: TabId) {
+        if self.tabs.tabs().iter().any(|tab| {
+            tab.id == id && matches!(tab.target.media_kind(), MediaKind::Audio | MediaKind::Video)
+        }) {
+            // Capture at creation, including unopened background tabs. Activation
+            // and transfer preserve this snapshot, not another tab's later change.
+            self.playback_volumes.entry(id).or_insert_with(|| {
+                *self
+                    .last_playback_volume
+                    .lock()
+                    .expect("last listening volume")
+            });
+        }
+    }
+
     pub(super) fn stepped_playback_volume(&self, volume: f32, delta: f32) -> f32 {
         let next = (volume + delta * f32::from(self.volume_step_percent) / 100.0)
             .clamp(0.0, towavue_core::MAX_VOLUME);
@@ -74,6 +89,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             0.0
         };
+        *self
+            .last_playback_volume
+            .lock()
+            .expect("last listening volume") = *volume;
         let gain = self
             .edits
             .get(&id)
@@ -108,6 +127,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if level > 0.0 {
             volume.unmuted = level;
         }
+        *self
+            .last_playback_volume
+            .lock()
+            .expect("last listening volume") = *volume;
         // Existing saved gain remains independent; changing the listening level
         // never re-decodes the timeline, modifies history, or changes export.
         let gain = self.edit_state().volume * level;

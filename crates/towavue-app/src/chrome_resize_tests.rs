@@ -58,7 +58,7 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
                         || name.ends_with("\\track.wav")
                         || name == "00:00 / 03:00"
                         || name == "00:00"
-                        || name == "100%"
+                        || name == "50%"
                     {
                         result.insert(name.to_owned(), text.pos * density);
                     }

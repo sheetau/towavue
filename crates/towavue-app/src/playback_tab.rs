@@ -31,6 +31,7 @@ pub(super) struct RetainedPlaybackTab {
     pub folder_snapshot: Option<FolderSnapshot>,
     pub error: Option<String>,
     pub status: Option<(String, Instant)>,
+    pub export_notice: Option<(Instant, PathBuf)>,
     pub seek_latencies: Vec<Duration>,
     pub drift_samples: Vec<Duration>,
     pub metrics_recorded: bool,

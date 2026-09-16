@@ -136,6 +136,8 @@ fn current_frame_export_keeps_clicked_picture_edits_save_state_and_owner_guards(
             assert!(app.capture_frame_export().is_none(), "one export at a time");
             crate::audio_export_tests::drain_export(&mut app, &rx);
             assert!(app.export_error.is_none());
+            let shown = app.status_message.as_ref().expect("success notice").1;
+            assert_eq!(app.export_notice_target(shown), Some(target.as_path()));
             assert_eq!(
                 std::fs::read(&target).expect("frame PNG"),
                 towavue_runtime_windows::edited_video_frame_png(

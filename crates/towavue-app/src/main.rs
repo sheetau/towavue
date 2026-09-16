@@ -10,6 +10,7 @@ mod chrome;
 #[cfg(test)]
 mod chrome_resize_tests;
 mod cursor;
+mod export_notice;
 mod export_progress;
 mod file_drop;
 mod filmstrip;
@@ -255,6 +256,7 @@ enum UiAction {
     CommitVideoScrub(MediaTime),
     ResolveGuard(GuardDecision),
     CancelExport,
+    RevealExport(Instant),
     DismissExportError,
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
@@ -463,6 +465,7 @@ struct RetainedImageTab {
     state: PlaybackState,
     graphics_epoch: u64,
     status_message: Option<(String, Instant)>,
+    export_notice: Option<(Instant, PathBuf)>,
 }
 
 struct CachedImageTexture {
@@ -1008,6 +1011,7 @@ struct Application<N> {
     command_overlay_return_focus: Option<egui::Id>,
     palette: palette::CommandPalette,
     status_message: Option<(String, Instant)>,
+    export_notice: Option<(Instant, PathBuf)>,
     relative_seek_notice: Option<(Instant, i64)>,
     pending_guard: Option<GuardedAction>,
     guard_return_focus: Option<(TabId, egui::Id)>,
@@ -1273,6 +1277,7 @@ where
             command_overlay_return_focus: None,
             palette: palette::CommandPalette::default(),
             status_message: None,
+            export_notice: None,
             relative_seek_notice: None,
             pending_guard: None,
             guard_return_focus: None,
@@ -1644,6 +1649,7 @@ where
             state: self.state,
             graphics_epoch: self.graphics_epoch,
             status_message: self.status_message.take(),
+            export_notice: self.export_notice.take(),
         }
     }
 
@@ -1667,6 +1673,7 @@ where
         self.image_error = saved.error;
         self.state = saved.state;
         self.status_message = saved.status_message;
+        self.export_notice = saved.export_notice;
         self.restore_ui_textures |= saved.graphics_epoch != self.graphics_epoch;
         self.restored_reading_pages = self.reading_mode;
         if saved.resume_loading {
@@ -1748,6 +1755,7 @@ where
             folder_snapshot: self.folder_snapshot.take(),
             error: self.playback_error.take(),
             status: self.status_message.take(),
+            export_notice: self.export_notice.take(),
             seek_latencies: std::mem::take(&mut self.seek_latencies),
             drift_samples: std::mem::take(&mut self.drift_samples),
             metrics_recorded: self.metrics_recorded,
@@ -1807,6 +1815,7 @@ where
         self.folder_snapshot = saved.folder_snapshot;
         self.playback_error = saved.error;
         self.status_message = saved.status;
+        self.export_notice = saved.export_notice;
         self.seek_latencies = saved.seek_latencies;
         self.drift_samples = saved.drift_samples;
         self.metrics_recorded = saved.metrics_recorded;
@@ -5769,12 +5778,15 @@ where
                                         .then(|| time_selection::focus_hint(ui.ctx())).flatten()
                                 })
                             }).flatten();
+                            let mut export_link = None;
                             let (text, color, tooltip) =
                                 if let Some(message) = self.visual_selection_status().filter(|_| self.view_drag.is_some()) {
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(message) = selection_hint {
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(message) = self.status_notice() {
+                                    export_link = self.export_notice.as_ref().map(|(shown, _)| *shown)
+                                        .filter(|shown| self.export_notice_target(*shown).is_some());
                                     (message.clone(), chrome::FOREGROUND, message)
                                 } else if let Some(path) = self.displayed_image_path() {
                                     let parent = path
@@ -5795,11 +5807,21 @@ where
                                         format!("Shortcuts: {}", self.shortcut_path.display()),
                                     )
                                 };
-                            ui.add(
+                            let response = ui.add(
                                 egui::Label::new(RichText::new(text).size(12.0).color(color))
-                                    .truncate(),
+                                    .truncate()
+                                    .show_tooltip_when_elided(false)
+                                    .sense(if export_link.is_some() { egui::Sense::click() } else { egui::Sense::hover() }),
                             )
-                            .help_text(tooltip);
+                            .help_text(if export_link.is_some() { format!("{tooltip}\nShow exported file in Explorer") } else { tooltip });
+                            if let Some(shown) = export_link {
+                                response.widget_info(|| egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button, response.enabled(), "Show exported file in Explorer"));
+                                if response.clicked() {
+                                    actions.push(UiAction::RevealExport(shown));
+                                }
+                                response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                            }
                         },
                     );
                     let info_width = (info_right - ui.next_widget_position().x).max(0.0);
@@ -6405,6 +6427,11 @@ where
                 }
             }
             UiAction::Recent(action) => self.handle_recent_action(action),
+            UiAction::RevealExport(shown) => {
+                if let Some(path) = self.export_notice_target(shown).map(Path::to_path_buf) {
+                    self.reveal_path(path);
+                }
+            }
             UiAction::OpenGalleryBackground(path) => {
                 let Some(gallery) = self.tabs.gallery() else {
                     return;
@@ -7809,6 +7836,10 @@ where
                             },
                             export.request.target.display()
                         ));
+                        self.export_notice = self
+                            .status_message
+                            .as_ref()
+                            .map(|(_, shown)| (*shown, export.request.target.clone()));
                         self.refresh_title();
                         if !export.cancelling
                             && let Some(action) = export.continuation
@@ -7997,12 +8028,7 @@ where
                 }
             }
             CommandId::RevealFile => {
-                let notify = Arc::clone(&self.notify);
-                if let Err(error) =
-                    reveal_file(path, move |result| notify(AppEvent::FileRevealed(result)))
-                {
-                    self.set_status(format!("Could not reveal file: {error}"));
-                }
+                self.reveal_path(path);
             }
             CommandId::CloseTab => self.request_guarded(GuardedAction::CloseTab(id)),
             CommandId::CloseOtherTabs
@@ -9274,6 +9300,7 @@ where
     }
 
     fn set_status(&mut self, message: String) {
+        self.export_notice = None;
         self.relative_seek_notice = None;
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
@@ -10018,6 +10045,7 @@ where
             .is_some_and(|(_, shown)| shown.elapsed() >= STATUS_MESSAGE_DURATION)
         {
             self.status_message = None;
+            self.export_notice = None;
             self.request_redraw();
         }
         self.expire_shortcut_prefix();

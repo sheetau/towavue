@@ -579,6 +579,11 @@ fn export_progress_unknown_length_freezes_on_cancel_and_all_terminal_events_clea
         assert!(fill(&finished).is_none() && indicator(&finished).is_none());
         assert!(app.active_export.is_none());
         assert_eq!(app.export_error.is_some(), terminal == 2);
+        assert_eq!(app.export_notice.is_some(), terminal == 0);
+        if terminal == 0 {
+            let shown = app.status_message.as_ref().expect("success notice").1;
+            assert_eq!(app.export_notice_target(shown), Some(path.as_path()));
+        }
         app.handle_export_event(ExportEvent::Progress(Duration::from_secs(30)));
         assert!(
             app.active_export.is_none(),
@@ -684,5 +689,7 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     );
     assert_eq!(app.tabs.active().expect("other tab").id, other);
     assert!(target.is_file());
+    let shown = app.status_message.as_ref().expect("success notice").1;
+    assert_eq!(app.export_notice_target(shown), Some(target.as_path()));
     assert_eq!(std::fs::read(source).expect("source unchanged"), original);
 }

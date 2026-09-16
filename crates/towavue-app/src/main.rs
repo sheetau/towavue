@@ -9535,6 +9535,10 @@ where
         self.fullscreen_controls_visible = false;
         self.viewing_cursor.activity();
         if let Some(window) = &self.window {
+            let _transitions = self
+                .native_caption
+                .as_ref()
+                .and_then(|caption| caption.suppress_transitions());
             let monitor = window.current_monitor();
             if enabled {
                 // A maximized Win32 client otherwise retains its work-area inset in fullscreen.

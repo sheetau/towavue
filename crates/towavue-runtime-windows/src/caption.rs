@@ -5,8 +5,9 @@ use std::sync::Arc;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
-    DwmDefWindowProc, DwmExtendFrameIntoClientArea, DwmGetWindowAttribute, DwmSetWindowAttribute,
+    DWMWA_CAPTION_BUTTON_BOUNDS, DWMWA_CAPTION_COLOR, DWMWA_TRANSITIONS_FORCEDISABLED,
+    DWMWA_USE_IMMERSIVE_DARK_MODE, DwmDefWindowProc, DwmExtendFrameIntoClientArea,
+    DwmGetWindowAttribute, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     BLACK_BRUSH, ClientToScreen, CombineRgn, CreateRectRgn, DeleteObject, FillRect, GetDC,
@@ -51,9 +52,53 @@ pub struct NativeCaption {
     handle: HWND,
     state: Rc<CaptionState>,
     windowed_size: Cell<Option<winit::dpi::LogicalSize<f64>>>,
+    transitions_suppressed: Cell<bool>,
 }
 
 impl NativeCaption {
+    /// Suppress this window's DWM animations for a synchronous fullscreen change,
+    /// including the caller's intermediate restore and final re-maximize.
+    pub fn suppress_transitions(&self) -> Option<impl Drop + '_> {
+        struct RestoreTransitions<'a> {
+            caption: &'a NativeCaption,
+            previous: bool,
+        }
+        impl Drop for RestoreTransitions<'_> {
+            fn drop(&mut self) {
+                // SAFETY: the borrow retains the same-thread HWND owner; DWM copies
+                // the scalar synchronously, including during unwind.
+                unsafe {
+                    let previous = i32::from(self.previous);
+                    let _ = DwmSetWindowAttribute(
+                        self.caption.handle,
+                        DWMWA_TRANSITIONS_FORCEDISABLED,
+                        (&previous as *const i32).cast(),
+                        size_of::<i32>() as u32,
+                    );
+                }
+                self.caption.transitions_suppressed.set(self.previous);
+            }
+        }
+        // SAFETY: NativeCaption is thread-bound and retains its window. Winit's
+        // same-thread fullscreen/maximize calls execute inline, within this guard.
+        unsafe {
+            let disabled = 1_i32;
+            DwmSetWindowAttribute(
+                self.handle,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                (&disabled as *const i32).cast(),
+                size_of::<i32>() as u32,
+            )
+            .ok()?;
+            Some(RestoreTransitions {
+                caption: self,
+                // This is a set-only DWM attribute. The caption is its sole writer;
+                // preserve nested suppression without querying an unsupported value.
+                previous: self.transitions_suppressed.replace(true),
+            })
+        }
+    }
+
     pub fn new(window: Arc<Window>) -> Result<Self, Box<dyn std::error::Error>> {
         let initial_size = window.inner_size();
         let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
@@ -95,6 +140,7 @@ impl NativeCaption {
             handle,
             state,
             windowed_size: Cell::new(None),
+            transitions_suppressed: Cell::new(false),
         };
         // SAFETY: DWM copies this scalar attribute synchronously. Older systems may
         // reject dark mode; their native frame remains functional with its OS colors.
@@ -830,6 +876,24 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                let transitions_disabled = || i32::from(caption.transitions_suppressed.get());
+                let previous = transitions_disabled();
+                {
+                    let _outer = caption
+                        .suppress_transitions()
+                        .expect("suppress transitions");
+                    assert_eq!(transitions_disabled(), 1);
+                    {
+                        let _inner = caption.suppress_transitions().expect("nested suppression");
+                        assert_eq!(transitions_disabled(), 1);
+                    }
+                    assert_eq!(
+                        transitions_disabled(),
+                        1,
+                        "preserve an existing suppression"
+                    );
+                }
+                assert_eq!(transitions_disabled(), previous);
                 // Hidden native bounds may be nonempty but are not a visible
                 // caption measurement. Initial layout must use the DPI fallback.
                 // SAFETY: this test owns the hidden window on its event-loop thread.
@@ -1208,6 +1272,44 @@ mod tests {
                                     );
                                 }
                                 let _ = DeleteObject(region.into());
+                                let windowed_size = window.inner_size();
+                                let windowed_position = window.outer_position().expect("position");
+                                {
+                                    let _transition = caption
+                                        .suppress_transitions()
+                                        .expect("fullscreen entry suppression");
+                                    if maximized {
+                                        window.set_maximized(false);
+                                    }
+                                    caption.set_fullscreen(true);
+                                    assert_eq!(transitions_disabled(), 1);
+                                    assert_eq!(window.inner_size(), monitor.size());
+                                    assert_eq!(
+                                        window.outer_position().expect("position"),
+                                        monitor.position()
+                                    );
+                                }
+                                assert_eq!(transitions_disabled(), previous);
+                                {
+                                    let _transition = caption
+                                        .suppress_transitions()
+                                        .expect("fullscreen exit suppression");
+                                    caption.set_fullscreen(false);
+                                    if maximized {
+                                        window.set_maximized(true);
+                                    }
+                                    assert_eq!(transitions_disabled(), 1);
+                                }
+                                assert_eq!(transitions_disabled(), previous);
+                                assert_eq!(window.is_maximized(), maximized);
+                                assert_eq!(window.inner_size(), windowed_size);
+                                assert_eq!(
+                                    window.outer_position().expect("position"),
+                                    windowed_position
+                                );
+                                eprintln!(
+                                    "PASS fullscreen transition: maximized={maximized} scale={scale}"
+                                );
                             }
                             for show in [SW_HIDE, SW_SHOWMINNOACTIVE] {
                                 let _ = ShowWindow(handle, show);

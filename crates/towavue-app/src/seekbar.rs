@@ -33,86 +33,109 @@ pub fn show_drag(
         .fixed_pos(status.left_top() - egui::vec2(0.0, 6.0))
         .constrain(false)
         .show(context, |ui| {
-            let (rect, response) = ui.allocate_exact_size(
+            let (_, response) = ui.allocate_exact_size(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            let drag = if video {
-                timeline_input::video_seek_drag(&response)
-            } else {
-                timeline_input::seek_drag(&response)
-            };
-            // The app applies the committed seek after painting. Keep its position
-            // for every pass of this release frame, without replaying the action.
-            let frame = context.cumulative_frame_nr();
-            let release = context.data_mut(|data| {
-                let id = response.id.with("release-progress");
-                if drag.released
-                    && let Some(position) = drag.position
-                {
-                    data.insert_temp(id, (frame, compact_ratio(rect, position.x)));
-                }
-                data.get_temp::<(u64, f32)>(id)
-                    .filter(|(saved, _)| *saved == frame && enabled)
-                    .map(|(_, progress)| progress)
-            });
-            let preview = release.or_else(|| {
-                drag.dragging
-                    .then(|| drag.position.map(|p| compact_ratio(rect, p.x)))
-                    .flatten()
-            });
-            let active = response.hovered() || response.has_focus() || preview.is_some();
-            let progress = preview.unwrap_or(progress);
-            let height = if active {
-                4.0
-            } else {
-                1.0 / context.pixels_per_point()
-            };
-            let travel = if active { compact_travel(rect) } else { rect };
-            // Only the handle's center is inset. Track/progress keep their full
-            // width when hovered so expanding the bar does not shorten its ends.
-            let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width(), height));
-            let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
-            let progress_x = egui::lerp(rect.x_range(), progress.clamp(0.0, 1.0));
-            ui.painter().rect_filled(
-                track,
-                0.0,
-                if active {
-                    crate::chrome::HOVER
-                } else {
-                    crate::chrome::BORDER
-                },
-            );
-            if response.hovered()
-                && let Some(pointer) = response.hover_pos()
-            {
-                ui.painter().rect_filled(
-                    Rect::from_min_max(
-                        track.min,
-                        egui::pos2(pointer.x.clamp(track.left(), track.right()), track.bottom()),
-                    ),
-                    0.0,
-                    egui::Color32::from_white_alpha(64),
-                );
-            }
-            ui.painter().rect_filled(
-                Rect::from_min_max(track.min, egui::pos2(progress_x, track.bottom())),
-                0.0,
-                crate::chrome::FOREGROUND,
-            );
-            if active {
-                ui.painter().circle_filled(
-                    egui::pos2(x, rect.center().y),
-                    compact_radius(rect),
-                    crate::chrome::FOREGROUND,
-                );
-            }
-            (
-                response.on_hover_cursor(egui::CursorIcon::PointingHand),
-                drag,
-            )
+            show_control(ui, response, progress, video)
         })
         .inner
+}
+
+/// The same control within an existing card layer, without a separate Area or preview.
+pub fn inline(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    progress: f32,
+) -> (Response, timeline_input::Drag) {
+    let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+    show_control(ui, response, progress, false)
+}
+
+fn show_control(
+    ui: &egui::Ui,
+    response: Response,
+    progress: f32,
+    video: bool,
+) -> (Response, timeline_input::Drag) {
+    let context = ui.ctx();
+    let rect = response.rect;
+    let enabled = response.enabled();
+    let drag = if video {
+        timeline_input::video_seek_drag(&response)
+    } else {
+        timeline_input::seek_drag(&response)
+    };
+    // The app applies the committed seek after painting. Keep its position
+    // for every pass of this release frame, without replaying the action.
+    let frame = context.cumulative_frame_nr();
+    let release = context.data_mut(|data| {
+        let id = response.id.with("release-progress");
+        if drag.released
+            && let Some(position) = drag.position
+        {
+            data.insert_temp(id, (frame, compact_ratio(rect, position.x)));
+        }
+        data.get_temp::<(u64, f32)>(id)
+            .filter(|(saved, _)| *saved == frame && enabled)
+            .map(|(_, progress)| progress)
+    });
+    let preview = release.or_else(|| {
+        drag.dragging
+            .then(|| drag.position.map(|p| compact_ratio(rect, p.x)))
+            .flatten()
+    });
+    let active = response.hovered() || response.has_focus() || preview.is_some();
+    let progress = preview.unwrap_or(progress);
+    let height = if active {
+        4.0
+    } else {
+        1.0 / context.pixels_per_point()
+    };
+    let travel = if active { compact_travel(rect) } else { rect };
+    // Only the handle's center is inset. Track/progress keep their full
+    // width when hovered so expanding the bar does not shorten its ends.
+    let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width(), height));
+    let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
+    let progress_x = egui::lerp(rect.x_range(), progress.clamp(0.0, 1.0));
+    ui.painter().rect_filled(
+        track,
+        0.0,
+        if active {
+            crate::chrome::HOVER
+        } else {
+            crate::chrome::BORDER
+        },
+    );
+    if response.hovered()
+        && let Some(pointer) = response.hover_pos()
+    {
+        ui.painter().rect_filled(
+            Rect::from_min_max(
+                track.min,
+                egui::pos2(pointer.x.clamp(track.left(), track.right()), track.bottom()),
+            ),
+            0.0,
+            egui::Color32::from_white_alpha(64),
+        );
+    }
+    ui.painter().rect_filled(
+        Rect::from_min_max(track.min, egui::pos2(progress_x, track.bottom())),
+        0.0,
+        crate::chrome::FOREGROUND,
+    );
+    if active {
+        ui.painter().circle_filled(
+            egui::pos2(x, rect.center().y),
+            compact_radius(rect),
+            crate::chrome::FOREGROUND,
+        );
+    }
+    (
+        response.on_hover_cursor(egui::CursorIcon::PointingHand),
+        drag,
+    )
 }
 
 pub fn value_input(

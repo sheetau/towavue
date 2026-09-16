@@ -14,38 +14,60 @@ pub(super) struct Transport {
     pub next: bool,
 }
 
-pub(super) fn progress(
-    ui: &egui::Ui,
-    thumbnail: egui::Rect,
-    position: MediaTime,
-    duration: Option<MediaTime>,
-) {
-    let pixel = 1.0 / ui.ctx().pixels_per_point();
-    let bottom = (thumbnail.bottom() / pixel).floor() * pixel;
-    let track = egui::Rect::from_min_max(
-        egui::pos2(thumbnail.left(), bottom - pixel),
-        egui::pos2(thumbnail.right(), bottom),
-    );
-    ui.painter().rect_filled(track, 0.0, chrome::MUTED);
-    if let Some(duration) = duration.filter(|duration| *duration > MediaTime::ZERO) {
-        let fraction = (position.as_nanoseconds() as f64 / duration.as_nanoseconds() as f64)
-            .clamp(0.0, 1.0) as f32;
-        ui.painter().rect_filled(
-            track.with_max_x(track.left() + track.width() * fraction),
-            0.0,
-            chrome::FOREGROUND,
-        );
-    }
+#[derive(Debug, PartialEq)]
+pub(super) enum Action {
+    Command(CommandId),
+    Seek(MediaTime),
 }
 
 impl Transport {
-    pub fn show(&self, ui: &mut egui::Ui, thumbnail: egui::Rect) -> Option<CommandId> {
-        progress(ui, thumbnail, self.position, self.duration);
+    pub fn show(&self, ui: &mut egui::Ui, thumbnail: egui::Rect) -> Option<Action> {
+        let duration = self.duration.filter(|duration| *duration > MediaTime::ZERO);
+        let seconds = duration.map_or(0.0, MediaTime::as_seconds_f64);
+        let progress = if seconds > 0.0 {
+            (self.position.as_seconds_f64() / seconds).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        let pixel = 1.0 / ui.ctx().pixels_per_point();
+        let rect = egui::Rect::from_center_size(
+            egui::pos2(
+                thumbnail.center().x,
+                (thumbnail.bottom() / pixel).floor() * pixel - pixel * 0.5,
+            ),
+            egui::vec2(thumbnail.width(), 12.0),
+        );
+        let seek = ui
+            .add_enabled_ui(self.enabled && duration.is_some(), |ui| {
+                let (response, drag) = seekbar::inline(
+                    ui,
+                    rect,
+                    ui.id().with(("preview-seek", self.instance)),
+                    progress,
+                );
+                let value = seekbar::value_input(
+                    &response,
+                    "Preview playback position (seconds)",
+                    self.position.as_seconds_f64(),
+                    0.0..=seconds,
+                    KEYBOARD_SEEK_STEP.as_secs_f64(),
+                    true,
+                );
+                value
+                    .or_else(|| {
+                        drag.released
+                            .then_some(drag.position)
+                            .flatten()
+                            .map(|point| seconds * f64::from(seekbar::compact_ratio(rect, point.x)))
+                    })
+                    .map(|seconds| Action::Seek(media_time(Duration::from_secs_f64(seconds))))
+            })
+            .inner;
         if self.state == PlaybackState::Playing {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
         if !ui.rect_contains_pointer(thumbnail) {
-            return None;
+            return seek;
         }
         let audio = self.kind == MediaKind::Audio;
         let rect = egui::Rect::from_center_size(
@@ -103,7 +125,7 @@ impl Transport {
                 action = Some(CommandId::NextMedia);
             }
         }
-        action
+        action.map(Action::Command).or(seek)
     }
 }
 
@@ -171,33 +193,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         path: PathBuf,
         command: CommandId,
     ) {
-        if self.modal_input_blocked()
-            || self.palette_open
-            || self.grid_open
-            || self.filmstrip_open
-            || self.incoming_tab_pointer.is_some()
-            || self.ui_context.as_ref().is_some_and(|context| {
-                egui::Popup::is_any_open(context)
-                    || context.input(|input| !input.raw.hovered_files.is_empty())
-            })
-        {
-            return;
-        }
-        let Some(transport) = self
-            .preview_transport(tab, &path)
-            .filter(|transport| transport.instance == instance)
-        else {
+        let Some(transport) = self.validated_preview_transport(tab, instance, &path) else {
             return;
         };
-        if self
-            .tabs
-            .tabs()
-            .iter()
-            .find(|item| item.id == tab)
-            .is_none_or(|tab| tab.target.current_path() != path)
-        {
-            return;
-        }
         match command {
             CommandId::TogglePause if transport.enabled => {
                 if self.displayed_tab == Some(tab) {
@@ -241,5 +239,78 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             _ => return,
         }
         self.request_redraw();
+    }
+
+    pub(super) fn handle_preview_seek(
+        &mut self,
+        tab: TabId,
+        instance: u64,
+        path: &Path,
+        target: MediaTime,
+    ) {
+        let Some(transport) = self
+            .validated_preview_transport(tab, instance, path)
+            .filter(|transport| transport.enabled)
+        else {
+            return;
+        };
+        let Some(duration) = transport
+            .duration
+            .filter(|duration| *duration > MediaTime::ZERO)
+        else {
+            return;
+        };
+        let target = target.max(MediaTime::ZERO).min(duration);
+        if self.displayed_tab == Some(tab) {
+            self.seek_to(target);
+        } else {
+            let edit = self
+                .edits
+                .get(&tab)
+                .map(EditHistory::state)
+                .unwrap_or_default();
+            let saved = self
+                .retained_playback
+                .get_mut(&tab)
+                .expect("validated playback");
+            saved.seek_to(target, edit);
+            if saved.state == PlaybackState::Playing {
+                self.arm_audio_queue(tab);
+            }
+        }
+        self.request_redraw();
+    }
+
+    fn validated_preview_transport(
+        &self,
+        tab: TabId,
+        instance: u64,
+        path: &Path,
+    ) -> Option<Transport> {
+        if self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || self.filmstrip_open
+            || self.incoming_tab_pointer.is_some()
+            || self.ui_context.as_ref().is_some_and(|context| {
+                egui::Popup::is_any_open(context)
+                    || context.input(|input| !input.raw.hovered_files.is_empty())
+            })
+        {
+            return None;
+        }
+        let transport = self
+            .preview_transport(tab, path)
+            .filter(|transport| transport.instance == instance)?;
+        if self
+            .tabs
+            .tabs()
+            .iter()
+            .find(|item| item.id == tab)
+            .is_none_or(|tab| tab.target.current_path() != path)
+        {
+            return None;
+        }
+        Some(transport)
     }
 }

@@ -219,8 +219,177 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
             assert_eq!(app.tabs.active().expect("unchanged foreground").id, active);
             assert_eq!(app.edits[&tab], history);
         }
+        let (output, _) = frame(app, button, None);
+        let bar = node_center(&output, "Preview playback position (seconds)");
+        frame(app, bar, None);
+        assert_eq!(frame(app, bar, Some(true)).1, 0);
+        assert_eq!(frame(app, bar, Some(false)).1, 1);
+        let transport = app.preview_transport(tab, &path).expect("seek owner");
+        let duration = transport.duration.expect("known duration");
+        let session = if app.displayed_tab == Some(tab) {
+            app.session.as_ref()
+        } else {
+            app.retained_playback[&tab].session.as_ref()
+        }
+        .expect("same tab session");
+        let target = media_time(Duration::from_secs_f64(duration.as_seconds_f64() * 0.5));
+        assert!((session.target().as_nanoseconds() - target.as_nanoseconds()).abs() <= 1);
+        assert_eq!(transport.state, PlaybackState::Paused);
+        assert_eq!(
+            app.tabs.active().expect("seek does not activate").id,
+            active
+        );
+        assert_eq!(app.edits[&tab], history);
+        if app.displayed_tab != Some(tab) && transport.kind == MediaKind::Video {
+            assert!(app.retained_playback[&tab].video_suspended);
+        }
     }
     app.ui_context = previous_context;
+}
+
+fn exercise_retained_preview_seek<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    events: &mpsc::Receiver<AppEvent>,
+    tab: TabId,
+) {
+    let active = app.tabs.active_id();
+    let saved = &app.retained_playback[&tab];
+    let (path, instance, kind) = (saved.path.clone(), saved.instance, saved.kind);
+    let duration = media_time(saved.duration.expect("source duration"));
+    let quarter = MediaTime::from_nanoseconds(duration.as_nanoseconds() / 4);
+    let three_quarters = MediaTime::from_nanoseconds(duration.as_nanoseconds() * 3 / 4);
+    let keep = towavue_core::TimeRange::new(quarter, three_quarters).expect("keep range");
+    let history = app.edits.get_mut(&tab).expect("history");
+    history.set_source_duration(Some(duration));
+    history.push(
+        EditOperation::Timeline(towavue_core::TimelineEdit::Keep(keep)),
+        kind,
+    );
+    let history = history.clone();
+    let plan = history.timeline(duration).expect("edited timeline");
+    let end = plan.duration();
+    let target = MediaTime::from_nanoseconds(end.as_nanoseconds() / 2);
+    let selection = towavue_core::TimeRange::new(
+        MediaTime::from_nanoseconds(end.as_nanoseconds() / 4),
+        MediaTime::from_nanoseconds(end.as_nanoseconds() * 3 / 4),
+    )
+    .expect("edited selection");
+    let saved = app
+        .retained_playback
+        .get_mut(&tab)
+        .expect("background owner");
+    saved
+        .session
+        .as_mut()
+        .expect("session")
+        .seek_with_timeline(MediaTime::ZERO, 1.0, plan.clone(), true)
+        .expect("prepare edited source");
+    saved.state = PlaybackState::Paused;
+    saved.clock = Some(PlaybackClock::paused(MediaTime::ZERO, 1.0));
+    saved.time_selection = Some(selection);
+    saved.playback_selection = None;
+    app.handle_preview_seek(tab, instance, &path, target);
+    assert_eq!(app.retained_playback[&tab].state, PlaybackState::Paused);
+    assert!(app.retained_playback[&tab].playback_selection.is_none());
+    app.handle_preview_transport(tab, instance, path.clone(), CommandId::TogglePause);
+    app.handle_preview_seek(tab, instance, &path, target);
+    assert_eq!(
+        app.retained_playback[&tab].playback_selection,
+        Some(selection)
+    );
+    assert_eq!(app.retained_playback[&tab].state, PlaybackState::Playing);
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("selected session")
+            .range()
+            .end,
+        Some(selection.end())
+    );
+    app.handle_preview_seek(tab, instance, &path, MediaTime::ZERO);
+    assert!(app.retained_playback[&tab].playback_selection.is_none());
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("full plan")
+            .timeline(),
+        Some(&plan)
+    );
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("full range")
+            .range()
+            .end,
+        Some(end)
+    );
+    wait(app, events, |app| {
+        app.retained_playback[&tab].position() > media_time(Duration::from_millis(40))
+    });
+    assert_eq!(app.retained_playback[&tab].state, PlaybackState::Playing);
+    app.handle_preview_seek(tab, instance, &path, end);
+    assert_eq!(app.retained_playback[&tab].state, PlaybackState::Paused);
+    let generation = app.retained_playback[&tab]
+        .session
+        .as_ref()
+        .expect("end preview")
+        .generation();
+    app.handle_preview_seek(tab, instance.wrapping_add(1), &path, MediaTime::ZERO);
+    app.handle_preview_seek(
+        tab,
+        instance,
+        &path.with_extension("stale"),
+        MediaTime::ZERO,
+    );
+    app.palette_open = true;
+    app.handle_preview_seek(tab, instance, &path, MediaTime::ZERO);
+    app.palette_open = false;
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("same generation")
+            .generation(),
+        generation
+    );
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("same target")
+            .target(),
+        end
+    );
+    app.retained_playback
+        .get_mut(&tab)
+        .expect("ended fixture")
+        .state = PlaybackState::Ended;
+    app.handle_preview_seek(tab, instance, &path, target);
+    assert_eq!(app.retained_playback[&tab].state, PlaybackState::Paused);
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("reopened end preview")
+            .target(),
+        target
+    );
+    assert_eq!(
+        app.retained_playback[&tab]
+            .session
+            .as_ref()
+            .expect("same edit mapping")
+            .timeline(),
+        Some(&plan)
+    );
+    assert_eq!(app.edits[&tab], history);
+    assert_eq!(app.tabs.active_id(), active);
+    if kind == MediaKind::Video {
+        assert!(app.retained_playback[&tab].video_suspended);
+    }
 }
 
 fn recover_failed_playback<N: Fn(AppEvent) + Send + Sync + 'static>(
@@ -385,15 +554,19 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_control
                     !app.image_loading && app.image.is_some()
                 });
                 click_preview_transport(&mut app, first);
-                let music = open_muted(&mut app, self.root.join("tone.wav"), MediaKind::Audio);
-                wait(&mut app, &events, |app| app.media_duration.is_some());
-                app.toggle_pause();
-                click_preview_transport(&mut app, music);
-                app.open_external(self.root.join("image.bmp"), false);
-                wait(&mut app, &events, |app| {
-                    !app.image_loading && app.image.is_some()
-                });
-                click_preview_transport(&mut app, music);
+                exercise_retained_preview_seek(&mut app, &events, first);
+                if self.audio {
+                    let music = open_muted(&mut app, self.root.join("tone.wav"), MediaKind::Audio);
+                    wait(&mut app, &events, |app| app.media_duration.is_some());
+                    app.toggle_pause();
+                    click_preview_transport(&mut app, music);
+                    app.open_external(self.root.join("image.bmp"), false);
+                    wait(&mut app, &events, |app| {
+                        !app.image_loading && app.image.is_some()
+                    });
+                    click_preview_transport(&mut app, music);
+                    exercise_retained_preview_seek(&mut app, &events, music);
+                }
                 event_loop.exit();
                 return;
             }
@@ -911,5 +1084,14 @@ fn tab_preview_play_pause_keeps_active_and_background_cards_open() {
         "playback_tab_tests::tab_preview_play_pause_keeps_active_and_background_cards_open",
     ) {
         run_trial(root, true, false, true);
+    }
+}
+
+#[test]
+fn tab_preview_seeks_video_only_background_without_losing_its_clock() {
+    if let Some(root) = tests::isolated_test_root(
+        "playback_tab_tests::tab_preview_seeks_video_only_background_without_losing_its_clock",
+    ) {
+        run_trial(root, false, false, true);
     }
 }

@@ -230,6 +230,82 @@ impl RetainedPlaybackTab {
         self.state = next;
     }
 
+    /// Seek on the edited axis without activating the tab or waking hidden video.
+    pub fn seek_to(&mut self, target: MediaTime, edit: towavue_core::EditState) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let plan = session.timeline().cloned();
+        let duration = plan
+            .as_ref()
+            .map(towavue_core::EditTimeline::duration)
+            .or(self.duration.map(media_time));
+        if self
+            .playback_selection
+            .is_some_and(|range| target < range.start() || target > range.end())
+        {
+            self.playback_selection = None;
+        }
+        if self.state == PlaybackState::Playing && self.playback_selection.is_none() {
+            self.playback_selection = self.time_selection.filter(|range| {
+                target >= range.start()
+                    && target < range.end()
+                    && duration.is_some_and(|duration| range.end() <= duration)
+            });
+        }
+        let end = self
+            .playback_selection
+            .map(towavue_core::TimeRange::end)
+            .or(duration);
+        let target = end
+            .map_or(target, |end| target.min(end))
+            .max(MediaTime::ZERO);
+        let range = self.playback_selection.map_or_else(
+            || {
+                plan.as_ref().map_or_else(
+                    || edit.playback_range(),
+                    |plan| towavue_core::PlaybackRange {
+                        start: MediaTime::ZERO,
+                        end: Some(plan.duration()),
+                    },
+                )
+            },
+            |range| towavue_core::PlaybackRange {
+                start: range.start(),
+                end: Some(range.end()),
+            },
+        );
+        let pause =
+            self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
+        let result = match plan {
+            Some(plan) => session.seek_with_timeline_selection(
+                target,
+                edit.rate,
+                plan,
+                self.playback_selection,
+                pause,
+            ),
+            None => session.seek_with_edits(target, edit.rate, range, pause),
+        };
+        match result {
+            Ok(_) => {
+                if pause {
+                    self.state = PlaybackState::Paused;
+                }
+                self.audio_drained = !session.has_audio();
+                self.pending_time = None;
+                self.decode_finished = false;
+                self.metrics_recorded = false;
+                if let Some(owner) = &mut self.resume {
+                    owner.natural_end = false;
+                }
+                // Hidden video does not produce a first-frame clock anchor.
+                self.anchor(target, self.state != PlaybackState::Playing);
+            }
+            Err(error) => self.fail(error.to_string()),
+        }
+    }
+
     pub fn suspend_video_if_bounded(&mut self) {
         if self.kind != MediaKind::Video || self.video_suspended || self.end().is_none() {
             return;

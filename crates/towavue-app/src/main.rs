@@ -241,6 +241,7 @@ enum UiAction {
     ActivateTab(TabId),
     TabCommand(TabId, CommandId),
     PreviewTransport(TabId, u64, PathBuf, CommandId),
+    PreviewSeek(TabId, u64, PathBuf, MediaTime),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     TimeAdjustment(
@@ -5288,19 +5289,31 @@ where
                                         let transport = hovered
                                             .then(|| self.preview_transport(tab.id, &target.path))
                                             .flatten();
-                                        if let Some(command) = self.tab_preview.show_with_transport(
+                                        if let Some(action) = self.tab_preview.show_with_transport(
                                             &response,
                                             &target,
                                             retained_image.as_ref(),
                                             transport.as_ref(),
                                         ) && let Some(transport) = transport
                                         {
-                                            actions.push(UiAction::PreviewTransport(
-                                                tab.id,
-                                                transport.instance,
-                                                target.path.clone(),
-                                                command,
-                                            ));
+                                            actions.push(match action {
+                                                preview_transport::Action::Command(command) => {
+                                                    UiAction::PreviewTransport(
+                                                        tab.id,
+                                                        transport.instance,
+                                                        target.path.clone(),
+                                                        command,
+                                                    )
+                                                }
+                                                preview_transport::Action::Seek(position) => {
+                                                    UiAction::PreviewSeek(
+                                                        tab.id,
+                                                        transport.instance,
+                                                        target.path.clone(),
+                                                        position,
+                                                    )
+                                                }
+                                            });
                                         }
                                     }
                                     if let Some((target, focus)) = tab_menu_focus
@@ -6356,6 +6369,9 @@ where
             UiAction::ActivateTab(id) => self.activate_tab(id),
             UiAction::PreviewTransport(id, instance, path, command) => {
                 self.handle_preview_transport(id, instance, path, command)
+            }
+            UiAction::PreviewSeek(id, instance, path, target) => {
+                self.handle_preview_seek(id, instance, &path, target)
             }
             UiAction::TabCommand(id, command) => {
                 let focus = self

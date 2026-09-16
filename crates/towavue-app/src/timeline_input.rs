@@ -60,6 +60,16 @@ pub fn is_active(context: &Context) -> bool {
     })
 }
 
+pub fn owns_layer(context: &Context, layer: egui::LayerId) -> bool {
+    context
+        .data(|data| {
+            data.get_temp::<State>(state_id())
+                .and_then(|state| state.active)
+        })
+        .and_then(|active| context.read_response(active.id))
+        .is_some_and(|response| response.layer_id == layer)
+}
+
 pub fn is_dragging(response: &Response) -> bool {
     response.ctx.data(|data| {
         data.get_temp::<State>(state_id())

@@ -400,7 +400,7 @@ impl TabPreview {
         target: &Target,
         retained: Option<&RetainedPreview>,
         transport: Option<&crate::preview_transport::Transport>,
-    ) -> Option<towavue_core::CommandId> {
+    ) -> Option<crate::preview_transport::Action> {
         crate::media_preview::Preview::tab(response)
             .show(|ui| {
                 ui.set_max_width(240.0);

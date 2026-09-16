@@ -41,6 +41,10 @@ pub fn tab_hovered(response: &Response) -> bool {
         return false;
     }
     let layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("media-preview"));
+    // A captured card seek must receive its release even outside the card.
+    if crate::timeline_input::owns_layer(context, layer) {
+        return true;
+    }
     if open.card.contains(pointer) {
         return context.layer_id_at(pointer) == Some(layer);
     }
@@ -167,6 +171,11 @@ impl Preview {
                 })
         {
             if self.seek.is_none() {
+                let layer =
+                    egui::LayerId::new(egui::Order::Tooltip, response.id.with("media-preview"));
+                if crate::timeline_input::owns_layer(context, layer) {
+                    crate::timeline_input::cancel(context);
+                }
                 context.data_mut(|data| {
                     if data
                         .get_temp::<TabHover>(tab_hover_id())

@@ -1111,3 +1111,126 @@ fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
         })
         .expect("native sequence");
 }
+
+#[test]
+fn fresh_direct_and_gallery_opens_preserve_complete_shell_order() {
+    run_first_open_order_routes(
+        "image_navigation::sequence_tests::fresh_direct_and_gallery_opens_preserve_complete_shell_order",
+        false,
+    );
+}
+
+#[test]
+#[ignore = "read-only initial-open routes for TOWAVUE_SHELL_REFERENCE_DIR; isolated settings, no visible window"]
+fn reference_direct_and_gallery_opens_preserve_complete_shell_order() {
+    run_first_open_order_routes(
+        "image_navigation::sequence_tests::reference_direct_and_gallery_opens_preserve_complete_shell_order",
+        true,
+    );
+}
+
+fn run_first_open_order_routes(test_name: &str, reference: bool) {
+    let Some(root) = crate::tests::isolated_test_root(test_name) else {
+        return;
+    };
+    let folder = if reference {
+        PathBuf::from(
+            std::env::var_os("TOWAVUE_SHELL_REFERENCE_DIR").expect("explicit reference folder"),
+        )
+    } else {
+        let folder = root.join("media");
+        std::fs::create_dir(&folder).expect("owned folder");
+        for index in 0..128 {
+            super::performance_tests::bitmap_fixture(&folder.join(format!("{index:03}.bmp")));
+        }
+        folder
+    };
+    let mut order = FolderOrderProvider::new().expect("baseline Shell provider");
+    let baseline = order.snapshot(&folder).expect("baseline native order");
+    assert_ne!(baseline.source, FolderSnapshotSource::NaturalNameFallback);
+    let paths = baseline
+        .items_of_kind(MediaKind::Image)
+        .map(|item| item.path.clone())
+        .collect::<Vec<_>>();
+    assert!(!paths.is_empty());
+    if !reference {
+        assert_eq!(paths.len(), 128);
+    }
+    for gallery in [false, true] {
+        for index in [0, paths.len() / 2, paths.len() - 1] {
+            let (notify, events) = std::sync::mpsc::channel();
+            let mut app = Application::new(None, move |event| {
+                let _ = notify.send(event);
+            })
+            .expect("fresh app");
+            app.ui_context = Some(fonts::test_context());
+            assert!(app.folder_snapshot.is_none());
+            if gallery {
+                assert_eq!(
+                    app.tabs.active_id(),
+                    Some(app.tabs.gallery().expect("Gallery"))
+                );
+                app.handle_ui_action(UiAction::Recent(menu::RecentAction::Open(
+                    paths[index].clone(),
+                    towavue_runtime_windows::RecentKind::File,
+                    menu::OpenTarget::Tab,
+                )));
+            } else {
+                app.open_external(paths[index].clone(), false);
+            }
+            assert!(
+                app.folder_snapshot.is_none(),
+                "do not publish speculative order before Shell completion"
+            );
+            let started = Instant::now();
+            while app.folder_snapshot.is_none() {
+                let event = events
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("native completion event");
+                app.handle_app_event(event);
+                assert!(
+                    started.elapsed() < Duration::from_secs(30),
+                    "initial folder load timed out"
+                );
+            }
+            let snapshot = app.folder_snapshot.as_ref().expect("initial snapshot");
+            assert_ne!(snapshot.source, FolderSnapshotSource::NaturalNameFallback);
+            assert_eq!(snapshot.sort_columns, baseline.sort_columns);
+            assert!(
+                snapshot
+                    .items
+                    .iter()
+                    .map(|item| &item.path)
+                    .eq(baseline.items.iter().map(|item| &item.path)),
+                "first applied order must be complete and match the Shell baseline"
+            );
+            assert_eq!(app.path.as_ref(), Some(&paths[index]));
+            let source = snapshot.source;
+            // Folder enumeration can finish before the first image decoder. Card
+            // ownership is available after that independent completion arrives.
+            while app.displayed_tab.is_none() {
+                let event = events
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("first image completion");
+                app.handle_app_event(event);
+                assert!(
+                    started.elapsed() < Duration::from_secs(30),
+                    "initial image load timed out"
+                );
+            }
+            let tab = app.displayed_tab.expect("image tab");
+            let position = app
+                .preview_folder(tab, &paths[index])
+                .expect("shared hover-card folder position");
+            assert_eq!(position.index, index);
+            assert_eq!(position.count, paths.len());
+            eprintln!(
+                "FIRST_OPEN gallery={gallery} index={index} count={} source={:?}",
+                paths.len(),
+                source
+            );
+        }
+    }
+    // The isolated-test parent removes generated media/settings after all child
+    // workers exit. Reference media is outside that owned root.
+}

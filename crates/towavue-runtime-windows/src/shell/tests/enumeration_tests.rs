@@ -168,3 +168,271 @@ fn hidden_shell_enumeration_reports_batch_cost() -> Result<(), &'static str> {
     fs::remove_dir_all(root).expect("remove owned fixtures");
     Ok(())
 }
+
+#[test]
+#[ignore = "read-only first/reused Shell snapshots of an explicitly selected reference folder"]
+fn reference_first_requests_preserve_shell_order() -> Result<(), String> {
+    let folder = std::env::var_os("TOWAVUE_SHELL_REFERENCE_DIR")
+        .map(PathBuf::from)
+        .ok_or("set TOWAVUE_SHELL_REFERENCE_DIR to the reference folder")?;
+    let expected_first = std::env::var_os("TOWAVUE_SHELL_EXPECTED_FIRST");
+    let hidden = std::env::var_os("TOWAVUE_SHELL_FORCE_HIDDEN").is_some();
+    let mut baseline: Option<FolderSnapshot> = if std::env::var_os("TOWAVUE_SHELL_COMPARE_LIVE")
+        .is_some()
+    {
+        let mut provider = FolderOrderProvider::new().map_err(|error| error.to_string())?;
+        let snapshot = provider
+            .snapshot(&folder)
+            .map_err(|error| error.to_string())?;
+        if snapshot.source != FolderSnapshotSource::LiveExplorerView {
+            return Err("the comparison requires an already open matching Explorer view".into());
+        }
+        println!("FIRST_SHELL live_baseline_count={}", snapshot.items.len());
+        Some(snapshot)
+    } else {
+        None
+    };
+    for provider_index in 0..4 {
+        let mut provider = FolderOrderProvider::new().map_err(|error| error.to_string())?;
+        for request in 0..2 {
+            let started = Instant::now();
+            let snapshot = if hidden {
+                let folder = folder.clone();
+                thread::spawn(move || first_hidden_snapshot(&folder))
+                    .join()
+                    .map_err(|_| "hidden snapshot worker panicked")??
+            } else {
+                provider
+                    .snapshot(&folder)
+                    .map_err(|error| error.to_string())?
+            };
+            let expected_index = expected_first.as_ref().and_then(|name| {
+                snapshot
+                    .items
+                    .iter()
+                    .position(|item| item.path.file_name() == Some(name.as_os_str()))
+            });
+            let changed = baseline.as_ref().is_some_and(|baseline| {
+                baseline.sort_columns != snapshot.sort_columns
+                    || !baseline
+                        .items
+                        .iter()
+                        .map(|item| &item.path)
+                        .eq(snapshot.items.iter().map(|item| &item.path))
+            });
+            println!(
+                "FIRST_SHELL provider={provider_index} request={request} source={:?} count={} columns={:?} expected_first_index={expected_index:?} changed={changed} elapsed_ms={:.3}",
+                snapshot.source,
+                snapshot.items.len(),
+                snapshot.sort_columns,
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            if expected_first.is_some() && expected_index != Some(0) {
+                return Err(
+                    "the supplied first item is not first in the captured Shell view".into(),
+                );
+            }
+            if changed {
+                return Err("the first/reused Shell snapshots differ; inspect source and sort metadata before attributing the change".into());
+            }
+            if baseline.is_none() {
+                baseline = Some(snapshot);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn first_hidden_snapshot(folder: &Path) -> Result<FolderSnapshot, String> {
+    let apartment = ShellApartment::new();
+    if !apartment.0 {
+        return Err("could not initialize reference STA".into());
+    }
+    let folder = canonical_shell_path(folder).map_err(|error| error.to_string())?;
+    let pidl = parse_path(&folder).ok_or("could not parse reference folder")?;
+    if std::env::var_os("TOWAVUE_SHELL_LEGACY_CAPTURE").is_none() {
+        // SAFETY: this worker owns the initialized apartment and PIDL.
+        let started = Instant::now();
+        return unsafe {
+            hidden_snapshot(&folder, &pidl, 1, &|| {
+                started.elapsed() < Duration::from_secs(30)
+            })
+        }
+        .ok_or("hidden reference snapshot failed".into());
+    }
+    // SAFETY: the probe owns this STA, PIDL, browser and view. No live Explorer
+    // window, view state, source media or settings are modified. Drop all native
+    // objects before the apartment, as in the production hidden-view path.
+    unsafe {
+        let browser = HiddenExplorerBrowser::new().ok_or("hidden browser unavailable")?;
+        browser
+            .browser
+            .BrowseToIDList(pidl.as_ptr(), SBSP_ABSOLUTE)
+            .map_err(|error| error.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            pump_messages();
+            if let Ok(view) = browser.browser.GetCurrentView::<IFolderView2>()
+                && view_matches(&view, pidl.as_ptr())
+                && let Some(snapshot) = capture_view(
+                    &view,
+                    &folder,
+                    &pidl,
+                    FolderSnapshotSource::PersistedShellView,
+                    1,
+                    &|| true,
+                )
+            {
+                return Ok(snapshot);
+            }
+            if Instant::now() >= deadline {
+                return Err("hidden reference view timed out".into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+#[test]
+fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("clock after Unix epoch")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "towavue-shell-ready-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&root).expect("owned fixture root");
+    for count in [0, 4, 4096] {
+        let folder = root.join(count.to_string());
+        fs::create_dir(&folder).expect("owned folder");
+        let mut expected = std::collections::BTreeSet::new();
+        for index in (0..count).rev() {
+            let extension = ["png", "jpg", "mp4", "wav"][index % 4];
+            let name = format!("item-{index}.{extension}");
+            fs::write(folder.join(&name), []).expect("owned media placeholder");
+            expected.insert(name);
+        }
+        if count != 0 {
+            fs::write(folder.join("excluded.txt"), []).expect("unsupported item");
+        }
+        thread::spawn(move || {
+            if count == 0 {
+                // Preserve the established empty-folder fallback: Shell may not
+                // expose an IShellItemArray for an empty view. A labelled empty
+                // result is safe; it must not leave the request waiting forever.
+                let mut provider = FolderOrderProvider::new().expect("empty provider");
+                let snapshot = provider.snapshot(&folder).expect("empty folder result");
+                assert!(snapshot.items.is_empty());
+                return;
+            }
+            let apartment = ShellApartment::new();
+            assert!(apartment.0);
+            let folder = canonical_shell_path(&folder).expect("canonical folder");
+            let pidl = parse_path(&folder).expect("PIDL");
+            let mut baseline: Option<FolderSnapshot> = None;
+            for generation in 1..=3 {
+                eprintln!("HIDDEN_COMPLETE count={count} generation={generation}");
+                let started = Instant::now();
+                // SAFETY: all native objects live and drop on this fresh STA.
+                let snapshot = unsafe {
+                    hidden_snapshot(&folder, &pidl, generation, &|| {
+                        started.elapsed() < Duration::from_secs(30)
+                    })
+                }
+                .expect("complete hidden snapshot");
+                assert_eq!(snapshot.source, FolderSnapshotSource::PersistedShellView);
+                assert_eq!(snapshot.generation, generation);
+                assert_eq!(snapshot.items.len(), count);
+                let actual = snapshot
+                    .items
+                    .iter()
+                    .map(|item| {
+                        item.path
+                            .file_name()
+                            .expect("fixture file name")
+                            .to_string_lossy()
+                            .into_owned()
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+                assert_eq!(actual, expected);
+                if let Some(baseline) = &baseline {
+                    assert_eq!(snapshot.sort_columns, baseline.sort_columns);
+                    assert!(
+                        snapshot
+                            .items
+                            .iter()
+                            .map(|item| (&item.path, &item.identity, item.kind))
+                            .eq(baseline.items.iter().map(|item| (
+                                &item.path,
+                                &item.identity,
+                                item.kind
+                            ))),
+                        "fresh hidden views preserve complete order/identity/kind"
+                    );
+                }
+                baseline = Some(snapshot);
+            }
+            // Cancellation must work even if the view is already ready, and a
+            // cancelled wait must not poison a subsequent wait on that view.
+            unsafe {
+                let browser = HiddenExplorerBrowser::new().expect("owned browser");
+                let enumeration =
+                    HiddenEnumeration::new(&browser.browser).expect("subscribe before navigation");
+                browser
+                    .browser
+                    .BrowseToIDList(pidl.as_ptr(), SBSP_ABSOLUTE)
+                    .expect("browse");
+                let view = browser
+                    .browser
+                    .GetCurrentView::<IFolderView2>()
+                    .expect("view");
+                let checks = std::cell::Cell::new(0);
+                assert!(
+                    enumeration
+                        .wait(&|| {
+                            checks.set(checks.get() + 1);
+                            checks.get() < 2
+                        })
+                        .is_none()
+                );
+                assert_eq!(checks.get(), 2);
+                let started = Instant::now();
+                assert!(
+                    enumeration
+                        .wait(&|| started.elapsed() < Duration::from_secs(30))
+                        .is_some()
+                );
+                let snapshot = capture_view(
+                    &view,
+                    &folder,
+                    &pidl,
+                    FolderSnapshotSource::PersistedShellView,
+                    4,
+                    &|| true,
+                )
+                .expect("ready after cancelled wait");
+                assert_eq!(snapshot.items.len(), count);
+            }
+        })
+        .join()
+        .expect("Shell worker");
+    }
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn browser_enumeration_sink_does_not_advertise_agility() {
+    let events: IExplorerBrowserEvents = EnumerationEvents {
+        state: Arc::new(AtomicU8::new(0)),
+        view: std::rc::Rc::new(std::cell::RefCell::new(None)),
+    }
+    .into();
+    assert!(
+        events
+            .cast::<windows::Win32::System::Com::IAgileObject>()
+            .is_err(),
+        "native connection-point ownership must remain on the creating STA"
+    );
+}

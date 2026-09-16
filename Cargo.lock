@@ -2674,6 +2674,7 @@ dependencies = [
  "towavue-core",
  "wasapi",
  "windows",
+ "windows-core",
  "winit",
  "zune-core",
  "zune-jpeg",

@@ -58,6 +58,7 @@ wasapi = "=0.24.0"
 winit = "=0.30.13"
 zune-core = "=0.5.3"
 zune-jpeg = "=0.5.15"
+windows-core = "=0.62.2"
 windows = { version = "=0.62.2", features = [
     "Win32_Foundation",
     "Win32_Graphics_Direct3D",

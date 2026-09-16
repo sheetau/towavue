@@ -3,6 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -13,18 +14,23 @@ use towavue_core::{
     SortColumn, SortDirection,
 };
 use windows::Win32::Foundation::{HANDLE, HWND, PROPERTYKEY, RECT, WAIT_FAILED};
-use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, IServiceProvider};
+use windows::Win32::System::Com::{
+    CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, DISPATCH_FLAGS, DISPPARAMS, EXCEPINFO,
+    IConnectionPoint, IConnectionPointContainer, IDispatch, IDispatch_Impl, IServiceProvider,
+    ITypeInfo,
+};
 use windows::Win32::System::Ole::{OleInitialize, OleUninitialize};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    EBO_NOBORDER, EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, IExplorerBrowser,
-    IFolderView2, IPersistFolder2, IShellBrowser, IShellItem, IShellItemArray, IShellWindows,
-    IWebBrowserApp, SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject,
-    SHOpenFolderAndSelectItems, SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH,
-    SORT_ASCENDING, SORT_DESCENDING, SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows,
-    StrCmpLogicalW,
+    DISPID_FILELISTENUMDONE, DShellFolderViewEvents, DShellFolderViewEvents_Impl, EBO_NOBORDER,
+    EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, IExplorerBrowser,
+    IExplorerBrowserEvents, IExplorerBrowserEvents_Impl, IFolderView2, IPersistFolder2,
+    IShellBrowser, IShellItem, IShellItemArray, IShellView, IShellWindows, IWebBrowserApp,
+    SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject, SHOpenFolderAndSelectItems,
+    SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH, SORT_ASCENDING, SORT_DESCENDING,
+    SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows, StrCmpLogicalW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, MWMO_INPUTAVAILABLE,
@@ -414,10 +420,24 @@ fn shell_snapshot(
             }
         }
 
+        hidden_snapshot(&folder, &folder_pidl, generation, current)
+    }
+}
+
+// SAFETY: callers own an initialized STA; the browser, view and callback never
+// leave it. Readiness is separate from successful navigation/view creation.
+unsafe fn hidden_snapshot(
+    folder: &Path,
+    folder_pidl: &OwnedPidl,
+    generation: u64,
+    current: &impl Fn() -> bool,
+) -> Option<FolderSnapshot> {
+    unsafe {
         if !current() {
             return None;
         }
         let browser = HiddenExplorerBrowser::new()?;
+        let enumeration = HiddenEnumeration::new(&browser.browser)?;
         if !current() {
             return None;
         }
@@ -428,6 +448,7 @@ fn shell_snapshot(
             eprintln!("towavue: hidden Shell navigation failed: {error}");
             return None;
         }
+        enumeration.wait(current)?;
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if !current() {
@@ -438,8 +459,8 @@ fn shell_snapshot(
                 && view_matches(&view, folder_pidl.as_ptr())
                 && let Some(snapshot) = capture_view(
                     &view,
-                    &folder,
-                    &folder_pidl,
+                    folder,
+                    folder_pidl,
                     FolderSnapshotSource::PersistedShellView,
                     generation,
                     current,
@@ -451,6 +472,176 @@ fn shell_snapshot(
                 return None;
             }
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+// State 0: pending; 1: enumeration complete; 2: navigation/subscription failed.
+// The view sink owns only this atomic. The browser sink also owns a thread-bound
+// subscription slot, explicitly disconnected before browser teardown. No stack
+// storage is borrowed by either callback.
+#[windows::core::implement(DShellFolderViewEvents)]
+struct EnumerationReady(Arc<AtomicU8>);
+
+impl DShellFolderViewEvents_Impl for EnumerationReady_Impl {}
+impl IDispatch_Impl for EnumerationReady_Impl {
+    fn GetTypeInfoCount(&self) -> windows::core::Result<u32> {
+        Ok(0)
+    }
+    fn GetTypeInfo(&self, _: u32, _: u32) -> windows::core::Result<ITypeInfo> {
+        Err(windows::Win32::Foundation::DISP_E_BADINDEX.into())
+    }
+    fn GetIDsOfNames(
+        &self,
+        _: *const windows::core::GUID,
+        _: *const PCWSTR,
+        _: u32,
+        _: u32,
+        _: *mut i32,
+    ) -> windows::core::Result<()> {
+        Err(windows::Win32::Foundation::DISP_E_UNKNOWNNAME.into())
+    }
+    fn Invoke(
+        &self,
+        id: i32,
+        _: *const windows::core::GUID,
+        _: u32,
+        _: DISPATCH_FLAGS,
+        _: *const DISPPARAMS,
+        result: *mut VARIANT,
+        _: *mut EXCEPINFO,
+        _: *mut u32,
+    ) -> windows::core::Result<()> {
+        if id == DISPID_FILELISTENUMDONE as i32 {
+            self.0.store(1, AtomicOrdering::Release);
+        }
+        if !result.is_null() {
+            // SAFETY: IDispatch supplies writable output storage. Unobserved
+            // selection/verb notifications keep their default allowed behavior.
+            unsafe {
+                result.write(VARIANT::from(true));
+            }
+        }
+        Ok(())
+    }
+}
+
+struct ViewSubscription {
+    point: IConnectionPoint,
+    cookie: u32,
+}
+impl Drop for ViewSubscription {
+    fn drop(&mut self) {
+        // SAFETY: subscriptions and the view are released on the owning STA.
+        unsafe {
+            let _ = self.point.Unadvise(self.cookie);
+        }
+    }
+}
+
+// This sink owns STA-only connection points/RefCell storage. Do not advertise
+// agility: COM must marshal callbacks back to the creating apartment.
+#[windows::core::implement(IExplorerBrowserEvents, Agile = false)]
+struct EnumerationEvents {
+    state: Arc<AtomicU8>,
+    view: std::rc::Rc<std::cell::RefCell<Option<ViewSubscription>>>,
+}
+
+impl IExplorerBrowserEvents_Impl for EnumerationEvents_Impl {
+    fn OnNavigationPending(&self, _: *const ITEMIDLIST) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnNavigationComplete(&self, _: *const ITEMIDLIST) -> windows::core::Result<()> {
+        Ok(())
+    }
+    fn OnNavigationFailed(&self, _: *const ITEMIDLIST) -> windows::core::Result<()> {
+        self.state.store(2, AtomicOrdering::Release);
+        Ok(())
+    }
+    fn OnViewCreated(&self, view: windows::core::Ref<IShellView>) -> windows::core::Result<()> {
+        let result = (|| {
+            let view = view.as_ref().ok_or_else(|| {
+                windows::core::Error::from_hresult(windows::Win32::Foundation::E_POINTER)
+            })?;
+            // SAFETY: register the view's automation EnumDone event during
+            // creation, before synchronous navigation can finish. View order is
+            // captured only after EnumDone and a usable item array are available.
+            let subscription = unsafe {
+                let dispatch: IDispatch =
+                    view.GetItemObject(windows::Win32::UI::Shell::SVGIO_BACKGROUND)?;
+                let points: IConnectionPointContainer = dispatch.cast()?;
+                let point = points.FindConnectionPoint(&DShellFolderViewEvents::IID)?;
+                let callback: DShellFolderViewEvents = EnumerationReady(self.state.clone()).into();
+                let cookie = point.Advise(&callback)?;
+                ViewSubscription { point, cookie }
+            };
+            self.view.replace(Some(subscription));
+            Ok(())
+        })();
+        if result.is_err() {
+            self.state.store(2, AtomicOrdering::Release);
+        }
+        result
+    }
+}
+
+struct HiddenEnumeration {
+    browser: IExplorerBrowser,
+    cookie: u32,
+    state: Arc<AtomicU8>,
+    view: std::rc::Rc<std::cell::RefCell<Option<ViewSubscription>>>,
+}
+
+impl HiddenEnumeration {
+    unsafe fn new(browser: &IExplorerBrowser) -> Option<Self> {
+        let state = Arc::new(AtomicU8::new(0));
+        let view = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let events: IExplorerBrowserEvents = EnumerationEvents {
+            state: state.clone(),
+            view: view.clone(),
+        }
+        .into();
+        // SAFETY: registration precedes BrowseToIDList, so synchronous initial
+        // callbacks cannot be missed. The guard drops on this same STA.
+        let cookie = unsafe { browser.Advise(&events) }.ok()?;
+        Some(Self {
+            browser: browser.clone(),
+            cookie,
+            state,
+            view,
+        })
+    }
+
+    unsafe fn wait(&self, current: &impl Fn() -> bool) -> Option<()> {
+        if !current() {
+            return None;
+        }
+        loop {
+            match self.state.load(AtomicOrdering::Acquire) {
+                1 => return current().then_some(()),
+                2 => return None,
+                _ => {}
+            }
+            if !current() {
+                return None;
+            }
+            // SAFETY: dispatch on the owning STA lets Shell finish enumeration.
+            unsafe { pump_messages() };
+            if self.state.load(AtomicOrdering::Acquire) == 0 {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+}
+
+impl Drop for HiddenEnumeration {
+    fn drop(&mut self) {
+        let subscription = self.view.borrow_mut().take();
+        drop(subscription);
+        // SAFETY: unsubscribe before the owning hidden browser is destroyed.
+        // Drop the view subscription first, with no RefCell borrow across COM calls.
+        unsafe {
+            let _ = self.browser.Unadvise(self.cookie);
         }
     }
 }

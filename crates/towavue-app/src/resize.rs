@@ -223,7 +223,7 @@ fn text_input_rows(
         });
     }
     let editor = if rows == 1 {
-        egui::TextEdit::singleline(value)
+        egui::TextEdit::singleline(value).vertical_align(egui::Align::Center)
     } else {
         egui::TextEdit::multiline(value)
             .desired_rows(rows)
@@ -258,6 +258,91 @@ fn filter_name(filter: ResampleFilter) -> &'static str {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    pub(crate) fn assert_centered_input(
+        output: &egui::FullOutput,
+        rect: egui::Rect,
+        text: &str,
+        density: f32,
+    ) {
+        let text_rect = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(shape) = &shape.shape
+                    && shape.galley.text() == text
+                {
+                    Some(egui::Rect::from_min_size(shape.pos, shape.galley.size()))
+                } else {
+                    None
+                }
+            })
+            .expect("input text or placeholder");
+        assert!(
+            (text_rect.center().y - rect.center().y).abs() <= 1.0 / density,
+            "text centered at {density}x: {text_rect:?} in {rect:?}"
+        );
+        let (points, stroke) = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::LineSegment { points, stroke } = &shape.shape
+                    && points[0].x == points[1].x
+                    && rect.contains(points[0])
+                    && rect.contains(points[1])
+                    && (points[1].y - points[0].y).abs() > 5.0
+                {
+                    Some((*points, *stroke))
+                } else {
+                    None
+                }
+            })
+            .expect("painted input caret");
+        assert_eq!(stroke.color, egui::Color32::WHITE);
+        assert!(
+            ((points[0].y + points[1].y) * 0.5 - rect.center().y).abs() <= 1.0 / density,
+            "caret centered at {density}x: {points:?} in {rect:?}"
+        );
+    }
+
+    #[test]
+    fn single_line_inputs_center_text_placeholder_and_white_caret() {
+        for density in [1.0, 1.25, 2.0] {
+            for height in [24.0, 32.0] {
+                for value in ["", "Abc12あ"] {
+                    let context = crate::fonts::test_context();
+                    context.set_pixels_per_point(density);
+                    context.global_style_mut(|style| {
+                        crate::chrome::style(style);
+                        style.visuals.text_cursor.blink = false;
+                    });
+                    let mut value = value.to_owned();
+                    let mut rect = egui::Rect::NOTHING;
+                    let mut frame = || {
+                        context.run_ui(egui::RawInput::default(), |ui| {
+                            let response = ui.add_sized([240.0, height], |ui: &mut egui::Ui| {
+                                text_input(ui, "Placeholder", &mut value)
+                            });
+                            rect = response.rect;
+                            response.request_focus();
+                        })
+                    };
+                    frame();
+                    let output = frame();
+                    assert_centered_input(
+                        &output,
+                        rect,
+                        if value.is_empty() {
+                            "Placeholder"
+                        } else {
+                            &value
+                        },
+                        density,
+                    );
+                }
+            }
+        }
+    }
 
     pub(crate) fn select_all_filters<N: Fn(crate::AppEvent) + Send + Sync + 'static>(
         app: &mut crate::Application<N>,

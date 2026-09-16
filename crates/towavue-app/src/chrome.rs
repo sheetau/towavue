@@ -106,6 +106,7 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.window_stroke.color = BORDER;
     style.visuals.extreme_bg_color = BACKGROUND;
     style.visuals.text_edit_bg_color = Some(BACKGROUND);
+    style.visuals.text_cursor.stroke.color = Color32::WHITE;
     style.visuals.faint_bg_color = BORDER;
     style.visuals.weak_text_color = Some(MUTED);
     style.visuals.selection.bg_fill = HOVER;

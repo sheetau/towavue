@@ -92,10 +92,16 @@ pub fn show(
         ui.set_opacity(opacity);
     }
     let width = (ui.available_width() - 40.0).clamp(0.0, 660.0);
+    let gap = (ui.available_width() - width).max(0.0);
+    let left = (gap / 2.0).min((gap - 40.0).max(0.0));
     let top = (ui.available_height() * 0.04).clamp(6.0, 20.0);
     let mut chosen = None;
     ui.add_space(top);
-    let search_changed = ui
+    let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+        ui.cursor().min + egui::vec2(left, 0.0),
+        egui::vec2(width, 24.0),
+    )));
+    let search_changed = header
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.spacing_mut().button_padding = egui::vec2(4.0, 0.0);
@@ -177,6 +183,7 @@ pub fn show(
             search.changed()
         })
         .inner;
+    ui.advance_cursor_after_rect(header.min_rect());
     ui.add_space(16.0);
     if ui.is_enabled() && egui::Popup::is_any_open(ui.ctx()) {
         let opacity = ui.opacity();
@@ -216,9 +223,7 @@ pub fn show(
             );
         }
         ui.horizontal(|ui| {
-            let width = width.min((ui.available_width() - 40.0).max(0.0));
-            let gap = (ui.available_width() - width).max(0.0);
-            ui.add_space((gap / 2.0).min((gap - 40.0).max(0.0)));
+            ui.add_space(left);
             ui.allocate_ui_with_layout(
                 egui::vec2(width, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
@@ -543,6 +548,7 @@ mod tests {
                 CommandId::OpenFile,
                 "Ctrl+K Ctrl+O".parse().expect("shortcut"),
             );
+            let grid = std::cell::Cell::new(egui::Rect::NOTHING);
             let frame = |events| {
                 let mut commands = Vec::new();
                 let output = context.run_ui(
@@ -552,7 +558,9 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        if let Some(command) = show(ui, &shortcuts, |_| {}) {
+                        if let Some(command) = show(ui, &shortcuts, |ui| {
+                            grid.set(ui.available_rect_before_wrap());
+                        }) {
                             commands.push(command);
                         }
                     },
@@ -578,8 +586,10 @@ mod tests {
                 assert!((rect.center().y - search.center().y).abs() <= 1.0 / density);
             }
             assert!((search.height() - 24.0).abs() <= 1.0 / density);
-            assert!((search.left() - 8.0).abs() <= 1.0 / density);
-            assert!((folder.right() - (size.x - 8.0)).abs() <= 1.0 / density);
+            let hint = text_rect(&output, "Search Gallery").expect("Gallery placeholder");
+            assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);
+            assert!((search.left() - grid.get().left()).abs() <= 1.0 / density);
+            assert!((folder.right() - grid.get().right()).abs() <= 1.0 / density);
             let border = |output: &egui::FullOutput| {
                 output
                     .shapes

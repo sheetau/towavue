@@ -219,6 +219,7 @@ impl CommandPalette {
                 ui.add_sized(
                     [ui.available_width(), 24.0],
                     egui::TextEdit::singleline(&mut self.query)
+                        .vertical_align(egui::Align::Center)
                         .id(query_id)
                         .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
@@ -527,6 +528,71 @@ fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn palette_centers_text_placeholder_and_white_caret() {
+        for density in [1.0, 1.25, 2.0] {
+            for query in ["", ">open", "Abc12あ"] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(|style| {
+                    crate::chrome::style(style);
+                    style.animation_time = 0.0;
+                    style.visuals.text_cursor.blink = false;
+                });
+                let mut palette = CommandPalette {
+                    query: query.into(),
+                    ..Default::default()
+                };
+                let mut frame = || {
+                    context.run_ui(egui::RawInput::default(), |_| {
+                        palette.show(
+                            &context,
+                            CommandContext {
+                                palette_open: true,
+                                ..Default::default()
+                            },
+                            &ShortcutBindings::default(),
+                            0.0,
+                        );
+                    })
+                };
+                for _ in 0..3 {
+                    frame();
+                }
+                let output = frame();
+                let bounds = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        matches!(node.label(), Some("Search commands" | "Search files"))
+                    })
+                    .expect("search field")
+                    .1
+                    .bounds()
+                    .expect("bounds");
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                crate::resize::tests::assert_centered_input(
+                    &output,
+                    rect,
+                    if query.is_empty() {
+                        "Search files by name"
+                    } else {
+                        query
+                    },
+                    density,
+                );
+            }
+        }
+    }
 
     fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {

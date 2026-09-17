@@ -99,12 +99,8 @@ fn drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel() {
             let feedback = host.tab_drag_feedback(no_target).expect("owned drag");
             assert_eq!(
                 feedback.cursor,
-                if point.x >= 0.0 {
-                    egui::CursorIcon::Move
-                } else {
-                    egui::CursorIcon::NoDrop
-                },
-                "local media insertion or unavailable external transfer"
+                egui::CursorIcon::NoDrop,
+                "unavailable external transfer, including over the source media"
             );
             host.update_tab_cursor_with(Some(feedback), |_, cursor| applied.push(cursor));
         }
@@ -164,6 +160,8 @@ fn drag_cursor_restores_the_previous_owner_when_feedback_changes_windows() {
                 source,
                 target: None,
                 cursor: egui::CursorIcon::Move,
+                badge: None,
+                point: egui::Pos2::ZERO,
             }),
             |app, icon| applied.push((app.window_key.expect("key"), icon)),
         );
@@ -267,6 +265,80 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert!(host.window_at_drop(source, outside).is_none());
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(host.windows[&target].incoming_tab_pointer, Some(point));
+    assert!(
+        host.tab_badge.is_some() && !host.tab_badge_failed,
+        "real hidden native badge"
+    );
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, point)))
+            .expect("feedback")
+            .badge,
+        Some(tab_drag::badge::Kind::Move)
+    );
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| None)
+            .expect("feedback")
+            .badge,
+        Some(tab_drag::badge::Kind::New)
+    );
+
+    let origin = host.windows[&source]
+        .window
+        .as_ref()
+        .expect("source")
+        .inner_position()
+        .expect("origin");
+    let source_density = host.windows[&source]
+        .ui_context
+        .as_ref()
+        .expect("context")
+        .pixels_per_point();
+    let mut checked_monitors = 0;
+    for monitor in event_loop.available_monitors() {
+        let position = monitor.position();
+        let size = monitor.size();
+        let mut screen = (
+            position.x + size.width as i32 / 2,
+            position.y + size.height as i32 / 2,
+        );
+        let client = |point: (i32, i32)| {
+            egui::pos2(
+                (point.0 - origin.x) as f32 / source_density,
+                (point.1 - origin.y) as f32 / source_density,
+            )
+        };
+        if tab_drag::over_tab_region(
+            host.windows[&source].ui_context.as_ref().expect("context"),
+            client(screen),
+        ) {
+            screen.1 += 64;
+        }
+        frame(
+            host.windows.get_mut(&source).expect("source"),
+            true,
+            vec![egui::Event::PointerMoved(client(screen))],
+        );
+        host.update_tab_drops_with(event_loop, false, |_, _, _| None);
+        host.tab_badge
+            .as_ref()
+            .expect("monitor badge")
+            .verify_placement(
+                tab_drag::badge::Kind::New,
+                screen,
+                monitor.scale_factor() as f32,
+            );
+        checked_monitors += 1;
+    }
+    assert!(checked_monitors > 0);
+    eprintln!(
+        "PASS native drag badge geometry on {checked_monitors} monitors; hidden window, scripted positions"
+    );
+    frame(
+        host.windows.get_mut(&source).expect("source"),
+        true,
+        vec![egui::Event::PointerMoved(outside)],
+    );
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(
         host.tab_drag_feedback(|_, _, _| Some((target, point)))
             .expect("merge feedback")
@@ -292,6 +364,13 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     assert!(host.windows[&target].incoming_tab_pointer.is_none());
     assert_eq!(
         host.tab_drag_feedback(|_, _, _| Some((target, point)))
+            .expect("feedback")
+            .badge,
+        Some(tab_drag::badge::Kind::Forbidden)
+    );
+
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, point)))
             .expect("blocked feedback")
             .cursor,
         egui::CursorIcon::NoDrop
@@ -307,15 +386,43 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .expect("target")
         .filmstrip_open = true;
     let body = point + egui::vec2(0.0, 100.0);
-    assert_eq!(host.windows[&target].incoming_gap(body), Some(1));
+    assert_eq!(host.windows[&target].incoming_gap(body), None);
+    assert_eq!(host.windows[&target].incoming_filmstrip_gap(body), Some(1));
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
-    assert_eq!(host.windows[&target].incoming_tab_pointer, Some(body));
+    assert_eq!(host.windows[&target].incoming_tab_pointer, None);
     assert_eq!(
         host.tab_drag_feedback(|_, _, _| Some((target, body)))
             .expect("body feedback")
             .cursor,
         egui::CursorIcon::Move
     );
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, body)))
+            .expect("body badge")
+            .badge,
+        Some(tab_drag::badge::Kind::New)
+    );
+    let context = host.windows[&target]
+        .ui_context
+        .clone()
+        .expect("target context");
+    for _ in 0..2 {
+        let _ = context.run_ui(egui::RawInput::default(), |_| {});
+    }
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| Some((target, body)))
+            .expect("stale target")
+            .badge,
+        Some(tab_drag::badge::Kind::Forbidden),
+        "unknown target layout cannot silently detach"
+    );
+    for _ in 0..3 {
+        frame(
+            host.windows.get_mut(&target).expect("target"),
+            false,
+            vec![],
+        );
+    }
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(host.windows[&target].incoming_tab_pointer, Some(point));
     frame(
@@ -324,7 +431,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         vec![pointer(outside, false)],
     );
     assert!(host.windows[&source].pending_tab_drop.is_some());
-    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
     assert_eq!(
         host.windows.len(),
         original_count,
@@ -367,7 +474,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .tab_detach_request(moved)
         .expect("return request");
     let returned = host
-        .merge_tab_drop(target, &request, welcome, point + egui::vec2(0.0, 100.0))
+        .merge_tab_drop(target, &request, welcome, point)
         .expect("Welcome insertion");
     assert_eq!(host.windows[&welcome].tabs.tabs()[0].id, returned);
     assert_eq!(host.windows[&welcome].edits[&returned], edits);
@@ -380,7 +487,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         frame(app, true, vec![]);
     }
     let start = tab_drag::tests::label_center(app, returned);
-    let outside = egui::pos2(1000.0, 90.0);
+    let outside = egui::pos2(240.0, 200.0);
     let origin = app
         .window
         .as_ref()
@@ -406,7 +513,11 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     frame(app, true, vec![pointer(outside, false)]);
     assert!(app.pending_tab_drop.is_some());
     let previous: Vec<_> = host.windows.keys().copied().collect();
-    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
+    assert!(
+        host.tab_badge.is_none(),
+        "release disposes the helper before transfer"
+    );
     let detached = *host
         .windows
         .keys()
@@ -435,6 +546,32 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .get_mut(&target)
         .expect("target")
         .activate_tab(target_tabs.active().expect("original active").id);
+    // A last tab may merge elsewhere, but cannot create another lone window.
+    let app = host.windows.get_mut(&welcome).expect("single-tab source");
+    for _ in 0..3 {
+        frame(app, true, vec![]);
+    }
+    let last = app.tabs.tab_ids().next().expect("last Gallery tab");
+    assert_eq!(app.tabs.tab_ids().count(), 1);
+    let start = tab_drag::tests::label_center(app, last);
+    frame(app, true, vec![pointer(start, true)]);
+    frame(app, true, vec![egui::Event::PointerMoved(body)]);
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| None)
+            .expect("last-tab feedback")
+            .badge,
+        Some(tab_drag::badge::Kind::Forbidden)
+    );
+    let before = host.windows.len();
+    frame(
+        host.windows.get_mut(&welcome).expect("source"),
+        true,
+        vec![pointer(body, false)],
+    );
+    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
+    assert_eq!(host.windows.len(), before);
+    assert!(host.windows[&welcome].tabs.tab_ids().any(|id| id == last));
+    assert!(host.tab_badge.is_none());
     host.windows
         .get_mut(&welcome)
         .expect("Welcome")
@@ -442,6 +579,6 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.remove_closed();
     assert_eq!(host.windows.len(), original_count);
     eprintln!(
-        "PASS hosted tab drop: captured drag/hover/body-release merges dirty in-memory animation at the indicated gap without a new HWND, including filmstrip-open hosts; hidden native GPU indicator and Welcome body insertion; modal/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
+        "PASS hosted tab drop: captured drag/hover merges dirty in-memory animation at toolbar gaps, including filmstrip-open hosts; media-area release detaches; hidden native GPU indicator and three-state badge; last-tab detach/modal/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
     );
 }

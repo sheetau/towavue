@@ -393,7 +393,8 @@ fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation()
                         && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
                 for y in [100.0, 300.0, 575.0] {
                     let body = egui::pos2(point.x, y);
-                    assert_eq!(incoming_gap(&context, &ids, body), Some(gap));
+                    assert_eq!(incoming_gap(&context, &ids, body), None);
+                    assert_eq!(incoming_filmstrip_gap(&context, &ids, body), Some(gap));
                     app.incoming_tab_pointer = Some(body);
                     let (output, actions) = frame(&mut app, size, false, vec![]);
                     assert!(actions.is_empty());
@@ -458,9 +459,16 @@ fn incoming_tabs_append_in_unused_toolbar_space_without_expanding_native_control
             for y in [point.y, 300.0, 575.0] {
                 assert_eq!(
                     incoming_gap(&context, &ids, egui::pos2(width - 1.0, y)),
-                    Some(ids.len())
+                    if y == point.y { Some(ids.len()) } else { None }
                 );
-                assert_eq!(incoming_gap(&context, &ids, egui::pos2(1.0, y)), Some(0));
+                assert_eq!(
+                    incoming_gap(&context, &ids, egui::pos2(1.0, y)),
+                    if y == point.y { Some(0) } else { None }
+                );
+                assert_eq!(
+                    incoming_filmstrip_gap(&context, &ids, egui::pos2(1.0, y)),
+                    Some(0)
+                );
             }
             for outside in [
                 egui::pos2(-1.0, 100.0),
@@ -532,7 +540,7 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
     );
     assert_eq!(
         incoming_gap(context, &[gallery], egui::pos2(240.0, 300.0)),
-        Some(1)
+        None
     );
 }
 
@@ -937,10 +945,19 @@ fn tab_drag_keeps_tab_geometry_fixed_until_release() {
         "the tab stays clipped to the strip while the pointer crosses the media"
     );
     assert!(
-        state(&app).local_drop,
-        "the media area is a local insertion target"
+        !state(&app).local_drop,
+        "the media area is outside the tab insertion band"
     );
-    let (_, actions) = frame(&mut app, size, true, vec![pointer(over_media, false)]);
+    let over_strip = egui::pos2(over_media.x, original[0].2.center().y);
+    let (_, actions) = frame(
+        &mut app,
+        size,
+        true,
+        vec![
+            egui::Event::PointerMoved(over_strip),
+            pointer(over_strip, false),
+        ],
+    );
     assert!(actions == vec![UiAction::ReorderTab(original[0].0, 3)]);
     assert!(state(&app).drag.is_none());
     assert!(frame(&mut app, size, true, vec![]).1.is_empty());
@@ -1117,7 +1134,7 @@ fn local_tab_drops_project_client_positions_without_replaying_release() {
         let original = state(&app).widgets;
         let start = original[2].2.center();
         for batched in [false, true] {
-            for y in [100.0, size.y - 1.0] {
+            for y in [start.y, 100.0, size.y - 1.0] {
                 for (x, gap) in [(1.0, 0), (drop_point(&context, 1).x, 1), (size.x - 1.0, 3)] {
                     let target = egui::pos2(x, y);
                     let mut events = vec![egui::Event::PointerMoved(start), pointer(start, true)];
@@ -1133,15 +1150,20 @@ fn local_tab_drops_project_client_positions_without_replaying_release() {
                             .1
                             .is_empty()
                         );
-                        assert!(state(&app).local_drop);
+                        assert_eq!(state(&app).local_drop, y == start.y);
                         events = vec![];
                     }
                     events.extend([egui::Event::PointerMoved(target), pointer(target, false)]);
                     let (_, actions) = frame(&mut app, size, true, events);
-                    assert!(
-                        actions == vec![UiAction::ReorderTab(original[2].0, gap)],
-                        "density={density}, batched={batched}, target={target:?}, gap={gap}"
-                    );
+                    if y == start.y {
+                        assert!(actions == vec![UiAction::ReorderTab(original[2].0, gap)]);
+                    } else {
+                        assert!(
+                            matches!(actions.as_slice(), [UiAction::DropTab(id, point, _)]
+                            if *id == original[2].0 && *point == target),
+                            "media release detaches"
+                        );
+                    }
                     assert_eq!(
                         state(&app).widgets,
                         original,
@@ -1387,4 +1409,50 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     eprintln!(
         "PASS hardware tab drag: release-only reorder/return and unchanged history/transport/session generation; CPU transfers 0"
     );
+}
+
+#[test]
+fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        let size = egui::vec2(960.0, 576.0);
+        for _ in 0..3 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let layout = state(&app);
+        let (tab, _, label) = layout.widgets[0];
+        let strip = layout.strip.expect("strip");
+        let ids: Vec<_> = app.tabs.tab_ids().collect();
+        for y in [strip.top(), strip.bottom() + 14.9] {
+            assert!(incoming_gap(&context, &ids, egui::pos2(label.center().x, y)).is_some());
+        }
+        let body = egui::pos2(label.center().x, strip.bottom() + 15.1);
+        assert!(incoming_gap(&context, &ids, body).is_none());
+        assert!(incoming_filmstrip_gap(&context, &ids, body).is_some());
+        frame(&mut app, size, true, vec![pointer(label.center(), true)]);
+        let (output, actions) = frame(&mut app, size, true, vec![egui::Event::PointerMoved(body)]);
+        assert!(actions.is_empty());
+        let expected = egui::Rect::from_min_max(
+            label.min,
+            label.max + egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))),
+            "group opacity includes the close slot, not only the drag label");
+        let (_, actions) = frame(&mut app, size, true, vec![pointer(body, false)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::DropTab(id, point, _)] if *id == tab && *point == body)
+        );
+        let (output, actions) = frame(&mut app, size, true, vec![]);
+        assert!(actions.is_empty());
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))));
+    }
 }

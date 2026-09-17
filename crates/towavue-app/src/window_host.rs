@@ -66,6 +66,8 @@ pub(crate) struct WindowHost {
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
+    tab_badge: Option<tab_drag::badge::Badge>,
+    tab_badge_failed: bool,
     #[cfg(test)]
     captured_events: CapturedEvents,
 }
@@ -84,6 +86,8 @@ impl WindowHost {
             last_playback_volume: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
+            tab_badge: None,
+            tab_badge_failed: false,
             #[cfg(test)]
             captured_events: Arc::default(),
         };
@@ -443,7 +447,7 @@ impl WindowHost {
         let gap = self
             .windows
             .get(&target)
-            .and_then(|app| app.incoming_gap(point))
+            .and_then(|app| app.incoming_filmstrip_gap(point))
             .ok_or("drop on an available window")?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {

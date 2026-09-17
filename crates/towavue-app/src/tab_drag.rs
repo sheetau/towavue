@@ -1,5 +1,7 @@
 use crate::*;
 
+pub(crate) mod badge;
+
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -36,6 +38,7 @@ fn state_id() -> egui::Id {
 pub(super) struct Layout {
     state: State,
     gap: Option<(usize, f32)>,
+    source_rect: Option<egui::Rect>,
 }
 
 impl Layout {
@@ -155,10 +158,20 @@ impl Layout {
             .filter(|drag| drag.crossed)
             .and_then(|_| {
                 ui.input(|input| input.pointer.hover_pos())
-                    .and_then(|pointer| client_gap(&rectangles, strip, screen, pointer))
+                    .and_then(|pointer| tab_gap(&rectangles, strip, screen, pointer))
             });
+        let source_rect = state
+            .drag
+            .as_ref()
+            .filter(|drag| drag.crossed)
+            .and_then(|drag| tabs.iter().position(|(id, _)| *id == drag.tab))
+            .and_then(|index| rectangles.get(index).copied());
         state.widgets.clear();
-        Self { state, gap }
+        Self {
+            state,
+            gap,
+            source_rect,
+        }
     }
 
     pub(super) fn register(&mut self, tab: TabId, response: &egui::Response) {
@@ -167,8 +180,14 @@ impl Layout {
 
     pub(super) fn finish(mut self, ui: &egui::Ui, strip: egui::Rect) -> Option<UiAction> {
         let context = ui.ctx();
-        let screen = context.content_rect();
         let mut action = None;
+        // The toolbar behind every tab is opaque black. One final overlay gives
+        // group opacity (including text/audio/close), without multiplying each
+        // overlapping primitive's alpha separately or copying a GPU surface.
+        if let Some(rect) = self.source_rect {
+            ui.painter_at(strip)
+                .rect_filled(rect, 3.0, egui::Color32::from_black_alpha(128));
+        }
         if let Some(drag) = &self.state.drag {
             if drag.crossed
                 && self.state.last_frame != context.cumulative_frame_nr()
@@ -207,12 +226,9 @@ impl Layout {
                     None
                 } else if let Some((gap, _)) = self.gap {
                     Some(UiAction::ReorderTab(drag.tab, gap))
-                } else if ui.input(|input| {
-                    input
-                        .pointer
-                        .interact_pos()
-                        .is_some_and(|p| !screen.contains(p))
-                }) {
+                } else if ui
+                    .input(|input| input.pointer.interact_pos().is_some_and(|p| p.is_finite()))
+                {
                     Some(UiAction::DropTab(
                         drag.tab,
                         ui.input(|input| input.pointer.interact_pos())
@@ -298,6 +314,31 @@ impl DropStrip {
     }
 }
 
+fn tab_region(strip: egui::Rect, screen: egui::Rect, point: egui::Pos2) -> bool {
+    // Match the reference tab strip's 15-point vertical detach magnetism.
+    point.is_finite()
+        && screen.contains(point)
+        && point.y >= strip.top() - 15.0
+        && point.y <= strip.bottom() + 15.0
+}
+
+fn tab_gap(
+    rectangles: &[egui::Rect],
+    strip: egui::Rect,
+    screen: egui::Rect,
+    point: egui::Pos2,
+) -> Option<(usize, f32)> {
+    tab_region(strip, screen, point)
+        .then(|| client_gap(rectangles, strip, screen, point))
+        .flatten()
+}
+
+pub(super) fn over_tab_region(context: &egui::Context, point: egui::Pos2) -> bool {
+    context
+        .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
+        .is_some_and(|layout| tab_region(layout.strip, layout.screen, point))
+}
+
 fn client_gap(
     rectangles: &[egui::Rect],
     strip: egui::Rect,
@@ -319,10 +360,21 @@ fn client_gap(
 pub(super) fn over_incoming_client(context: &egui::Context, point: egui::Pos2) -> bool {
     context
         .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
-        .is_some_and(|layout| incoming_gap(context, &layout.tabs, point).is_some())
+        .is_some_and(|layout| incoming_filmstrip_gap(context, &layout.tabs, point).is_some())
 }
 
+#[cfg(test)]
 pub(super) fn incoming_gap(
+    context: &egui::Context,
+    tabs: &[TabId],
+    point: egui::Pos2,
+) -> Option<usize> {
+    over_tab_region(context, point)
+        .then(|| incoming_filmstrip_gap(context, tabs, point))
+        .flatten()
+}
+
+pub(super) fn incoming_filmstrip_gap(
     context: &egui::Context,
     tabs: &[TabId],
     point: egui::Pos2,

@@ -13629,7 +13629,11 @@ mod tests {
             (
                 egui::pos2(500.0, 90.0),
                 false,
-                Some(UiAction::ReorderTab(a, 3)),
+                Some(UiAction::DropTab(
+                    a,
+                    egui::pos2(500.0, 90.0),
+                    egui::vec2(70.0, 14.0),
+                )),
             ),
             (egui::pos2(500.0, 14.0), true, None),
             (

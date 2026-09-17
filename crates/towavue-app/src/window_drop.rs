@@ -9,6 +9,8 @@ struct DragFeedback {
     source: WindowKey,
     target: Option<(WindowKey, egui::Pos2)>,
     cursor: egui::CursorIcon,
+    badge: Option<tab_drag::badge::Kind>,
+    point: egui::Pos2,
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
@@ -39,6 +41,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn incoming_gap(&self, point: egui::Pos2) -> Option<usize> {
+        if !self
+            .ui_context
+            .as_ref()
+            .is_some_and(|context| tab_drag::over_tab_region(context, point))
+        {
+            return None;
+        }
+        self.incoming_filmstrip_gap(point)
+    }
+
+    pub(super) fn incoming_filmstrip_gap(&self, point: egui::Pos2) -> Option<usize> {
         if !self.accepts_tab_drop() || self.validate_transfer_window().is_err() {
             return None;
         }
@@ -59,7 +72,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 return None;
             }
         }
-        tab_drag::incoming_gap(context, &self.tabs.tab_ids().collect::<Vec<_>>(), point)
+        tab_drag::incoming_filmstrip_gap(context, &self.tabs.tab_ids().collect::<Vec<_>>(), point)
     }
 }
 
@@ -76,7 +89,7 @@ impl WindowHost {
             let tab = tab_drag::active_pointer(
                 context,
                 (
-                    app.tabs.active().map(|tab| tab.id),
+                    app.tabs.active_id(),
                     app.media_generation,
                     app.graphics_epoch,
                 ),
@@ -109,28 +122,47 @@ impl WindowHost {
                 source: *key,
                 target: None,
                 cursor: egui::CursorIcon::NoDrop,
+                badge: None,
+                point,
             };
             if local_drop {
-                if !filmstrip || (can_detach && app.incoming_gap(point).is_some()) {
+                if !filmstrip || (can_detach && app.incoming_filmstrip_gap(point).is_some()) {
                     feedback.cursor = egui::CursorIcon::Move;
                     if filmstrip {
                         feedback.target = Some((*key, point));
                     }
                 }
-            } else if !context.content_rect().contains(point) && can_detach {
-                if let Some((target, point)) = pick(self, *key, point) {
+            } else if (!filmstrip || !context.content_rect().contains(point)) && can_detach {
+                if let Some((target, point)) = pick(self, *key, point)
+                    .filter(|(key, point)| filmstrip || self.tab_region_at(*key, *point))
+                {
                     if self
                         .windows
                         .get(&target)
-                        .and_then(|app| app.incoming_gap(point))
+                        .and_then(|app| {
+                            if filmstrip {
+                                app.incoming_filmstrip_gap(point)
+                            } else {
+                                app.incoming_gap(point)
+                            }
+                        })
                         .is_some()
                     {
                         feedback.target = Some((target, point));
                         feedback.cursor = egui::CursorIcon::Move;
                     }
-                } else {
+                } else if filmstrip || app.tabs.tab_ids().count() > 1 {
                     feedback.cursor = egui::CursorIcon::Move;
                 }
+            }
+            if !filmstrip && !local_drop {
+                feedback.badge = Some(if feedback.cursor == egui::CursorIcon::NoDrop {
+                    tab_drag::badge::Kind::Forbidden
+                } else if feedback.target.is_some() {
+                    tab_drag::badge::Kind::Move
+                } else {
+                    tab_drag::badge::Kind::New
+                });
             }
             Some(feedback)
         })
@@ -152,8 +184,61 @@ impl WindowHost {
             && let Some(app) = self.windows.get(&feedback.source)
         {
             // Reapply after rendering/native mouse messages, even if the effect did not change.
-            apply(app, feedback.cursor);
+            apply(
+                app,
+                if feedback.badge.is_some() {
+                    egui::CursorIcon::Default
+                } else {
+                    feedback.cursor
+                },
+            );
         }
+    }
+
+    fn update_drag_badge(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        mut feedback: Option<DragFeedback>,
+        visible: bool,
+    ) -> Option<DragFeedback> {
+        let Some(item) = feedback.as_ref().filter(|item| item.badge.is_some()) else {
+            self.tab_badge = None;
+            self.tab_badge_failed = false;
+            return feedback;
+        };
+        if !self.tab_badge_failed {
+            let result = self
+                .source_client_position(item.source, item.point)
+                .and_then(|point| {
+                    if self.tab_badge.is_none() {
+                        self.tab_badge =
+                            Some(tab_drag::badge::Badge::new().map_err(|error| error.to_string())?);
+                    }
+                    let badge = self.tab_badge.as_mut().expect("created badge");
+                    let density = badge.density_at(event_loop, (point.x, point.y));
+                    badge
+                        .update(
+                            item.badge.expect("badge kind"),
+                            (point.x, point.y),
+                            density,
+                            visible,
+                        )
+                        .map_err(|error| error.to_string())
+                });
+            if let Err(error) = result {
+                self.tab_badge = None;
+                self.tab_badge_failed = true;
+                if let Some(app) = self.windows.get_mut(&item.source) {
+                    app.set_status(format!("Could not show tab drag feedback: {error}"));
+                }
+            }
+        }
+        if self.tab_badge_failed
+            && let Some(item) = &mut feedback
+        {
+            item.badge = None; // Retain native Move/NoDrop if decoration creation fails.
+        }
+        feedback
     }
 
     pub(super) fn source_client_position(
@@ -201,6 +286,21 @@ impl WindowHost {
         })
     }
 
+    fn tab_region_at(&self, target: WindowKey, point: egui::Pos2) -> bool {
+        let Some(app) = self.windows.get(&target) else {
+            return true;
+        };
+        let Some(context) = app.ui_context.as_ref() else {
+            return true;
+        };
+        // Only a current layout can identify a media-area detach. Keep stale or
+        // missing layouts as candidate targets so the existing merge guards reject
+        // them, rather than silently turning an uncertain merge into a new window.
+        tab_drag::incoming_filmstrip_gap(context, &app.tabs.tab_ids().collect::<Vec<_>>(), point)
+            .is_none()
+            || tab_drag::over_tab_region(context, point)
+    }
+
     fn merge_tab_drop(
         &mut self,
         source: WindowKey,
@@ -231,14 +331,25 @@ impl WindowHost {
             .iter_mut()
             .filter_map(|(key, app)| app.pending_tab_drop.take().map(|request| (*key, request)))
             .collect();
+        if !pending.is_empty() {
+            self.tab_badge = None;
+        }
         for (source, (request, point, anchor)) in pending {
-            let result = if let Some((target, point)) = pick(self, source, point) {
+            let result = if let Some((target, point)) = pick(self, source, point)
+                .filter(|(target, point)| self.tab_region_at(*target, *point))
+            {
                 self.merge_tab_drop(source, &request, target, point)
                     .map(|_| {
                         if visible && let Some(window) = &self.windows[&target].window {
                             let _ = towavue_runtime_windows::activate_window(window.as_ref());
                         }
                     })
+            } else if self
+                .windows
+                .get(&source)
+                .is_some_and(|app| app.tabs.tab_ids().count() <= 1)
+            {
+                Err("Move the last tab to another window".into())
             } else {
                 self.source_client_position(source, point)
                     .and_then(|position| {
@@ -263,6 +374,7 @@ impl WindowHost {
                 app.request_redraw();
             }
         }
+        let feedback = self.update_drag_badge(event_loop, feedback, visible);
         self.update_tab_cursor_with(feedback, |app, cursor| {
             if visible && let Some(window) = &app.window {
                 cursor::set_native(window, cursor, app.media_cursors.as_ref());

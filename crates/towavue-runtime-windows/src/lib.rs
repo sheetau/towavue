@@ -1,5 +1,8 @@
 //! Windows-specific media, graphics, audio, and Shell integration boundary.
 
+mod drag_badge;
+pub use drag_badge::DragBadge;
+
 mod audio;
 mod avif_container;
 #[cfg(feature = "presentation-verification")]

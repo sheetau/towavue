@@ -1,0 +1,3 @@
+# Drag badge artwork
+
+The arrow-right, browser-plus and ban coordinates and the 23-DIP badge styling are reused from Monapad `src/cursor.html` (MIT; see [license](MONAPAD-LICENSE.txt)). Monapad identifies these shapes as [Tabler outline icons](https://github.com/tabler/tabler-icons), whose [MIT license](TABLER-LICENSE.txt) is also retained. The paths are transcribed directly into `src/tab_drag/badge.rs`, with 17-DIP artwork, 1-DIP non-scaling round strokes, a 75% white background, gray border and 5-DIP corners. Forbidden uses red strokes. The native decoration follows the pointer at a 12-DIP offset and does not intercept input. Rasterization is cached by state and pixel size, using the already locked tiny-skia 0.11.4. It is not a browser or an OLE drag image.

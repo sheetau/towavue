@@ -2645,6 +2645,7 @@ dependencies = [
  "egui",
  "egui-winit",
  "find-msvc-tools",
+ "tiny-skia",
  "towavue-core",
  "towavue-runtime-windows",
  "winit",

@@ -2455,7 +2455,9 @@ mod tests {
             };
             app.pending_folder = (blocked == 5).then_some((1, crate::FolderIntent::Open));
             if blocked == 6 {
-                app.image_sequence.steps.push_back(true);
+                app.image_sequence
+                    .steps
+                    .push_back(crate::image_navigation::ImageStep::press(true));
             }
             app.prepare_filmstrip(&context);
             assert!(app.filmstrip.visible.is_empty(), "blocked case {blocked}");
@@ -3525,7 +3527,10 @@ fn snapshot_comparison_reuse_preserves_sequence_and_preview_refresh_decisions() 
             app.folder_snapshot = previous;
             app.image_sequence = ImageSequence {
                 awaiting: Some(7),
-                steps: [true, false].into(),
+                steps: [true, false]
+                    .into_iter()
+                    .map(crate::image_navigation::ImageStep::press)
+                    .collect(),
             };
             app.filmstrip_open = open;
             app.filmstrip.focus = Some(current.clone());

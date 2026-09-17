@@ -2,6 +2,8 @@ use crate::*;
 
 mod sequence;
 pub(super) use sequence::ImageSequence;
+#[cfg(test)]
+pub(super) use sequence::ImageStep;
 
 #[cfg(test)]
 pub(crate) mod performance_tests;

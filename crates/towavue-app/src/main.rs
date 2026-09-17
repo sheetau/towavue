@@ -2784,8 +2784,8 @@ where
             // Reorder only the existing bounded set; do not increase its reach or budget.
             let mut queued_target = current;
             let mut prioritized = 0;
-            for &forward in &self.image_sequence.steps {
-                queued_target = if forward {
+            for step in &self.image_sequence.steps {
+                queued_target = if step.forward {
                     (queued_target + 1) % images.len()
                 } else {
                     (queued_target + images.len() - 1) % images.len()
@@ -10813,6 +10813,21 @@ where
                     | (u64::from(*is_synthetic) << 2);
                 self.trace_burst(towavue_runtime_windows::BurstEvent::Key, key | (flags << 8));
             }
+        }
+        // Releases must reach held navigation even when egui, a popup or focus
+        // restoration consumes keyboard input. Synthetic releases cancel only.
+        match &event {
+            WindowEvent::Focused(false) => self.cancel_image_repeats(),
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic,
+                ..
+            } if event.state == ElementState::Released => {
+                if let Some(stroke) = self.key_stroke(event) {
+                    self.release_image_repeats(&stroke.key, *is_synthetic);
+                }
+            }
+            _ => {}
         }
         // Focus transfer reports already-held keys as synthetic presses. They
         // must not launch commands (notably Enter toggling a new window's

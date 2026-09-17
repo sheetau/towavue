@@ -363,14 +363,23 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
     for _ in 0..300 {
         app.repeat_media_shortcut("Backspace".parse().expect("alias"));
     }
-    assert_eq!(app.image_sequence.steps.len(), 256);
-    assert!(app.image_sequence.steps.iter().all(|forward| !forward));
+    assert_eq!(
+        app.image_sequence.steps.len(),
+        44,
+        "full held run is folded before overflow"
+    );
+    assert!(app.image_sequence.steps.iter().all(|step| !step.forward));
+    app.release_image_repeats(&Key::Backspace, false);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&paths[99]),
+        "all 300 repeats contribute to the final position"
+    );
+    assert!(app.image_sequence.steps.is_empty());
     assert!(
         app.status_message
             .as_ref()
-            .expect("queue limit")
-            .0
-            .contains("queue is full")
+            .is_none_or(|(text, _)| !text.contains("queue is full"))
     );
 
     app.image_sequence.steps.clear();
@@ -404,7 +413,11 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
     assert!(app.image_sequence.steps.is_empty());
     app.repeat_media_shortcut("N".parse().expect("custom key"));
     assert_eq!(
-        app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+        app.image_sequence
+            .steps
+            .iter()
+            .map(|step| step.forward)
+            .collect::<Vec<_>>(),
         [true]
     );
 }
@@ -439,7 +452,7 @@ fn queued_destinations_precede_speculation_without_expanding_neighbors() {
         ),
     ] {
         app.image_navigation_forward = forward;
-        app.image_sequence.steps = steps.iter().copied().collect();
+        app.image_sequence.steps = steps.iter().copied().map(ImageStep::press).collect();
         assert_eq!(
             app.image_prefetch_paths(),
             Some(
@@ -451,7 +464,11 @@ fn queued_destinations_precede_speculation_without_expanding_neighbors() {
             "forward={forward}, steps={steps:?}"
         );
         assert_eq!(
-            app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+            app.image_sequence
+                .steps
+                .iter()
+                .map(|step| step.forward)
+                .collect::<Vec<_>>(),
             steps
         );
     }
@@ -467,7 +484,9 @@ fn queued_destinations_precede_speculation_without_expanding_neighbors() {
     );
     app.reading_mode = true;
     let reading_plan = app.image_prefetch_paths();
-    app.image_sequence.steps.extend([false; 256]);
+    app.image_sequence
+        .steps
+        .extend([false; 256].into_iter().map(ImageStep::press));
     assert_eq!(app.image_prefetch_paths(), reading_plan);
 }
 
@@ -491,7 +510,9 @@ fn directional_prefetch_control_preserves_bounds_queue_priority_and_reading() {
         );
     }
     app.image_navigation_forward = true;
-    app.image_sequence.steps.extend([false, true, true]);
+    app.image_sequence
+        .steps
+        .extend([false, true, true].into_iter().map(ImageStep::press));
     assert_eq!(
         app.image_prefetch_paths(),
         Some(
@@ -608,7 +629,11 @@ fn initial_image_burst_waits_for_original_presentation_and_folder_order() {
             "burst must not restart initial loading"
         );
         assert_eq!(
-            app.image_sequence.steps.iter().copied().collect::<Vec<_>>(),
+            app.image_sequence
+                .steps
+                .iter()
+                .map(|step| step.forward)
+                .collect::<Vec<_>>(),
             [true, true, false, true]
         );
         assert_eq!(draw(&mut app, &context), None);
@@ -848,6 +873,7 @@ fn native_render_frame_advances_the_sequence_only_after_the_new_original() {
         "image_navigation::sequence_tests::native_render_frame_advances_the_sequence_only_after_the_new_original",
         false,
         false,
+        false,
     );
 }
 
@@ -858,6 +884,7 @@ fn native_initial_large_images_preserve_every_accepted_step() {
         "image_navigation::sequence_tests::native_initial_large_images_preserve_every_accepted_step",
         true,
         false,
+        false,
     );
 }
 
@@ -867,6 +894,7 @@ fn native_folder_notifications_preserve_initial_navigation_burst() {
         "image_navigation::sequence_tests::native_folder_notifications_preserve_initial_navigation_burst",
         false,
         true,
+        false,
     );
 }
 
@@ -877,10 +905,21 @@ fn native_folder_notifications_preserve_initial_large_image_burst() {
         "image_navigation::sequence_tests::native_folder_notifications_preserve_initial_large_image_burst",
         true,
         true,
+        false,
     );
 }
 
-fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
+#[test]
+fn native_held_navigation_settles_after_release_from_middle_and_late_positions() {
+    run_native_sequence(
+        "image_navigation::sequence_tests::native_held_navigation_settles_after_release_from_middle_and_late_positions",
+        false,
+        false,
+        true,
+    );
+}
+
+fn run_native_sequence(test_name: &str, large: bool, native_order: bool, held: bool) {
     let Some(root) = crate::tests::isolated_test_root(test_name) else {
         return;
     };
@@ -888,6 +927,7 @@ fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
         root: PathBuf,
         large: bool,
         native_order: bool,
+        held: bool,
     }
     use winit::platform::windows::EventLoopBuilderExtWindows;
     impl ApplicationHandler for Trial {
@@ -925,6 +965,14 @@ fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
                     super::performance_tests::bitmap_fixture(path);
                 }
             }
+            if self.held {
+                for (index, path) in paths.iter().enumerate() {
+                    let mut bytes = std::fs::read(path).expect("owned BMP");
+                    bytes[55] = index as u8;
+                    bytes[58] = index as u8;
+                    std::fs::write(path, bytes).expect("distinct original pixels");
+                }
+            }
             app.ui_state = Some(egui_winit::State::new(
                 context,
                 egui::ViewportId::ROOT,
@@ -948,6 +996,14 @@ fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
             app.displayed_tab = None;
             app.image = None;
             app.load_path(paths[0].clone(), MediaKind::Image);
+            if self.held {
+                app.pending_folder = None;
+                app.folder_order.request(None);
+                app.apply_folder_snapshot(snapshot);
+                held::native_release_trial(&mut app, &paths);
+                event_loop.exit();
+                return;
+            }
             if self.native_order {
                 for _ in 0..100 {
                     app.process_shortcut("Right".parse().expect("navigation key"));
@@ -1108,6 +1164,7 @@ fn run_native_sequence(test_name: &str, large: bool, native_order: bool) {
             root,
             large,
             native_order,
+            held,
         })
         .expect("native sequence");
 }
@@ -1269,3 +1326,5 @@ fn queued_image_steps_stop_at_folder_ends_without_reloading_or_wrapping() {
         assert!(app.pending_guard.is_none());
     }
 }
+
+mod held;

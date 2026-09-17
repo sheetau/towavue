@@ -518,6 +518,9 @@ impl CommandDefinition {
             return false;
         }
         (!self.requires_reading_mode || context.reading_mode)
+            && (context.media_kind != Some(MediaKind::Audio)
+                || context.timeline_open
+                || self.id != CommandId::SelectAll)
             && (context.media_kind != Some(MediaKind::Video)
                 || context.timeline_open
                 || !matches!(
@@ -800,8 +803,8 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(
         CommandId::ToggleTimeline,
-        "Toggle video editing timeline",
-        &[MediaKind::Video],
+        "Toggle editing timeline",
+        PLAYABLE_MEDIA,
     ),
     command(CommandId::ToggleGridMenu, "Toggle grid menu", ANY_MEDIA),
     command(
@@ -1150,6 +1153,46 @@ impl ShortcutBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_timeline_toggle_is_available_while_time_edits_require_editing_mode() {
+        let enabled = |id, kind, timeline_open| {
+            command_definitions()
+                .iter()
+                .find(|definition| definition.id == id)
+                .expect("command")
+                .is_enabled(CommandContext {
+                    media_kind: Some(kind),
+                    timeline_open,
+                    has_time_selection: true,
+                    ..Default::default()
+                })
+        };
+        for kind in [MediaKind::Image, MediaKind::Audio, MediaKind::Video] {
+            for timeline in [false, true] {
+                assert_eq!(
+                    enabled(CommandId::ToggleTimeline, kind, timeline),
+                    kind != MediaKind::Image
+                );
+                for command in [
+                    CommandId::SetTrimStart,
+                    CommandId::SetTrimEnd,
+                    CommandId::DeleteTimeSelection,
+                    CommandId::PlayTimeSelection,
+                ] {
+                    assert_eq!(
+                        enabled(command, kind, timeline),
+                        kind != MediaKind::Image && timeline
+                    );
+                }
+                if kind == MediaKind::Audio {
+                    assert_eq!(enabled(CommandId::SelectAll, kind, timeline), timeline);
+                    assert!(enabled(CommandId::TogglePause, kind, timeline));
+                    assert!(enabled(CommandId::StepAudioForward, kind, timeline));
+                }
+            }
+        }
+    }
 
     #[test]
     fn explicit_choice_commands_round_trip_and_follow_media_and_reading_guards() {

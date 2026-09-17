@@ -1944,6 +1944,7 @@ mod tests {
         app.ui_context = Some(context.clone());
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.media_kind = Some(MediaKind::Audio);
+        app.timeline_open = true;
         app.media_duration = Some(std::time::Duration::from_secs(10));
         app.state = PlaybackState::Paused;
         let draw = |app: &mut Application<_>, events| {

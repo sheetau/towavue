@@ -1678,7 +1678,7 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
                 } else {
                     assert!(bounds.top() >= 24.0, "tab bar remains outside dim");
                 }
-                if fullscreen && kind != MediaKind::Audio {
+                if fullscreen {
                     assert_eq!(bounds.bottom(), 576.0);
                 } else {
                     assert!(

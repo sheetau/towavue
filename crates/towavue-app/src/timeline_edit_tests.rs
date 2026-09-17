@@ -479,7 +479,7 @@ fn queued_timeline_release_precedes_native_cancellation() {
                     for release_first in [true, false] {
                         for batched_press in [false, true] {
                             app.time_selection = None;
-                            app.fullscreen = kind == MediaKind::Audio;
+                            app.fullscreen = false;
                             app.ui_state
                                 .as_mut()
                                 .expect("input state")
@@ -554,9 +554,7 @@ fn queued_timeline_release_precedes_native_cancellation() {
                             );
                             assert!(!crate::timeline_input::is_active(&context));
                             assert!(!app.edits[&tab].is_dirty());
-                            if escape && kind == MediaKind::Audio {
-                                assert_eq!(app.fullscreen, !release_first);
-                            }
+                            assert!(!app.fullscreen, "editing stays windowed");
                         }
                     }
                 }
@@ -624,6 +622,7 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
             app.ui_context = Some(context.clone());
             app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
             app.media_kind = Some(MediaKind::Audio);
+            app.timeline_open = true;
             app.media_duration = Some(Duration::from_secs(10));
             app.state = PlaybackState::Paused;
             app.time_selection = Some(range(2000, 6000));

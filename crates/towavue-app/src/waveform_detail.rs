@@ -59,6 +59,7 @@ mod tests {
             let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
             app.path = Some(path.clone());
             app.media_kind = Some(MediaKind::Audio);
+            app.timeline_open = true;
             app.media_duration = Some(Duration::from_secs(1));
             app.state = PlaybackState::Paused;
             let waveform = context.load_texture(

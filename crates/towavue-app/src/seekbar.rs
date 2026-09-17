@@ -8,9 +8,9 @@ pub fn show(
     progress: f32,
     parent: Option<egui::LayerId>,
     enabled: bool,
-    video: bool,
+    allow_timeline: bool,
 ) -> (Response, Option<egui::Pos2>, bool) {
-    let (response, drag) = show_drag(context, status, progress, parent, enabled, video);
+    let (response, drag) = show_drag(context, status, progress, parent, enabled, allow_timeline);
     let commit = if drag.released { drag.position } else { None };
     (response, commit, drag.open_timeline)
 }
@@ -21,7 +21,7 @@ pub fn show_drag(
     progress: f32,
     parent: Option<egui::LayerId>,
     enabled: bool,
-    video: bool,
+    allow_timeline: bool,
 ) -> (Response, timeline_input::Drag) {
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
@@ -37,7 +37,7 @@ pub fn show_drag(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            show_control(ui, response, progress, video)
+            show_control(ui, response, progress, allow_timeline)
         })
         .inner
 }
@@ -57,12 +57,12 @@ fn show_control(
     ui: &egui::Ui,
     response: Response,
     progress: f32,
-    video: bool,
+    allow_timeline: bool,
 ) -> (Response, timeline_input::Drag) {
     let context = ui.ctx();
     let rect = response.rect;
     let enabled = response.enabled();
-    let drag = if video {
+    let drag = if allow_timeline {
         timeline_input::video_seek_drag(&response)
     } else {
         timeline_input::seek_drag(&response)
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn seek_drag_keeps_the_thumbnail_and_time_visible_without_hover() {
-        for video in [false, true] {
+        for allow_timeline in [false, true] {
             let context = crate::fonts::test_context();
             let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0));
             let status = Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0));
@@ -378,7 +378,7 @@ mod tests {
                     },
                     |_| {
                         let (response, drag) =
-                            show_drag(&context, status, 0.2, None, enabled, video);
+                            show_drag(&context, status, 0.2, None, enabled, allow_timeline);
                         let mut other = response.clone();
                         other.id = response.id.with("unrelated-widget");
                         assert!(!timeline_input::is_dragging(&other));
@@ -421,7 +421,7 @@ mod tests {
     #[test]
     fn release_paints_the_committed_position_across_discarded_passes() {
         for density in [1.0, 1.25, 2.0] {
-            for video in [false, true] {
+            for allow_timeline in [false, true] {
                 for discard in [false, true] {
                     for batched in [false, true] {
                         let context = Context::default();
@@ -452,7 +452,7 @@ mod tests {
                                 .native_pixels_per_point = Some(density);
                             let output = context.run_ui(input, |_| {
                                 let (_, commit, open) =
-                                    show(&context, status, progress, None, true, video);
+                                    show(&context, status, progress, None, true, allow_timeline);
                                 assert!(!open);
                                 commits.extend(commit);
                                 if discard && context.current_pass_index() == 0 {

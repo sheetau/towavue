@@ -15,6 +15,7 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
         app.tabs.open_new(path.clone(), MediaKind::Audio);
         app.path = Some(path.clone());
         app.media_kind = Some(MediaKind::Audio);
+        app.timeline_open = true;
         app.state = PlaybackState::Paused;
         app.status_message = None;
         app.media_duration = Some(Duration::from_secs(180));

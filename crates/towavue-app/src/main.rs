@@ -6,6 +6,8 @@ mod audio_export;
 #[cfg(test)]
 mod audio_export_tests;
 mod audio_playback;
+#[cfg(test)]
+mod audio_view_tests;
 mod chrome;
 #[cfg(test)]
 mod chrome_resize_tests;
@@ -1841,7 +1843,7 @@ where
             .flatten();
         self.image_view = saved.view;
         self.waveform_detail = saved.waveform_detail;
-        self.timeline_open = saved.kind == MediaKind::Audio || saved.timeline_open;
+        self.timeline_open = saved.timeline_open;
         self.time_selection = saved.time_selection;
         self.playback_selection = saved.playback_selection;
         self.video_repeat = saved.video_repeat;
@@ -1986,7 +1988,7 @@ where
         self.resume_owner = None;
         self.image = None;
         self.reading_pages.clear();
-        self.timeline_open = kind == MediaKind::Audio;
+        self.timeline_open = false;
         self.waveform = None;
         self.waveform_detail = waveform_detail::Detail::default();
         self.media_duration = None;
@@ -3698,15 +3700,6 @@ where
             let rect = self.draw_status_bar(root, actions, &mut volume_targets);
             Some(rect)
         } else {
-            if self.media_kind == Some(MediaKind::Audio) {
-                // Keep every timeline control above the hover overlay, without
-                // reflowing the waveform whenever the pointer enters or leaves.
-                egui::Panel::bottom("fullscreen-audio-status-space")
-                    .exact_size(chrome::STATUS_HEIGHT)
-                    .show_separator_line(false)
-                    .frame(egui::Frame::NONE)
-                    .show(root, |_| {});
-            }
             None
         };
         self.draw_timeline(root, actions);
@@ -5833,8 +5826,7 @@ where
                             ui.set_min_width(path_width);
                             let selection_hint = (!self.modal_input_blocked() && self.reading_drag.is_none()).then(|| {
                                 selection::focus_hint(ui.ctx()).or_else(|| {
-                                    ((self.media_kind == Some(MediaKind::Video) && self.timeline_open)
-                                        || self.media_kind == Some(MediaKind::Audio))
+                                    self.timeline_is_visible()
                                         .then(|| time_selection::focus_hint(ui.ctx())).flatten()
                                 })
                             }).flatten();
@@ -6050,10 +6042,11 @@ where
             KEYBOARD_SEEK_STEP.as_secs_f64(),
             enabled,
         );
-        if let Some(pointer) = drag
-            .position
-            .or(response.interact_pointer_pos())
-            .or_else(|| media_preview::hover_pos(&response))
+        if self.media_kind == Some(MediaKind::Video)
+            && let Some(pointer) = drag
+                .position
+                .or(response.interact_pointer_pos())
+                .or_else(|| media_preview::hover_pos(&response))
         {
             let ratio = seekbar::compact_ratio(response.rect, pointer.x);
             self.draw_seek_preview(&response, ratio, duration);
@@ -6157,8 +6150,9 @@ where
     }
 
     fn timeline_is_visible(&self) -> bool {
-        self.media_kind == Some(MediaKind::Audio)
-            || (self.media_kind == Some(MediaKind::Video) && self.timeline_open && !self.fullscreen)
+        matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
+            && self.timeline_open
+            && !self.fullscreen
     }
 
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
@@ -12652,10 +12646,10 @@ mod tests {
     }
 
     #[test]
-    fn audio_timeline_is_permanent_and_video_timeline_has_no_thumbnail_requests() {
+    fn playback_timeline_is_explicit_and_has_no_thumbnail_requests() {
         let stroke = |key: &str| key.parse::<KeyStroke>().expect("shortcut");
         let Some(root) = isolated_test_root(
-            "tests::audio_timeline_is_permanent_and_video_timeline_has_no_thumbnail_requests",
+            "tests::playback_timeline_is_explicit_and_has_no_thumbnail_requests",
         ) else {
             return;
         };
@@ -12686,16 +12680,8 @@ mod tests {
                     }
                     app.timeline_open = false;
                     app.process_shortcut(stroke("T"));
-                    if kind == MediaKind::Audio {
-                        assert_eq!(
-                            app.fullscreen, fullscreen,
-                            "audio T must not leave fullscreen"
-                        );
-                        assert!(!app.timeline_open, "audio does not need a toggle flag");
-                    } else {
-                        assert!(!app.fullscreen);
-                        assert!(app.timeline_open);
-                    }
+                    assert!(!app.fullscreen);
+                    assert!(app.timeline_open);
                     assert!(app.timeline_is_visible());
                     let context = fonts::test_context();
                     context.enable_accesskit();
@@ -12745,7 +12731,7 @@ mod tests {
                         assert!(!app.fullscreen_controls_visible);
                     }
                     app.process_shortcut(stroke("T"));
-                    assert_eq!(app.timeline_is_visible(), kind == MediaKind::Audio);
+                    assert!(!app.timeline_is_visible());
                     assert_eq!(app.current_position(), media_time(Duration::from_secs(2)));
                     assert_eq!(app.edits[&tab], history);
                     assert_eq!(app.generation, generation);
@@ -18446,10 +18432,7 @@ mod tests {
                     );
                 }
                 let before = frame(&mut app, vec![], true);
-                if kind == MediaKind::Audio {
-                    let bounds = timeline(&before).expect("fullscreen audio keeps its timeline");
-                    assert!(bounds.height() > 30.0 && bounds.y1 <= 450.0);
-                }
+                assert!(timeline(&before).is_none(), "fullscreen hides editing");
                 let edge = egui::pos2(600.0, 465.0);
                 let mut tree = frame(&mut app, vec![egui::Event::PointerMoved(edge)], true);
                 for _ in 0..3 {
@@ -18461,7 +18444,7 @@ mod tests {
                     assert_eq!(
                         timeline(&tree),
                         timeline(&before),
-                        "hover never reflows the waveform"
+                        "hover cannot reveal editing without a live session"
                     );
                 }
                 frame(

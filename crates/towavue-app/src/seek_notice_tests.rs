@@ -17,6 +17,7 @@ fn seek_delta_is_white_inline_with_clock_and_does_not_replace_path_or_controls()
                 app.tabs.open_new(path.clone(), kind);
                 app.path = Some(path);
                 app.media_kind = Some(kind);
+                app.timeline_open = kind == MediaKind::Audio;
                 app.state = PlaybackState::Paused;
                 app.clock = Some(PlaybackClock::paused(
                     media_time(Duration::from_secs(569)),

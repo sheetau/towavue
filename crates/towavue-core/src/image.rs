@@ -286,23 +286,14 @@ impl ReadingSettings {
             return None;
         }
         let current = self.spread(image_index, image_count);
-        Some(if forward {
-            if current.end == image_count {
-                0
-            } else {
-                current.end
-            }
+        if forward {
+            (current.end < image_count).then_some(current.end)
         } else {
-            self.spread(
-                if current.start == 0 {
-                    image_count - 1
-                } else {
-                    current.start - 1
-                },
-                image_count,
-            )
-            .start
-        })
+            current
+                .start
+                .checked_sub(1)
+                .map(|previous| self.spread(previous, image_count).start)
+        }
     }
 
     pub fn toggle_axis(&mut self) {
@@ -527,10 +518,18 @@ mod tests {
                             assert_eq!(settings.spread(index, total), range);
                         }
                         covered.extend(range.clone());
-                        let next = settings
-                            .adjacent_spread(start, total, true)
-                            .expect("next spread");
-                        assert_eq!(settings.adjacent_spread(next, total, false), Some(start));
+                        if range.end < total {
+                            let next = settings
+                                .adjacent_spread(start, total, true)
+                                .expect("next spread");
+                            assert_eq!(next, range.end);
+                            assert_eq!(settings.adjacent_spread(next, total, false), Some(start));
+                        } else {
+                            assert_eq!(settings.adjacent_spread(start, total, true), None);
+                        }
+                        if start == 0 {
+                            assert_eq!(settings.adjacent_spread(start, total, false), None);
+                        }
                         start = range.end;
                     }
                     assert_eq!(covered, (0..total).collect::<Vec<_>>());

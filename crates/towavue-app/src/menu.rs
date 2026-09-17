@@ -3,6 +3,9 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 
 use CommandId::*;
 
+mod choices;
+pub(crate) use choices::Choices;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OpenTarget {
     Tab,
@@ -21,10 +24,11 @@ pub(crate) enum RecentAction {
 }
 
 #[derive(Default)]
-pub(crate) struct RecentMenu<'a> {
+pub(crate) struct MenuData<'a> {
     pub folders: &'a [std::path::PathBuf],
     pub files: &'a [std::path::PathBuf],
     pub action: Option<RecentAction>,
+    pub choices: Choices,
 }
 
 /// Project folder history at delivery, without filesystem work or new persisted
@@ -118,7 +122,13 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             &[PreviousVideoFrame, NextVideoFrame],
             &[StepAudioBackward, StepAudioForward],
             &[CycleAudioRepeat, ToggleVideoRepeat, ToggleAudioShuffle],
-            &[PreviousMedia, NextMedia, PreviousSameKind, NextSameKind],
+            &[
+                PreviousMedia,
+                NextMedia,
+                PreviousSameKind,
+                NextSameKind,
+                FolderNavigationStop,
+            ],
             &[PreviousImage, NextImage, FirstImage, LastImage],
             &[PreviousTab, NextTab],
             &[
@@ -211,7 +221,7 @@ pub(crate) fn show_section(
     shortcuts: &ShortcutBindings,
     initial: Option<Section>,
 ) -> Option<CommandId> {
-    show_section_with_recent(ui, context, shortcuts, initial, &mut RecentMenu::default())
+    show_section_with_recent(ui, context, shortcuts, initial, &mut MenuData::default())
 }
 
 pub(crate) fn show_section_with_recent(
@@ -219,7 +229,7 @@ pub(crate) fn show_section_with_recent(
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     initial: Option<Section>,
-    recent: &mut RecentMenu<'_>,
+    recent: &mut MenuData<'_>,
 ) -> Option<CommandId> {
     let mut chosen = None;
     if let Some(section) = initial {
@@ -247,7 +257,7 @@ fn submenu(
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     requested: Option<egui::Id>,
-    recent: &mut RecentMenu<'_>,
+    recent: &mut MenuData<'_>,
 ) -> (egui::Response, Option<CommandId>) {
     let category = ui.next_auto_id();
     if requested == Some(category) {
@@ -273,7 +283,7 @@ fn show_items(
     title: &str,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
-    recent: &mut RecentMenu<'_>,
+    recent: &mut MenuData<'_>,
     ancestor: Option<egui::Rect>,
 ) -> (Option<CommandId>, bool) {
     let groups = MENUS
@@ -281,6 +291,7 @@ fn show_items(
         .find(|(name, _)| *name == title)
         .expect("registered menu")
         .1;
+    choices::reserve_cascade(ui, groups, ancestor);
     let keyboard = MenuKeyboard::begin(ui);
     let back = keyboard.left;
     let requested = keyboard
@@ -298,6 +309,22 @@ fn show_items(
                     ui.separator();
                 }
                 for id in *group {
+                    if let Some((response, command)) =
+                        choices::submenu(ui, *id, context, &recent.choices, requested, ancestor)
+                    {
+                        if response.enabled() {
+                            items.push(response.id);
+                        }
+                        if response.gained_focus()
+                            || (response.has_focus()
+                                && (response.rect.top() < ui.clip_rect().top()
+                                    || response.rect.bottom() > ui.clip_rect().bottom()))
+                        {
+                            response.scroll_to_me(None);
+                        }
+                        chosen = chosen.or(command);
+                        continue;
+                    }
                     let definition = command_definitions()
                         .iter()
                         .find(|definition| definition.id == *id)
@@ -379,7 +406,7 @@ fn show_items(
     (chosen, back)
 }
 
-fn show_recent(ui: &mut egui::Ui, recent: &mut RecentMenu<'_>, available_width: f32) -> bool {
+fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f32) -> bool {
     use crate::hover_help::HoverHelp;
     use towavue_runtime_windows::RecentKind;
     let keyboard = MenuKeyboard::begin(ui);
@@ -754,7 +781,7 @@ mod tests {
                                                 "File",
                                                 CommandContext::default(),
                                                 &crate::shortcuts::defaults(),
-                                                &mut RecentMenu {
+                                                &mut MenuData {
                                                     files: &files,
                                                     ..Default::default()
                                                 },
@@ -886,10 +913,11 @@ mod tests {
                 let mut time = 0.0;
                 let mut frame = |events| {
                     time += 0.1;
-                    let mut recent = RecentMenu {
+                    let mut recent = MenuData {
                         folders: if empty.get() { &[] } else { &folders },
                         files: if empty.get() { &[] } else { &files },
                         action: None,
+                        ..Default::default()
                     };
                     let output = context.run_ui(
                         egui::RawInput {
@@ -1132,11 +1160,10 @@ mod tests {
         navigate(egui::Key::Tab, false, "Open file");
         navigate(egui::Key::ArrowLeft, false, "File");
         navigate(egui::Key::ArrowDown, false, "Edit");
-        navigate(
-            egui::Key::ArrowRight,
-            false,
-            "Cycle volume step (2% / 5% / 10%)",
-        );
+        navigate(egui::Key::ArrowRight, false, "Listening volume step");
+        navigate(egui::Key::ArrowRight, false, "2%");
+        navigate(egui::Key::ArrowDown, false, "5%");
+        navigate(egui::Key::ArrowLeft, false, "Listening volume step");
         navigate(egui::Key::ArrowLeft, false, "Edit");
         navigate(egui::Key::ArrowDown, false, "View");
         navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
@@ -1501,7 +1528,7 @@ mod tests {
     }
 
     #[test]
-    fn every_registered_command_has_exactly_one_menu_location() {
+    fn every_menu_command_has_exactly_one_leaf_location() {
         let mut placed = BTreeSet::new();
         assert_eq!(
             MENUS.iter().map(|(title, _)| *title).collect::<Vec<_>>(),
@@ -1512,10 +1539,16 @@ mod tests {
             for group in *groups {
                 assert!(!group.is_empty());
                 for command in *group {
-                    assert!(
-                        placed.insert(*command),
-                        "duplicate menu command: {command:?}"
-                    );
+                    if let Some((_, rows)) = choices::options(*command) {
+                        for (child, _) in rows {
+                            assert!(placed.insert(*child), "duplicate choice command: {child:?}");
+                        }
+                    } else {
+                        assert!(
+                            placed.insert(*command),
+                            "duplicate menu command: {command:?}"
+                        );
+                    }
                 }
             }
         }
@@ -1524,6 +1557,7 @@ mod tests {
             command_definitions()
                 .iter()
                 .map(|definition| definition.id)
+                .filter(|id| !matches!(id, CycleVolumeStep | CycleAudioRepeat))
                 .collect()
         );
     }

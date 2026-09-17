@@ -173,6 +173,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             })
     }
 
+    pub(super) fn set_audio_repeat(&mut self, repeat: RepeatMode) {
+        self.ensure_audio_queue();
+        if let Some(queue) = self
+            .tabs
+            .active()
+            .and_then(|tab| self.audio_queues.get_mut(&tab.id))
+        {
+            queue.order.set_repeat(repeat);
+        }
+        self.request_redraw();
+    }
+
     pub(super) fn change_audio_mode(&mut self, shuffle: bool) {
         self.ensure_audio_queue();
         if let Some(queue) = self

@@ -55,6 +55,14 @@ pub enum CommandId {
     VolumeUp,
     ToggleMute,
     CycleVolumeStep,
+    VolumeStepTwo,
+    VolumeStepFive,
+    VolumeStepTen,
+    AudioRepeatOff,
+    AudioRepeatAll,
+    AudioRepeatOne,
+    FolderNavigationStop,
+    FolderNavigationLoop,
     RateDown,
     RateUp,
     ResetRate,
@@ -186,6 +194,14 @@ impl CommandId {
             Self::VolumeUp => "volume_up",
             Self::ToggleMute => "toggle_mute",
             Self::CycleVolumeStep => "cycle_volume_step",
+            Self::VolumeStepTwo => "volume_step_two",
+            Self::VolumeStepFive => "volume_step_five",
+            Self::VolumeStepTen => "volume_step_ten",
+            Self::AudioRepeatOff => "audio_repeat_off",
+            Self::AudioRepeatAll => "audio_repeat_all",
+            Self::AudioRepeatOne => "audio_repeat_one",
+            Self::FolderNavigationStop => "folder_navigation_stop",
+            Self::FolderNavigationLoop => "folder_navigation_loop",
             Self::RateDown => "rate_down",
             Self::RateUp => "rate_up",
             Self::ResetRate => "reset_rate",
@@ -493,6 +509,14 @@ impl CommandDefinition {
             return false;
         }
         let image_reading = context.media_kind == Some(MediaKind::Image) && context.reading_mode;
+        if image_reading
+            && matches!(
+                self.id,
+                CommandId::FolderNavigationStop | CommandId::FolderNavigationLoop
+            )
+        {
+            return false;
+        }
         (!self.requires_reading_mode || context.reading_mode)
             && (context.media_kind != Some(MediaKind::Video)
                 || context.timeline_open
@@ -716,6 +740,34 @@ const COMMANDS: &[CommandDefinition] = &[
         CommandId::CycleVolumeStep,
         "Cycle volume step (2% / 5% / 10%)",
         &[],
+    ),
+    command(CommandId::VolumeStepTwo, "Listening volume step: 2%", &[]),
+    command(CommandId::VolumeStepFive, "Listening volume step: 5%", &[]),
+    command(CommandId::VolumeStepTen, "Listening volume step: 10%", &[]),
+    command(
+        CommandId::AudioRepeatOff,
+        "Audio repeat: off",
+        &[MediaKind::Audio],
+    ),
+    command(
+        CommandId::AudioRepeatAll,
+        "Audio repeat: all",
+        &[MediaKind::Audio],
+    ),
+    command(
+        CommandId::AudioRepeatOne,
+        "Audio repeat: one",
+        &[MediaKind::Audio],
+    ),
+    command(
+        CommandId::FolderNavigationStop,
+        "Folder navigation: stop at ends",
+        VISUAL_MEDIA,
+    ),
+    command(
+        CommandId::FolderNavigationLoop,
+        "Folder navigation: loop at ends",
+        VISUAL_MEDIA,
     ),
     command(
         CommandId::RateDown,
@@ -1098,6 +1150,54 @@ impl ShortcutBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_choice_commands_round_trip_and_follow_media_and_reading_guards() {
+        use CommandId::*;
+        for id in [
+            VolumeStepTwo,
+            VolumeStepFive,
+            VolumeStepTen,
+            AudioRepeatOff,
+            AudioRepeatAll,
+            AudioRepeatOne,
+            FolderNavigationStop,
+            FolderNavigationLoop,
+        ] {
+            assert_eq!(id.as_str().parse::<CommandId>(), Ok(id));
+            let definition = command_definitions()
+                .iter()
+                .find(|definition| definition.id == id)
+                .expect("choice definition");
+            for media_kind in [
+                None,
+                Some(MediaKind::Image),
+                Some(MediaKind::Video),
+                Some(MediaKind::Audio),
+            ] {
+                for reading_mode in [false, true] {
+                    let expected = match id {
+                        VolumeStepTwo | VolumeStepFive | VolumeStepTen => true,
+                        AudioRepeatOff | AudioRepeatAll | AudioRepeatOne => {
+                            media_kind == Some(MediaKind::Audio)
+                        }
+                        _ => {
+                            media_kind == Some(MediaKind::Video)
+                                || (media_kind == Some(MediaKind::Image) && !reading_mode)
+                        }
+                    };
+                    assert_eq!(
+                        definition.is_enabled(CommandContext {
+                            media_kind,
+                            reading_mode,
+                            ..Default::default()
+                        }),
+                        expected
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn fine_rotations_follow_visual_media_reading_transition_and_timeline_guards() {

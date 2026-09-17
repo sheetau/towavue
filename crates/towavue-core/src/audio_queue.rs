@@ -22,6 +22,10 @@ impl AudioQueue {
         self.repeat
     }
 
+    pub fn set_repeat(&mut self, repeat: RepeatMode) {
+        self.repeat = repeat;
+    }
+
     pub fn cycle_repeat(&mut self) {
         self.repeat = match self.repeat {
             RepeatMode::Off => RepeatMode::All,

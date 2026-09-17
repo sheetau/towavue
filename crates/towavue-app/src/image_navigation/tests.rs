@@ -211,18 +211,24 @@ fn jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_hi
         .target
         .set_current_path(root.join(names[0]), MediaKind::Image);
     for (key, expected) in [
-        ("PageDown", 1),
-        ("Space", 1),
-        ("D", 1),
-        ("PageUp", 11),
-        ("Backspace", 11),
-        ("A", 11),
+        ("PageDown", Some(1)),
+        ("Space", Some(1)),
+        ("D", Some(1)),
+        ("PageUp", None),
+        ("Backspace", None),
+        ("A", None),
     ] {
         app.process_shortcut(key.parse().expect("alias"));
-        assert!(
-            matches!(&app.pending_guard,Some(GuardedAction::Navigate(path)) if *path==root.join(names[expected])),
-            "reading alias {key}"
-        );
+        match expected {
+            Some(expected) => assert!(
+                matches!(&app.pending_guard,Some(GuardedAction::Navigate(path)) if *path==root.join(names[expected])),
+                "reading alias {key}"
+            ),
+            None => assert!(
+                app.pending_guard.is_none(),
+                "reading alias {key} stops at the first spread"
+            ),
+        }
         app.resolve_guard(GuardDecision::Cancel);
     }
     for (key, expected) in [("Ctrl+Space", 5), ("Ctrl+Right", 1), ("Ctrl+0", 10)] {
@@ -444,5 +450,118 @@ fn named_navigation_keys_and_shifted_number_row_preserve_custom_symbols_and_cont
                 .expect("round trip"),
             parsed
         );
+    }
+}
+
+#[test]
+fn folder_end_choices_preserve_shell_order_guards_and_reading_never_wraps() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::tests::folder_end_choices_preserve_shell_order_guards_and_reading_never_wraps",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let items: Vec<_> = [
+        ("z.png", MediaKind::Image),
+        ("b.mp4", MediaKind::Video),
+        ("a.png", MediaKind::Image),
+        ("z.mp4", MediaKind::Video),
+        ("c.png", MediaKind::Image),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, (name, kind))| towavue_core::FolderMediaItem {
+        identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+        path: root.join(name),
+        kind,
+    })
+    .collect();
+    let tab = app.tabs.open_new(items[0].path.clone(), MediaKind::Image);
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    app.folder_snapshot = Some(FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![]),
+        folder_path: root.clone(),
+        items: items.clone(),
+        sort_columns: vec![],
+        source: FolderSnapshotSource::LiveExplorerView,
+        generation: 42,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    });
+    let history = app.edits.clone();
+    for looping in [false, true] {
+        for reading in [false, true] {
+            for current in 0..items.len() {
+                if reading && items[current].kind != MediaKind::Image {
+                    continue;
+                }
+                app.reading_mode = false;
+                app.media_kind = Some(items[current].kind);
+                app.path = Some(items[current].path.clone());
+                app.tabs
+                    .active_mut()
+                    .expect("tab")
+                    .target
+                    .set_current_path(items[current].path.clone(), items[current].kind);
+                app.dispatch(if looping {
+                    CommandId::FolderNavigationLoop
+                } else {
+                    CommandId::FolderNavigationStop
+                });
+                assert_eq!(app.folder_navigation_loop, looping);
+                app.reading_mode = reading;
+                if reading {
+                    app.dispatch(if looping {
+                        CommandId::FolderNavigationStop
+                    } else {
+                        CommandId::FolderNavigationLoop
+                    });
+                    assert_eq!(
+                        app.folder_navigation_loop, looping,
+                        "reading cannot change the inactive preference"
+                    );
+                }
+                for same_kind in [false, true] {
+                    let eligible: Vec<_> = items
+                        .iter()
+                        .filter(|item| !same_kind || item.kind == items[current].kind)
+                        .collect();
+                    let index = eligible
+                        .iter()
+                        .position(|item| item.path == items[current].path)
+                        .expect("current");
+                    for forward in [false, true] {
+                        let target = if forward {
+                            index.checked_add(1).filter(|next| *next < eligible.len())
+                        } else {
+                            index.checked_sub(1)
+                        }
+                        .or_else(|| {
+                            (looping && !reading).then_some(if forward {
+                                0
+                            } else {
+                                eligible.len() - 1
+                            })
+                        });
+                        app.navigate(forward, same_kind);
+                        match target {
+                            Some(target) => assert!(
+                                matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if *path == eligible[target].path)
+                            ),
+                            None => assert!(
+                                app.pending_guard.is_none(),
+                                "end stops without a guard or reload"
+                            ),
+                        }
+                        app.pending_guard = None;
+                        assert_eq!(app.path.as_ref(), Some(&items[current].path));
+                        assert_eq!(app.edits, history);
+                        assert_eq!(app.folder_snapshot.as_ref().expect("snapshot").items, items);
+                    }
+                }
+            }
+        }
     }
 }

@@ -162,6 +162,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn explicit_choices_are_idempotent_and_leave_listening_and_edits_unchanged() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "playback_volume::tests::explicit_choices_are_idempotent_and_leave_listening_and_edits_unchanged",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let path = root.join("audio.wav");
+        app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Audio);
+        app.set_playback_volume(0.37);
+        let history = app.edits.clone();
+        for (command, step) in [
+            (CommandId::VolumeStepTen, 10),
+            (CommandId::VolumeStepTwo, 2),
+            (CommandId::VolumeStepFive, 5),
+        ] {
+            for _ in 0..2 {
+                app.dispatch(command);
+                assert_eq!(app.volume_step_percent, step);
+                assert_eq!(app.playback_volume(), 0.37);
+                assert_eq!(app.edits, history);
+            }
+        }
+        for (command, mode) in [
+            (CommandId::AudioRepeatOne, towavue_core::RepeatMode::One),
+            (CommandId::AudioRepeatAll, towavue_core::RepeatMode::All),
+            (CommandId::AudioRepeatOff, towavue_core::RepeatMode::Off),
+        ] {
+            for _ in 0..2 {
+                app.dispatch(command);
+                assert_eq!(app.audio_mode(), (mode, false));
+                assert_eq!(app.playback_volume(), 0.37);
+                assert_eq!(app.edits, history);
+            }
+        }
+        app.dispatch(CommandId::FolderNavigationStop);
+        assert!(
+            app.folder_navigation_loop,
+            "image/video preference is unavailable on audio"
+        );
+    }
+
+    #[test]
     fn volume_steps_cycle_and_match_keys_wheel_and_exact_limits_without_edits() {
         let Some(root) = crate::tests::isolated_test_root(
             "playback_volume::tests::volume_steps_cycle_and_match_keys_wheel_and_exact_limits_without_edits",

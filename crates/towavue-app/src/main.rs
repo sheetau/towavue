@@ -882,6 +882,7 @@ struct Application<N> {
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     volume_step_percent: u8,
+    folder_navigation_loop: bool,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
@@ -1149,6 +1150,7 @@ where
             playback_volumes: BTreeMap::new(),
             last_playback_volume: Arc::default(),
             volume_step_percent: 2,
+            folder_navigation_loop: true,
             graphics_epoch: 0,
             idle_graphics_frame: None,
             restored_reading_pages: false,
@@ -4906,10 +4908,15 @@ where
                     ui.add_space(ui.spacing().item_spacing.x);
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
                     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-                    let mut recent = menu::RecentMenu {
+                    let mut recent = menu::MenuData {
                         folders: &self.recent_folders,
                         files: &self.recent_paths,
                         action: None,
+                        choices: menu::Choices {
+                            volume_step: self.volume_step_percent,
+                            audio_repeat: self.audio_mode().0,
+                            folder_loop: self.folder_navigation_loop && !self.reading_mode,
+                        },
                     };
                     let menu = logo_menu::show_with_recent(
                         ui,
@@ -6727,6 +6734,13 @@ where
             CommandId::PreviousSameKind => self.navigate(false, true),
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
+            CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
+            CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
+            CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
+            CommandId::FolderNavigationStop | CommandId::FolderNavigationLoop => {
+                self.folder_navigation_loop = command == CommandId::FolderNavigationLoop;
+                self.request_redraw();
+            }
             CommandId::ToggleVideoRepeat => {
                 self.video_repeat = !self.video_repeat;
                 self.request_redraw();
@@ -7033,6 +7047,14 @@ where
             }
             CommandId::ToggleMute => {
                 self.toggle_playback_mute();
+            }
+            CommandId::VolumeStepTwo | CommandId::VolumeStepFive | CommandId::VolumeStepTen => {
+                self.volume_step_percent = match command {
+                    CommandId::VolumeStepTwo => 2,
+                    CommandId::VolumeStepFive => 5,
+                    _ => 10,
+                };
+                self.request_redraw();
             }
             CommandId::CycleVolumeStep => {
                 self.volume_step_percent = match self.volume_step_percent {
@@ -8566,19 +8588,28 @@ where
         else {
             return;
         };
+        let wrap = !self.reading_mode && (kind == MediaKind::Audio || self.folder_navigation_loop);
         let target = if forward {
             items[current + 1..]
                 .iter()
-                .chain(items[..=current].iter())
+                .chain(
+                    items[..=current]
+                        .iter()
+                        .take(if wrap { current + 1 } else { 0 }),
+                )
                 .find(|item| !same_kind || item.kind == kind)
         } else {
             items[..current]
                 .iter()
                 .rev()
-                .chain(items[current..].iter().rev())
+                .chain(items[current..].iter().rev().take(if wrap {
+                    items.len() - current
+                } else {
+                    0
+                }))
                 .find(|item| !same_kind || item.kind == kind)
         };
-        if let Some(target) = target {
+        if let Some(target) = target.filter(|target| target.path != *path) {
             #[cfg(feature = "presentation-verification")]
             towavue_runtime_windows::record_burst(
                 towavue_runtime_windows::BurstEvent::TargetSelected,
@@ -17604,13 +17635,13 @@ mod tests {
                             for forward in [false, true] {
                                 app.image_navigation_forward = forward;
                                 let target = if forward {
-                                    (spread + 1) % spreads.len()
+                                    (spread + 1 < spreads.len()).then_some(spread + 1)
                                 } else {
-                                    (spread + spreads.len() - 1) % spreads.len()
+                                    spread.checked_sub(1)
                                 };
                                 assert_eq!(
                                     app.image_prefetch_paths(),
-                                    Some(paths[spreads[target].clone()].to_vec()),
+                                    target.map(|target| paths[spreads[target].clone()].to_vec()),
                                     "{page_count}/{first_page_count} current={current} forward={forward}"
                                 );
                             }
@@ -17863,26 +17894,36 @@ mod tests {
                     .set_current_path(path.clone(), MediaKind::Image);
                 let generation = app.media_generation;
                 for (command, target) in [
-                    (CommandId::NextImage, next[current]),
-                    (CommandId::PreviousImage, previous[current]),
-                    (CommandId::NextSameKind, (current + 1) % names.len()),
                     (
-                        CommandId::PreviousSameKind,
-                        (current + names.len() - 1) % names.len(),
+                        CommandId::NextImage,
+                        (next[current] > current).then_some(next[current]),
                     ),
+                    (
+                        CommandId::PreviousImage,
+                        (previous[current] < current).then_some(previous[current]),
+                    ),
+                    (
+                        CommandId::NextSameKind,
+                        (current + 1 < names.len()).then_some(current + 1),
+                    ),
+                    (CommandId::PreviousSameKind, current.checked_sub(1)),
                 ] {
                     app.dispatch(command);
-                    assert!(matches!(&app.pending_guard,
-                        Some(GuardedAction::Navigate(target_path)) if *target_path == root.join(names[target])));
+                    match target {
+                        Some(target) => assert!(matches!(&app.pending_guard,
+                            Some(GuardedAction::Navigate(target_path)) if *target_path == root.join(names[target]))),
+                        None => {
+                            assert!(app.pending_guard.is_none(), "reading stops at the boundary")
+                        }
+                    }
                     if matches!(command, CommandId::NextImage | CommandId::PreviousImage) {
                         assert_eq!(
                             app.image_prefetch_paths(),
-                            Some(
-                                app.reading_settings
-                                    .spread(target, names.len())
-                                    .map(|index| root.join(names[index]))
-                                    .collect()
-                            )
+                            target.map(|target| app
+                                .reading_settings
+                                .spread(target, names.len())
+                                .map(|index| root.join(names[index]))
+                                .collect())
                         );
                     }
                     app.resolve_guard(GuardDecision::Cancel);
@@ -21840,8 +21881,8 @@ mod tests {
             paths.push(path);
         }
         for (command, targets) in [
-            (CommandId::NextImage, vec![2, 4, 0]),
-            (CommandId::PreviousImage, vec![4, 2, 0]),
+            (CommandId::NextImage, vec![2, 4, 4]),
+            (CommandId::PreviousImage, vec![2, 0, 0]),
         ] {
             for target in targets {
                 app.dispatch(command);

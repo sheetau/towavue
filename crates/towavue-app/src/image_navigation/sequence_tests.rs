@@ -1234,3 +1234,38 @@ fn run_first_open_order_routes(test_name: &str, reference: bool) {
     // The isolated-test parent removes generated media/settings after all child
     // workers exit. Reference media is outside that owned root.
 }
+
+#[test]
+fn queued_image_steps_stop_at_folder_ends_without_reloading_or_wrapping() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::queued_image_steps_stop_at_folder_ends_without_reloading_or_wrapping",
+    ) else {
+        return;
+    };
+    for forward in [false, true] {
+        let (mut app, _, paths) = fixture(&root);
+        let path = if forward {
+            paths.last().expect("last")
+        } else {
+            &paths[0]
+        };
+        app.path = Some(path.clone());
+        app.tabs
+            .active_mut()
+            .expect("tab")
+            .target
+            .set_current_path(path.clone(), MediaKind::Image);
+        app.dispatch(CommandId::FolderNavigationStop);
+        let generation = app.media_generation;
+        app.image_sequence.awaiting = Some(generation);
+        for _ in 0..50 {
+            app.navigate_image(forward);
+        }
+        assert_eq!(app.image_sequence.steps.len(), 50);
+        app.finish_image_sequence_frame(Some(generation));
+        assert_eq!(app.path.as_ref(), Some(path));
+        assert_eq!(app.media_generation, generation);
+        assert!(app.image_sequence.steps.is_empty() && app.image_sequence.awaiting.is_none());
+        assert!(app.pending_guard.is_none());
+    }
+}

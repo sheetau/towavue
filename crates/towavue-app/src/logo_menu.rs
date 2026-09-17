@@ -67,7 +67,7 @@ pub(super) fn show_with_recent(
     shortcuts: &ShortcutBindings,
     source: Source,
     allowed: bool,
-    recent: &mut menu::RecentMenu<'_>,
+    recent: &mut menu::MenuData<'_>,
 ) -> egui::InnerResponse<Option<Option<CommandId>>> {
     let response = ui.add_enabled(
         allowed,

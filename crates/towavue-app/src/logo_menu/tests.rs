@@ -1000,3 +1000,145 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         "PASS hardware logo gesture: three directions, held feedback, submenu/Escape, unchanged history/transport and CPU transfers 0"
     );
 }
+
+#[test]
+fn choice_submenus_from_logo_click_and_drag_apply_once_without_inheriting_parent_geometry() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::choice_submenus_from_logo_click_and_drag_apply_once_without_inheriting_parent_geometry",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for drag in [false, true] {
+            for edit in [false, true] {
+                let (mut app, origin) = setup(&root);
+                app.ui_context
+                    .as_ref()
+                    .expect("context")
+                    .set_pixels_per_point(density);
+                let size = egui::vec2(640.0, 480.0);
+                let end = origin
+                    + if drag {
+                        if edit {
+                            egui::vec2(24.0, 24.0)
+                        } else {
+                            egui::vec2(-12.0, 24.0)
+                        }
+                    } else {
+                        egui::Vec2::ZERO
+                    };
+                frame(
+                    &mut app,
+                    size,
+                    vec![pointer(origin, true), pointer(end, false)],
+                );
+                // Subsequent actions use accessibility focus, without leaving a
+                // stationary mouse over a different entry in the scrolled menu.
+                frame(&mut app, size, vec![egui::Event::PointerGone]);
+                let title = if edit {
+                    "Listening volume step"
+                } else {
+                    "Folder navigation"
+                };
+                let labels = if drag {
+                    vec![title]
+                } else {
+                    vec![if edit { "Edit" } else { "View" }, title]
+                };
+                for label in labels {
+                    for _ in 0..20 {
+                        frame(&mut app, size, vec![]);
+                    }
+                    let tree = frame(&mut app, size, vec![])
+                        .platform_output
+                        .accesskit_update
+                        .expect("menu tree");
+                    let id = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.label().is_some_and(|text| {
+                                text.trim_end_matches('\u{23f5}').trim() == label
+                            })
+                        })
+                        .expect("submenu trigger")
+                        .0;
+                    frame(
+                        &mut app,
+                        size,
+                        vec![egui::Event::AccessKitActionRequest(
+                            egui::accesskit::ActionRequest {
+                                action: egui::accesskit::Action::Focus,
+                                target_tree: egui::accesskit::TreeId::ROOT,
+                                target_node: id,
+                                data: None,
+                            },
+                        )],
+                    );
+                    for _ in 0..20 {
+                        frame(&mut app, size, vec![]);
+                    }
+                    let before = frame(&mut app, size, vec![]);
+                    let trigger = before
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("visible submenu trigger")
+                        .nodes
+                        .iter()
+                        .find(|(node_id, _)| *node_id == id)
+                        .expect("visible submenu trigger");
+                    assert!(before.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with(label) && shape.clip_rect.contains(text.pos))), "trigger is visible: label={label}, drag={drag}, edit={edit}, bounds={:?}, focus={:?}", trigger.1.bounds(), before.platform_output.accesskit_update.as_ref().expect("visible submenu trigger").focus);
+                    frame(&mut app, size, vec![access(id, None)]);
+                }
+                for _ in 0..20 {
+                    frame(&mut app, size, vec![]);
+                }
+                let output = frame(&mut app, size, vec![]);
+                let bounds = popup_bounds(&output);
+                assert!(
+                    bounds.len() >= 2,
+                    "parent and choice menus remain visible: density={density}, drag={drag}, edit={edit}, bounds={bounds:?}, labels={:?}",
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .filter_map(|(_, node)| node.label())
+                        .collect::<Vec<_>>()
+                );
+                for pair in bounds.windows(2) {
+                    assert!(
+                        pair[0].right() <= pair[1].left(),
+                        "menu frames cannot overlap: {bounds:?}"
+                    );
+                }
+                let tree = output.platform_output.accesskit_update.expect("choices");
+                let selected = if edit { "5%" } else { "Stop at ends" };
+                let row = tree.nodes.iter().find(|(_, node)| node.label() == Some(selected)).unwrap_or_else(|| panic!("choice {selected} is visible: density={density}, drag={drag}, edit={edit}")).1.bounds().expect("choice bounds");
+                let center = egui::pos2(
+                    (row.x0 + row.x1) as f32 * 0.5,
+                    (row.y0 + row.y1) as f32 * 0.5,
+                );
+                let child = bounds
+                    .iter()
+                    .find(|bounds| bounds.contains(center))
+                    .unwrap_or_else(|| panic!("choice popup frame: density={density}, drag={drag}, edit={edit}, center={center:?}, row={row:?}, frames={bounds:?}"));
+                assert!(
+                    child.width() < 180.0 && child.height() < 100.0,
+                    "choice popup sizes from its own two or three rows: {child:?}"
+                );
+                frame(&mut app, size, vec![access(node(&tree, selected), None)]);
+                assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
+                assert_eq!(app.folder_navigation_loop, edit);
+                for _ in 0..3 {
+                    frame(&mut app, size, vec![]);
+                }
+                assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
+                assert_eq!(app.folder_navigation_loop, edit);
+            }
+        }
+    }
+}

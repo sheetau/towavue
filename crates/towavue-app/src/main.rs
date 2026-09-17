@@ -2948,6 +2948,10 @@ where
                         .collect();
                     self.recent_paths.clear();
                     self.recent_folders = menu::recent_folders(&update.entries);
+                    let hidden: std::collections::HashSet<_> =
+                        update.hidden_folders.iter().collect();
+                    self.recent_folders
+                        .retain(|folder| !hidden.contains(folder));
                     for entry in update.entries {
                         match entry.kind {
                             towavue_runtime_windows::RecentKind::File => {
@@ -6797,6 +6801,11 @@ where
                 self.grid_open = false;
                 self.palette_open = !self.palette_open;
                 self.palette.reset();
+                if self.palette_open
+                    && let Some(recent) = &self.recent_files
+                {
+                    recent.refresh();
+                }
                 self.request_redraw();
             }
             CommandId::GoToFile | CommandId::OpenRecentFolder => {
@@ -6804,6 +6813,9 @@ where
                 self.palette_open = true;
                 self.palette
                     .open_files(command == CommandId::OpenRecentFolder);
+                if let Some(recent) = &self.recent_files {
+                    recent.refresh();
+                }
                 self.request_redraw();
             }
             CommandId::ToggleGridMenu => {

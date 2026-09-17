@@ -7,16 +7,21 @@ use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod commands;
+mod pending;
+#[cfg(test)]
+mod removal_tests;
 pub use commands::LIMIT as COMMAND_HISTORY_LIMIT;
+use pending::Pending;
 
 const FILE_LIMIT: usize = 10_000;
 const FOLDER_LIMIT: usize = 40;
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
-const HEADER: &str = "towavue recent files v3";
+const HEADER: &str = "towavue recent files v4";
+const KIND_HEADER: &str = "towavue recent files v3";
 const TIMESTAMP_HEADER: &str = "towavue recent files v2";
 const LEGACY_HEADER: &str = "towavue recent files v1";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RecentKind {
     File,
     Folder,
@@ -45,6 +50,8 @@ pub struct RecentUpdate {
     /// None while a newer command edit is pending or its store is unavailable.
     pub commands: Option<Vec<towavue_core::CommandId>>,
     pub entries: Vec<RecentEntry>,
+    /// Explicitly removed derived folders, until a later serialized open restores them.
+    pub hidden_folders: Vec<PathBuf>,
     /// Gallery-only omissions. Persisted history and resume positions are untouched.
     pub missing_files: Vec<PathBuf>,
     pub error: Option<String>,
@@ -52,10 +59,11 @@ pub struct RecentUpdate {
 
 #[derive(Default)]
 struct Mailbox {
-    pending: Vec<RecentEntry>,
+    pending: Pending,
     commands: Vec<(towavue_core::CommandId, bool)>,
     clear: bool,
     refresh_gallery: bool,
+    refresh_history: bool,
     completed: Option<RecentUpdate>,
     closed: bool,
 }
@@ -79,31 +87,35 @@ impl RecentFiles {
                 let mut load_commands = true;
                 let mut load_files = true;
                 let mut paths = Vec::new();
-                let mut pending = Vec::new();
+                let mut hidden_folders = Vec::new();
+                let mut pending = Pending::default();
                 let mut clear = false;
                 let mut refresh_gallery = true;
                 let mut missing_files = Vec::new();
                 loop {
                     // A successfully opened source must not retain an older missing mark.
                     let opened: HashSet<_> = pending
+                        .opens
                         .iter()
                         .map(|entry: &RecentEntry| &entry.path)
                         .collect();
                     missing_files.retain(|path| !clear && !opened.contains(path));
                     let mut error = if load_files || clear || !pending.is_empty() {
-                        match update(&path, &pending, clear) {
+                        match update_pending(&path, &pending, clear) {
                             Ok(loaded) => {
-                                paths = loaded;
+                                paths = loaded.entries;
+                                hidden_folders = loaded.hidden_folders;
                                 load_files = false;
-                                pending.clear();
+                                pending = Pending::default();
                                 clear = false;
                                 None
                             }
                             Err(error) => {
                                 if clear {
                                     paths.clear();
+                                    hidden_folders.clear();
                                 }
-                                remember(&mut paths, &pending);
+                                apply_pending(&mut paths, &mut hidden_folders, &pending);
                                 Some(format!("Recent files unavailable: {error}"))
                             }
                         }
@@ -145,11 +157,12 @@ impl RecentFiles {
                     }
                     {
                         let mut mailbox = mutex.lock().expect("recent mailbox");
-                        if !mailbox.clear {
+                        if !mailbox.clear && mailbox.pending.is_empty() {
                             mailbox.completed = Some(RecentUpdate {
                                 commands: (commands_available && mailbox.commands.is_empty())
                                     .then(|| command_history.clone()),
                                 entries: paths.clone(),
+                                hidden_folders: hidden_folders.clone(),
                                 missing_files: missing_files.clone(),
                                 error,
                             });
@@ -163,6 +176,7 @@ impl RecentFiles {
                                 && !mailbox.clear
                                 && mailbox.commands.is_empty()
                                 && !mailbox.refresh_gallery
+                                && !mailbox.refresh_history
                         })
                         .expect("recent mailbox");
                     if mailbox.pending.is_empty()
@@ -178,17 +192,15 @@ impl RecentFiles {
                         command_pending.push(change);
                     }
                     let refresh = std::mem::take(&mut mailbox.refresh_gallery);
-                    load_files |= refresh;
+                    let reload_history = std::mem::take(&mut mailbox.refresh_history);
+                    load_files |= refresh || reload_history;
+                    load_commands |= reload_history;
                     refresh_gallery |= refresh;
                     if std::mem::take(&mut mailbox.clear) {
-                        pending.clear();
+                        pending = Pending::default();
                         clear = true;
                     }
-                    for item in std::mem::take(&mut mailbox.pending) {
-                        pending.retain(|old| old.path != item.path);
-                        pending.push(item);
-                    }
-                    trim_pending(&mut pending);
+                    pending.merge(std::mem::take(&mut mailbox.pending));
                 }
             })?;
         Ok(Self {
@@ -218,12 +230,28 @@ impl RecentFiles {
         ready.notify_one();
     }
 
+    /// Remove only history; loaded tabs, resume positions and source files are untouched.
+    pub fn remove(&self, path: PathBuf, kind: RecentKind) {
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("recent mailbox");
+        mailbox.pending.remove(path, kind);
+        mailbox.completed = None;
+        ready.notify_one();
+    }
+
     pub fn record(&self, path: PathBuf) {
         self.record_kind(path, RecentKind::File);
     }
 
     pub fn record_folder(&self, path: PathBuf) {
         self.record_kind(path, RecentKind::Folder);
+    }
+
+    /// Reload both histories on picker entry; no source stat scan or polling timer.
+    pub fn refresh(&self) {
+        let (mutex, ready) = &*self.shared;
+        mutex.lock().expect("recent mailbox").refresh_history = true;
+        ready.notify_one();
     }
 
     /// Recheck Gallery on activation, never on the UI thread or every redraw.
@@ -240,7 +268,7 @@ impl RecentFiles {
     pub fn clear(&self) {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("recent mailbox");
-        mailbox.pending.clear();
+        mailbox.pending = Pending::default();
         mailbox.completed = None;
         mailbox.clear = true;
         ready.notify_one();
@@ -257,9 +285,8 @@ impl RecentFiles {
         };
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("recent mailbox");
-        mailbox.pending.retain(|old| old.path != entry.path);
-        mailbox.pending.push(entry);
-        trim_pending(&mut mailbox.pending);
+        mailbox.pending.record(entry);
+        mailbox.completed = None;
         ready.notify_one();
     }
 
@@ -340,10 +367,23 @@ fn missing_paths(
     Some(missing)
 }
 
+#[derive(Default)]
+struct StoredHistory {
+    entries: Vec<RecentEntry>,
+    hidden_folders: Vec<PathBuf>,
+}
+
+#[cfg(test)]
 fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
+    Ok(read_history(path)?.entries)
+}
+
+fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StoredHistory::default());
+        }
         Err(error) => return Err(error),
     };
     let mut text = String::new();
@@ -355,17 +395,36 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
     }
     let mut lines = text.lines();
     let header = lines.next();
-    if !matches!(header, Some(HEADER | TIMESTAMP_HEADER | LEGACY_HEADER)) {
+    if !matches!(
+        header,
+        Some(HEADER | KIND_HEADER | TIMESTAMP_HEADER | LEGACY_HEADER)
+    ) {
         return Err(std::io::Error::other(
             "Unrecognized recent files format; existing file was retained.",
         ));
     }
     let mut paths = Vec::new();
+    let mut hidden_folders = Vec::new();
+    let mut hidden_seen = HashSet::new();
     let mut seen = HashSet::new();
     let mut files = 0;
     let mut folders = 0;
     for line in lines {
-        let (kind, line) = if header == Some(HEADER) {
+        if header == Some(HEADER)
+            && let Some(value) = line.strip_prefix("H\t")
+        {
+            let folder = PathBuf::from(value);
+            if !folder.is_absolute() || value.contains('\0') || hidden_folders.len() >= FILE_LIMIT {
+                return Err(std::io::Error::other(
+                    "Invalid removed folder entry; existing file was retained.",
+                ));
+            }
+            if hidden_seen.insert(folder.clone()) {
+                hidden_folders.push(folder);
+            }
+            continue;
+        }
+        let (kind, line) = if matches!(header, Some(HEADER | KIND_HEADER)) {
             match line.split_once('\t') {
                 Some(("F", rest)) => (RecentKind::File, rest),
                 Some(("D", rest)) => (RecentKind::Folder, rest),
@@ -420,10 +479,62 @@ fn read(path: &Path) -> std::io::Result<Vec<RecentEntry>> {
             });
         }
     }
-    Ok(paths)
+    Ok(StoredHistory {
+        entries: paths,
+        hidden_folders,
+    })
 }
 
-fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<Vec<RecentEntry>> {
+#[cfg(test)]
+fn update(path: &Path, entries: &[RecentEntry], clear: bool) -> std::io::Result<Vec<RecentEntry>> {
+    let folder_visibility = entries
+        .iter()
+        .filter_map(|entry| match entry.kind {
+            RecentKind::File => entry.path.parent().map(|path| (path.to_path_buf(), true)),
+            RecentKind::Folder => Some((entry.path.clone(), true)),
+        })
+        .collect();
+    let pending = Pending {
+        opens: entries.to_vec(),
+        folder_visibility,
+        ..Default::default()
+    };
+    Ok(update_pending(path, &pending, clear)?.entries)
+}
+
+fn apply_pending(
+    paths: &mut Vec<RecentEntry>,
+    hidden_folders: &mut Vec<PathBuf>,
+    pending: &Pending,
+) {
+    let removals: HashSet<_> = pending
+        .removals
+        .iter()
+        .map(|(path, kind)| (path.as_path(), *kind))
+        .collect();
+    paths.retain(|entry| !removals.contains(&(entry.path.as_path(), entry.kind)));
+    remember(paths, &pending.opens);
+    let mut hidden: HashSet<_> = std::mem::take(hidden_folders).into_iter().collect();
+    for (folder, visible) in &pending.folder_visibility {
+        if *visible {
+            hidden.remove(folder);
+        } else {
+            hidden.insert(folder.clone());
+        }
+    }
+    // Only file-derived folders need an exclusion after their explicit entry is removed.
+    // The bound follows retained file history, without deleting any child entries.
+    let parents: HashSet<_> = paths
+        .iter()
+        .filter(|entry| entry.kind == RecentKind::File)
+        .filter_map(|entry| entry.path.parent())
+        .collect();
+    hidden.retain(|folder| parents.contains(folder.as_path()));
+    hidden_folders.extend(hidden);
+    hidden_folders.sort();
+}
+
+fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Result<StoredHistory> {
     let parent = path
         .parent()
         .ok_or_else(|| std::io::Error::other("Recent files path has no parent."))?;
@@ -435,13 +546,18 @@ fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<
         .truncate(false)
         .open(path.with_extension("lock"))?;
     lock.lock()?;
-    let mut paths = if clear { Vec::new() } else { read(path)? };
+    let mut history = if clear {
+        StoredHistory::default()
+    } else {
+        read_history(path)?
+    };
     if pending.is_empty() && !clear {
-        return Ok(paths);
+        return Ok(history);
     }
-    remember(&mut paths, pending);
+    apply_pending(&mut history.entries, &mut history.hidden_folders, pending);
+    let paths = &history.entries;
     let mut text = format!("{HEADER}\n");
-    for item in &paths {
+    for item in paths {
         if item
             .opened_at
             .is_some_and(|stamp| stamp > 253_402_300_799_999)
@@ -471,6 +587,18 @@ fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<
         text.push_str(value);
         text.push('\n');
     }
+    for folder in &history.hidden_folders {
+        let value = folder
+            .to_str()
+            .filter(|value| !value.contains(['\n', '\r', '\0']))
+            .filter(|_| folder.is_absolute())
+            .ok_or_else(|| {
+                std::io::Error::other("Removed folder cannot be represented in history.")
+            })?;
+        text.push_str("H\t");
+        text.push_str(value);
+        text.push('\n');
+    }
     if text.len() as u64 > MAX_BYTES {
         return Err(std::io::Error::other(
             "Recent files list exceeds its size limit.",
@@ -495,7 +623,7 @@ fn update(path: &Path, pending: &[RecentEntry], clear: bool) -> std::io::Result<
         let _ = fs::remove_file(&temporary);
     }
     result?;
-    Ok(paths)
+    Ok(history)
 }
 
 #[cfg(test)]

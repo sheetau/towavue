@@ -8703,9 +8703,6 @@ where
             self.reading_mode,
             density,
         ));
-        if !self.reading_mode {
-            self.set_reading_layout(true, self.reading_settings);
-        }
         self.move_reading_drag((f64::from(delta.x) * density, f64::from(delta.y) * density));
         self.request_redraw();
     }
@@ -8714,10 +8711,11 @@ where
         if let Some(drag) = &mut self.reading_drag {
             drag.motion(delta);
             let settings = drag.settings;
-            if self.reading_settings != settings {
+            if drag.was_enabled && self.reading_settings != settings {
                 self.set_reading_layout(self.reading_mode, settings);
             }
         }
+        self.request_redraw();
     }
 
     fn finish_reading_drag(&mut self, cancel: bool) -> bool {
@@ -8731,7 +8729,12 @@ where
             self.set_reading_layout(drag.was_enabled, drag.before);
         }
         if !cancel {
-            self.set_status(self.reading_status());
+            if !drag.was_enabled && drag.direction.is_some() {
+                self.set_reading_layout(true, drag.settings);
+            }
+            if self.reading_mode {
+                self.set_status(self.reading_status());
+            }
         }
         self.request_redraw();
         true
@@ -9485,6 +9488,15 @@ where
     }
 
     fn reading_status(&self) -> String {
+        if let Some(drag) = &self.reading_drag
+            && !drag.was_enabled
+        {
+            return match drag.direction {
+                Some(true) => "Reading left: release to enable".into(),
+                Some(false) => "Reading right: release to enable".into(),
+                None => "Reading: drag left or right to choose direction".into(),
+            };
+        }
         format!(
             "Reading {} · first {}",
             self.reading_settings.page_count, self.reading_settings.first_page_count
@@ -17530,7 +17542,7 @@ mod tests {
         // Inject only the model: this headless test must never acquire the real cursor.
         app.reading_drag = Some(reading_input::ReadingDrag::new(
             app.reading_settings,
-            false,
+            true,
             1.0,
         ));
         app.reading_mode = true;
@@ -17539,7 +17551,7 @@ mod tests {
         assert_eq!(app.status_notice().as_deref(), Some("Reading 3 · first 3"));
         draw(&mut app, vec![]);
         assert!(app.finish_reading_drag(true));
-        assert!(!app.reading_mode);
+        assert!(app.reading_mode);
         assert_eq!(app.reading_settings, ReadingSettings::default());
         assert!(
             app.status_message.is_none(),

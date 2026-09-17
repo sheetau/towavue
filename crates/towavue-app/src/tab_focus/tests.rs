@@ -521,9 +521,7 @@ fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
                         response = Some(match control {
                             0 => chrome::button(ui, chrome::Icon::Play, "Play"),
                             1 => chrome::button(ui, chrome::Icon::Pause, "Pause"),
-                            2 => {
-                                chrome::button(ui, chrome::Icon::ExitFullscreen, "Exit fullscreen")
-                            }
+                            2 => chrome::button(ui, chrome::Icon::OpenFolder, "Open folder"),
                             3 => {
                                 chrome::audio_button(ui, chrome::AudioIcon::Repeat, false, "Repeat")
                             }

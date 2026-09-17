@@ -605,6 +605,31 @@ mod tests {
                     .find(|(_, node)| node.label().is_some_and(|name| name.starts_with(label)))
                     .expect("audio mode button");
                 let bounds = node.bounds().expect("button bounds");
+                let play = update
+                    .nodes
+                    .iter()
+                    .find_map(|(_, node)| {
+                        node.label()
+                            .is_some_and(|name| name.starts_with("Play / replay"))
+                            .then(|| node.bounds().expect("play bounds"))
+                    })
+                    .expect("leading transport control");
+                assert!((play.x0 - 6.0).abs() < 0.1);
+                assert!((play.width() - play.height()).abs() < 0.1);
+                assert!((bounds.width() - bounds.height()).abs() < 0.1);
+                let expected_x = if label == "Repeat off" {
+                    play.x1 + 6.0
+                } else {
+                    play.x1 + 36.0
+                };
+                assert!(
+                    (bounds.x0 - expected_x).abs() < 0.1,
+                    "mode buttons immediately follow transport: {label}, {bounds:?}"
+                );
+                assert!(!update.nodes.iter().any(|(_, node)| {
+                    node.label()
+                        .is_some_and(|name| name.starts_with("Exit fullscreen"))
+                }));
                 assert!(
                     bounds.x0 >= 0.0 && bounds.x1 <= width as f64,
                     "{label} outside {width}: {bounds:?}"

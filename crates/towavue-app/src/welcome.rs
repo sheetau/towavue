@@ -83,7 +83,10 @@ pub fn show(
     let previous_filter = *filter;
     let viewport = ui.available_rect_before_wrap();
     let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
-    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(inset));
+    // Keep the header/rail insets, but let scrolling cards reach the media edge.
+    let content_rect =
+        egui::Rect::from_min_max(inset.min, egui::pos2(inset.right(), viewport.bottom()));
+    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
     ui.advance_cursor_after_rect(viewport);
     let ui = &mut content;
     if !enabled {
@@ -102,7 +105,7 @@ pub fn show(
         egui::vec2(width, 24.0),
     )));
     let search_changed = header
-        .horizontal(|ui| {
+        .horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.spacing_mut().button_padding = egui::vec2(4.0, 0.0);
             let search = ui
@@ -119,9 +122,13 @@ pub fn show(
             let filter_button = ui
                 .add_sized(
                     [24.0, 24.0],
-                    egui::Button::new(chrome::Icon::Filter.text())
-                        .stroke(egui::Stroke::NONE)
-                        .frame_when_inactive(false),
+                    egui::Button::new(chrome::Icon::Filter.text().color(if filter.is_some() {
+                        chrome::FOREGROUND
+                    } else {
+                        chrome::MUTED
+                    }))
+                    .stroke(egui::Stroke::NONE)
+                    .frame_when_inactive(false),
                 )
                 .help_text("Filter media types");
             filter_button.widget_info(|| {
@@ -189,7 +196,6 @@ pub fn show(
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
     ui.visuals_mut().widgets.active.fg_stroke.color = color;
-    ui.spacing_mut().scroll.interact_background_opacity = 0.3;
     let body = ui.available_rect_before_wrap();
     let gutter_scroll = if ui.is_enabled()
         && ui
@@ -243,7 +249,10 @@ pub fn show(
         })
         .inner
     });
-    let rail = egui::Rect::from_min_max(egui::pos2(body.right() - 32.0, body.top()), body.max);
+    let rail = egui::Rect::from_min_max(
+        egui::pos2(body.right() - 32.0, inset.top()),
+        egui::pos2(body.right(), inset.bottom()),
+    );
     crate::gallery_rail::show(ui, &mut output, rail);
     chosen
 }
@@ -349,6 +358,7 @@ mod tests {
             let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 300.0));
             let original = context.global_style().visuals.widgets.clone();
             let overlay = std::cell::Cell::new(false);
+            let grid_clip = std::cell::Cell::new(egui::Rect::NOTHING);
             let frame = |events| {
                 context.run_ui(
                     egui::RawInput {
@@ -372,6 +382,7 @@ mod tests {
                         assert!(
                             show(ui, &ShortcutBindings::default(), |ui| {
                                 assert_eq!(ui.visuals().widgets, original, "card style");
+                                grid_clip.set(ui.clip_rect());
                                 ui.set_min_height(1200.0);
                             })
                             .is_none()
@@ -399,8 +410,15 @@ mod tests {
             }
             let idle = frame(vec![]);
             let track = node_rect(&idle, "Date unknown");
-            let gap = track.top() - node_rect(&idle, "Search Gallery").bottom();
-            assert!((16.0..=24.0).contains(&gap), "compact header gap: {gap}");
+            assert!(
+                (grid_clip.get().bottom() - screen.bottom()).abs() <= 1.0 / density,
+                "cards can reach the media bottom: {:?}",
+                grid_clip.get()
+            );
+            assert!(
+                (track.top() - 8.0).abs() <= 1.0 / density,
+                "date rail reaches the media top inset"
+            );
             assert!((track.right() - 472.0).abs() <= 1.0 / density);
             assert!((track.bottom() - 292.0).abs() <= 1.0 / density);
             let button = |pos, pressed| egui::Event::PointerButton {
@@ -471,6 +489,78 @@ mod tests {
                 (bottom - (track.bottom() - 2.0)).abs() <= 1.0 / density,
                 "owned drag reaches the end outside the rail"
             );
+        }
+    }
+
+    #[test]
+    fn gallery_header_centers_square_buttons_and_highlights_the_active_filter() {
+        for density in [1.0, 1.25, 2.0] {
+            for width in [240.0, 480.0, 960.0] {
+                for filter in [None, Some(MediaKind::Video)] {
+                    let context = crate::fonts::test_context();
+                    context.set_pixels_per_point(density);
+                    context.global_style_mut(chrome::style);
+                    context.enable_accesskit();
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..3 {
+                        output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 300.0),
+                                )),
+                                ..Default::default()
+                            },
+                            |ui| {
+                                let mut selected = filter;
+                                super::show(
+                                    ui,
+                                    &ShortcutBindings::default(),
+                                    &mut String::new(),
+                                    &mut selected,
+                                    &[],
+                                    true,
+                                    |_, _, _| vec![],
+                                );
+                            },
+                        );
+                    }
+                    let search = node_rect(&output, "Search Gallery");
+                    for label in ["Filter media types", "Open File…", "Open Folder…"] {
+                        let rect = node_rect(&output, label);
+                        assert!(
+                            (rect.width() - rect.height()).abs() <= 1.0 / density,
+                            "square {label}: {rect:?}"
+                        );
+                        assert!(
+                            (rect.center().y - search.center().y).abs() <= 1.0 / density,
+                            "centered {label}: {rect:?}, search={search:?}"
+                        );
+                    }
+                    let icon = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.text() == "\u{eaf1}" => {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("filter icon");
+                    let expected = if filter.is_some() {
+                        chrome::FOREGROUND
+                    } else {
+                        chrome::MUTED
+                    };
+                    assert!(
+                        icon.galley
+                            .job
+                            .sections
+                            .iter()
+                            .all(|section| section.format.color == expected)
+                    );
+                }
+            }
         }
     }
 

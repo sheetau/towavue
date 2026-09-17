@@ -56,8 +56,8 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
                     if name == "track.wav"
                         || name == "1. track.wav"
                         || name.ends_with("\\track.wav")
-                        || name == "00:00 / 03:00"
-                        || name == "00:00"
+                        || name == "00:00:00:000 / 00:03:00:000"
+                        || name == "00:00:00:000"
                         || name == "50%"
                     {
                         result.insert(name.to_owned(), text.pos * density);
@@ -81,11 +81,11 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
         }
         frame(280.0 * density);
         let narrow = origins(&frame(280.0 * density));
-        let clock = narrow.get("00:00").expect("compact clock");
+        let clock = narrow.get("00:00:00:000").expect("compact clock");
         for pixel in 1..40 {
             let current = origins(&frame(280.0 * density + pixel as f32));
             assert_eq!(
-                current.get("00:00"),
+                current.get("00:00:00:000"),
                 Some(clock),
                 "compact clock origin at density {density}, delta {pixel}"
             );

@@ -241,12 +241,14 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
                 .bounds()
                 .expect("header bounds")
                 .y1;
-            // A retained media tab can have the same filename as a filtered-out card.
+            // A retained media tab can have the same filename as a filtered-out
+            // card. Month buttons now span the media height beside the header.
             tree.nodes.iter().any(|(_, node)| {
                 node.label() == Some(label)
-                    && node
-                        .bounds()
-                        .is_some_and(|bounds| bounds.y0 >= header_bottom)
+                    && (MediaKind::from_path(Path::new(label)).is_none()
+                        || node
+                            .bounds()
+                            .is_some_and(|bounds| bounds.y0 >= header_bottom))
             })
         };
         for _ in 0..3 {

@@ -5658,16 +5658,6 @@ where
             .show(root, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    if self.fullscreen {
-                        let response = chrome::button(
-                            ui,
-                            chrome::Icon::ExitFullscreen,
-                            &self.command_hint(CommandId::ToggleFullscreen, "Exit fullscreen"),
-                        );
-                        if response.clicked() {
-                            actions.push(UiAction::Command(CommandId::ToggleFullscreen));
-                        }
-                    }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
                         let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::transport_button(
@@ -5701,6 +5691,16 @@ where
                         if play.clicked() && !held && !dragging {
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
+                        if self.media_kind == Some(MediaKind::Audio) {
+                            self.draw_audio_mode_buttons(ui, actions);
+                        } else if chrome::audio_button(
+                            ui,
+                            chrome::AudioIcon::Repeat,
+                            self.video_repeat,
+                            &self.command_hint(CommandId::ToggleVideoRepeat, if self.video_repeat { "Video repeat on" } else { "Video repeat off" }),
+                        ).clicked() {
+                            actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
+                        }
                         let clock_format = if self.timeline_is_visible() {
                             format_time_precise
                         } else {
@@ -5731,7 +5731,7 @@ where
                         }
                         if compact {
                             // Keep volume and mode controls visible before truncating a long clock.
-                            let controls_width = if self.media_kind == Some(MediaKind::Audio) { 114.0 } else { 80.0 };
+                            let controls_width = 46.0;
                             let time_width = (ui.available_width() - controls_width).max(0.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(time_width, 24.0),
@@ -5755,16 +5755,7 @@ where
                             )
                             .help_text("Playback volume · wheel to adjust (does not change export)");
                         volume_targets.push(volume);
-                        if self.media_kind == Some(MediaKind::Audio) {
-                            self.draw_audio_mode_buttons(ui, actions);
-                        } else if chrome::audio_button(
-                            ui,
-                            chrome::AudioIcon::Repeat,
-                            self.video_repeat,
-                            &self.command_hint(CommandId::ToggleVideoRepeat, if self.video_repeat { "Video repeat on" } else { "Video repeat off" }),
-                        ).clicked() {
-                            actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
-                        }
+
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
                         let enabled = self.image_handoff.is_none() && (self.reading_mode || !self.command_context().has_unsaved_edits);
@@ -16198,8 +16189,8 @@ mod tests {
                 PlaybackState::Paused,
                 true,
                 20.0,
-                CommandId::ToggleFullscreen,
-                "Exit fullscreen",
+                CommandId::TogglePause,
+                "Play / replay",
             ),
         ] {
             app.media_kind = Some(kind);
@@ -18266,10 +18257,16 @@ mod tests {
                     assert!(actions.is_empty());
                     output.platform_output.accesskit_update.expect("tree")
                 };
-                let exit = |tree: &egui::accesskit::TreeUpdate| {
+                let status_control = |tree: &egui::accesskit::TreeUpdate| {
                     tree.nodes.iter().find_map(|(id, node)| {
                         node.label()
-                            .is_some_and(|label| label.starts_with("Exit fullscreen"))
+                            .is_some_and(|label| {
+                                label.starts_with(if kind == MediaKind::Image {
+                                    "Reading mode"
+                                } else {
+                                    "Play / replay"
+                                })
+                            })
                             .then_some(*id)
                     })
                 };
@@ -18282,7 +18279,7 @@ mod tests {
                 for _ in 0..3 {
                     let tree = frame(&mut app, vec![], true);
                     assert!(
-                        exit(&tree).is_none(),
+                        status_control(&tree).is_none(),
                         "fullscreen starts without status: {kind:?}"
                     );
                     assert!(!app.fullscreen_controls_visible);
@@ -18298,7 +18295,10 @@ mod tests {
                         (state == PlaybackState::Faulted).then(|| "fixture".into());
                     app.set_status("+10s".into());
                     let tree = frame(&mut app, vec![egui::Event::PointerMoved(body)], true);
-                    assert!(exit(&tree).is_none(), "notices never reveal status");
+                    assert!(
+                        status_control(&tree).is_none(),
+                        "notices never reveal status"
+                    );
                 }
                 app.state = PlaybackState::Paused;
                 app.playback_error = None;
@@ -18318,7 +18318,10 @@ mod tests {
                         }],
                         true,
                     );
-                    assert!(exit(&tree).is_none(), "Tab does not reveal hidden status");
+                    assert!(
+                        status_control(&tree).is_none(),
+                        "Tab does not reveal hidden status"
+                    );
                 }
                 let before = frame(&mut app, vec![], true);
                 if kind == MediaKind::Audio {
@@ -18330,7 +18333,7 @@ mod tests {
                 for _ in 0..3 {
                     tree = frame(&mut app, vec![], true);
                 }
-                let target = exit(&tree).expect("hover reveals status");
+                let target = status_control(&tree).expect("hover reveals status");
                 assert!(app.fullscreen_controls_visible);
                 if kind == MediaKind::Audio {
                     assert_eq!(
@@ -18353,15 +18356,15 @@ mod tests {
                 );
                 assert_eq!(frame(&mut app, vec![], true).focus, target);
                 let tree = frame(&mut app, vec![egui::Event::PointerMoved(body)], true);
-                assert!(!app.fullscreen_controls_visible && exit(&tree).is_none());
+                assert!(!app.fullscreen_controls_visible && status_control(&tree).is_none());
                 assert_ne!(tree.focus, target, "hidden controls release their focus");
                 frame(&mut app, vec![egui::Event::PointerMoved(edge)], true);
                 let tree = frame(&mut app, vec![egui::Event::PointerGone], true);
-                assert!(exit(&tree).is_none());
+                assert!(status_control(&tree).is_none());
                 frame(&mut app, vec![egui::Event::PointerMoved(edge)], true);
-                assert!(exit(&frame(&mut app, vec![], false)).is_none());
+                assert!(status_control(&frame(&mut app, vec![], false)).is_none());
                 app.pending_guard = Some(GuardedAction::Exit);
-                assert!(exit(&frame(&mut app, vec![], true)).is_none());
+                assert!(status_control(&frame(&mut app, vec![], true)).is_none());
                 app.pending_guard = None;
                 app.set_fullscreen(false);
                 app.set_status("Windowed status".into());
@@ -18471,7 +18474,7 @@ mod tests {
         let actions = frame(&mut app, vec![button(edge, false)], true);
         assert!(matches!(
             actions.as_slice(),
-            [UiAction::Command(CommandId::ToggleFullscreen)]
+            [UiAction::Command(CommandId::ToggleReadingMode)]
         ));
         // The status Area has just been raised by its button. Both halves of Seek must still work.
         for y in [549.0, 543.0] {

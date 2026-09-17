@@ -116,7 +116,7 @@ pub fn style(style: &mut egui::Style) {
     style.spacing.scroll.bar_width = 5.0;
     style.spacing.scroll.dormant_background_opacity = 0.0;
     style.spacing.scroll.active_background_opacity = 0.0;
-    style.spacing.scroll.interact_background_opacity = 0.25;
+    style.spacing.scroll.interact_background_opacity = 0.45;
     style.spacing.scroll.dormant_handle_opacity = 1.0;
     style.spacing.scroll.active_handle_opacity = 1.0;
     style.spacing.scroll.interact_handle_opacity = 1.0;
@@ -169,7 +169,6 @@ pub enum Icon {
     OpenFolder,
     Pause,
     Play,
-    ExitFullscreen,
     Speaker,
     Muted,
     PreviousTrack,
@@ -183,7 +182,6 @@ impl Icon {
             Self::OpenFile => '\u{ea94}',
             Self::OpenFolder => '\u{eaf7}',
             Self::Pause | Self::Play => return egui::RichText::new(""),
-            Self::ExitFullscreen => '\u{eb4d}',
             Self::Speaker => '\u{eb75}',
             Self::Muted => '\u{eb24}',
             Self::PreviousTrack => '\u{eab5}',
@@ -243,10 +241,14 @@ pub fn transport_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response 
 
 fn button_with_sense(ui: &mut Ui, icon: Icon, label: &str, sense: egui::Sense) -> egui::Response {
     let response = ui
-        .add_sized(
-            [28.0, 24.0],
-            egui::Button::new(icon.text()).frame(false).sense(sense),
-        )
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            ui.add_sized(
+                [24.0, 24.0],
+                egui::Button::new(icon.text()).frame(false).sense(sense),
+            )
+        })
+        .inner
         .help_text(label);
     let origin = response.rect.center() - egui::vec2(8.0, 8.0);
     let color = ui.style().interact(&response).fg_stroke.color;
@@ -293,7 +295,7 @@ pub enum AudioIcon {
 pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -> egui::Response {
     let response = ui
         .add_sized(
-            [28.0, 24.0],
+            [24.0, 24.0],
             egui::Button::new("").frame(false).selected(selected),
         )
         .help_text(label);
@@ -352,7 +354,7 @@ pub fn reading_button(ui: &mut Ui, enabled: bool, selected: bool) -> egui::Respo
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
-                [28.0, 24.0],
+                [24.0, 24.0],
                 egui::Button::new("")
                     .frame(false)
                     .sense(egui::Sense::click_and_drag())
@@ -588,7 +590,7 @@ mod tests {
                 let output = context.run_ui(Default::default(), |ui| {
                     let response = button(ui, icon, label);
                     bounds = response.rect;
-                    assert_eq!(bounds.size(), egui::vec2(28.0, 24.0));
+                    assert_eq!(bounds.size(), egui::vec2(24.0, 24.0));
                 });
                 assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if !text.galley.job.text.is_empty())));
                 let origin = bounds.center() - egui::vec2(8.0, 8.0);
@@ -878,7 +880,7 @@ mod tests {
         for selected in [false, true] {
             let output = context.run_ui(Default::default(), |ui| {
                 let response = super::reading_button(ui, true, selected);
-                assert_eq!(response.rect.size(), egui::vec2(28.0, 24.0));
+                assert_eq!(response.rect.size(), egui::vec2(24.0, 24.0));
             });
             let pages: Vec<_> = output
                 .shapes

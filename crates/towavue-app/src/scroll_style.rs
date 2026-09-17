@@ -220,8 +220,8 @@ mod tests {
                     "track hover does not brighten the handle"
                 );
                 assert!(
-                    track_hover[0].fill.a() > 0 && track_hover[0].fill.a() <= 64,
-                    "track stays translucent"
+                    (102..=128).contains(&track_hover[0].fill.a()),
+                    "track remains legible over white content at 40-50% opacity"
                 );
                 for down in [false, true, false] {
                     let output = render(Some(handle.center()), down);

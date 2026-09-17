@@ -251,7 +251,18 @@ fn folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources() {
 
 #[test]
 fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
-    for density in [1.0, 1.25, 2.0] {
+    for (density, reading) in [1.0, 1.25, 2.0].into_iter().flat_map(|density| {
+        [
+            None,
+            Some(ReadingSettings::default()),
+            Some(ReadingSettings {
+                reversed: true,
+                ..ReadingSettings::default()
+            }),
+        ]
+        .map(move |reading| (density, reading))
+    }) {
+        let reversed = reading.is_some_and(|settings| settings.reversed);
         let context = fonts::test_context();
         context.set_pixels_per_point(density);
         context.enable_accesskit();
@@ -262,7 +273,7 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
             pages: None,
             index: 1,
             revision: 2,
-            reading: None,
+            reading,
         };
         let frame = |events, instance, revision, count, enabled, focused| {
             let mut actions = Vec::new();
@@ -296,6 +307,22 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
         };
         frame(vec![], 1, 2, 5, true, true);
         let (output, _) = frame(vec![], 1, 2, 5, true, true);
+        let fill = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == chrome::FOREGROUND => Some(rect.rect),
+                _ => None,
+            })
+            .expect("folder progress fill");
+        let expected_left = thumbnail.left()
+            + if reversed {
+                thumbnail.width() * 0.75
+            } else {
+                0.0
+            };
+        assert!((fill.left() - expected_left).abs() < 0.01);
+        assert!((fill.width() - thumbnail.width() * 0.25).abs() < 0.01);
         let tree = output.platform_output.accesskit_update.expect("tree");
         let (node_id, node) = tree
             .nodes
@@ -383,7 +410,11 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
             assert_eq!(
                 actions,
                 if instance == 1 && revision == 2 && count == 5 && enabled && focused && !escape {
-                    vec![preview_transport::Action::ImageSeek(4)]
+                    vec![preview_transport::Action::ImageSeek(if reversed {
+                        0
+                    } else {
+                        4
+                    })]
                 } else {
                     vec![]
                 }

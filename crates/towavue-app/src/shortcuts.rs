@@ -7,6 +7,7 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
 const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
 const IMAGE_BINDING_HEADER: &str = "# towavue shortcuts v4";
+const READING_BINDING_HEADER: &str = "# towavue shortcuts v6";
 const FULLSCREEN_BINDING_HEADER: &str = "# towavue shortcuts v5";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
@@ -77,6 +78,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::KeepTimeSelection, "Ctrl+Y"),
         (CommandId::ZoomSelection, "Ctrl+Shift+Y"),
         (CommandId::ToggleReadingMode, "B"),
+        (CommandId::ReadingLeft, "Left"),
+        (CommandId::ReadingRight, "Right"),
         (CommandId::IncreaseReadingPages, "Ctrl+]"),
         (CommandId::DecreaseReadingPages, "Ctrl+["),
         (CommandId::IncreaseReadingFirstPage, "Ctrl+Shift+Right"),
@@ -172,9 +175,14 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let mut declared = std::collections::BTreeSet::new();
-    let fullscreen_bindings = text
+    let reading_bindings = text
         .lines()
-        .any(|line| line.trim() == FULLSCREEN_BINDING_HEADER);
+        .any(|line| line.trim() == READING_BINDING_HEADER);
+    let mut unchanged_image_bindings = std::collections::BTreeSet::new();
+    let fullscreen_bindings = reading_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == FULLSCREEN_BINDING_HEADER);
     let mut implicit_fullscreen = true;
     let image_bindings =
         fullscreen_bindings || text.lines().any(|line| line.trim() == IMAGE_BINDING_HEADER);
@@ -243,6 +251,12 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         {
             sequences = standard.all(command).to_vec();
         }
+        if !reading_bindings
+            && matches!(command, CommandId::PreviousImage | CommandId::NextImage)
+            && sequences == standard.all(command)
+        {
+            unchanged_image_bindings.insert(command);
+        }
         bindings.set(command, sequences[0].clone());
         for sequence in sequences.into_iter().skip(1) {
             bindings.add(command, sequence);
@@ -297,6 +311,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ToggleVideoRepeat
                         | CommandId::GoToFile
                         | CommandId::OpenRecentFolder
+                        | CommandId::ReadingLeft
+                        | CommandId::ReadingRight
                 ))
                 && !declared.contains(&definition.id)
         })
@@ -325,6 +341,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .filter(|candidate| {
                 !towavue_core::command_definitions().iter().any(|other| {
                     declared.contains(&other.id)
+                        && !(matches!(
+                            definition.id,
+                            CommandId::ReadingLeft | CommandId::ReadingRight
+                        ) && unchanged_image_bindings.contains(&other.id))
                         && contexts.iter().any(|context| other.is_enabled(*context))
                         && bindings.all(other.id).iter().any(|bound| {
                             bound.strokes().starts_with(candidate.strokes())
@@ -344,7 +364,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{FULLSCREEN_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{READING_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
@@ -577,13 +597,23 @@ mod tests {
             };
             for (keys, command) in [
                 (
-                    &["Left", "PageUp", "Backspace", "A"][..],
-                    CommandId::PreviousImage,
+                    &["Left"][..],
+                    if reading_mode {
+                        CommandId::ReadingLeft
+                    } else {
+                        CommandId::PreviousImage
+                    },
                 ),
                 (
-                    &["Right", "PageDown", "Space", "D"][..],
-                    CommandId::NextImage,
+                    &["Right"][..],
+                    if reading_mode {
+                        CommandId::ReadingRight
+                    } else {
+                        CommandId::NextImage
+                    },
                 ),
+                (&["PageUp", "Backspace", "A"][..], CommandId::PreviousImage),
+                (&["PageDown", "Space", "D"][..], CommandId::NextImage),
                 (&["Ctrl+Space"][..], CommandId::JumpImagesForward5),
                 (&["Ctrl+Backspace"][..], CommandId::JumpImagesBackward5),
                 (&["Ctrl+Left"][..], CommandId::PreviousSameKind),
@@ -1454,7 +1484,11 @@ mod tests {
                 (None, [None, None]),
                 (
                     Some(MediaKind::Image),
-                    [Some(CommandId::PreviousImage), Some(CommandId::NextImage)],
+                    if reading_mode {
+                        [Some(CommandId::ReadingLeft), Some(CommandId::ReadingRight)]
+                    } else {
+                        [Some(CommandId::PreviousImage), Some(CommandId::NextImage)]
+                    },
                 ),
                 (
                     Some(MediaKind::Video),
@@ -2026,3 +2060,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod reading_tests;

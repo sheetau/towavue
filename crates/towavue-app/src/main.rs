@@ -5926,28 +5926,30 @@ where
             else {
                 return;
             };
+            let reversed = self.reading_mode && self.reading_settings.reversed;
             let progress = if images.len() > 1 {
                 index as f32 / (images.len() - 1) as f32
             } else {
                 0.0
             };
             let (response, drag) =
-                seekbar::show_drag(context, status, progress, parent, enabled, false);
+                seekbar::show_directed_drag(context, status, progress, parent, enabled, reversed);
             let commit = drag.released.then_some(drag.position).flatten();
-            let value = seekbar::value_input(
+            let value = seekbar::directed_value_input(
                 &response,
                 "Image position",
                 (index + 1) as f64,
                 1.0..=images.len() as f64,
                 1.0,
                 enabled,
+                reversed,
             );
             if let Some(pointer) = response
                 .interact_pointer_pos()
                 .or_else(|| media_preview::hover_pos(&response))
             {
                 let target = seekbar::item_index(
-                    seekbar::compact_ratio(response.rect, pointer.x),
+                    seekbar::directed_ratio(response.rect, pointer.x, reversed),
                     images.len(),
                 );
                 if !self.filmstrip_open
@@ -5997,7 +5999,7 @@ where
                     .or_else(|| live.then_some(drag.position).flatten())
                     .map(|pointer| {
                         seekbar::item_index(
-                            seekbar::compact_ratio(response.rect, pointer.x),
+                            seekbar::directed_ratio(response.rect, pointer.x, reversed),
                             images.len(),
                         )
                     })
@@ -6774,6 +6776,8 @@ where
             CommandId::JumpImagesForward8 => self.jump_images(8),
             CommandId::JumpImagesForward9 => self.jump_images(9),
             CommandId::JumpImagesForward10 => self.jump_images(10),
+            CommandId::ReadingLeft => self.navigate_image(self.reading_settings.reversed),
+            CommandId::ReadingRight => self.navigate_image(!self.reading_settings.reversed),
             CommandId::PreviousImage => self.navigate_image(false),
             CommandId::NextImage => self.navigate_image(true),
             CommandId::FirstImage => self.navigate_image_boundary(false),

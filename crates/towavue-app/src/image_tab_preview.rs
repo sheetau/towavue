@@ -27,22 +27,25 @@ impl FolderPosition {
             egui::vec2(thumbnail.width(), 12.0),
         );
         let count = self.count;
+        let reversed = self.reading.is_some_and(|settings| settings.reversed);
         let progress = self.index as f32 / count.saturating_sub(1).max(1) as f32;
         ui.add_enabled_ui(count > 1, |ui| {
-            let (response, drag) = seekbar::inline(
+            let (response, drag) = seekbar::inline_directed(
                 ui,
                 rect,
                 ui.id()
                     .with(("preview-image-position", self.instance, self.revision)),
                 progress,
+                reversed,
             );
-            let value = seekbar::value_input(
+            let value = seekbar::directed_value_input(
                 &response,
                 "Preview image position",
                 (self.index + 1) as f64,
                 1.0..=count as f64,
                 1.0,
                 true,
+                reversed,
             );
             value
                 .map(|value| value.round() as usize - 1)
@@ -51,7 +54,10 @@ impl FolderPosition {
                         .then_some(drag.position)
                         .flatten()
                         .map(|point| {
-                            seekbar::item_index(seekbar::compact_ratio(rect, point.x), count)
+                            seekbar::item_index(
+                                seekbar::directed_ratio(rect, point.x, reversed),
+                                count,
+                            )
                         })
                 })
                 .filter(|index| *index != self.index)

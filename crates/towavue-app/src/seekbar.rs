@@ -23,6 +23,37 @@ pub fn show_drag(
     enabled: bool,
     allow_timeline: bool,
 ) -> (Response, timeline_input::Drag) {
+    show_drag_with_direction(
+        context,
+        status,
+        progress,
+        parent,
+        enabled,
+        allow_timeline,
+        false,
+    )
+}
+
+pub fn show_directed_drag(
+    context: &Context,
+    status: Rect,
+    progress: f32,
+    parent: Option<egui::LayerId>,
+    enabled: bool,
+    reversed: bool,
+) -> (Response, timeline_input::Drag) {
+    show_drag_with_direction(context, status, progress, parent, enabled, false, reversed)
+}
+
+fn show_drag_with_direction(
+    context: &Context,
+    status: Rect,
+    progress: f32,
+    parent: Option<egui::LayerId>,
+    enabled: bool,
+    allow_timeline: bool,
+    reversed: bool,
+) -> (Response, timeline_input::Drag) {
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
         context.set_sublayer(parent, area.layer());
@@ -37,7 +68,7 @@ pub fn show_drag(
                 egui::vec2(status.width(), 12.0),
                 egui::Sense::click_and_drag(),
             );
-            show_control(ui, response, progress, allow_timeline)
+            show_control(ui, response, progress, allow_timeline, reversed)
         })
         .inner
 }
@@ -49,8 +80,18 @@ pub fn inline(
     id: egui::Id,
     progress: f32,
 ) -> (Response, timeline_input::Drag) {
+    inline_directed(ui, rect, id, progress, false)
+}
+
+pub fn inline_directed(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    id: egui::Id,
+    progress: f32,
+    reversed: bool,
+) -> (Response, timeline_input::Drag) {
     let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-    show_control(ui, response, progress, false)
+    show_control(ui, response, progress, false, reversed)
 }
 
 fn show_control(
@@ -58,6 +99,7 @@ fn show_control(
     response: Response,
     progress: f32,
     allow_timeline: bool,
+    reversed: bool,
 ) -> (Response, timeline_input::Drag) {
     let context = ui.ctx();
     let rect = response.rect;
@@ -87,7 +129,7 @@ fn show_control(
             .flatten()
     });
     let active = response.hovered() || response.has_focus() || preview.is_some();
-    let progress = preview.unwrap_or(progress);
+    let progress = preview.unwrap_or(if reversed { 1.0 - progress } else { progress });
     let height = if active {
         4.0
     } else {
@@ -112,16 +154,17 @@ fn show_control(
         && let Some(pointer) = response.hover_pos()
     {
         ui.painter().rect_filled(
-            Rect::from_min_max(
-                track.min,
-                egui::pos2(pointer.x.clamp(track.left(), track.right()), track.bottom()),
+            progress_rect(
+                track,
+                pointer.x.clamp(track.left(), track.right()),
+                reversed,
             ),
             0.0,
             egui::Color32::from_white_alpha(64),
         );
     }
     ui.painter().rect_filled(
-        Rect::from_min_max(track.min, egui::pos2(progress_x, track.bottom())),
+        progress_rect(track, progress_x, reversed),
         0.0,
         crate::chrome::FOREGROUND,
     );
@@ -138,6 +181,19 @@ fn show_control(
     )
 }
 
+fn progress_rect(track: Rect, x: f32, reversed: bool) -> Rect {
+    if reversed {
+        Rect::from_min_max(egui::pos2(x, track.top()), track.max)
+    } else {
+        Rect::from_min_max(track.min, egui::pos2(x, track.bottom()))
+    }
+}
+
+pub fn directed_ratio(rect: Rect, x: f32, reversed: bool) -> f32 {
+    let ratio = compact_ratio(rect, x);
+    if reversed { 1.0 - ratio } else { ratio }
+}
+
 pub fn value_input(
     response: &Response,
     label: &str,
@@ -145,6 +201,18 @@ pub fn value_input(
     range: std::ops::RangeInclusive<f64>,
     step: f64,
     enabled: bool,
+) -> Option<f64> {
+    directed_value_input(response, label, value, range, step, enabled, false)
+}
+
+pub fn directed_value_input(
+    response: &Response,
+    label: &str,
+    value: f64,
+    range: std::ops::RangeInclusive<f64>,
+    step: f64,
+    enabled: bool,
+    reversed: bool,
 ) -> Option<f64> {
     use egui::accesskit::{Action, ActionData, Orientation, TreeId};
     if enabled {
@@ -218,8 +286,8 @@ pub fn value_input(
                     ..
                 } if focused && *modifiers == egui::Modifiers::NONE => {
                     let next = match key {
-                        egui::Key::ArrowLeft => target - step,
-                        egui::Key::ArrowRight => target + step,
+                        egui::Key::ArrowLeft => target + if reversed { step } else { -step },
+                        egui::Key::ArrowRight => target + if reversed { -step } else { step },
                         egui::Key::Home => *range.start(),
                         egui::Key::End => *range.end(),
                         _ => return true,

@@ -43,9 +43,10 @@ Public installer distribution is not yet available. To run from source, see the 
 | Close / reopen tab | Ctrl+W / Ctrl+Shift+T |
 | Fullscreen | F11 / Enter |
 | Filmstrip | F |
-| Previous / next image | Left / Right |
+| Image navigation | Left / Right; follows reading direction in reading mode |
 | Image zoom | Ctrl+wheel |
 | Reading mode | B |
+| Reverse reading direction | H / V (reading mode) |
 | Play / pause video or audio | Space |
 | Seek backward / forward | Left / Right |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |

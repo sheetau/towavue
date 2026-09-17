@@ -3,6 +3,9 @@ use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
 use crate::hover_help::HoverHelp;
 
+mod tab_fade;
+pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade};
+
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
     let mut actions = Vec::new();
     for button in buttons {
@@ -221,14 +224,6 @@ pub fn tab_audio_button(
         },
     );
     response
-}
-
-pub fn tab_label(label: String, active: bool) -> egui::Atoms<'static> {
-    let text = egui::RichText::new(label);
-    egui::Atoms::new((
-        if active { text.color(FOREGROUND) } else { text },
-        egui::Atom::grow(),
-    ))
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
@@ -772,12 +767,8 @@ mod tests {
                         assert!(row.contains_rect(audio.rect));
                         assert!(!audio.rect.intersects(close_rect));
                     }
-                    let response = ui.put(
-                        label_rect,
-                        egui::Button::new(super::tab_label("Tab label".into(), true))
-                            .truncate()
-                            .gap(0.0),
-                    );
+                    let response = super::tab_title(ui, label_rect, "Tab label", true);
+                    super::tab_title_fade(ui, label_rect, true, false);
                     assert!(
                         row.contains_rect(response.rect),
                         "label overflow: {height}, {audio:?}, {:?}",

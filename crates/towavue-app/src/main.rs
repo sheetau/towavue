@@ -4967,12 +4967,15 @@ where
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
                     ui.spacing_mut().scroll.dormant_handle_opacity = 0.0;
+                    let scroll_fade = ui.spacing().scroll.fade;
+                    ui.spacing_mut().scroll.fade.strength = 0.0;
                     let strip_scroll = egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
                         .max_height(layout.tab_height)
                         .auto_shrink([true, false])
                         .show_styled(ui, |ui| {
+                            ui.spacing_mut().scroll.fade = scroll_fade;
                             ui.horizontal_centered(|ui| {
                                 let tab_rects: Vec<_> = self
                                     .tabs
@@ -5140,15 +5143,8 @@ where
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.active.bg_stroke =
                                         egui::Stroke::NONE;
-                                    let response = tab_ui.put(
-                                        label_rect,
-                                        egui::Button::new(chrome::tab_label(label.clone(), active))
-                                            .fill(Color32::TRANSPARENT)
-                                            .stroke(egui::Stroke::NONE)
-                                            .gap(0.0)
-                                            .truncate()
-                                            .sense(egui::Sense::click_and_drag()),
-                                    );
+                                    let response =
+                                        chrome::tab_title(&mut tab_ui, label_rect, &label, active);
                                     response.widget_info(|| {
                                         egui::WidgetInfo::labeled(
                                             egui::WidgetType::Button,
@@ -5206,12 +5202,18 @@ where
                                     let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
                                         .help_text("Close tab");
                                     tab_focus::release_pointer_focus(&close);
-                                    if response.hovered()
+                                    let tab_hovered = response.hovered()
                                         || close.hovered()
                                         || audio_button
                                             .as_ref()
-                                            .is_some_and(egui::Response::hovered)
-                                    {
+                                            .is_some_and(egui::Response::hovered);
+                                    chrome::tab_title_fade(
+                                        &tab_ui,
+                                        label_rect,
+                                        active,
+                                        tab_hovered,
+                                    );
+                                    if tab_hovered {
                                         painter.set(
                                             hover_background,
                                             egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
@@ -5402,8 +5404,16 @@ where
                                         incoming_pointer,
                                     );
                                 }
+                                // Paint before ScrollArea's own floating scrollbar.
+                                chrome::tab_strip_fades(
+                                    ui,
+                                    strip,
+                                    ui.min_rect().width(),
+                                    (strip.left() - ui.min_rect().left()).max(0.0),
+                                );
                             });
                         });
+                    ui.spacing_mut().scroll.fade = scroll_fade;
                     // egui 0.35 uses the ScrollArea ID plus its usize axis for the bar.
                     if let Some(response) = ui.ctx().read_response(strip_scroll.id.with(0_usize))
                         && response.enabled()
@@ -14092,6 +14102,50 @@ mod tests {
                     );
                 },
             );
+            let tabs: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(tab)
+                        if [chrome::BORDER, chrome::BACKGROUND].contains(&tab.fill)
+                            && tab.corner_radius == egui::CornerRadius::same(3)
+                            && tab.rect.width() >= 70.0
+                            && tab.rect.top() < 32.0 =>
+                    {
+                        Some((tab.rect, shape.clip_rect))
+                    }
+                    _ => None,
+                })
+                .collect();
+            let content = tabs
+                .iter()
+                .fold(egui::Rect::NOTHING, |rect, (tab, _)| rect.union(*tab));
+            let clip = tabs.first().expect("tab backgrounds").1;
+            let expected_edges = usize::from(content.left() < clip.left())
+                + usize::from(content.right() > clip.right());
+            let edges: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(edge)
+                        if edge.fill == chrome::BACKGROUND
+                            && edge.rect.width() <= 1.01
+                            && edge.rect.top() < 32.0
+                            && edge.rect.height() > 10.0 =>
+                    {
+                        Some(edge.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                edges.len(),
+                expected_edges,
+                "opaque tab-strip edges follow actual clipping: {content:?}, {clip:?}"
+            );
+            for edge in edges {
+                assert!(edge.left() == clip.left() || edge.right() == clip.right());
+            }
             output
                 .shapes
                 .iter()

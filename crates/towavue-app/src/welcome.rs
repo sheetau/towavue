@@ -27,15 +27,7 @@ pub(super) fn tab(
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
-    let response = ui.put(
-        label_rect,
-        egui::Button::new(chrome::tab_label("Gallery".into(), active))
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE)
-            .gap(0.0)
-            .truncate()
-            .sense(egui::Sense::click_and_drag()),
-    );
+    let response = chrome::tab_title(ui, label_rect, "Gallery", active);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "Gallery tab")
     });
@@ -54,7 +46,9 @@ pub(super) fn tab(
     crate::tab_focus::release_pointer_focus(&response);
     crate::tab_focus::release_pointer_button_focus(&response, egui::PointerButton::Middle);
     crate::tab_focus::release_pointer_focus(&close);
-    if response.hovered() || close.hovered() {
+    let hovered = response.hovered() || close.hovered();
+    chrome::tab_title_fade(ui, label_rect, active, hovered);
+    if hovered {
         ui.painter().set(
             hover_background,
             egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),

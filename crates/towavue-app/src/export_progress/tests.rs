@@ -66,10 +66,7 @@ fn fill(output: &egui::FullOutput) -> Option<egui::Rect> {
     output.shapes.iter().find_map(|shape| match &shape.shape {
         egui::Shape::Rect(rect)
             if rect.fill == chrome::FOREGROUND
-                && (rect.rect.bottom()
-                    - chrome::title_layout(0.0, 0.0, output.pixels_per_point).height)
-                    .abs()
-                    < 0.001
+                && (rect.rect.bottom() - chrome::TITLE_HEIGHT).abs() < 0.001
                 && rect.rect.height() <= 1.0 =>
         {
             Some(rect.rect)
@@ -619,18 +616,15 @@ fn export_progress_toolbar_geometry_uia_hover_and_lightweight_loading() {
             let before = app.edits.clone();
             for (i, events) in [
                 vec![],
-                vec![egui::Event::PointerMoved(egui::pos2(
-                    width * 0.4,
-                    32.0 - 1.25 / density,
-                ))],
+                vec![egui::Event::PointerMoved(egui::pos2(width * 0.4, 31.75))],
                 vec![egui::Event::PointerButton {
-                    pos: egui::pos2(width * 0.4, 32.0 - 1.25 / density),
+                    pos: egui::pos2(width * 0.4, 31.75),
                     button: egui::PointerButton::Primary,
                     pressed: true,
                     modifiers: egui::Modifiers::NONE,
                 }],
                 vec![egui::Event::PointerButton {
-                    pos: egui::pos2(width * 0.4, 32.0 - 1.25 / density),
+                    pos: egui::pos2(width * 0.4, 31.75),
                     button: egui::PointerButton::Primary,
                     pressed: false,
                     modifiers: egui::Modifiers::NONE,

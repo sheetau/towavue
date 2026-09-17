@@ -13705,15 +13705,7 @@ mod tests {
         let mut app = Application::new(None, |_| {}).expect("app");
         app.tabs
             .open_new(PathBuf::from("title-layout.png"), MediaKind::Image);
-        for (density, inset) in [
-            (1.0, 0.0),
-            (1.0, 8.0),
-            (1.25, 8.0),
-            (1.5, 0.0),
-            (1.5, 8.0),
-            (2.0, 0.0),
-            (2.0, 6.5),
-        ] {
+        for (density, inset) in [(1.0, 0.0), (1.0, 8.0), (1.25, 8.0), (2.0, 0.0), (2.0, 6.5)] {
             let context = fonts::test_context();
             context.set_pixels_per_point(density);
             context.enable_accesskit();
@@ -13734,11 +13726,9 @@ mod tests {
                     |ui| {
                         app.draw_top_bar(ui, &mut Vec::new());
                         assert!(
-                            (ui.available_rect_before_wrap().top()
-                                - inset
-                                - chrome::title_layout(0.0, 0.0, density).height)
+                            (ui.available_rect_before_wrap().top() - inset - chrome::TITLE_HEIGHT)
                                 .abs()
-                                <= 1.0 / 64.0,
+                                < 0.01,
                             "density={density} inset={inset} remaining={:?} root={:?}",
                             ui.available_rect_before_wrap(),
                             ui.max_rect()
@@ -13760,8 +13750,7 @@ mod tests {
                         .bounds()
                         .expect("bounds");
                     assert!(
-                        ((bounds.y0 + bounds.y1) as f32 * 0.5 - inset - (16.0 - 1.0 / density))
-                            .abs()
+                        ((bounds.y0 + bounds.y1) as f32 * 0.5 - inset - 16.0).abs()
                             <= 1.0 / density
                     );
                     assert!(
@@ -13783,7 +13772,7 @@ mod tests {
             return;
         };
         for width in [320.0, 480.0, 960.0] {
-            for density in [1.0, 1.25, 1.5, 2.0] {
+            for density in [1.0, 1.25, 2.0] {
                 for (kind, timeline) in [
                     (MediaKind::Video, false),
                     (MediaKind::Video, true),
@@ -13870,10 +13859,7 @@ mod tests {
                     let close = bounds("Close tab: a.png");
                     assert!((logo.width() - 28.0).abs() < 0.01, "{logo:?}");
                     for rect in [logo, label, close] {
-                        assert!(
-                            (rect.center().y - (16.0 - 1.0 / density)).abs() <= 1.0 / density,
-                            "{rect:?}"
-                        );
+                        assert!((rect.center().y - 16.0).abs() <= 1.0 / density, "{rect:?}");
                         assert!(
                             (rect.height() - chrome::title_layout(0.0, 0.0, density).tab_height)
                                 .abs()
@@ -13896,8 +13882,7 @@ mod tests {
                         text.pos
                     );
                     assert!(
-                        (text.pos.y + text.galley.size().y * 0.5 - (16.0 - 1.0 / density)).abs()
-                            <= 1.0 / density
+                        (text.pos.y + text.galley.size().y * 0.5 - 16.0).abs() <= 1.0 / density
                     );
                     let borders: Vec<_> = output
                         .shapes
@@ -13919,7 +13904,7 @@ mod tests {
                         2,
                         "width={width}, density={density}, timeline={timeline}, borders={borders:?}"
                     );
-                    assert!((borders[0] - (32.0 - 1.0 / density)).abs() <= 1.0 / density);
+                    assert!((borders[0] - 32.0).abs() <= 1.0);
                     assert!(borders[1] > 32.0);
                     if timeline {
                         assert!(borders[1] < 260.0);

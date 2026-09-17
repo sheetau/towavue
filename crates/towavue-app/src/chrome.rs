@@ -48,7 +48,6 @@ pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_gray(24);
 pub const HOVER: Color32 = Color32::from_gray(44);
-// Nominal height before removing the one-physical-pixel top spacer.
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
@@ -85,9 +84,8 @@ pub fn title_layout(top_inset: f32, top: f32, density: f32) -> TitleLayout {
     // The invisible maximized strip is not part of our fixed-height toolbar.
     // egui may already have removed it through the root safe area.
     let hidden = (top_inset / density - top).max(0.0);
-    // Remove only the top spacer; keep the tab size and bottom gap unchanged.
-    let height = TITLE_HEIGHT - 1.0 / density + hidden;
-    let top_padding = hidden;
+    let height = TITLE_HEIGHT + hidden;
+    let top_padding = hidden + 1.0 / density;
     let available = (height - 1.0 / density - top_padding).max(0.0);
     let gap = 3.0_f32.min(available / 4.0);
     let tab_height = available - 2.0 * gap;
@@ -848,12 +846,9 @@ mod tests {
                 let visible_top = (inset / density).max(top);
                 assert_eq!(layout.drag_top, visible_top);
                 assert!(layout.drag_top * density < row_top);
-                assert!(
-                    (top + layout.height - visible_top - super::TITLE_HEIGHT + 1.0 / density).abs()
-                        < 0.001
-                );
+                assert!((top + layout.height - visible_top - super::TITLE_HEIGHT).abs() < 0.001);
                 assert!(row_top >= inset - 0.001);
-                assert!((row_top - visible_top * density - 3.0 * density).abs() < 0.001);
+                assert!((row_top - visible_top * density - 1.0 - 3.0 * density).abs() < 0.001);
                 assert!(
                     ((top + layout.height) * density - 1.0 - row_bottom - 3.0 * density).abs()
                         < 0.001
@@ -866,8 +861,8 @@ mod tests {
         }
         for density in [1.0, 1.25, 2.0] {
             let layout = super::title_layout(0.0, 0.0, density);
-            assert_eq!(layout.height, super::TITLE_HEIGHT - 1.0 / density);
-            assert_eq!(layout.top_padding, 3.0);
+            assert_eq!(layout.height, super::TITLE_HEIGHT);
+            assert_eq!(layout.top_padding, 3.0 + 1.0 / density);
             assert!(
                 (layout.height - 1.0 / density - layout.top_padding - layout.tab_height - 3.0)
                     .abs()

@@ -134,7 +134,7 @@ use crate::hover_help::HoverHelp;
 
 const AUDIO_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const FOLDER_EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const PREFIX_TIMEOUT: Duration = Duration::from_secs(1);
+const PREFIX_TIMEOUT: Duration = Duration::from_secs(5);
 const STATUS_MESSAGE_DURATION: Duration = Duration::from_secs(4);
 const VIDEO_EARLY_TOLERANCE: Duration = Duration::from_millis(5);
 const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
@@ -5701,11 +5701,16 @@ where
                         if play.clicked() && !held && !dragging {
                             actions.push(UiAction::Command(CommandId::TogglePause));
                         }
+                        let clock_format = if self.timeline_is_visible() {
+                            format_time_precise
+                        } else {
+                            format_time
+                        };
                         let duration = self
                             .playback_duration()
-                            .map(|duration| format_time(MediaTime::ZERO.saturating_add(duration)))
+                            .map(|duration| clock_format(MediaTime::ZERO.saturating_add(duration)))
                             .unwrap_or_else(|| "—".into());
-                        let position = format_time(self.current_position());
+                        let position = clock_format(self.current_position());
                         let compact = ui.max_rect().width() < 340.0;
                         let mut time_text = egui::text::LayoutJob::default();
                         let format = egui::TextFormat {
@@ -8933,13 +8938,19 @@ where
                 self.metrics_recorded = false;
                 self.pending_seek_started =
                     (self.media_kind == Some(MediaKind::Video)).then_some(started);
-                self.set_status(if end == Some(MediaTime::ZERO) {
-                    "Empty timeline · Undo restores deleted time".into()
-                } else if edited || range.contains(target) {
-                    format!("Position {:.3}s", target.as_seconds_f64())
-                } else {
-                    "Outside trim · paused source preview; Play returns to trim start".into()
-                });
+                const OUTSIDE: &str =
+                    "Outside trim · paused source preview; Play returns to trim start";
+                if end == Some(MediaTime::ZERO) {
+                    self.set_status("Empty timeline · Undo restores deleted time".into());
+                } else if !edited && !range.contains(target) {
+                    self.set_status(OUTSIDE.into());
+                } else if self
+                    .status_message
+                    .as_ref()
+                    .is_some_and(|(text, _)| text == OUTSIDE)
+                {
+                    self.status_message = None;
+                }
                 self.refresh_title();
                 (end != Some(MediaTime::ZERO) && (edited || range.contains(target)))
                     .then_some(target)
@@ -9417,6 +9428,14 @@ where
         self.request_redraw();
     }
 
+    fn status_lifetime(&self, shown: Instant) -> Duration {
+        if self.prefix_started == Some(shown) {
+            PREFIX_TIMEOUT
+        } else {
+            STATUS_MESSAGE_DURATION
+        }
+    }
+
     fn relative_seek_text(&self) -> Option<String> {
         let (_, delta) = self
             .relative_seek_notice
@@ -9445,7 +9464,7 @@ where
             return Some(message.clone());
         }
         if let Some((message, shown)) = &self.status_message
-            && shown.elapsed() < STATUS_MESSAGE_DURATION
+            && shown.elapsed() < self.status_lifetime(*shown)
         {
             return Some(message.clone());
         }
@@ -9691,11 +9710,19 @@ where
                 window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
             }
         }
-        self.set_status(if enabled {
-            "Fullscreen — Bottom edge for controls · Escape to return".into()
+        const HINT: &str = "Fullscreen — Bottom edge for controls · Escape/Enter to return";
+        if enabled {
+            self.set_status(HINT.into());
         } else {
-            "Windowed view".into()
-        });
+            if self
+                .status_message
+                .as_ref()
+                .is_some_and(|(text, _)| text == HINT)
+            {
+                self.status_message = None;
+            }
+            self.request_redraw();
+        }
     }
 
     fn prepare_filmstrip(&mut self, context: &egui::Context) {
@@ -10205,7 +10232,7 @@ where
         if self
             .status_message
             .as_ref()
-            .is_some_and(|(_, shown)| shown.elapsed() >= STATUS_MESSAGE_DURATION)
+            .is_some_and(|(_, shown)| shown.elapsed() >= self.status_lifetime(*shown))
         {
             self.status_message = None;
             self.export_notice = None;
@@ -10299,7 +10326,7 @@ where
         let status_expiry = self
             .status_message
             .as_ref()
-            .map(|(_, shown)| *shown + STATUS_MESSAGE_DURATION);
+            .map(|(_, shown)| *shown + self.status_lifetime(*shown));
         let prefix_expiry = self.prefix_started.map(|started| started + PREFIX_TIMEOUT);
         let seek_notice_expiry = self
             .relative_seek_notice
@@ -10642,6 +10669,17 @@ fn format_time(time: MediaTime) -> String {
     } else {
         format!("{:02}:{:02}", seconds / 60, seconds % 60)
     }
+}
+
+fn format_time_precise(time: MediaTime) -> String {
+    let milliseconds = time.as_nanoseconds().max(0) as u64 / 1_000_000;
+    format!(
+        "{:02}:{:02}:{:02}:{:03}",
+        milliseconds / 3_600_000,
+        milliseconds / 60_000 % 60,
+        milliseconds / 1_000 % 60,
+        milliseconds % 1_000
+    )
 }
 
 fn media_time(duration: Duration) -> MediaTime {
@@ -12584,7 +12622,7 @@ mod tests {
                     if fullscreen && kind == MediaKind::Audio {
                         assert_eq!(
                             app.status_message.as_ref().expect("fullscreen hint").0,
-                            "Fullscreen — Bottom edge for controls · Escape to return"
+                            "Fullscreen — Bottom edge for controls · Escape/Enter to return"
                         );
                     }
                     app.timeline_open = false;
@@ -12621,6 +12659,11 @@ mod tests {
                             |ui| app.draw_ui(ui, &mut actions),
                         );
                         assert!(actions.is_empty());
+                        if !app.fullscreen && width == 960.0 {
+                            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                                egui::Shape::Text(text) if text.galley.text() == "00:00:02:000 / 00:00:10:000")),
+                                "visible timeline clock includes milliseconds");
+                        }
                         let tree = output.platform_output.accesskit_update.expect("tree");
                         let sliders: Vec<_> = tree
                             .nodes
@@ -14697,6 +14740,14 @@ mod tests {
         }
         assert!(app.dismiss_overlay_or_fullscreen());
         assert!(!app.fullscreen);
+        assert!(
+            app.status_message.is_none(),
+            "no redundant exit notice or stale entry hint"
+        );
+        app.set_fullscreen(true);
+        app.set_status("Keep this diagnostic".into());
+        app.set_fullscreen(false);
+        assert_eq!(app.status_notice().as_deref(), Some("Keep this diagnostic"));
         assert!(app.timeline_open);
         assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
         assert_eq!(app.state, PlaybackState::Paused);
@@ -18190,7 +18241,7 @@ mod tests {
                 app.set_fullscreen(true);
                 assert_eq!(
                     app.status_notice().as_deref(),
-                    Some("Fullscreen — Bottom edge for controls · Escape to return")
+                    Some("Fullscreen — Bottom edge for controls · Escape/Enter to return")
                 );
                 let context = fonts::test_context();
                 context.enable_accesskit();
@@ -18813,6 +18864,13 @@ mod tests {
         assert!(app.entered_shortcut.is_empty());
         assert!(app.prefix_started.is_none());
         assert!(app.status_message.is_none());
+
+        assert_eq!(PREFIX_TIMEOUT, Duration::from_secs(5));
+        seed(&mut app, now - Duration::from_millis(4500));
+        app.expire_shortcut_prefix();
+        assert_eq!(app.status_notice().as_deref(), Some("Ctrl+K …"));
+        assert_eq!(app.entered_shortcut, vec![prefix.clone()]);
+        assert_eq!(app.idle_wakeup(now), Some(now + Duration::from_millis(500)));
 
         seed(&mut app, now - PREFIX_TIMEOUT);
         app.expire_shortcut_prefix();
@@ -22240,6 +22298,21 @@ mod tests {
         ] {
             assert_eq!(format_time(MediaTime::from_nanoseconds(ns)), expected);
         }
+        for (ns, expected) in [
+            (-1, "00:00:00:000"),
+            (999_999, "00:00:00:000"),
+            (1_000_000, "00:00:00:001"),
+            (59_999_999_999, "00:00:59:999"),
+            (3_600_000_000_000, "01:00:00:000"),
+            (3_661_234_567_890, "01:01:01:234"),
+            (360_001_234_000_000, "100:00:01:234"),
+            (i64::MAX, "2562047:47:16:854"),
+        ] {
+            assert_eq!(
+                format_time_precise(MediaTime::from_nanoseconds(ns)),
+                expected
+            );
+        }
         assert_eq!(format_size(1_500_000), "1.5 MB");
     }
 
@@ -23326,7 +23399,12 @@ mod tests {
                     for (key, forward) in
                         [("Left", false), ("J", false), ("Right", true), ("L", true)]
                     {
+                        app.status_message = None;
                         app.seek_to(time(1));
+                        assert!(
+                            app.status_message.is_none(),
+                            "position is already in the clock"
+                        );
                         app.state = PlaybackState::Ended;
                         let generation = app.generation;
                         app.process_shortcut(key.parse().expect("transport shortcut"));

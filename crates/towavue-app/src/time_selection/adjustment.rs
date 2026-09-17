@@ -235,7 +235,7 @@ pub(super) fn values(
         // ordinary gain caption, but retain its numeric/accessibility control.
         if (control.has_focus() || selection.is_some()) && (stretch || preview.is_none()) {
             let label = if stretch {
-                format!("Length {value:.3}s")
+                format!("Length {}", crate::format_time_precise(range.duration()))
             } else if mixed {
                 format!("Mixed (start {value:.0}%)")
             } else {
@@ -257,7 +257,7 @@ pub(super) fn values(
                 crate::chrome::FOREGROUND,
             );
         }
-        super::describe_focus(&control, available, name, value);
+        super::describe_focus(&control, available, name, value, stretch);
         if let Some(next) = next {
             let edit = if stretch {
                 TimelineEdit::Stretch(

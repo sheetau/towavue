@@ -15,7 +15,7 @@ pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
         .then_some(text)
 }
 
-fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64) {
+fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64, time: bool) {
     if response.has_focus() {
         response.ctx.data_mut(|data| {
             let key = "time-selection-focus-hint".into();
@@ -24,7 +24,17 @@ fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64) {
                     key,
                     (
                         response.id,
-                        format!("{label}: {value:.3} · Left/Right adjust"),
+                        if time {
+                            format!(
+                                "{}: {} · Left/Right adjust",
+                                label.trim_end_matches(" (seconds)"),
+                                crate::format_time_precise(MediaTime::from_nanoseconds(
+                                    (value * 1e9) as i64
+                                ))
+                            )
+                        } else {
+                            format!("{label}: {value:.3} · Left/Right adjust")
+                        },
                     ),
                 );
             } else {
@@ -375,7 +385,7 @@ pub(super) fn show(
         painter.text(
             rect.center_top() + egui::vec2(0.0, 2.0),
             egui::Align2::CENTER_TOP,
-            format!("Length {:.3}s", range.duration().as_seconds_f64()),
+            format!("Length {}", crate::format_time_precise(range.duration())),
             egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
@@ -434,9 +444,9 @@ pub(super) fn show(
                     egui::Align2::RIGHT_CENTER
                 },
                 format!(
-                    "{} {:.3}s",
+                    "{} {}",
                     if start { "In" } else { "Out" },
-                    current.as_seconds_f64()
+                    crate::format_time_precise(current)
                 ),
                 egui::FontId::proportional(LABEL_SIZE),
                 crate::chrome::FOREGROUND,
@@ -453,7 +463,7 @@ pub(super) fn show(
             .map_or(duration, |range| range.end())
             .max(duration);
         let editable = enabled && displayed_end == duration;
-        describe_focus(&control, editable, label, current.as_seconds_f64());
+        describe_focus(&control, editable, label, current.as_seconds_f64(), true);
         if let Some(value) = crate::seekbar::value_input(
             &control,
             label,
@@ -654,7 +664,15 @@ mod tests {
                 assert!(context.memory(|memory| memory.has_focus(target)));
                 assert_eq!(
                     focus_hint(&context),
-                    Some(format!("{label}: {value:.3} · Left/Right adjust"))
+                    Some(if label.ends_with(" (seconds)") {
+                        format!(
+                            "{}: {} · Left/Right adjust",
+                            label.trim_end_matches(" (seconds)"),
+                            crate::format_time_precise(time(value))
+                        )
+                    } else {
+                        format!("{label}: {value:.3} · Left/Right adjust")
+                    })
                 );
                 let tree = output
                     .platform_output
@@ -689,12 +707,18 @@ mod tests {
                         target,
                         egui::Sense::focusable_noninteractive(),
                     );
-                    describe_focus(&response, false, label, value);
+                    describe_focus(
+                        &response,
+                        false,
+                        label,
+                        value,
+                        label.ends_with(" (seconds)"),
+                    );
                     assert!(
                         focus_hint(&context).is_none(),
                         "disabled control has no hint"
                     );
-                    describe_focus(&response, true, label, value);
+                    describe_focus(&response, true, label, value, label.ends_with(" (seconds)"));
                     assert!(focus_hint(&context).is_some());
                     response.surrender_focus();
                     assert!(
@@ -1548,8 +1572,11 @@ mod tests {
                     ] {
                         let preview_length = if target > rect.right() { 10.0 } else { 5.0 };
                         let expected_labels = [
-                            "In 2.500s".to_owned(),
-                            format!("Out {:.3}s", 2.5 + preview_length),
+                            "In 00:00:02:500".to_owned(),
+                            format!(
+                                "Out {}",
+                                crate::format_time_precise(time(2.5 + preview_length))
+                            ),
                         ];
                         let context = egui::Context::default();
                         context.set_pixels_per_point(density);
@@ -1623,7 +1650,10 @@ mod tests {
                                     .collect();
                                 assert_eq!(
                                     lengths,
-                                    [format!("Length {preview_length:.3}s")],
+                                    [format!(
+                                        "Length {}",
+                                        crate::format_time_precise(time(preview_length))
+                                    )],
                                     "one current length label, including the discarded release pass"
                                 );
                             }
@@ -1656,10 +1686,15 @@ mod tests {
                                 if let Some(value) =
                                     labels.iter().find_map(|label| label.strip_prefix(prefix))
                                 {
-                                    let value: f64 = value
-                                        .trim_end_matches('s')
-                                        .parse()
-                                        .expect("displayed seconds");
+                                    let parts: Vec<f64> = value
+                                        .split(':')
+                                        .map(|part| part.parse().expect("clock field"))
+                                        .collect();
+                                    assert_eq!(parts.len(), 4);
+                                    let value = parts[0] * 3600.0
+                                        + parts[1] * 60.0
+                                        + parts[2]
+                                        + parts[3] / 1000.0;
                                     let node = tree
                                         .nodes
                                         .iter()
@@ -1718,7 +1753,7 @@ mod tests {
                         if cancel {
                             assert!(actions.is_empty());
                             let expected = if selection.is_some() {
-                                vec!["In 2.500s", "Out 5.000s"]
+                                vec!["In 00:00:02:500", "Out 00:00:05:000"]
                             } else {
                                 vec![]
                             };

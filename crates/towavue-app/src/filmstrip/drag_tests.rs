@@ -1641,7 +1641,10 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
         let end = gutter + egui::vec2(100.0, 0.0);
         render(&mut strip, true, vec![egui::Event::PointerMoved(end)]);
         render(&mut strip, true, vec![pointer(end, false)]);
-        assert_eq!(strip.scroll_offset, before, "gutters must not drag the bar");
+        assert!(
+            (strip.scroll_offset - (before - 100.0).max(0.0)).abs() < 1.0,
+            "gutters swipe the content without dragging the bar"
+        );
     }
     for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
         let context = crate::fonts::test_context();
@@ -1820,9 +1823,9 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
 }
 
 #[test]
-fn filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading_and_drag() {
+fn filmstrip_empty_space_keeps_open_and_respects_disabled_loading_and_drag() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading_and_drag",
+        "filmstrip::drag_tests::filmstrip_empty_space_keeps_open_and_respects_disabled_loading_and_drag",
     ) else {
         return;
     };
@@ -1868,17 +1871,10 @@ fn filmstrip_empty_space_dismisses_without_opening_and_respects_disabled_loading
             assert!(render(vec![egui::Event::PointerMoved(release)]).is_empty());
         }
         let actions = render(vec![pointer(release, false)]);
-        if enabled && !outside && !drag {
-            assert!(
-                actions == [UiAction::CloseFilmstrip],
-                "empty space closes only the filmstrip"
-            );
-        } else {
-            assert!(
-                actions.is_empty(),
-                "disabled/outside/drag release cannot dismiss"
-            );
-        }
+        assert!(
+            actions.is_empty(),
+            "empty-space clicks and drags never dismiss or open media"
+        );
     }
 }
 
@@ -2332,4 +2328,271 @@ pub(crate) fn hardware_drag_cancel<N: Fn(AppEvent) + Send + Sync + 'static>(
     eprintln!(
         "PASS hardware filmstrip drag: stationary preview draw/cancel; unchanged tabs/history/transport/generation and CPU transfers 0; no child launched"
     );
+}
+
+#[test]
+fn filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let mut snapshot = snapshot(&root);
+            for index in 3..40 {
+                let mut item = snapshot.items[0].clone();
+                item.path = root.join(format!("{index}.png"));
+                snapshot.items.push(item);
+            }
+            let current = &snapshot.items[10].path;
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("strip");
+            let mut time = 0.0;
+            let mut render = |strip: &mut Filmstrip, events: Vec<egui::Event>, enabled| {
+                time += 1.0 / 60.0;
+                let mut raw = input(events);
+                raw.time = Some(time);
+                let mut actions = Vec::new();
+                let _ = context.run_ui(raw, |_| {
+                    strip.show(
+                        &context,
+                        context.content_rect(),
+                        Some(&snapshot),
+                        Some(current),
+                        enabled,
+                        &mut actions,
+                    );
+                    if discard && context.current_pass_index() == 0 {
+                        context.request_discard("swipe multipass control");
+                    }
+                });
+                assert!(
+                    actions.is_empty(),
+                    "swipe never opens media or closes the overlay"
+                );
+                assert!(strip.active_drag(&context, Some(current)).is_none());
+            };
+            let origin = egui::pos2(680.0, 100.0);
+            for _ in 0..4 {
+                render(&mut strip, vec![egui::Event::PointerMoved(origin)], true);
+            }
+            for interrupt in ["settle", "press", "wheel", "focus", "disabled"] {
+                let before = strip.scroll_offset;
+                render(&mut strip, vec![pointer(origin, true)], true);
+                for step in 1..=3 {
+                    render(
+                        &mut strip,
+                        vec![egui::Event::PointerMoved(
+                            origin - egui::vec2(40.0 * step as f32, 0.0),
+                        )],
+                        true,
+                    );
+                    assert!(
+                        (strip.scroll_offset - before - 40.0 * step as f32).abs() < 1.0,
+                        "pointer distance is applied once at density {density}, discard={discard}"
+                    );
+                }
+                let end = origin - egui::vec2(120.0, 0.0);
+                render(&mut strip, vec![pointer(end, false)], true);
+                let released = strip.scroll_offset;
+                render(&mut strip, vec![], true);
+                assert!(
+                    strip.scroll_offset > released,
+                    "a fast release coasts briefly"
+                );
+                match interrupt {
+                    "press" => render(&mut strip, vec![pointer(end, true)], true),
+                    "wheel" => render(
+                        &mut strip,
+                        vec![egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::Vec2::ZERO,
+                            phase: egui::TouchPhase::Move,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                        true,
+                    ),
+                    "focus" => render(&mut strip, vec![egui::Event::WindowFocused(false)], true),
+                    "disabled" => render(&mut strip, vec![], false),
+                    _ => {}
+                }
+                let stopped = strip.scroll_offset;
+                for _ in 0..20 {
+                    render(&mut strip, vec![], interrupt != "disabled");
+                }
+                assert!(
+                    strip.scroll_offset <= released + 72.1,
+                    "bounded travel after release"
+                );
+                if interrupt != "settle" {
+                    assert_eq!(strip.scroll_offset, stopped, "{interrupt} brakes momentum");
+                }
+                let settled = strip.scroll_offset;
+                for _ in 0..5 {
+                    render(&mut strip, vec![], true);
+                }
+                assert_eq!(strip.scroll_offset, settled, "no idle drift");
+                render(
+                    &mut strip,
+                    vec![
+                        pointer(end, false),
+                        egui::Event::WindowFocused(true),
+                        egui::Event::PointerMoved(origin),
+                    ],
+                    true,
+                );
+            }
+            render(
+                &mut strip,
+                vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+                true,
+            );
+            let slow_end = origin - egui::vec2(40.0, 0.0);
+            render(&mut strip, vec![egui::Event::PointerMoved(slow_end)], true);
+            for _ in 0..12 {
+                render(&mut strip, vec![], true);
+            }
+            render(&mut strip, vec![pointer(slow_end, false)], true);
+            let stopped = strip.scroll_offset;
+            for _ in 0..20 {
+                render(&mut strip, vec![], true);
+            }
+            assert_eq!(
+                strip.scroll_offset, stopped,
+                "pausing before release stops exactly under the pointer"
+            );
+            let before = strip.scroll_offset;
+            let end = origin - egui::vec2(120.0, 0.0);
+            render(
+                &mut strip,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(-10_000.0, origin.y)),
+                    egui::Event::PointerMoved(origin),
+                    pointer(origin, true),
+                    egui::Event::PointerMoved(end),
+                    pointer(end, false),
+                ],
+                true,
+            );
+            assert!(
+                (strip.scroll_offset - before - 120.0).abs() < 1.0,
+                "a complete batched swipe moves once, including discarded passes"
+            );
+        }
+    }
+}
+
+#[test]
+fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_card_drag_enters_transfer_only_after_leaving_the_band",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let snapshot = snapshot(&root);
+        let current = &snapshot.items[0].path;
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        for _ in 0..4 {
+            frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                current,
+                true,
+                input(vec![]),
+            );
+        }
+        let output = frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![]),
+        )
+        .0;
+        let rect = card(&output, "source.png");
+        let origin = rect.center();
+        let inside = origin + egui::vec2(100.0, 0.0);
+        let outside = egui::pos2(inside.x, rect.top() - 40.0);
+        let before = strip.scroll_offset;
+        let actions = frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![
+                egui::Event::PointerMoved(origin),
+                pointer(origin, true),
+                egui::Event::PointerMoved(inside),
+                pointer(inside, false),
+            ]),
+        )
+        .1;
+        assert!(actions.is_empty());
+        assert_eq!(
+            strip.scroll_offset, before,
+            "a batched card drag cannot become a background swipe"
+        );
+        for leave in [false, true] {
+            frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                current,
+                true,
+                input(vec![
+                    egui::Event::PointerMoved(origin),
+                    pointer(origin, true),
+                ]),
+            );
+            frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                current,
+                true,
+                input(vec![egui::Event::PointerMoved(inside)]),
+            );
+            assert!(
+                strip.active_drag(&context, Some(current)).is_none(),
+                "horizontal movement inside the band is not a transfer"
+            );
+            assert_eq!(strip.scroll_offset, before, "card drags do not swipe");
+            let end = if leave { outside } else { inside };
+            frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                current,
+                true,
+                input(vec![egui::Event::PointerMoved(end)]),
+            );
+            assert_eq!(strip.active_drag(&context, Some(current)).is_some(), leave);
+            let actions = frame(
+                &mut strip,
+                &context,
+                &snapshot,
+                current,
+                true,
+                input(vec![pointer(end, false)]),
+            )
+            .1;
+            assert!(
+                actions.is_empty(),
+                "internal release neither opens nor navigates"
+            );
+        }
+    }
 }

@@ -6,6 +6,7 @@ struct Scope {
     generation: u64,
     current: Option<PathBuf>,
     screen: Rect,
+    media: Rect,
     density: f32,
 }
 
@@ -48,6 +49,7 @@ impl State {
         context: &Context,
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
+        media: Rect,
         enabled: bool,
     ) {
         let scope = snapshot.map(|snapshot| Scope {
@@ -55,6 +57,7 @@ impl State {
             generation: snapshot.generation,
             current: current.map(Path::to_owned),
             screen: context.content_rect(),
+            media,
             density: context.pixels_per_point(),
         });
         let frame = context.cumulative_frame_nr();
@@ -122,7 +125,12 @@ impl State {
         })
     }
 
-    pub(super) fn finish(&mut self, context: &Context, actions: &mut Vec<UiAction>) {
+    pub(super) fn finish(
+        &mut self,
+        context: &Context,
+        band: Option<Rect>,
+        actions: &mut Vec<UiAction>,
+    ) {
         let (pointer, down, released) = context.input(|input| {
             (
                 input.pointer.interact_pos(),
@@ -135,7 +143,8 @@ impl State {
         }
         if let (Some(drag), Some(scope)) = (&mut self.drag, &self.scope) {
             if let Some(pointer) = pointer {
-                drag.crossed |= pointer.distance_sq(drag.origin) > 36.0;
+                drag.crossed |= band.is_some_and(|band| !band.contains(pointer))
+                    && pointer.distance_sq(drag.origin) > 36.0;
             }
             if drag.crossed && down {
                 context.set_dragged_id(drag.widget);

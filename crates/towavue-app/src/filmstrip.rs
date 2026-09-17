@@ -23,6 +23,7 @@ struct Preparation {
 }
 
 mod drag;
+mod swipe;
 
 #[cfg(test)]
 pub(crate) mod drag_tests;
@@ -65,6 +66,7 @@ pub struct Filmstrip {
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
+    swipe: swipe::State,
 }
 
 impl Filmstrip {
@@ -87,6 +89,7 @@ impl Filmstrip {
             tab_navigation: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
+            swipe: swipe::State::default(),
         })
     }
 
@@ -99,9 +102,11 @@ impl Filmstrip {
 
     pub fn cancel_drag(&mut self) {
         self.drag.clear();
+        self.swipe.clear();
     }
 
     pub(crate) fn cancel_native_drag(&mut self, context: &Context) -> bool {
+        self.swipe.clear();
         self.drag.cancel(context)
     }
 
@@ -117,6 +122,7 @@ impl Filmstrip {
         self.preparation = None;
         self.warming = None;
         self.drag.clear();
+        self.swipe.clear();
         self.focused_card = None;
         self.card_paths.clear();
         self.tab_navigation = None;
@@ -378,7 +384,7 @@ impl Filmstrip {
         actions: &mut Vec<UiAction>,
     ) {
         let screen = media_rect.intersect(context.content_rect());
-        self.drag.begin(context, snapshot, current, enabled);
+        self.drag.begin(context, snapshot, current, screen, enabled);
         let pointer = context.input(|input| input.pointer.hover_pos());
         let pointer_moved = pointer != self.pointer_position
             && context.input(|input| {
@@ -499,7 +505,8 @@ impl Filmstrip {
             .or(relocated_focus)
             .or_else(|| self.focus_requested.then_some(selected).flatten());
         let mut wanted = Vec::new();
-        let area = egui::Area::new("filmstrip".into())
+        let mut band = None;
+        egui::Area::new("filmstrip".into())
             .order(egui::Order::Foreground)
             .fade_in(false)
             .movable(false)
@@ -547,12 +554,22 @@ impl Filmstrip {
                 } else {
                     0.0
                 };
-                let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
-                let ui = &mut scroll_ui;
+                let background = ui.interact(screen, ui.id().with("filmstrip-swipe"), egui::Sense::drag());
                 let padding = ((inset.width() - STEP) / 2.0).max(0.0);
                 let content_width = snapshot.items.len() as f32 * STEP + padding * 2.0;
+                self.swipe.update(
+                    &background, snapshot, current, &mut self.scroll_offset,
+                    (content_width - inset.width()).max(0.0),
+                    recenter || self.focus_requested || tab_target.is_some() || relocated_focus.is_some(),
+                );
+                let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
+                let ui = &mut scroll_ui;
                 let mut scroll = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip-scroll")
+                    .scroll_source(egui::scroll_area::ScrollSource {
+                        drag: egui::scroll_area::DragScroll::Never,
+                        ..Default::default()
+                    })
                     // The fixed card geometry determines overflow before the first sizing pass.
                     .scroll_bar_visibility(if content_width > inset.width() {
                         egui::scroll_area::ScrollBarVisibility::AlwaysVisible
@@ -733,7 +750,7 @@ impl Filmstrip {
                         }
                         let mut tooltip = item.path.display().to_string();
                         tooltip.push_str(
-                            "\nDrag outside the window to open the source file in a new window.",
+                            "\nDrag beyond the thumbnail band, then outside the window to open in a new window.",
                         );
                         if let Some(Err(error)) = self.previews.get(&item.path) {
                             tooltip.push_str(&format!("\nPreview unavailable: {error}"));
@@ -742,12 +759,20 @@ impl Filmstrip {
                     }
                 });
                 self.scroll_offset = output.state.offset.x;
+                self.swipe.exclusions.clear();
+                self.swipe.exclusions.extend(self.card_paths.iter().filter_map(|(id, _, _)| {
+                    context.read_response(*id).map(|response| response.interact_rect)
+                }));
+                if let Some(bar) = context.read_response(output.id.with(0usize)) {
+                    self.swipe.exclusions.push(bar.interact_rect);
+                }
+                band = Some(Rect::from_center_size(
+                    egui::pos2(screen.center().x, output.inner_rect.center().y),
+                    egui::vec2(screen.width(), HEIGHT),
+                ).intersect(screen));
             });
-        if enabled && !egui::Popup::is_any_open(context) && area.response.clicked() {
-            actions.push(UiAction::CloseFilmstrip);
-        }
         self.set_visible(wanted);
-        self.drag.finish(context, actions);
+        self.drag.finish(context, band, actions);
     }
 
     pub fn show_recent(

@@ -262,7 +262,6 @@ enum UiAction {
     OpenGalleryBackground(PathBuf),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
-    CloseFilmstrip,
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
@@ -6576,18 +6575,6 @@ where
                     if self.path.as_ref() != Some(&path) {
                         self.request_guarded(GuardedAction::Navigate(path));
                     }
-                }
-            }
-            UiAction::CloseFilmstrip => {
-                if self.filmstrip_open
-                    && !self.palette_open
-                    && !self.grid_open
-                    && !self
-                        .ui_context
-                        .as_ref()
-                        .is_some_and(egui::Popup::is_any_open)
-                {
-                    self.close_filmstrip();
                 }
             }
             UiAction::Seek(target) => self.seek_to(target),

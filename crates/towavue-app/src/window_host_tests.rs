@@ -49,11 +49,27 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
+        let original = app.tabs.active().expect("original tab").id;
         app.handle_ui_action(UiAction::OpenFilmstripMedia(paths[3].clone(), true));
+        assert!(
+            app.filmstrip_open,
+            "background creation preserves the source overlay"
+        );
         let background = app.tabs.tabs().last().expect("background tab").id;
         assert_ne!(background, app.tabs.active().expect("active tab").id);
         app.set_playback_volume(0.8);
         app.activate_tab(background);
+        assert!(
+            !app.filmstrip_open,
+            "fresh background tab starts without an overlay"
+        );
+        app.activate_tab(original);
+        assert!(app.filmstrip_open, "source tab restores its own overlay");
+        app.activate_tab(background);
+        assert!(
+            !app.filmstrip_open,
+            "destination retains its closed overlay"
+        );
         assert_eq!(app.playback_volume(), 0.0, "new media remains muted");
         app.toggle_playback_mute();
         assert_eq!(
@@ -84,6 +100,36 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
             .playback_volume(),
         0.5
     );
+}
+
+#[test]
+fn gallery_belongs_to_empty_launches_and_last_media_close_not_transfer_staging() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::tests::gallery_belongs_to_empty_launches_and_last_media_close_not_transfer_staging",
+    ) else {
+        return;
+    };
+    let path = root.join("source.bmp");
+    tab_transfer::tests::bitmap(&path);
+    for initial in [None, Some(path.clone())] {
+        let empty_launch = initial.is_none();
+        let mut app = Application::new(initial, |_| {}).expect("app");
+        assert_eq!(app.tabs.gallery().is_some(), empty_launch);
+        app.open_external(path.clone(), false);
+        assert_eq!(app.tabs.gallery().is_some(), empty_launch);
+        let media = app.tabs.active().expect("media tab").id;
+        app.close_tab_unchecked(media);
+        assert!(app.tabs.gallery().is_some());
+        assert!(app.tabs.tabs().is_empty());
+        assert!(!app.exit_requested);
+    }
+    let mut host = WindowHost::new(None, None).expect("host");
+    let source = *host.windows.keys().next().expect("source");
+    let transfer = host
+        .add_transfer_application()
+        .expect("transfer destination");
+    assert!(host.windows[&transfer].tabs.is_empty());
+    assert!(host.windows[&source].tabs.gallery().is_some());
 }
 
 pub(super) fn drain_captured(host: &mut WindowHost) {

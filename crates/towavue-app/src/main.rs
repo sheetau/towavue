@@ -1103,6 +1103,10 @@ where
         let filmstrip = filmstrip::Filmstrip::new(preview_cache.clone(), move || {
             filmstrip_notify(AppEvent::FilmstripReady)
         })?;
+        let mut tabs = TabSet::default();
+        if initial_path.is_some() {
+            tabs.take_gallery(tabs.gallery().expect("initial Gallery"));
+        }
         Ok(Self {
             initial_path,
             notify,
@@ -1138,7 +1142,7 @@ where
             folder_refresh_started: Instant::now(),
             folder_snapshot: None,
             folder_watcher: None,
-            tabs: TabSet::default(),
+            tabs,
             displayed_tab: None,
             retained_images: BTreeMap::new(),
             retained_playback: BTreeMap::new(),
@@ -1424,6 +1428,9 @@ where
                 self.open_folder_path(path);
             } else {
                 self.open_external(path, false);
+            }
+            if self.tabs.is_empty() && self.pending_folder.is_none() {
+                self.tabs.open_gallery();
             }
         } else {
             self.state = PlaybackState::Paused;
@@ -1903,6 +1910,12 @@ where
         self.cancel_frame_steps();
         self.retain_image_tab();
         self.retain_playback_tab();
+        if self.displayed_tab != self.tabs.active_id() {
+            // The departing tab has retained its overlay. A fresh destination
+            // starts closed; an existing destination restores its own state below.
+            self.filmstrip_open = false;
+            self.filmstrip_return_focus = None;
+        }
         if !self
             .retained_playback
             .values()
@@ -2248,6 +2261,9 @@ where
                         self.apply_folder_snapshot(snapshot);
                     }
                 } else {
+                    if self.tabs.is_empty() && !self.exit_requested {
+                        self.tabs.open_gallery();
+                    }
                     self.set_status(format!(
                         "No supported media in {}",
                         snapshot.folder_path.display()
@@ -10759,6 +10775,22 @@ where
                     | (u64::from(*is_synthetic) << 2);
                 self.trace_burst(towavue_runtime_windows::BurstEvent::Key, key | (flags << 8));
             }
+        }
+        // Focus transfer reports already-held keys as synthetic presses. They
+        // must not launch commands (notably Enter toggling a new window's
+        // fullscreen state). Keep releases so held-key and egui state clears.
+        if matches!(
+            &event,
+            WindowEvent::KeyboardInput {
+                event: KeyEvent {
+                    state: ElementState::Pressed,
+                    ..
+                },
+                is_synthetic: true,
+                ..
+            }
+        ) {
+            return;
         }
         if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = &event {
             self.media_cursors = Some(cursor::MediaCursors::new(event_loop, *scale_factor));

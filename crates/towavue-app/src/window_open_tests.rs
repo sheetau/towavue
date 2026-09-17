@@ -583,6 +583,10 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             Some(&canonical_shell_path(path).expect("canonical path"))
         );
         assert_eq!(app.tabs.tabs().len(), 1);
+        assert!(app.tabs.gallery().is_none());
+        assert!(!app.filmstrip_open && !app.fullscreen);
+        assert!(app.window.as_ref().expect("window").fullscreen().is_none());
+        assert!(!app.window.as_ref().expect("window").is_maximized());
         assert!(!app.command_context().has_unsaved_edits && app.export_paths.is_empty());
         let app = finish_child(host, child);
         if path == &bad_image {

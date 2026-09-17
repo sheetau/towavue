@@ -169,7 +169,6 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
                     }
                     _ => None,
                 })
-                .expect("tab card remains open")
         };
         // Let the active tab's automatic scroll-to-visible animation settle
         // before hovering another tab; actual source movement closes its card.
@@ -180,7 +179,16 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
         let source = node_center(&output, &display_name(&path));
         frame(app, source, None);
         let (output, _) = frame(app, source, None);
-        let bounds = card(&output);
+        if tab == active {
+            assert!(
+                card(&output).is_none(),
+                "active tab has no interactive card"
+            );
+            assert_eq!(app.tabs.active().expect("foreground").id, active);
+            assert_eq!(app.edits[&tab], history);
+            continue;
+        }
+        let bounds = card(&output).expect("inactive card remains open");
         let caption_top = output
             .shapes
             .iter()
@@ -214,7 +222,11 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
             assert_eq!(transport.state, state);
             let (output, count) = frame(app, button, None);
             assert_eq!(count, 0);
-            assert_eq!(card(&output), bounds, "transport must not move its card");
+            assert_eq!(
+                card(&output),
+                Some(bounds),
+                "transport must not move its card"
+            );
             button = node_center(&output, label);
             assert_eq!(app.tabs.active().expect("unchanged foreground").id, active);
             assert_eq!(app.edits[&tab], history);

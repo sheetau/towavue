@@ -125,6 +125,16 @@ impl WindowHost {
         Ok(key)
     }
 
+    fn add_transfer_application(&mut self) -> Result<WindowKey, Box<dyn Error>> {
+        let key = self.add_application(None)?;
+        let app = self.windows.get_mut(&key).expect("new window");
+        // This hidden destination will receive media or a transferred Gallery.
+        // Do not manufacture an additional start tab while staging the handoff.
+        app.tabs
+            .take_gallery(app.tabs.gallery().expect("initial Gallery"));
+        Ok(key)
+    }
+
     fn start_pending(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
         let mut device = self
             .windows
@@ -307,7 +317,7 @@ impl WindowHost {
             .expect("validated renderer")
             .graphics_device();
         let destination = self
-            .add_application(None)
+            .add_transfer_application()
             .map_err(|error| error.to_string())?;
         // Keep the empty HWND hidden until both startup and transfer succeed.
         let started = start(
@@ -317,13 +327,6 @@ impl WindowHost {
         let moved = started.and_then(|()| self.move_tab(source, destination, request, 0));
         match moved {
             Ok(_) => {
-                // A detached window contains the transferred tab, not a new start tab.
-                let app = self.windows.get_mut(&destination).expect("destination");
-                if let Some(gallery) = app.tabs.gallery()
-                    && app.tabs.active_id() != Some(gallery)
-                {
-                    app.tabs.close_gallery(gallery);
-                }
                 self.windows[&destination]
                     .window
                     .as_ref()
@@ -502,7 +505,7 @@ impl WindowHost {
             .expect("validated renderer")
             .graphics_device();
         let destination = self
-            .add_application(None)
+            .add_transfer_application()
             .map_err(|error| error.to_string())?;
         let app = self.windows.get_mut(&destination).expect("new window");
         let opened = start(app, device).and_then(|()| {

@@ -282,6 +282,12 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         (None, false),
     ] {
         let keys: Vec<_> = host.windows.keys().copied().collect();
+        if local {
+            host.windows
+                .get_mut(&source)
+                .expect("source")
+                .set_fullscreen(true);
+        }
         let client = if local {
             let path = requested.clone().expect("local target");
             let kind = if path.is_dir() {
@@ -326,6 +332,9 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         let app = host.windows.get_mut(&child).expect("child");
         assert_eq!(app.window.as_ref().expect("HWND").is_visible(), Some(false));
         assert!(!app.command_context().has_unsaved_edits);
+        assert!(!app.fullscreen);
+        assert!(app.window.as_ref().expect("HWND").fullscreen().is_none());
+        assert!(!app.window.as_ref().expect("HWND").is_maximized());
         if requested.as_ref().is_some_and(|path| path.is_file()) {
             let app = opening_tests::finish_child(host, child);
             assert!(app.playback_error.is_none());
@@ -351,7 +360,20 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
                 "directory resolves through ordinary Shell Open"
             );
         }
+        let app = host.windows.get(&child).expect("child");
+        if requested.is_some() {
+            assert!(
+                app.tabs.gallery().is_none(),
+                "media launch has no extra Gallery"
+            );
+            assert_eq!(app.tabs.tabs().len(), 1);
+        }
         let mut original = host.windows.remove(&source).expect("source");
+        assert_eq!(
+            original.fullscreen, local,
+            "launch preserves the source window mode"
+        );
+        original.set_fullscreen(false);
         assert!(
             original
                 .session
@@ -377,6 +399,44 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         host.windows.get_mut(&child).expect("child").exit_requested = true;
         host.remove_closed();
         assert_eq!(host.windows.len(), keys.len());
+    }
+    let root = host.windows[&source]
+        .path
+        .as_ref()
+        .expect("source")
+        .parent()
+        .expect("root")
+        .to_owned();
+    let empty = root.join("empty-launch-folder");
+    std::fs::create_dir_all(&empty).expect("empty folder");
+    let unsupported = root.join("unsupported.txt");
+    std::fs::write(&unsupported, b"not media").expect("unsupported fixture");
+    for target in [empty, unsupported] {
+        let keys: Vec<_> = host.windows.keys().copied().collect();
+        host.open_launched_window_with(Some(target), false, |app, device| {
+            app.start_on_device(event_loop, device, false)
+                .map_err(|error| error.to_string())
+        })
+        .expect("empty launch");
+        let child = *host
+            .windows
+            .keys()
+            .find(|key| !keys.contains(key))
+            .expect("child");
+        let app = host.windows.get_mut(&child).expect("child");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.pending_folder.is_some() {
+            app.finish_folder_load();
+            assert!(Instant::now() < deadline, "empty folder deadline");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(
+            app.tabs.gallery().is_some(),
+            "failed or empty launch restores Gallery"
+        );
+        assert!(app.tabs.tabs().is_empty());
+        app.exit_requested = true;
+        host.remove_closed();
     }
     let count = host.windows.len();
     assert!(

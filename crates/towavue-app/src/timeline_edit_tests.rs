@@ -1187,7 +1187,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                     vec![(0.0, 0.25), (0.5, 0.75), (0.75, 1.0)]
                 }
             );
-            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("00:03 / 00:04"))));
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("00:00:03:500 / 00:00:04:000"))));
             let (_, actions) = render(
                 &mut app,
                 &context,

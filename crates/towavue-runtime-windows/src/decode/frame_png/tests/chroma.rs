@@ -65,7 +65,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
             unsafe {
                 (*source.as_mut_ptr()).chroma_location = location;
             }
-            let output_pixel = if depth == 8 { "rgb24" } else { "rgb48be" };
+            let output_pixel = if depth == 8 { "rgb24" } else { "gbrp16be" };
             // Explicit independent coordinates ensure a conversion that silently
             // ignores metadata cannot also define the expected pixels.
             let reference = Command::new(&ffmpeg)
@@ -81,8 +81,16 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
                 "{}",
                 String::from_utf8_lossy(&reference.stderr)
             );
+            // Packed 16-bit full-chroma output is the defective path under test.
+            // Use planar CLI samples here; the numeric regression independently
+            // verifies colors instead of trusting either scaler layout.
+            let reference_pixels = if depth == 8 {
+                reference.stdout
+            } else {
+                planar_reference_rgb(&reference.stdout, false)
+            };
             let bytes = if depth == 8 { 3 } else { 6 };
-            assert_eq!(reference.stdout.len(), 16 * 8 * bytes);
+            assert_eq!(reference_pixels.len(), 16 * 8 * bytes);
             for flip in [false, true] {
                 let operations = if flip {
                     vec![EditOperation::FlipHorizontal]
@@ -105,7 +113,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
                     for x in 0..16 {
                         let sx = if flip { 15 - x } else { x };
                         let at = (y * 16 + sx) * bytes;
-                        expected.extend_from_slice(&reference.stdout[at..at + bytes]);
+                        expected.extend_from_slice(&reference_pixels[at..at + bytes]);
                     }
                 }
                 assert_eq!(actual, expected, "{name}, {location:?}, flip={flip}");
@@ -198,7 +206,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
                     .expect("native tagged-frame extraction");
                 assert_eq!(
                     unpack(&png).1,
-                    reference.stdout,
+                    reference_pixels,
                     "container chroma {location:?}"
                 );
                 assert_eq!(fs::read(&video).expect("source video bytes"), original);
@@ -210,7 +218,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
                     modified
                 );
             }
-            results.push(reference.stdout);
+            results.push(reference_pixels);
         }
         if chroma_width == 8 {
             assert_ne!(

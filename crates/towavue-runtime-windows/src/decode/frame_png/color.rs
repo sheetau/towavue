@@ -19,6 +19,39 @@ pub(super) fn convert(
     matrix: i32,
     full: bool,
     subsampled: (bool, bool),
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<frame::Video, DecodeError> {
+    let planar = match pixel {
+        Pixel::RGB48BE => Pixel::GBRP16BE,
+        Pixel::RGBA64BE => Pixel::GBRAP16BE,
+        _ => return convert_planes(source, pixel, matrix, full, subsampled),
+    };
+    // The pinned scaler's packed 16-bit RGB/full-chroma path can corrupt
+    // colors. Keep its full-depth planar conversion and explicitly interleave
+    // samples, without another color conversion, quantization or resampling.
+    let planes = convert_planes(source, planar, matrix, full, subsampled)?;
+    let channels = if pixel == Pixel::RGBA64BE { 4 } else { 3 };
+    let mut output = frame::Video::new(pixel, source.width(), source.height());
+    let stride = output.stride(0);
+    for y in 0..source.height() as usize {
+        check_cancelled(cancelled)?;
+        for x in 0..source.width() as usize {
+            for (channel, plane) in [2, 0, 1, 3].into_iter().take(channels).enumerate() {
+                let from = y * planes.stride(plane) + x * 2;
+                let to = y * stride + (x * channels + channel) * 2;
+                output.data_mut(0)[to..to + 2].copy_from_slice(&planes.data(plane)[from..from + 2]);
+            }
+        }
+    }
+    Ok(output)
+}
+
+fn convert_planes(
+    source: &frame::Video,
+    pixel: Pixel,
+    matrix: i32,
+    full: bool,
+    subsampled: (bool, bool),
 ) -> Result<frame::Video, DecodeError> {
     // The legacy slice API has no frame flags and would interpolate vertical
     // chroma across temporal fields. Use the native field-aware frame API only

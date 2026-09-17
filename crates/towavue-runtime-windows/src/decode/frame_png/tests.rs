@@ -4,6 +4,7 @@ mod alpha;
 mod chroma;
 mod exif;
 mod grayscale;
+mod high_depth;
 mod interlaced;
 mod webm_alpha;
 use std::{fs, io::Cursor, process::Command};
@@ -482,4 +483,30 @@ fn frame_png_retains_icc_bytes_without_overriding_them_with_cicp() {
     .expect("frame PNG fixture");
     assert_eq!(restored, profile);
     assert!(chunks(&encoded, b"cICP").is_empty());
+}
+
+// CLI raw GBR(A) planes have no row padding. Recombine whole sample iterators,
+// independently of the production frame-stride traversal.
+fn planar_reference_rgb(bytes: &[u8], alpha: bool) -> Vec<u8> {
+    let channels = if alpha { 4 } else { 3 };
+    assert_eq!(bytes.len() % (channels * 2), 0);
+    let plane_size = bytes.len() / channels;
+    let planes: Vec<_> = bytes.chunks_exact(plane_size).collect();
+    let mut result = Vec::with_capacity(bytes.len());
+    for (index, ((r, g), b)) in planes[2]
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .zip(planes[0].as_chunks::<2>().0.iter())
+        .zip(planes[1].as_chunks::<2>().0.iter())
+        .enumerate()
+    {
+        result.extend_from_slice(r);
+        result.extend_from_slice(g);
+        result.extend_from_slice(b);
+        if alpha {
+            result.extend_from_slice(&planes[3][index * 2..index * 2 + 2]);
+        }
+    }
+    result
 }

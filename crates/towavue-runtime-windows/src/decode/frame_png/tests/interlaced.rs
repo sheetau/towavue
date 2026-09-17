@@ -63,9 +63,9 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
         fs::write(&input, &raw).expect("raw fixture");
         let output_pixel = match (depth == 8, alpha) {
             (true, false) => "rgb24",
-            (false, false) => "rgb48be",
+            (false, false) => "gbrp16be",
             (true, true) => "rgba",
-            (false, true) => "rgba64be",
+            (false, true) => "gbrap16be",
         };
         for (location, location_name) in [
             (ffmpeg::ffi::AVChromaLocation::AVCHROMA_LOC_LEFT, "left"),
@@ -87,8 +87,16 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                 "{}",
                 String::from_utf8_lossy(&reference.stderr)
             );
+            // Packed 16-bit full-chroma output is the defective path under test.
+            // Use planar CLI samples here; the numeric regression independently
+            // verifies colors instead of trusting either scaler layout.
+            let reference_pixels = if depth == 8 {
+                reference.stdout
+            } else {
+                planar_reference_rgb(&reference.stdout, alpha)
+            };
             let bytes = (if alpha { 4 } else { 3 }) * if depth == 8 { 1 } else { 2 };
-            assert_eq!(reference.stdout.len(), 32 * 16 * bytes);
+            assert_eq!(reference_pixels.len(), 32 * 16 * bytes);
             for top_first in [false, true] {
                 // SAFETY: only scalar properties of the exclusively owned fixture
                 // change; all plane allocations and borrowed source pixels stay intact.
@@ -119,7 +127,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                         let progressive =
                             encode(&source, VideoOrientation::default(), &[], &|| false)
                                 .expect("progressive negative control");
-                        assert_ne!(unpack(&progressive).1, reference.stdout);
+                        assert_ne!(unpack(&progressive).1, reference_pixels);
                         // SAFETY: restore the same borrowed fixture's field flag.
                         unsafe {
                             (*source.as_mut_ptr()).flags = ffmpeg::ffi::AV_FRAME_FLAG_INTERLACED;
@@ -139,7 +147,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                     let expected: Vec<_> = (0..16)
                         .flat_map(|y| {
                             let sy = if flip { 15 - y } else { y };
-                            reference.stdout[sy * 32 * bytes..(sy + 1) * 32 * bytes]
+                            reference_pixels[sy * 32 * bytes..(sy + 1) * 32 * bytes]
                                 .iter()
                                 .copied()
                         })
@@ -246,7 +254,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                 let png = source_video_frame_png(&video, MediaTime::ZERO, &|| false)
                     .expect("interlaced container PNG");
                 assert!(
-                    unpack(&png).1 == reference.stdout,
+                    unpack(&png).1 == reference_pixels,
                     "container field colors: {name}"
                 );
                 assert_eq!(fs::read(&video).expect("unchanged source"), source_bytes);

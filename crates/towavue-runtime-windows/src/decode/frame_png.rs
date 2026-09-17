@@ -212,7 +212,7 @@ fn encode(
         yuv && descriptor.log2_chroma_w != 0,
         yuv && descriptor.log2_chroma_h != 0,
     );
-    let mut rgb = color::convert(source, pixel, matrix, full, subsampled)?;
+    let mut rgb = color::convert(source, pixel, matrix, full, subsampled, cancelled)?;
     // SAFETY: immutable scalar metadata on the borrowed decoded frame. Legacy
     // sws_scale converts channels/ranges but does not interpret AVFrame alpha_mode.
     let premultiplied = alpha

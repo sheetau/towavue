@@ -23,6 +23,25 @@ pub(super) enum Action {
 
 impl Transport {
     pub fn show(&self, ui: &mut egui::Ui, thumbnail: egui::Rect) -> Option<Action> {
+        // Register the background first so seek and previous/next controls keep
+        // their own hit regions. Media replacement changes the click owner.
+        let surface = ui
+            .add_enabled_ui(self.enabled, |ui| {
+                ui.interact(
+                    thumbnail,
+                    ui.id().with(("preview-toggle", self.instance)),
+                    egui::Sense::click(),
+                )
+            })
+            .inner;
+        surface.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                surface.enabled(),
+                "Toggle preview playback",
+            )
+        });
+        crate::tab_focus::release_pointer_focus(&surface);
         let duration = self.duration.filter(|duration| *duration > MediaTime::ZERO);
         let seconds = duration.map_or(0.0, MediaTime::as_seconds_f64);
         let progress = if seconds > 0.0 {
@@ -73,7 +92,7 @@ impl Transport {
         let audio = self.kind == MediaKind::Audio;
         let rect = egui::Rect::from_center_size(
             thumbnail.center(),
-            egui::vec2(if audio { 84.0 } else { 28.0 }, 24.0),
+            egui::vec2(if audio { 72.0 } else { 24.0 }, 24.0),
         );
         ui.painter()
             .rect_filled(rect, 4.0, Color32::from_black_alpha(160));
@@ -126,7 +145,11 @@ impl Transport {
                 action = Some(CommandId::NextMedia);
             }
         }
-        action.map(Action::Command).or(seek)
+        action.map(Action::Command).or(seek).or_else(|| {
+            surface
+                .clicked()
+                .then_some(Action::Command(CommandId::TogglePause))
+        })
     }
 }
 

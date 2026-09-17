@@ -64,51 +64,53 @@ fn card_seek_rejects_replacement_disabled_duration_and_interrupted_drags() {
 
 #[test]
 fn replacing_media_between_press_and_release_does_not_control_the_new_track() {
-    let context = fonts::test_context();
-    let thumbnail = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(240.0, 80.0));
-    let frame = |instance, pressed: Option<bool>| {
-        let mut events = vec![egui::Event::PointerMoved(thumbnail.center())];
-        if let Some(pressed) = pressed {
-            events.push(egui::Event::PointerButton {
-                pos: thumbnail.center(),
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            });
-        }
-        let mut action = None;
-        let _ = context.run_ui(
-            egui::RawInput {
-                focused: true,
-                events,
-                ..Default::default()
-            },
-            |ui| {
-                action = Transport {
-                    instance,
-                    kind: MediaKind::Audio,
-                    state: PlaybackState::Paused,
-                    position: MediaTime::ZERO,
-                    duration: None,
-                    enabled: true,
-                    previous: false,
-                    next: false,
-                }
-                .show(ui, thumbnail);
-            },
+    for offset in [egui::Vec2::ZERO, egui::vec2(-100.0, -25.0)] {
+        let context = fonts::test_context();
+        let thumbnail = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(240.0, 80.0));
+        let frame = |instance, pressed: Option<bool>| {
+            let mut events = vec![egui::Event::PointerMoved(thumbnail.center() + offset)];
+            if let Some(pressed) = pressed {
+                events.push(egui::Event::PointerButton {
+                    pos: thumbnail.center() + offset,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                });
+            }
+            let mut action = None;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    action = Transport {
+                        instance,
+                        kind: MediaKind::Audio,
+                        state: PlaybackState::Paused,
+                        position: MediaTime::ZERO,
+                        duration: None,
+                        enabled: true,
+                        previous: false,
+                        next: false,
+                    }
+                    .show(ui, thumbnail);
+                },
+            );
+            action
+        };
+        frame(1, None);
+        frame(1, None);
+        assert!(frame(1, Some(true)).is_none());
+        assert!(frame(2, Some(false)).is_none());
+        frame(2, None);
+        frame(2, Some(true));
+        assert_eq!(
+            frame(2, Some(false)),
+            Some(Action::Command(CommandId::TogglePause))
         );
-        action
-    };
-    frame(1, None);
-    frame(1, None);
-    assert!(frame(1, Some(true)).is_none());
-    assert!(frame(2, Some(false)).is_none());
-    frame(2, None);
-    frame(2, Some(true));
-    assert_eq!(
-        frame(2, Some(false)),
-        Some(Action::Command(CommandId::TogglePause))
-    );
+    }
 }
 
 #[test]
@@ -251,6 +253,29 @@ fn tab_card_bridge_transport_clicks_and_progress_keep_layout_and_ownership() {
                         .1
                         .2,
                     Some(Action::Command(expected))
+                );
+            }
+            for point in [
+                thumbnail.left_top() + egui::vec2(12.0, 12.0),
+                thumbnail.right_top() + egui::vec2(-12.0, 12.0),
+            ] {
+                frame(point, None, true, false, true);
+                assert!(
+                    frame(point, Some(true), true, false, true)
+                        .0
+                        .expect("card press")
+                        .1
+                        .2
+                        .is_none()
+                );
+                assert_eq!(
+                    frame(point, Some(false), true, false, true)
+                        .0
+                        .expect("card release")
+                        .1
+                        .2,
+                    Some(Action::Command(CommandId::TogglePause)),
+                    "whole thumbnail playback"
                 );
             }
             let bar = thumbnail.center_bottom() - egui::vec2(0.0, 0.5 / density);

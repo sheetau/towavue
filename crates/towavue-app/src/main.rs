@@ -5245,7 +5245,15 @@ where
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if preview_allowed && !egui::Popup::is_any_open(tab_ui.ctx()) {
+                                    if preview_allowed && active {
+                                        response.clone().help_text(
+                                            tab.target.current_path().display().to_string(),
+                                        );
+                                    }
+                                    if preview_allowed
+                                        && !active
+                                        && !egui::Popup::is_any_open(tab_ui.ctx())
+                                    {
                                         // Playing audio changes the label's leading inset, not
                                         // the tab's location or its hover-card ownership.
                                         let mut response = response.clone();

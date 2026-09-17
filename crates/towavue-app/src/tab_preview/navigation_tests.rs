@@ -3,6 +3,140 @@ use crate::preview_transport::{Action, Transport};
 use towavue_core::{CommandId, MediaTime, PlaybackState};
 
 #[test]
+fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_padding() {
+    for density in [1.0, 1.25, 2.0] {
+        for (width, height) in [(240, 135), (90, 160), (240, 100)] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            let mut tabs = TabSet::default();
+            tabs.open_new("video.mp4".into(), MediaKind::Video);
+            let mut preview = TabPreview::new().expect("preview worker");
+            let target = preview.target(tabs.active().expect("tab"));
+            preview.target = Some(target.clone());
+            preview.finish(
+                &context,
+                target.clone(),
+                preview.generation,
+                Ok(PreviewImage {
+                    width,
+                    height,
+                    rgba: vec![255; (width * height * 4) as usize].into(),
+                }),
+            );
+            let source =
+                egui::Rect::from_min_size(egui::pos2(220.0, 20.0), egui::vec2(100.0, 24.0));
+            let mut time = 0.0;
+            let mut frame = |preview: &TabPreview, point| {
+                time += 0.05;
+                context.run_ui(
+                    egui::RawInput {
+                        time: Some(time),
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 400.0),
+                        )),
+                        events: vec![egui::Event::PointerMoved(point)],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response =
+                            ui.interact(source, "video-tab".into(), egui::Sense::click());
+                        preview.show_with_transport(
+                            &response,
+                            &target,
+                            None,
+                            Some(&Transport {
+                                instance: 1,
+                                kind: MediaKind::Video,
+                                state: PlaybackState::Paused,
+                                position: MediaTime::ZERO,
+                                duration: Some(MediaTime::from_nanoseconds(100_000_000_000)),
+                                enabled: true,
+                                previous: false,
+                                next: false,
+                            }),
+                            None,
+                        );
+                    },
+                )
+            };
+            let seek_bounds = |output: &egui::FullOutput| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Preview playback position (seconds)"))
+                    .expect("seek control")
+                    .1
+                    .bounds()
+                    .expect("seek bounds")
+            };
+            for _ in 0..3 {
+                frame(&preview, source.center());
+            }
+            let before = seek_bounds(&frame(&preview, source.center()));
+            let pointer = egui::pos2(
+                ((before.x0 + before.x1) * 0.5) as f32,
+                before.y0 as f32 - 20.0,
+            );
+            frame(&preview, pointer);
+            preview.finish_sheet(
+                &context,
+                target.clone(),
+                preview.generation,
+                Ok(towavue_runtime_windows::VideoPreviewSheet {
+                    layout: towavue_runtime_windows::VideoSheetLayout::for_position(
+                        Duration::from_secs(100),
+                        Duration::ZERO,
+                    )
+                    .expect("layout"),
+                    image: PreviewImage {
+                        width: 960,
+                        height: 640,
+                        rgba: vec![255; 960 * 640 * 4].into(),
+                    },
+                }),
+            );
+            let texture = preview
+                .texture
+                .as_ref()
+                .expect("texture")
+                .as_ref()
+                .expect("ready")
+                .id();
+            let after = frame(&preview, pointer);
+            assert_eq!(
+                seek_bounds(&after),
+                before,
+                "sheet arrival keeps controls stationary"
+            );
+            let image = after
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .reduce(egui::Rect::union)
+                .expect("sheet pixels");
+            assert!(
+                (image.width() - 240.0).abs() <= 1.0 / density,
+                "sheet cannot acquire extra horizontal padding: {image:?}"
+            );
+            assert!((image.height() - 160.0).abs() <= 1.0 / density);
+        }
+    }
+}
+
+#[test]
 fn audio_card_navigation_keeps_pointer_ownership_when_artwork_shrinks_or_loads() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();

@@ -449,7 +449,12 @@ impl TabPreview {
                         sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
                     let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
                     let size = size * scale;
-                    let height = if transport.is_some() || folder.is_some() {
+                    // Video sheets contain padded 240x160 cells. Keep that same
+                    // viewport for the earlier unpadded thumbnail, otherwise a
+                    // retained shorter height shrinks the whole sheet cell.
+                    let height = if target.kind == MediaKind::Video {
+                        160.0
+                    } else if transport.is_some() || folder.is_some() {
                         size.y.max(40.0)
                     } else {
                         size.y
@@ -1339,7 +1344,7 @@ mod tests {
     }
 
     #[test]
-    fn loaded_image_hover_reuses_current_pixels_without_a_preview_job() {
+    fn active_image_has_only_path_help_and_background_hover_reuses_retained_pixels() {
         let mut app = crate::Application::new(None, |_| {}).expect("headless app");
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
@@ -1396,9 +1401,15 @@ mod tests {
             output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture))
         };
         let _ = context.tex_manager().write().take_delta();
+        for _ in 0..12 {
+            frame(&mut app, pointer);
+        }
+        assert!(frame(&mut app, pointer).shapes.iter().any(|shape|
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == path.display().to_string())),
+            "active tab retains ordinary delayed path help");
         assert!(
-            painted(&frame(&mut app, pointer), texture),
-            "reuse the loaded image instead of waiting for a file thumbnail"
+            !painted(&frame(&mut app, pointer), texture),
+            "active tabs have no preview card"
         );
         assert!(
             app.tab_preview.target.is_none(),
@@ -1413,7 +1424,7 @@ mod tests {
         assert!(image.advance_animation(end));
         assert!(image.next_frame_at.is_none());
         let _ = context.tex_manager().write().take_delta();
-        assert!(painted(&frame(&mut app, pointer), texture));
+        assert!(!painted(&frame(&mut app, pointer), texture));
         assert!(context.tex_manager().write().take_delta().set.is_empty());
         let original = app.image.as_ref().expect("image").decoded.clone();
         let edited = towavue_runtime_windows::render_image_edits(
@@ -1426,7 +1437,7 @@ mod tests {
             .expect("edited presentation");
         let edited_texture = app.image.as_ref().expect("edited").texture.id();
         let _ = context.tex_manager().write().take_delta();
-        assert!(painted(&frame(&mut app, pointer), edited_texture));
+        assert!(!painted(&frame(&mut app, pointer), edited_texture));
         assert!(!painted(&frame(&mut app, pointer), texture));
         assert!(context.tex_manager().write().take_delta().set.is_empty());
         app.tabs.open_new("other.png".into(), MediaKind::Image);
@@ -1581,11 +1592,16 @@ mod tests {
         app.path = Some(path);
         app.media_kind = Some(MediaKind::Image);
         app.push_edit(towavue_core::EditOperation::RotateClockwise);
+        let dirty_tab = app.tabs.active_id().expect("dirty tab");
+        app.tabs.open_new("foreground.png".into(), MediaKind::Image);
         let tabs = app.tabs.clone();
-        let history = app.edits[&tabs.active().expect("active").id]
-            .operations()
-            .to_vec();
-        let target = app.tab_preview.target(tabs.active().expect("tab"));
+        let history = app.edits[&dirty_tab].operations().to_vec();
+        let target = app.tab_preview.target(
+            tabs.tabs()
+                .iter()
+                .find(|tab| tab.id == dirty_tab)
+                .expect("dirty tab"),
+        );
         let texture = context.load_texture(
             "fixture-tab-preview",
             egui::ColorImage::filled([64, 32], egui::Color32::RED),
@@ -1642,10 +1658,7 @@ mod tests {
         assert!(rect.top() >= 32.0 && rect.right() <= 960.0);
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("preview-image.png"))));
         assert_eq!(app.tabs, tabs);
-        assert_eq!(
-            app.edits[&tabs.active().expect("active").id].operations(),
-            history
-        );
+        assert_eq!(app.edits[&dirty_tab].operations(), history);
         assert!(app.pending_guard.is_none() && app.session.is_none());
         let target = app.tab_preview.target.clone().expect("hovered tab");
         let generation = app.tab_preview.generation;
@@ -1670,10 +1683,7 @@ mod tests {
             "hover resumes after drag leaves"
         );
         assert_eq!(app.tabs, tabs);
-        assert_eq!(
-            app.edits[&tabs.active().expect("active").id].operations(),
-            history
-        );
+        assert_eq!(app.edits[&dirty_tab].operations(), history);
         frame(&mut app, egui::pos2(400.0, 300.0), 1.1, false);
         assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
         for overlay in 0..3 {

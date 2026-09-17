@@ -507,6 +507,16 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                 }
                 let (output, _) = frame(&mut app, vec![]);
                 let tree = output.platform_output.accesskit_update.expect("tree");
+                if !background {
+                    assert!(
+                        !tree
+                            .nodes
+                            .iter()
+                            .any(|(_, node)| node.label() == Some("Preview image position")),
+                        "active tab has no image-seek card"
+                    );
+                    continue;
+                }
                 let node = &tree
                     .nodes
                     .iter()

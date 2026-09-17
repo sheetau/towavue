@@ -108,6 +108,14 @@ fn reading_tab_hover_joins_retained_pages_without_decoding_uploading_or_activati
                     let tabs = app.tabs.clone();
                     let _ = context.tex_manager().write().take_delta();
                     let output = frame(&mut app);
+                    if !background {
+                        assert!(!output.shapes.iter().any(|shape|
+                            matches!(&shape.shape, egui::Shape::Mesh(mesh) if ids.contains(&mesh.texture_id))),
+                            "active reading tab has no preview card");
+                        assert_eq!(app.tabs, tabs);
+                        assert!(app.tab_preview.target.is_none());
+                        continue;
+                    }
                     let rects = ids.map(|id| {
                         output
                             .shapes

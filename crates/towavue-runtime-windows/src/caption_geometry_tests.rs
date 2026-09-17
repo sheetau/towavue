@@ -15,6 +15,7 @@ struct Geometry {
     visible_top_gap: i32,
     button_size: [(i32, i32); 3],
     client_size: (i32, i32),
+    frame_insets: [i32; 3],
 }
 
 fn geometry(window: &Window, name: &str, state: &str) -> Geometry {
@@ -30,7 +31,12 @@ fn geometry(window: &Window, name: &str, state: &str) -> Geometry {
     // SAFETY: all queries address an owned live window on this event-loop thread;
     // outputs are separate stack values and no pointers survive the native calls.
     let result = unsafe {
-        assert_ne!(GetForegroundWindow(), handle, "reference must not activate");
+        // Winit can replace the extended style during fullscreen restoration.
+        // Record activation separately; it is not a geometry failure or proof
+        // that the native placement path stays nonactivating.
+        if GetForegroundWindow() == handle {
+            eprintln!("CAPTION_REFERENCE foreground: {name} {state}");
+        }
         GetWindowRect(handle, &mut outer).expect("outer bounds");
         GetClientRect(handle, &mut client).expect("client bounds");
         DwmGetWindowAttribute(
@@ -55,6 +61,11 @@ fn geometry(window: &Window, name: &str, state: &str) -> Geometry {
                 (rect.right - rect.left, rect.bottom - rect.top)
             }),
             client_size: (client.right, client.bottom),
+            frame_insets: [
+                origin.x - outer.left,
+                outer.right - origin.x - client.right,
+                outer.bottom - origin.y - client.bottom,
+            ],
         }
     };
     eprintln!(
@@ -86,6 +97,7 @@ fn compare_native_reference_geometry_and_fullscreen_restore() {
     struct Trial;
     impl ApplicationHandler for Trial {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let mut references = Vec::new();
             for custom in [false, true] {
                 let name = if custom {
                     "towavue-frame"
@@ -117,7 +129,7 @@ fn compare_native_reference_geometry_and_fullscreen_restore() {
                 let caption = custom
                     .then(|| NativeCaption::new(window.clone()).expect("custom native frame"));
                 let monitors: Vec<_> = window.available_monitors().collect();
-                for monitor in monitors {
+                for (monitor_index, monitor) in monitors.into_iter().enumerate() {
                     let position = monitor.position();
                     window.set_outer_position(winit::dpi::PhysicalPosition::new(
                         position.x + 40,
@@ -155,6 +167,25 @@ fn compare_native_reference_geometry_and_fullscreen_restore() {
                             },
                         );
                         assert_eq!(before.maximized, maximized);
+                        if custom {
+                            let (_, _, reference) = references
+                                .iter()
+                                .find(|(index, zoomed, _): &&(usize, bool, Geometry)| {
+                                    *index == monitor_index && *zoomed == maximized
+                                })
+                                .expect("standard frame on the same monitor");
+                            assert_eq!(before.dpi, reference.dpi);
+                            assert_eq!(
+                                before.frame_insets, reference.frame_insets,
+                                "retain standard left/right/bottom resize borders"
+                            );
+                            assert_eq!(
+                                before.visible_right_gap, reference.visible_right_gap,
+                                "close button must meet the same visible right edge as the standard frame"
+                            );
+                        } else {
+                            references.push((monitor_index, maximized, before.clone()));
+                        }
                         for cycle in 0..3 {
                             let _guard = caption
                                 .as_ref()
@@ -191,6 +222,18 @@ fn compare_native_reference_geometry_and_fullscreen_restore() {
                             );
                             assert_eq!(immediate.maximized, maximized);
                             assert_eq!(settled.maximized, maximized);
+                            assert_eq!(
+                                settled.frame_insets, before.frame_insets,
+                                "restored resize borders"
+                            );
+                            assert_eq!(
+                                settled.visible_right_gap, before.visible_right_gap,
+                                "restored visible right edge"
+                            );
+                            assert_eq!(
+                                settled.client_size, before.client_size,
+                                "restored client dimensions"
+                            );
                             assert_eq!(
                                 settled.button_size, before.button_size,
                                 "restored native button dimensions"

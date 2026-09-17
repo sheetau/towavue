@@ -669,15 +669,11 @@ unsafe extern "system" fn caption_proc(
                 && DwmDefWindowProc(handle, message, wparam, lparam, &mut dwm_result).as_bool();
             if message == WM_NCCALCSIZE && wparam.0 != 0 {
                 let proposed_top = (*(lparam.0 as *const NCCALCSIZE_PARAMS)).rgrc[0].top;
-                if IsZoomed(handle).as_bool() {
-                    let dpi = GetDpiForWindow(handle);
-                    let border = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi)
-                        + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
-                    let rect = &mut (*(lparam.0 as *mut NCCALCSIZE_PARAMS)).rgrc[0];
-                    rect.left += border;
-                    rect.right -= border;
-                    rect.bottom -= border;
-                }
+                // Retain the native left/right/bottom frame calculation, including
+                // invisible resize borders. Extending those into the client makes
+                // the close button's invisible outer margin visible as a gap.
+                // The original message pointer is borrowed only for this call.
+                DefSubclassProc(handle, message, wparam, lparam);
                 // DwmDefWindowProc cannot hit-test caption buttons with a non-client
                 // top inset. Keep it zero and expose the hidden strip as UI safe area.
                 (*(lparam.0 as *mut NCCALCSIZE_PARAMS)).rgrc[0].top = proposed_top;
@@ -705,7 +701,7 @@ unsafe extern "system" fn caption_proc(
                             + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
                         let mut client = RECT::default();
                         if GetClientRect(handle, &mut client).is_ok()
-                            && let Some(edge) = resize_hit(point, client, border)
+                            && let Some(edge) = top_resize_hit(point, client, border)
                         {
                             return LRESULT(edge as isize);
                         }
@@ -827,21 +823,18 @@ impl CaptionSurface {
     }
 }
 
-fn resize_hit(point: POINT, rect: RECT, border: i32) -> Option<u32> {
+fn top_resize_hit(point: POINT, rect: RECT, border: i32) -> Option<u32> {
+    // Only the top frame was extended into the client. The native procedure
+    // already owns the other three edges; do not steal their inner UI pixels.
+    if point.y >= rect.top + border {
+        return None;
+    }
     let left = point.x < rect.left + border;
     let right = point.x >= rect.right - border;
-    let top = point.y < rect.top + border;
-    let bottom = point.y >= rect.bottom - border;
-    match (left, right, top, bottom) {
-        (true, _, true, _) => Some(HTTOPLEFT),
-        (_, true, true, _) => Some(HTTOPRIGHT),
-        (true, _, _, true) => Some(HTBOTTOMLEFT),
-        (_, true, _, true) => Some(HTBOTTOMRIGHT),
-        (true, _, _, _) => Some(HTLEFT),
-        (_, true, _, _) => Some(HTRIGHT),
-        (_, _, true, _) => Some(HTTOP),
-        (_, _, _, true) => Some(HTBOTTOM),
-        _ => None,
+    match (left, right) {
+        (true, _) => Some(HTTOPLEFT),
+        (_, true) => Some(HTTOPRIGHT),
+        _ => Some(HTTOP),
     }
 }
 
@@ -899,18 +892,9 @@ mod tests {
                 right: 960 * scale,
                 bottom: 576 * scale,
             };
-            for (x, y, hit) in [
-                (1, 1, HTTOPLEFT),
-                (959, 1, HTTOPRIGHT),
-                (1, 575, HTBOTTOMLEFT),
-                (959, 575, HTBOTTOMRIGHT),
-                (1, 200, HTLEFT),
-                (959, 200, HTRIGHT),
-                (300, 1, HTTOP),
-                (300, 575, HTBOTTOM),
-            ] {
+            for (x, y, hit) in [(1, 1, HTTOPLEFT), (959, 1, HTTOPRIGHT), (300, 1, HTTOP)] {
                 assert_eq!(
-                    resize_hit(
+                    top_resize_hit(
                         POINT {
                             x: x * scale,
                             y: y * scale
@@ -921,9 +905,19 @@ mod tests {
                     Some(hit)
                 );
             }
-            for (x, y) in [(20, 16), (100, 16), (300, 16), (500, 300)] {
+            for (x, y) in [
+                (20, 16),
+                (100, 16),
+                (300, 16),
+                (500, 300),
+                (1, 575),
+                (959, 575),
+                (1, 200),
+                (959, 200),
+                (300, 575),
+            ] {
                 assert_eq!(
-                    resize_hit(
+                    top_resize_hit(
                         POINT {
                             x: x * scale,
                             y: y * scale
@@ -1192,8 +1186,12 @@ mod tests {
                     for (x, y, expected) in [
                         (300, 16, HTCAPTION),
                         (100, 16, HTCLIENT),
-                        (1, 100, HTLEFT),
-                        (300, 575, HTBOTTOM),
+                        (-1, 100, HTLEFT),
+                        (960, 100, HTRIGHT),
+                        (300, 576, HTBOTTOM),
+                        (1, 100, HTCLIENT),
+                        (959, 100, HTCLIENT),
+                        (300, 575, HTCLIENT),
                     ] {
                         let packed = u32::from((origin.x + x) as u16)
                             | (u32::from((origin.y + y) as u16) << 16);
@@ -1432,7 +1430,12 @@ mod tests {
                                 for button in buttons {
                                     eprintln!("  {:?}: {:?}", button.action, button.bounds);
                                     assert!(
-                                        caption.controls_bounds().contains_rect(button.bounds),
+                                        caption.controls_bounds().contains_rect(
+                                            button.bounds.intersect(egui::Rect::from_min_size(
+                                                egui::Pos2::ZERO,
+                                                egui::vec2(size.width as f32, size.height as f32)
+                                            ))
+                                        ),
                                         "the child cutout must not cover native buttons"
                                     );
                                     let center = button.bounds.center();

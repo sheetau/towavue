@@ -49,7 +49,7 @@ pub use taskbar::{
     NativeTaskbar, TaskbarAction, TaskbarEvent, TaskbarIcons, TaskbarProgress, TaskbarTransport,
 };
 
-pub use recent::{RecentEntry, RecentFiles, RecentKind, RecentUpdate};
+pub use recent::{COMMAND_HISTORY_LIMIT, RecentEntry, RecentFiles, RecentKind, RecentUpdate};
 mod tempo;
 mod watch;
 mod waveform;

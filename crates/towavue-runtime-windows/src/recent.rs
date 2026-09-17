@@ -6,6 +6,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod commands;
+pub use commands::LIMIT as COMMAND_HISTORY_LIMIT;
+
 const FILE_LIMIT: usize = 10_000;
 const FOLDER_LIMIT: usize = 40;
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -39,6 +42,8 @@ impl RecentEntry {
 }
 
 pub struct RecentUpdate {
+    /// None while a newer command edit is pending or its store is unavailable.
+    pub commands: Option<Vec<towavue_core::CommandId>>,
     pub entries: Vec<RecentEntry>,
     /// Gallery-only omissions. Persisted history and resume positions are untouched.
     pub missing_files: Vec<PathBuf>,
@@ -48,6 +53,7 @@ pub struct RecentUpdate {
 #[derive(Default)]
 struct Mailbox {
     pending: Vec<RecentEntry>,
+    commands: Vec<(towavue_core::CommandId, bool)>,
     clear: bool,
     refresh_gallery: bool,
     completed: Option<RecentUpdate>,
@@ -67,6 +73,11 @@ impl RecentFiles {
             .name("towavue-recent-files".into())
             .spawn(move || {
                 let (mutex, ready) = &*worker_shared;
+                let command_path = path.with_file_name("command-history.txt");
+                let mut command_history = Vec::new();
+                let mut command_pending = Vec::new();
+                let mut load_commands = true;
+                let mut load_files = true;
                 let mut paths = Vec::new();
                 let mut pending = Vec::new();
                 let mut clear = false;
@@ -79,25 +90,51 @@ impl RecentFiles {
                         .map(|entry: &RecentEntry| &entry.path)
                         .collect();
                     missing_files.retain(|path| !clear && !opened.contains(path));
-                    let error = match update(&path, &pending, clear) {
-                        Ok(loaded) => {
-                            paths = loaded;
-                            pending.clear();
-                            clear = false;
-                            None
-                        }
-                        Err(error) => {
-                            if clear {
-                                paths.clear();
+                    let mut error = if load_files || clear || !pending.is_empty() {
+                        match update(&path, &pending, clear) {
+                            Ok(loaded) => {
+                                paths = loaded;
+                                load_files = false;
+                                pending.clear();
+                                clear = false;
+                                None
                             }
-                            remember(&mut paths, &pending);
-                            Some(format!("Recent files unavailable: {error}"))
+                            Err(error) => {
+                                if clear {
+                                    paths.clear();
+                                }
+                                remember(&mut paths, &pending);
+                                Some(format!("Recent files unavailable: {error}"))
+                            }
                         }
+                    } else {
+                        None
                     };
+                    let mut commands_available = true;
+                    if load_commands || !command_pending.is_empty() {
+                        match commands::update(&command_path, &command_pending) {
+                            Ok(loaded) => {
+                                command_history = loaded;
+                                command_pending.clear();
+                                load_commands = false;
+                            }
+                            Err(command_error) => {
+                                commands_available = false;
+                                let message =
+                                    format!("Command history unavailable: {command_error}");
+                                error = Some(error.map_or(message.clone(), |error| {
+                                    format!("{error}; {message}")
+                                }));
+                            }
+                        }
+                    }
                     if refresh_gallery {
                         if let Some(missing) = missing_paths(&paths, || {
                             let mailbox = mutex.lock().expect("recent mailbox");
-                            mailbox.closed || mailbox.clear || !mailbox.pending.is_empty()
+                            mailbox.closed
+                                || mailbox.clear
+                                || !mailbox.pending.is_empty()
+                                || !mailbox.commands.is_empty()
                         }) {
                             missing_files = missing;
                             refresh_gallery = false;
@@ -110,6 +147,8 @@ impl RecentFiles {
                         let mut mailbox = mutex.lock().expect("recent mailbox");
                         if !mailbox.clear {
                             mailbox.completed = Some(RecentUpdate {
+                                commands: (commands_available && mailbox.commands.is_empty())
+                                    .then(|| command_history.clone()),
                                 entries: paths.clone(),
                                 missing_files: missing_files.clone(),
                                 error,
@@ -122,13 +161,25 @@ impl RecentFiles {
                             !mailbox.closed
                                 && mailbox.pending.is_empty()
                                 && !mailbox.clear
+                                && mailbox.commands.is_empty()
                                 && !mailbox.refresh_gallery
                         })
                         .expect("recent mailbox");
-                    if mailbox.pending.is_empty() && !mailbox.clear && mailbox.closed {
+                    if mailbox.pending.is_empty()
+                        && mailbox.commands.is_empty()
+                        && !mailbox.clear
+                        && mailbox.closed
+                    {
                         break;
                     }
-                    refresh_gallery |= std::mem::take(&mut mailbox.refresh_gallery);
+                    for change in std::mem::take(&mut mailbox.commands) {
+                        command_pending
+                            .retain(|old: &(towavue_core::CommandId, bool)| old.0 != change.0);
+                        command_pending.push(change);
+                    }
+                    let refresh = std::mem::take(&mut mailbox.refresh_gallery);
+                    load_files |= refresh;
+                    refresh_gallery |= refresh;
                     if std::mem::take(&mut mailbox.clear) {
                         pending.clear();
                         clear = true;
@@ -144,6 +195,27 @@ impl RecentFiles {
             shared,
             worker: Some(worker),
         })
+    }
+
+    /// Only palette activation enters MRU; menu/shortcut dispatch is not recorded.
+    pub fn record_command(&self, command: towavue_core::CommandId) {
+        self.queue_command(command, true);
+    }
+
+    pub fn remove_command(&self, command: towavue_core::CommandId) {
+        self.queue_command(command, false);
+    }
+
+    fn queue_command(&self, command: towavue_core::CommandId, remember: bool) {
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("recent mailbox");
+        // One final operation per finite registered command, in last-action order.
+        mailbox.commands.retain(|old| old.0 != command);
+        mailbox.commands.push((command, remember));
+        if let Some(completed) = &mut mailbox.completed {
+            completed.commands = None;
+        }
+        ready.notify_one();
     }
 
     pub fn record(&self, path: PathBuf) {
@@ -446,6 +518,10 @@ mod tests {
             fs::remove_file(path).expect("remove owned history");
         }
         fs::remove_file(path.with_extension("lock")).expect("remove owned lock");
+        let command_lock = path.with_file_name("command-history.lock");
+        if command_lock.exists() {
+            fs::remove_file(command_lock).expect("remove owned command lock");
+        }
         fs::remove_dir(path.parent().expect("directory")).expect("no temporary files left");
     }
 

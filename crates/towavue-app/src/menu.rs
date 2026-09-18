@@ -20,6 +20,7 @@ pub(crate) enum RecentAction {
         towavue_runtime_windows::RecentKind,
         OpenTarget,
     ),
+    Remove(std::path::PathBuf, towavue_runtime_windows::RecentKind),
     Clear,
 }
 

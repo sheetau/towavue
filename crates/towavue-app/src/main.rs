@@ -895,6 +895,7 @@ struct Application<N> {
     resume_open: Option<towavue_runtime_windows::VideoResume>,
     resume_revision: u64,
     recent_paths: Vec<PathBuf>,
+    recent_commands: Vec<CommandId>,
     gallery_missing_files: Vec<PathBuf>,
     gallery_listing: gallery::Listing,
     recent_folders: Vec<PathBuf>,
@@ -1163,6 +1164,7 @@ where
             resume_open: None,
             resume_revision: 0,
             recent_paths: Vec::new(),
+            recent_commands: Vec::new(),
             gallery_missing_files: Vec::new(),
             gallery_listing: gallery::Listing::default(),
             recent_folders: Vec::new(),
@@ -1571,6 +1573,29 @@ where
             return;
         }
         match action {
+            menu::RecentAction::Remove(path, kind) => {
+                let listed = match kind {
+                    towavue_runtime_windows::RecentKind::File => self.recent_paths.contains(&path),
+                    towavue_runtime_windows::RecentKind::Folder => {
+                        self.recent_folders.contains(&path)
+                    }
+                };
+                if listed && let Some(recent) = &self.recent_files {
+                    recent.remove(path.clone(), kind);
+                }
+                match kind {
+                    towavue_runtime_windows::RecentKind::File => {
+                        self.recent_paths.retain(|old| *old != path);
+                        self.recent_months.remove(&path);
+                        self.gallery_missing_files.retain(|old| *old != path);
+                        self.gallery_listing.invalidate();
+                    }
+                    towavue_runtime_windows::RecentKind::Folder => {
+                        self.recent_folders.retain(|old| *old != path)
+                    }
+                }
+                self.request_redraw();
+            }
             menu::RecentAction::Clear => {
                 self.clear_video_resume();
                 if let Some(recent) = &self.recent_files {
@@ -2934,6 +2959,9 @@ where
                     .as_ref()
                     .and_then(|recent| recent.take_completed())
                 {
+                    if let Some(commands) = update.commands {
+                        self.recent_commands = commands;
+                    }
                     self.gallery_missing_files = update.missing_files;
                     self.gallery_listing.invalidate();
                     self.recent_months = update
@@ -6305,6 +6333,7 @@ where
             &self.shortcuts,
             top,
             palette::OpenSources {
+                commands: &self.recent_commands,
                 files: &self.recent_paths,
                 folders: &self.recent_folders,
                 folder: self.folder_snapshot.as_ref(),
@@ -6313,9 +6342,27 @@ where
             },
         );
         match chosen {
-            Some(palette::Choice::Command(command)) => actions.push(UiAction::Command(command)),
+            Some(palette::Choice::Command(command)) => {
+                self.recent_commands.retain(|old| *old != command);
+                self.recent_commands.insert(0, command);
+                self.recent_commands
+                    .truncate(towavue_runtime_windows::COMMAND_HISTORY_LIMIT);
+                if let Some(history) = &self.recent_files {
+                    history.record_command(command);
+                }
+                actions.push(UiAction::Command(command));
+            }
+            Some(palette::Choice::RemoveCommand(command)) => {
+                self.recent_commands.retain(|old| *old != command);
+                if let Some(history) = &self.recent_files {
+                    history.remove_command(command);
+                }
+                self.request_redraw();
+            }
             Some(palette::Choice::Open(action)) => {
-                self.cancel_command_overlay();
+                if matches!(action, menu::RecentAction::Open(..)) {
+                    self.cancel_command_overlay();
+                }
                 actions.push(UiAction::Recent(action));
             }
             None => {}
@@ -9927,21 +9974,40 @@ where
         let Some(context) = &self.ui_context else {
             return false;
         };
-        // The modified picker shortcuts remain available from Gallery search and
-        // the palette itself; ordinary text/IME and modal input keep ownership.
+        // A modified picker chord can start from text focus. Once started, its
+        // next stroke belongs to the chord (including cancellation/invalid keys),
+        // not the text editor. IME and modal input still retain ownership.
+        let picker_prefix = |sequence: &[KeyStroke]| {
+            [
+                CommandId::GoToFile,
+                CommandId::OpenRecentFolder,
+                CommandId::ToggleCommandPalette,
+            ]
+            .iter()
+            .any(|command| {
+                self.shortcuts
+                    .all(*command)
+                    .iter()
+                    .any(|binding| binding.strokes().starts_with(sequence))
+            })
+        };
         if !self.native_ime_composing
             && !self.modal_input_blocked()
             && !egui::Popup::is_any_open(context)
-            && (stroke.modifiers.control || stroke.modifiers.logo)
-            && matches!(
-                self.shortcuts
-                    .resolve(std::slice::from_ref(stroke), self.command_context()),
-                ShortcutMatch::Command(
-                    CommandId::GoToFile
-                        | CommandId::OpenRecentFolder
-                        | CommandId::ToggleCommandPalette
-                )
-            )
+            && (self.prefix_started.is_some() && picker_prefix(&self.entered_shortcut)
+                || (stroke.modifiers.control || stroke.modifiers.logo)
+                    && match self
+                        .shortcuts
+                        .resolve(std::slice::from_ref(stroke), self.command_context())
+                    {
+                        ShortcutMatch::Command(
+                            CommandId::GoToFile
+                            | CommandId::OpenRecentFolder
+                            | CommandId::ToggleCommandPalette,
+                        ) => true,
+                        ShortcutMatch::Prefix => picker_prefix(std::slice::from_ref(stroke)),
+                        _ => false,
+                    })
         {
             return true;
         }
@@ -10800,6 +10866,9 @@ where
         match &event {
             WindowEvent::Ime(winit::event::Ime::Preedit(text, _)) => {
                 self.native_ime_composing = !text.is_empty();
+                if self.native_ime_composing {
+                    self.cancel_shortcut_prefix();
+                }
             }
             WindowEvent::Ime(winit::event::Ime::Commit(_) | winit::event::Ime::Disabled)
             | WindowEvent::Focused(false) => self.native_ime_composing = false,

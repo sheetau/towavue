@@ -10,10 +10,17 @@ use towavue_core::{
 };
 use towavue_runtime_windows::RecentKind;
 
+#[cfg(test)]
+mod files_tests;
+mod history;
+
 pub struct CommandPalette {
     query: String,
     selected: Option<usize>,
     selected_path: Option<PathBuf>,
+    selected_command: Option<CommandId>,
+    hidden_paths: std::collections::HashSet<String>,
+    removed_selection: Option<usize>,
     folders: bool,
     fresh: bool,
     ime_composing: bool,
@@ -25,6 +32,9 @@ impl Default for CommandPalette {
             query: ">".into(),
             selected: None,
             selected_path: None,
+            selected_command: None,
+            hidden_paths: Default::default(),
+            removed_selection: None,
             folders: false,
             fresh: true,
             ime_composing: false,
@@ -34,6 +44,7 @@ impl Default for CommandPalette {
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct OpenSources<'a> {
+    pub commands: &'a [CommandId],
     pub files: &'a [PathBuf],
     pub folders: &'a [PathBuf],
     pub folder: Option<&'a towavue_core::FolderSnapshot>,
@@ -44,6 +55,7 @@ pub(crate) struct OpenSources<'a> {
 #[derive(Debug, PartialEq)]
 pub(crate) enum Choice {
     Command(CommandId),
+    RemoveCommand(CommandId),
     Open(RecentAction),
 }
 
@@ -89,7 +101,7 @@ impl CommandPalette {
         (
             choice.and_then(|choice| match choice {
                 Choice::Command(command) => Some(command),
-                Choice::Open(_) => None,
+                Choice::Open(_) | Choice::RemoveCommand(_) => None,
             }),
             close,
         )
@@ -254,82 +266,16 @@ impl CommandPalette {
                 if query_changed {
                     self.selected = None;
                     self.selected_path = None;
+                    self.selected_command = None;
+                    self.hidden_paths.clear();
+                    self.removed_selection = None;
                 }
                 if !command_mode {
                     chosen = self.show_files(ui, &sources, (up, down), enter, query_changed)
                         .map(Choice::Open);
                     return;
                 }
-                let query = self.query[1..].trim().to_ascii_lowercase();
-                let matches: Vec<_> = command_definitions()
-                    .iter()
-                    .filter(|definition| definition.title.to_ascii_lowercase().contains(&query))
-                    .collect();
-                let enabled: Vec<_> = matches
-                    .iter()
-                    .map(|definition| definition.is_enabled(commands))
-                    .collect();
-                if self
-                    .selected
-                    .is_none_or(|index| !enabled.get(index).copied().unwrap_or(false))
-                {
-                    self.selected = enabled.iter().position(|enabled| *enabled);
-                }
-                if up || down {
-                    self.selected = next_enabled(self.selected, &enabled, down);
-                }
-                if enter.is_some() && let Some(index) = self.selected {
-                    chosen = Some(Choice::Command(matches[index].id));
-                }
-                egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
-                    .show_styled(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        if matches.is_empty() {
-                            ui.weak("No matching commands");
-                        }
-                        for (index, definition) in matches.iter().enumerate() {
-                            let shortcut = shortcuts.label(definition.id, commands);
-                            let response = ui
-                                .add_enabled(
-                                    enabled[index],
-                                    egui::Button::selectable(
-                                        self.selected == Some(index),
-                                        (
-                                            definition.title,
-                                            egui::Atom::grow(),
-                                            egui::RichText::new(&shortcut)
-                                                .color(crate::chrome::MUTED)
-                                                .atom_max_width(ui.available_width() * 0.5),
-                                        ),
-                                    )
-                                    .truncate()
-                                    .min_size(egui::vec2(ui.available_width(), 22.0)),
-                                )
-                                .help_ui(|ui| {
-                                    ui.set_max_width(
-                                        (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
-                                    );
-                                    ui.add(
-                                        egui::Label::new(format!(
-                                            "{}  {}",
-                                            definition.title, shortcut
-                                        ))
-                                        .wrap(),
-                                    );
-                                });
-                            // Selection is a visual command cursor, not an on/off setting.
-                            context.accesskit_node_builder(response.id, |node| {
-                                node.clear_toggled();
-                            });
-                            if (up || down || query_changed) && self.selected == Some(index) {
-                                response.scroll_to_me(Some(egui::Align::Center));
-                            }
-                            if response.clicked() && !query_changed {
-                                chosen = Some(Choice::Command(definition.id));
-                            }
-                        }
-                    });
+                chosen = self.show_commands(ui, commands, shortcuts, sources.commands, (up, down, enter.is_some()), query_changed);
             });
         (chosen, close || (!opened && self.outside_press(context)))
     }
@@ -358,9 +304,11 @@ impl CommandPalette {
                 } else {
                     path_score(path, &query)
                 };
-                score.is_some() && seen.insert(normalized(&path.to_string_lossy()))
+                let key = normalized(&path.to_string_lossy());
+                score.is_some() && !self.hidden_paths.contains(&key) && seen.insert(key)
             })
             .collect();
+        let recent_count = paths.len();
         // Empty Go to File shows history immediately, as in the reference picker.
         let search = sources
             .search
@@ -368,12 +316,10 @@ impl CommandPalette {
         if !self.folders
             && let Some(result) = search
         {
-            paths.extend(
-                result
-                    .paths
-                    .iter()
-                    .filter(|path| seen.insert(normalized(&path.to_string_lossy()))),
-            );
+            paths.extend(result.paths.iter().filter(|path| {
+                let key = normalized(&path.to_string_lossy());
+                !self.hidden_paths.contains(&key) && seen.insert(key)
+            }));
         } else if !self.folders
             && !query.is_empty()
             && let Some(folder) = sources.folder
@@ -384,7 +330,8 @@ impl CommandPalette {
                 .take(towavue_runtime_windows::FILE_SEARCH_LIMIT)
                 .filter_map(|item| {
                     let score = path_score(&item.path, &query)?;
-                    seen.insert(normalized(&item.path.to_string_lossy()))
+                    let key = normalized(&item.path.to_string_lossy());
+                    (!self.hidden_paths.contains(&key) && seen.insert(key))
                         .then_some((score, &item.path))
                 })
                 .collect();
@@ -395,7 +342,10 @@ impl CommandPalette {
             .selected_path
             .as_ref()
             .and_then(|selected| paths.iter().position(|path| *path == selected))
-            .or_else(|| (!paths.is_empty()).then_some(0));
+            .or_else(|| {
+                let index = self.removed_selection.take().unwrap_or(0);
+                (!paths.is_empty()).then_some(index.min(paths.len().saturating_sub(1)))
+            });
         let selected = if up || down {
             next_enabled(selected, &vec![true; paths.len()], down)
         } else {
@@ -439,75 +389,152 @@ impl CommandPalette {
                 ui.weak("Searching subfolders...");
             }
         }
-        egui::ScrollArea::vertical()
-            .id_salt(("quick-open-results", self.folders))
-            .max_height((ui.ctx().content_rect().height() - 90.0).clamp(40.0, 264.0))
-            .show_styled(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                if paths.is_empty() {
-                    ui.weak(if self.folders {
-                        "No matching recent folders"
-                    } else {
-                        "No matching files"
-                    });
+        let row_height = 22.0;
+        let row_count = paths.len().max(1);
+        let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0).clamp(1.0, 264.0);
+        let scroll_salt = ("quick-open-results", self.folders);
+        let mut scroll = egui::ScrollArea::vertical()
+            .id_salt(scroll_salt)
+            .max_height(height);
+        if (up || down || query_changed || selection_moved)
+            && let Some(index) = selected
+        {
+            // Reveal before virtualization, moving only far enough to expose the row.
+            let offset =
+                egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id(scroll_salt))
+                    .map_or(0.0, |state| state.offset.y);
+            let top = index as f32 * row_height;
+            let bottom = top + row_height;
+            scroll = scroll
+                .vertical_scroll_offset(offset.clamp((bottom - height).max(0.0).min(top), top));
+        }
+        ui.spacing_mut().item_spacing.y = 0.0;
+        scroll.show_rows_styled(ui, row_height, row_count, |ui, rows| {
+            if paths.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(if self.folders {
+                            "No matching recent folders"
+                        } else {
+                            "No matching files"
+                        })
+                        .weak(),
+                    )
+                    .truncate(),
+                );
+                return;
+            }
+            for index in rows {
+                let path = paths[index];
+                let name = path
+                    .file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy();
+                let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
+                let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
+                let selected_row = selected == Some(index);
+                let close = selected_row || ui.rect_contains_pointer(row);
+                let mut body = row;
+                if close {
+                    body.max.x -= 22.0;
                 }
-                for (index, path) in paths.iter().enumerate() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or(path.as_os_str())
-                        .to_string_lossy();
-                    let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
-                    let response = ui
-                        .push_id(path, |ui| {
-                            ui.add(
-                                egui::Button::selectable(
-                                    selected == Some(index),
-                                    (
-                                        name.as_ref(),
-                                        egui::Atom::grow(),
-                                        egui::RichText::new(parent.as_ref())
-                                            .color(crate::chrome::MUTED)
-                                            .atom_max_width(ui.available_width() * 0.6),
-                                    ),
-                                )
-                                .truncate()
-                                .min_size(egui::vec2(ui.available_width(), 22.0)),
+                let group = if self.folders && index == 0 {
+                    "folders"
+                } else if !self.folders && index == 0 && recent_count > 0 {
+                    "recently opened"
+                } else if !self.folders && index == recent_count {
+                    "file results"
+                } else {
+                    ""
+                };
+                if !self.folders && index == recent_count && recent_count > 0 {
+                    ui.painter().hline(
+                        row.x_range(),
+                        row.top(),
+                        egui::Stroke::new(1.0, crate::chrome::BORDER),
+                    );
+                }
+                let response = ui
+                    .push_id(path, |ui| {
+                        ui.put(
+                            body,
+                            egui::Button::selectable(
+                                selected_row,
+                                (
+                                    name.as_ref().atom_max_width(body.width() * 0.65),
+                                    egui::RichText::new(parent.as_ref())
+                                        .small()
+                                        .color(crate::chrome::MUTED)
+                                        .atom_max_width(body.width() * 0.6),
+                                    egui::Atom::grow(),
+                                    egui::RichText::new(group)
+                                        .small()
+                                        .color(crate::chrome::MUTED)
+                                        .atom_max_width(body.width() * 0.3),
+                                ),
                             )
+                            .truncate()
+                            .min_size(body.size()),
+                        )
+                    })
+                    .inner
+                    .help_text(path.to_string_lossy());
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.clear_toggled();
+                    node.set_label(path.to_string_lossy().as_ref());
+                });
+                if close {
+                    let close_rect =
+                        egui::Rect::from_min_max(egui::pos2(body.right(), row.top()), row.max);
+                    let label = if self.folders || index < recent_count {
+                        "Remove from Recently Opened"
+                    } else {
+                        "Dismiss search result"
+                    };
+                    let remove = ui
+                        .push_id(("remove-path", path), |ui| {
+                            crate::chrome::tab_close(ui, close_rect, false)
                         })
                         .inner
-                        .help_text(path.to_string_lossy());
-                    ui.ctx().accesskit_node_builder(response.id, |node| {
-                        node.clear_toggled();
-                        node.set_label(path.to_string_lossy().as_ref());
+                        .help_text(label);
+                    ui.ctx().accesskit_node_builder(remove.id, |node| {
+                        node.set_label(format!("{label}: {}", path.display()));
                     });
-                    if (up || down || query_changed || selection_moved) && selected == Some(index) {
-                        response.scroll_to_me(Some(egui::Align::Center));
-                    }
-                    if response.clicked() && !query_changed {
-                        let modifiers = ui.input(|input| {
-                            input
-                                .events
-                                .iter()
-                                .rev()
-                                .find_map(|event| match event {
-                                    egui::Event::PointerButton {
-                                        button: egui::PointerButton::Primary,
-                                        pressed: false,
-                                        modifiers,
-                                        ..
-                                    } => Some(*modifiers),
-                                    _ => None,
-                                })
-                                .unwrap_or(input.modifiers)
-                        });
-                        chosen = Some(RecentAction::Open(
-                            (*path).clone(),
-                            kind,
-                            open_target(modifiers),
-                        ));
+                    if remove.clicked() && !query_changed {
+                        self.hidden_paths
+                            .insert(normalized(&path.to_string_lossy()));
+                        if selected_row {
+                            self.selected_path = None;
+                            self.removed_selection = Some(index);
+                        }
+                        chosen = Some(RecentAction::Remove((*path).clone(), kind));
                     }
                 }
-            });
+                if response.clicked() && !query_changed {
+                    let modifiers = ui.input(|input| {
+                        input
+                            .events
+                            .iter()
+                            .rev()
+                            .find_map(|event| match event {
+                                egui::Event::PointerButton {
+                                    button: egui::PointerButton::Primary,
+                                    pressed: false,
+                                    modifiers,
+                                    ..
+                                } => Some(*modifiers),
+                                _ => None,
+                            })
+                            .unwrap_or(input.modifiers)
+                    });
+                    chosen = Some(RecentAction::Open(
+                        (*path).clone(),
+                        kind,
+                        open_target(modifiers),
+                    ));
+                }
+            }
+        });
         chosen
     }
 }
@@ -605,7 +632,7 @@ mod tests {
         }
     }
 
-    fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    pub(super) fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: None,
@@ -621,13 +648,27 @@ mod tests {
         sources: OpenSources<'_>,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, Vec<Choice>) {
+        open_frame_at(
+            context,
+            palette,
+            sources,
+            events,
+            (egui::vec2(600.0, 400.0), 0.0, 1.0),
+        )
+    }
+
+    pub(super) fn open_frame_at(
+        context: &egui::Context,
+        palette: &mut CommandPalette,
+        sources: OpenSources<'_>,
+        events: Vec<egui::Event>,
+        layout: (egui::Vec2, f32, f32),
+    ) -> (egui::FullOutput, Vec<Choice>) {
+        context.set_pixels_per_point(layout.2);
         let mut choices = Vec::new();
         let output = context.run_ui(
             egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(600.0, 400.0),
-                )),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, layout.0)),
                 events,
                 ..Default::default()
             },
@@ -639,17 +680,325 @@ mod tests {
                         ..Default::default()
                     },
                     &crate::shortcuts::defaults(),
-                    0.0,
+                    layout.1,
                     sources,
                 );
                 choices.extend(choice);
             },
         );
-        assert!(!output.shapes.iter().any(|shape| matches!(
-            &shape.shape,
-            egui::Shape::Text(text) if matches!(text.galley.text(), "recently opened" | "file results")
-        )), "picker results have no redundant headings");
+
         (output, choices)
+    }
+
+    #[test]
+    fn thousand_results_virtualize_reveal_wrapped_selection_and_fit_compact_status() {
+        use towavue_runtime_windows::{FileSearchRequest, FileSearchResult};
+        for (size, scale) in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)]
+            .into_iter()
+            .flat_map(|size| [1.0, 1.25, 2.0].map(move |scale| (size, scale)))
+        {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.animation_time = 0.0;
+            });
+            let mut palette = CommandPalette::default();
+            palette.open_files(false);
+            palette.query = "image".into();
+            let mut result = FileSearchResult {
+                request: FileSearchRequest {
+                    root: "C:/media".into(),
+                    query: "image".into(),
+                },
+                paths: (0..1000)
+                    .map(|index| {
+                        PathBuf::from(format!(
+                            "C:/media/long parent description/image-{index:04}.png"
+                        ))
+                    })
+                    .collect(),
+                matches: 2000,
+                skipped: 7,
+                error: None,
+            };
+            let recent = result.paths[..5].to_vec();
+            fn sources<'a>(recent: &'a [PathBuf], result: &'a FileSearchResult) -> OpenSources<'a> {
+                OpenSources {
+                    files: recent,
+                    search: Some(result),
+                    ..Default::default()
+                }
+            }
+            let layout = (size, 30.0, scale);
+            for _ in 0..4 {
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                );
+            }
+            let verify = |output: &egui::FullOutput, selected: &Path| {
+                let panel = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.fill == crate::chrome::FLOATING_BACKGROUND
+                                && rect.stroke.color == crate::chrome::BORDER =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .expect("palette panel");
+                assert!(
+                    panel.left() >= 0.0 && panel.right() <= size.x && panel.bottom() <= size.y,
+                    "bounded panel at {size:?}/{scale}: {panel:?}"
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let rows: Vec<_> = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| {
+                        node.role() == egui::accesskit::Role::Button
+                            && node
+                                .label()
+                                .is_some_and(|label| label.starts_with("C:/media/"))
+                    })
+                    .collect();
+                assert!(
+                    rows.len() <= 16,
+                    "only visible rows plus overscan: {}",
+                    rows.len()
+                );
+                let (_, node) = rows
+                    .into_iter()
+                    .find(|(_, node)| node.label() == Some(selected.to_string_lossy().as_ref()))
+                    .expect("selected virtual row is mounted");
+                let bounds = node.bounds().expect("selected row bounds");
+                let center = egui::pos2(
+                    ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                    ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                );
+                assert!(
+                    panel.contains(center),
+                    "selected row is visible: {center:?} in {panel:?}"
+                );
+            };
+            verify(
+                &open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                )
+                .0,
+                &result.paths[0],
+            );
+            let pointer = egui::pos2(size.x * 0.5, 120.0);
+            open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![egui::Event::PointerMoved(pointer)],
+                layout,
+            );
+            open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -400.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                layout,
+            );
+            for _ in 0..40 {
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                );
+            }
+            let scrolled = open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![],
+                layout,
+            )
+            .0;
+            assert_eq!(
+                palette.selected_path.as_ref(),
+                Some(&result.paths[0]),
+                "manual scrolling does not change keyboard selection"
+            );
+            assert!(
+                !scrolled
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("scrolled tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label()
+                        == Some(result.paths[0].to_string_lossy().as_ref())),
+                "idle frames must not recenter a manually scrolled list"
+            );
+            let (clicked_path, point) = scrolled
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find_map(|(_, node)| {
+                    if node.role() != egui::accesskit::Role::Button {
+                        return None;
+                    }
+                    let label = node
+                        .label()
+                        .filter(|label| label.starts_with("C:/media/"))?;
+                    let rect = node.bounds()?;
+                    let point = egui::pos2(
+                        (rect.x0 + rect.x1) as f32 * 0.5,
+                        (rect.y0 + rect.y1) as f32 * 0.5,
+                    );
+                    (point.y > 100.0 && point.y < size.y - 12.0)
+                        .then(|| (PathBuf::from(label), point))
+                })
+                .expect("visible scrolled row");
+            let button = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::ALT,
+            };
+            open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![egui::Event::PointerMoved(point), button(true)],
+                layout,
+            );
+            assert_eq!(
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![button(false)],
+                    layout
+                )
+                .1,
+                [Choice::Open(RecentAction::Open(
+                    clicked_path,
+                    RecentKind::File,
+                    OpenTarget::Replace
+                ))],
+                "scrolled pointer at {size:?}/{scale}: {point:?}"
+            );
+            open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+                layout,
+            );
+            verify(
+                &open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                )
+                .0,
+                &result.paths[999],
+            );
+            assert_eq!(
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![key(egui::Key::Enter, egui::Modifiers::CTRL)],
+                    layout
+                )
+                .1,
+                [Choice::Open(RecentAction::Open(
+                    result.paths[999].clone(),
+                    RecentKind::File,
+                    OpenTarget::Window
+                ))]
+            );
+            for index in 0..8 {
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                    layout,
+                );
+                verify(
+                    &open_frame_at(
+                        &context,
+                        &mut palette,
+                        sources(&recent, &result),
+                        vec![],
+                        layout,
+                    )
+                    .0,
+                    &result.paths[index],
+                );
+            }
+            // An asynchronous reorder keeps the selected path and reveals its new row.
+            let selected = result.paths[7].clone();
+            result.paths.swap(7, 995);
+            verify(
+                &open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                )
+                .0,
+                &selected,
+            );
+            result.error =
+                Some("Cannot search this folder: ".to_owned() + &"long diagnostic ".repeat(40));
+            for _ in 0..3 {
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                );
+            }
+            verify(
+                &open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![],
+                    layout,
+                )
+                .0,
+                &selected,
+            );
+        }
     }
 
     #[test]
@@ -665,7 +1014,7 @@ mod tests {
                         OpenTarget::Window,
                     ),
                 ] {
-                    let context = egui::Context::default();
+                    let context = crate::fonts::test_context();
                     context.enable_accesskit();
                     let mut palette = CommandPalette::default();
                     palette.open_files(folders);
@@ -736,7 +1085,7 @@ mod tests {
 
     #[test]
     fn picker_prefix_reset_and_ime_keep_text_editing_separate_from_opening() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         let files = [PathBuf::from("C:/media/open file.png")];
         let sources = OpenSources {
@@ -823,7 +1172,7 @@ mod tests {
         use towavue_core::{
             FolderMediaItem, FolderSnapshot, FolderSnapshotSource, MediaKind, ShellIdentity,
         };
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         palette.open_files(false);
         palette.query = "image".into();
@@ -914,7 +1263,7 @@ mod tests {
 
     #[test]
     fn accessibility_names_and_replaces_the_query_without_running_commands() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         context.enable_accesskit();
         let mut palette = CommandPalette::default();
         let frame = |palette: &mut CommandPalette, events| {
@@ -1002,7 +1351,7 @@ mod tests {
     #[test]
     fn palette_pastes_copies_and_cuts_unicode_without_running_commands() {
         for text in ["open", "日本語 café 🎞️"] {
-            let context = egui::Context::default();
+            let context = crate::fonts::test_context();
             let mut palette = CommandPalette::default();
             palette.open_files(false);
             let commands = CommandContext {
@@ -1061,6 +1410,427 @@ mod tests {
     }
 
     #[test]
+    fn command_history_groups_keep_identity_and_remove_without_running() {
+        for size in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)] {
+            for density in [1.0, 1.25, 2.0] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.global_style_mut(|style| {
+                    style.animation_time = 0.0;
+                    style.scroll_animation = egui::style::ScrollAnimation::none();
+                    style.interaction.tooltip_delay = 60.0;
+                });
+                let mut palette = CommandPalette::default();
+                let mut history = vec![
+                    CommandId::OpenFolder,
+                    CommandId::OpenFile,
+                    CommandId::TogglePause,
+                ];
+                let layout = (size, 0.0, density);
+                let frame = |palette: &mut CommandPalette, history: &[CommandId], events| {
+                    open_frame_at(
+                        &context,
+                        palette,
+                        OpenSources {
+                            commands: history,
+                            ..Default::default()
+                        },
+                        events,
+                        layout,
+                    )
+                };
+                let mut output = egui::FullOutput::default();
+                for _ in 0..5 {
+                    output = frame(&mut palette, &history, vec![]).0;
+                }
+                assert_eq!(palette.selected_command, Some(CommandId::OpenFolder));
+                assert!(picker_text(&output, "recently used").is_some());
+                assert!(picker_text(&output, "other commands").is_some());
+                let folder_y = picker_text(&output, "Open folder")
+                    .expect("first MRU")
+                    .0
+                    .pos
+                    .y;
+                let file_y = picker_text(&output, "Open file")
+                    .expect("second MRU")
+                    .0
+                    .pos
+                    .y;
+                assert!((file_y - folder_y - 22.0).abs() < 1.0);
+                frame(
+                    &mut palette,
+                    &history,
+                    vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                );
+                assert_eq!(palette.selected_command, Some(CommandId::OpenFile));
+                history.swap(0, 1);
+                frame(&mut palette, &history, vec![]);
+                assert_eq!(
+                    palette.selected_command,
+                    Some(CommandId::OpenFile),
+                    "asynchronous reorder retains command identity"
+                );
+                assert_eq!(
+                    frame(
+                        &mut palette,
+                        &history,
+                        vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+                    )
+                    .1,
+                    [Choice::Command(CommandId::OpenFile)]
+                );
+                output = frame(&mut palette, &history, vec![]).0;
+                let label = "Remove Open file from Recently Used";
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let bounds = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("selected removal button")
+                    .1
+                    .bounds()
+                    .expect("button bounds");
+                let position = egui::pos2(
+                    ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                    ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                );
+                frame(
+                    &mut palette,
+                    &history,
+                    vec![egui::Event::PointerMoved(position)],
+                );
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert!(
+                    frame(&mut palette, &history, vec![button(true)])
+                        .1
+                        .is_empty()
+                );
+                assert_eq!(
+                    frame(&mut palette, &history, vec![button(false)]).1,
+                    [Choice::RemoveCommand(CommandId::OpenFile)]
+                );
+                history.retain(|command| *command != CommandId::OpenFile);
+                for _ in 0..3 {
+                    output = frame(&mut palette, &history, vec![egui::Event::PointerGone]).0;
+                }
+                assert_eq!(palette.selected_command, Some(CommandId::OpenFolder));
+                assert!(
+                    picker_text(&output, "Open file").is_some(),
+                    "removing MRU keeps the ordinary command"
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                assert!(
+                    !tree
+                        .nodes
+                        .iter()
+                        .any(|(_, node)| node.label() == Some(label))
+                );
+            }
+        }
+    }
+
+    pub(super) fn picker_text<'a>(
+        output: &'a egui::FullOutput,
+        label: &str,
+    ) -> Option<(&'a egui::epaint::TextShape, egui::Rect)> {
+        output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text == label => {
+                Some((text, shape.clip_rect))
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn picker_keyboard_reveals_only_at_edges_and_wraps_virtual_rows() {
+        for size in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)] {
+            for density in [1.0, 1.25, 2.0] {
+                for mode in 0..3 {
+                    let context = crate::fonts::test_context();
+                    context.enable_accesskit();
+                    context.global_style_mut(|style| {
+                        crate::chrome::style(style);
+                        style.animation_time = 0.0;
+                        style.scroll_animation = egui::style::ScrollAnimation::none();
+                        style.interaction.tooltip_delay = 60.0;
+                    });
+                    let paths: Vec<_> = (0..80)
+                        .map(|index| PathBuf::from(format!("C:/media/item-{index:03}.png")))
+                        .collect();
+                    let sources = OpenSources {
+                        files: &paths,
+                        folders: &paths,
+                        ..Default::default()
+                    };
+                    let mut palette = CommandPalette::default();
+                    if mode != 0 {
+                        palette.open_files(mode == 2);
+                    }
+                    let layout = (size, 30.0, density);
+                    let render = |palette: &mut CommandPalette, events| {
+                        open_frame_at(&context, palette, sources, events, layout).0
+                    };
+                    let mut output = render(&mut palette, vec![]);
+                    for _ in 0..4 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    let definitions = command_definitions();
+                    let title = |palette: &CommandPalette| -> String {
+                        if mode == 0 {
+                            definitions[palette.selected.expect("selection")]
+                                .title
+                                .into()
+                        } else {
+                            palette
+                                .selected_path
+                                .as_ref()
+                                .expect("path")
+                                .file_name()
+                                .expect("fixture filename")
+                                .to_string_lossy()
+                                .into_owned()
+                        }
+                    };
+                    let mut unchanged_visible_steps = 0;
+                    let mut edge_steps = 0;
+                    for _ in 0..24 {
+                        let old_title = title(&palette);
+                        let (old, clip) = picker_text(&output, &old_title).expect("selected text");
+                        let old_position = old.pos;
+                        let old_index = palette.selected.expect("selected row");
+                        output = render(
+                            &mut palette,
+                            vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                        );
+                        for _ in 0..3 {
+                            output = render(&mut palette, vec![]);
+                        }
+                        let index = palette.selected.expect("selected row");
+                        let selected_title = title(&palette);
+                        let (selected, selected_clip) =
+                            picker_text(&output, &selected_title).expect("revealed selection");
+                        let bottom = selected.pos.y + selected.galley.size().y;
+                        assert!(
+                            selected.pos.y >= selected_clip.top() - 1.0
+                                && bottom <= selected_clip.bottom() + 1.0,
+                            "selection outside viewport: {mode} {size:?} {density} {selected_title} {bottom} {selected_clip:?}"
+                        );
+                        if index > old_index {
+                            let expected = old_position.y + (index - old_index) as f32 * 22.0;
+                            if expected + selected.galley.size().y + 4.0 <= clip.bottom() {
+                                assert!(
+                                    (selected.pos.y - expected - selected_clip.top() + clip.top())
+                                        .abs()
+                                        <= 1.1,
+                                    "visible rows must not recenter: {mode} {size:?} {density} {old_index}->{index} expected={expected} actual={} old_clip={clip:?} new_clip={selected_clip:?}",
+                                    selected.pos.y
+                                );
+                                unchanged_visible_steps += 1;
+                            } else {
+                                edge_steps += 1;
+                            }
+                        }
+                    }
+                    assert!(unchanged_visible_steps > 0 && edge_steps > 0);
+                    // Reopen and wrap directly from the first to last enabled row, then back.
+                    if mode == 0 {
+                        palette.reset();
+                    } else {
+                        palette.open_files(mode == 2);
+                    }
+                    for _ in 0..4 {
+                        render(&mut palette, vec![]);
+                    }
+                    let first = title(&palette);
+                    render(
+                        &mut palette,
+                        vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+                    );
+                    for _ in 0..3 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    let last = title(&palette);
+                    assert_ne!(last, first);
+                    let (text, clip) = picker_text(&output, &last).expect("last row rendered");
+                    assert!(
+                        text.pos.y >= clip.top() - 1.0
+                            && text.pos.y + text.galley.size().y <= clip.bottom() + 1.0
+                    );
+                    render(
+                        &mut palette,
+                        vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+                    );
+                    for _ in 0..3 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    assert_eq!(title(&palette), first);
+                    let (text, clip) = picker_text(&output, &first).expect("first row rendered");
+                    assert!(
+                        text.pos.y >= clip.top() - 1.0
+                            && text.pos.y + text.galley.size().y <= clip.bottom() + 1.0
+                    );
+                    if mode != 0 {
+                        let tree = output
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .expect("accessibility tree");
+                        let visible_paths = tree
+                            .nodes
+                            .iter()
+                            .filter(|(_, node)| {
+                                node.label()
+                                    .is_some_and(|label| label.starts_with("C:/media/"))
+                            })
+                            .count();
+                        assert!(visible_paths < 20, "retain bounded virtual rows");
+                    }
+                    let before = picker_text(&output, &first).expect("first row").0.pos.y;
+                    let point = picker_text(&output, &first).expect("first row").1.center();
+                    render(
+                        &mut palette,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                delta: egui::vec2(0.0, -88.0),
+                                phase: egui::TouchPhase::Move,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ],
+                    );
+                    for _ in 0..40 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    assert!(
+                        picker_text(&output, &first)
+                            .is_none_or(|(text, _)| text.pos.y < before - 20.0),
+                        "manual wheel scrolls independently of selection"
+                    );
+                    let visible_text = |output: &egui::FullOutput| -> Vec<(String, egui::Pos2)> {
+                        output
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text)
+                                    if shape.clip_rect.intersects(egui::Rect::from_min_size(
+                                        text.pos,
+                                        text.galley.size(),
+                                    )) =>
+                                {
+                                    Some((text.galley.job.text.clone(), text.pos))
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    };
+                    let settled = visible_text(&output);
+                    for _ in 0..5 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    assert_eq!(
+                        visible_text(&output),
+                        settled,
+                        "idle frames retain manual scroll"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn picker_paths_follow_names_with_smaller_muted_text_and_bounded_rows() {
+        for folders in [false, true] {
+            for size in [
+                egui::vec2(600.0, 400.0),
+                egui::vec2(240.0, 180.0),
+                egui::vec2(180.0, 110.0),
+            ] {
+                for density in [1.0, 1.25, 2.0] {
+                    let context = crate::fonts::test_context();
+                    context.global_style_mut(crate::chrome::style);
+                    let mut palette = CommandPalette::default();
+                    palette.open_files(folders);
+                    let paths = [
+                        PathBuf::from("C:/media/short.png"),
+                        PathBuf::from(
+                            "C:/a much longer parent folder/a very long file name that must truncate.png",
+                        ),
+                    ];
+                    let sources = OpenSources {
+                        files: &paths,
+                        folders: &paths,
+                        ..Default::default()
+                    };
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..5 {
+                        output = open_frame_at(
+                            &context,
+                            &mut palette,
+                            sources,
+                            vec![],
+                            (size, 0.0, density),
+                        )
+                        .0;
+                    }
+                    for path in &paths {
+                        let (name, clip) = picker_text(
+                            &output,
+                            &path
+                                .file_name()
+                                .expect("fixture filename")
+                                .to_string_lossy(),
+                        )
+                        .expect("name");
+                        let (parent, _) = picker_text(
+                            &output,
+                            &path.parent().expect("fixture parent").to_string_lossy(),
+                        )
+                        .expect("parent");
+                        let gap = parent.pos.x - (name.pos.x + name.galley.size().x);
+                        assert!(
+                            (0.0..=12.0).contains(&gap),
+                            "adjacent description: {gap} at {size:?}"
+                        );
+                        assert!(
+                            parent.galley.job.sections[0].format.font_id.size
+                                < name.galley.job.sections[0].format.font_id.size
+                        );
+                        assert_eq!(
+                            parent.galley.job.sections[0].format.color,
+                            crate::chrome::MUTED
+                        );
+                        assert!(
+                            name.pos.x >= clip.left() - 1.0
+                                && parent.pos.x + parent.galley.size().x <= clip.right() + 1.0
+                        );
+                        assert!(
+                            (name.pos.y + name.galley.size().y / 2.0
+                                - parent.pos.y
+                                - parent.galley.size().y / 2.0)
+                                .abs()
+                                < 1.0
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn compact_palette_keeps_search_and_shortcut_columns_inside_the_window() {
         for (size, top) in [
             egui::vec2(960.0, 576.0),
@@ -1070,7 +1840,7 @@ mod tests {
         .into_iter()
         .flat_map(|size| [0.0, 30.0].map(|top| (size, top)))
         {
-            let context = egui::Context::default();
+            let context = crate::fonts::test_context();
             context.global_style_mut(|style| {
                 crate::chrome::style(style);
                 style.animation_time = 0.0;
@@ -1165,10 +1935,10 @@ mod tests {
             let first = text("Ctrl+O");
             let second = text(prefix);
             assert!((file.pos.x - folder.pos.x).abs() < 1.0);
-            assert!(
-                (first.pos.x + first.galley.size().x - second.pos.x - second.galley.size().x).abs()
-                    < 1.0
-            );
+            let group = text("other commands");
+            assert!(first.pos.x + first.galley.size().x <= group.pos.x);
+            assert!(group.pos.x + group.galley.size().x < panel.right());
+            assert!(first.pos.x + first.galley.size().x <= second.pos.x + second.galley.size().x);
             assert!(first.pos.x >= file.pos.x + file.galley.size().x);
             assert!(second.pos.x >= folder.pos.x + folder.galley.size().x);
             assert!(second.pos.x + second.galley.size().x < panel.right());
@@ -1205,7 +1975,7 @@ mod tests {
 
     #[test]
     fn outside_press_closes_palette_and_hands_off_to_the_background() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         let mut open = true;
         let outside = egui::pos2(40.0, 540.0);
@@ -1312,7 +2082,7 @@ mod tests {
 
     #[test]
     fn palette_accepts_text_navigation_enter_and_empty_results_across_layout_passes() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         let commands = CommandContext {
             media_kind: Some(towavue_core::MediaKind::Video),
@@ -1386,7 +2156,7 @@ mod tests {
 
     #[test]
     fn focused_palette_does_not_request_native_ime_cancellation() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         let commands = CommandContext {
             palette_open: true,
@@ -1447,7 +2217,7 @@ mod tests {
 
     #[test]
     fn ime_confirmation_and_cancel_do_not_run_or_close_the_palette() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let mut palette = CommandPalette::default();
         let commands = CommandContext {
             palette_open: true,

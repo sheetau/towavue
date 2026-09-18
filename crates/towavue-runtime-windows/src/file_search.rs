@@ -41,6 +41,8 @@ pub struct FileSearch {
     worker: LatestTask,
     state: Arc<Mutex<State>>,
     notify: Arc<dyn Fn() + Send + Sync>,
+    #[cfg(test)]
+    before_publish: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl FileSearch {
@@ -49,6 +51,8 @@ impl FileSearch {
             worker: LatestTask::new("towavue-file-search")?,
             state: Arc::new(Mutex::new(State::default())),
             notify: Arc::new(notify),
+            #[cfg(test)]
+            before_publish: None,
         })
     }
 
@@ -69,10 +73,16 @@ impl FileSearch {
         };
         let shared = Arc::clone(&self.state);
         let notify = Arc::clone(&self.notify);
+        #[cfg(test)]
+        let before_publish = self.before_publish.clone();
         self.worker.submit(move |cancellation| {
             let Some(result) = scan(request, &cancellation) else {
                 return;
             };
+            #[cfg(test)]
+            if let Some(hook) = before_publish {
+                hook();
+            }
             let mut state = shared.lock().expect("file search state");
             // The revision also rejects A -> B -> A completions, and closing
             // invalidates it before cancelling the worker. Notify holds no lock.
@@ -189,11 +199,145 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    #[test]
+    fn late_scans_cannot_publish_after_query_root_round_trip_clear_or_drop() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let root = fixture("late");
+        let other = root.join("other");
+        fs::create_dir(&other).expect("other root");
+        fs::write(root.join("alpha.png"), []).expect("source");
+        fs::write(root.join("beta.png"), []).expect("source");
+        fs::write(other.join("alpha-other.png"), []).expect("other source");
+        for mode in 0..5 {
+            let (tx, rx) = mpsc::channel();
+            let mut worker = FileSearch::new(move || {
+                let _ = tx.send(());
+            })
+            .expect("worker");
+            let (started_tx, started_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let release_rx = Mutex::new(release_rx);
+            let first = AtomicBool::new(true);
+            worker.before_publish = Some(Arc::new(move || {
+                if first.swap(false, Ordering::Relaxed) {
+                    started_tx.send(()).expect("scan finished");
+                    release_rx
+                        .lock()
+                        .expect("release receiver")
+                        .recv_timeout(Duration::from_secs(5))
+                        .expect("release scan");
+                }
+            }));
+            let original = FileSearchRequest {
+                root: root.clone(),
+                query: "alpha".into(),
+            };
+            worker.update(Some(original.clone()));
+            started_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("paused before publication");
+            let expected = match mode {
+                0 => Some(FileSearchRequest {
+                    root: root.clone(),
+                    query: "beta".into(),
+                }),
+                1 => Some(FileSearchRequest {
+                    root: other.clone(),
+                    query: "alpha".into(),
+                }),
+                2 => {
+                    worker.update(Some(FileSearchRequest {
+                        root: other.clone(),
+                        query: "beta".into(),
+                    }));
+                    fs::write(root.join("alpha-new.png"), [])
+                        .expect("new result after the old scan");
+                    Some(original)
+                }
+                _ => None,
+            };
+            if mode == 4 {
+                drop(worker);
+                release_tx.send(()).expect("finish after drop");
+                assert_eq!(
+                    rx.recv_timeout(Duration::from_secs(5)),
+                    Err(mpsc::RecvTimeoutError::Disconnected)
+                );
+                continue;
+            }
+            worker.update(expected.clone());
+            assert!(worker.result().is_none());
+            release_tx.send(()).expect("finish obsolete scan");
+            if let Some(expected) = expected {
+                rx.recv_timeout(Duration::from_secs(5))
+                    .expect("latest result");
+                let result = worker.result().expect("latest result");
+                assert_eq!(result.request, expected);
+                if mode == 2 {
+                    assert!(result.paths.contains(&root.join("alpha-new.png")));
+                }
+            } else {
+                let (done_tx, done_rx) = mpsc::channel();
+                worker.worker.submit(move |_| {
+                    done_tx.send(()).expect("drained obsolete task");
+                });
+                done_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("worker drained");
+                assert!(worker.result().is_none());
+            }
+            assert!(rx.try_recv().is_err(), "obsolete result never notifies");
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
     fn fixture(name: &str) -> PathBuf {
         let root =
             std::env::temp_dir().join(format!("towavue-search-{name}-{}", std::process::id()));
         fs::create_dir(&root).expect("unique owned fixture");
         root
+    }
+
+    #[test]
+    #[ignore = "requires Windows directory symlink creation permission; uses only owned fixtures"]
+    fn descendant_reparse_points_do_not_escape_or_cycle_but_explicit_roots_are_allowed() {
+        let root = fixture("reparse");
+        let inside = root.join("inside");
+        let outside = root.join("outside");
+        fs::create_dir(&inside).expect("search root");
+        fs::create_dir(&outside).expect("outside owned root");
+        fs::write(inside.join("image.png"), []).expect("inside file");
+        fs::write(outside.join("image-outside.png"), b"unchanged").expect("outside file");
+        let escape = inside.join("escape");
+        let cycle = inside.join("cycle");
+        std::os::windows::fs::symlink_dir(&outside, &escape).expect("create owned escape symlink");
+        std::os::windows::fs::symlink_dir(&inside, &cycle).expect("create owned cycle symlink");
+        let result = scan(
+            FileSearchRequest {
+                root: inside.clone(),
+                query: "image".into(),
+            },
+            &Cancellation::default(),
+        )
+        .expect("scan");
+        assert_eq!(result.paths, [inside.join("image.png")]);
+        assert_eq!(result.skipped, 2);
+        let explicit = scan(
+            FileSearchRequest {
+                root: escape.clone(),
+                query: "image".into(),
+            },
+            &Cancellation::default(),
+        )
+        .expect("explicit linked root");
+        assert_eq!(explicit.paths, [escape.join("image-outside.png")]);
+        assert_eq!(
+            fs::read(outside.join("image-outside.png")).expect("source preserved"),
+            b"unchanged"
+        );
+        fs::remove_dir(escape).expect("remove owned link, not target");
+        fs::remove_dir(cycle).expect("remove owned cycle link");
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 
     #[test]

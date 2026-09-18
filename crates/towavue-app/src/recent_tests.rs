@@ -1,3 +1,6 @@
+mod command_history;
+mod removal;
+
 use crate::*;
 use menu::{OpenTarget, RecentAction};
 use towavue_core::KeySequence;
@@ -106,6 +109,32 @@ fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_
     assert!(!app.owns_focused_shortcut(&stroke("Ctrl+P")));
     assert!(app.owns_focused_shortcut(&stroke("Ctrl+Q")));
     assert!(!app.owns_focused_shortcut(&stroke("Q")));
+    for command in [
+        CommandId::GoToFile,
+        CommandId::OpenRecentFolder,
+        CommandId::ToggleCommandPalette,
+    ] {
+        app.shortcuts
+            .set(command, "Ctrl+K P".parse().expect("picker chord"));
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+K")));
+        app.process_shortcut(stroke("Ctrl+K"));
+        assert!(app.prefix_started.is_some());
+        assert!(
+            app.owns_focused_shortcut(&stroke("P")),
+            "unmodified suffix belongs to the chord"
+        );
+        app.native_ime_composing = true;
+        assert!(!app.owns_focused_shortcut(&stroke("P")));
+        app.native_ime_composing = false;
+        app.process_shortcut(stroke("P"));
+        assert!(app.palette_open);
+        assert!(app.entered_shortcut.is_empty());
+        app.process_shortcut(stroke("Ctrl+K"));
+        assert!(app.owns_focused_shortcut(&stroke("Escape")));
+        app.process_shortcut(stroke("Escape"));
+        assert!(app.entered_shortcut.is_empty());
+        app.shortcuts.remove(command);
+    }
 }
 
 #[test]

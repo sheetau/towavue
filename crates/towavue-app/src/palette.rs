@@ -13,6 +13,7 @@ use towavue_runtime_windows::RecentKind;
 #[cfg(test)]
 mod files_tests;
 mod history;
+mod preview;
 
 pub struct CommandPalette {
     query: String,
@@ -24,6 +25,7 @@ pub struct CommandPalette {
     folders: bool,
     fresh: bool,
     ime_composing: bool,
+    preview: Option<preview::FilePreview>,
 }
 
 impl Default for CommandPalette {
@@ -38,6 +40,7 @@ impl Default for CommandPalette {
             folders: false,
             fresh: true,
             ime_composing: false,
+            preview: None,
         }
     }
 }
@@ -78,8 +81,35 @@ impl CommandPalette {
         (!self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
             .then(|| normalized(self.query.trim()))
     }
+    pub fn with_previews(
+        cache: towavue_runtime_windows::PreviewCache,
+        notify: impl Fn() + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Ok(Self {
+            preview: Some(preview::FilePreview::new(cache, notify)?),
+            ..Self::default()
+        })
+    }
+
+    pub fn clear_preview(&mut self) {
+        if let Some(preview) = &mut self.preview {
+            preview.clear();
+        }
+    }
+
+    pub fn finish_preview(&mut self, context: &egui::Context) -> bool {
+        self.preview
+            .as_mut()
+            .is_some_and(|preview| preview.finish(context))
+    }
+
     pub fn reset(&mut self) {
-        *self = Self::default();
+        self.clear_preview();
+        let preview = self.preview.take();
+        *self = Self {
+            preview,
+            ..Self::default()
+        };
     }
 
     pub fn open_files(&mut self, folders: bool) {
@@ -258,6 +288,7 @@ impl CommandPalette {
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.query.starts_with('>');
                 if command_mode {
+                    self.clear_preview();
                     self.folders = false;
                 }
                 context.accesskit_node_builder(query_id, |node| {
@@ -357,6 +388,13 @@ impl CommandPalette {
         let selection_moved = self.selected != selected;
         self.selected = selected;
         self.selected_path = selected.map(|index| paths[index].clone());
+        if self.folders {
+            self.clear_preview();
+        } else if let Some(preview) = &mut self.preview {
+            preview.show(ui, self.selected_path.as_deref());
+        } else {
+            preview::paint(ui, self.selected_path.as_deref(), None);
+        }
         let kind = if self.folders {
             RecentKind::Folder
         } else {
@@ -394,7 +432,11 @@ impl CommandPalette {
         }
         let row_height = 22.0;
         let row_count = paths.len().max(1);
-        let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0).clamp(1.0, 264.0);
+        // The window can constrain the inner height before reaching the screen edge.
+        // Use the same effective viewport as ScrollArea when revealing a selected row.
+        let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0)
+            .clamp(1.0, 264.0)
+            .min(ui.available_height().max(1.0));
         let scroll_salt = ("quick-open-results", self.folders);
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt(scroll_salt)

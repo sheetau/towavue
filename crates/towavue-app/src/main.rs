@@ -312,6 +312,7 @@ enum AppEvent {
         Option<towavue_runtime_windows::VideoResumeSource>,
     ),
     FilmstripReady,
+    PickerPreviewReady,
     PlaylistDuration(playlist::DurationRequest, u64, Option<Duration>),
     StatusFileDetails(u64, Option<towavue_runtime_windows::FileDetails>),
     TabPreview(
@@ -1127,6 +1128,10 @@ where
         let filmstrip = filmstrip::Filmstrip::new(preview_cache.clone(), move || {
             filmstrip_notify(AppEvent::FilmstripReady)
         })?;
+        let picker_notify = Arc::clone(&notify);
+        let palette = palette::CommandPalette::with_previews(preview_cache.clone(), move || {
+            picker_notify(AppEvent::PickerPreviewReady)
+        })?;
         let mut tabs = TabSet::default();
         if initial_path.is_some() {
             tabs.take_gallery(tabs.gallery().expect("initial Gallery"));
@@ -1333,7 +1338,7 @@ where
             grid_open: false,
             palette_open: false,
             command_overlay_return_focus: None,
-            palette: palette::CommandPalette::default(),
+            palette,
             status_message: None,
             export_notice: None,
             relative_seek_notice: None,
@@ -1575,6 +1580,7 @@ where
             return;
         }
         self.palette_open = false;
+        self.palette.clear_preview();
         self.command_overlay_return_focus = None;
         self.file_search.update(None);
         self.grid_open = false;
@@ -3010,6 +3016,14 @@ where
                 Ok(path) => format!("Selected in Explorer: {}", path.display()),
                 Err(error) => format!("Could not reveal file: {error}"),
             }),
+            AppEvent::PickerPreviewReady => {
+                if let Some(context) = &self.ui_context
+                    && self.palette.finish_preview(context)
+                    && self.palette_open
+                {
+                    self.request_redraw();
+                }
+            }
             AppEvent::FileSearchReady => self.request_redraw(),
             AppEvent::RecentFilesReady => {
                 if let Some(update) = self
@@ -6528,6 +6542,7 @@ where
     fn cancel_command_overlay(&mut self) {
         self.file_search.update(None);
         self.palette_open = false;
+        self.palette.clear_preview();
         self.grid_open = false;
         if let Some(id) = self.command_overlay_return_focus.take()
             && let Some(context) = &self.ui_context
@@ -6930,6 +6945,7 @@ where
             None
         };
         self.palette_open = false;
+        self.palette.clear_preview();
         self.file_search.update(None);
         match command {
             CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
@@ -7182,6 +7198,7 @@ where
                         .map(|focus| (tab.id, focus))
                 });
                 self.palette_open = false;
+                self.palette.clear_preview();
                 self.grid_open = false;
                 self.request_redraw();
             }
@@ -9601,6 +9618,7 @@ where
         }
         self.refresh_title();
         self.filmstrip.clear_previews();
+        self.palette.clear_preview();
         self.waveform = None;
         self.hover_thumbnail = None;
         if self.timeline_open {

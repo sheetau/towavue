@@ -242,7 +242,7 @@ fn export_output_cancellable(
     )
 }
 
-fn export_options_cancellable(
+pub(crate) fn export_options_cancellable(
     request: &ExportRequest,
     options: ExportOptions,
     cancelled: &AtomicBool,

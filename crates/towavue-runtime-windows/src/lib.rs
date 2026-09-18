@@ -16,6 +16,11 @@ mod dialog;
 mod export;
 mod file_details;
 mod file_operation;
+mod source_save;
+pub use source_save::{
+    PreparedSourceSave, SavedSource, SourceSaveError, SourceSaveEvent, SourceSaveJob,
+    commit_source_save, prepare_source_save,
+};
 mod file_search;
 mod fonts;
 mod image;

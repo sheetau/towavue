@@ -104,7 +104,7 @@ impl FileOperationSource {
         &self.path
     }
 
-    fn capture(path: &Path) -> Result<Self, FileOperationError> {
+    pub(crate) fn capture(path: &Path) -> Result<Self, FileOperationError> {
         let path = std::path::absolute(path)?;
         validate_name(path.file_name().ok_or(FileOperationError::InvalidName)?)?;
         let file = open_source(&path)?;
@@ -112,7 +112,29 @@ impl FileOperationSource {
         Ok(Self { path, stamp })
     }
 
-    fn verify(&self) -> Result<File, FileOperationError> {
+    /// Replacement can inherit a different creation time; file identity, length
+    /// and last-write time still bind the actual source/output bytes.
+    pub(crate) fn matches_file_at(&self, path: &Path) -> Result<bool, FileOperationError> {
+        let actual = Stamp::read(&open_source(path)?)?;
+        Ok(actual.volume == self.stamp.volume
+            && actual.index == self.stamp.index
+            && actual.length == self.stamp.length
+            && actual.written == self.stamp.written)
+    }
+
+    /// ReplaceFile can update both creation and write times when merging named
+    /// streams. Only use this after native success and strict pre-call verification.
+    pub(crate) fn matches_published_file_at(
+        &self,
+        path: &Path,
+    ) -> Result<bool, FileOperationError> {
+        let actual = Stamp::read(&open_source(path)?)?;
+        Ok(actual.volume == self.stamp.volume
+            && actual.index == self.stamp.index
+            && actual.length == self.stamp.length)
+    }
+
+    pub(crate) fn verify(&self) -> Result<File, FileOperationError> {
         let file = open_source(&self.path)?;
         if Stamp::read(&file)? != self.stamp {
             return Err(FileOperationError::SourceChanged);

@@ -15,6 +15,7 @@ pub(super) struct KeyboardSettings {
     recorded: Vec<KeyStroke>,
     last_capture_frame: Option<u64>,
     focus_search: bool,
+    search_id: Option<egui::Id>,
 }
 
 #[derive(Clone)]
@@ -23,7 +24,7 @@ pub(super) struct Edit {
     slot: Option<usize>,
     expected: Vec<KeySequence>,
     text: String,
-    recording: bool,
+    submit: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -48,18 +49,56 @@ impl KeyboardSettings {
     }
 
     pub fn capturing(&self) -> bool {
-        self.record_search || self.edit.as_ref().is_some_and(|edit| edit.recording)
+        self.record_search || self.edit.is_some()
     }
 
     pub fn cancel_capture(&mut self) {
         self.record_search = false;
         self.recorded.clear();
-        if let Some(edit) = &mut self.edit {
-            edit.recording = false;
+        self.edit = None;
+    }
+
+    fn search_focused(&self, context: &egui::Context) -> bool {
+        self.edit.is_none()
+            && self
+                .search_id
+                .is_some_and(|id| context.memory(|memory| memory.has_focus(id)))
+    }
+
+    fn search_control(stroke: &KeyStroke) -> bool {
+        (stroke.modifiers
+            == Modifiers {
+                alt: true,
+                ..Default::default()
+            }
+            && matches!(stroke.key, Key::Character('k' | 'p')))
+            || (stroke.modifiers == Modifiers::default() && stroke.key == Key::Escape)
+    }
+
+    pub(super) fn apply_search_control(&mut self, stroke: &KeyStroke) {
+        match stroke.key {
+            Key::Character('k') => {
+                self.record_search = !self.record_search;
+                self.recorded.clear();
+            }
+            Key::Character('p') => self.precedence = !self.precedence,
+            Key::Escape => {
+                self.query.clear();
+                self.cancel_capture();
+                self.focus_search = true;
+            }
+            _ => unreachable!("validated search control"),
         }
     }
 
     pub fn capture(&mut self, stroke: KeyStroke) {
+        if stroke.key == Key::Enter
+            && stroke.modifiers == Modifiers::default()
+            && let Some(edit) = self.edit.as_mut()
+        {
+            edit.submit = true;
+            return;
+        }
         if stroke.key == Key::Escape {
             self.cancel_capture();
             self.edit = None;
@@ -72,7 +111,7 @@ impl KeyboardSettings {
         let value = KeySequence::new(self.recorded.clone())
             .expect("recorded key")
             .to_string();
-        if let Some(edit) = self.edit.as_mut().filter(|edit| edit.recording) {
+        if let Some(edit) = self.edit.as_mut() {
             edit.text = value;
         } else if self.record_search {
             self.query = format!("\"{value}\"");
@@ -90,7 +129,7 @@ impl KeyboardSettings {
                 .and_then(|index| bindings.all(command).get(index))
                 .map(ToString::to_string)
                 .unwrap_or_default(),
-            recording: true,
+            submit: false,
         });
     }
 
@@ -234,6 +273,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .ui_context
                 .as_ref()
                 .is_some_and(egui::Popup::is_any_open)
+    }
+
+    pub(super) fn keyboard_search_owns_shortcut(&self, stroke: &KeyStroke) -> bool {
+        self.keyboard_settings_active()
+            && !self.native_ime_composing
+            && !self.palette_open
+            && !self.grid_open
+            && !self.modal_input_blocked()
+            && KeyboardSettings::search_control(stroke)
+            && self.ui_context.as_ref().is_some_and(|context| {
+                !egui::Popup::is_any_open(context) && self.keyboard_settings.search_focused(context)
+            })
     }
 
     pub(super) fn apply_keybinding_change(&mut self, change: Change) {

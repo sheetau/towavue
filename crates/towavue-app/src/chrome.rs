@@ -112,6 +112,7 @@ pub fn configure_input(context: &egui::Context) {
 }
 
 pub fn style(style: &mut egui::Style) {
+    style.interaction.selectable_labels = false;
     #[cfg(debug_assertions)]
     {
         // Different tab controls can legitimately replace each other at the same rect.
@@ -156,6 +157,16 @@ pub fn style(style: &mut egui::Style) {
         visuals.expansion = 0.0;
     }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
+}
+
+pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, button: egui::Button<'_>) -> egui::Response {
+    ui.scope(|ui| {
+        flat_buttons(ui);
+        ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+        ui.spacing_mut().interact_size = rect.size();
+        ui.put(rect, button)
+    })
+    .inner
 }
 
 pub fn flat_buttons(ui: &mut egui::Ui) {

@@ -248,18 +248,18 @@ fn search_field(
         ui.spacing_mut().text_edit_width = f32::INFINITY;
         crate::resize::unframed_text_input(ui, "Search Gallery", query)
     });
-    let filter_button = ui
-        .put(
-            filter_rect,
-            egui::Button::new(chrome::Icon::Filter.text().color(if filter.is_some() {
-                chrome::FOREGROUND
-            } else {
-                chrome::MUTED
-            }))
-            .stroke(egui::Stroke::NONE)
-            .frame_when_inactive(false),
-        )
-        .help_text("Filter media types");
+    let filter_button = chrome::icon_button_at(
+        ui,
+        filter_rect,
+        egui::Button::new(chrome::Icon::Filter.text().color(if filter.is_some() {
+            chrome::FOREGROUND
+        } else {
+            chrome::MUTED
+        }))
+        .stroke(egui::Stroke::NONE)
+        .frame_when_inactive(false),
+    )
+    .help_text("Filter media types");
     filter_button.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -289,7 +289,8 @@ fn search_field(
     }
     let clear = ui
         .add_enabled_ui(!query.is_empty(), |ui| {
-            ui.put(
+            chrome::icon_button_at(
+                ui,
                 clear_rect,
                 egui::Button::new(RichText::new("\u{eabf}").font(crate::fonts::icon_font()))
                     .stroke(egui::Stroke::NONE)
@@ -305,10 +306,31 @@ fn search_field(
             "Clear Gallery search",
         )
     });
-    if clear.clicked() {
+    let clear_key = ui.is_enabled()
+        && (search.has_focus()
+            || ui.memory(|memory| {
+                memory.had_focus_last_frame(search.id) && memory.focused().is_none()
+            }))
+        && !egui::Popup::is_any_open(ui.ctx())
+        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if clear.clicked() || clear_key {
         query.clear();
         search.mark_changed();
         search.request_focus();
+    }
+    if search.has_focus() {
+        // Escape clears this search instead of moving focus out before UI routing.
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                search.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                    ..Default::default()
+                },
+            )
+        });
     }
     let stroke = if search.has_focus() {
         ui.visuals().selection.stroke
@@ -815,6 +837,25 @@ mod tests {
                         && text.galley.job.sections.iter().all(|s| s.format.color == chrome::BORDER))));
                 frame(vec![egui::Event::Text("new search".into())]);
                 assert_eq!(query.borrow().as_str(), "new search");
+                let escape = || egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                context.memory_mut(|memory| memory.stop_text_input());
+                frame(vec![escape()]);
+                assert_eq!(
+                    query.borrow().as_str(),
+                    "new search",
+                    "Escape requires search focus"
+                );
+                frame(vec![action(search_id, Action::Focus)]);
+                frame(vec![escape()]);
+                assert!(query.borrow().is_empty());
+                assert_eq!(filter.get(), Some(MediaKind::Video));
+                frame(vec![egui::Event::Text("new search".into())]);
                 let output = frame(vec![]);
                 let clear = node_rect(&output, "Clear Gallery search").center();
                 let pointer = |pressed| egui::Event::PointerButton {

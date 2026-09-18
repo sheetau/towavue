@@ -7,58 +7,73 @@ impl KeyboardSettings {
         bindings: &ShortcutBindings,
         enabled: bool,
     ) -> Option<Change> {
+        if ui.input(|input| {
+            !input.focused || input.events.contains(&egui::Event::WindowFocused(false))
+        }) {
+            self.cancel_capture();
+        }
         let frame = ui.ctx().cumulative_frame_nr();
-        if self.capturing()
-            && (enabled || self.edit.is_some())
-            && self.last_capture_frame != Some(frame)
-        {
+        if (enabled || self.edit.is_some()) && self.last_capture_frame != Some(frame) {
             self.last_capture_frame = Some(frame);
-            let strokes = ui.input(|input| {
-                input
-                    .events
-                    .iter()
-                    .filter_map(|event| match event {
-                        egui::Event::Key {
-                            key,
-                            pressed: true,
-                            repeat: false,
-                            modifiers,
-                            ..
-                        } => egui_stroke(*key, *modifiers),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-            });
-            for stroke in strokes {
-                self.capture(stroke);
-            }
-            // Native capture is intercepted before egui; this covers offscreen input.
+            let focused = enabled
+                && (self.search_focused(ui.ctx())
+                    || self.search_id.is_some_and(|id| {
+                        ui.memory(|memory| {
+                            memory.focused().is_none() && memory.had_focus_last_frame(id)
+                        }) && ui.input(|input| input.key_pressed(egui::Key::Escape))
+                    }));
+            let capture = self.capturing();
             ui.input_mut(|input| {
                 input.events.retain(|event| {
-                    !matches!(event, egui::Event::Key { .. } | egui::Event::Text(_))
-                })
+                    if let egui::Event::Key {
+                        key,
+                        pressed,
+                        repeat,
+                        modifiers,
+                        ..
+                    } = event
+                    {
+                        if let Some(stroke) = egui_stroke(*key, *modifiers) {
+                            let control = focused && Self::search_control(&stroke);
+                            if *pressed && !*repeat {
+                                if control {
+                                    self.apply_search_control(&stroke);
+                                } else if capture {
+                                    self.capture(stroke);
+                                }
+                            }
+                            return !capture && !control;
+                        }
+                        return !capture;
+                    }
+                    // Native capture is intercepted before egui; this also prevents
+                    // recorded characters from entering the offscreen search editor.
+                    !(matches!(event, egui::Event::Text(_)) && (capture || self.capturing()))
+                });
             });
         }
         let mut change = None;
-        ui.add_enabled_ui(enabled && self.edit.is_none(), |ui| {
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                ui.add_space(16.0);
-                ui.heading("Keyboard Shortcuts");
-            });
-            ui.add_space(10.0);
+        let body = ui.available_rect_before_wrap().shrink(8.0);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
+            if !enabled || self.edit.is_some() {
+                let opacity = ui.opacity();
+                ui.disable();
+                ui.set_opacity(opacity);
+            }
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.visuals_mut().clip_rect_margin = 0.0;
             self.search(ui);
             if self.record_search {
-                ui.label("Recording keys — press up to four strokes. Escape stops recording.");
+                ui.label("Recording keys — press up to four strokes. Escape clears the search.");
             }
             if let Some(message) = &self.message {
                 ui.colored_label(chrome::MUTED, message);
             }
-            ui.add_space(12.0);
+            ui.add_space(8.0);
             let rows = self.rows(bindings);
-            let row_width = ui.available_width().max(240.0);
-            let command_width = (row_width * 0.42).max(100.0);
-            let keys_width = (row_width * 0.25).max(100.0);
+            let row_width = ui.available_width();
+            let command_width = row_width * 0.42;
+            let keys_width = row_width * 0.25;
             let (header, _) =
                 ui.allocate_exact_size(egui::vec2(row_width, 24.0), egui::Sense::hover());
             for (left, width, text) in [
@@ -79,29 +94,42 @@ impl KeyboardSettings {
                     text,
                 );
             }
-            ui.separator();
+            ui.painter().hline(
+                header.x_range(),
+                header.bottom(),
+                egui::Stroke::new(1.0, chrome::BORDER),
+            );
+            ui.add_space(1.0);
             if rows.is_empty() {
                 ui.label("No matching keyboard shortcuts");
             }
             egui::ScrollArea::vertical()
                 .id_salt("keyboard-rows")
-                .show_rows_styled(ui, 34.0, rows.len(), |ui, range| {
+                .show_rows_styled(ui, 24.0, rows.len(), |ui, range| {
                     for row in &rows[range] {
                         ui.push_id((row.command.id, row.slot), |ui| {
                             let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(row_width, 34.0),
+                                egui::vec2(row_width, 24.0),
                                 egui::Sense::click(),
                             );
-                            let hovered = response.hovered() || response.has_focus();
+                            // The edit button is a child hit target: keep the row hovered
+                            // while the pointer crosses onto it, so it cannot disappear.
+                            let hovered = response.contains_pointer() || response.has_focus();
                             if hovered {
                                 ui.painter().rect_filled(rect, 0.0, chrome::HOVER);
                             }
                             let edit_rect = egui::Rect::from_min_size(
-                                rect.min + egui::vec2(4.0, 5.0),
-                                egui::Vec2::splat(24.0),
+                                rect.min + egui::vec2(4.0, 2.0),
+                                egui::Vec2::splat(20.0),
                             );
-                            let edit = hovered
-                                .then(|| icon(ui, edit_rect, '\u{ea73}', "Edit keybinding", false));
+                            let edit = hovered.then(|| {
+                                let (glyph, label) = if row.slot.is_some() {
+                                    ('\u{ea73}', "Edit keybinding")
+                                } else {
+                                    ('\u{ea60}', "Add keybinding")
+                                };
+                                icon(ui, edit_rect, glyph, label, false)
+                            });
                             for (left, width, text) in [
                                 (34.0, command_width - 34.0, row.command.title),
                                 (
@@ -121,7 +149,7 @@ impl KeyboardSettings {
                             ] {
                                 let cell = egui::Rect::from_min_size(
                                     rect.min + egui::vec2(left, 0.0),
-                                    egui::vec2(width, 34.0),
+                                    egui::vec2(width, 24.0),
                                 );
                                 cell_label(ui, cell.shrink2(egui::vec2(4.0, 0.0)), text)
                                     .help_text(text);
@@ -192,35 +220,28 @@ impl KeyboardSettings {
     }
 
     fn search(&mut self, ui: &mut egui::Ui) {
-        let width = (ui.available_width() - 32.0).max(120.0);
         let (outer, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
-        let outer =
-            egui::Rect::from_min_size(outer.min + egui::vec2(16.0, 0.0), egui::vec2(width, 30.0));
-        ui.painter().rect_stroke(
-            outer,
-            3.0,
-            egui::Stroke::new(1.0, chrome::BORDER),
-            egui::StrokeKind::Inside,
-        );
-        let buttons = [0.0, 26.0, 52.0].map(|offset| {
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+        let background = ui.painter().add(egui::Shape::Noop);
+        let buttons = [0.0, 22.0, 44.0].map(|offset| {
             egui::Rect::from_min_size(
-                outer.right_top() + egui::vec2(-28.0 - offset, 2.0),
-                egui::vec2(26.0, 26.0),
+                outer.right_top() + egui::vec2(-22.0 - offset, 2.0),
+                egui::Vec2::splat(20.0),
             )
         });
         let text_rect = egui::Rect::from_min_max(
-            outer.min + egui::vec2(6.0, 0.0),
-            egui::pos2(buttons[2].left() - 4.0, outer.bottom()),
+            outer.min,
+            egui::pos2(buttons[2].left() - 2.0, outer.bottom()),
         );
-        let search = ui.put(
-            text_rect,
-            egui::TextEdit::singleline(&mut self.query)
-                .id_salt("keyboard-search")
-                .hint_text("Search commands or keybindings")
-                .frame(egui::Frame::NONE)
-                .vertical_align(egui::Align::Center),
-        );
+        let search = ui.put(text_rect, |ui: &mut egui::Ui| {
+            ui.spacing_mut().text_edit_width = f32::INFINITY;
+            crate::resize::unframed_text_input(
+                ui,
+                "Search commands or keybindings",
+                &mut self.query,
+            )
+        });
+        self.search_id = Some(search.id);
         if self.focus_search {
             search.request_focus();
             self.focus_search = false;
@@ -236,7 +257,7 @@ impl KeyboardSettings {
         {
             self.record_search = !self.record_search;
             self.recorded.clear();
-            search.surrender_focus();
+            search.request_focus();
         }
         if icon(
             ui,
@@ -248,6 +269,7 @@ impl KeyboardSettings {
         .clicked()
         {
             self.precedence = !self.precedence;
+            search.request_focus();
         }
         if icon(
             ui,
@@ -263,6 +285,35 @@ impl KeyboardSettings {
             self.record_search = false;
             self.focus_search = true;
         }
+        if search.has_focus() {
+            // Escape clears this search instead of moving focus out before UI routing.
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    search.id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        escape: true,
+                        ..Default::default()
+                    },
+                )
+            });
+        }
+        let stroke = if search.has_focus() {
+            ui.visuals().selection.stroke
+        } else {
+            ui.visuals().widgets.hovered.bg_stroke
+        };
+        ui.painter().set(
+            background,
+            egui::epaint::RectShape::new(
+                outer,
+                2.0,
+                egui::Color32::BLACK,
+                stroke,
+                egui::StrokeKind::Inside,
+            ),
+        );
     }
 
     fn edit_dialog(
@@ -272,89 +323,57 @@ impl KeyboardSettings {
     ) -> Option<Change> {
         let edit = self.edit.as_mut()?;
         let mut change = None;
-        let mut close = false;
+        let submit = std::mem::take(&mut edit.submit)
+            || context
+                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         egui::Modal::new(egui::Id::new("keyboard-edit")).show(context, |ui| {
-            ui.set_width(460.0_f32.min(context.content_rect().width() - 40.0));
-            ui.heading(
-                command_definitions()
-                    .iter()
-                    .find(|command| command.id == edit.command)
-                    .expect("command")
-                    .title,
-            );
-            ui.label("Record keys or type a sequence, for example Ctrl+K Ctrl+S.");
-            ui.add(
-                egui::TextEdit::singleline(&mut edit.text)
-                    .interactive(!edit.recording)
-                    .desired_width(f32::INFINITY),
-            );
-            if ui.checkbox(&mut edit.recording, "Record keys").changed() {
-                self.recorded.clear();
-            }
-            ui.label("Escape cancels. To bind Escape, stop recording and type Escape.");
-            let parsed = edit.text.trim().parse::<KeySequence>();
-            if let Ok(sequence) = &parsed {
-                let matches: Vec<_> = command_definitions()
-                    .iter()
-                    .filter(|other| {
-                        other.id != edit.command
-                            && bindings.all(other.id).iter().any(|bound| {
-                                bound.strokes().starts_with(sequence.strokes())
-                                    || sequence.strokes().starts_with(bound.strokes())
-                            })
-                    })
-                    .map(|other| other.title)
-                    .collect();
-                if !matches.is_empty() {
-                    ui.label(format!(
-                        "Also used by: {}. Context and precedence determine which command runs.",
-                        matches.join(", ")
-                    ));
-                }
-            } else if !edit.text.trim().is_empty() {
-                ui.label("Enter a valid key or key sequence.");
-            }
-            if let Some(message) = &self.message {
-                ui.colored_label(chrome::MUTED, message);
-            }
-            ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(parsed.is_ok(), egui::Button::new("Save"))
-                    .clicked()
-                {
-                    let mut replacement = edit.expected.clone();
-                    let sequence = parsed.expect("valid sequence");
-                    if let Some(slot) = edit.slot {
-                        replacement[slot] = sequence;
-                    } else {
-                        replacement.push(sequence);
+            ui.set_width(400.0_f32.min((context.content_rect().width() - 40.0).max(120.0)));
+            ui.spacing_mut().item_spacing.y = 10.0;
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.label("Press desired key combination and then press ENTER.");
+                ui.add(
+                    egui::TextEdit::singleline(&mut edit.text)
+                        .interactive(false)
+                        .horizontal_align(egui::Align::Center)
+                        .desired_width(f32::INFINITY),
+                );
+                let parsed = edit.text.trim().parse::<KeySequence>();
+                if let Ok(sequence) = &parsed {
+                    keycaps(ui, sequence);
+                    let matches: Vec<_> = command_definitions()
+                        .iter()
+                        .filter(|other| {
+                            other.id != edit.command
+                                && bindings.all(other.id).iter().any(|bound| {
+                                    bound.strokes().starts_with(sequence.strokes())
+                                        || sequence.strokes().starts_with(bound.strokes())
+                                })
+                        })
+                        .map(|other| other.title)
+                        .collect();
+                    if !matches.is_empty() {
+                        ui.label(format!("Also used by: {}", matches.join(", ")));
                     }
-                    change = Some(Change {
-                        command: edit.command,
-                        expected: edit.expected.clone(),
-                        replacement,
-                    });
-                }
-                if ui.button("Remove").clicked() {
-                    let mut replacement = edit.expected.clone();
-                    if let Some(slot) = edit.slot {
-                        replacement.remove(slot);
+                    if submit {
+                        let mut replacement = edit.expected.clone();
+                        if let Some(slot) = edit.slot {
+                            replacement[slot] = sequence.clone();
+                        } else {
+                            replacement.push(sequence.clone());
+                        }
+                        change = Some(Change {
+                            command: edit.command,
+                            expected: edit.expected.clone(),
+                            replacement,
+                        });
                     }
-                    change = Some(Change {
-                        command: edit.command,
-                        expected: edit.expected.clone(),
-                        replacement,
-                    });
                 }
-                if ui.button("Cancel").clicked() {
-                    close = true;
+                if let Some(message) = &self.message {
+                    ui.colored_label(chrome::MUTED, message);
                 }
             });
         });
         if context.input(|input| input.key_pressed(egui::Key::Escape)) {
-            close = true;
-        }
-        if close {
             self.edit = None;
             self.cancel_capture();
         }
@@ -370,16 +389,17 @@ fn icon(
     selected: bool,
 ) -> egui::Response {
     // Codicon record-keys / sort-precedence / clear-all / edit in the bundled font.
-    let response = ui
-        .put(
-            rect,
-            egui::Button::selectable(
-                selected,
-                RichText::new(glyph.to_string()).font(fonts::icon_font()),
-            )
-            .frame_when_inactive(false),
+    let response = chrome::icon_button_at(
+        ui,
+        rect,
+        egui::Button::selectable(
+            selected,
+            RichText::new(glyph.to_string()).font(fonts::icon_font()),
         )
-        .help_text(label);
+        .stroke(egui::Stroke::NONE)
+        .frame_when_inactive(false),
+    )
+    .help_text(label);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
     });
@@ -392,5 +412,64 @@ fn cell_label(ui: &mut egui::Ui, rect: egui::Rect, text: &str) -> egui::Response
             .max_rect(rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     )
-    .add(egui::Label::new(text).truncate())
+    .add(egui::Label::new(text).selectable(false).truncate())
+}
+
+fn keycaps(ui: &mut egui::Ui, sequence: &KeySequence) {
+    let mut tokens = Vec::new();
+    for (index, stroke) in sequence.strokes().iter().enumerate() {
+        if index > 0 {
+            tokens.push(("chord to".to_owned(), false));
+        }
+        for (index, key) in stroke.to_string().split('+').enumerate() {
+            if index > 0 {
+                tokens.push(("+".to_owned(), false));
+            }
+            tokens.push((key.to_owned(), true));
+        }
+    }
+    let width = ui.available_width();
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut rows = vec![(0.0_f32, Vec::new())];
+    for (text, cap) in tokens {
+        let galley = ui
+            .painter()
+            .layout_no_wrap(text, font.clone(), chrome::MUTED);
+        let size = galley.size().x + if cap { 10.0 } else { 0.0 };
+        if rows
+            .last()
+            .is_some_and(|(used, row)| !row.is_empty() && used + 4.0 + size > width)
+        {
+            rows.push((0.0, Vec::new()));
+        }
+        let (used, row) = rows.last_mut().expect("keycap row");
+        *used += size + if row.is_empty() { 0.0 } else { 4.0 };
+        row.push((galley, cap, size));
+    }
+    // Measure complete rows before centering; egui's main alignment aligns each
+    // allocation, rather than centering a sequence of differently sized widgets.
+    for (used, row) in rows {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), egui::Sense::hover());
+        let mut left = rect.center().x - used * 0.5;
+        for (galley, cap, size) in row {
+            if cap {
+                ui.painter().rect(
+                    egui::Rect::from_center_size(
+                        egui::pos2(left + size * 0.5, rect.center().y),
+                        egui::vec2(size, galley.size().y + 6.0),
+                    ),
+                    3.0,
+                    chrome::BACKGROUND,
+                    egui::Stroke::new(1.0, chrome::BORDER),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            let origin = egui::pos2(
+                left + if cap { 5.0 } else { 0.0 },
+                rect.center().y - galley.size().y * 0.5,
+            );
+            ui.painter().galley(origin, galley, chrome::MUTED);
+            left += size + 4.0;
+        }
+    }
 }

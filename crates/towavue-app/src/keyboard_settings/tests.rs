@@ -103,7 +103,10 @@ fn settings_tab_keeps_media_history_records_without_dispatch_and_saves_through_i
     }
     let entry: KeyStroke = "Ctrl+K".parse().expect("valid test key");
     assert!(app.owns_focused_shortcut(&entry));
+    let record_key = "Alt+K".parse().expect("key");
+    assert!(app.keyboard_search_owns_shortcut(&record_key));
     app.native_ime_composing = true;
+    assert!(!app.keyboard_search_owns_shortcut(&record_key));
     assert!(!app.owns_focused_shortcut(&entry));
     app.native_ime_composing = false;
     app.process_shortcut(entry.clone());
@@ -117,33 +120,13 @@ fn settings_tab_keeps_media_history_records_without_dispatch_and_saves_through_i
     app.handle_ui_action(UiAction::FinishResize(None));
     assert_eq!(app.tabs.active_id(), Some(settings));
     assert!(app.keyboard_settings.edit.is_some());
-    let edit = app
-        .keyboard_settings
-        .edit
-        .as_mut()
-        .expect("keyboard settings fixture");
-    edit.text = "Ctrl+K F2".into();
-    edit.recording = false;
+    app.keyboard_settings
+        .capture("Ctrl+K".parse().expect("key"));
+    app.keyboard_settings.capture("F2".parse().expect("key"));
     let size = egui::vec2(780.0, 540.0);
     crate::audio_export::tests::frame(&mut app, size, vec![]);
-    let output = crate::audio_export::tests::frame(&mut app, size, vec![]);
-    let tree = output
-        .platform_output
-        .accesskit_update
-        .expect("accessibility tree");
-    let save = crate::video_rotation::tests::node(&tree, "Save");
-    crate::audio_export::tests::frame(
-        &mut app,
-        size,
-        vec![egui::Event::AccessKitActionRequest(
-            egui::accesskit::ActionRequest {
-                action: egui::accesskit::Action::Click,
-                target_tree: egui::accesskit::TreeId::ROOT,
-                target_node: save,
-                data: None,
-            },
-        )],
-    );
+    app.process_shortcut("Enter".parse().expect("key"));
+    crate::audio_export::tests::frame(&mut app, size, vec![]);
     assert!(app.keyboard_settings.edit.is_none());
     assert_eq!(
         app.shortcuts,
@@ -235,4 +218,373 @@ fn precedence_matches_primary_alternative_resolution_and_when_matches_reading_co
         .find(|row| row.command.id == CommandId::RotateClockwise)
         .expect("keyboard settings fixture");
     assert!(rotate.when.contains("image && !reading") && rotate.when.contains("video && timeline"));
+}
+
+fn key_event(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    }
+}
+
+#[test]
+fn search_controls_require_focus_and_recording_enter_submits_without_changing_the_sequence() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        let mut settings = KeyboardSettings::default();
+        let bindings = shortcuts::defaults();
+        let frame = |settings: &mut KeyboardSettings, mut events: Vec<egui::Event>| {
+            // Deliver complete presses: egui infers repeat when a previous key has no release.
+            let releases: Vec<_> = events
+                .iter()
+                .filter_map(|event| {
+                    if let egui::Event::Key { key, modifiers, .. } = event {
+                        Some(egui::Event::Key {
+                            key: *key,
+                            physical_key: None,
+                            pressed: false,
+                            repeat: false,
+                            modifiers: *modifiers,
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            events.extend(releases);
+            let mut change = None;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 440.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| change = settings.show(ui, &bindings, true),
+            );
+            change
+        };
+        frame(&mut settings, vec![]);
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::K, egui::Modifiers::ALT)],
+        );
+        assert!(
+            !settings.record_search,
+            "Alt+K outside the search cannot start recording"
+        );
+        settings.request_search_focus();
+        frame(&mut settings, vec![]);
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::K, egui::Modifiers::ALT)],
+        );
+        assert!(settings.record_search);
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::W, egui::Modifiers::CTRL)],
+        );
+        assert_eq!(settings.query, "\"Ctrl+W\"");
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::P, egui::Modifiers::ALT)],
+        );
+        assert!(settings.precedence);
+        assert_eq!(settings.query, "\"Ctrl+W\"");
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(settings.query.is_empty() && !settings.capturing());
+        settings.begin_edit(CommandId::OpenFile, Some(0), &bindings);
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::K, egui::Modifiers::CTRL)],
+        );
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::F2, egui::Modifiers::NONE)],
+        );
+        let change = frame(
+            &mut settings,
+            vec![key_event(egui::Key::Enter, egui::Modifiers::NONE)],
+        )
+        .expect("Enter submits");
+        assert_eq!(change.replacement[0].to_string(), "Ctrl+K F2");
+        assert_eq!(change.expected, bindings.all(CommandId::OpenFile));
+        assert!(
+            frame(&mut settings, vec![]).is_none(),
+            "no repeated submission"
+        );
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::Escape, egui::Modifiers::NONE)],
+        );
+        assert!(settings.edit.is_none());
+        settings.begin_edit(CommandId::OpenFile, Some(0), &bindings);
+        assert!(frame(&mut settings, vec![egui::Event::WindowFocused(false)]).is_none());
+        assert!(
+            settings.edit.is_none() && !settings.capturing(),
+            "focus loss cancels the recorder transaction"
+        );
+    }
+}
+
+#[test]
+fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
+    for density in [1.0, 1.25, 2.0] {
+        for width in [320.0, 960.0] {
+            let context = fonts::test_context();
+            context.global_style_mut(chrome::style);
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            let mut settings = KeyboardSettings::default();
+            let bindings = shortcuts::defaults();
+            let frame = |settings: &mut KeyboardSettings, enabled, events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 440.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        settings.show(ui, &bindings, enabled);
+                    },
+                )
+            };
+            frame(&mut settings, true, vec![]);
+            let output = frame(&mut settings, true, vec![]);
+            let nodes = &output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes;
+            let rect = |label: &str| {
+                let bounds = nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect(label)
+                    .1
+                    .bounds()
+                    .expect("bounds");
+                egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                )
+            };
+            let record = rect("Record keys");
+            let sort = rect("Sort by precedence");
+            let clear = rect("Clear keybindings search input");
+            assert_eq!(record.size(), egui::Vec2::splat(20.0));
+            assert_eq!(sort.left() - record.right(), 2.0);
+            assert_eq!(clear.left() - sort.right(), 2.0);
+            assert!(clear.right() <= width - 10.0);
+            let mut rows: Vec<_> = nodes
+                .iter()
+                .filter(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button
+                        && node.label().is_some_and(|label| label.contains(": "))
+                })
+                .map(|(_, node)| node.bounds().expect("row bounds"))
+                .collect();
+            rows.sort_by(|a, b| a.y0.total_cmp(&b.y0));
+            assert!(rows.len() > 4);
+            assert!(
+                (rows[1].y0 - rows[0].y0 - 24.0).abs() < 0.1,
+                "row bounds at {density}: {rows:?}"
+            );
+            assert!(rows[0].x0 >= 8.0);
+            let point = egui::pos2(rows[0].x0 as f32 + 70.0, rows[0].y0 as f32 + 12.0);
+            let hovered = frame(&mut settings, true, vec![egui::Event::PointerMoved(point)]);
+            assert_ne!(hovered.platform_output.cursor_icon, egui::CursorIcon::Text);
+            let colors = |output: &egui::FullOutput| {
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == "Command" => Some(
+                            text.galley
+                                .job
+                                .sections
+                                .iter()
+                                .map(|section| section.format.color)
+                                .collect::<Vec<_>>(),
+                        ),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let border = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::LineSegment { points, .. }
+                        if points[0].y == points[1].y
+                            && points[0].distance(points[1]) > width * 0.8 =>
+                    {
+                        Some(points[0].y)
+                    }
+                    _ => None,
+                })
+                .expect("header border");
+            let first = settings.rows(&bindings)[0].command.title;
+            let clip = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == first => Some(shape.clip_rect),
+                    _ => None,
+                })
+                .expect("first row text");
+            assert!((clip.top() - border - 1.0).abs() <= 1.0 / density);
+            assert!(
+                clip.bottom() <= 432.0,
+                "bottom inset remains outside the scroll clip"
+            );
+            let blocked = frame(&mut settings, false, vec![]);
+            assert!(!colors(&output).is_empty());
+            assert_eq!(
+                colors(&output),
+                colors(&blocked),
+                "popup guards must not dim the list"
+            );
+            let secondary = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            // Re-enable and register hit regions after the explicit disabled-paint probe.
+            frame(&mut settings, true, vec![]);
+            frame(&mut settings, true, vec![secondary(true)]);
+            frame(&mut settings, true, vec![secondary(false)]);
+            assert!(egui::Popup::is_any_open(&context));
+            let popup = frame(&mut settings, false, vec![]);
+            assert_eq!(colors(&output), colors(&popup));
+            let tree = popup
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("menu tree");
+            let (add, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Add keybinding"))
+                .expect("context menu action");
+            assert!(!node.is_disabled());
+            frame(
+                &mut settings,
+                false,
+                vec![egui::Event::AccessKitActionRequest(
+                    egui::accesskit::ActionRequest {
+                        target_tree: egui::accesskit::TreeId::ROOT,
+                        target_node: *add,
+                        action: egui::accesskit::Action::Click,
+                        data: None,
+                    },
+                )],
+            );
+            assert!(
+                settings
+                    .edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.slot.is_none())
+            );
+        }
+    }
+}
+
+#[test]
+fn unassigned_commands_offer_add_and_record_a_first_binding() {
+    let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
+    context.enable_accesskit();
+    let bindings = shortcuts::defaults();
+    let mut settings = KeyboardSettings::default();
+    let rows = settings.rows(&bindings);
+    assert!(
+        command_definitions()
+            .iter()
+            .all(|command| rows.iter().any(|row| row.command.id == command.id))
+    );
+    let command = rows
+        .iter()
+        .find(|row| row.slot.is_none())
+        .expect("unassigned command")
+        .command;
+    settings.query = command.id.as_str().to_owned();
+    let frame = |settings: &mut KeyboardSettings, events| {
+        context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 440.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                settings.show(ui, &bindings, true);
+            },
+        )
+    };
+    frame(&mut settings, vec![]);
+    let output = frame(&mut settings, vec![]);
+    let bounds = output
+        .platform_output
+        .accesskit_update
+        .expect("tree")
+        .nodes
+        .into_iter()
+        .find(|(_, node)| node.label() == Some(format!("{}: ", command.title).as_str()))
+        .expect("unassigned row")
+        .1
+        .bounds()
+        .expect("row bounds");
+    let point = egui::pos2(bounds.x0 as f32 + 14.0, bounds.y0 as f32 + 12.0);
+    frame(&mut settings, vec![egui::Event::PointerMoved(point)]);
+    let output = frame(&mut settings, vec![]);
+    let add = output
+        .platform_output
+        .accesskit_update
+        .expect("tree")
+        .nodes
+        .into_iter()
+        .find(|(_, node)| node.label() == Some("Add keybinding"))
+        .expect("add control")
+        .0;
+    frame(
+        &mut settings,
+        vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: add,
+                action: egui::accesskit::Action::Click,
+                data: None,
+            },
+        )],
+    );
+    let edit = settings.edit.as_ref().expect("recorder");
+    assert_eq!(edit.command, command.id);
+    assert!(edit.slot.is_none() && edit.expected.is_empty());
+    settings.capture("Alt+F9".parse().expect("key"));
+    settings.capture("Enter".parse().expect("key"));
+    let mut change = None;
+    let _ = context.run_ui(egui::RawInput::default(), |ui| {
+        change = settings.show(ui, &bindings, true)
+    });
+    let change = change.expect("first binding");
+    assert!(change.expected.is_empty());
+    assert_eq!(change.replacement[0].to_string(), "Alt+F9");
 }

@@ -10519,6 +10519,11 @@ where
     }
 
     fn process_shortcut(&mut self, stroke: KeyStroke) {
+        if self.keyboard_search_owns_shortcut(&stroke) {
+            self.keyboard_settings.apply_search_control(&stroke);
+            self.request_redraw();
+            return;
+        }
         if self.keyboard_capture_active() {
             self.keyboard_settings.capture(stroke);
             self.request_redraw();
@@ -11432,19 +11437,21 @@ where
             self.process_key(event);
             return;
         }
-        if self.keyboard_capture_active()
-            && let WindowEvent::KeyboardInput {
-                event,
-                is_synthetic: false,
-                ..
-            } = &event
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic: false,
+            ..
+        } = &event
+            && (self.keyboard_capture_active()
+                || self
+                    .key_stroke(event)
+                    .is_some_and(|stroke| self.keyboard_search_owns_shortcut(&stroke)))
         {
             if event.state == ElementState::Pressed
                 && !event.repeat
                 && let Some(stroke) = self.key_stroke(event)
             {
-                self.keyboard_settings.capture(stroke);
-                self.request_redraw();
+                self.process_shortcut(stroke);
             }
             return;
         }

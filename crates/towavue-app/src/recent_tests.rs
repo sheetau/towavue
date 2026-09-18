@@ -90,7 +90,7 @@ fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_
     let stroke = |text: &str| text.parse::<KeySequence>().expect("key").strokes()[0].clone();
     for palette in [false, true] {
         app.palette_open = palette;
-        for keys in ["Ctrl+P", "Ctrl+Shift+P", "Ctrl+Alt+O"] {
+        for keys in ["Ctrl+P", "Ctrl+Shift+P", "Ctrl+F"] {
             assert!(app.owns_focused_shortcut(&stroke(keys)));
             app.native_ime_composing = true;
             assert!(!app.owns_focused_shortcut(&stroke(keys)));
@@ -102,6 +102,23 @@ fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_
             app.pending_guard = None;
         }
     }
+    for kind in [
+        None,
+        Some(MediaKind::Image),
+        Some(MediaKind::Video),
+        Some(MediaKind::Audio),
+    ] {
+        app.media_kind = kind;
+        app.palette_open = false;
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+F")));
+        app.process_shortcut(stroke("Ctrl+F"));
+        assert!(
+            app.palette_open,
+            "folder picker opens from text focus for {kind:?}"
+        );
+    }
+    app.media_kind = None;
+    app.palette_open = false;
     app.shortcuts.set(
         CommandId::GoToFile,
         "Ctrl+Q".parse().expect("custom shortcut"),
@@ -210,7 +227,7 @@ fn quick_open_dispatches_from_gallery_and_preserves_replacement_guards() {
     app.activate_tab(gallery);
     app.recent_folders = vec![root.clone()];
     app.process_shortcut(
-        "Ctrl+Alt+O"
+        "Ctrl+F"
             .parse::<KeySequence>()
             .expect("folder binding")
             .strokes()[0]

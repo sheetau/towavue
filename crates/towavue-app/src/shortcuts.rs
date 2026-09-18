@@ -8,6 +8,7 @@ const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
 const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
 const IMAGE_BINDING_HEADER: &str = "# towavue shortcuts v4";
 const READING_BINDING_HEADER: &str = "# towavue shortcuts v6";
+const RECENT_FOLDER_BINDING_HEADER: &str = "# towavue shortcuts v7";
 const FULLSCREEN_BINDING_HEADER: &str = "# towavue shortcuts v5";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
@@ -44,7 +45,7 @@ pub fn defaults() -> ShortcutBindings {
     for (command, shortcut) in [
         (CommandId::OpenFile, "Ctrl+O"),
         (CommandId::GoToFile, "Ctrl+P"),
-        (CommandId::OpenRecentFolder, "Ctrl+Alt+O"),
+        (CommandId::OpenRecentFolder, "Ctrl+F"),
         (CommandId::ToggleFullscreen, "F11"),
         (CommandId::OpenFolder, "Ctrl+Shift+O"),
         (CommandId::CloseTab, "Ctrl+W"),
@@ -175,9 +176,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let mut declared = std::collections::BTreeSet::new();
-    let reading_bindings = text
+    let recent_folder_bindings = text
         .lines()
-        .any(|line| line.trim() == READING_BINDING_HEADER);
+        .any(|line| line.trim() == RECENT_FOLDER_BINDING_HEADER);
+    let reading_bindings = recent_folder_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == READING_BINDING_HEADER);
     let mut unchanged_image_bindings = std::collections::BTreeSet::new();
     let fullscreen_bindings = reading_bindings
         || text
@@ -261,6 +266,24 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         for sequence in sequences.into_iter().skip(1) {
             bindings.add(command, sequence);
         }
+    }
+    let recent_folder = CommandId::OpenRecentFolder;
+    let old_recent: KeySequence = "Ctrl+Alt+O".parse().expect("legacy folder shortcut");
+    let new_recent = standard.get(recent_folder).expect("folder shortcut");
+    if !recent_folder_bindings
+        && declared.contains(&recent_folder)
+        && bindings.all(recent_folder) == [old_recent]
+        && !declared.iter().any(|command| {
+            *command != recent_folder
+                && bindings.all(*command).iter().any(|bound| {
+                    bound.strokes().starts_with(new_recent.strokes())
+                        || new_recent.strokes().starts_with(bound.strokes())
+                })
+        })
+    {
+        // Migrate only an old generated default when the new chord is free.
+        // Versioned explicit bindings, alternatives and custom prefixes stay exact.
+        bindings.set(recent_folder, new_recent.clone());
     }
     let enter: KeySequence = "Enter".parse().expect("built-in alternative");
     if implicit_fullscreen
@@ -364,7 +387,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{READING_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{RECENT_FOLDER_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for (command, _) in bindings.iter() {
         output.push_str(command.as_str());
@@ -1575,10 +1598,81 @@ mod tests {
     }
 
     #[test]
+    fn recent_folder_default_migrates_without_overwriting_custom_keys_or_prefixes() {
+        let command = CommandId::OpenRecentFolder;
+        for header in [
+            "",
+            MULTI_BINDING_HEADER,
+            FRAME_BINDING_HEADER,
+            IMAGE_BINDING_HEADER,
+            FULLSCREEN_BINDING_HEADER,
+            READING_BINDING_HEADER,
+        ] {
+            let bindings = parse(
+                &format!("{header}\nopen_recent_folder = Ctrl+Alt+O\n"),
+                defaults(),
+            )
+            .expect("old generated default");
+            assert_eq!(
+                bindings.get(command).expect("new default").to_string(),
+                "Ctrl+F"
+            );
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+        for custom in ["Ctrl+F", "Ctrl+F X"] {
+            let bindings = parse(&format!("{READING_BINDING_HEADER}\nopen_recent_folder = Ctrl+Alt+O\nopen_file = {custom}\n"), defaults()).expect("custom conflict");
+            assert_eq!(
+                bindings
+                    .get(command)
+                    .expect("retained legacy key")
+                    .to_string(),
+                "Ctrl+Alt+O"
+            );
+            assert_eq!(
+                bindings
+                    .get(CommandId::OpenFile)
+                    .expect("custom key")
+                    .to_string(),
+                custom
+            );
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+        for (header, configured) in [
+            (READING_BINDING_HEADER, "Ctrl+K O"),
+            (READING_BINDING_HEADER, "Ctrl+Alt+O | Ctrl+Q"),
+            (RECENT_FOLDER_BINDING_HEADER, "Ctrl+Alt+O"),
+        ] {
+            let bindings = parse(
+                &format!("{header}\nopen_recent_folder = {configured}\n"),
+                defaults(),
+            )
+            .expect("explicit binding");
+            assert_eq!(
+                bindings
+                    .all(command)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>(),
+                configured.split(" | ").collect::<Vec<_>>()
+            );
+            assert_eq!(
+                parse(&serialize(&bindings), defaults()).expect("round trip"),
+                bindings
+            );
+        }
+    }
+
+    #[test]
     fn quick_open_defaults_do_not_shadow_existing_custom_keys_or_prefixes() {
         for (text, removed) in [
             ("open_file = Ctrl+P\n", CommandId::GoToFile),
-            ("open_folder = Ctrl+Alt+O X\n", CommandId::OpenRecentFolder),
+            ("open_folder = Ctrl+F X\n", CommandId::OpenRecentFolder),
             ("toggle_audio_shuffle = Ctrl+P\n", CommandId::GoToFile),
         ] {
             let bindings = parse(text, defaults()).expect("existing custom binding");
@@ -1587,7 +1681,7 @@ mod tests {
         let bindings = defaults();
         for (keys, command) in [
             ("Ctrl+P", CommandId::GoToFile),
-            ("Ctrl+Alt+O", CommandId::OpenRecentFolder),
+            ("Ctrl+F", CommandId::OpenRecentFolder),
         ] {
             assert_eq!(
                 bindings.resolve(

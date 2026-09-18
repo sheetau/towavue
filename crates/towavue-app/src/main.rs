@@ -18934,7 +18934,7 @@ mod tests {
         assert!(!app.filmstrip_open);
         app.shortcuts.set(
             CommandId::ToggleFilmstrip,
-            "Ctrl+F Space".parse().expect("custom filmstrip chord"),
+            "Ctrl+G Space".parse().expect("custom filmstrip chord"),
         );
         for fullscreen in [false, true] {
             app.fullscreen = fullscreen;
@@ -18946,8 +18946,8 @@ mod tests {
                     "unbound and UI keys remain with filmstrip: {key}"
                 );
             }
-            assert!(app.owns_focused_shortcut(&stroke("Ctrl+F")));
-            app.process_shortcut(stroke("Ctrl+F"));
+            assert!(app.owns_focused_shortcut(&stroke("Ctrl+G")));
+            app.process_shortcut(stroke("Ctrl+G"));
             assert!(app.filmstrip_open);
             assert!(app.owns_focused_shortcut(&stroke("Space")));
             app.process_shortcut(stroke("Space"));

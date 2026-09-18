@@ -83,6 +83,9 @@ fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, String> {
             let (name, _) = line
                 .split_once('=')
                 .ok_or("Missing '=' in keyboard shortcuts")?;
+            if name.trim() == "reverse_reading_folder_order" {
+                continue;
+            }
             let command: CommandId = name
                 .trim()
                 .parse()
@@ -186,7 +189,7 @@ mod tests {
             return;
         };
         let path = root.join("shortcuts.conf");
-        let original = "\u{feff}# towavue shortcuts v7\r\n# Keep my notes\r\nopen_file = Ctrl+O\r\nreload_shortcuts = Ctrl+K Ctrl+S\r\n";
+        let original = "\u{feff}# towavue shortcuts v7\r\n# Keep my notes\r\nreverse_reading_folder_order = Alt+H\r\nopen_file = Ctrl+O\r\nreload_shortcuts = Ctrl+K Ctrl+S\r\n";
         fs::write(&path, original).expect("shortcut editor fixture");
         let initial = load_from(&path).expect("shortcut editor fixture");
         let removed = save_command(
@@ -201,6 +204,7 @@ mod tests {
         let text = fs::read_to_string(&path).expect("shortcut editor fixture");
         assert!(text.starts_with('\u{feff}') && text.contains("# Keep my notes\r\n"));
         assert!(!text.replace("\r\n", "").contains('\n'));
+        assert!(!text.contains("reverse_reading_folder_order"));
         let changed = text.replace("open_folder = Ctrl+Shift+O", "open_folder = Alt+F12");
         fs::write(&path, &changed).expect("shortcut editor fixture");
         let saved = save_command(

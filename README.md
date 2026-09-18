@@ -48,7 +48,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Image zoom | Ctrl+wheel |
 | Reading mode | B |
 | Reverse reading direction | H / V (reading mode) |
-| Reverse reading folder order | Alt+H (reading mode) |
+| Reload Explorer folder order | F5 |
 | Play / pause video or audio | Space |
 | Seek backward / forward | Left / Right |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |

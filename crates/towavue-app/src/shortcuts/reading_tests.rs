@@ -15,28 +15,37 @@ fn resolve(bindings: &ShortcutBindings, key: &str, reading: bool) -> ShortcutMat
 }
 
 #[test]
-fn reading_folder_reverse_shortcut_is_scoped_and_preserves_custom_bindings() {
-    let command = CommandId::ReverseReadingFolderOrder;
+fn reload_folder_order_retires_reverse_without_stealing_custom_keys() {
+    let command = CommandId::ReloadFolderOrder;
     let defaults = defaults();
-    assert_eq!(
-        resolve(&defaults, "Alt+H", true),
-        ShortcutMatch::Command(command)
-    );
-    assert_eq!(resolve(&defaults, "Alt+H", false), ShortcutMatch::None);
+    assert!("reverse_reading_folder_order".parse::<CommandId>().is_err());
+    for reading in [false, true] {
+        assert_eq!(
+            resolve(&defaults, "F5", reading),
+            ShortcutMatch::Command(command)
+        );
+        assert_eq!(resolve(&defaults, "Alt+H", reading), ShortcutMatch::None);
+    }
     for kind in [MediaKind::Audio, MediaKind::Video] {
         assert_eq!(
             defaults.resolve(
-                "Alt+H".parse::<KeySequence>().expect("key").strokes(),
+                "F5".parse::<KeySequence>().expect("key").strokes(),
                 CommandContext {
                     media_kind: Some(kind),
-                    reading_mode: true,
                     ..Default::default()
                 }
             ),
-            ShortcutMatch::None
+            ShortcutMatch::Command(command)
         );
     }
-    for custom in ["next_image = Alt+H\n", "next_image = Alt+H N\n"] {
+    assert_eq!(
+        defaults.resolve(
+            "F5".parse::<KeySequence>().expect("key").strokes(),
+            CommandContext::default()
+        ),
+        ShortcutMatch::None
+    );
+    for custom in ["open_file = F5\n", "open_file = F5 N\n"] {
         let bindings = parse(custom, defaults.clone()).expect("custom binding");
         assert!(bindings.all(command).is_empty());
         assert_eq!(
@@ -44,13 +53,26 @@ fn reading_folder_reverse_shortcut_is_scoped_and_preserves_custom_bindings() {
             bindings
         );
     }
-    let bindings =
-        parse("reverse_reading_folder_order = Alt+J\n", defaults.clone()).expect("custom reverse");
-    assert_eq!(
-        resolve(&bindings, "Alt+J", true),
-        ShortcutMatch::Command(command)
-    );
-    assert_eq!(resolve(&bindings, "Alt+H", true), ShortcutMatch::None);
+    for old in ["Alt+H", "Alt+J", "", "retired syntax"] {
+        let text = format!(
+            "# towavue shortcuts v9\nreverse_reading_folder_order = {old}\nopen_file = Alt+O\nreload_folder_order =\n"
+        );
+        let bindings = parse(&text, defaults.clone()).expect("retired setting");
+        assert!(bindings.all(command).is_empty());
+        assert_eq!(
+            bindings
+                .get(CommandId::OpenFile)
+                .expect("custom key")
+                .to_string(),
+            "Alt+O"
+        );
+        let rewritten = serialize(&bindings);
+        assert!(!rewritten.contains("reverse_reading_folder_order"));
+        assert_eq!(
+            parse(&rewritten, defaults.clone()).expect("round trip"),
+            bindings
+        );
+    }
 }
 
 #[test]

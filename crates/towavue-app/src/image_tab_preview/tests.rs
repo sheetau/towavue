@@ -79,27 +79,33 @@ fn wait_image(app: &mut App) {
 }
 
 #[test]
-fn reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_cards_consistent() {
+fn shell_reordering_keeps_first_spread_loading_navigation_and_background_cards_consistent() {
     let Some(root) = crate::tests::isolated_test_root(
-        "image_tab_preview::tests::reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_cards_consistent",
+        "image_tab_preview::tests::shell_reordering_keeps_first_spread_loading_navigation_and_background_cards_consistent",
     ) else {
         return;
     };
     for reversed in [false, true] {
         let (mut app, context, id, paths) = fixture(&root);
-        let shell_items = app
+        for (index, item) in app
             .folder_snapshot
-            .as_ref()
+            .as_mut()
             .expect("snapshot")
             .items
-            .clone();
+            .iter_mut()
+            .enumerate()
+        {
+            item.identity = towavue_core::ShellIdentity::new(vec![index as u8 + 1]);
+        }
+        let mut reordered = app.folder_snapshot.clone().expect("snapshot");
+        reordered.items.reverse();
+        let shell_items = reordered.items.clone();
         app.reading_mode = true;
         app.reading_settings.first_page_count = 1;
         app.reading_settings.reversed = reversed;
         let history = app.edits.clone();
-        app.dispatch(CommandId::ReverseReadingFolderOrder);
+        app.apply_folder_snapshot(reordered);
         wait_image(&mut app);
-        assert!(app.reading_settings.folder_reversed);
         assert_eq!(app.reading_settings.reversed, reversed);
         assert_eq!(app.path.as_ref(), Some(&paths[0]));
         assert_eq!(app.edits, history);
@@ -117,7 +123,7 @@ fn reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_
         assert_eq!(app.path.as_ref(), Some(&paths[3]));
         assert!(
             app.reading_pages.is_empty(),
-            "first-spread count starts at the reversed folder head"
+            "first-spread count starts at the new Shell head"
         );
         app.dispatch(if reversed {
             CommandId::ReadingLeft
@@ -197,7 +203,6 @@ fn reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_
             active
         );
         assert_eq!(app.tabs.active_id(), Some(foreground));
-        assert!(app.retained_images[&id].reading_settings.folder_reversed);
         app.activate_tab(id);
         wait_image(&mut app);
         assert_eq!(app.path.as_ref(), Some(&paths[3]));
@@ -212,20 +217,14 @@ fn reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_
         let position = app
             .preview_folder(id, &paths[3])
             .expect("ordinary position");
-        assert_eq!(position.index, 3);
+        assert_eq!(position.index, 0, "leaving reading preserves Shell order");
         assert_eq!(
             app.preview_image_path(id, &paths[3], 0),
-            Some(paths[0].clone())
+            Some(paths[3].clone())
         );
-        app.dispatch(CommandId::ReverseReadingFolderOrder);
-        assert!(
-            app.reading_settings.folder_reversed,
-            "command is disabled outside reading"
-        );
-        assert!(!app.reading_mode);
         app.dispatch(CommandId::FirstImage);
         wait_image(&mut app);
-        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+        assert_eq!(app.path.as_ref(), Some(&paths[3]));
     }
 }
 
@@ -1099,218 +1098,209 @@ fn reading_leading_focus_survives_regrouping_background_restore_and_shell_change
     ) else {
         return;
     };
-    for folder_reversed in [false, true] {
-        for reversed in [false, true] {
-            for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
-                for (initial_count, source_index, count) in [(2, 5, 5), (3, 10, 10)] {
-                    let (mut app, context, id, _) = fixture(&root);
-                    let paths: Vec<_> = (0..12)
-                        .map(|i| root.join(format!("focus-{i}.bmp")))
-                        .collect();
-                    for (i, path) in paths.iter().enumerate() {
-                        write_bitmap(path, 2 + i as i32, 3, [10, 20, 40 + i as u8, 255]);
-                    }
-                    let snapshot = app.folder_snapshot.as_mut().expect("folder");
-                    snapshot.items = paths
-                        .iter()
-                        .enumerate()
-                        .map(|(i, path)| towavue_core::FolderMediaItem {
-                            path: path.clone(),
-                            kind: MediaKind::Image,
-                            identity: towavue_core::ShellIdentity::new(vec![i as u8 + 1]),
-                        })
-                        .collect();
-                    if folder_reversed {
-                        snapshot.items.reverse();
-                    }
-                    let source = paths[source_index].clone();
-                    app.path = Some(source.clone());
-                    app.tabs
-                        .get_mut(id)
-                        .expect("tab")
-                        .target
-                        .set_current_path(source.clone(), MediaKind::Image);
-                    app.image = None;
-                    app.reading_mode = false;
-                    app.set_reading_layout(
-                        true,
-                        ReadingSettings {
-                            page_count: initial_count,
-                            first_page_count: initial_count,
-                            axis,
-                            reversed,
-                            folder_reversed,
-                        },
-                    );
-                    wait_image(&mut app);
-                    let focus_index = source_index - 1;
-                    assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
-                    let mut edits = EditHistory::default();
-                    assert!(edits.push(EditOperation::FlipHorizontal, MediaKind::Image));
-                    assert!(edits.undo());
-                    app.edits.insert(id, edits);
-                    let history = app.edits.clone();
-                    app.set_reading_layout(
-                        true,
-                        ReadingSettings {
-                            page_count: count,
-                            first_page_count: count,
-                            ..app.reading_settings
-                        },
-                    );
-                    wait_image(&mut app);
-                    assert_eq!(app.path.as_ref(), Some(&source));
-                    assert_eq!(app.edits, history);
-                    assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
-                    assert_eq!(
-                        app.reading_request_paths(),
-                        std::iter::once(source.clone())
-                            .chain(paths[..count].iter().cloned())
-                            .collect::<Vec<_>>()
-                    );
-                    assert_eq!(
-                        app.reading_pages.len(),
-                        count,
-                        "all visible originals load even with an extra retained source"
-                    );
-                    let source_texture = app.image.as_ref().expect("source retained").texture.id();
-                    let output =
-                        context.run_ui(Default::default(), |ui| app.draw_reading_pages(ui));
-                    let meshes: Vec<_> = output
-                        .shapes
-                        .iter()
-                        .filter_map(|shape| match &shape.shape {
-                            egui::Shape::Mesh(mesh) => Some(mesh),
-                            _ => None,
-                        })
-                        .collect();
-                    assert_eq!(meshes.len(), count);
-                    assert!(meshes.iter().all(|mesh| mesh.texture_id != source_texture));
-                    assert_eq!(
-                        app.image_copy_request().expect("focused copy").image.frames[0].rgba[0],
-                        40 + focus_index as u8
-                    );
-                    let position = app.preview_folder(id, &source).expect("position");
-                    assert_eq!(position.index, focus_index);
-                    assert_eq!(position.reading_paths(), Some(paths[..count].to_vec()));
-                    assert!(
-                        app.status_details()
-                            .contains(&format!("{} / 12", focus_index + 1))
-                    );
-                    assert_eq!(
-                        app.image_prefetch_paths(),
-                        Some(paths[count..(count * 2).min(paths.len())].to_vec())
-                    );
-                    let foreground = app.tabs.open_new(root.join("other.bmp"), MediaKind::Image);
-                    app.retain_image_tab();
-                    app.displayed_tab = Some(foreground);
-                    app.path = Some(root.join("other.bmp"));
-                    let preview = app
-                        .retained_tab_preview(id, &source)
-                        .expect("retained preview");
-                    let tab_preview::RetainedPreview::Reading { pages, .. } = preview else {
-                        panic!("reading card")
-                    };
-                    assert_eq!(pages.len(), count);
-                    assert!(pages.iter().all(|page| {
-                        page.0
-                            .as_ref()
-                            .is_some_and(|texture| texture.id() != source_texture)
-                    }));
-                    assert_eq!(
-                        app.preview_folder(id, &source).expect("background").index,
-                        focus_index
-                    );
-                    assert!(
-                        app.valid_preview_image_destination(
-                            id,
-                            app.retained_images[&id].instance,
-                            &source,
-                            &source
-                        ),
-                        "a hidden source remains a valid seek destination"
-                    );
-                    let saved = app.retained_images.remove(&id).expect("saved");
-                    app.tabs.activate(id);
-                    app.displayed_tab = Some(id);
-                    app.path = Some(source.clone());
-                    app.restore_image_tab(saved);
-                    assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
-                    // Rename the focus while retaining its Shell identity, then remove it.
-                    let mut snapshot = app.folder_snapshot.clone().expect("folder");
-                    let renamed = root.join("renamed-focus.bmp");
-                    std::fs::copy(&paths[focus_index], &renamed).expect("rename fixture");
-                    snapshot
-                        .items
-                        .iter_mut()
-                        .find(|item| item.path == paths[focus_index])
-                        .expect("focus")
-                        .path = renamed.clone();
-                    snapshot.generation += 1;
-                    app.apply_folder_snapshot(snapshot.clone());
-                    wait_image(&mut app);
-                    assert_eq!(app.reading_focus_path(), Some(&renamed));
-                    snapshot.items.retain(|item| item.path != renamed);
-                    snapshot.generation += 1;
-                    app.apply_folder_snapshot(snapshot);
-                    wait_image(&mut app);
-                    assert_ne!(app.reading_focus_path(), Some(&renamed));
-                    app.set_reading_layout(false, app.reading_settings);
-                    assert_eq!(app.path.as_ref(), Some(&source));
-                    assert_eq!(app.edits, history);
-                    assert!(app.reading_focus.is_none());
-                    assert_eq!(
-                        app.image
-                            .as_ref()
-                            .expect("original single view")
-                            .decoded
-                            .frames[0]
-                            .rgba[0],
-                        40 + source_index as u8
-                    );
-                    // Recreate the original grouping after the Shell removal control.
-                    let snapshot = app.folder_snapshot.as_mut().expect("folder");
-                    snapshot.items = paths
-                        .iter()
-                        .enumerate()
-                        .map(|(i, path)| towavue_core::FolderMediaItem {
-                            path: path.clone(),
-                            kind: MediaKind::Image,
-                            identity: towavue_core::ShellIdentity::new(vec![i as u8 + 1]),
-                        })
-                        .collect();
-                    if folder_reversed {
-                        snapshot.items.reverse();
-                    }
-                    app.set_reading_layout(
-                        true,
-                        ReadingSettings {
-                            page_count: initial_count,
-                            first_page_count: initial_count,
-                            ..app.reading_settings
-                        },
-                    );
-                    wait_image(&mut app);
-                    app.set_reading_layout(
-                        true,
-                        ReadingSettings {
-                            page_count: count,
-                            first_page_count: count,
-                            ..app.reading_settings
-                        },
-                    );
-                    wait_image(&mut app);
-                    app.dispatch(CommandId::NextImage);
-                    wait_image(&mut app);
-                    assert_eq!(
-                        app.path.as_ref(),
-                        Some(&paths[count]),
-                        "advance from the focused spread, even back to the retained source"
-                    );
-                    app.dispatch(CommandId::PreviousImage);
-                    wait_image(&mut app);
-                    assert_eq!(app.path.as_ref(), Some(&paths[0]));
+
+    for reversed in [false, true] {
+        for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+            for (initial_count, source_index, count) in [(2, 5, 5), (3, 10, 10)] {
+                let (mut app, context, id, _) = fixture(&root);
+                let paths: Vec<_> = (0..12)
+                    .map(|i| root.join(format!("focus-{i}.bmp")))
+                    .collect();
+                for (i, path) in paths.iter().enumerate() {
+                    write_bitmap(path, 2 + i as i32, 3, [10, 20, 40 + i as u8, 255]);
                 }
+                let snapshot = app.folder_snapshot.as_mut().expect("folder");
+                snapshot.items = paths
+                    .iter()
+                    .enumerate()
+                    .map(|(i, path)| towavue_core::FolderMediaItem {
+                        path: path.clone(),
+                        kind: MediaKind::Image,
+                        identity: towavue_core::ShellIdentity::new(vec![i as u8 + 1]),
+                    })
+                    .collect();
+                let source = paths[source_index].clone();
+                app.path = Some(source.clone());
+                app.tabs
+                    .get_mut(id)
+                    .expect("tab")
+                    .target
+                    .set_current_path(source.clone(), MediaKind::Image);
+                app.image = None;
+                app.reading_mode = false;
+                app.set_reading_layout(
+                    true,
+                    ReadingSettings {
+                        page_count: initial_count,
+                        first_page_count: initial_count,
+                        axis,
+                        reversed,
+                    },
+                );
+                wait_image(&mut app);
+                let focus_index = source_index - 1;
+                assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
+                let mut edits = EditHistory::default();
+                assert!(edits.push(EditOperation::FlipHorizontal, MediaKind::Image));
+                assert!(edits.undo());
+                app.edits.insert(id, edits);
+                let history = app.edits.clone();
+                app.set_reading_layout(
+                    true,
+                    ReadingSettings {
+                        page_count: count,
+                        first_page_count: count,
+                        ..app.reading_settings
+                    },
+                );
+                wait_image(&mut app);
+                assert_eq!(app.path.as_ref(), Some(&source));
+                assert_eq!(app.edits, history);
+                assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
+                assert_eq!(
+                    app.reading_request_paths(),
+                    std::iter::once(source.clone())
+                        .chain(paths[..count].iter().cloned())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    app.reading_pages.len(),
+                    count,
+                    "all visible originals load even with an extra retained source"
+                );
+                let source_texture = app.image.as_ref().expect("source retained").texture.id();
+                let output = context.run_ui(Default::default(), |ui| app.draw_reading_pages(ui));
+                let meshes: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) => Some(mesh),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(meshes.len(), count);
+                assert!(meshes.iter().all(|mesh| mesh.texture_id != source_texture));
+                assert_eq!(
+                    app.image_copy_request().expect("focused copy").image.frames[0].rgba[0],
+                    40 + focus_index as u8
+                );
+                let position = app.preview_folder(id, &source).expect("position");
+                assert_eq!(position.index, focus_index);
+                assert_eq!(position.reading_paths(), Some(paths[..count].to_vec()));
+                assert!(
+                    app.status_details()
+                        .contains(&format!("{} / 12", focus_index + 1))
+                );
+                assert_eq!(
+                    app.image_prefetch_paths(),
+                    Some(paths[count..(count * 2).min(paths.len())].to_vec())
+                );
+                let foreground = app.tabs.open_new(root.join("other.bmp"), MediaKind::Image);
+                app.retain_image_tab();
+                app.displayed_tab = Some(foreground);
+                app.path = Some(root.join("other.bmp"));
+                let preview = app
+                    .retained_tab_preview(id, &source)
+                    .expect("retained preview");
+                let tab_preview::RetainedPreview::Reading { pages, .. } = preview else {
+                    panic!("reading card")
+                };
+                assert_eq!(pages.len(), count);
+                assert!(pages.iter().all(|page| {
+                    page.0
+                        .as_ref()
+                        .is_some_and(|texture| texture.id() != source_texture)
+                }));
+                assert_eq!(
+                    app.preview_folder(id, &source).expect("background").index,
+                    focus_index
+                );
+                assert!(
+                    app.valid_preview_image_destination(
+                        id,
+                        app.retained_images[&id].instance,
+                        &source,
+                        &source
+                    ),
+                    "a hidden source remains a valid seek destination"
+                );
+                let saved = app.retained_images.remove(&id).expect("saved");
+                app.tabs.activate(id);
+                app.displayed_tab = Some(id);
+                app.path = Some(source.clone());
+                app.restore_image_tab(saved);
+                assert_eq!(app.reading_focus_path(), Some(&paths[focus_index]));
+                // Rename the focus while retaining its Shell identity, then remove it.
+                let mut snapshot = app.folder_snapshot.clone().expect("folder");
+                let renamed = root.join("renamed-focus.bmp");
+                std::fs::copy(&paths[focus_index], &renamed).expect("rename fixture");
+                snapshot
+                    .items
+                    .iter_mut()
+                    .find(|item| item.path == paths[focus_index])
+                    .expect("focus")
+                    .path = renamed.clone();
+                snapshot.generation += 1;
+                app.apply_folder_snapshot(snapshot.clone());
+                wait_image(&mut app);
+                assert_eq!(app.reading_focus_path(), Some(&renamed));
+                snapshot.items.retain(|item| item.path != renamed);
+                snapshot.generation += 1;
+                app.apply_folder_snapshot(snapshot);
+                wait_image(&mut app);
+                assert_ne!(app.reading_focus_path(), Some(&renamed));
+                app.set_reading_layout(false, app.reading_settings);
+                assert_eq!(app.path.as_ref(), Some(&source));
+                assert_eq!(app.edits, history);
+                assert!(app.reading_focus.is_none());
+                assert_eq!(
+                    app.image
+                        .as_ref()
+                        .expect("original single view")
+                        .decoded
+                        .frames[0]
+                        .rgba[0],
+                    40 + source_index as u8
+                );
+                // Recreate the original grouping after the Shell removal control.
+                let snapshot = app.folder_snapshot.as_mut().expect("folder");
+                snapshot.items = paths
+                    .iter()
+                    .enumerate()
+                    .map(|(i, path)| towavue_core::FolderMediaItem {
+                        path: path.clone(),
+                        kind: MediaKind::Image,
+                        identity: towavue_core::ShellIdentity::new(vec![i as u8 + 1]),
+                    })
+                    .collect();
+                app.set_reading_layout(
+                    true,
+                    ReadingSettings {
+                        page_count: initial_count,
+                        first_page_count: initial_count,
+                        ..app.reading_settings
+                    },
+                );
+                wait_image(&mut app);
+                app.set_reading_layout(
+                    true,
+                    ReadingSettings {
+                        page_count: count,
+                        first_page_count: count,
+                        ..app.reading_settings
+                    },
+                );
+                wait_image(&mut app);
+                app.dispatch(CommandId::NextImage);
+                wait_image(&mut app);
+                assert_eq!(
+                    app.path.as_ref(),
+                    Some(&paths[count]),
+                    "advance from the focused spread, even back to the retained source"
+                );
+                app.dispatch(CommandId::PreviousImage);
+                wait_image(&mut app);
+                assert_eq!(app.path.as_ref(), Some(&paths[0]));
             }
         }
     }

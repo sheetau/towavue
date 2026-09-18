@@ -277,9 +277,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let path = focus.map_or(path, |item| item.path.as_path());
         let mut index = None;
         let mut count = 0;
-        for item in
-            snapshot.reading_sequence(reading.is_some_and(|settings| settings.folder_reversed))
-        {
+        for item in snapshot.items_of_kind(MediaKind::Image) {
             if item.path == path {
                 index = Some(count);
             }
@@ -291,7 +289,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let pages = reading.map(|settings| {
             let range = settings.spread(index, count);
             snapshot
-                .reading_sequence(reading.is_some_and(|settings| settings.folder_reversed))
+                .items_of_kind(MediaKind::Image)
                 .skip(range.start)
                 .take(range.len())
                 .map(|item| item.path.clone())
@@ -313,9 +311,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         source: &Path,
         index: usize,
     ) -> Option<PathBuf> {
-        let (_, snapshot, reading) = self.preview_image_snapshot(id, source)?;
+        let (_, snapshot, _) = self.preview_image_snapshot(id, source)?;
         snapshot
-            .reading_sequence(reading.is_some_and(|settings| settings.folder_reversed))
+            .items_of_kind(MediaKind::Image)
             .nth(index)
             .map(|item| item.path.clone())
     }

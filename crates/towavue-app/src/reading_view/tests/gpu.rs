@@ -103,292 +103,287 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
             let window = event_loop
                 .create_window(Window::default_attributes().with_visible(false))
                 .expect("hidden window");
-            for folder_reversed in [false, true] {
-                for density in [1.0, 1.25, 2.0] {
-                    for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
-                        let mut renderer = FrameRenderer::new(&window).expect("hardware renderer");
-                        let mut app = Application::new(None, |_| {}).expect("app");
-                        let context = fonts::test_context();
-                        context.global_style_mut(chrome::style);
-                        app.ui_context = Some(context.clone());
-                        let paths = ["first.png", "second.png", "third.png", "fourth.png"]
-                            .map(|name| self.root.join(name));
-                        let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
-                        app.path = Some(paths[0].clone());
-                        app.displayed_tab = Some(tab);
-                        app.media_kind = Some(MediaKind::Image);
-                        app.state = PlaybackState::Paused;
-                        app.reading_mode = true;
-                        app.reading_settings.axis = axis;
-                        app.reading_settings.reversed = true;
-                        app.reading_settings.folder_reversed = folder_reversed;
-                        let mut shell_paths = paths.to_vec();
-                        if folder_reversed {
-                            shell_paths.reverse();
-                        }
-                        app.folder_snapshot = Some(FolderSnapshot {
-                            folder_identity: towavue_core::ShellIdentity::new(vec![0]),
-                            folder_path: self.root.clone(),
-                            items: shell_paths
-                                .iter()
-                                .enumerate()
-                                .map(|(index, path)| towavue_core::FolderMediaItem {
-                                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
-                                    path: path.clone(),
-                                    kind: MediaKind::Image,
-                                })
-                                .collect(),
-                            sort_columns: vec![],
-                            source: FolderSnapshotSource::NaturalNameFallback,
-                            generation: 1,
-                            captured_at: std::time::SystemTime::UNIX_EPOCH,
-                        });
-                        let decoded = |page: usize, revision: usize| {
-                            let (width, height) = if page.is_multiple_of(2) {
-                                (96, 64)
-                            } else {
-                                (64, 96)
-                            };
-                            let mut rgba = color(page, revision).repeat((width * height) as usize);
-                            for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate()
-                            {
-                                if (index % width as usize / 4 + index / width as usize / 4)
-                                    .is_multiple_of(2)
-                                {
-                                    pixel.copy_from_slice(&[220, 160, 80, 96]);
-                                }
-                            }
-                            Arc::new(DecodedImage {
-                                format: "test",
-                                animation_plays: 0,
-                                frames: vec![
-                                    towavue_runtime_windows::DecodedImageFrame {
-                                        width,
-                                        height,
-                                        rgba,
-                                        delay: Duration::from_secs(60),
-                                    },
-                                    towavue_runtime_windows::DecodedImageFrame {
-                                        width,
-                                        height,
-                                        rgba: color(page, revision + 10)
-                                            .repeat((width * height) as usize),
-                                        delay: Duration::from_secs(60),
-                                    },
-                                ],
-                            })
-                        };
-                        app.image = Some(
-                            app.image_texture_cache
-                                .load(&context, &paths[0], decoded(0, 0), TextureOptions::LINEAR)
-                                .expect("first"),
-                        );
-                        app.reading_pages = vec![Ok(app
-                            .image_texture_cache
-                            .load(&context, &paths[1], decoded(1, 0), TextureOptions::LINEAR)
-                            .expect("second"))];
-                        image_surface(&mut app, &context, &mut renderer, density);
-                        assert_eq!(context.pixels_per_point(), density);
-                        let before = image_surface(&mut app, &context, &mut renderer, density);
-                        app.dispatch(CommandId::IncreaseReadingPages);
-                        app.image_loader.request(Vec::new());
-                        let due = Instant::now() - Duration::from_millis(1);
-                        app.image
-                            .as_mut()
-                            .expect("shared current page")
-                            .next_frame_at = Some(due);
-                        app.schedule();
-                        equal_surface(
-                            &before,
-                            &image_surface(&mut app, &context, &mut renderer, density),
-                            density,
-                            0,
-                            "settings request changed the held spread",
-                        );
-                        assert_eq!(app.image.as_ref().expect("current").frame_index, 0);
-                        assert_eq!(
-                            app.image.as_ref().expect("current").next_frame_at,
-                            Some(due)
-                        );
-                        assert!(
-                            app.idle_wakeup(Instant::now()).is_none(),
-                            "held animation has no refresh timer"
-                        );
-                        let stale = app.image_generation;
-                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
-                            generation: stale,
-                            first_index: 0,
-                            total: 3,
-                            images: vec![(paths[0].clone(), Ok(decoded(0, 1)))],
-                        });
-                        equal_surface(
-                            &before,
-                            &image_surface(&mut app, &context, &mut renderer, density),
-                            density,
-                            1,
-                            "first completion changed the held spread",
-                        );
-                        let held = app.image_handoff.take().expect("held layout");
-                        assert!(
-                            image_surface(&mut app, &context, &mut renderer, density) != before,
-                            "negative control must detect partial-layout pixels"
-                        );
-                        app.image_handoff = Some(held);
-                        app.dispatch(CommandId::IncreaseReadingPages);
-                        app.image_loader.request(Vec::new());
-                        assert_eq!(app.reading_settings.page_count, 4);
-                        equal_surface(
-                            &before,
-                            &image_surface(&mut app, &context, &mut renderer, density),
-                            density,
-                            2,
-                            "supersession captured a partial spread",
-                        );
-                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
-                            generation: stale,
-                            first_index: 1,
-                            total: 3,
-                            images: vec![(paths[1].clone(), Ok(decoded(1, 1)))],
-                        });
-                        equal_surface(
-                            &before,
-                            &image_surface(&mut app, &context, &mut renderer, density),
-                            density,
-                            3,
-                            "stale completion changed the held spread",
-                        );
-                        for (index, path) in paths.iter().enumerate() {
-                            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
-                                generation: app.image_generation,
-                                first_index: index,
-                                total: paths.len(),
-                                images: vec![(path.clone(), Ok(decoded(index, 1)))],
-                            });
-                            if index < 3 {
-                                let due = Instant::now() - Duration::from_millis(1);
-                                for image in app.image.iter_mut().chain(
-                                    app.reading_pages
-                                        .iter_mut()
-                                        .filter_map(|page| page.as_mut().ok()),
-                                ) {
-                                    image.next_frame_at = Some(due);
-                                }
-                                app.schedule();
-                                for image in app.image.iter().chain(
-                                    app.reading_pages
-                                        .iter()
-                                        .filter_map(|page| page.as_ref().ok()),
-                                ) {
-                                    assert_eq!(
-                                        image.frame_index, 0,
-                                        "unshown incoming pages must not animate"
-                                    );
-                                    assert_eq!(image.next_frame_at, Some(due));
-                                }
-                                assert!(app.idle_wakeup(Instant::now()).is_none());
-                                equal_surface(
-                                    &before,
-                                    &image_surface(&mut app, &context, &mut renderer, density),
-                                    density,
-                                    index + 4,
-                                    "partial latest layout changed the held spread",
-                                );
-                            }
-                        }
-                        assert!(!app.image_loading && app.image_handoff.is_none());
-                        assert_eq!(app.reading_pages.len(), 3);
-                        let completed = image_surface(&mut app, &context, &mut renderer, density);
-                        assert!(
-                            completed != before,
-                            "latest layout must replace the held pixels"
-                        );
-                        equal_surface(
-                            &completed,
-                            &image_surface(&mut app, &context, &mut renderer, density),
-                            density,
-                            7,
-                            "completed layout changed on the next frame",
-                        );
-                        app.image
-                            .as_mut()
-                            .expect("completed current page")
-                            .next_frame_at = Some(Instant::now() - Duration::from_millis(1));
-                        app.schedule();
-                        assert_eq!(
-                            app.image.as_ref().expect("resumed animation").frame_index,
-                            1
-                        );
-                        assert!(
-                            image_surface(&mut app, &context, &mut renderer, density) != completed,
-                            "completed layout resumes animation without reloading"
-                        );
-                        let animated = image_surface(&mut app, &context, &mut renderer, density);
-                        let retained: Vec<_> = app
-                            .image
+
+            for density in [1.0, 1.25, 2.0] {
+                for axis in [ReadingAxis::Horizontal, ReadingAxis::Vertical] {
+                    let mut renderer = FrameRenderer::new(&window).expect("hardware renderer");
+                    let mut app = Application::new(None, |_| {}).expect("app");
+                    let context = fonts::test_context();
+                    context.global_style_mut(chrome::style);
+                    app.ui_context = Some(context.clone());
+                    let paths = ["first.png", "second.png", "third.png", "fourth.png"]
+                        .map(|name| self.root.join(name));
+                    let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+                    app.path = Some(paths[0].clone());
+                    app.displayed_tab = Some(tab);
+                    app.media_kind = Some(MediaKind::Image);
+                    app.state = PlaybackState::Paused;
+                    app.reading_mode = true;
+                    app.reading_settings.axis = axis;
+                    app.reading_settings.reversed = true;
+                    let shell_paths = paths.to_vec();
+                    app.folder_snapshot = Some(FolderSnapshot {
+                        folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+                        folder_path: self.root.clone(),
+                        items: shell_paths
                             .iter()
-                            .chain(
+                            .enumerate()
+                            .map(|(index, path)| towavue_core::FolderMediaItem {
+                                identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                                path: path.clone(),
+                                kind: MediaKind::Image,
+                            })
+                            .collect(),
+                        sort_columns: vec![],
+                        source: FolderSnapshotSource::NaturalNameFallback,
+                        generation: 1,
+                        captured_at: std::time::SystemTime::UNIX_EPOCH,
+                    });
+                    let decoded = |page: usize, revision: usize| {
+                        let (width, height) = if page.is_multiple_of(2) {
+                            (96, 64)
+                        } else {
+                            (64, 96)
+                        };
+                        let mut rgba = color(page, revision).repeat((width * height) as usize);
+                        for (index, pixel) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                            if (index % width as usize / 4 + index / width as usize / 4)
+                                .is_multiple_of(2)
+                            {
+                                pixel.copy_from_slice(&[220, 160, 80, 96]);
+                            }
+                        }
+                        Arc::new(DecodedImage {
+                            format: "test",
+                            animation_plays: 0,
+                            frames: vec![
+                                towavue_runtime_windows::DecodedImageFrame {
+                                    width,
+                                    height,
+                                    rgba,
+                                    delay: Duration::from_secs(60),
+                                },
+                                towavue_runtime_windows::DecodedImageFrame {
+                                    width,
+                                    height,
+                                    rgba: color(page, revision + 10)
+                                        .repeat((width * height) as usize),
+                                    delay: Duration::from_secs(60),
+                                },
+                            ],
+                        })
+                    };
+                    app.image = Some(
+                        app.image_texture_cache
+                            .load(&context, &paths[0], decoded(0, 0), TextureOptions::LINEAR)
+                            .expect("first"),
+                    );
+                    app.reading_pages = vec![Ok(app
+                        .image_texture_cache
+                        .load(&context, &paths[1], decoded(1, 0), TextureOptions::LINEAR)
+                        .expect("second"))];
+                    image_surface(&mut app, &context, &mut renderer, density);
+                    assert_eq!(context.pixels_per_point(), density);
+                    let before = image_surface(&mut app, &context, &mut renderer, density);
+                    app.dispatch(CommandId::IncreaseReadingPages);
+                    app.image_loader.request(Vec::new());
+                    let due = Instant::now() - Duration::from_millis(1);
+                    app.image
+                        .as_mut()
+                        .expect("shared current page")
+                        .next_frame_at = Some(due);
+                    app.schedule();
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        0,
+                        "settings request changed the held spread",
+                    );
+                    assert_eq!(app.image.as_ref().expect("current").frame_index, 0);
+                    assert_eq!(
+                        app.image.as_ref().expect("current").next_frame_at,
+                        Some(due)
+                    );
+                    assert!(
+                        app.idle_wakeup(Instant::now()).is_none(),
+                        "held animation has no refresh timer"
+                    );
+                    let stale = app.image_generation;
+                    app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        generation: stale,
+                        first_index: 0,
+                        total: 3,
+                        images: vec![(paths[0].clone(), Ok(decoded(0, 1)))],
+                    });
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        1,
+                        "first completion changed the held spread",
+                    );
+                    let held = app.image_handoff.take().expect("held layout");
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != before,
+                        "negative control must detect partial-layout pixels"
+                    );
+                    app.image_handoff = Some(held);
+                    app.dispatch(CommandId::IncreaseReadingPages);
+                    app.image_loader.request(Vec::new());
+                    assert_eq!(app.reading_settings.page_count, 4);
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        2,
+                        "supersession captured a partial spread",
+                    );
+                    app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        generation: stale,
+                        first_index: 1,
+                        total: 3,
+                        images: vec![(paths[1].clone(), Ok(decoded(1, 1)))],
+                    });
+                    equal_surface(
+                        &before,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        3,
+                        "stale completion changed the held spread",
+                    );
+                    for (index, path) in paths.iter().enumerate() {
+                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            generation: app.image_generation,
+                            first_index: index,
+                            total: paths.len(),
+                            images: vec![(path.clone(), Ok(decoded(index, 1)))],
+                        });
+                        if index < 3 {
+                            let due = Instant::now() - Duration::from_millis(1);
+                            for image in app.image.iter_mut().chain(
+                                app.reading_pages
+                                    .iter_mut()
+                                    .filter_map(|page| page.as_mut().ok()),
+                            ) {
+                                image.next_frame_at = Some(due);
+                            }
+                            app.schedule();
+                            for image in app.image.iter().chain(
                                 app.reading_pages
                                     .iter()
                                     .filter_map(|page| page.as_ref().ok()),
-                            )
-                            .cloned()
-                            .collect();
-                        app.set_reading_layout(true, app.reading_settings);
-                        app.image_loader.request(Vec::new());
-                        for (index, (path, previous)) in paths.iter().zip(&retained).enumerate() {
-                            app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
-                                generation: app.image_generation,
-                                first_index: index,
-                                total: paths.len(),
-                                images: vec![(path.clone(), Ok(previous.decoded.clone()))],
-                            });
+                            ) {
+                                assert_eq!(
+                                    image.frame_index, 0,
+                                    "unshown incoming pages must not animate"
+                                );
+                                assert_eq!(image.next_frame_at, Some(due));
+                            }
+                            assert!(app.idle_wakeup(Instant::now()).is_none());
                             equal_surface(
-                                &animated,
+                                &before,
                                 &image_surface(&mut app, &context, &mut renderer, density),
                                 density,
-                                index + 8,
-                                "same-source reload restarted displayed animation pixels",
+                                index + 4,
+                                "partial latest layout changed the held spread",
                             );
                         }
-                        assert!(!app.image_loading && app.image_handoff.is_none());
-                        for (image, previous) in app
-                            .image
-                            .iter()
-                            .chain(
-                                app.reading_pages
-                                    .iter()
-                                    .filter_map(|page| page.as_ref().ok()),
-                            )
-                            .zip(&retained)
-                        {
-                            assert_eq!(image.texture.id(), previous.texture.id());
-                            assert_eq!(image.frame_index, previous.frame_index);
-                            assert_eq!(image.next_frame_at, previous.next_frame_at);
-                            assert_eq!(image.plays_left, previous.plays_left);
-                        }
-                        app.image = Some(
-                            ImagePresentation::from_decoded(
-                                &context,
-                                &paths[0],
-                                retained[0].decoded.clone(),
-                            )
-                            .expect("restart negative control"),
-                        );
-                        assert!(
-                            image_surface(&mut app, &context, &mut renderer, density) != animated,
-                            "full-surface comparison must detect an animation restart"
-                        );
-                        assert!(
-                            app.edits
-                                .values()
-                                .all(|history| history.operations().is_empty())
+                    }
+                    assert!(!app.image_loading && app.image_handoff.is_none());
+                    assert_eq!(app.reading_pages.len(), 3);
+                    let completed = image_surface(&mut app, &context, &mut renderer, density);
+                    assert!(
+                        completed != before,
+                        "latest layout must replace the held pixels"
+                    );
+                    equal_surface(
+                        &completed,
+                        &image_surface(&mut app, &context, &mut renderer, density),
+                        density,
+                        7,
+                        "completed layout changed on the next frame",
+                    );
+                    app.image
+                        .as_mut()
+                        .expect("completed current page")
+                        .next_frame_at = Some(Instant::now() - Duration::from_millis(1));
+                    app.schedule();
+                    assert_eq!(
+                        app.image.as_ref().expect("resumed animation").frame_index,
+                        1
+                    );
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != completed,
+                        "completed layout resumes animation without reloading"
+                    );
+                    let animated = image_surface(&mut app, &context, &mut renderer, density);
+                    let retained: Vec<_> = app
+                        .image
+                        .iter()
+                        .chain(
+                            app.reading_pages
+                                .iter()
+                                .filter_map(|page| page.as_ref().ok()),
+                        )
+                        .cloned()
+                        .collect();
+                    app.set_reading_layout(true, app.reading_settings);
+                    app.image_loader.request(Vec::new());
+                    for (index, (path, previous)) in paths.iter().zip(&retained).enumerate() {
+                        app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            generation: app.image_generation,
+                            first_index: index,
+                            total: paths.len(),
+                            images: vec![(path.clone(), Ok(previous.decoded.clone()))],
+                        });
+                        equal_surface(
+                            &animated,
+                            &image_surface(&mut app, &context, &mut renderer, density),
+                            density,
+                            index + 8,
+                            "same-source reload restarted displayed animation pixels",
                         );
                     }
+                    assert!(!app.image_loading && app.image_handoff.is_none());
+                    for (image, previous) in app
+                        .image
+                        .iter()
+                        .chain(
+                            app.reading_pages
+                                .iter()
+                                .filter_map(|page| page.as_ref().ok()),
+                        )
+                        .zip(&retained)
+                    {
+                        assert_eq!(image.texture.id(), previous.texture.id());
+                        assert_eq!(image.frame_index, previous.frame_index);
+                        assert_eq!(image.next_frame_at, previous.next_frame_at);
+                        assert_eq!(image.plays_left, previous.plays_left);
+                    }
+                    app.image = Some(
+                        ImagePresentation::from_decoded(
+                            &context,
+                            &paths[0],
+                            retained[0].decoded.clone(),
+                        )
+                        .expect("restart negative control"),
+                    );
+                    assert!(
+                        image_surface(&mut app, &context, &mut renderer, density) != animated,
+                        "full-surface comparison must detect an animation restart"
+                    );
+                    assert!(
+                        app.edits
+                            .values()
+                            .all(|history| history.operations().is_empty())
+                    );
                 }
             }
+
             self.completed = true;
             eprintln!(
-                "PASS reading layout GPU: 12 folder-order/axis/density cases, 84 held whole-surface comparisons, 12 partial-layout negative controls and 12 stable completed layouts; held/incoming animation deadlines stay unchanged with no refresh timer, completed animation resumes. Same-source reload preserves all 4 presentations and passes 48 whole-surface comparisons with 12 restart negative controls. Generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
+                "PASS reading layout GPU: 6 axis/density cases, 42 held whole-surface comparisons, 6 partial-layout negative controls and 6 stable completed layouts; held/incoming animation deadlines stay unchanged with no refresh timer, completed animation resumes. Same-source reload preserves all 4 presentations and passes 24 whole-surface comparisons with 6 restart negative controls. Generated mixed-alpha pages, hidden hardware rendering, scripted completions, no physical input."
             );
             event_loop.exit();
         }

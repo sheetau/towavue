@@ -147,22 +147,41 @@ fn parse(text: &str, mut layouts: GridLayouts) -> Result<GridLayouts, String> {
         let Some((kind, commands)) = line.split_once('=') else {
             return Err(format!("grid.conf line {} is missing '='", index + 1));
         };
-        let parsed = commands
-            .split(',')
-            .map(|value| {
+        let media_kind = match kind.trim() {
+            "image" => MediaKind::Image,
+            "video" => MediaKind::Video,
+            "audio" => MediaKind::Audio,
+            _ => {
+                return Err(format!(
+                    "unknown media kind on grid.conf line {}",
+                    index + 1
+                ));
+            }
+        };
+        let values: Vec<_> = commands.split(',').collect();
+        if values.len() != 16 {
+            return Err(format!(
+                "grid.conf line {} has {} commands; expected 16",
+                index + 1,
+                values.len()
+            ));
+        }
+        let standard = defaults();
+        let parsed = values
+            .into_iter()
+            .enumerate()
+            .map(|(slot, value)| {
+                // Restore only the retired cell; preserve the other custom positions.
+                if value.trim() == "reverse_reading_folder_order" {
+                    return Ok(standard.get(media_kind)[slot]);
+                }
                 value
                     .trim()
                     .parse::<CommandId>()
                     .map_err(|_| format!("unknown command on grid.conf line {}", index + 1))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let parsed: [CommandId; 16] = parsed.try_into().map_err(|values: Vec<_>| {
-            format!(
-                "grid.conf line {} has {} commands; expected 16",
-                index + 1,
-                values.len()
-            )
-        })?;
+        let parsed: [CommandId; 16] = parsed.try_into().expect("validated grid length");
         match kind.trim() {
             "image" => layouts.image = parsed,
             "video" => layouts.video = parsed,
@@ -248,6 +267,33 @@ mod tests {
         assert_eq!(layouts.video, [CommandId::TogglePause; 16]);
         assert_eq!(KEYS[0], '1');
         assert_eq!(KEYS[15], 'v');
+    }
+
+    #[test]
+    fn retired_reading_reverse_restores_only_its_grid_cell() {
+        for (name, kind) in [
+            ("image", MediaKind::Image),
+            ("video", MediaKind::Video),
+            ("audio", MediaKind::Audio),
+        ] {
+            for slot in 0..16 {
+                let mut commands = ["reload_folder_order"; 16];
+                commands[slot] = "reverse_reading_folder_order";
+                let loaded = parse(&format!("{name} = {}", commands.join(",")), defaults())
+                    .expect("legacy custom grid");
+                for (index, command) in loaded.get(kind).iter().enumerate() {
+                    assert_eq!(
+                        *command,
+                        if index == slot {
+                            defaults().get(kind)[slot]
+                        } else {
+                            CommandId::ReloadFolderOrder
+                        }
+                    );
+                }
+                assert!(!serialize(&loaded).contains("reverse_reading_folder_order"));
+            }
+        }
     }
 
     #[test]

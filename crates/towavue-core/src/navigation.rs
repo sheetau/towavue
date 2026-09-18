@@ -64,7 +64,10 @@ impl FolderSnapshot {
         self.items.iter().position(|item| item.path == path)
     }
 
-    pub fn items_of_kind(&self, kind: MediaKind) -> impl Iterator<Item = &FolderMediaItem> {
+    pub fn items_of_kind(
+        &self,
+        kind: MediaKind,
+    ) -> impl DoubleEndedIterator<Item = &FolderMediaItem> {
         self.items.iter().filter(move |item| item.kind == kind)
     }
 
@@ -78,31 +81,12 @@ impl FolderSnapshot {
             .or_else(|| self.items.iter().find(|item| item.path == path))
     }
 
-    /// Image-only Shell order, optionally reversed for reading without mutating
-    /// the snapshot used by ordinary media navigation or the filmstrip.
-    pub fn reading_sequence(
-        &self,
-        reversed: bool,
-    ) -> impl DoubleEndedIterator<Item = &FolderMediaItem> + Clone {
-        (0..self.items.len())
-            .map(move |index| {
-                &self.items[if reversed {
-                    self.items.len() - 1 - index
-                } else {
-                    index
-                }]
-            })
-            .filter(|item| item.kind == MediaKind::Image)
-    }
-
     pub fn reading_items(
         &self,
         current_path: &Path,
         settings: ReadingSettings,
     ) -> Vec<&FolderMediaItem> {
-        let images = self
-            .reading_sequence(settings.folder_reversed)
-            .collect::<Vec<_>>();
+        let images = self.items_of_kind(MediaKind::Image).collect::<Vec<_>>();
         let Some(current) = images.iter().position(|item| item.path == current_path) else {
             return Vec::new();
         };
@@ -209,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn reading_folder_reversal_partitions_from_the_new_start_independently_of_direction() {
+    fn reading_spreads_follow_shell_order_independently_of_direction() {
         for total in 0..25 {
             let images: Vec<_> = (0..total)
                 .map(|index| item(&format!("{}.png", 30 - index), MediaKind::Image))
@@ -228,66 +212,59 @@ mod tests {
                 captured_at: SystemTime::UNIX_EPOCH,
             };
             let original = snapshot.items.clone();
-            for folder_reversed in [false, true] {
-                let mut expected = images.clone();
-                if folder_reversed {
-                    expected.reverse();
-                }
-                assert_eq!(
-                    snapshot
-                        .reading_sequence(folder_reversed)
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                    expected
-                );
-                for page_count in 2..=10 {
-                    for first_page_count in 1..=page_count {
-                        for reversed in [false, true] {
-                            let settings = ReadingSettings {
-                                page_count,
-                                first_page_count,
-                                folder_reversed,
-                                reversed,
-                                ..Default::default()
-                            };
-                            let mut start = 0;
-                            while start < total {
-                                let count = if start == 0 {
-                                    first_page_count
-                                } else {
-                                    page_count
-                                }
-                                .min(total - start);
-                                let end = start + count;
-                                let mut spread = expected[start..end].iter().collect::<Vec<_>>();
-                                if reversed {
-                                    spread.reverse();
-                                }
-                                for entry in &expected[start..end] {
-                                    assert_eq!(
-                                        snapshot.reading_items(&entry.path, settings),
-                                        spread
-                                    );
-                                }
-                                assert_eq!(
-                                    settings.adjacent_spread(start, total, true),
-                                    (end < total).then_some(end)
-                                );
-                                if start > 0 {
-                                    let previous = settings
-                                        .adjacent_spread(start, total, false)
-                                        .expect("previous");
-                                    assert_eq!(
-                                        settings.adjacent_spread(previous, total, true),
-                                        Some(start)
-                                    );
-                                }
-                                start = end;
+
+            let expected = images.clone();
+            assert_eq!(
+                snapshot
+                    .items_of_kind(MediaKind::Image)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for page_count in 2..=10 {
+                for first_page_count in 1..=page_count {
+                    for reversed in [false, true] {
+                        let settings = ReadingSettings {
+                            page_count,
+                            first_page_count,
+                            reversed,
+                            ..Default::default()
+                        };
+                        let mut start = 0;
+                        while start < total {
+                            let count = if start == 0 {
+                                first_page_count
+                            } else {
+                                page_count
                             }
+                            .min(total - start);
+                            let end = start + count;
+                            let mut spread = expected[start..end].iter().collect::<Vec<_>>();
+                            if reversed {
+                                spread.reverse();
+                            }
+                            for entry in &expected[start..end] {
+                                assert_eq!(snapshot.reading_items(&entry.path, settings), spread);
+                            }
+                            assert_eq!(
+                                settings.adjacent_spread(start, total, true),
+                                (end < total).then_some(end)
+                            );
+                            if start > 0 {
+                                let previous = settings
+                                    .adjacent_spread(start, total, false)
+                                    .expect("previous");
+                                assert_eq!(
+                                    settings.adjacent_spread(previous, total, true),
+                                    Some(start)
+                                );
+                            }
+                            start = end;
                         }
                     }
                 }
             }
+
             assert_eq!(
                 snapshot.items, original,
                 "reading never mutates Shell order"

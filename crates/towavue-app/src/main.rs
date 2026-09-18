@@ -2835,9 +2835,7 @@ where
     fn image_prefetch_paths(&self) -> Option<Vec<PathBuf>> {
         let snapshot = self.folder_snapshot.as_ref()?;
         let path = self.reading_focus_path()?;
-        let images: Vec<_> = snapshot
-            .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
-            .collect();
+        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
         let current = images.iter().position(|item| &item.path == path)?;
         if !self.reading_mode {
             // Keep ordinary navigation speculation bounded to nine neighbors.
@@ -6098,9 +6096,7 @@ where
             let Some(snapshot) = &self.folder_snapshot else {
                 return;
             };
-            let images: Vec<_> = snapshot
-                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
-                .collect();
+            let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
             let Some(index) = images
                 .iter()
                 .position(|item| Some(&item.path) == self.reading_focus_path())
@@ -7299,12 +7295,7 @@ where
                 self.reading_settings.toggle_axis();
                 self.request_redraw();
             }
-            CommandId::ReverseReadingFolderOrder => {
-                let mut settings = self.reading_settings;
-                settings.folder_reversed = !settings.folder_reversed;
-                self.set_reading_layout(true, settings);
-                self.set_status(self.reading_status());
-            }
+            CommandId::ReloadFolderOrder => self.refresh_folder_snapshot(),
             CommandId::ReverseReadingOrder => {
                 self.reading_settings.reversed = !self.reading_settings.reversed;
                 self.request_redraw();
@@ -9020,9 +9011,7 @@ where
         else {
             return;
         };
-        let images: Vec<_> = snapshot
-            .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
-            .collect();
+        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
         let Some(current) = images.iter().position(|item| &item.path == path) else {
             return;
         };
@@ -9135,13 +9124,9 @@ where
             return;
         }
         let target = if last {
-            snapshot
-                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
-                .next_back()
+            snapshot.items_of_kind(MediaKind::Image).next_back()
         } else {
-            snapshot
-                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
-                .next()
+            snapshot.items_of_kind(MediaKind::Image).next()
         };
         if let Some(target) = target
             && (&target.path != path || !self.reading_source_visible())
@@ -9887,7 +9872,7 @@ where
             };
         }
         format!(
-            "{}Reading {} · {}first {}{}",
+            "{}Reading {} · {}first {}",
             if self.reading_drag.is_some() {
                 "(\u{2195}) "
             } else {
@@ -9900,11 +9885,6 @@ where
                 ""
             },
             self.reading_settings.first_page_count,
-            if self.reading_settings.folder_reversed {
-                " · reverse folder"
-            } else {
-                ""
-            }
         )
     }
 
@@ -18207,7 +18187,6 @@ mod tests {
                             first_page_count,
                             axis,
                             reversed,
-                            folder_reversed: false,
                         };
                         for (current, path) in paths.iter().enumerate() {
                             app.path = Some(path.clone());
@@ -20380,6 +20359,31 @@ mod tests {
             .expect("initial folder snapshot");
         let edit = app.edit_state();
         assert!(app.edits.values().any(EditHistory::is_dirty));
+        let media_generation = app.media_generation;
+        app.process_shortcut("F5".parse().expect("reload shortcut"));
+        let refresh_generation = app
+            .pending_folder
+            .as_ref()
+            .expect("F5 requests fresh order")
+            .0;
+        assert_ne!(refresh_generation, snapshot.generation);
+        assert!(
+            app.pending_guard.is_none(),
+            "order reload does not edit or close the source"
+        );
+        wait_for_folder(&mut app);
+        assert_eq!(
+            app.folder_snapshot
+                .as_ref()
+                .expect("fresh order")
+                .generation,
+            refresh_generation
+        );
+        assert_eq!(app.media_generation, media_generation);
+        assert_eq!(app.path, path);
+        assert_eq!(app.tabs, tabs);
+        assert_eq!(app.edit_state(), edit);
+        assert!(app.edits.values().any(EditHistory::is_dirty));
         for rejected in [empty, unsupported] {
             app.open_folder_path(rejected);
             wait_for_folder(&mut app);
@@ -20408,7 +20412,7 @@ mod tests {
         }
         app.open_folder_path(root.join("empty"));
         let open_generation = app.pending_folder.as_ref().expect("pending Open").0;
-        app.refresh_folder_snapshot();
+        app.dispatch(CommandId::ReloadFolderOrder);
         assert_eq!(
             app.pending_folder
                 .as_ref()

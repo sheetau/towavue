@@ -1258,17 +1258,7 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
     ) else {
         return;
     };
-    for (mode, folder_reversed) in [
-        (0, false),
-        (1, false),
-        (2, false),
-        (1, true),
-        (2, true),
-        (3, false),
-        (3, true),
-        (4, false),
-        (4, true),
-    ] {
+    for mode in 0..=4 {
         let partial = mode != 0;
         let primary_failed = mode == 2 || mode == 4;
         let hidden_source = mode >= 3;
@@ -1294,9 +1284,6 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
             // The first three reading pages omit a retained source outside this spread.
             shell_paths.rotate_left(1);
         }
-        if folder_reversed {
-            shell_paths.reverse();
-        }
         let snapshot = FolderSnapshot {
             folder_identity: towavue_core::ShellIdentity::new(vec![0]),
             folder_path: root.clone(),
@@ -1320,7 +1307,6 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
             source.reading_settings.first_page_count = source.reading_settings.page_count;
             source.reading_settings.axis = towavue_core::ReadingAxis::Vertical;
             source.reading_settings.reversed = true;
-            source.reading_settings.folder_reversed = folder_reversed;
             source.folder_snapshot = Some(snapshot.clone());
             if hidden_source {
                 source.reading_focus = snapshot
@@ -1364,10 +1350,6 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
         let pixels = Arc::clone(&source.image_previews[&last].pixels);
         let stale_generation = source.image_generation;
         let destination_id = transfer(&mut source, &mut destination, id);
-        assert_eq!(
-            destination.reading_settings.folder_reversed,
-            folder_reversed
-        );
         assert!(destination.image_loading);
         if hidden_source {
             assert_eq!(destination.reading_focus_path(), Some(&paths[1]));

@@ -74,7 +74,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let position = if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
                 let mut count = 0;
                 let mut position = None;
-                for item in snapshot.reading_sequence(self.reading_settings.folder_reversed) {
+                for item in snapshot.items_of_kind(MediaKind::Image) {
                     if Some(&item.path) == self.reading_focus_path() {
                         position = Some(count);
                     }

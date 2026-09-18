@@ -259,51 +259,46 @@ fn reading_arrows_keep_fixed_shell_spreads_and_ordinary_commands_keep_their_mean
         generation: 1,
         captured_at: std::time::SystemTime::UNIX_EPOCH,
     });
-    for folder_reversed in [false, true] {
-        app.reading_settings.folder_reversed = folder_reversed;
-        let mut paths = paths.clone();
-        if folder_reversed {
-            paths.reverse();
-        }
-        for first in [1, 2] {
-            app.reading_settings.first_page_count = first;
-            for reversed in [false, true] {
-                app.reading_settings.reversed = reversed;
-                for index in 0..paths.len() {
-                    app.path = Some(paths[index].clone());
-                    app.tabs
-                        .active_mut()
-                        .expect("active tab")
-                        .target
-                        .set_current_path(paths[index].clone(), MediaKind::Image);
-                    for (key, forward) in [
-                        ("Left", reversed),
-                        ("Right", !reversed),
-                        ("Space", true),
-                        ("Backspace", false),
-                    ] {
-                        let target =
-                            app.reading_settings
-                                .adjacent_spread(index, paths.len(), forward);
-                        app.process_shortcut(key.parse().expect("valid shortcut"));
-                        match target {
-                            Some(target) => assert!(
-                                matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &paths[target]),
-                                "{key} at {index}, reversed={reversed}"
-                            ),
-                            None => {
-                                assert!(app.pending_guard.is_none(), "stop at the reading boundary")
-                            }
+
+    let paths = paths.clone();
+    for first in [1, 2] {
+        app.reading_settings.first_page_count = first;
+        for reversed in [false, true] {
+            app.reading_settings.reversed = reversed;
+            for index in 0..paths.len() {
+                app.path = Some(paths[index].clone());
+                app.tabs
+                    .active_mut()
+                    .expect("active tab")
+                    .target
+                    .set_current_path(paths[index].clone(), MediaKind::Image);
+                for (key, forward) in [
+                    ("Left", reversed),
+                    ("Right", !reversed),
+                    ("Space", true),
+                    ("Backspace", false),
+                ] {
+                    let target = app
+                        .reading_settings
+                        .adjacent_spread(index, paths.len(), forward);
+                    app.process_shortcut(key.parse().expect("valid shortcut"));
+                    match target {
+                        Some(target) => assert!(
+                            matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &paths[target]),
+                            "{key} at {index}, reversed={reversed}"
+                        ),
+                        None => {
+                            assert!(app.pending_guard.is_none(), "stop at the reading boundary")
                         }
-                        app.resolve_guard(GuardDecision::Cancel);
-                        assert_eq!(app.path.as_ref(), Some(&paths[index]));
-                        assert_eq!(app.edits, history);
                     }
+                    app.resolve_guard(GuardDecision::Cancel);
+                    assert_eq!(app.path.as_ref(), Some(&paths[index]));
+                    assert_eq!(app.edits, history);
                 }
             }
         }
     }
-    app.reading_settings.folder_reversed = false;
+
     app.path = Some(paths[2].clone());
     app.reading_settings.reversed = false;
     app.process_shortcut("H".parse().expect("valid shortcut"));
@@ -325,188 +320,183 @@ fn reversed_seek_mirrors_paint_hover_drag_and_focused_keys_but_not_numeric_indic
     ) else {
         return;
     };
-    for folder_reversed in [false, true] {
-        for density in [1.0, 1.25, 2.0] {
-            for reading in [false, true] {
-                for reversed in [false, true] {
-                    let mirror = reading && reversed;
-                    let mut app = Application::new(None, |_| {}).expect("application");
-                    let paths: Vec<_> = (0..7)
-                        .rev()
-                        .map(|i| root.join(format!("{i}.png")))
-                        .collect();
-                    app.path = Some(paths[1].clone());
-                    app.tabs.open_new(paths[1].clone(), MediaKind::Image);
-                    app.media_kind = Some(MediaKind::Image);
-                    app.reading_mode = reading;
-                    app.reading_settings.reversed = reversed;
-                    app.reading_settings.folder_reversed = folder_reversed;
-                    let mut shell_paths = paths.clone();
-                    if reading && folder_reversed {
-                        shell_paths.reverse();
-                    }
-                    app.folder_snapshot = Some(FolderSnapshot {
-                        folder_identity: towavue_core::ShellIdentity::new(vec![]),
-                        folder_path: root.clone(),
-                        items: shell_paths
-                            .iter()
-                            .map(|path| towavue_core::FolderMediaItem {
-                                identity: towavue_core::ShellIdentity::new(vec![]),
-                                path: path.clone(),
-                                kind: MediaKind::Image,
-                            })
-                            .collect(),
-                        sort_columns: vec![],
-                        source: FolderSnapshotSource::LiveExplorerView,
-                        generation: 1,
-                        captured_at: std::time::SystemTime::UNIX_EPOCH,
-                    });
-                    let context = fonts::test_context();
-                    context.enable_accesskit();
-                    context.set_pixels_per_point(density);
-                    context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
-                    app.ui_context = Some(context.clone());
-                    let mut time = 0.0;
-                    let mut frame = |app: &mut Application<_>, events| {
-                        time += 0.1;
-                        let mut actions = Vec::new();
-                        let output = context.run_ui(
-                            egui::RawInput {
-                                time: Some(time),
-                                screen_rect: Some(egui::Rect::from_min_size(
-                                    egui::Pos2::ZERO,
-                                    egui::vec2(960.0, 400.0),
-                                )),
-                                events,
-                                ..Default::default()
-                            },
-                            |_| {
-                                app.draw_seek_bar(
-                                    &context,
-                                    egui::Rect::from_min_size(
-                                        egui::pos2(0.0, 376.0),
-                                        egui::vec2(960.0, 24.0),
-                                    ),
-                                    None,
-                                    &mut actions,
-                                )
-                            },
-                        );
-                        (output, actions)
-                    };
-                    for _ in 0..3 {
-                        frame(&mut app, vec![]);
-                    }
-                    let (output, _) = frame(&mut app, vec![]);
-                    let fill = output
-                        .shapes
+
+    for density in [1.0, 1.25, 2.0] {
+        for reading in [false, true] {
+            for reversed in [false, true] {
+                let mirror = reading && reversed;
+                let mut app = Application::new(None, |_| {}).expect("application");
+                let paths: Vec<_> = (0..7)
+                    .rev()
+                    .map(|i| root.join(format!("{i}.png")))
+                    .collect();
+                app.path = Some(paths[1].clone());
+                app.tabs.open_new(paths[1].clone(), MediaKind::Image);
+                app.media_kind = Some(MediaKind::Image);
+                app.reading_mode = reading;
+                app.reading_settings.reversed = reversed;
+                let shell_paths = paths.clone();
+                app.folder_snapshot = Some(FolderSnapshot {
+                    folder_identity: towavue_core::ShellIdentity::new(vec![]),
+                    folder_path: root.clone(),
+                    items: shell_paths
                         .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Rect(rect) if rect.fill == chrome::FOREGROUND => {
-                                Some(rect.rect)
-                            }
-                            _ => None,
+                        .map(|path| towavue_core::FolderMediaItem {
+                            identity: towavue_core::ShellIdentity::new(vec![]),
+                            path: path.clone(),
+                            kind: MediaKind::Image,
                         })
-                        .expect("progress fill");
-                    if mirror {
-                        assert_eq!(fill.right(), 960.0);
-                        assert!((fill.left() - 800.0).abs() < 0.1);
-                    } else {
-                        assert_eq!(fill.left(), 0.0);
-                        assert!((fill.right() - 160.0).abs() < 0.1);
-                    }
-                    let tree = output
-                        .platform_output
-                        .accesskit_update
-                        .expect("accessibility tree");
-                    let (id, node) = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| node.label() == Some("Image position"))
-                        .expect("image position slider");
-                    assert_eq!(node.numeric_value(), Some(2.0));
-                    let bounds = node.bounds().expect("slider bounds");
-                    let rect = egui::Rect::from_min_max(
-                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
-                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        .collect(),
+                    sort_columns: vec![],
+                    source: FolderSnapshotSource::LiveExplorerView,
+                    generation: 1,
+                    captured_at: std::time::SystemTime::UNIX_EPOCH,
+                });
+                let context = fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+                app.ui_context = Some(context.clone());
+                let mut time = 0.0;
+                let mut frame = |app: &mut Application<_>, events| {
+                    time += 0.1;
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            time: Some(time),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 400.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |_| {
+                            app.draw_seek_bar(
+                                &context,
+                                egui::Rect::from_min_size(
+                                    egui::pos2(0.0, 376.0),
+                                    egui::vec2(960.0, 24.0),
+                                ),
+                                None,
+                                &mut actions,
+                            )
+                        },
                     );
-                    let point = egui::pos2(egui::lerp(rect.x_range(), 0.2), rect.center().y);
-                    for _ in 0..12 {
-                        frame(&mut app, vec![egui::Event::PointerMoved(point)]);
-                    }
-                    let target = if mirror { 5 } else { 1 };
-                    let (hover, _) = frame(&mut app, vec![]);
-                    assert!(hover.shapes.iter().any(|shape| matches!(&shape.shape,
+                    (output, actions)
+                };
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let (output, _) = frame(&mut app, vec![]);
+                let fill = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect) if rect.fill == chrome::FOREGROUND => {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .expect("progress fill");
+                if mirror {
+                    assert_eq!(fill.right(), 960.0);
+                    assert!((fill.left() - 800.0).abs() < 0.1);
+                } else {
+                    assert_eq!(fill.left(), 0.0);
+                    assert!((fill.right() - 160.0).abs() < 0.1);
+                }
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .expect("accessibility tree");
+                let (id, node) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Image position"))
+                    .expect("image position slider");
+                assert_eq!(node.numeric_value(), Some(2.0));
+                let bounds = node.bounds().expect("slider bounds");
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                let point = egui::pos2(egui::lerp(rect.x_range(), 0.2), rect.center().y);
+                for _ in 0..12 {
+                    frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+                }
+                let target = if mirror { 5 } else { 1 };
+                let (hover, _) = frame(&mut app, vec![]);
+                assert!(hover.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text().contains(&display_name(&paths[target])))),
                     "hover caption follows the mirrored target");
-                    assert_eq!(app.path.as_ref(), Some(&paths[1]), "hover is read-only");
-                    let button = |pos, pressed| egui::Event::PointerButton {
-                        pos,
-                        button: egui::PointerButton::Primary,
-                        pressed,
-                        modifiers: egui::Modifiers::NONE,
-                    };
-                    frame(&mut app, vec![button(point, true)]);
-                    let (_, actions) = frame(&mut app, vec![button(point, false)]);
-                    let target = if mirror { 5 } else { 1 };
-                    if target != 1 {
-                        assert!(
-                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
-                        );
-                    } else {
-                        assert!(actions.is_empty());
-                    }
-                    let start = rect.center();
-                    frame(
-                        &mut app,
-                        vec![egui::Event::PointerMoved(start), button(start, true)],
+                assert_eq!(app.path.as_ref(), Some(&paths[1]), "hover is read-only");
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut app, vec![button(point, true)]);
+                let (_, actions) = frame(&mut app, vec![button(point, false)]);
+                let target = if mirror { 5 } else { 1 };
+                if target != 1 {
+                    assert!(
+                        matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
                     );
-                    let (_, actions) = frame(&mut app, vec![egui::Event::PointerMoved(point)]);
-                    if target != 1 {
-                        assert!(
-                            matches!(actions.as_slice(), [UiAction::ScrubImage(path, _, _)] if path == &paths[target])
-                        );
-                    }
-                    frame(
-                        &mut app,
-                        vec![button(point, false), egui::Event::PointerGone],
+                } else {
+                    assert!(actions.is_empty());
+                }
+                let start = rect.center();
+                frame(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(start), button(start, true)],
+                );
+                let (_, actions) = frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+                if target != 1 {
+                    assert!(
+                        matches!(actions.as_slice(), [UiAction::ScrubImage(path, _, _)] if path == &paths[target])
                     );
-                    let access = |action, data| {
-                        egui::Event::AccessKitActionRequest(ActionRequest {
-                            action,
-                            target_tree: TreeId::ROOT,
-                            target_node: *id,
-                            data,
-                        })
-                    };
-                    frame(&mut app, vec![access(Action::Focus, None)]);
-                    for (key, target) in [
-                        (egui::Key::ArrowLeft, if mirror { 2 } else { 0 }),
-                        (egui::Key::ArrowRight, if mirror { 0 } else { 2 }),
-                    ] {
-                        let (_, actions) = frame(
-                            &mut app,
-                            vec![egui::Event::Key {
-                                key,
-                                physical_key: None,
-                                pressed: true,
-                                repeat: false,
-                                modifiers: egui::Modifiers::NONE,
-                            }],
-                        );
-                        assert!(
-                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
-                        );
-                    }
-                    for (action, data, target) in [
-                        (Action::Increment, None, 2),
-                        (Action::SetValue, Some(ActionData::NumericValue(7.0)), 6),
-                    ] {
-                        let (_, actions) = frame(&mut app, vec![access(action, data)]);
-                        assert!(
-                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
-                        );
-                    }
+                }
+                frame(
+                    &mut app,
+                    vec![button(point, false), egui::Event::PointerGone],
+                );
+                let access = |action, data| {
+                    egui::Event::AccessKitActionRequest(ActionRequest {
+                        action,
+                        target_tree: TreeId::ROOT,
+                        target_node: *id,
+                        data,
+                    })
+                };
+                frame(&mut app, vec![access(Action::Focus, None)]);
+                for (key, target) in [
+                    (egui::Key::ArrowLeft, if mirror { 2 } else { 0 }),
+                    (egui::Key::ArrowRight, if mirror { 0 } else { 2 }),
+                ] {
+                    let (_, actions) = frame(
+                        &mut app,
+                        vec![egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                    );
+                    assert!(
+                        matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
+                    );
+                }
+                for (action, data, target) in [
+                    (Action::Increment, None, 2),
+                    (Action::SetValue, Some(ActionData::NumericValue(7.0)), 6),
+                ] {
+                    let (_, actions) = frame(&mut app, vec![access(action, data)]);
+                    assert!(
+                        matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])
+                    );
                 }
             }
         }

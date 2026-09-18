@@ -93,7 +93,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::DecreaseReadingFirstPage, "Ctrl+Shift+Left"),
         (CommandId::ToggleReadingAxis, "R"),
         (CommandId::ReverseReadingOrder, "H"),
-        (CommandId::ReverseReadingFolderOrder, "Alt+H"),
+        (CommandId::ReloadFolderOrder, "F5"),
         (CommandId::Undo, "Ctrl+Z"),
         (CommandId::Redo, "Ctrl+Shift+Z"),
         (CommandId::ApplyCrop, "Ctrl+Y"),
@@ -224,6 +224,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         let Some((command, sequence)) = line.split_once('=') else {
             return Err(format!("shortcuts.conf line {} is missing '='", index + 1));
         };
+        // Retired generated declarations must not invalidate unrelated custom keys.
+        if command.trim() == "reverse_reading_folder_order" {
+            continue;
+        }
         let command = command
             .trim()
             .parse::<CommandId>()
@@ -380,7 +384,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::OpenKeyboardSettings
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
-                        | CommandId::ReverseReadingFolderOrder
+                        | CommandId::ReloadFolderOrder
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom

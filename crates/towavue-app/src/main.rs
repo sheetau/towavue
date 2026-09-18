@@ -5090,6 +5090,7 @@ where
                                                     id,
                                                     !self.closed_tabs.is_empty(),
                                                     &self.shortcuts,
+                                                    None,
                                                 )
                                             })
                                         {
@@ -5286,6 +5287,7 @@ where
                                                     tab.id,
                                                     !self.closed_tabs.is_empty(),
                                                     &self.shortcuts,
+                                                    self.tab_mute_state(tab.id),
                                                 )
                                             })
                                     {
@@ -8200,6 +8202,7 @@ where
         };
         match command {
             CommandId::ReopenClosedTab => self.reopen_closed_tab(),
+            CommandId::ToggleMute => self.toggle_tab_mute(id),
             CommandId::CopyFilePath => {
                 if let Some(context) = &self.ui_context {
                     context.copy_text(path.display().to_string());

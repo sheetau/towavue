@@ -121,6 +121,7 @@ pub fn show(
     target: TabId,
     can_reopen: bool,
     shortcuts: &ShortcutBindings,
+    muted: Option<bool>,
 ) -> Option<CommandId> {
     let keyboard = crate::menu::MenuKeyboard::begin(ui);
     let mut items = Vec::new();
@@ -134,6 +135,7 @@ pub fn show(
             CloseAllTabs,
         ][..],
         &[ReopenClosedTab],
+        &[ToggleMute],
         &[CopyFilePath, RevealFile],
     ] {
         if !items.is_empty() {
@@ -146,12 +148,22 @@ pub fn show(
                 .expect("registered tab command");
             let enabled = match command {
                 ReopenClosedTab => can_reopen,
+                ToggleMute => muted.is_some(),
                 CopyFilePath | RevealFile => tabs.tabs().iter().any(|tab| tab.id == target),
                 _ => !close_targets(tabs, target, *command).is_empty(),
             };
+            let title = if *command == ToggleMute {
+                if muted == Some(true) {
+                    "Unmute tab"
+                } else {
+                    "Mute tab"
+                }
+            } else {
+                definition.title
+            };
             let response = ui.add_enabled(
                 enabled,
-                egui::Button::new(definition.title).shortcut_text(
+                egui::Button::new(title).shortcut_text(
                     shortcuts.label(
                         *command,
                         towavue_core::CommandContext {

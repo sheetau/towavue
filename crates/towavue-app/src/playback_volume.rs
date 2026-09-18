@@ -72,14 +72,52 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .level
     }
 
-    pub(super) fn toggle_tab_mute(&mut self, id: TabId) {
-        let Some(tab) = self.tabs.tabs().iter().find(|tab| tab.id == id) else {
-            return;
+    /// Context menus also control paused or unopened media without activating it.
+    /// A known silent video is ineligible; unknown media retains its initial gain
+    /// until decoding discovers the streams. Never apply it to a different source.
+    pub(super) fn tab_mute_state(&self, id: TabId) -> Option<bool> {
+        let tab = self.tabs.tabs().iter().find(|tab| tab.id == id)?;
+        if !matches!(tab.target.media_kind(), MediaKind::Audio | MediaKind::Video) {
+            return None;
+        }
+        let session = if self.tabs.active().is_some_and(|tab| tab.id == id) {
+            (self.path.as_deref() == Some(tab.target.current_path()))
+                .then_some(self.session.as_ref())
+                .flatten()
+        } else {
+            self.retained_playback
+                .get(&id)
+                .filter(|saved| saved.path == tab.target.current_path())
+                .and_then(|saved| saved.session.as_ref())
         };
-        if self.tab_audio_indicator(tab).is_none() {
+        if session.is_some_and(|session| !session.has_audio()) {
+            return None;
+        }
+        Some(
+            self.playback_volumes
+                .get(&id)
+                .copied()
+                .unwrap_or_default()
+                .level
+                == 0.0,
+        )
+    }
+
+    pub(super) fn toggle_tab_mute(&mut self, id: TabId) {
+        if self.tab_mute_state(id).is_none() {
             return;
         }
-        if self.tabs.active().is_some_and(|tab| tab.id == id) {
+        self.seed_playback_volume(id);
+        let path = self
+            .tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == id)
+            .expect("eligible media tab")
+            .target
+            .current_path()
+            .to_owned();
+        if self.tabs.active().is_some_and(|tab| tab.id == id) && self.path.as_ref() == Some(&path) {
             self.toggle_playback_mute();
             return;
         }
@@ -99,13 +137,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .map(EditHistory::state)
             .unwrap_or_default()
             .volume;
-        self.retained_playback
+        if let Some(session) = self
+            .retained_playback
             .get_mut(&id)
-            .expect("playing tab")
-            .session
-            .as_mut()
-            .expect("audio output")
-            .set_volume(gain * volume.level);
+            .filter(|saved| saved.path == path)
+            .and_then(|saved| saved.session.as_mut())
+        {
+            session.set_volume(gain * volume.level);
+        }
         self.request_redraw();
     }
 
@@ -521,6 +560,25 @@ mod tests {
                     .expect("background")
                     .state = PlaybackState::Paused;
                 assert_eq!(app.tab_audio_indicator(first_tab), None);
+                let active_before_mute = app.tabs.active_id();
+                let history_before_mute = app.edits.clone();
+                for (muted, expected) in [(true, 0.0), (false, 2.0)] {
+                    app.dispatch_tab_command(first, CommandId::ToggleMute);
+                    assert_eq!(app.tab_mute_state(first), Some(muted));
+                    let saved = &app.retained_playback[&first];
+                    assert_eq!(saved.state, PlaybackState::Paused);
+                    assert_eq!(
+                        saved
+                            .session
+                            .as_ref()
+                            .expect("paused audio")
+                            .verification_volume(),
+                        (expected, Some(expected))
+                    );
+                    assert_eq!(app.tabs.active_id(), active_before_mute);
+                    assert_eq!(app.edits, history_before_mute);
+                    check(&app, 0.0);
+                }
                 app.retained_playback
                     .get_mut(&first)
                     .expect("background")

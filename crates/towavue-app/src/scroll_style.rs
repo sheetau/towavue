@@ -27,10 +27,10 @@ fn with_style<R>(
     // egui paints bars with the parent's widget visuals after laying out content.
     // Restore the content's style separately, without adding a scope or changing IDs.
     let widgets = &mut ui.visuals_mut().widgets;
-    // egui's opacity states refer to the entire track, but widget visuals
-    // distinguish the thumb itself. Keep track hover at the idle thumb color.
+    // Track and thumb hover share one opaque handle color. The scroll style
+    // supplies idle opacity and preserves the tab strip's separate fade.
     let handle_color = egui::Color32::from_gray(0xcc);
-    widgets.inactive.fg_stroke.color = handle_color.gamma_multiply(0.6);
+    widgets.inactive.fg_stroke.color = handle_color;
     widgets.hovered.fg_stroke.color = handle_color;
     widgets.active.fg_stroke.color = handle_color;
     for visual in [
@@ -216,8 +216,8 @@ mod tests {
                 assert!(!handle.contains(track_point));
                 let track_hover = bars(&render(Some(track_point), false));
                 assert_eq!(
-                    track_hover[1].fill, idle[1].fill,
-                    "track hover does not brighten the handle"
+                    track_hover[1].fill, handle_color,
+                    "track hover shares the opaque handle color"
                 );
                 assert!(
                     (102..=128).contains(&track_hover[0].fill.a()),

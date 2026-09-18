@@ -539,3 +539,76 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         "PASS hardware tab context: keyboard/Menu key/UIA from tab and close, Escape focus, unchanged history/transport and CPU transfers 0"
     );
 }
+
+#[test]
+fn tab_context_mute_targets_unopened_media_and_disables_unrelated_tabs() {
+    let Some(root) = tests::isolated_test_root(
+        "tab_menu::keyboard_tests::tab_context_mute_targets_unopened_media_and_disables_unrelated_tabs",
+    ) else {
+        return;
+    };
+    let mut app = setup(&root);
+    let active = app.tabs.active_id().expect("active image");
+    let audio = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
+    app.seed_playback_volume(audio);
+    let video = app.tabs.open_new(root.join("video.mp4"), MediaKind::Video);
+    app.seed_playback_volume(video);
+    let gallery = app.tabs.open_gallery();
+    app.tabs.activate(active);
+    let history = app.edits.clone();
+    let generation = app.media_generation;
+    for (id, label, eligible) in [
+        (audio, "audio.wav", true),
+        (video, "video.mp4", true),
+        (active, "third.png", false),
+        (gallery, "Gallery tab", false),
+    ] {
+        let origin = node(&settle(&mut app), label);
+        tree(
+            &mut app,
+            vec![action(origin, egui::accesskit::Action::ShowContextMenu)],
+        );
+        let menu = settle(&mut app);
+        let (target, button) = menu
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Mute tab")))
+            .expect("mute entry always present");
+        assert_eq!(button.is_disabled(), !eligible);
+        tree(
+            &mut app,
+            vec![action(*target, egui::accesskit::Action::Click)],
+        );
+        assert_eq!(app.tab_mute_state(id), eligible.then_some(true));
+        egui::Popup::close_all(app.ui_context.as_ref().expect("context"));
+        if eligible {
+            tree(
+                &mut app,
+                vec![action(origin, egui::accesskit::Action::ShowContextMenu)],
+            );
+            let menu = settle(&mut app);
+            let (target, button) = menu
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Unmute tab")))
+                .expect("muted state changes the action");
+            assert!(!button.is_disabled());
+            tree(
+                &mut app,
+                vec![action(*target, egui::accesskit::Action::Click)],
+            );
+            assert_eq!(app.tab_mute_state(id), Some(false));
+        }
+        assert_eq!(app.tabs.active_id(), Some(active));
+        assert_eq!(app.media_generation, generation);
+        assert_eq!(app.edits, history);
+        assert!(
+            app.session.is_none() && app.retained_playback.is_empty(),
+            "context action neither loads nor starts background playback"
+        );
+        assert!(app.pending_guard.is_none());
+    }
+    app.tabs.close(audio);
+    app.dispatch_tab_command(audio, CommandId::ToggleMute);
+    assert_eq!(app.tab_mute_state(audio), None, "stale target is harmless");
+}

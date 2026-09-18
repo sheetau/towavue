@@ -120,8 +120,8 @@ pub fn style(style: &mut egui::Style) {
     style.spacing.scroll.dormant_background_opacity = 0.0;
     style.spacing.scroll.active_background_opacity = 0.0;
     style.spacing.scroll.interact_background_opacity = 0.45;
-    style.spacing.scroll.dormant_handle_opacity = 1.0;
-    style.spacing.scroll.active_handle_opacity = 1.0;
+    style.spacing.scroll.dormant_handle_opacity = 0.6;
+    style.spacing.scroll.active_handle_opacity = 0.6;
     style.spacing.scroll.interact_handle_opacity = 1.0;
     style.visuals.window_shadow.offset = [0, 8];
     style.visuals.window_shadow.blur = 18;

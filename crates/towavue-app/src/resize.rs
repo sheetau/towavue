@@ -185,7 +185,15 @@ fn scroll_on_focus(response: egui::Response) -> egui::Response {
 }
 
 pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
-    text_input_rows(ui, label, value, 1)
+    text_input_rows(ui, label, value, 1, true)
+}
+
+pub(super) fn unframed_text_input(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+) -> egui::Response {
+    text_input_rows(ui, label, value, 1, false)
 }
 
 pub(super) fn multiline_text_input(
@@ -193,7 +201,7 @@ pub(super) fn multiline_text_input(
     label: &str,
     value: &mut String,
 ) -> egui::Response {
-    text_input_rows(ui, label, value, 3)
+    text_input_rows(ui, label, value, 3, true)
 }
 
 fn text_input_rows(
@@ -201,6 +209,7 @@ fn text_input_rows(
     label: &str,
     value: &mut String,
     rows: usize,
+    framed: bool,
 ) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
     let id = ui.make_persistent_id(label);
@@ -230,7 +239,17 @@ fn text_input_rows(
             .desired_width(f32::INFINITY)
             .char_limit(4097)
     };
-    let mut response = ui.add(editor.id(id).hint_text(label));
+    let editor = if framed {
+        editor
+    } else {
+        editor.frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
+    };
+    let mut response = ui
+        .scope(|ui| {
+            ui.visuals_mut().weak_text_color = Some(crate::chrome::BORDER);
+            ui.add(editor.id(id).hint_text(label))
+        })
+        .inner;
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), label)
     });
@@ -339,6 +358,12 @@ pub(crate) mod tests {
                         },
                         density,
                     );
+                    if value.is_empty() {
+                        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                            egui::Shape::Text(text) if text.galley.text() == "Placeholder"
+                                && text.galley.job.sections.iter().all(|section|
+                                    section.format.color == crate::chrome::BORDER))));
+                    }
                 }
             }
         }

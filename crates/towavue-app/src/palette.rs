@@ -236,6 +236,8 @@ impl CommandPalette {
                         memory.request_focus(query_id);
                     }
                 });
+                let weak_text_color = ui.visuals().weak_text_color;
+                ui.visuals_mut().weak_text_color = Some(crate::chrome::BORDER);
                 ui.add_sized(
                     [ui.available_width(), 24.0],
                     egui::TextEdit::singleline(&mut self.query)
@@ -252,6 +254,7 @@ impl CommandPalette {
                         }),
                 )
                 .help_text("Up / Down: select   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
+                ui.visuals_mut().weak_text_color = weak_text_color;
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.query.starts_with('>');
                 if command_mode {
@@ -628,6 +631,12 @@ mod tests {
                     },
                     density,
                 );
+                if query.is_empty() {
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().starts_with("Search files by name")
+                            && text.galley.job.sections.iter().all(|section|
+                                section.format.color == crate::chrome::BORDER))));
+                }
             }
         }
     }

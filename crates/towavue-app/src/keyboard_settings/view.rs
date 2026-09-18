@@ -201,6 +201,7 @@ impl KeyboardSettings {
                             self.begin_edit(row.command.id, row.slot, bindings);
                         }
                         response.context_menu(|ui| {
+                            chrome::flat_buttons(ui);
                             if ui.button("Edit keybinding").clicked() {
                                 self.begin_edit(row.command.id, row.slot, bindings);
                                 ui.close();

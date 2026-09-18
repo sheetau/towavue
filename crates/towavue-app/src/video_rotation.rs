@@ -104,6 +104,7 @@ impl VideoRotationDialog {
                         }
                         ui.label("Black canvas; resampled on the GPU. Export encoding may differ.");
                         ui.horizontal(|ui| {
+                            crate::chrome::flat_buttons(ui);
                             if ui
                                 .add_enabled(value.is_ok(), egui::Button::new("Apply rotation"))
                                 .clicked()

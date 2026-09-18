@@ -152,6 +152,7 @@ impl ResizeDialog {
                         }
                     }
                     ui.horizontal(|ui| {
+                        crate::chrome::flat_buttons(ui);
                         if self
                             .reveal_focus(
                                 ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),

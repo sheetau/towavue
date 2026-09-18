@@ -196,6 +196,7 @@ impl MetadataDialog {
             });
             let options = self.options();
             ui.horizontal(|ui| {
+                crate::chrome::flat_buttons(ui);
                 if ui.add_enabled(options.is_ok() && !self.ime_composing, egui::Button::new("Apply metadata")).clicked() { action = Some(Some(options.expect("valid options"))); }
                 if ui.button("Cancel").clicked() { action = Some(None); }
             });

@@ -99,6 +99,7 @@ impl RotationDialog {
                         ));
                     }
                     ui.horizontal(|ui| {
+                        crate::chrome::flat_buttons(ui);
                         if ui
                             .add_enabled(value.is_some(), egui::Button::new("Apply rotation"))
                             .clicked()

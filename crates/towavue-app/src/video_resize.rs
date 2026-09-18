@@ -51,6 +51,7 @@ impl VideoResizeDialog {
                         }
                         ui.label("Even dimensions; linked edge rounds to 2 pixels. Export encoding may differ.");
                         ui.horizontal(|ui| {
+                            crate::chrome::flat_buttons(ui);
                             if self.inputs.reveal_focus(ui.add_enabled(value.is_ok(), egui::Button::new("Apply resize"))).clicked() {
                                 action = Some(value.ok());
                             }

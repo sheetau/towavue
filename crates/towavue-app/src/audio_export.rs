@@ -61,6 +61,7 @@ impl AudioExportDialog {
                 ui.label("Settings last while this file stays in this tab. Apply does not export a file.");
             });
             ui.horizontal(|ui| {
+                crate::chrome::flat_buttons(ui);
                 if ui.button("Apply options").clicked() { action = Some(Some(self.options)); }
                 if ui.button("Cancel").clicked() { action = Some(None); }
             });

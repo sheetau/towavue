@@ -4029,6 +4029,7 @@ where
                     .show_styled(ui, |ui| {
                         ui.label(error);
                     });
+                chrome::flat_buttons(ui);
                 if ui.button("OK").clicked() {
                     actions.push(UiAction::DismissExportError);
                 }
@@ -4076,6 +4077,7 @@ where
             return;
         };
         let mut contents = |ui: &mut egui::Ui| {
+            chrome::flat_buttons(ui);
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
             ui.add(
                 egui::Label::new(display_name(&export.request.target))
@@ -4152,6 +4154,7 @@ where
             .help_text(&name);
             ui.label("Undo is kept in open tabs.");
             ui.horizontal_wrapped(|ui| {
+                chrome::flat_buttons(ui);
                 if ui
                     .add_enabled(
                         self.active_export.is_none(),
@@ -5788,6 +5791,7 @@ where
                                     .iter()
                                     .find(|definition| definition.id == command)
                                     .map_or(command.as_str(), |definition| definition.title);
+                                chrome::flat_buttons(ui);
                                 let enabled = command_definitions()
                                     .iter()
                                     .find(|definition| definition.id == command)

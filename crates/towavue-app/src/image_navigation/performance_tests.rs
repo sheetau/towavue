@@ -2,6 +2,7 @@ use super::*;
 use std::os::windows::process::CommandExt;
 
 mod gpu;
+mod held_reference;
 mod reference;
 
 pub(super) fn bitmap_fixture(path: &Path) {

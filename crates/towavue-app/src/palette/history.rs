@@ -51,7 +51,9 @@ impl CommandPalette {
             .flatten()
             .map(Choice::Command);
         let context = ui.ctx().clone();
+        reserve_scroll_bar(ui);
         egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
             .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
             .show_styled(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -72,37 +74,33 @@ impl CommandPalette {
                     let shortcut = shortcuts.label(definition.id, commands);
                     let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
                     let selected = self.selected == Some(index);
-                    let close = index < recent_count && (selected || ui.rect_contains_pointer(row));
-                    let mut body = row;
-                    if close {
-                        body.max.x -= 22.0;
-                    }
+                    let controls = selected || ui.rect_contains_pointer(row);
+                    let row_actions =
+                        RowActions::new(row, index < recent_count && controls, controls);
+                    let body = row_actions.body;
                     let background = ui.painter().add(egui::Shape::Noop);
+                    let mut atoms = egui::Atoms::new((definition.title, egui::Atom::grow()));
+                    if !shortcut.is_empty() {
+                        atoms.push_right(label_gap(ui));
+                        atoms.push_right(
+                            egui::RichText::new(&shortcut)
+                                .color(crate::chrome::MUTED)
+                                .atom_max_width(body.width() * 0.5),
+                        );
+                    }
+                    if !group.is_empty() {
+                        atoms.push_right(label_gap(ui));
+                        atoms.push_right(
+                            egui::RichText::new(group)
+                                .small()
+                                .color(crate::chrome::MUTED)
+                                .atom_max_width(body.width() * 0.3),
+                        );
+                    }
                     let response = ui
                         .push_id(definition.id, |ui| {
-                            crate::chrome::flat_buttons(ui);
                             ui.add_enabled_ui(enabled[index], |ui| {
-                                ui.put(
-                                    body,
-                                    egui::Button::selectable(
-                                        selected,
-                                        (
-                                            definition.title,
-                                            egui::Atom::grow(),
-                                            egui::RichText::new(&shortcut)
-                                                .color(crate::chrome::MUTED)
-                                                .atom_max_width(body.width() * 0.5),
-                                            egui::RichText::new(group)
-                                                .small()
-                                                .color(crate::chrome::MUTED)
-                                                .atom_max_width(body.width() * 0.3),
-                                        ),
-                                    )
-                                    .truncate()
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE)
-                                    .min_size(body.size()),
-                                )
+                                row_button(ui, body, selected, atoms)
                             })
                             .inner
                         })
@@ -131,12 +129,24 @@ impl CommandPalette {
                     if response.clicked() && !query_changed {
                         chosen = Some(Choice::Command(definition.id));
                     }
-                    if close {
-                        let close_rect =
-                            egui::Rect::from_min_max(egui::pos2(body.right(), row.top()), row.max);
+                    if let Some(rect) = row_actions.configure {
+                        let configure = ui
+                            .push_id(("configure-command", definition.id), |ui| {
+                                row_icon(ui, rect, '\u{eb51}')
+                            })
+                            .inner
+                            .help_text("Configure keybinding");
+                        context.accesskit_node_builder(configure.id, |node| {
+                            node.set_label(format!("Configure keybinding: {}", definition.title));
+                        });
+                        if configure.clicked() && !query_changed {
+                            chosen = Some(Choice::Configure(definition.id));
+                        }
+                    }
+                    if let Some(close_rect) = row_actions.remove {
                         let remove = ui
                             .push_id(("remove-command", definition.id), |ui| {
-                                crate::chrome::tab_close(ui, close_rect, false)
+                                row_icon(ui, close_rect, '\u{ea76}')
                             })
                             .inner
                             .help_text("Remove from Recently Used");

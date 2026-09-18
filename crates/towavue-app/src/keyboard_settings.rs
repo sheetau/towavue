@@ -133,6 +133,12 @@ impl KeyboardSettings {
         });
     }
 
+    pub(super) fn focus_command(&mut self, command: CommandId) {
+        self.query = format!("@command:{}", command.as_str());
+        self.message = None;
+        self.request_search_focus();
+    }
+
     fn rows(&self, bindings: &ShortcutBindings) -> Vec<Row> {
         let query = self.query.trim().to_lowercase();
         let exact = query
@@ -144,7 +150,9 @@ impl KeyboardSettings {
             for index in 0..bindings.all(command.id).len().max(1) {
                 let bound = bindings.all(command.id).get(index);
                 let keys = bound.map(ToString::to_string).unwrap_or_default();
-                let matches = if let Some(exact) = exact {
+                let matches = if let Some(id) = query.strip_prefix("@command:") {
+                    command.id.as_str() == id
+                } else if let Some(exact) = exact {
                     keys.to_lowercase() == exact
                 } else {
                     let haystack = format!(

@@ -93,3 +93,91 @@ fn palette_use_and_remove_persist_but_direct_dispatch_does_not() {
         std::fs::read_to_string(root.join("command-history.txt")).expect("persisted removal");
     assert_eq!(persisted, "towavue command history v1\n");
 }
+
+#[test]
+fn palette_gear_reuses_settings_keeps_dirty_media_and_does_not_run_or_record_the_target() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::command_history::palette_gear_reuses_settings_keeps_dirty_media_and_does_not_run_or_record_the_target",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    context.global_style_mut(chrome::style);
+    app.ui_context = Some(context);
+    let media = tab_transfer::tests::install(
+        &mut app,
+        root.join("source.png"),
+        tab_transfer::tests::decoded(false),
+    );
+    app.edits
+        .entry(media)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    let edits = app.edits[&media].clone();
+    let shortcuts = std::fs::read(&app.shortcut_path).ok();
+    app.recent_commands = vec![CommandId::OpenFile, CommandId::ZoomIn];
+    let history = app.recent_commands.clone();
+    let mut settings_tab = None;
+    for command in [CommandId::ZoomIn, CommandId::OpenFile] {
+        app.dispatch(CommandId::ToggleCommandPalette);
+        let frame = |app: &mut Application<_>, events| {
+            audio_export::tests::frame(app, egui::vec2(800.0, 560.0), events)
+        };
+        for _ in 0..4 {
+            frame(&mut app, vec![]);
+        }
+        let title = command_definitions()
+            .iter()
+            .find(|item| item.id == command)
+            .expect("command")
+            .title;
+        frame(&mut app, vec![egui::Event::Text(title.to_owned())]);
+        let output = frame(&mut app, vec![]);
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let label = format!("Configure keybinding: {title}");
+        let (gear, _) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(&label))
+            .expect("gear");
+        frame(
+            &mut app,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: *gear,
+                    action: egui::accesskit::Action::Click,
+                    data: None,
+                },
+            )],
+        );
+        assert!(app.keyboard_settings_active() && !app.palette_open);
+        if let Some(id) = settings_tab {
+            assert_eq!(app.tabs.active_id(), Some(id));
+        }
+        settings_tab = app.tabs.active_id();
+        assert_eq!(
+            app.keyboard_settings.query,
+            format!("@command:{}", command.as_str())
+        );
+        assert_eq!(app.recent_commands, history);
+        assert_eq!(app.edits[&media], edits);
+        assert!(app.retained_images.contains_key(&media));
+        assert!(
+            app.pending_dialog.is_none(),
+            "the Open file target must not execute"
+        );
+        assert_eq!(std::fs::read(&app.shortcut_path).ok(), shortcuts);
+    }
+    app.activate_tab(media);
+    app.dispatch(CommandId::CloseTab);
+    assert!(app.pending_guard.is_some());
+    app.handle_ui_action(UiAction::ConfigureKeybinding(CommandId::OpenFolder));
+    assert_eq!(
+        app.tabs.active_id(),
+        Some(media),
+        "a queued gear action cannot bypass a leave guard"
+    );
+}

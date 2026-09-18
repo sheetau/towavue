@@ -132,15 +132,7 @@ impl KeyboardSettings {
                             });
                             for (left, width, text) in [
                                 (34.0, command_width - 34.0, row.command.title),
-                                (
-                                    command_width,
-                                    keys_width,
-                                    if row.keys.is_empty() {
-                                        "Unassigned"
-                                    } else {
-                                        &row.keys
-                                    },
-                                ),
+                                (command_width, keys_width, &row.keys),
                                 (
                                     command_width + keys_width,
                                     (row_width - command_width - keys_width).max(0.0),

@@ -588,3 +588,33 @@ fn unassigned_commands_offer_add_and_record_a_first_binding() {
     assert!(change.expected.is_empty());
     assert_eq!(change.replacement[0].to_string(), "Alt+F9");
 }
+
+#[test]
+fn command_query_matches_only_its_id_and_keeps_unassigned_rows_blank() {
+    let bindings = shortcuts::defaults();
+    let mut settings = KeyboardSettings::default();
+    for command in [CommandId::ZoomIn, CommandId::OpenFile] {
+        settings.focus_command(command);
+        assert_eq!(settings.query, format!("@command:{}", command.as_str()));
+        let rows = settings.rows(&bindings);
+        assert_eq!(rows.len(), bindings.all(command).len().max(1));
+        assert!(rows.iter().all(|row| row.command.id == command));
+    }
+    settings.query = "@command:open_".into();
+    assert!(
+        settings.rows(&bindings).is_empty(),
+        "command IDs are not prefix searches"
+    );
+    let unassigned = command_definitions()
+        .iter()
+        .find(|command| bindings.all(command.id).is_empty())
+        .expect("unassigned");
+    settings.focus_command(unassigned.id);
+    assert_eq!(settings.rows(&bindings).len(), 1);
+    let context = fonts::test_context();
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        settings.show(ui, &bindings, true);
+    });
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == "Unassigned")));
+}

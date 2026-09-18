@@ -14,6 +14,8 @@ use towavue_runtime_windows::RecentKind;
 mod files_tests;
 mod history;
 mod preview;
+mod row;
+use row::{RowActions, label_gap, reserve_scroll_bar, row_button, row_icon};
 
 pub struct CommandPalette {
     query: String,
@@ -59,6 +61,7 @@ pub(crate) struct OpenSources<'a> {
 pub(crate) enum Choice {
     Command(CommandId),
     RemoveCommand(CommandId),
+    Configure(CommandId),
     Open(RecentAction),
 }
 
@@ -131,7 +134,7 @@ impl CommandPalette {
         (
             choice.and_then(|choice| match choice {
                 Choice::Command(command) => Some(command),
-                Choice::Open(_) | Choice::RemoveCommand(_) => None,
+                Choice::Open(_) | Choice::RemoveCommand(_) | Choice::Configure(_) => None,
             }),
             close,
         )
@@ -438,7 +441,9 @@ impl CommandPalette {
             .clamp(1.0, 264.0)
             .min(ui.available_height().max(1.0));
         let scroll_salt = ("quick-open-results", self.folders);
+        reserve_scroll_bar(ui);
         let mut scroll = egui::ScrollArea::vertical()
+            .auto_shrink([false, true])
             .id_salt(scroll_salt)
             .max_height(height);
         if (up || down || query_changed || selection_moved)
@@ -483,10 +488,8 @@ impl CommandPalette {
                 let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
                 let selected_row = selected == Some(index);
                 let close = selected_row || ui.rect_contains_pointer(row);
-                let mut body = row;
-                if close {
-                    body.max.x -= 22.0;
-                }
+                let row_actions = RowActions::new(row, close, false);
+                let body = row_actions.body;
                 let background = ui.painter().add(egui::Shape::Noop);
                 let group = if self.folders && index == 0 {
                     "folders"
@@ -506,33 +509,27 @@ impl CommandPalette {
                 }
                 let (name_width, parent_width, group_width) =
                     file_label_widths(ui, body.width(), &name, group);
+                let mut atoms = egui::Atoms::new((
+                    name.as_ref().atom_max_width(name_width),
+                    label_gap(ui),
+                    egui::RichText::new(parent.as_ref())
+                        .small()
+                        .color(crate::chrome::MUTED)
+                        .atom_max_width(parent_width)
+                        .atom_shrink(true),
+                    egui::Atom::grow(),
+                ));
+                if !group.is_empty() {
+                    atoms.push_right(label_gap(ui));
+                    atoms.push_right(
+                        egui::RichText::new(group)
+                            .small()
+                            .color(crate::chrome::MUTED)
+                            .atom_max_width(group_width),
+                    );
+                }
                 let response = ui
-                    .push_id(path, |ui| {
-                        crate::chrome::flat_buttons(ui);
-                        ui.put(
-                            body,
-                            egui::Button::selectable(
-                                selected_row,
-                                (
-                                    name.as_ref().atom_max_width(name_width),
-                                    egui::RichText::new(parent.as_ref())
-                                        .small()
-                                        .color(crate::chrome::MUTED)
-                                        .atom_max_width(parent_width)
-                                        .atom_shrink(true),
-                                    egui::Atom::grow(),
-                                    egui::RichText::new(group)
-                                        .small()
-                                        .color(crate::chrome::MUTED)
-                                        .atom_max_width(group_width),
-                                ),
-                            )
-                            .truncate()
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::NONE)
-                            .min_size(body.size()),
-                        )
-                    })
+                    .push_id(path, |ui| row_button(ui, body, selected_row, atoms))
                     .inner
                     .help_text(path.to_string_lossy());
                 ui.painter()
@@ -541,9 +538,7 @@ impl CommandPalette {
                     node.clear_toggled();
                     node.set_label(path.to_string_lossy().as_ref());
                 });
-                if close {
-                    let close_rect =
-                        egui::Rect::from_min_max(egui::pos2(body.right(), row.top()), row.max);
+                if let Some(close_rect) = row_actions.remove {
                     let label = if self.folders || index < recent_count {
                         "Remove from Recently Opened"
                     } else {
@@ -551,7 +546,7 @@ impl CommandPalette {
                     };
                     let remove = ui
                         .push_id(("remove-path", path), |ui| {
-                            crate::chrome::tab_close(ui, close_rect, false)
+                            row_icon(ui, close_rect, '\u{ea76}')
                         })
                         .inner
                         .help_text(label);
@@ -598,8 +593,8 @@ impl CommandPalette {
 }
 
 fn file_label_widths(ui: &egui::Ui, width: f32, name: &str, group: &str) -> (f32, f32, f32) {
-    let available =
-        (width - 2.0 * ui.spacing().button_padding.x - 3.0 * ui.spacing().icon_spacing).max(0.0);
+    let gaps = if group.is_empty() { 1.0 } else { 2.0 };
+    let available = (width - 6.0 - gaps * ui.spacing().icon_spacing).max(0.0);
     let measure = |text: egui::WidgetText| {
         text.into_galley(
             ui,

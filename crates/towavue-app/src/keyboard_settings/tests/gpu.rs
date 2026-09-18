@@ -29,11 +29,32 @@ fn keyboard_settings_ui_reaches_gpu_at_three_densities() {
                 let mut app = Application::new(None, |_| {}).expect("settings GPU fixture");
                 app.ui_context = Some(context.clone());
                 app.dispatch(CommandId::OpenKeyboardSettings);
-                for (phase_index, phase) in ["list", "search", "edit"].into_iter().enumerate() {
+                for (phase_index, phase) in
+                    ["list", "search", "commands", "files", "folders", "edit"]
+                        .into_iter()
+                        .enumerate()
+                {
                     if phase == "search" {
                         app.keyboard_settings.query = "reading".into();
                     }
+                    if phase == "commands" {
+                        app.recent_commands = vec![CommandId::OpenFile, CommandId::OpenFolder];
+                        app.dispatch(CommandId::ToggleCommandPalette);
+                    }
+                    if phase == "files" || phase == "folders" {
+                        app.recent_paths = vec![
+                            self.root.join("Example media.png"),
+                            self.root.join("Another image.png"),
+                        ];
+                        app.recent_folders = vec![
+                            self.root.join("Example media folder"),
+                            self.root.join("Another folder"),
+                        ];
+                        app.palette.open_files(phase == "folders");
+                        app.palette_open = true;
+                    }
                     if phase == "edit" {
+                        app.cancel_command_overlay();
                         app.keyboard_settings.begin_edit(
                             CommandId::OpenFile,
                             Some(0),

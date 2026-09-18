@@ -242,6 +242,7 @@ impl PlaybackClock {
 #[derive(Clone, PartialEq)]
 enum UiAction {
     KeybindingChange(TabId, keyboard_settings::Change),
+    ConfigureKeybinding(CommandId),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
     Command(CommandId),
     BeginReadingDrag(egui::Pos2, egui::Vec2),
@@ -6500,6 +6501,9 @@ where
                 }
                 actions.push(UiAction::Command(command));
             }
+            Some(palette::Choice::Configure(command)) => {
+                actions.push(UiAction::ConfigureKeybinding(command));
+            }
             Some(palette::Choice::RemoveCommand(command)) => {
                 self.recent_commands.retain(|old| *old != command);
                 if let Some(history) = &self.recent_files {
@@ -6663,6 +6667,12 @@ where
             UiAction::KeybindingChange(id, change) => {
                 if self.tabs.active_id() == Some(id) {
                     self.apply_keybinding_change(change);
+                }
+            }
+            UiAction::ConfigureKeybinding(command) => {
+                self.dispatch(CommandId::OpenKeyboardSettings);
+                if self.keyboard_settings_active() {
+                    self.keyboard_settings.focus_command(command);
                 }
             }
             UiAction::Command(command) => self.dispatch(command),

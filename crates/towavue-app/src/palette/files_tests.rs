@@ -1,7 +1,7 @@
 use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
-fn button_position(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+fn button_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {
     let tree = output
         .platform_output
         .accesskit_update
@@ -16,10 +16,14 @@ fn button_position(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
         .bounds()
         .expect("bounds");
     // The root supplies the pixel-scale transform; node bounds are logical points.
-    egui::pos2(
-        (bounds.x0 + bounds.x1) as f32 / 2.0,
-        (bounds.y0 + bounds.y1) as f32 / 2.0,
+    egui::Rect::from_min_max(
+        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
     )
+}
+
+fn button_position(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    button_rect(output, label).center()
 }
 
 #[test]
@@ -445,7 +449,34 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         render(&mut palette, vec![egui::Event::PointerMoved(idle.center())]);
         output = render(&mut palette, vec![]).0;
         let hovered = bounds(&output);
-        assert!((idle.width() - hovered.width() - 22.0).abs() <= 1.0 / density);
+        assert!((idle.width() - hovered.width() - 44.0).abs() <= 1.0 / density);
+        let gear = button_rect(&output, &format!("Configure keybinding: {title}"));
+        let remove = button_rect(&output, &format!("Remove {title} from Recently Used"));
+        assert_eq!(gear.size(), egui::Vec2::splat(20.0));
+        assert_eq!(remove.size(), egui::Vec2::splat(20.0));
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let bar = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+            .expect("scrollbar")
+            .1
+            .bounds()
+            .expect("scrollbar bounds");
+        assert!(
+            f64::from(remove.right()) <= bar.x0,
+            "actions stay outside the scrollbar hit region at {density}: {remove:?}, {bar:?}"
+        );
+        assert!((gear.left() - hovered.right() - 2.0).abs() < 0.01);
+        assert!((remove.left() - gear.right() - 2.0).abs() < 0.01);
+        let shortcut =
+            crate::shortcuts::defaults().label(CommandId::OpenFolder, CommandContext::default());
+        let (text, _) = picker_text(&output, &shortcut).expect("shortcut label");
+        assert!((gear.left() - text.pos.x - text.galley.size().x - 2.0).abs() <= 1.0 / density);
         let point = button_position(&output, &format!("Remove {title} from Recently Used"));
         render(&mut palette, vec![egui::Event::PointerMoved(point)]);
         let click = |pressed| egui::Event::PointerButton {
@@ -457,5 +488,80 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         render(&mut palette, vec![click(true)]);
         let choices = render(&mut palette, vec![click(false)]).1;
         assert_eq!(choices, [Choice::RemoveCommand(CommandId::OpenFolder)]);
+    }
+}
+
+#[test]
+fn palette_gear_configures_enabled_and_context_disabled_commands_without_execution() {
+    for density in [1.0, 1.25, 2.0] {
+        for command in [CommandId::OpenFile, CommandId::TogglePause] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(|style| {
+                crate::chrome::style(style);
+                style.animation_time = 0.0;
+                style.interaction.tooltip_delay = 60.0;
+            });
+            let definition = command_definitions()
+                .iter()
+                .find(|item| item.id == command)
+                .expect("command");
+            let mut palette = CommandPalette {
+                query: format!(">{}", definition.title),
+                ..Default::default()
+            };
+            let frame = |palette: &mut CommandPalette, events| {
+                open_frame_at(
+                    &context,
+                    palette,
+                    OpenSources::default(),
+                    events,
+                    (egui::vec2(600.0, 400.0), 0.0, density),
+                )
+            };
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame(&mut palette, vec![]).0;
+            }
+            let body = button_rect(&output, definition.title);
+            frame(&mut palette, vec![egui::Event::PointerMoved(body.center())]);
+            output = frame(&mut palette, vec![]).0;
+            let label = format!("Configure keybinding: {}", definition.title);
+            let gear = button_rect(&output, &label);
+            assert_eq!(gear.size(), egui::Vec2::splat(20.0));
+            assert!(
+                (gear.left() - button_rect(&output, definition.title).right() - 2.0).abs() < 0.01
+            );
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree");
+            let (_, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(&label))
+                .expect("gear");
+            assert!(
+                !node.is_disabled(),
+                "context-disabled commands still support editing their binding"
+            );
+            assert!(!tree.nodes.iter().any(|(_, node)| {
+                node.label()
+                    .is_some_and(|label| label.starts_with("Remove "))
+            }));
+            frame(&mut palette, vec![egui::Event::PointerMoved(gear.center())]);
+            let click = |pressed| egui::Event::PointerButton {
+                pos: gear.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            assert!(frame(&mut palette, vec![click(true)]).1.is_empty());
+            assert_eq!(
+                frame(&mut palette, vec![click(false)]).1,
+                [Choice::Configure(command)]
+            );
+        }
     }
 }

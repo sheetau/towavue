@@ -222,11 +222,11 @@ impl Icon {
             Self::Filter => '\u{eaf1}',
             Self::OpenFile => '\u{ea94}',
             Self::OpenFolder => '\u{eaf7}',
-            Self::Pause | Self::Play => return egui::RichText::new(""),
+            Self::Pause | Self::Play | Self::PreviousTrack | Self::NextTrack => {
+                return egui::RichText::new("");
+            }
             Self::Speaker => '\u{eb75}',
             Self::Muted => '\u{eb24}',
-            Self::PreviousTrack => '\u{eab5}',
-            Self::NextTrack => '\u{eab6}',
         };
         egui::RichText::new(glyph).font(crate::fonts::icon_font())
     }
@@ -283,28 +283,20 @@ fn button_with_sense(ui: &mut Ui, icon: Icon, label: &str, sense: egui::Sense) -
         })
         .inner
         .help_text(label);
-    let origin = response.rect.center() - egui::vec2(8.0, 8.0);
-    let color = ui.style().interact(&response).fg_stroke.color;
-    let point = |x, y| origin + egui::vec2(x, y);
-    // Solid counterparts to the bundled Codicon transport outlines.
-    match icon {
-        Icon::Play => {
-            ui.painter().add(egui::Shape::convex_polygon(
-                vec![point(4.0, 2.0), point(14.0, 8.0), point(4.0, 14.0)],
-                color,
-                Stroke::NONE,
-            ));
-        }
-        Icon::Pause => {
-            for x in [3.0, 10.0] {
-                ui.painter().rect_filled(
-                    Rect::from_min_max(point(x, 2.0), point(x + 3.0, 14.0)),
-                    0.0,
-                    color,
-                );
-            }
-        }
-        _ => {}
+    let artwork = match icon {
+        Icon::Play => Some(crate::lucide::Kind::Play),
+        Icon::Pause => Some(crate::lucide::Kind::Pause),
+        Icon::PreviousTrack => Some(crate::lucide::Kind::Previous),
+        Icon::NextTrack => Some(crate::lucide::Kind::Next),
+        _ => None,
+    };
+    if let Some(kind) = artwork {
+        crate::lucide::paint(
+            ui,
+            response.rect,
+            kind,
+            ui.style().interact(&response).fg_stroke.color,
+        );
     }
     let role = if matches!(icon, Icon::Pause | Icon::PreviousTrack | Icon::NextTrack) {
         Icon::Play
@@ -337,46 +329,12 @@ pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -
         ("audio-mode", matches!(icon, AudioIcon::Shuffle)),
     );
     let color = if selected { FOREGROUND } else { MUTED };
-    let center = response.rect.center();
-    let point = |x, y| center + egui::vec2(x, y);
-    let stroke = Stroke::new(1.4, color);
-    let paths = match icon {
-        AudioIcon::Shuffle => [
-            vec![point(-7.0, -5.0), point(7.0, 5.0)],
-            vec![point(-7.0, 5.0), point(7.0, -5.0)],
-        ],
-        _ => [
-            vec![point(-7.0, 1.0), point(-7.0, -5.0), point(7.0, -5.0)],
-            vec![point(7.0, -1.0), point(7.0, 5.0), point(-7.0, 5.0)],
-        ],
+    let kind = match icon {
+        AudioIcon::Repeat => crate::lucide::Kind::Repeat,
+        AudioIcon::RepeatOne => crate::lucide::Kind::RepeatOne,
+        AudioIcon::Shuffle => crate::lucide::Kind::Shuffle,
     };
-    for path in paths {
-        ui.painter().add(egui::Shape::line(path, stroke));
-    }
-    ui.painter().add(egui::Shape::line(
-        vec![point(4.0, -8.0), point(7.0, -5.0), point(4.0, -2.0)],
-        stroke,
-    ));
-    if matches!(icon, AudioIcon::Shuffle) {
-        ui.painter().add(egui::Shape::line(
-            vec![point(4.0, 2.0), point(7.0, 5.0), point(4.0, 8.0)],
-            stroke,
-        ));
-    } else {
-        ui.painter().add(egui::Shape::line(
-            vec![point(-4.0, 2.0), point(-7.0, 5.0), point(-4.0, 8.0)],
-            stroke,
-        ));
-    }
-    if matches!(icon, AudioIcon::RepeatOne) {
-        ui.painter().text(
-            center,
-            egui::Align2::CENTER_CENTER,
-            "1",
-            egui::FontId::proportional(10.0),
-            color,
-        );
-    }
+    crate::lucide::paint(ui, response.rect, kind, color);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
@@ -595,55 +553,50 @@ mod tests {
     }
 
     #[test]
-    fn transport_buttons_use_solid_shapes_without_changing_their_hit_bounds() {
+    fn transport_buttons_keep_hit_bounds_and_pixel_aligned_cached_artwork() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
-            context.set_pixels_per_point(density);
             context.global_style_mut(super::style);
-            for (icon, label) in [(Icon::Play, "Play / replay"), (Icon::Pause, "Pause")] {
-                let mut bounds = Rect::NOTHING;
-                let output = context.run_ui(Default::default(), |ui| {
-                    let response = button(ui, icon, label);
-                    bounds = response.rect;
-                    assert_eq!(bounds.size(), egui::vec2(24.0, 24.0));
-                });
-                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if !text.galley.job.text.is_empty())));
-                let origin = bounds.center() - egui::vec2(8.0, 8.0);
-                let shapes: Vec<_> = output
-                    .shapes
-                    .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Path(path) => {
-                            assert!(path.closed);
-                            assert_eq!(path.fill, MUTED);
-                            assert_eq!(path.stroke.width, 0.0);
-                            Some(path.points.clone())
-                        }
-                        egui::Shape::Rect(rect) if rect.fill == MUTED => {
-                            assert_eq!(rect.stroke.width, 0.0);
-                            Some(vec![rect.rect.min, rect.rect.max])
-                        }
-                        _ => None,
-                    })
-                    .collect();
-                let expected = if matches!(icon, Icon::Play) {
-                    vec![vec![(4.0, 2.0), (14.0, 8.0), (4.0, 14.0)]]
-                } else {
-                    vec![
-                        vec![(3.0, 2.0), (6.0, 14.0)],
-                        vec![(10.0, 2.0), (13.0, 14.0)],
-                    ]
-                };
-                assert_eq!(
-                    shapes,
-                    expected
-                        .into_iter()
-                        .map(|points| points
-                            .into_iter()
-                            .map(|(x, y)| origin + egui::vec2(x, y))
-                            .collect::<Vec<_>>())
-                        .collect::<Vec<_>>()
-                );
+            for icon in [
+                Icon::Play,
+                Icon::Pause,
+                Icon::PreviousTrack,
+                Icon::NextTrack,
+            ] {
+                let mut previous = None;
+                for _ in 0..3 {
+                    let mut input = egui::RawInput::default();
+                    input
+                        .viewports
+                        .get_mut(&egui::ViewportId::ROOT)
+                        .expect("root")
+                        .native_pixels_per_point = Some(density);
+                    let mut bounds = Rect::NOTHING;
+                    let output = context.run_ui(input, |ui| {
+                        bounds = button(ui, icon, "Transport").rect;
+                        assert_eq!(bounds.size(), egui::vec2(24.0, 24.0));
+                    });
+                    assert_eq!(output.pixels_per_point, density);
+                    let image = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 4 => Some(mesh),
+                            _ => None,
+                        })
+                        .expect("Lucide texture mesh");
+                    for vertex in &image.vertices {
+                        assert!(bounds.contains(vertex.pos));
+                        let physical = vertex.pos * density;
+                        assert!((physical.x - physical.x.round()).abs() < 0.001);
+                        assert!((physical.y - physical.y.round()).abs() < 0.001);
+                        assert_eq!(vertex.color, MUTED);
+                    }
+                    if let Some(previous) = previous {
+                        assert_eq!(image.texture_id, previous);
+                    }
+                    previous = Some(image.texture_id);
+                }
             }
         }
     }

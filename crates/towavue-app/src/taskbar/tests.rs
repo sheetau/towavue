@@ -132,6 +132,17 @@ fn bundled_transport_icons_keep_alpha_contrast_and_distinct_shapes_at_each_densi
                 assert_ne!(pixels, other);
             }
         }
+        if let Some(directory) = std::env::var_os("TOWAVUE_LUCIDE_ARTIFACTS") {
+            let directory = PathBuf::from(directory);
+            std::fs::create_dir_all(&directory).expect("artifact directory");
+            for (index, pixels) in images.iter().enumerate() {
+                std::fs::write(
+                    directory.join(format!("taskbar-{side}-{index}.rgba")),
+                    pixels,
+                )
+                .expect("taskbar raster artifact");
+            }
+        }
         TaskbarIcons::new(side, images.each_ref().map(|image| image.as_slice()))
             .expect("native icons");
     }

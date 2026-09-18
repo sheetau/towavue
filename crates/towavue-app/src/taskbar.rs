@@ -95,46 +95,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 }
 
 fn icon_pixels(size: u32) -> [Vec<u8>; 4] {
-    // Codepoints from the bundled Monaco/Codicon mapping: chevron-left, play,
-    // debug-pause, chevron-right. Retain the existing artwork attribution.
-    // A bounded, icon-only font collection avoids requiring a UI pass or copying
-    // the window's potentially large text atlas. It is dropped after this batch.
-    let mut definitions = egui::FontDefinitions::empty();
-    definitions.font_data.insert(
-        "codicon".into(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/codicon.ttf")).into(),
-    );
-    definitions
-        .families
-        .insert(fonts::icon_font().family, vec!["codicon".into()]);
-    let mut collection = egui::epaint::text::Fonts::new(Default::default(), definitions);
-    let glyphs = {
-        let mut fonts = collection.with_pixels_per_point(size as f32 / 32.0);
-        ['\u{eab5}', '\u{eb2c}', '\u{ead1}', '\u{eab6}'].map(|glyph| {
-            let galley = fonts.layout_no_wrap(
-                glyph.to_string(),
-                egui::FontId::new(32.0, fonts::icon_font().family),
-                egui::Color32::WHITE,
-            );
-            galley.rows[0].glyphs[0].uv_rect
-        })
-    };
-    let atlas = collection.texture_atlas().image();
-    glyphs.map(|uv| {
-        let width = usize::from(uv.max[0] - uv.min[0]);
-        let height = usize::from(uv.max[1] - uv.min[1]);
+    use crate::lucide::{Kind, render};
+    [Kind::Previous, Kind::Play, Kind::Pause, Kind::Next].map(|kind| {
+        let mut pixels = render(kind, size, 32.0)
+            .expect("bounded taskbar icon")
+            .data()
+            .to_vec();
         let side = size as usize;
-        let mut pixels = vec![0; side * side * 4];
-        for y in 0..height.min(side) {
-            for x in 0..width.min(side) {
-                let alpha = atlas[(usize::from(uv.min[0]) + x, usize::from(uv.min[1]) + y)].a();
-                let target = ((y + side.saturating_sub(height) / 2) * side
-                    + x
-                    + side.saturating_sub(width) / 2)
-                    * 4;
-                pixels[target..target + 4].fill(alpha);
-            }
-        }
         // A black outline behind the white fill remains visible against
         // both light and dark Shell previews without OS theme overrides.
         let fill = pixels.clone();

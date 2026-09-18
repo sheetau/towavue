@@ -41,6 +41,7 @@ mod image_wheel_tests;
 mod keyboard_settings;
 mod list_navigation;
 mod logo_menu;
+mod lucide;
 mod media_preview;
 mod menu;
 mod metadata_export;
@@ -16791,14 +16792,17 @@ mod tests {
                             .shapes
                             .iter()
                             .find_map(|shape| match &shape.shape {
-                                egui::Shape::Path(path)
-                                    if path.closed
-                                        && path
-                                            .points
-                                            .iter()
-                                            .all(|point| point.x < 40.0 && point.y > 265.0) =>
+                                egui::Shape::Mesh(mesh)
+                                    if mesh.vertices.len() == 4
+                                        && mesh.vertices.iter().all(|vertex| {
+                                            vertex.pos.x < 40.0 && vertex.pos.y > 265.0
+                                        }) =>
                                 {
-                                    Some(path.fill)
+                                    let color = mesh.vertices[0].color;
+                                    assert!(
+                                        mesh.vertices.iter().all(|vertex| vertex.color == color)
+                                    );
+                                    Some(color)
                                 }
                                 _ => None,
                             })

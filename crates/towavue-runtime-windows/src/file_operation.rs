@@ -19,6 +19,7 @@ use windows::core::PCWSTR;
 #[derive(Clone, Debug)]
 pub enum FileOperationAction {
     Rename(OsString),
+    RenameToPath(PathBuf),
     MoveToFolder(PathBuf),
     Recycle,
 }
@@ -175,6 +176,20 @@ fn perform(
     let target = match action {
         FileOperationAction::Rename(name) => {
             validate_name(&name)?;
+            source.path.with_file_name(name)
+        }
+        FileOperationAction::RenameToPath(target) => {
+            let name = target.file_name().ok_or(FileOperationError::InvalidName)?;
+            validate_name(name)?;
+            if target.parent().map(std::fs::canonicalize).transpose()?
+                != source
+                    .path
+                    .parent()
+                    .map(std::fs::canonicalize)
+                    .transpose()?
+            {
+                return Err(FileOperationError::InvalidName);
+            }
             source.path.with_file_name(name)
         }
         FileOperationAction::MoveToFolder(folder) => {

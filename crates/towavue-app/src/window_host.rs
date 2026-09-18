@@ -27,6 +27,7 @@ mod opening_tests;
 #[path = "window_launch_tests.rs"]
 mod launch_tests;
 
+mod file_operations;
 mod idle_graphics;
 
 // Never reused, even after the native HWND or a window-local session ID is reused.
@@ -58,6 +59,7 @@ type WindowApplication = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
 
 pub(crate) struct WindowHost {
+    file_operation: Option<file_operations::Transaction>,
     windows: BTreeMap<WindowKey, WindowApplication>,
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
@@ -78,6 +80,7 @@ impl WindowHost {
         proxy: Option<EventLoopProxy<Event>>,
     ) -> Result<Self, Box<dyn Error>> {
         let mut host = Self {
+            file_operation: None,
             windows: BTreeMap::new(),
             proxy,
             next_key: 1,
@@ -109,8 +112,12 @@ impl WindowHost {
         let captured_events = self.captured_events.clone();
         let notify: Box<dyn Fn(AppEvent) + Send + Sync> = Box::new(move |event| {
             #[cfg(test)]
-            if matches!(event, AppEvent::VideoResume(_))
-                && let Some(queue) = captured_events.lock().expect("test events").as_mut()
+            if matches!(
+                event,
+                AppEvent::VideoResume(_)
+                    | AppEvent::FileOperationSource(..)
+                    | AppEvent::FileOperationFinished(..)
+            ) && let Some(queue) = captured_events.lock().expect("test events").as_mut()
             {
                 queue.push_back(Event::Window(key, event));
                 return;
@@ -171,6 +178,9 @@ impl WindowHost {
     }
 
     fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        if self.file_operation.is_some() {
+            return;
+        }
         let local: Vec<_> = self
             .windows
             .iter_mut()
@@ -363,6 +373,9 @@ impl WindowHost {
                 for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
                     app.handle_app_event(AppEvent::ShortcutsChanged(bindings.clone()));
                 }
+            }
+            Event::Window(key, AppEvent::FileOperationFinished(serial, result)) => {
+                self.finish_host_file_operation(key, serial, result)
             }
             Event::Window(key, event) => {
                 if let Some(app) = self.windows.get_mut(&key).filter(|app| !app.exit_requested) {
@@ -572,6 +585,9 @@ impl WindowHost {
     }
 
     fn recover_pending_graphics(&mut self) {
+        if self.file_operation.is_some() {
+            return;
+        }
         self.recover_pending_graphics_with(|app, device| app.create_graphics_surface(device));
     }
 
@@ -672,6 +688,7 @@ impl WindowHost {
     }
 
     fn prepare_wait(&mut self) -> ControlFlow {
+        self.start_pending_file_operation();
         self.recover_pending_graphics();
         self.remove_closed();
         let mut wait = ControlFlow::Wait;

@@ -16,6 +16,7 @@ mod cursor;
 mod export_notice;
 mod export_progress;
 mod file_drop;
+mod file_operations;
 mod filmstrip;
 mod fonts;
 mod frame_export;
@@ -292,6 +293,11 @@ enum UiAction {
 }
 
 enum AppEvent {
+    FileOperationSource(
+        u64,
+        Result<towavue_runtime_windows::FileOperationSource, String>,
+    ),
+    FileOperationFinished(u64, Result<file_operations::Completed, String>),
     ShortcutsChanged(ShortcutBindings),
     TaskbarReady,
     TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
@@ -406,6 +412,7 @@ enum FolderIntent {
 }
 
 enum DialogIntent {
+    RelocateFile,
     OpenFile,
     OpenFolder,
     ExportFrame(frame_export::PendingFrameExport),
@@ -890,6 +897,7 @@ struct Application<N> {
     viewing_cursor: cursor::ViewingCursor,
     platform_cursor: egui::CursorIcon,
     media_cursors: Option<cursor::MediaCursors>,
+    file_operations: file_operations::State,
     pending_dialog: Option<DialogIntent>,
     file_dialog_return_focus: Option<(u64, Option<TabId>, egui::Id)>,
     renderer: Option<FrameRenderer>,
@@ -1173,6 +1181,7 @@ where
             viewing_cursor: cursor::ViewingCursor::default(),
             platform_cursor: egui::CursorIcon::Default,
             media_cursors: None,
+            file_operations: file_operations::State::default(),
             pending_dialog: None,
             file_dialog_return_focus: None,
             renderer: None,
@@ -3003,6 +3012,9 @@ where
                 self.finish_playback_tab_preparation(tab, instance, path, duration, source);
             }
             AppEvent::FolderReady => {
+                if self.file_operations.locked {
+                    return;
+                }
                 self.finish_folder_load();
                 self.finish_audio_folder_loads();
                 self.finish_image_tab_preparation();
@@ -3022,6 +3034,10 @@ where
                     }
                 }
             }
+            AppEvent::FileOperationSource(serial, result) => {
+                self.finish_file_source(serial, result)
+            }
+            AppEvent::FileOperationFinished(..) => {} // WindowHost owns cross-window completion.
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
             AppEvent::LicenseGuideRevealed(result) => {
@@ -3114,6 +3130,16 @@ where
             }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::Playback(generation, event) => {
+                if self.file_operations.locked
+                    && (self.file_operations.position.is_some()
+                        && generation == self.media_generation
+                        || self.retained_playback.values().any(|saved| {
+                            saved.instance == generation && saved.recovery_position.is_some()
+                        }))
+                {
+                    return;
+                }
+
                 if generation == self.media_generation {
                     self.handle_playback_event(event);
                 } else {
@@ -3304,6 +3330,9 @@ where
     }
 
     fn load_next_frame(&mut self) {
+        if self.file_operations.position.is_some() {
+            return;
+        }
         if self.pending_time.is_some() {
             return;
         }
@@ -7427,6 +7456,8 @@ where
                 self.push_edit(EditOperation::SetRate(rate));
             }
             CommandId::ResetRate => self.push_edit(EditOperation::SetRate(1.0)),
+            CommandId::RenameFile => self.begin_file_relocation(file_operations::Kind::Rename),
+            CommandId::MoveFile => self.begin_file_relocation(file_operations::Kind::Move),
             CommandId::Save => {
                 self.export_current(false, None);
             }
@@ -8068,6 +8099,7 @@ where
         };
         let cancelled_or_failed = !matches!(&result, Ok(Some(_)));
         match intent {
+            DialogIntent::RelocateFile => self.finish_file_destination(result),
             DialogIntent::ExportFrame(intent) => intent.finish(self, result),
             DialogIntent::OpenFile => match result {
                 Ok(Some(path)) => self.open_external(path, false),
@@ -8507,6 +8539,12 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if self.file_operations.busy() {
+            self.set_status(
+                "Wait for the file operation or close its dialog before leaving.".into(),
+            );
+            return;
+        }
         let background_image = matches!(&action, GuardedAction::NavigateImageTab(id, ..) if self.displayed_tab != Some(*id));
         if !background_image {
             self.image_sequence = image_navigation::ImageSequence::default();
@@ -9795,6 +9833,9 @@ where
     }
 
     fn check_eof(&mut self) {
+        if self.file_operations.position.is_some() {
+            return;
+        }
         if matches!(self.state, PlaybackState::Playing | PlaybackState::Paused)
             && self.decode_finished
             && self.pending_time.is_none()
@@ -10118,7 +10159,8 @@ where
     }
 
     fn modal_input_blocked(&self) -> bool {
-        self.keyboard_settings.edit.is_some()
+        self.file_operations.busy()
+            || self.keyboard_settings.edit.is_some()
             || self.resize_dialog.is_some()
             || self.rotation_dialog.is_some()
             || self.video_rotation_dialog.is_some()

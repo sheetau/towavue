@@ -107,6 +107,36 @@ fn rename_move_and_case_only_rename_keep_bytes_and_do_not_replace_destinations()
 }
 
 #[test]
+fn rename_dialog_paths_reject_other_folders_and_accept_equivalent_parents() {
+    let fixture = Fixture::new();
+    let original = fixture.0.join("source.png");
+    let other = fixture.0.join("other");
+    fs::create_dir(&other).expect("other folder");
+    fs::write(&original, b"owned content").expect("source");
+    assert!(matches!(
+        perform(
+            &source(&original),
+            FileOperationAction::RenameToPath(other.join("new.png"))
+        ),
+        Err(FileOperationError::InvalidName)
+    ));
+    assert_eq!(fs::read(&original).expect("unchanged"), b"owned content");
+    assert!(!other.join("new.png").exists());
+    let target = fixture.0.join("new.png");
+    let equivalent = other.join("..").join("new.png");
+    assert_eq!(
+        perform(
+            &source(&original),
+            FileOperationAction::RenameToPath(equivalent)
+        )
+        .expect("same parent"),
+        FileOperationOutcome::Moved(target.clone())
+    );
+    assert!(!original.exists());
+    assert_eq!(fs::read(target).expect("renamed"), b"owned content");
+}
+
+#[test]
 fn stale_sources_invalid_names_and_unavailable_folders_preserve_files() {
     let fixture = Fixture::new();
     let original = fixture.0.join("source.png");

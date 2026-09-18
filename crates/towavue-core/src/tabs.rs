@@ -180,6 +180,19 @@ impl TabSet {
         id
     }
 
+    /// A filesystem relocation preserves tab identity, kind, order and selection.
+    pub fn relocate_file(&mut self, source: &Path, target: &Path) -> Vec<TabId> {
+        let mut changed = Vec::new();
+        for tab in &mut self.tabs {
+            if tab.target.current_path() == source {
+                tab.target
+                    .set_current_path(target.to_owned(), tab.target.media_kind());
+                changed.push(tab.id);
+            }
+        }
+        changed
+    }
+
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
     }
@@ -314,6 +327,29 @@ impl TabSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relocation_retains_duplicate_tab_ids_and_updates_audio_folder() {
+        let mut tabs = TabSet::default();
+        let source = PathBuf::from("old/track.wav");
+        let target = PathBuf::from("new/renamed.wav");
+        let first = tabs.open_new(source.clone(), MediaKind::Audio);
+        let second = tabs.open_new(source.clone(), MediaKind::Audio);
+        let unrelated = tabs.open_new(PathBuf::from("still.png"), MediaKind::Image);
+        let order = tabs.tab_ids().collect::<Vec<_>>();
+        assert_eq!(tabs.relocate_file(&source, &target), vec![first, second]);
+        assert_eq!(tabs.tab_ids().collect::<Vec<_>>(), order);
+        assert_eq!(tabs.active_id(), Some(unrelated));
+        for tab in tabs.tabs().iter().filter(|tab| tab.id != unrelated) {
+            assert_eq!(
+                tab.target,
+                TabTarget::AudioFolder {
+                    folder: PathBuf::from("new"),
+                    current: target.clone()
+                }
+            );
+        }
+    }
 
     #[test]
     fn keyboard_settings_is_a_single_ordered_utility_with_no_media_target() {

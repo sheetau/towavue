@@ -542,6 +542,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
                 // Drain real resume results through route; leave other events
                 // queued normally so scripted Shell snapshots stay controlled.
                 *self.host.captured_events.lock().expect("test events") = Some(VecDeque::new());
+                file_operations::tests::exercise(&mut self.host);
                 opening_tests::exercise(&mut self.host, event_loop);
                 dropping::tests::exercise(&mut self.host, event_loop);
                 launch_tests::exercise(&mut self.host, event_loop);

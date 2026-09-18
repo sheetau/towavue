@@ -132,6 +132,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::StepAudioBackward, ","),
         (CommandId::StepAudioForward, "."),
         (CommandId::ResetRate, "/"),
+        (CommandId::RenameFile, "F2"),
+        (CommandId::MoveFile, "F7"),
         (CommandId::Save, "Ctrl+S"),
         (CommandId::ExportAs, "Ctrl+Shift+S"),
         (CommandId::ToggleTimeline, "T"),
@@ -396,6 +398,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
                         | CommandId::ReloadFolderOrder
+                        | CommandId::RenameFile
+                        | CommandId::MoveFile
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
@@ -1663,6 +1667,38 @@ mod tests {
             reloaded.get(CommandId::ZoomIn),
             bindings.get(CommandId::ZoomIn)
         );
+    }
+
+    #[test]
+    fn relocation_defaults_preserve_explicit_bindings_and_existing_prefixes() {
+        for (command, key) in [(CommandId::RenameFile, "F2"), (CommandId::MoveFile, "F7")] {
+            assert_eq!(defaults().get(command).expect("default").to_string(), key);
+            for value in [key.to_owned(), format!("{key} X")] {
+                let bindings = parse(
+                    &format!("{CURRENT_BINDING_HEADER}\nopen_file = {value}\n"),
+                    defaults(),
+                )
+                .expect("custom prefix");
+                assert!(bindings.get(command).is_none());
+                assert_eq!(
+                    bindings
+                        .get(CommandId::OpenFile)
+                        .expect("custom binding")
+                        .to_string(),
+                    value
+                );
+            }
+            let removed = parse(
+                &format!("{CURRENT_BINDING_HEADER}\n{} =\n", command.as_str()),
+                defaults(),
+            )
+            .expect("explicit removal");
+            assert!(removed.get(command).is_none());
+            assert_eq!(
+                parse(&serialize(&removed), defaults()).expect("round trip"),
+                removed
+            );
+        }
     }
 
     #[test]

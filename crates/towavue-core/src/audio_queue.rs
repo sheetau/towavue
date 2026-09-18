@@ -18,6 +18,19 @@ pub struct AudioQueue {
 }
 
 impl AudioQueue {
+    pub fn relocate_file(&mut self, source: &Path, target: &Path) {
+        for path in self.items.iter_mut().chain(self.order.iter_mut()) {
+            if path == source {
+                *path = target.to_owned();
+            }
+        }
+        if let Some((path, _)) = &mut self.pending_shuffle
+            && path == source
+        {
+            *path = target.to_owned();
+        }
+    }
+
     pub fn repeat(&self) -> RepeatMode {
         self.repeat
     }
@@ -119,6 +132,27 @@ impl AudioQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relocation_preserves_shuffle_cycle_modes_and_pending_current_track() {
+        let paths: Vec<_> = ["z.wav", "a.wav", "m.wav"].map(PathBuf::from).into();
+        let moved = PathBuf::from("new.wav");
+        let mut queue = AudioQueue::default();
+        queue.set_items(paths.clone());
+        queue.set_repeat(RepeatMode::All);
+        queue.toggle_shuffle(&paths[1], 42);
+        let next = queue.next(&paths[1], false);
+        queue.relocate_file(&paths[1], &moved);
+        assert_eq!(queue.next(&moved, false), next);
+        assert_eq!(queue.repeat(), RepeatMode::All);
+        assert!(queue.shuffled());
+        assert!(!queue.order.contains(&paths[1]));
+        let mut pending = AudioQueue::default();
+        pending.toggle_shuffle(&paths[1], 42);
+        pending.relocate_file(&paths[1], &moved);
+        pending.set_items(vec![paths[0].clone(), moved.clone(), paths[2].clone()]);
+        assert_eq!(pending.order.first(), Some(&moved));
+    }
 
     #[test]
     fn repeat_modes_and_explicit_navigation_use_shell_order() {

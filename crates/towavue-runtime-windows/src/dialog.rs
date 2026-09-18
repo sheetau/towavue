@@ -44,6 +44,8 @@ pub enum DialogError {
 pub enum FileDialogKind {
     OpenFile,
     OpenFolder,
+    RenameFile { source: PathBuf },
+    MoveFile { source: PathBuf },
     SaveFile { suggested_name: String },
     SaveAudio { suggested_name: String },
     SaveFrame { suggested_name: String },
@@ -324,6 +326,12 @@ fn dialog_thread(
         let _apartment = DialogApartment;
         match kind {
             FileDialogKind::OpenFile => show_initialized_dialog(false, owner_handle),
+            FileDialogKind::RenameFile { source } => {
+                show_relocation_dialog(&source, owner_handle, false)
+            }
+            FileDialogKind::MoveFile { source } => {
+                show_relocation_dialog(&source, owner_handle, true)
+            }
             FileDialogKind::OpenFolder => show_initialized_dialog(true, owner_handle),
             FileDialogKind::SaveFile { suggested_name } => {
                 show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Media)
@@ -335,6 +343,62 @@ fn dialog_thread(
                 show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Frame)
             }
         }
+    }
+}
+
+unsafe fn show_relocation_dialog(
+    source: &std::path::Path,
+    owner: HWND,
+    moving: bool,
+) -> Result<Option<PathBuf>, DialogError> {
+    use windows::Win32::UI::Shell::{IFileDialog, IShellItem, SHCreateItemFromParsingName};
+    use windows::core::Interface;
+    // Caller retains the worker STA and owner for all interfaces and path buffers.
+    unsafe {
+        let dialog: IFileDialog = if moving {
+            let open: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
+            open.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_PICKFOLDERS)?;
+            open.cast()?
+        } else {
+            let save: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL)?;
+            save.SetOptions(FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST)?;
+            let name: Vec<u16> = source
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            save.SetFileName(PCWSTR(name.as_ptr()))?;
+            save.cast()?
+        };
+        dialog.SetTitle(if moving {
+            w!("Move file to folder")
+        } else {
+            w!("Rename file")
+        })?;
+        dialog.SetOkButtonLabel(if moving {
+            w!("Move here")
+        } else {
+            w!("Rename")
+        })?;
+        if let Some(parent) = source.parent() {
+            use std::os::windows::ffi::OsStrExt;
+            let wide: Vec<u16> = parent.as_os_str().encode_wide().chain(Some(0)).collect();
+            let folder: IShellItem = SHCreateItemFromParsingName(PCWSTR(wide.as_ptr()), None)?;
+            dialog.SetFolder(&folder)?;
+        }
+        if let Err(error) = dialog.Show(Some(owner)) {
+            if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
+                return Ok(None);
+            }
+            return Err(error.into());
+        }
+        let item = dialog.GetResult()?;
+        let value = item.GetDisplayName(SIGDN_FILESYSPATH)?;
+        let path = value.to_string().map(PathBuf::from);
+        CoTaskMemFree(Some(value.0.cast()));
+        Ok(Some(path?))
     }
 }
 

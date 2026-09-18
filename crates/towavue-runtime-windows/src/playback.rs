@@ -443,6 +443,26 @@ impl PlaybackSession {
         self.recovery_frame = recovery_frame;
     }
 
+    /// Release all file readers, including the reusable software decode input,
+    /// before an accepted filesystem mutation. The device and transport settings stay.
+    pub fn suspend_for_file_operation(&mut self, position: MediaTime) {
+        self.suspend_for_graphics_recovery(position);
+        self.video_input = None;
+        self.current_video_source = None;
+    }
+
+    /// Resume the same content after a confirmed move, or the original path after
+    /// failure. The caller preserves the transport clock and checks mutation identity.
+    pub fn resume_after_file_operation(
+        &mut self,
+        path: &Path,
+        position: MediaTime,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        self.path = path.to_owned();
+        self.video_input = None;
+        self.replace_graphics_device(self.graphics_device.clone(), position)
+    }
+
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
         #[cfg(test)]
         let stage = std::time::Instant::now();

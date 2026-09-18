@@ -80,6 +80,8 @@ pub enum CommandId {
     RateDown,
     RateUp,
     ResetRate,
+    RenameFile,
+    MoveFile,
     Save,
     ExportAs,
     ExportAudio,
@@ -249,6 +251,8 @@ impl CommandId {
             Self::RateDown => "rate_down",
             Self::RateUp => "rate_up",
             Self::ResetRate => "reset_rate",
+            Self::RenameFile => "rename_file",
+            Self::MoveFile => "move_file",
             Self::Save => "save",
             Self::ExportAs => "export_as",
             Self::ExportAudio => "export_audio",
@@ -538,6 +542,8 @@ impl CommandDefinition {
                     | CommandId::FlipVertical
                     | CommandId::ResizeImage
                     | CommandId::FreeRotateImage
+                    | CommandId::RenameFile
+                    | CommandId::MoveFile
                     | CommandId::Save
                     | CommandId::ExportAs
                     | CommandId::MetadataExportOptions
@@ -902,6 +908,8 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(CommandId::RateUp, "Increase playback rate", PLAYABLE_MEDIA),
     command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
+    command(CommandId::RenameFile, "Rename file...", ANY_MEDIA),
+    command(CommandId::MoveFile, "Move file...", ANY_MEDIA),
     command(CommandId::Save, "Save exported media", ANY_MEDIA),
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
     command(

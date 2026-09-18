@@ -24,6 +24,11 @@ impl Owner {
         }
     }
 
+    pub(super) fn relocate(&mut self, source: VideoResumeSource) {
+        self.source = source;
+        self.saved = None;
+    }
+
     fn record(
         &mut self,
         history: &VideoResumeHistory,

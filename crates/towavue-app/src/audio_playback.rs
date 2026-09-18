@@ -13,6 +13,31 @@ pub(super) struct AudioTab {
 }
 
 impl AudioTab {
+    pub(super) fn refresh_after_relocation(&mut self) {
+        self.snapshot = None;
+        if let Some(provider) = &self.provider {
+            provider.request(Some(self.folder.clone()));
+            self.refreshing = true;
+        }
+    }
+
+    pub(super) fn relocate(&mut self, source: &Path, target: &Path) {
+        self.order.relocate_file(source, target);
+        if let Some(folder) = target.parent() {
+            if self.folder != folder {
+                self.order.set_items(vec![target.to_owned()]);
+            }
+            self.folder = folder.to_owned();
+            self.snapshot = None;
+            self.handled_eof = None;
+            self.requested_eof = None;
+            if let Some(provider) = &self.provider {
+                provider.request(Some(self.folder.clone()));
+                self.refreshing = true;
+            }
+        }
+    }
+
     pub(super) fn transfer(
         &mut self,
         old: u64,
@@ -248,6 +273,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn advance_audio_queues(&mut self) {
+        if self.file_operations.locked {
+            return;
+        }
         let active = self.tabs.active().map(|tab| tab.id);
         let ids: Vec<_> = self.audio_queues.keys().copied().collect();
         for id in ids {

@@ -249,6 +249,7 @@ enum UiAction {
     PreviewTransport(TabId, u64, PathBuf, CommandId),
     PreviewSeek(TabId, u64, PathBuf, MediaTime),
     PreviewImageSeek(TabId, u64, PathBuf, PathBuf),
+    CollapseTimeline(TabId, u64),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     TimeAdjustment(
@@ -6225,11 +6226,12 @@ where
             return;
         }
         let max_height = root.available_height() * 0.6;
+        let min_height = 64.0_f32.min(max_height);
         let panel = self.timeline_panel_id();
         let resizable = timeline_edit::panel_resize_enabled(root, panel);
-        egui::Panel::bottom(panel)
+        let response = egui::Panel::bottom(panel)
             .default_size(96.0)
-            .size_range(64.0_f32.min(max_height)..=max_height)
+            .size_range(min_height..=max_height)
             .resizable(resizable)
             .frame(egui::Frame::NONE.fill(chrome::BACKGROUND).inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 0 }))
             .show(root, |ui| {
@@ -6306,6 +6308,20 @@ where
                 }
                 self.draw_waveform_activity(ui, rect);
             });
+        if resizable
+            && timeline_edit::panel_collapse_released(
+                root.ctx(),
+                panel,
+                response.response.rect.bottom(),
+                min_height,
+            )
+            && let Some(tab) = self.tabs.active()
+        {
+            let action = UiAction::CollapseTimeline(tab.id, self.media_generation);
+            if !actions.contains(&action) {
+                actions.push(action);
+            }
+        }
     }
 
     fn timeline_panel_id(&self) -> egui::Id {
@@ -6540,6 +6556,7 @@ where
             UiAction::PreviewSeek(id, instance, path, target) => {
                 self.handle_preview_seek(id, instance, &path, target)
             }
+            UiAction::CollapseTimeline(id, instance) => self.collapse_timeline(id, instance),
             UiAction::TabCommand(id, command) => {
                 let focus = self
                     .ui_context
@@ -8573,6 +8590,7 @@ where
                 let panel = egui::Id::new(("timeline", id));
                 data.remove::<egui::containers::panel::PanelState>(panel);
                 data.remove::<bool>(panel.with("cancel-resize"));
+                data.remove::<u64>(panel.with("cancel-resize-frame"));
             });
         }
         if let Some(saved) = self.retained_playback.remove(&id) {

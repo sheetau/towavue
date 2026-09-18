@@ -1,6 +1,10 @@
 use super::*;
 use towavue_core::{EditTimeline, PlaybackRange};
 
+#[cfg(test)]
+#[path = "timeline_panel_tests.rs"]
+mod panel_tests;
+
 pub(super) fn resizing_panel(context: &egui::Context, panel: egui::Id) -> bool {
     // egui 0.35's Panel keeps the pre-drag size until its resize handle releases.
     // Its handle ID is internal; the rendered resize regression guards this dependency.
@@ -56,6 +60,14 @@ pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
         data.remove_temp::<bool>(panel.with("cancel-resize"))
             .unwrap_or(false)
     });
+    if cancelled || interrupted {
+        // stop_dragging can look like a release in later layout passes too.
+        // Keep cancellation effective for the entire frame, not just this pass.
+        let frame = ui.ctx().cumulative_frame_nr();
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(panel.with("cancel-resize-frame"), frame);
+        });
+    }
     if enabled
         && !cancelled
         && let Some(response) = ui.ctx().read_response(panel.with("__resize"))
@@ -65,7 +77,52 @@ pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
     enabled && !cancelled
 }
 
+pub(super) fn panel_collapse_released(
+    context: &egui::Context,
+    panel: egui::Id,
+    bottom: f32,
+    minimum: f32,
+) -> bool {
+    if context.data(|data| data.get_temp::<u64>(panel.with("cancel-resize-frame")))
+        == Some(context.cumulative_frame_nr())
+        || !context
+            .read_response(panel.with("__resize"))
+            .is_some_and(|response| response.drag_stopped_by(egui::PointerButton::Primary))
+    {
+        return false;
+    }
+    // Commit on release so overshooting and returning, Escape, or capture loss
+    // can keep the timeline open. A small extra pull separates collapse from min-size.
+    context.input(|input| {
+        input
+            .events
+            .iter()
+            .find_map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => Some(*pos),
+                _ => None,
+            })
+            .is_some_and(|point| bottom - point.y < minimum - 8.0)
+    })
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn collapse_timeline(&mut self, tab: TabId, instance: u64) {
+        if self.tabs.active_id() != Some(tab)
+            || self.media_generation != instance
+            || !self.timeline_is_visible()
+            || self.filmstrip_open
+            || self.preview_input_blocked()
+        {
+            return;
+        }
+        self.dispatch(CommandId::ToggleTimeline);
+    }
+
     pub(super) fn set_time_selection(&mut self, selection: Option<towavue_core::TimeRange>) {
         if self.time_selection != selection {
             let position = self.current_position();

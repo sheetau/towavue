@@ -814,10 +814,29 @@ impl Filmstrip {
         let cell_height = cell_width * 2.0 / 3.0 + 24.0;
         let row_height = cell_height + 8.0 + ui.spacing().item_spacing.y;
         let row_count = paths.len().div_ceil(columns);
-        let focus = self
+        let mut focus = self
             .recent_focus
             .as_ref()
             .and_then(|path| paths.iter().position(|candidate| candidate == path));
+        let navigation = if enabled
+            && self
+                .focused_card
+                .is_some_and(|id| ui.memory(|memory| memory.has_focus(id)))
+        {
+            crate::list_navigation::Navigation::for_list(ui)
+        } else {
+            Default::default()
+        };
+        if navigation.moved()
+            && let Some(index) = focus
+        {
+            let delta = navigation.rows(ui.clip_rect().height(), row_height) * columns as isize;
+            focus = Some(
+                index
+                    .saturating_add_signed(delta)
+                    .min(paths.len().saturating_sub(1)),
+            );
+        }
         let rows = recent_rows(
             ui.clip_rect(),
             origin,
@@ -866,6 +885,9 @@ impl Filmstrip {
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.set_description(path.display().to_string())
                     });
+                    if navigation.moved() && focus == Some(start + column) {
+                        response.request_focus();
+                    }
                     if response.has_focus() {
                         focused_card = Some(response.id);
                         recent_focus = Some(path.clone());
@@ -1459,6 +1481,34 @@ mod tests {
                             "width {width}, density {density}, row {row}: {bounds:?} vs {viewport:?}"
                         );
                     }
+                }
+                for (key, at_start) in [(egui::Key::PageDown, false), (egui::Key::PageUp, true)] {
+                    frame(
+                        &mut strip,
+                        vec![egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                    );
+                    for _ in 0..5 {
+                        frame(&mut strip, vec![]);
+                    }
+                    let (tree, viewport, _) = frame(&mut strip, vec![]);
+                    let node = &tree
+                        .nodes
+                        .iter()
+                        .find(|(id, _)| *id == tree.focus)
+                        .expect("page focus")
+                        .1;
+                    assert_eq!(node.label() == Some("00.png"), at_start);
+                    let bounds = node.bounds().expect("page bounds");
+                    assert!(
+                        bounds.y0 >= f64::from(viewport.top()) - 1.0
+                            && bounds.y1 <= f64::from(viewport.bottom()) + 1.0
+                    );
                 }
                 frame(
                     &mut strip,

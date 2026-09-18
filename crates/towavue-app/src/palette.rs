@@ -1,3 +1,4 @@
+use crate::list_navigation::Navigation;
 use crate::scroll_style::ScrollAreaStyle;
 use egui::AtomExt;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
@@ -27,6 +28,7 @@ pub struct CommandPalette {
     folders: bool,
     fresh: bool,
     ime_composing: bool,
+    list_height: f32,
     preview: Option<preview::FilePreview>,
 }
 
@@ -42,6 +44,7 @@ impl Default for CommandPalette {
             folders: false,
             fresh: true,
             ime_composing: false,
+            list_height: 264.0,
             preview: None,
         }
     }
@@ -161,7 +164,7 @@ impl CommandPalette {
             state.store(context, query_id);
             self.fresh = false;
         }
-        let (up, down, enter, close) = context.input_mut(|input| {
+        let (navigation, enter, close) = context.input_mut(|input| {
             // The pinned TextEdit exposes UIA ValuePattern but does not handle SetValue.
             if input.has_accesskit_action_request(query_id, egui::accesskit::Action::SetValue) {
                 for event in std::mem::take(&mut input.events) {
@@ -206,6 +209,8 @@ impl CommandPalette {
                 for key in [
                     egui::Key::ArrowUp,
                     egui::Key::ArrowDown,
+                    egui::Key::PageUp,
+                    egui::Key::PageDown,
                     egui::Key::Enter,
                     egui::Key::Escape,
                 ] {
@@ -220,7 +225,7 @@ impl CommandPalette {
                         }
                     )
                 });
-                return (false, false, None, false);
+                return (Navigation::default(), None, false);
             }
             let enter = input.events.iter().find_map(|event| match event {
                 egui::Event::Key {
@@ -235,8 +240,7 @@ impl CommandPalette {
                 input.consume_key(modifiers, egui::Key::Enter);
             }
             (
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
-                input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                Navigation::read(input),
                 enter,
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
@@ -286,7 +290,7 @@ impl CommandPalette {
                             "Search files by name (hold Ctrl-key to force new window or Alt-key for same window)"
                         }),
                 )
-                .help_text("Up / Down: select   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
+                .help_text("Up / Down: select   Page Up / Down: page   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
                 ui.visuals_mut().weak_text_color = weak_text_color;
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.query.starts_with('>');
@@ -308,11 +312,11 @@ impl CommandPalette {
                     self.removed_selection = None;
                 }
                 if !command_mode {
-                    chosen = self.show_files(ui, &sources, (up, down), enter, query_changed)
+                    chosen = self.show_files(ui, &sources, navigation, enter, query_changed)
                         .map(Choice::Open);
                     return;
                 }
-                chosen = self.show_commands(ui, commands, shortcuts, sources.commands, (up, down, enter.is_some()), query_changed);
+                chosen = self.show_commands(ui, commands, shortcuts, sources.commands, (navigation, enter.is_some()), query_changed);
             });
         (chosen, close || (!opened && self.outside_press(context)))
     }
@@ -321,11 +325,10 @@ impl CommandPalette {
         &mut self,
         ui: &mut egui::Ui,
         sources: &OpenSources<'_>,
-        navigation: (bool, bool),
+        navigation: Navigation,
         enter: Option<egui::Modifiers>,
         query_changed: bool,
     ) -> Option<RecentAction> {
-        let (up, down) = navigation;
         let recent = if self.folders {
             sources.folders
         } else {
@@ -383,11 +386,12 @@ impl CommandPalette {
                 let index = self.removed_selection.take().unwrap_or(0);
                 (!paths.is_empty()).then_some(index.min(paths.len().saturating_sub(1)))
             });
-        let selected = if up || down {
-            next_enabled(selected, &vec![true; paths.len()], down)
-        } else {
-            selected
-        };
+        let selected = navigate_enabled(
+            selected,
+            &vec![true; paths.len()],
+            navigation,
+            self.list_height,
+        );
         let selection_moved = self.selected != selected;
         self.selected = selected;
         self.selected_path = selected.map(|index| paths[index].clone());
@@ -446,7 +450,7 @@ impl CommandPalette {
             .auto_shrink([false, true])
             .id_salt(scroll_salt)
             .max_height(height);
-        if (up || down || query_changed || selection_moved)
+        if (navigation.moved() || query_changed || selection_moved)
             && let Some(index) = selected
         {
             // Match ScrollArea's wrapped salt in egui 0.35. Loading the raw
@@ -463,7 +467,7 @@ impl CommandPalette {
                 .vertical_scroll_offset(offset.clamp((bottom - height).max(0.0).min(top), top));
         }
         ui.spacing_mut().item_spacing.y = 0.0;
-        scroll.show_rows_styled(ui, row_height, row_count, |ui, rows| {
+        let output = scroll.show_rows_styled(ui, row_height, row_count, |ui, rows| {
             if paths.is_empty() {
                 ui.add(
                     egui::Label::new(
@@ -588,6 +592,7 @@ impl CommandPalette {
                 }
             }
         });
+        self.list_height = output.inner_rect.height();
         chosen
     }
 }
@@ -644,6 +649,39 @@ fn open_target(modifiers: egui::Modifiers) -> OpenTarget {
     } else {
         OpenTarget::Tab
     }
+}
+
+fn navigate_enabled(
+    mut current: Option<usize>,
+    enabled: &[bool],
+    navigation: Navigation,
+    height: f32,
+) -> Option<usize> {
+    for _ in 0..navigation.steps.unsigned_abs() {
+        current = next_enabled(current, enabled, navigation.steps > 0);
+    }
+    if navigation.pages != 0
+        && let Some(index) = current
+    {
+        let target = Navigation {
+            steps: 0,
+            pages: navigation.pages,
+        }
+        .destination(index, enabled.len(), height, 22.0);
+        // A page measures physical rows, including disabled commands. Clamp at the
+        // ends, then find an enabled target without wrapping to the opposite edge.
+        current = if navigation.pages > 0 {
+            (target..enabled.len())
+                .find(|i| enabled[*i])
+                .or_else(|| (index..target).rev().find(|i| enabled[*i]))
+        } else {
+            (0..=target)
+                .rev()
+                .find(|i| enabled[*i])
+                .or_else(|| (target..=index).find(|i| enabled[*i]))
+        };
+    }
+    current
 }
 
 fn next_enabled(current: Option<usize>, enabled: &[bool], forward: bool) -> Option<usize> {
@@ -2289,6 +2327,71 @@ mod tests {
             },
         );
         assert!(closed);
+    }
+
+    #[test]
+    fn list_navigation_pages_all_picker_modes_and_clamps_without_opening() {
+        for density in [1.0, 1.25, 2.0] {
+            for mode in 0..3 {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                let paths: Vec<_> = (0..80)
+                    .map(|index| PathBuf::from(format!("C:/media/item-{index:03}.png")))
+                    .collect();
+                let sources = OpenSources {
+                    files: &paths,
+                    folders: &paths,
+                    ..Default::default()
+                };
+                let mut palette = CommandPalette::default();
+                if mode != 0 {
+                    palette.open_files(mode == 2);
+                }
+                let frame = |palette: &mut CommandPalette, events| {
+                    let (_, choices) = open_frame_at(
+                        &context,
+                        palette,
+                        sources,
+                        events,
+                        (egui::vec2(600.0, 400.0), 40.0, density),
+                    );
+                    assert!(choices.is_empty());
+                };
+                for _ in 0..4 {
+                    frame(&mut palette, vec![]);
+                }
+                let start = palette.selected.expect("first selection");
+                let key = |key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                frame(&mut palette, vec![key(egui::Key::PageDown)]);
+                let end = palette.selected.expect("page selection");
+                assert!(end > start + 1, "mode {mode}");
+                if mode != 0 {
+                    assert_eq!(end, (palette.list_height / 22.0).floor() as usize);
+                }
+                frame(&mut palette, vec![key(egui::Key::PageUp)]);
+                if mode == 0 {
+                    let page = (palette.list_height / 22.0).floor().max(1.0) as usize;
+                    assert!(palette.selected.expect("enabled command") <= end.saturating_sub(page));
+                } else {
+                    assert_eq!(palette.selected, Some(start));
+                }
+                for _ in 0..30 {
+                    frame(&mut palette, vec![key(egui::Key::PageDown)]);
+                }
+                let end = palette.selected;
+                frame(&mut palette, vec![key(egui::Key::PageDown)]);
+                assert_eq!(palette.selected, end, "page navigation must not wrap");
+                palette.ime_composing = true;
+                frame(&mut palette, vec![key(egui::Key::PageUp)]);
+                assert_eq!(palette.selected, end, "IME owns candidate paging");
+            }
+        }
     }
 
     #[test]

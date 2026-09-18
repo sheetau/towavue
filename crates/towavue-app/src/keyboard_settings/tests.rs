@@ -618,3 +618,80 @@ fn command_query_matches_only_its_id_and_keeps_unassigned_rows_blank() {
     assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
         egui::Shape::Text(text) if text.galley.text() == "Unassigned")));
 }
+
+#[test]
+fn list_navigation_reveals_virtual_rows_without_editing_and_preserves_search_input() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        let bindings = shortcuts::defaults();
+        let mut settings = KeyboardSettings::default();
+        let frame = |settings: &mut KeyboardSettings, events| {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 360.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    assert!(settings.show(ui, &bindings, true).is_none());
+                },
+            );
+            output.platform_output.accesskit_update.expect("tree")
+        };
+        frame(&mut settings, vec![]);
+        let rows = settings.rows(&bindings);
+        let tree = frame(&mut settings, vec![]);
+        let label = |index: usize| format!("{}: {}", rows[index].command.title, rows[index].keys);
+        let first = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label(0).as_str()))
+            .expect("first row")
+            .0;
+        frame(
+            &mut settings,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: first,
+                    data: None,
+                },
+            )],
+        );
+        // 360 minus both margins, search/header/separators leaves 287 points: eleven rows.
+        for (key, index) in [
+            (egui::Key::PageDown, 11),
+            (egui::Key::ArrowDown, 12),
+            (egui::Key::PageUp, 1),
+            (egui::Key::ArrowUp, 0),
+        ] {
+            let tree = frame(&mut settings, vec![key_event(key, egui::Modifiers::NONE)]);
+            let node = &tree
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == tree.focus)
+                .expect("focused row")
+                .1;
+            assert_eq!(node.label(), Some(label(index).as_str()));
+            let bounds = node.bounds().expect("visible bounds");
+            assert!(bounds.y0 >= 64.0 && bounds.y1 <= 353.0, "{bounds:?}");
+            assert!(settings.edit.is_none());
+        }
+        settings.request_search_focus();
+        frame(&mut settings, vec![]);
+        let previous = settings.row_focus;
+        frame(
+            &mut settings,
+            vec![key_event(egui::Key::PageDown, egui::Modifiers::NONE)],
+        );
+        assert_eq!(settings.row_focus, previous);
+        assert!(settings.search_focused(&context));
+    }
+}

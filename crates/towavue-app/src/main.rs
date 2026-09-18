@@ -37,6 +37,7 @@ mod image_visibility_tests;
 #[cfg(test)]
 mod image_wheel_tests;
 mod keyboard_settings;
+mod list_navigation;
 mod logo_menu;
 mod media_preview;
 mod menu;
@@ -3722,6 +3723,15 @@ where
             }
         }
         let modal_blocked = self.modal_input_blocked();
+        list_navigation::block_for_frame(
+            &context,
+            modal_blocked
+                || self.palette_open
+                || self.grid_open
+                || self.filmstrip_open
+                || self.native_ime_composing
+                || self.prefix_started.is_some(),
+        );
         tab_focus::begin(
             &context,
             self.tabs.active().map(|tab| tab.id),
@@ -10304,7 +10314,9 @@ where
     }
 
     fn owns_focused_shortcut(&self, stroke: &KeyStroke) -> bool {
-        if self.owns_seek_shortcut(stroke) {
+        if self.owns_seek_shortcut(stroke)
+            || self.prefix_started.is_some() && self.list_owns_key(stroke)
+        {
             return true;
         }
         let Some(context) = &self.ui_context else {
@@ -10396,6 +10408,25 @@ where
                     .shortcuts
                     .resolve(std::slice::from_ref(stroke), self.command_context())
                     != ShortcutMatch::None)
+    }
+
+    fn list_owns_key(&self, stroke: &KeyStroke) -> bool {
+        stroke.modifiers == Modifiers::default()
+            && matches!(
+                stroke.key,
+                Key::ArrowUp | Key::ArrowDown | Key::PageUp | Key::PageDown
+            )
+            && !self.native_ime_composing
+            && !self.modal_input_blocked()
+            && !self.grid_open
+            && !self.palette_open
+            && !self.filmstrip_open
+            && ((self.tabs.gallery().is_some() && self.tabs.active_id() == self.tabs.gallery())
+                || self.keyboard_settings_active()
+                || self.media_kind == Some(MediaKind::Audio))
+            && self.ui_context.as_ref().is_some_and(|context| {
+                !context.text_edit_focused() && !egui::Popup::is_any_open(context)
+            })
     }
 
     fn process_key(&mut self, event: &KeyEvent) {
@@ -11544,7 +11575,16 @@ where
                 self.modifiers = modifiers.state();
                 self.rotation_modifiers_changed();
             }
-            WindowEvent::KeyboardInput { event, .. } if !consumed => self.process_key(&event),
+            WindowEvent::KeyboardInput { event, .. } if !consumed => {
+                if self
+                    .key_stroke(&event)
+                    .is_some_and(|stroke| self.list_owns_key(&stroke))
+                {
+                    self.request_redraw();
+                } else {
+                    self.process_key(&event);
+                }
+            }
             WindowEvent::RedrawRequested => self.render_frame(),
             _ if consumed => self.request_redraw(),
             _ => {}

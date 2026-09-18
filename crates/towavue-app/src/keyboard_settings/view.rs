@@ -103,110 +103,142 @@ impl KeyboardSettings {
             if rows.is_empty() {
                 ui.label("No matching keyboard shortcuts");
             }
-            egui::ScrollArea::vertical()
-                .id_salt("keyboard-rows")
-                .show_rows_styled(ui, 24.0, rows.len(), |ui, range| {
-                    for row in &rows[range] {
-                        ui.push_id((row.command.id, row.slot), |ui| {
-                            let (rect, response) = ui.allocate_exact_size(
-                                egui::vec2(row_width, 24.0),
-                                egui::Sense::click(),
-                            );
-                            // The edit button is a child hit target: keep the row hovered
-                            // while the pointer crosses onto it, so it cannot disappear.
-                            let hovered = response.contains_pointer() || response.has_focus();
-                            if hovered {
-                                ui.painter().rect_filled(rect, 0.0, chrome::HOVER);
-                            }
-                            let edit_rect = egui::Rect::from_min_size(
-                                rect.min + egui::vec2(4.0, 2.0),
-                                egui::Vec2::splat(20.0),
-                            );
-                            let edit = hovered.then(|| {
-                                let (glyph, label) = if row.slot.is_some() {
-                                    ('\u{ea73}', "Edit keybinding")
-                                } else {
-                                    ('\u{ea60}', "Add keybinding")
-                                };
-                                icon(ui, edit_rect, glyph, label, false)
-                            });
-                            for (left, width, text) in [
-                                (34.0, command_width - 34.0, row.command.title),
-                                (command_width, keys_width, &row.keys),
-                                (
-                                    command_width + keys_width,
-                                    (row_width - command_width - keys_width).max(0.0),
-                                    &row.when,
-                                ),
-                            ] {
-                                let cell = egui::Rect::from_min_size(
-                                    rect.min + egui::vec2(left, 0.0),
-                                    egui::vec2(width, 24.0),
-                                );
-                                cell_label(ui, cell.shrink2(egui::vec2(4.0, 0.0)), text)
-                                    .help_text(text);
-                            }
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    response.enabled(),
-                                    format!("{}: {}", row.command.title, row.keys),
-                                )
-                            });
-                            if edit.is_some_and(|response| response.clicked())
-                                || response.double_clicked()
-                                || ui.input(|input| {
-                                    input.has_accesskit_action_request(
-                                        response.id,
-                                        egui::accesskit::Action::Click,
-                                    )
-                                })
-                                || response.has_focus()
-                                    && ui.input(|input| input.key_pressed(egui::Key::Enter))
-                            {
-                                self.begin_edit(row.command.id, row.slot, bindings);
-                            }
-                            response.context_menu(|ui| {
-                                if ui.button("Edit keybinding").clicked() {
-                                    self.begin_edit(row.command.id, row.slot, bindings);
-                                    ui.close();
-                                }
-                                if ui.button("Add keybinding").clicked() {
-                                    self.begin_edit(row.command.id, None, bindings);
-                                    ui.close();
-                                }
-                                if ui
-                                    .add_enabled(
-                                        row.slot.is_some(),
-                                        egui::Button::new("Remove keybinding"),
-                                    )
-                                    .clicked()
-                                {
-                                    let mut replacement = bindings.all(row.command.id).to_vec();
-                                    if let Some(slot) = row.slot {
-                                        replacement.remove(slot);
-                                    }
-                                    change = Some(Change {
-                                        command: row.command.id,
-                                        expected: bindings.all(row.command.id).to_vec(),
-                                        replacement,
-                                    });
-                                    ui.close();
-                                }
-                                if ui.button("Reset command to defaults").clicked() {
-                                    change = Some(Change {
-                                        command: row.command.id,
-                                        expected: bindings.all(row.command.id).to_vec(),
-                                        replacement: shortcuts::defaults()
-                                            .all(row.command.id)
-                                            .to_vec(),
-                                    });
-                                    ui.close();
-                                }
-                            });
+            let focused_row = self.row_focus.and_then(|(command, slot, id)| {
+                ui.memory(|memory| memory.has_focus(id))
+                    .then(|| {
+                        rows.iter()
+                            .position(|row| row.command.id == command && row.slot == slot)
+                    })
+                    .flatten()
+            });
+            let navigation = if focused_row.is_some() {
+                crate::list_navigation::Navigation::for_list(ui)
+            } else {
+                Default::default()
+            };
+            let reveal = focused_row.filter(|_| navigation.moved()).map(|index| {
+                navigation.destination(index, rows.len(), ui.available_height(), 24.0)
+            });
+            let mut scroll = egui::ScrollArea::vertical().id_salt("keyboard-rows");
+            if let Some(index) = reveal {
+                let offset = egui::scroll_area::State::load(
+                    ui.ctx(),
+                    ui.make_persistent_id(egui::IdSalt::new("keyboard-rows")),
+                )
+                .map_or(0.0, |state| state.offset.y);
+                let top = index as f32 * 24.0;
+                let minimum = (top + 24.0 - ui.available_height()).max(0.0).min(top);
+                scroll = scroll.vertical_scroll_offset(offset.clamp(minimum, top));
+            } else if let Some(offset) =
+                crate::list_navigation::unfocused_scroll(ui, "keyboard-rows", 24.0)
+            {
+                scroll = scroll.vertical_scroll_offset(offset);
+            }
+            scroll.show_rows_styled(ui, 24.0, rows.len(), |ui, range| {
+                for index in range {
+                    let row = &rows[index];
+                    ui.push_id((row.command.id, row.slot), |ui| {
+                        let (rect, response) = ui
+                            .allocate_exact_size(egui::vec2(row_width, 24.0), egui::Sense::click());
+                        if reveal == Some(index) {
+                            response.request_focus();
+                        }
+                        if response.has_focus() {
+                            self.row_focus = Some((row.command.id, row.slot, response.id));
+                        }
+                        // The edit button is a child hit target: keep the row hovered
+                        // while the pointer crosses onto it, so it cannot disappear.
+                        let hovered = response.contains_pointer() || response.has_focus();
+                        if hovered {
+                            ui.painter().rect_filled(rect, 0.0, chrome::HOVER);
+                        }
+                        let edit_rect = egui::Rect::from_min_size(
+                            rect.min + egui::vec2(4.0, 2.0),
+                            egui::Vec2::splat(20.0),
+                        );
+                        let edit = hovered.then(|| {
+                            let (glyph, label) = if row.slot.is_some() {
+                                ('\u{ea73}', "Edit keybinding")
+                            } else {
+                                ('\u{ea60}', "Add keybinding")
+                            };
+                            icon(ui, edit_rect, glyph, label, false)
                         });
-                    }
-                });
+                        for (left, width, text) in [
+                            (34.0, command_width - 34.0, row.command.title),
+                            (command_width, keys_width, &row.keys),
+                            (
+                                command_width + keys_width,
+                                (row_width - command_width - keys_width).max(0.0),
+                                &row.when,
+                            ),
+                        ] {
+                            let cell = egui::Rect::from_min_size(
+                                rect.min + egui::vec2(left, 0.0),
+                                egui::vec2(width, 24.0),
+                            );
+                            cell_label(ui, cell.shrink2(egui::vec2(4.0, 0.0)), text)
+                                .help_text(text);
+                        }
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                response.enabled(),
+                                format!("{}: {}", row.command.title, row.keys),
+                            )
+                        });
+                        if edit.is_some_and(|response| response.clicked())
+                            || response.double_clicked()
+                            || ui.input(|input| {
+                                input.has_accesskit_action_request(
+                                    response.id,
+                                    egui::accesskit::Action::Click,
+                                )
+                            })
+                            || response.has_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        {
+                            self.begin_edit(row.command.id, row.slot, bindings);
+                        }
+                        response.context_menu(|ui| {
+                            if ui.button("Edit keybinding").clicked() {
+                                self.begin_edit(row.command.id, row.slot, bindings);
+                                ui.close();
+                            }
+                            if ui.button("Add keybinding").clicked() {
+                                self.begin_edit(row.command.id, None, bindings);
+                                ui.close();
+                            }
+                            if ui
+                                .add_enabled(
+                                    row.slot.is_some(),
+                                    egui::Button::new("Remove keybinding"),
+                                )
+                                .clicked()
+                            {
+                                let mut replacement = bindings.all(row.command.id).to_vec();
+                                if let Some(slot) = row.slot {
+                                    replacement.remove(slot);
+                                }
+                                change = Some(Change {
+                                    command: row.command.id,
+                                    expected: bindings.all(row.command.id).to_vec(),
+                                    replacement,
+                                });
+                                ui.close();
+                            }
+                            if ui.button("Reset command to defaults").clicked() {
+                                change = Some(Change {
+                                    command: row.command.id,
+                                    expected: bindings.all(row.command.id).to_vec(),
+                                    replacement: shortcuts::defaults().all(row.command.id).to_vec(),
+                                });
+                                ui.close();
+                            }
+                        });
+                    });
+                }
+            });
         });
         self.edit_dialog(ui.ctx(), bindings).or(change)
     }

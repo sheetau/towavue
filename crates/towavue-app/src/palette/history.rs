@@ -7,10 +7,10 @@ impl CommandPalette {
         commands: CommandContext,
         shortcuts: &ShortcutBindings,
         history: &[CommandId],
-        navigation: (bool, bool, bool),
+        navigation: (Navigation, bool),
         query_changed: bool,
     ) -> Option<Choice> {
-        let (up, down, enter) = navigation;
+        let (navigation, enter) = navigation;
         let query = self.query[1..].trim().to_ascii_lowercase();
         let mut matches: Vec<_> = command_definitions()
             .iter()
@@ -40,9 +40,7 @@ impl CommandPalette {
             })
             .filter(|index| enabled[*index])
             .or_else(|| enabled.iter().position(|enabled| *enabled));
-        if up || down {
-            self.selected = next_enabled(self.selected, &enabled, down);
-        }
+        self.selected = navigate_enabled(self.selected, &enabled, navigation, self.list_height);
         let selection_changed = previous_index != self.selected
             || self.selected_command != self.selected.map(|index| matches[index].id);
         self.selected_command = self.selected.map(|index| matches[index].id);
@@ -52,7 +50,7 @@ impl CommandPalette {
             .map(Choice::Command);
         let context = ui.ctx().clone();
         reserve_scroll_bar(ui);
-        egui::ScrollArea::vertical()
+        let output = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
             .show_styled(ui, |ui| {
@@ -123,7 +121,7 @@ impl CommandPalette {
                             node.set_description(shortcut.clone());
                         }
                     });
-                    if (up || down || query_changed || selection_changed) && selected {
+                    if (navigation.moved() || query_changed || selection_changed) && selected {
                         response.scroll_to_me(None);
                     }
                     if response.clicked() && !query_changed {
@@ -163,6 +161,7 @@ impl CommandPalette {
                     }
                 }
             });
+        self.list_height = output.inner_rect.height();
         chosen
     }
 }

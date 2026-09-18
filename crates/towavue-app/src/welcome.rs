@@ -166,10 +166,14 @@ pub fn show(
     } else {
         0.0
     };
+    let keyboard_offset = crate::list_navigation::unfocused_scroll(ui, "welcome", 40.0);
     let mut scroll = egui::ScrollArea::vertical()
         .id_salt("welcome")
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .auto_shrink([false, false]);
+    if let Some(offset) = keyboard_offset {
+        scroll = scroll.vertical_scroll_offset(offset);
+    }
     if search_changed || previous_filter != *filter {
         scroll = scroll.vertical_scroll_offset(0.0);
     }

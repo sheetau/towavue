@@ -113,8 +113,7 @@ impl Playlist {
             // The scrollbar is part of the list's wheel ownership too.
             self.scroll_rect = Some(ui.available_rect_before_wrap().intersect(ui.clip_rect()));
             let mut reveal = None;
-            if ui.is_enabled()
-                && !egui::Popup::is_any_open(ui.ctx())
+            if crate::list_navigation::available(ui)
                 && let Some((path, id)) = &self.keyboard_focus
                 && ui.memory(|memory| memory.has_focus(*id))
                 && let Some(mut index) = items.iter().position(|item| &item.path == path)
@@ -174,7 +173,12 @@ impl Playlist {
                     ..Default::default()
                 })
                 .auto_shrink([false, false]);
-            if changed || reveal.is_some() {
+            let keyboard_offset =
+                crate::list_navigation::unfocused_scroll(ui, "audio_playlist", 32.0);
+            if let Some(offset) = keyboard_offset {
+                self.wheel.clear();
+                scroll = scroll.vertical_scroll_offset(offset);
+            } else if changed || reveal.is_some() {
                 self.wheel.clear();
                 if let Some(index) = reveal.or_else(|| focus.map(|(_, index)| index)) {
                     let offset = self.scroll_offset;

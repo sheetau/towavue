@@ -16,6 +16,7 @@ pub(super) struct KeyboardSettings {
     last_capture_frame: Option<u64>,
     focus_search: bool,
     search_id: Option<egui::Id>,
+    row_focus: Option<(CommandId, Option<usize>, egui::Id)>,
 }
 
 #[derive(Clone)]

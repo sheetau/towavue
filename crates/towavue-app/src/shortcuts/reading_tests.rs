@@ -15,6 +15,45 @@ fn resolve(bindings: &ShortcutBindings, key: &str, reading: bool) -> ShortcutMat
 }
 
 #[test]
+fn reading_folder_reverse_shortcut_is_scoped_and_preserves_custom_bindings() {
+    let command = CommandId::ReverseReadingFolderOrder;
+    let defaults = defaults();
+    assert_eq!(
+        resolve(&defaults, "Alt+H", true),
+        ShortcutMatch::Command(command)
+    );
+    assert_eq!(resolve(&defaults, "Alt+H", false), ShortcutMatch::None);
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        assert_eq!(
+            defaults.resolve(
+                "Alt+H".parse::<KeySequence>().expect("key").strokes(),
+                CommandContext {
+                    media_kind: Some(kind),
+                    reading_mode: true,
+                    ..Default::default()
+                }
+            ),
+            ShortcutMatch::None
+        );
+    }
+    for custom in ["next_image = Alt+H\n", "next_image = Alt+H N\n"] {
+        let bindings = parse(custom, defaults.clone()).expect("custom binding");
+        assert!(bindings.all(command).is_empty());
+        assert_eq!(
+            parse(&serialize(&bindings), defaults.clone()).expect("round trip"),
+            bindings
+        );
+    }
+    let bindings =
+        parse("reverse_reading_folder_order = Alt+J\n", defaults.clone()).expect("custom reverse");
+    assert_eq!(
+        resolve(&bindings, "Alt+J", true),
+        ShortcutMatch::Command(command)
+    );
+    assert_eq!(resolve(&bindings, "Alt+H", true), ShortcutMatch::None);
+}
+
+#[test]
 fn reading_arrows_migrate_only_unchanged_defaults_and_preserve_custom_commands() {
     for old in [
         "",

@@ -37,6 +37,7 @@ pub enum CommandId {
     DecreaseReadingPages,
     ToggleReadingAxis,
     ReverseReadingOrder,
+    ReverseReadingFolderOrder,
     ReadingLeft,
     ReadingRight,
     Undo,
@@ -178,6 +179,7 @@ impl CommandId {
             Self::DecreaseReadingFirstPage => "decrease_reading_first_page",
             Self::ToggleReadingAxis => "toggle_reading_axis",
             Self::ReverseReadingOrder => "reverse_reading_order",
+            Self::ReverseReadingFolderOrder => "reverse_reading_folder_order",
             Self::ReadingLeft => "reading_left",
             Self::ReadingRight => "reading_right",
             Self::Undo => "undo",
@@ -691,6 +693,11 @@ const COMMANDS: &[CommandDefinition] = &[
     reading_command(
         CommandId::ReverseReadingOrder,
         "Reverse reading direction",
+        &[MediaKind::Image],
+    ),
+    reading_command(
+        CommandId::ReverseReadingFolderOrder,
+        "Reverse reading folder order",
         &[MediaKind::Image],
     ),
     command(CommandId::Undo, "Undo edit", ANY_MEDIA),

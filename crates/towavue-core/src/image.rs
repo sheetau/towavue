@@ -226,6 +226,8 @@ pub struct ReadingSettings {
     pub first_page_count: usize,
     pub axis: ReadingAxis,
     pub reversed: bool,
+    /// Reverse the Shell image sequence before partitioning spreads.
+    pub folder_reversed: bool,
 }
 
 impl Default for ReadingSettings {
@@ -235,6 +237,7 @@ impl Default for ReadingSettings {
             first_page_count: 2,
             axis: ReadingAxis::Horizontal,
             reversed: false,
+            folder_reversed: false,
         }
     }
 }
@@ -261,7 +264,7 @@ impl ReadingSettings {
         self.first_page_count = self.first_page_count.saturating_sub(1).max(1);
     }
 
-    /// The fixed, non-overlapping spread containing this image in Shell image order.
+    /// The fixed, non-overlapping spread containing this image in the chosen reading sequence.
     pub fn spread(&self, image_index: usize, image_count: usize) -> std::ops::Range<usize> {
         if image_count == 0 {
             return 0..0;

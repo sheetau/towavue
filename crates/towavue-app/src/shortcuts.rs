@@ -87,6 +87,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::DecreaseReadingFirstPage, "Ctrl+Shift+Left"),
         (CommandId::ToggleReadingAxis, "R"),
         (CommandId::ReverseReadingOrder, "H"),
+        (CommandId::ReverseReadingFolderOrder, "Alt+H"),
         (CommandId::Undo, "Ctrl+Z"),
         (CommandId::Redo, "Ctrl+Shift+Z"),
         (CommandId::ApplyCrop, "Ctrl+Y"),
@@ -336,6 +337,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::OpenRecentFolder
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
+                        | CommandId::ReverseReadingFolderOrder
                 ))
                 && !declared.contains(&definition.id)
         })

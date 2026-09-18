@@ -113,7 +113,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                 Err(_) => (None, egui::Vec2::splat(1.0)),
             })
             .collect();
-        // Loader results omit the current source and follow unreversed Shell order.
+        // Loader results omit the current source and follow the chosen reading sequence.
         // Insert that source before applying the reading axis/order to the joined layout.
         let ordered = snapshot
             .map(|snapshot| {

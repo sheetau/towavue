@@ -79,6 +79,157 @@ fn wait_image(app: &mut App) {
 }
 
 #[test]
+fn reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_cards_consistent() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::reading_folder_reversal_keeps_first_spread_loading_navigation_and_background_cards_consistent",
+    ) else {
+        return;
+    };
+    for reversed in [false, true] {
+        let (mut app, context, id, paths) = fixture(&root);
+        let shell_items = app
+            .folder_snapshot
+            .as_ref()
+            .expect("snapshot")
+            .items
+            .clone();
+        app.reading_mode = true;
+        app.reading_settings.first_page_count = 1;
+        app.reading_settings.reversed = reversed;
+        let history = app.edits.clone();
+        app.dispatch(CommandId::ReverseReadingFolderOrder);
+        wait_image(&mut app);
+        assert!(app.reading_settings.folder_reversed);
+        assert_eq!(app.reading_settings.reversed, reversed);
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+        assert_eq!(app.edits, history);
+        assert_eq!(
+            app.preview_folder(id, &paths[0]).expect("position").index,
+            3
+        );
+        assert_eq!(
+            app.preview_image_path(id, &paths[0], 0),
+            Some(paths[3].clone())
+        );
+
+        app.dispatch(CommandId::FirstImage);
+        wait_image(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&paths[3]));
+        assert!(
+            app.reading_pages.is_empty(),
+            "first-spread count starts at the reversed folder head"
+        );
+        app.dispatch(if reversed {
+            CommandId::ReadingLeft
+        } else {
+            CommandId::ReadingRight
+        });
+        wait_image(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&paths[2]));
+        assert_eq!(
+            app.reading_request_paths(),
+            [paths[2].clone(), paths[1].clone()]
+        );
+        assert_eq!(app.image_prefetch_paths(), Some(vec![paths[0].clone()]));
+        assert_eq!(app.reading_pages.len(), 1);
+        assert_eq!(
+            app.reading_pages[0]
+                .as_ref()
+                .expect("second page")
+                .decoded
+                .frames[0]
+                .rgba[0],
+            70
+        );
+        assert!(app.status_details().contains(&"2 / 4".to_owned()));
+        let first = app.image.as_ref().expect("first page").texture.id();
+        let second = app.reading_pages[0]
+            .as_ref()
+            .expect("second page")
+            .texture
+            .id();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 500.0),
+                )),
+                ..Default::default()
+            },
+            |ui| app.draw_reading_pages(ui),
+        );
+        let center = |id| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == id => {
+                        Some(mesh.calc_bounds().center().x)
+                    }
+                    _ => None,
+                })
+                .expect("page pixels drawn")
+        };
+        assert_eq!(center(first) > center(second), reversed);
+
+        let foreground = app
+            .tabs
+            .open_new(root.join("foreground.bmp"), MediaKind::Image);
+        app.retain_image_tab();
+        app.displayed_tab = Some(foreground);
+        app.path = Some(root.join("foreground.bmp"));
+        let active = (app.path.clone(), app.media_generation, app.image_generation);
+        let position = app
+            .preview_folder(id, &paths[2])
+            .expect("background position");
+        assert_eq!(position.index, 1);
+        assert_eq!(
+            position.reading_paths(),
+            Some(vec![paths[2].clone(), paths[1].clone()])
+        );
+        let target = app
+            .preview_image_path(id, &paths[2], 0)
+            .expect("reversed first");
+        assert_eq!(target, paths[3]);
+        app.handle_preview_image_seek(id, position.instance, paths[2].clone(), target);
+        assert_eq!(
+            (app.path.clone(), app.media_generation, app.image_generation),
+            active
+        );
+        assert_eq!(app.tabs.active_id(), Some(foreground));
+        assert!(app.retained_images[&id].reading_settings.folder_reversed);
+        app.activate_tab(id);
+        wait_image(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&paths[3]));
+        assert!(app.reading_pages.is_empty());
+        assert_eq!(
+            app.folder_snapshot.as_ref().expect("snapshot").items,
+            shell_items
+        );
+
+        app.dispatch(CommandId::ToggleReadingMode);
+        assert!(!app.reading_mode);
+        let position = app
+            .preview_folder(id, &paths[3])
+            .expect("ordinary position");
+        assert_eq!(position.index, 3);
+        assert_eq!(
+            app.preview_image_path(id, &paths[3], 0),
+            Some(paths[0].clone())
+        );
+        app.dispatch(CommandId::ReverseReadingFolderOrder);
+        assert!(
+            app.reading_settings.folder_reversed,
+            "command is disabled outside reading"
+        );
+        assert!(!app.reading_mode);
+        app.dispatch(CommandId::FirstImage);
+        wait_image(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
+    }
+}
+
+#[test]
 fn folder_card_navigation_preserves_background_owner_and_reading_activation() {
     let Some(root) = crate::tests::isolated_test_root(
         "image_tab_preview::tests::folder_card_navigation_preserves_background_owner_and_reading_activation",

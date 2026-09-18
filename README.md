@@ -7,7 +7,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **One app for your media.** Browse images, watch videos, and play music in tabs.
 - **Familiar folder browsing.** Navigate in Windows Explorer's folder order, with a thumbnail filmstrip and recent files.
 - **Flexible viewing.** Zoom, pan, fit or fill the window, and switch to fullscreen.
-- **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, and direction.
+- **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, direction, and independent folder-order reversal.
 - **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
 - **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
 - **Undo and export.** Keep the source unchanged while editing, then export the result.
@@ -47,6 +47,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Image zoom | Ctrl+wheel |
 | Reading mode | B |
 | Reverse reading direction | H / V (reading mode) |
+| Reverse reading folder order | Alt+H (reading mode) |
 | Play / pause video or audio | Space |
 | Seek backward / forward | Left / Right |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |

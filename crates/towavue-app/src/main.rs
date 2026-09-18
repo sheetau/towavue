@@ -2785,7 +2785,9 @@ where
     fn image_prefetch_paths(&self) -> Option<Vec<PathBuf>> {
         let snapshot = self.folder_snapshot.as_ref()?;
         let path = self.path.as_ref()?;
-        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+        let images: Vec<_> = snapshot
+            .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
+            .collect();
         let current = images.iter().position(|item| &item.path == path)?;
         if !self.reading_mode {
             // Keep ordinary navigation speculation bounded to nine neighbors.
@@ -5985,7 +5987,9 @@ where
             let Some(snapshot) = &self.folder_snapshot else {
                 return;
             };
-            let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+            let images: Vec<_> = snapshot
+                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
+                .collect();
             let Some(index) = images
                 .iter()
                 .position(|item| Some(item.path.as_path()) == self.path.as_deref())
@@ -7150,6 +7154,12 @@ where
             CommandId::ToggleReadingAxis => {
                 self.reading_settings.toggle_axis();
                 self.request_redraw();
+            }
+            CommandId::ReverseReadingFolderOrder => {
+                let mut settings = self.reading_settings;
+                settings.folder_reversed = !settings.folder_reversed;
+                self.set_reading_layout(true, settings);
+                self.set_status(self.reading_status());
             }
             CommandId::ReverseReadingOrder => {
                 self.reading_settings.reversed = !self.reading_settings.reversed;
@@ -8795,7 +8805,9 @@ where
         let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
             return;
         };
-        let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
+        let images: Vec<_> = snapshot
+            .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
+            .collect();
         let Some(current) = images.iter().position(|item| &item.path == path) else {
             return;
         };
@@ -8908,9 +8920,13 @@ where
             return;
         }
         let target = if last {
-            snapshot.items_of_kind(MediaKind::Image).last()
+            snapshot
+                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
+                .next_back()
         } else {
-            snapshot.items_of_kind(MediaKind::Image).next()
+            snapshot
+                .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
+                .next()
         };
         if let Some(target) = target
             && &target.path != path
@@ -9655,8 +9671,14 @@ where
             };
         }
         format!(
-            "Reading {} · first {}",
-            self.reading_settings.page_count, self.reading_settings.first_page_count
+            "Reading {} · first {}{}",
+            self.reading_settings.page_count,
+            self.reading_settings.first_page_count,
+            if self.reading_settings.folder_reversed {
+                " · reverse folder"
+            } else {
+                ""
+            }
         )
     }
 
@@ -16273,7 +16295,9 @@ mod tests {
                     .iter()
                     .filter(|shape| {
                         matches!(&shape.shape,
-                    egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::Managed(0))
+                    egui::Shape::Mesh(mesh) if mesh.texture_id != egui::TextureId::Managed(0)
+                        // Status artwork is also a texture; only count the larger page previews.
+                        && mesh.calc_bounds().height() > 24.0)
                     })
                     .count();
                 if images == if reading { 2 } else { 1 } {
@@ -17880,6 +17904,7 @@ mod tests {
                             first_page_count,
                             axis,
                             reversed,
+                            folder_reversed: false,
                         };
                         for (current, path) in paths.iter().enumerate() {
                             app.path = Some(path.clone());

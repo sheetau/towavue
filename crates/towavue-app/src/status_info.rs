@@ -70,9 +70,25 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(path) = self.displayed_image_path()
             && let Some(snapshot) = &self.folder_snapshot
-            && let Some(index) = snapshot.item_index(path)
         {
-            details.push(format!("{} / {}", index + 1, snapshot.items.len()));
+            let position = if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
+                let mut count = 0;
+                let mut position = None;
+                for item in snapshot.reading_sequence(self.reading_settings.folder_reversed) {
+                    if &item.path == path {
+                        position = Some(count);
+                    }
+                    count += 1;
+                }
+                position.map(|index| (index, count))
+            } else {
+                snapshot
+                    .item_index(path)
+                    .map(|index| (index, snapshot.items.len()))
+            };
+            if let Some((index, count)) = position {
+                details.push(format!("{} / {}", index + 1, count));
+            }
         }
         if let Some(image) = image {
             if image.decoded.is_animated() {

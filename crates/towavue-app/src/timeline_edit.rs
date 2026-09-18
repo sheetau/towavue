@@ -375,15 +375,14 @@ pub(super) fn waveform_regions(
         }
         cuts.sort_by(f64::total_cmp);
         for pair in cuts.windows(2).filter(|pair| pair[0] < pair[1]) {
-            let gain = master_volume
+            let gain = f64::from(master_volume)
+                * f64::from(saved_gain)
                 * preview
                     .filter(|(range, _)| {
                         pair[0] >= range.start().as_seconds_f64()
                             && pair[1] <= range.end().as_seconds_f64()
                     })
-                    .map_or(saved_gain, |(_, factor)| {
-                        (saved_gain * factor).min(towavue_core::MAX_VOLUME)
-                    });
+                    .map_or(1.0, |(_, factor)| f64::from(factor));
             if gain <= 0.0 {
                 continue;
             }
@@ -394,7 +393,7 @@ pub(super) fn waveform_regions(
                 ),
                 egui::vec2(
                     rect.width() * ((pair[1] - pair[0]) / duration) as f32,
-                    rect.height() * gain,
+                    rect.height() * gain.min(1.0) as f32,
                 ),
             );
             let source_at = |time| {
@@ -402,8 +401,14 @@ pub(super) fn waveform_regions(
                     / source_seconds
             };
             let uv = egui::Rect::from_min_max(
-                egui::pos2(source_at(pair[0]) as f32, 0.0),
-                egui::pos2(source_at(pair[1]) as f32, 1.0),
+                egui::pos2(
+                    source_at(pair[0]) as f32,
+                    (0.5 - 0.5 / gain.max(1.0)) as f32,
+                ),
+                egui::pos2(
+                    source_at(pair[1]) as f32,
+                    (0.5 + 0.5 / gain.max(1.0)) as f32,
+                ),
             );
             regions.push((destination, uv));
         }

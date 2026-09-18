@@ -191,7 +191,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
         );
     }
     for kind in [MediaKind::Audio, MediaKind::Video] {
-        for limited in [false, true] {
+        for repeats in 0..=2 {
             let relative_target = directory.join(if kind == MediaKind::Audio {
                 "relative.wav"
             } else {
@@ -201,7 +201,7 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
                 EditOperation::Timeline(TimelineEdit::SetVolume(range(500, 1500), 0.5)),
                 EditOperation::Timeline(TimelineEdit::ScaleVolume(range(0, 2000), 1.5)),
             ];
-            if limited {
+            for _ in 0..repeats {
                 operations.push(EditOperation::Timeline(TimelineEdit::ScaleVolume(
                     range(0, 2000),
                     2.0,
@@ -241,12 +241,12 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
                 } else {
                     1.0
                 };
-                let factor = if limited { 2.0 } else { 1.5 };
+                let factor = 1.5 * 2.0_f32.powi(repeats);
                 let actual = f32::from_le_bytes(*actual);
                 let expected = f32::from_le_bytes(*original) * base * factor;
                 assert!(
                     (actual - expected).abs() <= 1.0 / 32768.0,
-                    "relative PCM ratio {kind:?}, limited={limited}, sample={index}"
+                    "relative PCM ratio {kind:?}, repeats={repeats}, sample={index}"
                 );
             }
         }

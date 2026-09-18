@@ -319,11 +319,15 @@ pub(super) fn show(
                 output.selection = Some(preview);
             }
         } else if matches!(mode, Gesture::Seek | Gesture::Select | Gesture::Band(..)) {
-            head = if matches!(mode, Gesture::Select) {
-                snap(at(origin.x), origin.x)
-            } else {
-                at(pointer.x)
-            };
+            // An undecided gain-line press must not move even the painted CTI.
+            // A completed click still seeks; a horizontal drag becomes selection.
+            if !matches!(mode, Gesture::Band(..)) || drag.released {
+                head = if matches!(mode, Gesture::Select) {
+                    snap(at(origin.x), origin.x)
+                } else {
+                    at(pointer.x)
+                };
+            }
             if began_selection || (drag.released && !matches!(mode, Gesture::Select)) {
                 output.seek = Some(head);
             }
@@ -375,7 +379,7 @@ pub(super) fn show(
         );
     }
     let held_gain = gain_preview.filter(|_| crate::timeline_input::is_active(ui.ctx()));
-    adjustment::paint(&painter, rect, held_gain);
+    adjustment::paint(&painter, rect, duration, held_gain);
     if preview != selection
         && drag.dragging
         && gain_preview.is_none()
@@ -1317,6 +1321,17 @@ mod tests {
                                 true,
                             );
                             assert!(output.selection.is_none() && output.seek.is_none());
+                            if let Some((_, head, _)) = context.data(|data| {
+                                data.get_temp::<(u64, MediaTime, Option<TimeRange>)>(
+                                    response.id.with("cti-preview"),
+                                )
+                            }) {
+                                assert_eq!(
+                                    head,
+                                    time(0.0),
+                                    "gain press/drag must not move the painted CTI"
+                                );
+                            }
                             edits.extend(output.edit);
                             previews.extend(output.gain_preview);
                             if context.current_pass_index() == 0 {
@@ -1335,20 +1350,37 @@ mod tests {
                             .filter_map(|shape| match &shape.shape {
                                 egui::Shape::LineSegment { points, stroke }
                                     if stroke.color == egui::Color32::from_white_alpha(128)
-                                        && points[0].x == rect.left()
-                                        && points[1].x == rect.right() =>
+                                        && points[0].y == points[1].y =>
                                 {
                                     Some(points)
                                 }
                                 _ => None,
                             })
                             .collect();
+                        let active = held && !previews.is_empty();
+                        let left = if active {
+                            rect.left()
+                                + rect.width() * affected.start().as_seconds_f64() as f32 / 10.0
+                        } else {
+                            rect.left()
+                        };
+                        let right = if active {
+                            rect.left()
+                                + rect.width() * affected.end().as_seconds_f64() as f32 / 10.0
+                        } else {
+                            rect.right()
+                        };
                         assert_eq!(
                             lines.len(),
-                            1,
-                            "one neutral/relative line across all saved gain bands"
+                            1 + usize::from(left > rect.left()) + usize::from(right < rect.right())
                         );
-                        assert_eq!(lines[0][0].y, adjustment::gain_y(rect, displayed_gain));
+                        for points in lines {
+                            let moving = points[0].x == left && points[1].x == right;
+                            assert_eq!(
+                                points[0].y,
+                                adjustment::gain_y(rect, if moving { displayed_gain } else { 1.0 })
+                            );
+                        }
                         if selected.is_some() && !edits.is_empty() {
                             let tree = painted
                                 .platform_output

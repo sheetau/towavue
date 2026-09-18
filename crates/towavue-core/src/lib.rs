@@ -44,7 +44,8 @@ pub use timeline::{EditTimeline, TimeRange, TimelineEdit, TimelineSpan};
 pub use video_resize::VideoResize;
 pub use video_rotation::VideoRotation;
 
-/// Maximum linear level of each independent listening or saved-gain control.
+/// Maximum linear level of each listening/master control or relative gain operation.
+/// Timeline gains can accumulate beyond this level through repeated operations.
 pub const MAX_VOLUME: f32 = 2.0;
 
 /// A signed media timestamp stored as nanoseconds.

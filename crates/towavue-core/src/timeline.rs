@@ -29,7 +29,7 @@ pub enum TimelineEdit {
     Keep(TimeRange),
     Delete(TimeRange),
     SetVolume(TimeRange, f32),
-    /// Multiply existing gains, limiting the common factor to preserve their ratios.
+    /// Multiply existing gains by a per-operation factor, preserving their ratios.
     ScaleVolume(TimeRange, f32),
     Stretch(TimeRange, MediaTime),
 }
@@ -143,16 +143,10 @@ impl EditTimeline {
         None
     }
 
-    /// Largest relative gain adjustment (up to 200%) that keeps every selected
-    /// span within the cumulative gain limit. Silent spans remain silent.
+    /// Each relative operation can double the selected spans, independently of
+    /// previous adjustments. Overflow is rejected atomically when applying it.
     pub fn volume_scale_limit(&self, range: TimeRange) -> Option<f32> {
-        self.volume_peak(range).map(|maximum| {
-            if maximum == 0.0 {
-                crate::MAX_VOLUME
-            } else {
-                (crate::MAX_VOLUME / maximum).min(crate::MAX_VOLUME)
-            }
-        })
+        self.volume_peak(range).map(|_| crate::MAX_VOLUME)
     }
 
     fn volume_peak(&self, range: TimeRange) -> Option<f32> {
@@ -192,7 +186,13 @@ impl EditTimeline {
         }
         let scale = match edit {
             TimelineEdit::ScaleVolume(_, factor) => {
-                factor.min(self.volume_scale_limit(range).unwrap_or(1.0))
+                if self
+                    .volume_peak(range)
+                    .is_some_and(|peak| !(peak * factor).is_finite())
+                {
+                    return false;
+                }
+                factor
             }
             _ => 1.0,
         };
@@ -241,9 +241,7 @@ impl EditTimeline {
                     match edit {
                         TimelineEdit::SetVolume(_, volume) => next.volume = volume,
                         TimelineEdit::ScaleVolume(..) => {
-                            // The shared factor does the limiting; min only absorbs
-                            // f32 rounding at the maximum selected gain.
-                            next.volume = (span.volume * scale).min(crate::MAX_VOLUME);
+                            next.volume = span.volume * scale;
                         }
                         TimelineEdit::Stretch(_, duration) => {
                             let scale = |position: i64| {
@@ -334,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn relative_gain_preserves_ratios_limits_and_silent_spans_atomically() {
+    fn relative_gain_preserves_ratios_across_repeated_operations_and_silent_spans() {
         let mut plan = timeline();
         assert!(plan.apply(TimelineEdit::SetVolume(range(0, 400), 0.5)));
         assert!(plan.apply(TimelineEdit::SetVolume(range(400, 600), 0.0)));
@@ -346,18 +344,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             [0.75, 0.0, 1.5]
         );
-        assert!((plan.volume_scale_limit(range(0, 1000)).expect("limit") - 4.0 / 3.0).abs() < 1e-6);
+        assert_eq!(plan.volume_scale_limit(range(0, 1000)), Some(2.0));
         assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
         assert_eq!(
             plan.spans
                 .iter()
                 .map(|span| span.volume)
                 .collect::<Vec<_>>(),
-            [1.0, 0.0, 2.0]
+            [1.5, 0.0, 3.0]
+        );
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
+        assert_eq!(
+            plan.spans
+                .iter()
+                .map(|span| span.volume)
+                .collect::<Vec<_>>(),
+            [3.0, 0.0, 6.0]
         );
         let limited = plan.clone();
-        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
-        assert_eq!(plan, limited, "cannot flatten ratios at the ceiling");
         for factor in [f32::NAN, f32::INFINITY, -0.1, 2.001] {
             assert!(!plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), factor)));
             assert_eq!(plan, limited);
@@ -367,6 +371,19 @@ mod tests {
         assert_eq!(plan, limited);
         assert!(plan.apply(TimelineEdit::ScaleVolume(range(400, 600), 2.0)));
         assert_eq!(plan, limited, "a multiplier cannot restore muted samples");
+    }
+
+    #[test]
+    fn relative_gain_rejects_numeric_overflow_without_changing_any_span() {
+        let mut plan = timeline();
+        for _ in 0..127 {
+            assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
+        }
+        assert_eq!(plan.volume_scale_limit(range(0, 1000)), Some(2.0));
+        let before = plan.clone();
+        assert!(!plan.apply(TimelineEdit::ScaleVolume(range(100, 800), 2.0)));
+        assert_eq!(plan, before);
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 0.5)));
     }
 
     #[test]

@@ -60,14 +60,33 @@ pub(super) fn changes_plan(
     candidate.apply(edit) && candidate != original
 }
 
-pub(super) fn paint(painter: &egui::Painter, rect: Rect, preview: Option<(TimeRange, f32)>) {
-    let gain = preview.map_or(1.0, |(_, gain)| gain);
-    painter.hline(
-        rect.x_range(),
-        gain_y(rect, gain),
-        (1.0, egui::Color32::from_white_alpha(128)),
-    );
-    if preview.is_some() {
+pub(super) fn paint(
+    painter: &egui::Painter,
+    rect: Rect,
+    duration: MediaTime,
+    preview: Option<(TimeRange, f32)>,
+) {
+    let stroke = (1.0, egui::Color32::from_white_alpha(128));
+    if let Some((range, gain)) = preview {
+        let x_at = |time: MediaTime| {
+            egui::lerp(
+                rect.x_range(),
+                (time.as_seconds_f64() / duration.as_seconds_f64()).clamp(0.0, 1.0) as f32,
+            )
+        };
+        let left = x_at(range.start());
+        let right = x_at(range.end());
+        if left > rect.left() {
+            painter.hline(rect.left()..=left, gain_y(rect, 1.0), stroke);
+        }
+        painter.hline(left..=right, gain_y(rect, gain), stroke);
+        if right < rect.right() {
+            painter.hline(right..=rect.right(), gain_y(rect, 1.0), stroke);
+        }
+    } else {
+        painter.hline(rect.x_range(), gain_y(rect, 1.0), stroke);
+    }
+    if let Some((_, gain)) = preview {
         painter.text(
             rect.left_top() + egui::vec2(LABEL_INSET, 10.0),
             egui::Align2::LEFT_CENTER,
@@ -208,11 +227,11 @@ mod tests {
     }
 
     #[test]
-    fn relative_gain_limit_uses_the_highest_selected_gain() {
+    fn relative_gain_limit_is_independent_of_previous_adjustments() {
         let mut plan = EditTimeline::new(time(10), Default::default()).expect("plan");
         assert!(plan.apply(TimelineEdit::SetVolume(range(2, 4), 1.5)));
         assert_eq!(gain_limit(range(0, 2), Some(&plan)), 2.0);
-        assert!((gain_limit(range(0, 8), Some(&plan)) - 4.0 / 3.0).abs() < 1e-6);
+        assert_eq!(gain_limit(range(0, 8), Some(&plan)), 2.0);
         assert_eq!(gain_limit(range(0, 8), None), 2.0);
     }
 

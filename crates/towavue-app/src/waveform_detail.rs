@@ -18,6 +18,47 @@ mod tests {
     use towavue_core::TimelineEdit;
 
     #[test]
+    fn gain_preview_scales_the_unclipped_envelope_only_inside_selection() {
+        let range = towavue_core::TimeRange::new(
+            media_time(Duration::from_millis(2500)),
+            media_time(Duration::from_millis(7500)),
+        )
+        .expect("selection");
+        let plan = EditTimeline::new(media_time(Duration::from_secs(10)), Default::default())
+            .expect("plan");
+        let detail = Detail {
+            key: Some(Arc::new(Key {
+                path: "fixture.wav".into(),
+                plan,
+                rate: 1.0,
+                volume: 1.0,
+                columns: 4,
+            })),
+            values: Some(Arc::from([0.1, 0.2, 1.5, 0.4])),
+            ..Default::default()
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 100.0));
+        for density in [1.0, 1.25, 2.0] {
+            for (preview, heights) in [
+                (None, [10.0, 20.0, 100.0, 40.0]),
+                (Some((range, 0.5)), [10.0, 10.0, 75.0, 40.0]),
+                (Some((range, 2.0)), [10.0, 40.0, 100.0, 40.0]),
+            ] {
+                let mesh = detail.mesh(rect, density, preview).expect("mesh");
+                assert_eq!(mesh.vertices.len(), 16);
+                for (vertices, height) in mesh.vertices.as_chunks::<4>().0.iter().zip(heights) {
+                    let bounds = egui::Rect::from_points(&vertices.map(|vertex| vertex.pos));
+                    assert!((bounds.height() - height).abs() <= 1.0 / density);
+                }
+            }
+        }
+        assert_eq!(
+            detail.values.as_deref(),
+            Some([0.1, 0.2, 1.5, 0.4].as_slice())
+        );
+    }
+
+    #[test]
     fn refined_waveform_renders_native_samples_and_rejects_stale_edits_and_sizes() {
         use std::os::windows::process::CommandExt;
         let Some(root) = crate::tests::isolated_test_root(
@@ -99,7 +140,21 @@ mod tests {
                 .expect("coarse overview during settle time");
             assert!(!app.waveform_detail.started);
             app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
-            assert!(app.detailed_waveform(&context, rect, true).is_none());
+            assert!(
+                app.detailed_waveform(
+                    &context,
+                    rect,
+                    Some((
+                        towavue_core::TimeRange::new(
+                            MediaTime::ZERO,
+                            media_time(Duration::from_secs(1))
+                        )
+                        .expect("range"),
+                        1.0
+                    ))
+                )
+                .is_none()
+            );
             assert!(
                 !app.waveform_detail.started,
                 "release preview must not refine the pre-edit plan"
@@ -140,11 +195,11 @@ mod tests {
                 } else {
                     let wider =
                         egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
-                    app.detailed_waveform(&context, wider, false);
-                    app.detailed_waveform(&context, rect, false);
+                    app.detailed_waveform(&context, wider, None);
+                    app.detailed_waveform(&context, rect, None);
                 }
                 app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
-                app.detailed_waveform(&context, rect, false);
+                app.detailed_waveform(&context, rect, None);
                 assert!(app.waveform_detail.is_pending());
                 let status = app.status_message.clone();
                 // Hold the completed old response until the same plan/width is pending again.
@@ -194,7 +249,10 @@ mod tests {
                 .clone()
                 .expect("installed envelope");
             assert!(!app.waveform_detail.is_pending());
-            let expected = app.waveform_detail.mesh(rect, density).expect("sharp mesh");
+            let expected = app
+                .waveform_detail
+                .mesh(rect, density, None)
+                .expect("sharp mesh");
             let output = frame(&mut app);
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.vertices == expected.vertices)));
             assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)));
@@ -208,10 +266,22 @@ mod tests {
             }
             app.set_playback_volume(3.0);
             assert!(
-                app.detailed_waveform(&context, rect, true).is_none(),
-                "dragging uses the lightweight source overview"
+                app.detailed_waveform(
+                    &context,
+                    rect,
+                    Some((
+                        towavue_core::TimeRange::new(
+                            MediaTime::ZERO,
+                            media_time(Duration::from_secs(1))
+                        )
+                        .expect("range"),
+                        1.0
+                    ))
+                )
+                .is_some(),
+                "dragging retains the detailed envelope"
             );
-            assert!(app.detailed_waveform(&context, rect, false).is_some());
+            assert!(app.detailed_waveform(&context, rect, None).is_some());
             assert!(Arc::ptr_eq(
                 &retained,
                 app.waveform_detail
@@ -222,7 +292,7 @@ mod tests {
             assert!(app.edits.is_empty());
             let taller =
                 egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), rect.height() * 2.0));
-            assert!(app.detailed_waveform(&context, taller, false).is_some());
+            assert!(app.detailed_waveform(&context, taller, None).is_some());
             assert!(Arc::ptr_eq(
                 &retained,
                 app.waveform_detail
@@ -235,7 +305,7 @@ mod tests {
             app.waveform_detail = saved;
             app.graphics_epoch += 1;
             assert!(
-                app.detailed_waveform(&context, rect, false).is_some(),
+                app.detailed_waveform(&context, rect, None).is_some(),
                 "CPU amplitudes survive graphics recovery"
             );
             assert!(Arc::ptr_eq(
@@ -244,7 +314,7 @@ mod tests {
             ));
 
             let wider = egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
-            assert!(app.detailed_waveform(&context, wider, false).is_none());
+            assert!(app.detailed_waveform(&context, wider, None).is_none());
             app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
             assert!(
                 app.waveform_detail.values.is_none(),
@@ -262,7 +332,7 @@ mod tests {
                 )),
                 MediaKind::Audio,
             );
-            app.detailed_waveform(&context, rect, false);
+            app.detailed_waveform(&context, rect, None);
             assert_ne!(
                 app.waveform_detail
                     .key
@@ -331,7 +401,7 @@ mod tests {
             ));
             let texture = app.waveform.as_ref().expect("overview").id();
             let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 96.0));
-            app.detailed_waveform(&context, rect, false);
+            app.detailed_waveform(&context, rect, None);
             for operation in [
                 EditOperation::SetTrimStart(media_time(Duration::from_secs(2))),
                 EditOperation::SetTrimEnd(media_time(Duration::from_secs(8))),
@@ -344,7 +414,7 @@ mod tests {
                     "trim must reuse the original overview"
                 );
                 assert_eq!(app.waveform.as_ref().expect("same overview").id(), texture);
-                app.detailed_waveform(&context, rect, false);
+                app.detailed_waveform(&context, rect, None);
                 assert_ne!(app.waveform_detail.key.as_ref(), Some(&previous));
                 assert!(
                     !app.waveform_detail.started,
@@ -396,24 +466,48 @@ impl Detail {
         saved
     }
 
-    fn mesh(&self, rect: egui::Rect, density: f32) -> Option<egui::Mesh> {
+    fn mesh(
+        &self,
+        rect: egui::Rect,
+        density: f32,
+        preview: Option<(towavue_core::TimeRange, f32)>,
+    ) -> Option<egui::Mesh> {
         let values = self.values.as_ref()?;
         let snap = |value: f32| (value * density).round() / density;
         let mut mesh = egui::Mesh::default();
         for (column, value) in values.iter().enumerate() {
-            let half_height = rect.height() * value.min(1.0) * 0.5;
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(
-                    snap(rect.left() + rect.width() * column as f32 / values.len() as f32),
-                    snap(rect.center().y - half_height),
-                ),
-                egui::pos2(
-                    snap(rect.left() + rect.width() * (column + 1) as f32 / values.len() as f32),
-                    snap(rect.center().y + half_height),
-                ),
-            );
-            if bar.is_positive() {
-                mesh.add_colored_rect(bar, Color32::from_white_alpha(150));
+            let duration = self.key.as_ref()?.plan.duration().as_seconds_f64();
+            let from = column as f64 / values.len() as f64;
+            let to = (column + 1) as f64 / values.len() as f64;
+            let mut cuts = [from, from, to, to];
+            if let Some((range, _)) = preview {
+                cuts[1] = (range.start().as_seconds_f64() / duration).clamp(from, to);
+                cuts[2] = (range.end().as_seconds_f64() / duration).clamp(from, to);
+            }
+            cuts.sort_by(f64::total_cmp);
+            for pair in cuts.windows(2).filter(|pair| pair[0] < pair[1]) {
+                let factor = preview
+                    .filter(|(range, _)| {
+                        pair[0] >= range.start().as_seconds_f64() / duration
+                            && pair[1] <= range.end().as_seconds_f64() / duration
+                    })
+                    .map_or(1.0, |(_, factor)| factor);
+                // Multiply the retained, unclipped envelope before clipping display height.
+                let half_height =
+                    rect.height() * (f64::from(*value) * f64::from(factor)).min(1.0) as f32 * 0.5;
+                let bar = egui::Rect::from_min_max(
+                    egui::pos2(
+                        snap(rect.left() + rect.width() * pair[0] as f32),
+                        snap(rect.center().y - half_height),
+                    ),
+                    egui::pos2(
+                        snap(rect.left() + rect.width() * pair[1] as f32),
+                        snap(rect.center().y + half_height),
+                    ),
+                );
+                if bar.is_positive() {
+                    mesh.add_colored_rect(bar, Color32::from_white_alpha(150));
+                }
             }
         }
         Some(mesh)
@@ -457,7 +551,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         &mut self,
         context: &egui::Context,
         rect: egui::Rect,
-        gain_preview: bool,
+        gain_preview: Option<(towavue_core::TimeRange, f32)>,
     ) -> Option<egui::Mesh> {
         let path = self.path.as_ref()?;
         let state = self.edit_state();
@@ -503,7 +597,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let detail = &mut self.waveform_detail;
         if !detail.started
             && !self.waveform_loading
-            && !gain_preview
+            && gain_preview.is_none()
             && !crate::timeline_input::is_active(context)
         {
             let remaining =
@@ -533,11 +627,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 context.request_repaint_after(remaining);
             }
         }
-        if gain_preview {
-            None
-        } else {
-            detail.mesh(rect, context.pixels_per_point())
-        }
+        detail.mesh(rect, context.pixels_per_point(), gain_preview)
     }
 
     pub(super) fn install_detailed_waveform(

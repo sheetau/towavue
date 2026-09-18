@@ -691,7 +691,18 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
                     .map(|vertex| vertex.pos)
                     .collect::<Vec<_>>(),
             );
-            assert!((selected.height() / rect.height() - 2.0).abs() < 0.001);
+            let selected_uv = egui::Rect::from_points(
+                &dragging.vertices[4..8]
+                    .iter()
+                    .map(|vertex| vertex.uv)
+                    .collect::<Vec<_>>(),
+            );
+            assert!((selected.height() / selected_uv.height() / rect.height() - 2.0).abs() < 0.001);
+            assert_eq!(
+                selected.height(),
+                rect.height(),
+                "amplified geometry stays inside the viewport"
+            );
             assert!(
                 output
                     .textures_delta
@@ -757,9 +768,13 @@ fn waveform_regions_follow_source_uv_edited_width_gain_and_mute() {
                 destination.height(),
                 destination.center().y
             ),
-            (left, width, height, 70.0)
+            (left, width, f32::min(height, 100.0), 70.0)
         );
         assert_eq!((uv.left(), uv.right()), (u0, u1));
+        assert!(
+            (destination.height() / uv.height() - height).abs() < 0.001,
+            "clipped geometry retains the amplified source scale"
+        );
     }
     assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
     assert_eq!(

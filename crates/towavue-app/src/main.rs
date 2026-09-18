@@ -6364,7 +6364,7 @@ where
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
-                if let Some(mesh) = self.detailed_waveform(ui.ctx(), rect, result.gain_preview.is_some()) {
+                if let Some(mesh) = self.detailed_waveform(ui.ctx(), rect, result.gain_preview) {
                     waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
                 } else if let Some(waveform) = &self.waveform {
                     let mut mesh = egui::Mesh::with_texture(waveform.id());

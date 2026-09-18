@@ -434,6 +434,35 @@ mod tests {
         wav.extend((pcm.len() as u32).to_le_bytes());
         wav.extend(pcm);
         std::fs::write(&source, &wav).expect("owned PCM fixture");
+        let mut repeated = EditTimeline::new(time(2000), Default::default()).expect("plan");
+        let base = timeline_waveform(
+            &source,
+            &repeated,
+            1.0,
+            1.0,
+            64,
+            &crate::Cancellation::default(),
+        )
+        .expect("base envelope");
+        for factor in [2.0, 4.0, 8.0] {
+            assert!(repeated.apply(TimelineEdit::ScaleVolume(range(0, 2000), 2.0)));
+            let amplified = timeline_waveform(
+                &source,
+                &repeated,
+                1.0,
+                1.0,
+                64,
+                &crate::Cancellation::default(),
+            )
+            .expect("repeated gain envelope");
+            for (before, after) in base.iter().zip(amplified) {
+                assert!(
+                    (after - before * factor).abs() < 1e-5,
+                    "playback decode and envelope retain cumulative gain {factor}"
+                );
+            }
+        }
+
         for (stretch, rate) in [(false, 1.0), (true, 1.0), (true, 1.1)] {
             let mut operations = vec![EditOperation::Timeline(TimelineEdit::Delete(range(
                 500, 750,

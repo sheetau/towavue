@@ -88,6 +88,83 @@ pub enum PromptResponse {
     Cancel,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeleteConfirmation {
+    pub confirmed: bool,
+    pub dont_ask_again: bool,
+}
+
+fn delete_confirmation(button: i32, checked: bool) -> DeleteConfirmation {
+    let confirmed = button == IDYES.0;
+    DeleteConfirmation {
+        confirmed,
+        // Cancelling must never silently disable a future destructive-action prompt.
+        dont_ask_again: confirmed && checked,
+    }
+}
+
+/// Presents the application's recycle confirmation, with native verification UI.
+/// Persistence is the caller's responsibility, after a confirmed response only.
+pub fn confirm_file_delete(
+    owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
+    source: PathBuf,
+    notify: impl FnOnce(Result<DeleteConfirmation, DialogError>) + Send + 'static,
+) -> Result<(), DialogError> {
+    let handle = owner
+        .window_handle()
+        .map_err(|_| DialogError::OwnerUnavailable)?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err(DialogError::OwnerUnavailable);
+    };
+    let native_owner = handle.hwnd.get();
+    start_dialog_worker(
+        move || {
+            let _owner = owner;
+            let message: Vec<u16> = format!(
+                "{}\n\nThe file will be moved to the Recycle Bin.",
+                source.display()
+            )
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+            // SAFETY: the worker owns this STA and all modal buffers until the
+            // native dialog returns. Only plain response values cross threads.
+            unsafe { OleInitialize(None) }?;
+            let _apartment = DialogApartment;
+            let buttons = [
+                TASKDIALOG_BUTTON {
+                    nButtonID: IDYES.0,
+                    pszButtonText: w!("Delete file"),
+                },
+                TASKDIALOG_BUTTON {
+                    nButtonID: IDCANCEL.0,
+                    pszButtonText: w!("Cancel"),
+                },
+            ];
+            let config = TASKDIALOGCONFIG {
+                cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+                hwndParent: HWND(native_owner as *mut _),
+                dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
+                pszWindowTitle: w!("Delete file - towavue"),
+                pszMainInstruction: w!("Delete this file?"),
+                pszContent: PCWSTR(message.as_ptr()),
+                pszVerificationText: w!("Don't ask again"),
+                cButtons: buttons.len() as u32,
+                pButtons: buttons.as_ptr(),
+                nDefaultButton: IDCANCEL.0,
+                ..Default::default()
+            };
+            let mut button = IDCANCEL.0;
+            let mut checked = windows::core::BOOL::default();
+            // SAFETY: retained owner, strings, buttons and writable results all
+            // outlive this synchronous call; the HWND is never exposed to the app.
+            unsafe { TaskDialogIndirect(&config, Some(&mut button), None, Some(&mut checked)) }?;
+            Ok(delete_confirmation(button, checked.as_bool()))
+        },
+        notify,
+    )
+}
+
 /// Shows a GPU-independent modal prompt while retaining its owner on the worker.
 pub fn show_prompt(
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
@@ -387,6 +464,28 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn cancelled_delete_never_disables_future_confirmation() {
+        for checked in [false, true] {
+            for button in [IDCANCEL.0, IDNO.0, 0] {
+                assert_eq!(
+                    delete_confirmation(button, checked),
+                    DeleteConfirmation {
+                        confirmed: false,
+                        dont_ask_again: false,
+                    }
+                );
+            }
+            assert_eq!(
+                delete_confirmation(IDYES.0, checked),
+                DeleteConfirmation {
+                    confirmed: true,
+                    dont_ask_again: checked,
+                }
+            );
+        }
+    }
 
     #[test]
     fn unsaved_prompt_buttons_use_explicit_actions_and_exit_scope() {

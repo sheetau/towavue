@@ -15,6 +15,7 @@ mod decode;
 mod dialog;
 mod export;
 mod file_details;
+mod file_operation;
 mod file_search;
 mod fonts;
 mod image;
@@ -68,8 +69,8 @@ pub use decode::{
     adjacent_video_frame, edited_video_frame_png, source_video_frame_png,
 };
 pub use dialog::{
-    DialogError, FileDialogKind, PromptButtons, PromptResponse, cursor_position_in_window,
-    pick_path, show_prompt,
+    DeleteConfirmation, DialogError, FileDialogKind, PromptButtons, PromptResponse,
+    confirm_file_delete, cursor_position_in_window, pick_path, show_prompt,
 };
 pub use export::{
     AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
@@ -78,6 +79,10 @@ pub use export::{
     export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
 };
 pub use file_details::FileDetails;
+pub use file_operation::{
+    FileOperationAction, FileOperationError, FileOperationOutcome, FileOperationSource,
+    inspect_file_operation_source, start_file_operation,
+};
 pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
 pub use fonts::japanese_ui_font;
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};

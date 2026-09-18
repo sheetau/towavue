@@ -16,6 +16,14 @@ impl Default for PlaybackVolume {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn playback_volume_for(&self, tab: TabId) -> f32 {
+        self.playback_volumes
+            .get(&tab)
+            .copied()
+            .unwrap_or_default()
+            .level
+    }
+
     pub(super) fn seed_playback_volume(&mut self, id: TabId) {
         if self.tabs.tabs().iter().any(|tab| {
             tab.id == id && matches!(tab.target.media_kind(), MediaKind::Audio | MediaKind::Video)

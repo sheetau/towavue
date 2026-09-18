@@ -99,12 +99,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.audio_queues.remove(&id);
             return;
         }
-        let Some(folder) = self
-            .path
-            .as_ref()
-            .and_then(|path| path.parent())
-            .map(Path::to_owned)
-        else {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        self.ensure_audio_queue_for(id, &path);
+    }
+
+    pub(super) fn ensure_audio_queue_for(&mut self, id: TabId, path: &Path) {
+        let Some(folder) = path.parent().map(Path::to_owned) else {
             return;
         };
         if self
@@ -352,6 +354,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn advance_background_audio(&mut self, id: TabId, path: PathBuf) {
+        let listening_volume = self.playback_volume_for(id);
         let Some(mut saved) = self.retained_playback.remove(&id) else {
             return;
         };
@@ -359,6 +362,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             saved.restart();
         } else if let Some(renderer) = &self.renderer {
             saved.session.take();
+            saved.prepared_only = false;
             self.duration_workers.remove(&saved.instance);
             self.media_sequence = self
                 .media_sequence
@@ -398,7 +402,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             match PlaybackSession::open(
                 &path,
                 renderer.graphics_device(),
-                1.0,
+                listening_volume,
                 1.0,
                 Default::default(),
                 move |event| notify(AppEvent::Playback(instance, event)),

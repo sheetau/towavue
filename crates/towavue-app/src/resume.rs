@@ -6,13 +6,24 @@ use towavue_runtime_windows::{
 
 pub(super) struct Owner {
     source: VideoResumeSource,
-    saved: Duration,
+    saved: Option<Duration>,
     written: Instant,
     // Ended also describes an explicit paused end-frame preview.
     pub(super) natural_end: bool,
 }
 
 impl Owner {
+    pub(super) fn for_preview(source: VideoResumeSource) -> Self {
+        Self {
+            source,
+            // Hover did not look up the existing record. The first explicit
+            // transport write must also persist zero (seek-to-start or EOF).
+            saved: None,
+            written: Instant::now(),
+            natural_end: false,
+        }
+    }
+
     fn record(
         &mut self,
         history: &VideoResumeHistory,
@@ -40,11 +51,11 @@ impl Owner {
             return;
         };
         self.written = Instant::now();
-        if self.saved == position {
+        if self.saved == Some(position) {
             return;
         }
         history.remember(self.source.clone(), position, std::time::SystemTime::now());
-        self.saved = position;
+        self.saved = Some(position);
     }
 }
 
@@ -193,7 +204,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let position = resume.position;
         self.resume_owner = Some(Owner {
             source: resume.source,
-            saved: position.unwrap_or_default(),
+            saved: Some(position.unwrap_or_default()),
             written: Instant::now(),
             natural_end: false,
         });

@@ -665,7 +665,9 @@ fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video:
         (image.clone(), MediaKind::Image, false),
         (image, MediaKind::Image, true),
         (video.to_owned(), MediaKind::Video, false),
-        (audio, MediaKind::Audio, false),
+        (video.to_owned(), MediaKind::Video, true),
+        (audio.clone(), MediaKind::Audio, false),
+        (audio, MediaKind::Audio, true),
     ] {
         let source = host.add_application(None).expect("unopened source");
         let target = host.add_application(None).expect("unopened destination");
@@ -685,10 +687,31 @@ fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video:
             app.toggle_tab_mute(id);
         }
         assert!(app.session.is_none() && app.retained_playback.is_empty());
-        if prepared {
+        if prepared && kind == MediaKind::Image {
             app.prepare_image_tab(Some(id));
             assert!(app.retained_images[&id].image.is_none());
             app.prepare_image_tab(None);
+        } else if prepared {
+            // The outer event loop is paused here. Consume only the real metadata
+            // callback locally; keep all other events on their production route.
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let notify = Arc::clone(&app.notify);
+            let forwarding = Arc::clone(&notify);
+            app.notify = Arc::new(Box::new(move |event| match event {
+                AppEvent::PreparedPlayback(..) => {
+                    let _ = sender.send(event);
+                }
+                event => forwarding(event),
+            }));
+            app.prepare_playback_tab(id);
+            let event = receiver
+                .recv_timeout(Duration::from_secs(10))
+                .expect("prepared metadata");
+            app.handle_app_event(event);
+            app.notify = notify;
+            assert!(app.retained_playback[&id].duration.is_some());
+            assert!(app.retained_playback[&id].session.is_none());
+            assert!(app.retained_playback[&id].prepared_only);
         } else {
             assert!(app.retained_images.is_empty());
         }

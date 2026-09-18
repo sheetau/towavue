@@ -44,7 +44,8 @@ fn invalid(message: &str) -> io::Error {
 }
 
 impl VideoResumeSource {
-    fn capture(path: &Path) -> io::Result<Self> {
+    /// Capture read-only source identity on a worker, never in an input/paint callback.
+    pub fn capture(path: &Path) -> io::Result<Self> {
         if !path.is_absolute()
             || path
                 .to_str()

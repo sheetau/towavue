@@ -44,6 +44,7 @@ mod native_input_tests;
 mod overlay_input;
 mod palette;
 mod playback_tab;
+mod playback_tab_preparation;
 #[cfg(test)]
 mod playback_tab_tests;
 mod playback_volume;
@@ -298,6 +299,13 @@ enum AppEvent {
     ImagesReady,
     ImagePreview(PathBuf, u64, towavue_runtime_windows::CachedImagePreview),
     FolderReady,
+    PreparedPlayback(
+        TabId,
+        u64,
+        PathBuf,
+        Result<Duration, String>,
+        Option<towavue_runtime_windows::VideoResumeSource>,
+    ),
     FilmstripReady,
     PlaylistDuration(playlist::DurationRequest, u64, Option<Duration>),
     StatusFileDetails(u64, Option<towavue_runtime_windows::FileDetails>),
@@ -1800,6 +1808,7 @@ where
         });
         clock.set_paused(self.state != PlaybackState::Playing);
         playback_tab::RetainedPlaybackTab {
+            prepared_only: false,
             path: self.path.clone().expect("displayed path"),
             kind: self.media_kind.expect("displayed playback kind"),
             instance: self.media_generation,
@@ -2926,6 +2935,9 @@ where
             }
             AppEvent::ImagePreview(path, generation, preview) => {
                 self.finish_image_preview(path, generation, preview)
+            }
+            AppEvent::PreparedPlayback(tab, instance, path, duration, source) => {
+                self.finish_playback_tab_preparation(tab, instance, path, duration, source);
             }
             AppEvent::FolderReady => {
                 self.finish_folder_load();
@@ -4890,6 +4902,7 @@ where
             .filter(|_| self.accepts_tab_drop());
         let mut preview_target = None;
         let mut image_preparation_target = None;
+        let mut playback_preparation_target = None;
         let preview_allowed = !self.modal_input_blocked()
             && self.incoming_tab_pointer.is_none()
             && !self.palette_open
@@ -5319,6 +5332,8 @@ where
                                         let hovered = media_preview::tab_hovered(&response);
                                         if hovered && tab.target.media_kind() == MediaKind::Image {
                                             image_preparation_target = Some(tab.id);
+                                        } else if hovered {
+                                            playback_preparation_target = Some(tab.id);
                                         }
                                         let background = hovered
                                             .then(|| self.retained_playback.get(&tab.id))
@@ -5487,6 +5502,9 @@ where
             loading,
         );
         self.prepare_image_tab(image_preparation_target);
+        if let Some(tab) = playback_preparation_target {
+            self.prepare_playback_tab(tab);
+        }
         self.tab_preview.request(
             preview_target,
             &self.preview_cache,

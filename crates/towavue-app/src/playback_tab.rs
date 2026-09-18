@@ -6,6 +6,7 @@ use towavue_core::{FolderSnapshot, ImageViewState, MediaKind, MediaTime, Playbac
 use towavue_runtime_windows::{AudioOutputEvent, GraphicsDevice, PlaybackSession};
 
 pub(super) struct RetainedPlaybackTab {
+    pub prepared_only: bool,
     pub path: PathBuf,
     pub kind: MediaKind,
     pub instance: u64,

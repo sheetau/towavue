@@ -122,14 +122,14 @@ fn video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery() 
             resume::record(&mut app, false);
             assert_eq!(
                 app.resume_owner.as_ref().expect("owner").saved,
-                Duration::from_secs(4)
+                Some(Duration::from_secs(4))
             );
             app.resume_owner.as_mut().expect("owner").written =
                 Instant::now() - Duration::from_secs(6);
             resume::record(&mut app, false);
             assert_eq!(
                 app.resume_owner.as_ref().expect("owner").saved,
-                Duration::from_millis(1250)
+                Some(Duration::from_millis(1250))
             );
             let source = self.source.take().expect("source stamp");
             let generation = app.resume_revision;

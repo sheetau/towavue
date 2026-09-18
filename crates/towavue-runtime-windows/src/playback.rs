@@ -180,6 +180,31 @@ impl PlaybackSession {
         range: PlaybackRange,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
+        Self::open_with_pause(path, graphics_device, volume, rate, range, false, notify)
+    }
+
+    /// Prime bounded video/audio queues without starting transport. Pause is sent
+    /// before either decoder starts, so no decoded audio can race the pause.
+    pub fn open_paused(
+        path: &Path,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
+        Self::open_with_pause(path, graphics_device, volume, rate, range, true, notify)
+    }
+
+    fn open_with_pause(
+        path: &Path,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
         let audio_format = decode::probe_audio_format(path)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
@@ -216,7 +241,7 @@ impl PlaybackSession {
             generation: PlaybackGeneration::INITIAL,
             video_generation: PlaybackGeneration::INITIAL,
             target: range.start,
-            paused: false,
+            paused,
             volume,
             rate: rate.clamp(0.25, 4.0).max(0.25),
             range,
@@ -1499,6 +1524,50 @@ mod tests {
             assert!(session.recovery_frame.is_none());
         }
         std::fs::remove_file(path).expect("remove owned recovery fixture");
+    }
+
+    #[test]
+    #[ignore = "requires a live Windows shared-mode audio endpoint; owned fixture muted"]
+    fn paused_open_keeps_the_audio_clock_still_until_explicit_play() {
+        let device = GraphicsDevice::warp_for_test().expect("Windows WARP device");
+        let mut session = PlaybackSession::open_paused(
+            &fixture(),
+            device,
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            |_| {},
+        )
+        .expect("paused session with shared audio endpoint");
+        wait_for_video(&mut session);
+        assert!(session.paused);
+        assert!(session.has_audio());
+        let target = session.target();
+        let deadline = Instant::now() + Duration::from_millis(200);
+        while Instant::now() < deadline {
+            assert_eq!(
+                session.audio_position(),
+                Some(target),
+                "no initial audio clock advance"
+            );
+            assert!(
+                session.try_audio_event().is_none(),
+                "no failure or premature drain"
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+        session.set_paused(false).expect("explicit Play");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.audio_position() == Some(target) {
+            assert!(
+                Instant::now() < deadline,
+                "live endpoint must advance after Play"
+            );
+            assert!(session.try_audio_event().is_none());
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert!(session.audio_position().expect("source clock") > target);
+        eprintln!("PASS paused-open audio clock stays at the anchor until explicit Play");
     }
 
     #[test]

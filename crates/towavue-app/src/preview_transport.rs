@@ -174,7 +174,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 (
                     saved.instance,
                     saved.kind,
-                    saved.state,
+                    if saved.prepared_only {
+                        PlaybackState::Paused
+                    } else {
+                        saved.state
+                    },
                     saved.position(),
                     saved
                         .session
@@ -182,7 +186,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .and_then(PlaybackSession::timeline)
                         .map(|plan| plan.duration())
                         .or(saved.duration.map(media_time)),
-                    saved.session.is_some(),
+                    saved.session.is_some() || (saved.prepared_only && saved.duration.is_some()),
                     saved.recovery_position.is_some(),
                 )
             };
@@ -224,7 +228,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             CommandId::TogglePause if transport.enabled => {
                 if self.displayed_tab == Some(tab) {
                     self.toggle_pause();
-                } else if let Some(saved) = self.retained_playback.get_mut(&tab) {
+                } else if self.start_prepared_playback(tab)
+                    && let Some(saved) = self.retained_playback.get_mut(&tab)
+                {
                     saved.toggle_pause();
                     if saved.state == PlaybackState::Playing {
                         self.arm_audio_queue(tab);
@@ -252,7 +258,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     if next == path {
                         if self.displayed_tab == Some(tab) {
                             self.navigate_audio(forward);
-                        } else if let Some(saved) = self.retained_playback.get_mut(&tab) {
+                        } else if self.start_prepared_playback(tab)
+                            && let Some(saved) = self.retained_playback.get_mut(&tab)
+                        {
                             saved.restart();
                         }
                     } else {
@@ -288,6 +296,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.displayed_tab == Some(tab) {
             self.seek_to(target);
         } else {
+            if !self.start_prepared_playback(tab) {
+                return;
+            }
             let edit = self
                 .edits
                 .get(&tab)

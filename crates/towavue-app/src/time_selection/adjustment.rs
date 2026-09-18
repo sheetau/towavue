@@ -1,49 +1,8 @@
 use super::*;
 
-pub(super) fn bands(duration: MediaTime, plan: Option<&EditTimeline>) -> Vec<(TimeRange, f32)> {
-    let Some(plan) = plan else {
-        return TimeRange::new(MediaTime::ZERO, duration)
-            .map(|range| vec![(range, 1.0)])
-            .unwrap_or_default();
-    };
-    let mut offset = MediaTime::ZERO;
-    plan.spans()
-        .iter()
-        .filter_map(|span| {
-            let end = MediaTime::from_nanoseconds(
-                offset.as_nanoseconds() + span.duration().as_nanoseconds(),
-            );
-            let range = TimeRange::new(offset, end);
-            offset = end;
-            range.map(|range| (range, span.volume()))
-        })
-        .collect()
-}
-
-pub(super) fn gain_at(bands: &[(TimeRange, f32)], time: MediaTime) -> f32 {
-    bands
-        .iter()
-        .find(|(range, _)| time >= range.start() && time < range.end())
-        .or_else(|| bands.last())
-        .map_or(1.0, |(_, gain)| *gain)
-}
-
-pub(super) fn gain_range_at(bands: &[(TimeRange, f32)], time: MediaTime) -> Option<TimeRange> {
-    let index = bands
-        .iter()
-        .position(|(range, _)| time >= range.start() && time < range.end())
-        .or_else(|| bands.len().checked_sub(1))?;
-    let gain = bands[index].1;
-    let (mut left, mut right) = (index, index);
-    // Source cuts and rate changes can split one visible gain line into several
-    // spans. Drag the connected line, but never cross a different gain level.
-    while left > 0 && bands[left - 1].1 == gain {
-        left -= 1;
-    }
-    while right + 1 < bands.len() && bands[right + 1].1 == gain {
-        right += 1;
-    }
-    TimeRange::new(bands[left].0.start(), bands[right].0.end())
+pub(super) fn gain_limit(range: TimeRange, plan: Option<&EditTimeline>) -> f32 {
+    plan.and_then(|plan| plan.volume_scale_limit(range))
+        .unwrap_or(towavue_core::MAX_VOLUME)
 }
 
 pub(super) fn gain_height(rect: Rect) -> f32 {
@@ -101,39 +60,18 @@ pub(super) fn changes_plan(
     candidate.apply(edit) && candidate != original
 }
 
-pub(super) fn paint(
-    painter: &egui::Painter,
-    rect: Rect,
-    bands: &[(TimeRange, f32)],
-    preview: Option<(TimeRange, f32)>,
-    x_at: &impl Fn(MediaTime) -> f32,
-) {
-    for &(range, gain) in bands {
-        let mut cuts = vec![range.start(), range.end()];
-        if let Some((selected, _)) = preview {
-            cuts.extend(
-                [selected.start(), selected.end()]
-                    .into_iter()
-                    .filter(|time| *time > range.start() && *time < range.end()),
-            );
-            cuts.sort();
-        }
-        for pair in cuts.windows(2) {
-            let gain = preview
-                .filter(|(selected, _)| pair[0] >= selected.start() && pair[1] <= selected.end())
-                .map_or(gain, |(_, gain)| gain);
-            painter.hline(
-                x_at(pair[0])..=x_at(pair[1]),
-                gain_y(rect, gain),
-                (1.0, egui::Color32::from_white_alpha(128)),
-            );
-        }
-    }
-    if let Some((_, gain)) = preview {
+pub(super) fn paint(painter: &egui::Painter, rect: Rect, preview: Option<(TimeRange, f32)>) {
+    let gain = preview.map_or(1.0, |(_, gain)| gain);
+    painter.hline(
+        rect.x_range(),
+        gain_y(rect, gain),
+        (1.0, egui::Color32::from_white_alpha(128)),
+    );
+    if preview.is_some() {
         painter.text(
             rect.left_top() + egui::vec2(LABEL_INSET, 10.0),
             egui::Align2::LEFT_CENTER,
-            format!("Volume {:.0}%", gain * 100.0),
+            format!("Gain {:.0}%", gain * 100.0),
             egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
@@ -150,17 +88,7 @@ pub(super) fn values(
     enabled: bool,
 ) -> Option<TimelineEdit> {
     let range = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))?;
-    let bands = bands(duration, plan);
-    // A discarded release pass precedes model commit. Preserve its displayed
-    // uniform gain while keeping the existing control IDs/focus and input path.
-    let preview_gain = preview
-        .filter(|(selected, _)| *selected == range)
-        .map(|(_, gain)| gain);
-    let gain = preview_gain.unwrap_or_else(|| gain_at(&bands, range.start()));
-    let mixed = preview_gain.is_none()
-        && bands.iter().any(|(span, volume)| {
-            span.start() < range.end() && span.end() > range.start() && *volume != gain
-        });
+    let gain = preview.map_or(1.0, |(_, gain)| gain);
     let mut result = None;
     for stretch in [false, true] {
         let width = (response.rect.width() * 0.5).min(160.0);
@@ -183,7 +111,7 @@ pub(super) fn values(
         let name = if stretch {
             "Selected duration (seconds)"
         } else {
-            "Local volume (%)"
+            "Relative volume (%)"
         };
         let value = if stretch {
             range.duration().as_seconds_f64()
@@ -198,29 +126,7 @@ pub(super) fn values(
         let bounds = if stretch {
             stretch_limits(range, plan)
         } else {
-            0.0..=f64::from(towavue_core::MAX_VOLUME) * 100.0
-        };
-        // Preserve explicit unification when the ordered batch ends at the starting value.
-        // value_input consumes the events and computes their final value below.
-        let uniform_gain = if mixed && !stretch && available {
-            ui.input(|input| {
-                input.events.iter().any(|event| match event {
-                    egui::Event::AccessKitActionRequest(request)
-                        if request.target_tree == egui::accesskit::TreeId::ROOT
-                            && request.target_node == control.id.accesskit_id()
-                            && request.action == egui::accesskit::Action::SetValue =>
-                    {
-                        matches!(
-                            request.data,
-                            Some(egui::accesskit::ActionData::NumericValue(value))
-                                if value.is_finite()
-                        )
-                    }
-                    _ => false,
-                })
-            })
-        } else {
-            false
+            0.0..=f64::from(gain_limit(range, plan)) * 100.0
         };
         let next = crate::seekbar::value_input(
             &control,
@@ -229,17 +135,14 @@ pub(super) fn values(
             bounds,
             if stretch { 0.1 } else { 5.0 },
             available,
-        )
-        .or(uniform_gain.then_some(value));
+        );
         // The gain-line preview already paints its value. Do not overlay the
         // ordinary gain caption, but retain its numeric/accessibility control.
         if (control.has_focus() || selection.is_some()) && (stretch || preview.is_none()) {
             let label = if stretch {
                 format!("Length {}", crate::format_time_precise(range.duration()))
-            } else if mixed {
-                format!("Mixed (start {value:.0}%)")
             } else {
-                format!("Volume {value:.0}%")
+                format!("Gain {value:.0}%")
             };
             ui.painter().with_clip_rect(rect).text(
                 if stretch {
@@ -265,7 +168,7 @@ pub(super) fn values(
                     crate::media_time(std::time::Duration::from_secs_f64(next)),
                 )
             } else {
-                TimelineEdit::SetVolume(range, (next / 100.0) as f32)
+                TimelineEdit::ScaleVolume(range, (next / 100.0) as f32)
             };
             if result.is_none() && changes_plan(duration, plan, edit) {
                 result = Some(edit);
@@ -305,23 +208,12 @@ mod tests {
     }
 
     #[test]
-    fn gain_ranges_join_equal_neighbors_and_use_half_open_boundaries() {
-        let bands = [
-            (range(0, 1), 1.0),
-            (range(1, 2), 1.0),
-            (range(2, 4), 0.0),
-            (range(4, 8), 1.0),
-        ];
-        for (at, expected) in [
-            (0, range(0, 2)),
-            (1, range(0, 2)),
-            (2, range(2, 4)),
-            (4, range(4, 8)),
-            (8, range(4, 8)),
-        ] {
-            assert_eq!(gain_range_at(&bands, time(at)), Some(expected));
-        }
-        assert_eq!(gain_range_at(&[], time(0)), None);
+    fn relative_gain_limit_uses_the_highest_selected_gain() {
+        let mut plan = EditTimeline::new(time(10), Default::default()).expect("plan");
+        assert!(plan.apply(TimelineEdit::SetVolume(range(2, 4), 1.5)));
+        assert_eq!(gain_limit(range(0, 2), Some(&plan)), 2.0);
+        assert!((gain_limit(range(0, 8), Some(&plan)) - 4.0 / 3.0).abs() < 1e-6);
+        assert_eq!(gain_limit(range(0, 8), None), 2.0);
     }
 
     #[test]
@@ -351,8 +243,8 @@ mod tests {
             TimelineEdit::SetVolume(range(0, 8), f32::NAN)
         ));
         assert!(plan.apply(TimelineEdit::SetVolume(range(2, 4), 0.0)));
-        assert_eq!(gain_at(&bands(time(8), Some(&plan)), time(2)), 0.0);
-        assert_eq!(gain_at(&bands(time(8), Some(&plan)), time(4)), 1.0);
+        assert_eq!(plan.spans()[1].volume(), 0.0);
+        assert_eq!(plan.spans()[2].volume(), 1.0);
         assert!(changes_plan(
             time(10),
             Some(&plan),
@@ -361,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_gain_value_batches_preserve_event_order_without_replaying_edits() {
+    fn relative_gain_value_batches_returning_to_unity_do_not_edit() {
         use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
         for density in [1.0, 1.25, 2.0] {
             for selection in [None, Some(range(2, 8))] {
@@ -430,12 +322,9 @@ mod tests {
                                 }
                             },
                         );
-                        assert_eq!(
-                            edits,
-                            vec![TimelineEdit::SetVolume(
-                                selection.unwrap_or(range(0, 10)),
-                                1.0
-                            )]
+                        assert!(
+                            edits.is_empty(),
+                            "returning to 100% preserves existing gain differences"
                         );
                         if discard {
                             assert!(passes > 1);
@@ -447,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn accessible_volume_unifies_mixed_values_and_focused_keyboard_edits_length() {
+    fn accessible_relative_volume_preserves_mixed_values_and_keyboard_edits_length() {
         let context = crate::fonts::test_context();
         context.enable_accesskit();
         let mut plan = EditTimeline::new(time(10), Default::default()).expect("plan");
@@ -492,7 +381,7 @@ mod tests {
         let id = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Local volume (%)"))
+            .find(|(_, node)| node.label() == Some("Relative volume (%)"))
             .expect("volume")
             .0;
         assert_eq!(
@@ -513,14 +402,11 @@ mod tests {
             })
         };
         assert_eq!(draw(vec![event(100.0)], false, false).1, None);
-        assert_eq!(
-            draw(vec![event(100.0)], true, false).1,
-            Some(TimelineEdit::SetVolume(range(0, 10), 1.0))
-        );
+        assert_eq!(draw(vec![event(100.0)], true, false).1, None);
         for value in [200.0, 300.0, 400.0] {
             assert_eq!(
                 draw(vec![event(value)], true, false).1,
-                Some(TimelineEdit::SetVolume(range(0, 10), 2.0))
+                Some(TimelineEdit::ScaleVolume(range(0, 10), 2.0))
             );
         }
         let key = egui::Event::Key {

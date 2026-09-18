@@ -14,7 +14,8 @@ fn operations() -> Vec<EditOperation> {
     vec![
         EditOperation::Timeline(TimelineEdit::Delete(range(500, 1000))),
         EditOperation::Timeline(TimelineEdit::Stretch(range(500, 1000), time(1000))),
-        EditOperation::Timeline(TimelineEdit::SetVolume(range(200, 400), 0.5)),
+        EditOperation::Timeline(TimelineEdit::SetVolume(range(200, 400), 0.25)),
+        EditOperation::Timeline(TimelineEdit::ScaleVolume(range(200, 400), 2.0)),
     ]
 }
 fn plan() -> EditTimeline {

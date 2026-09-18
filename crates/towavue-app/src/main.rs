@@ -7635,7 +7635,10 @@ where
             }
             let retained_selection = match (operation, self.time_selection) {
                 (
-                    EditOperation::Timeline(towavue_core::TimelineEdit::SetVolume(_, _)),
+                    EditOperation::Timeline(
+                        towavue_core::TimelineEdit::SetVolume(_, _)
+                        | towavue_core::TimelineEdit::ScaleVolume(_, _),
+                    ),
                     selection,
                 ) => selection,
                 (

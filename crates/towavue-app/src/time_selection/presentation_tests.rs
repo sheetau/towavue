@@ -77,7 +77,7 @@ fn timeline_captions_share_font_and_edges_without_covering_loading() {
                     app.draw_waveform_activity(ui, rect);
                 },
             );
-            let volume = text_bounds(&output, "Volume ");
+            let volume = text_bounds(&output, "Gain ");
             let length = text_bounds(&output, "Length ");
             let start = text_bounds(&output, "In ");
             let end = text_bounds(&output, "Out ");
@@ -109,7 +109,7 @@ fn timeline_help_is_local_to_the_hovered_part_and_absent_on_empty_space() {
                 true,
                 Some("Playback position"),
             ),
-            (egui::pos2(220.0, 80.0), true, true, Some("Volume line")),
+            (egui::pos2(220.0, 80.0), true, true, Some("Relative gain")),
             (egui::pos2(120.0, 60.0), true, true, Some("Selection start")),
             (egui::pos2(320.0, 60.0), true, true, Some("Selection end")),
             (egui::pos2(220.0, 55.0), true, true, Some("Time selection")),

@@ -190,6 +190,67 @@ fn timeline_exports_join_selected_source_frames_and_samples_without_touching_inp
             "PCM gain at sample {index}"
         );
     }
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        for limited in [false, true] {
+            let relative_target = directory.join(if kind == MediaKind::Audio {
+                "relative.wav"
+            } else {
+                "relative.avi"
+            });
+            let mut operations = vec![
+                EditOperation::Timeline(TimelineEdit::SetVolume(range(500, 1500), 0.5)),
+                EditOperation::Timeline(TimelineEdit::ScaleVolume(range(0, 2000), 1.5)),
+            ];
+            if limited {
+                operations.push(EditOperation::Timeline(TimelineEdit::ScaleVolume(
+                    range(0, 2000),
+                    2.0,
+                )));
+            }
+            export_media(&ExportRequest {
+                source: source.clone(),
+                target: relative_target.clone(),
+                kind,
+                operations,
+                hardware_encode: false,
+            })
+            .expect("relative-gain export");
+            let (frames, audio) = decoded(&relative_target);
+            assert_eq!(audio.len(), source_audio.len());
+            if kind == MediaKind::Video {
+                assert_eq!(frames.len(), source_frames.len());
+                for (actual, expected) in frames.iter().zip(&source_frames) {
+                    assert!(
+                        actual
+                            .iter()
+                            .zip(expected)
+                            .all(|(a, b)| a.abs_diff(*b) <= 4),
+                        "relative gain preserves source frame order within the existing encoded-color bound"
+                    );
+                }
+            }
+            for (index, (actual, original)) in audio
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(source_audio.as_chunks::<4>().0)
+                .enumerate()
+            {
+                let base = if (24000 * 2..72000 * 2).contains(&index) {
+                    0.5
+                } else {
+                    1.0
+                };
+                let factor = if limited { 2.0 } else { 1.5 };
+                let actual = f32::from_le_bytes(*actual);
+                let expected = f32::from_le_bytes(*original) * base * factor;
+                assert!(
+                    (actual - expected).abs() <= 1.0 / 32768.0,
+                    "relative PCM ratio {kind:?}, limited={limited}, sample={index}"
+                );
+            }
+        }
+    }
     export_media(&ExportRequest {
         source: source.clone(),
         target: gain_target.clone(),

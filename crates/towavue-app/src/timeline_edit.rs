@@ -337,6 +337,15 @@ pub(super) fn waveform_regions(
     if source_seconds <= 0.0 || duration <= 0.0 {
         return Vec::new();
     }
+    let preview = preview.map(|(range, factor)| {
+        (
+            range,
+            factor.min(
+                plan.and_then(|plan| plan.volume_scale_limit(range))
+                    .unwrap_or(towavue_core::MAX_VOLUME),
+            ),
+        )
+    });
     let mut regions = Vec::new();
     let mut append = |start: f64, end: f64, source_start: f64, source_end: f64, saved_gain: f32| {
         // Split only display geometry at preview boundaries. No timeline clone,
@@ -354,7 +363,9 @@ pub(super) fn waveform_regions(
                         pair[0] >= range.start().as_seconds_f64()
                             && pair[1] <= range.end().as_seconds_f64()
                     })
-                    .map_or(saved_gain, |(_, gain)| gain);
+                    .map_or(saved_gain, |(_, factor)| {
+                        (saved_gain * factor).min(towavue_core::MAX_VOLUME)
+                    });
             if gain <= 0.0 {
                 continue;
             }

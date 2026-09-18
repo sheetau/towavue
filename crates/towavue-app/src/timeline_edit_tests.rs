@@ -724,7 +724,7 @@ fn gain_drag_updates_waveform_mesh_before_commit_without_reloading_pixels() {
                         _,
                         _,
                         _,
-                        TimelineEdit::SetVolume(_, 2.0)
+                        TimelineEdit::ScaleVolume(_, 2.0)
                     )]
                 ));
             }
@@ -794,9 +794,11 @@ fn waveform_gain_preview_matches_committed_geometry_across_edits() {
     );
     assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));
     assert!(plan.apply(TimelineEdit::Stretch(range(1000, 2000), time(2000))));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(0, 1000), 0.5)));
     assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(3000, 4000), 1.5)));
     for gain in [0.0, 0.5, 2.0] {
-        let selection = range(500, 2500);
+        let selection = range(500, 3500);
         let preview = waveform_regions(
             rect,
             source_duration,
@@ -805,7 +807,7 @@ fn waveform_gain_preview_matches_committed_geometry_across_edits() {
             Some((selection, gain)),
         );
         let mut committed = plan.clone();
-        assert!(committed.apply(TimelineEdit::SetVolume(selection, gain)));
+        assert!(committed.apply(TimelineEdit::ScaleVolume(selection, gain)));
         let expected = waveform_regions(rect, source_duration, Some(&committed), 2.0, None);
         assert_eq!(preview.len(), expected.len());
         for ((destination, uv), (expected_destination, expected_uv)) in
@@ -1038,7 +1040,7 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 tab,
                 app.generation,
                 app.time_selection,
-                TimelineEdit::SetVolume(range(500, 1000), 0.5),
+                TimelineEdit::ScaleVolume(range(500, 1000), 0.5),
             ));
             assert_eq!(app.current_position(), time(700));
             assert_eq!(app.time_selection, Some(range(500, 1000)));
@@ -1058,10 +1060,16 @@ fn run_app_trial(root: PathBuf, audio: bool) {
                 tab,
                 app.generation,
                 None,
-                TimelineEdit::SetVolume(range(500, 1000), 1.5),
+                TimelineEdit::ScaleVolume(
+                    TimeRange::new(MediaTime::ZERO, first_gain.duration()).expect("whole timeline"),
+                    1.5,
+                ),
             ));
             let mut expected = first_gain.clone();
-            assert!(expected.apply(TimelineEdit::SetVolume(range(500, 1000), 1.5)));
+            assert!(expected.apply(TimelineEdit::ScaleVolume(
+                TimeRange::new(MediaTime::ZERO, first_gain.duration()).expect("whole timeline"),
+                1.5
+            )));
             assert_eq!(
                 app.history_timeline().expect("history"),
                 Some(expected.clone())

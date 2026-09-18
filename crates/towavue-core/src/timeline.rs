@@ -29,6 +29,8 @@ pub enum TimelineEdit {
     Keep(TimeRange),
     Delete(TimeRange),
     SetVolume(TimeRange, f32),
+    /// Multiply existing gains, limiting the common factor to preserve their ratios.
+    ScaleVolume(TimeRange, f32),
     Stretch(TimeRange, MediaTime),
 }
 
@@ -141,21 +143,65 @@ impl EditTimeline {
         None
     }
 
+    /// Largest relative gain adjustment (up to 200%) that keeps every selected
+    /// span within the cumulative gain limit. Silent spans remain silent.
+    pub fn volume_scale_limit(&self, range: TimeRange) -> Option<f32> {
+        self.volume_peak(range).map(|maximum| {
+            if maximum == 0.0 {
+                crate::MAX_VOLUME
+            } else {
+                (crate::MAX_VOLUME / maximum).min(crate::MAX_VOLUME)
+            }
+        })
+    }
+
+    fn volume_peak(&self, range: TimeRange) -> Option<f32> {
+        if range.end > self.duration {
+            return None;
+        }
+        let mut offset = MediaTime::ZERO;
+        let mut maximum = 0.0_f32;
+        for span in &self.spans {
+            let end = MediaTime::from_nanoseconds(
+                offset.as_nanoseconds() + span.duration.as_nanoseconds(),
+            );
+            if offset < range.end && end > range.start {
+                maximum = maximum.max(span.volume);
+            }
+            offset = end;
+        }
+        Some(maximum)
+    }
+
     /// Reject invalid/overflowing edits atomically. Stretch preserves relative speeds.
     pub fn apply(&mut self, edit: TimelineEdit) -> bool {
         let range = match edit {
             TimelineEdit::Keep(range)
             | TimelineEdit::Delete(range)
             | TimelineEdit::SetVolume(range, _)
+            | TimelineEdit::ScaleVolume(range, _)
             | TimelineEdit::Stretch(range, _) => range,
         };
         if range.end > self.duration {
             return false;
         }
-        if let TimelineEdit::SetVolume(_, volume) = edit
+        if let TimelineEdit::SetVolume(_, volume) | TimelineEdit::ScaleVolume(_, volume) = edit
             && (!volume.is_finite() || !(0.0..=crate::MAX_VOLUME).contains(&volume))
         {
             return false;
+        }
+        let scale = match edit {
+            TimelineEdit::ScaleVolume(_, factor) => {
+                factor.min(self.volume_scale_limit(range).unwrap_or(1.0))
+            }
+            _ => 1.0,
+        };
+        if matches!(edit, TimelineEdit::ScaleVolume(..))
+            && (scale == 1.0 || self.volume_peak(range) == Some(0.0))
+        {
+            // A no-op must not quantize new source boundaries in a stretched
+            // span, nor add artificial rate splits to otherwise identical audio.
+            return true;
         }
         if let TimelineEdit::Stretch(_, duration) = edit
             && duration <= MediaTime::ZERO
@@ -194,6 +240,11 @@ impl EditTimeline {
                 if inside {
                     match edit {
                         TimelineEdit::SetVolume(_, volume) => next.volume = volume,
+                        TimelineEdit::ScaleVolume(..) => {
+                            // The shared factor does the limiting; min only absorbs
+                            // f32 rounding at the maximum selected gain.
+                            next.volume = (span.volume * scale).min(crate::MAX_VOLUME);
+                        }
                         TimelineEdit::Stretch(_, duration) => {
                             let scale = |position: i64| {
                                 i128::from(position) * i128::from(duration.as_nanoseconds())
@@ -259,6 +310,112 @@ mod tests {
     }
     fn timeline() -> EditTimeline {
         EditTimeline::new(time(1000), PlaybackRange::default()).expect("timeline")
+    }
+
+    #[test]
+    fn neutral_and_silent_relative_gain_preserve_fractional_source_boundaries() {
+        let ns = MediaTime::from_nanoseconds;
+        let interval = |a, b| TimeRange::new(ns(a), ns(b)).expect("range");
+        let mut plan = EditTimeline::new(ns(3), Default::default()).expect("plan");
+        assert!(plan.apply(TimelineEdit::Stretch(interval(0, 3), ns(8))));
+        let original = plan.clone();
+        assert!(plan.apply(TimelineEdit::ScaleVolume(interval(3, 6), 1.0)));
+        assert_eq!(
+            plan, original,
+            "neutral gain must not create new source/rate boundaries"
+        );
+        assert!(plan.apply(TimelineEdit::SetVolume(interval(0, 8), 0.0)));
+        let silent = plan.clone();
+        assert!(plan.apply(TimelineEdit::ScaleVolume(interval(3, 6), 2.0)));
+        assert_eq!(
+            plan, silent,
+            "multiplying silence must also be an exact no-op"
+        );
+    }
+
+    #[test]
+    fn relative_gain_preserves_ratios_limits_and_silent_spans_atomically() {
+        let mut plan = timeline();
+        assert!(plan.apply(TimelineEdit::SetVolume(range(0, 400), 0.5)));
+        assert!(plan.apply(TimelineEdit::SetVolume(range(400, 600), 0.0)));
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 1.5)));
+        assert_eq!(
+            plan.spans
+                .iter()
+                .map(|span| span.volume)
+                .collect::<Vec<_>>(),
+            [0.75, 0.0, 1.5]
+        );
+        assert!((plan.volume_scale_limit(range(0, 1000)).expect("limit") - 4.0 / 3.0).abs() < 1e-6);
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
+        assert_eq!(
+            plan.spans
+                .iter()
+                .map(|span| span.volume)
+                .collect::<Vec<_>>(),
+            [1.0, 0.0, 2.0]
+        );
+        let limited = plan.clone();
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), 2.0)));
+        assert_eq!(plan, limited, "cannot flatten ratios at the ceiling");
+        for factor in [f32::NAN, f32::INFINITY, -0.1, 2.001] {
+            assert!(!plan.apply(TimelineEdit::ScaleVolume(range(0, 1000), factor)));
+            assert_eq!(plan, limited);
+        }
+        assert!(!plan.apply(TimelineEdit::ScaleVolume(range(0, 1001), 0.5)));
+        assert!(plan.volume_scale_limit(range(0, 1001)).is_none());
+        assert_eq!(plan, limited);
+        assert!(plan.apply(TimelineEdit::ScaleVolume(range(400, 600), 2.0)));
+        assert_eq!(plan, limited, "a multiplier cannot restore muted samples");
+    }
+
+    #[test]
+    fn relative_gain_history_composes_with_cuts_stretch_and_undo() {
+        use crate::{EditHistory, EditOperation, MediaKind};
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut history = EditHistory::default();
+            history.set_source_duration(Some(time(1000)));
+            for edit in [
+                TimelineEdit::Delete(range(200, 400)),
+                TimelineEdit::Stretch(range(200, 400), time(400)),
+                TimelineEdit::SetVolume(range(100, 700), 0.5),
+            ] {
+                assert!(history.push(EditOperation::Timeline(edit), kind));
+            }
+            let before = history.timeline(time(1000)).expect("timeline");
+            let operation = EditOperation::Timeline(TimelineEdit::ScaleVolume(range(50, 800), 1.5));
+            assert!(history.push(operation, kind));
+            let after = history.timeline(time(1000)).expect("timeline");
+            assert_eq!(before.duration(), after.duration());
+            for at in 0..=1000 {
+                assert_eq!(before.source_time(time(at)), after.source_time(time(at)));
+            }
+            let volume_at = |plan: &EditTimeline, at| {
+                let mut offset = 0;
+                plan.spans
+                    .iter()
+                    .find(|span| {
+                        offset += span.duration.as_nanoseconds();
+                        at < offset
+                    })
+                    .expect("span")
+                    .volume
+            };
+            for at in 0..1000 {
+                let expected =
+                    volume_at(&before, at) * if (50..800).contains(&at) { 1.5 } else { 1.0 };
+                assert_eq!(volume_at(&after, at), expected);
+            }
+            history.mark_exported(history.operations().to_vec().as_slice());
+            assert!(!history.is_dirty());
+            assert!(history.undo());
+            assert_eq!(history.timeline(time(1000)), Some(before));
+            assert!(history.is_dirty());
+            assert!(history.redo());
+            assert_eq!(history.timeline(time(1000)), Some(after));
+            assert!(!history.is_dirty());
+            assert_eq!(history.operations().last(), Some(&operation));
+        }
     }
 
     #[test]

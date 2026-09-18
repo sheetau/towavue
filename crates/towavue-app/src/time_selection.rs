@@ -94,7 +94,6 @@ pub(super) fn show(
             .map_or((position, selection), |(_, head, preview)| (head, preview))
     });
     let pixel = 1.0 / ui.ctx().pixels_per_point();
-    let bands = adjustment::bands(duration, plan);
     let gain_preview_id = response.id.with("gain-preview");
     let mut gain_preview = ui.ctx().data(|data| {
         data.get_temp::<(u64, (TimeRange, f32))>(gain_preview_id)
@@ -126,12 +125,11 @@ pub(super) fn show(
                 return Gesture::Resize(range, left <= right);
             }
         }
-        let gain = adjustment::gain_at(&bands, at(origin.x));
+        let gain = 1.0;
         if !modifiers.any()
             && (selection.is_none() || selected.is_some())
             && (origin.y - adjustment::gain_y(rect, gain)).abs() <= 4.0
-            && let Some(range) =
-                selection.or_else(|| adjustment::gain_range_at(&bands, at(origin.x)))
+            && let Some(range) = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))
         {
             return Gesture::Band(range, gain);
         }
@@ -178,7 +176,7 @@ pub(super) fn show(
                         y - 4.0..=y + 4.0,
                     ),
                     "gain",
-                    "Volume line · drag up/down to change the local gain (also affects export)",
+                    "Relative gain · drag to multiply the selection or whole track; release returns to 100%",
                 ))
             }
             Gesture::Select
@@ -253,9 +251,9 @@ pub(super) fn show(
             let edit = match mode {
                 Gesture::Gain(range, original) => {
                     let gain = (original - (pointer.y - origin.y) / adjustment::gain_height(rect))
-                        .clamp(0.0, towavue_core::MAX_VOLUME);
+                        .clamp(0.0, adjustment::gain_limit(range, plan));
                     gain_preview = Some((range, gain));
-                    TimelineEdit::SetVolume(range, gain)
+                    TimelineEdit::ScaleVolume(range, gain)
                 }
                 Gesture::Stretch(range) => {
                     let limits = adjustment::stretch_limits(range, plan);
@@ -376,7 +374,8 @@ pub(super) fn show(
             ),
         );
     }
-    adjustment::paint(&painter, rect, &bands, gain_preview, &x_at);
+    let held_gain = gain_preview.filter(|_| crate::timeline_input::is_active(ui.ctx()));
+    adjustment::paint(&painter, rect, held_gain);
     if preview != selection
         && drag.dragging
         && gain_preview.is_none()
@@ -490,11 +489,10 @@ pub(super) fn show(
         && output.selection.is_none()
         && !crate::timeline_input::is_active(ui.ctx())
     {
-        output.edit =
-            adjustment::values(ui, response, duration, preview, plan, gain_preview, enabled);
+        output.edit = adjustment::values(ui, response, duration, preview, plan, held_gain, enabled);
     }
     output.gain_preview = gain_preview.or(match output.edit {
-        Some(TimelineEdit::SetVolume(range, gain)) => Some((range, gain)),
+        Some(TimelineEdit::ScaleVolume(range, gain)) => Some((range, gain)),
         _ => None,
     });
     if let Some(preview) = output.gain_preview {
@@ -629,7 +627,7 @@ mod tests {
                 ),
                 (
                     identity.with(("timeline-adjustment-value", false)),
-                    "Local volume (%)",
+                    "Relative volume (%)",
                     100.0,
                 ),
                 (
@@ -1262,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    fn gain_drag_after_selection_clear_preserves_other_bands_and_history() {
+    fn relative_gain_drag_preserves_ratios_history_and_returns_to_one_neutral_line() {
         use towavue_core::{EditHistory, EditOperation, MediaKind};
 
         let range = |a, b| TimeRange::new(time(a), time(b)).expect("range");
@@ -1270,11 +1268,11 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             for batched in [false, true] {
                 for (at, gain, selected, affected) in [
-                    (1.0, 1.0, None, range(0.0, 2.0)),
-                    (4.0, 0.5, None, range(2.0, 6.0)),
-                    (8.0, 1.0, None, range(6.0, 10.0)),
-                    (4.0, 0.5, Some(range(2.0, 8.0)), range(2.0, 8.0)),
-                    (4.0, 0.5, Some(range(0.0, 10.0)), range(0.0, 10.0)),
+                    (1.0, 1.0, None, range(0.0, 10.0)),
+                    (4.0, 1.0, None, range(0.0, 10.0)),
+                    (8.0, 1.0, None, range(0.0, 10.0)),
+                    (4.0, 1.0, Some(range(2.0, 8.0)), range(2.0, 8.0)),
+                    (4.0, 1.0, Some(range(0.0, 10.0)), range(0.0, 10.0)),
                 ] {
                     let context = egui::Context::default();
                     context.enable_accesskit();
@@ -1325,40 +1323,48 @@ mod tests {
                                 context.request_discard("local gain release must not replay");
                             }
                         });
-                        if let Some((_, gain)) = previews.last() {
-                            let labels: Vec<_> = painted
-                                .shapes
+                        let held = crate::timeline_input::is_active(&context);
+                        let displayed_gain = if held {
+                            previews.last().map_or(1.0, |(_, gain)| *gain)
+                        } else {
+                            1.0
+                        };
+                        let lines: Vec<_> = painted
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::LineSegment { points, stroke }
+                                    if stroke.color == egui::Color32::from_white_alpha(128)
+                                        && points[0].x == rect.left()
+                                        && points[1].x == rect.right() =>
+                                {
+                                    Some(points)
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        assert_eq!(
+                            lines.len(),
+                            1,
+                            "one neutral/relative line across all saved gain bands"
+                        );
+                        assert_eq!(lines[0][0].y, adjustment::gain_y(rect, displayed_gain));
+                        if selected.is_some() && !edits.is_empty() {
+                            let tree = painted
+                                .platform_output
+                                .accesskit_update
+                                .as_ref()
+                                .expect("tree");
+                            let node = tree
+                                .nodes
                                 .iter()
-                                .filter_map(|shape| {
-                                    if let egui::Shape::Text(text) = &shape.shape {
-                                        let text = text.galley.text();
-                                        if text.starts_with("Volume ")
-                                            || text.starts_with("Mixed (")
-                                        {
-                                            return Some(text.to_owned());
-                                        }
-                                    }
-                                    None
-                                })
-                                .collect();
+                                .find(|(_, node)| node.label() == Some("Relative volume (%)"))
+                                .expect("gain control");
                             assert_eq!(
-                                labels,
-                                [format!("Volume {:.0}%", gain * 100.0)],
-                                "one current gain label, including the discarded release pass"
+                                node.1.numeric_value(),
+                                Some(100.0),
+                                "release resets the relative control"
                             );
-                            if selected.is_some() && !edits.is_empty() {
-                                let tree = painted
-                                    .platform_output
-                                    .accesskit_update
-                                    .as_ref()
-                                    .expect("tree");
-                                let node = tree
-                                    .nodes
-                                    .iter()
-                                    .find(|(_, node)| node.label() == Some("Local volume (%)"))
-                                    .expect("release keeps the gain control");
-                                assert_eq!(node.1.numeric_value(), Some(f64::from(*gain) * 100.0));
-                            }
                         }
                         (edits, previews)
                     };
@@ -1394,7 +1400,7 @@ mod tests {
                         );
                         frame(vec![events[2].clone()])
                     };
-                    assert_eq!(edits, vec![TimelineEdit::SetVolume(affected, gain + 0.5)]);
+                    assert_eq!(edits, vec![TimelineEdit::ScaleVolume(affected, gain + 0.5)]);
                     assert!(!previews.is_empty());
                     assert!(
                         previews
@@ -1404,7 +1410,7 @@ mod tests {
                     assert!(frame(vec![]).0.is_empty());
                     assert_eq!(history.timeline(time(10.0)), Some(before.clone()));
                     let mut expected = before.clone();
-                    assert!(expected.apply(TimelineEdit::SetVolume(affected, gain + 0.5)));
+                    assert!(expected.apply(TimelineEdit::ScaleVolume(affected, gain + 0.5)));
                     assert!(history.push(EditOperation::Timeline(edits[0]), MediaKind::Audio));
                     assert_eq!(history.timeline(time(10.0)), Some(expected.clone()));
                     assert!(history.undo());
@@ -1471,7 +1477,7 @@ mod tests {
                     Some(if stretch {
                         TimelineEdit::Stretch(range, time(7.0))
                     } else {
-                        TimelineEdit::SetVolume(range, gain)
+                        TimelineEdit::ScaleVolume(range, gain)
                     })
                 );
                 assert!(results[0].seek.is_none() && results[0].selection.is_none());
@@ -1913,7 +1919,7 @@ mod tests {
             if vertical {
                 assert_eq!(
                     results[0].edit,
-                    Some(TimelineEdit::SetVolume(
+                    Some(TimelineEdit::ScaleVolume(
                         TimeRange::new(time(0.0), time(10.0)).expect("whole range"),
                         0.0
                     ))
@@ -1995,9 +2001,9 @@ mod tests {
         }
         let selected = app.time_selection;
         assert!(app.edits.is_empty());
-        let (_, actions) = draw(&mut app, vec![event("Local volume (%)", 50.0)]);
+        let (_, actions) = draw(&mut app, vec![event("Relative volume (%)", 50.0)]);
         assert!(
-            matches!(actions.as_slice(), [UiAction::TimeAdjustment(_, _, _, TimelineEdit::SetVolume(_, gain))] if *gain == 0.5)
+            matches!(actions.as_slice(), [UiAction::TimeAdjustment(_, _, _, TimelineEdit::ScaleVolume(_, gain))] if *gain == 0.5)
         );
         for action in actions {
             app.handle_ui_action(action);

@@ -41,17 +41,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn incoming_gap(&self, point: egui::Pos2) -> Option<usize> {
-        if !self
-            .ui_context
-            .as_ref()
-            .is_some_and(|context| tab_drag::over_tab_region(context, point))
-        {
-            return None;
-        }
-        self.incoming_filmstrip_gap(point)
-    }
-
-    pub(super) fn incoming_filmstrip_gap(&self, point: egui::Pos2) -> Option<usize> {
         if !self.accepts_tab_drop() || self.validate_transfer_window().is_err() {
             return None;
         }
@@ -72,7 +61,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 return None;
             }
         }
-        tab_drag::incoming_filmstrip_gap(context, &self.tabs.tab_ids().collect::<Vec<_>>(), point)
+        tab_drag::incoming_gap(context, &self.tabs.tab_ids().collect::<Vec<_>>(), point)
     }
 }
 
@@ -126,26 +115,18 @@ impl WindowHost {
                 point,
             };
             if local_drop {
-                if !filmstrip || (can_detach && app.incoming_filmstrip_gap(point).is_some()) {
+                if !filmstrip || (can_detach && app.incoming_gap(point).is_some()) {
                     feedback.cursor = egui::CursorIcon::Move;
                     if filmstrip {
                         feedback.target = Some((*key, point));
                     }
                 }
             } else if (!filmstrip || !context.content_rect().contains(point)) && can_detach {
-                if let Some((target, point)) = pick(self, *key, point)
-                    .filter(|(key, point)| filmstrip || self.tab_region_at(*key, *point))
-                {
+                if let Some((target, point)) = pick(self, *key, point) {
                     if self
                         .windows
                         .get(&target)
-                        .and_then(|app| {
-                            if filmstrip {
-                                app.incoming_filmstrip_gap(point)
-                            } else {
-                                app.incoming_gap(point)
-                            }
-                        })
+                        .and_then(|app| app.incoming_gap(point))
                         .is_some()
                     {
                         feedback.target = Some((target, point));
@@ -286,21 +267,6 @@ impl WindowHost {
         })
     }
 
-    fn tab_region_at(&self, target: WindowKey, point: egui::Pos2) -> bool {
-        let Some(app) = self.windows.get(&target) else {
-            return true;
-        };
-        let Some(context) = app.ui_context.as_ref() else {
-            return true;
-        };
-        // Only a current layout can identify a media-area detach. Keep stale or
-        // missing layouts as candidate targets so the existing merge guards reject
-        // them, rather than silently turning an uncertain merge into a new window.
-        tab_drag::incoming_filmstrip_gap(context, &app.tabs.tab_ids().collect::<Vec<_>>(), point)
-            .is_none()
-            || tab_drag::over_tab_region(context, point)
-    }
-
     fn merge_tab_drop(
         &mut self,
         source: WindowKey,
@@ -335,9 +301,10 @@ impl WindowHost {
             self.tab_badge = None;
         }
         for (source, (request, point, anchor)) in pending {
-            let result = if let Some((target, point)) = pick(self, source, point)
-                .filter(|(target, point)| self.tab_region_at(*target, *point))
-            {
+            // Native picking already excludes obscured client regions and the
+            // source window. A picked but unavailable target must reject the drop,
+            // not fall through to an unintended new window.
+            let result = if let Some((target, point)) = pick(self, source, point) {
                 self.merge_tab_drop(source, &request, target, point)
                     .map(|_| {
                         if visible && let Some(window) = &self.windows[&target].window {

@@ -333,6 +333,7 @@ fn tab_gap(
         .flatten()
 }
 
+#[cfg(test)]
 pub(super) fn over_tab_region(context: &egui::Context, point: egui::Pos2) -> bool {
     context
         .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
@@ -360,21 +361,10 @@ fn client_gap(
 pub(super) fn over_incoming_client(context: &egui::Context, point: egui::Pos2) -> bool {
     context
         .data(|data| data.get_temp::<DropStrip>("incoming-tab-strip".into()))
-        .is_some_and(|layout| incoming_filmstrip_gap(context, &layout.tabs, point).is_some())
+        .is_some_and(|layout| incoming_gap(context, &layout.tabs, point).is_some())
 }
 
-#[cfg(test)]
 pub(super) fn incoming_gap(
-    context: &egui::Context,
-    tabs: &[TabId],
-    point: egui::Pos2,
-) -> Option<usize> {
-    over_tab_region(context, point)
-        .then(|| incoming_filmstrip_gap(context, tabs, point))
-        .flatten()
-}
-
-pub(super) fn incoming_filmstrip_gap(
     context: &egui::Context,
     tabs: &[TabId],
     point: egui::Pos2,

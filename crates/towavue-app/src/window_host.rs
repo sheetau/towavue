@@ -447,7 +447,7 @@ impl WindowHost {
         let gap = self
             .windows
             .get(&target)
-            .and_then(|app| app.incoming_filmstrip_gap(point))
+            .and_then(|app| app.incoming_gap(point))
             .ok_or("drop on an available window")?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {

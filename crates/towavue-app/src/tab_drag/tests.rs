@@ -393,8 +393,7 @@ fn incoming_tabs_show_clipped_gaps_and_reject_stale_layouts_without_activation()
                         && stroke.width == 2.0 && stroke.color == chrome::FOREGROUND)));
                 for y in [100.0, 300.0, 575.0] {
                     let body = egui::pos2(point.x, y);
-                    assert_eq!(incoming_gap(&context, &ids, body), None);
-                    assert_eq!(incoming_filmstrip_gap(&context, &ids, body), Some(gap));
+                    assert_eq!(incoming_gap(&context, &ids, body), Some(gap));
                     app.incoming_tab_pointer = Some(body);
                     let (output, actions) = frame(&mut app, size, false, vec![]);
                     assert!(actions.is_empty());
@@ -459,16 +458,9 @@ fn incoming_tabs_append_in_unused_toolbar_space_without_expanding_native_control
             for y in [point.y, 300.0, 575.0] {
                 assert_eq!(
                     incoming_gap(&context, &ids, egui::pos2(width - 1.0, y)),
-                    if y == point.y { Some(ids.len()) } else { None }
+                    Some(ids.len())
                 );
-                assert_eq!(
-                    incoming_gap(&context, &ids, egui::pos2(1.0, y)),
-                    if y == point.y { Some(0) } else { None }
-                );
-                assert_eq!(
-                    incoming_filmstrip_gap(&context, &ids, egui::pos2(1.0, y)),
-                    Some(0)
-                );
+                assert_eq!(incoming_gap(&context, &ids, egui::pos2(1.0, y)), Some(0));
             }
             for outside in [
                 egui::pos2(-1.0, 100.0),
@@ -540,7 +532,7 @@ fn incoming_tabs_scroll_without_pointer_capture_and_accept_empty_welcome() {
     );
     assert_eq!(
         incoming_gap(context, &[gallery], egui::pos2(240.0, 300.0)),
-        None
+        Some(1)
     );
 }
 
@@ -1434,8 +1426,8 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
             assert!(incoming_gap(&context, &ids, egui::pos2(label.center().x, y)).is_some());
         }
         let body = egui::pos2(label.center().x, strip.bottom() + 15.1);
-        assert!(incoming_gap(&context, &ids, body).is_none());
-        assert!(incoming_filmstrip_gap(&context, &ids, body).is_some());
+        assert!(!over_tab_region(&context, body));
+        assert!(incoming_gap(&context, &ids, body).is_some());
         frame(&mut app, size, true, vec![pointer(label.center(), true)]);
         let (output, actions) = frame(&mut app, size, true, vec![egui::Event::PointerMoved(body)]);
         assert!(actions.is_empty());

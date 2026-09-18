@@ -386,10 +386,9 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .expect("target")
         .filmstrip_open = true;
     let body = point + egui::vec2(0.0, 100.0);
-    assert_eq!(host.windows[&target].incoming_gap(body), None);
-    assert_eq!(host.windows[&target].incoming_filmstrip_gap(body), Some(1));
+    assert_eq!(host.windows[&target].incoming_gap(body), Some(1));
     host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
-    assert_eq!(host.windows[&target].incoming_tab_pointer, None);
+    assert_eq!(host.windows[&target].incoming_tab_pointer, Some(body));
     assert_eq!(
         host.tab_drag_feedback(|_, _, _| Some((target, body)))
             .expect("body feedback")
@@ -400,7 +399,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         host.tab_drag_feedback(|_, _, _| Some((target, body)))
             .expect("body badge")
             .badge,
-        Some(tab_drag::badge::Kind::New)
+        Some(tab_drag::badge::Kind::Move)
     );
     let context = host.windows[&target]
         .ui_context
@@ -431,7 +430,7 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         vec![pointer(outside, false)],
     );
     assert!(host.windows[&source].pending_tab_drop.is_some());
-    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, point)));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
     assert_eq!(
         host.windows.len(),
         original_count,
@@ -513,7 +512,9 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     frame(app, true, vec![pointer(outside, false)]);
     assert!(app.pending_tab_drop.is_some());
     let previous: Vec<_> = host.windows.keys().copied().collect();
-    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, body)));
+    // Over the source media area, native picking excludes the source and finds
+    // no other unobscured destination. Cross-window body merging was checked above.
+    host.update_tab_drops_with(event_loop, false, |_, _, _| None);
     assert!(
         host.tab_badge.is_none(),
         "release disposes the helper before transfer"
@@ -579,6 +580,6 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     host.remove_closed();
     assert_eq!(host.windows.len(), original_count);
     eprintln!(
-        "PASS hosted tab drop: captured drag/hover merges dirty in-memory animation at toolbar gaps, including filmstrip-open hosts; media-area release detaches; hidden native GPU indicator and three-state badge; last-tab detach/modal/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
+        "PASS hosted tab drop: captured drag/hover merges dirty in-memory animation at toolbar gaps, including filmstrip-open hosts; external media-area release merges; source media-area release detaches; hidden native GPU indicator and three-state badge; last-tab detach/modal/stale-release rejection; source and destination neighbors retained; OS hit selection injected for hidden windows"
     );
 }

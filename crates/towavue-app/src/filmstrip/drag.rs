@@ -25,6 +25,7 @@ pub(super) struct State {
     last_frame: u64,
     claimed: Option<u64>,
     eligible: bool,
+    band: Option<Rect>,
 }
 
 impl State {
@@ -32,6 +33,7 @@ impl State {
         self.drag = None;
         self.scope = None;
         self.eligible = false;
+        self.band = None;
     }
 
     pub(super) fn cancel(&mut self, context: &Context) -> bool {
@@ -119,6 +121,7 @@ impl State {
                     input
                         .pointer
                         .interact_pos()
+                        .filter(|point| self.band.is_some_and(|band| !band.contains(*point)))
                         .map(|point| (drag.path.as_path(), scope.generation, point))
                 })
                 .flatten()
@@ -131,6 +134,7 @@ impl State {
         band: Option<Rect>,
         actions: &mut Vec<UiAction>,
     ) {
+        self.band = band;
         let (pointer, down, released) = context.input(|input| {
             (
                 input.pointer.interact_pos(),
@@ -151,6 +155,9 @@ impl State {
             }
             if released
                 && drag.crossed
+                // Leaving the band arms the drag, but returning cancels transfer
+                // eligibility at the live/release position, including batched input.
+                && pointer.is_some_and(|point| band.is_some_and(|band| !band.contains(point)))
                 && pointer.is_some_and(|pointer| {
                     !scope.screen.contains(pointer)
                         || crate::tab_drag::over_incoming_client(context, pointer)

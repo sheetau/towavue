@@ -2493,6 +2493,34 @@ fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
     ) else {
         return;
     };
+    // Render the real incoming layout as the app does. Without it, an internal
+    // release would be rejected independently of the thumbnail-band guard.
+    let frame = |strip: &mut Filmstrip,
+                 context: &Context,
+                 snapshot: &FolderSnapshot,
+                 current: &Path,
+                 enabled: bool,
+                 input: egui::RawInput| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(input, |ui| {
+            crate::tab_drag::incoming(
+                ui,
+                vec![],
+                vec![],
+                Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 32.0)),
+                None,
+            );
+            strip.show(
+                context,
+                context.content_rect(),
+                Some(snapshot),
+                Some(current),
+                enabled,
+                &mut actions,
+            );
+        });
+        (output, actions)
+    };
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.set_pixels_per_point(density);
@@ -2545,7 +2573,12 @@ fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
             strip.scroll_offset, before,
             "a batched card drag cannot become a background swipe"
         );
-        for leave in [false, true] {
+        for (leave, return_inside, batched) in [
+            (false, false, false),
+            (true, false, false),
+            (true, true, false),
+            (true, true, true),
+        ] {
             frame(
                 &mut strip,
                 &context,
@@ -2580,19 +2613,47 @@ fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
                 input(vec![egui::Event::PointerMoved(end)]),
             );
             assert_eq!(strip.active_drag(&context, Some(current)).is_some(), leave);
+            if return_inside && !batched {
+                frame(
+                    &mut strip,
+                    &context,
+                    &snapshot,
+                    current,
+                    true,
+                    input(vec![egui::Event::PointerMoved(inside)]),
+                );
+                assert!(
+                    strip.active_drag(&context, Some(current)).is_none(),
+                    "returning to the band removes live transfer feedback"
+                );
+            }
+            let release = if return_inside { inside } else { end };
+            let events = if return_inside && batched {
+                vec![egui::Event::PointerMoved(inside), pointer(inside, false)]
+            } else {
+                vec![pointer(release, false)]
+            };
             let actions = frame(
                 &mut strip,
                 &context,
                 &snapshot,
                 current,
                 true,
-                input(vec![pointer(end, false)]),
+                input(events),
             )
             .1;
-            assert!(
-                actions.is_empty(),
-                "internal release neither opens nor navigates"
-            );
+            if leave && !return_inside {
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::OpenWindow(path, generation, point, _)]
+                    if path == current && *generation == snapshot.generation && *point == outside)
+                );
+            } else {
+                assert!(
+                    actions.is_empty(),
+                    "release inside the band never opens or navigates"
+                );
+            }
+            assert!(strip.active_drag(&context, Some(current)).is_none());
         }
     }
 }

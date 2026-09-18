@@ -1,13 +1,6 @@
-<svg
-                class="icon-reading-outline"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
-                <path d="M3 19a9 9 0 0 1 9 0a9 9 0 0 1 9 0M3 6a9 9 0 0 1 9 0a9 9 0 0 1 9 0M3 6v13M12 6v13M21 6v13" />
-              </svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <g transform="translate(1 2)" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M11,3v16"/>
+    <path d="M19,17c1.1,0,2-.9,2-2V3c0-1.1-.89-2-2-2h-4c-1.57,0-3.06.74-4,2-.94-1.26-2.43-2-4-2H3c-1.1,0-2,.9-2,2v12c0,1.1.89,2,2,2h4c1.57,0,3.06.74,4,2,.94-1.26,2.43-2,4-2h4Z"/>
+  </g>
+</svg>

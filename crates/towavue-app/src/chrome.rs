@@ -396,6 +396,14 @@ pub fn reading_button(
         MUTED
     };
     reading_icon::paint(ui, response.rect, selected, direction, color);
+    let cursor = if selected {
+        egui::CursorIcon::Move
+    } else {
+        egui::CursorIcon::ResizeHorizontal
+    };
+    if response.enabled() && (response.hovered() || response.dragged()) {
+        ui.ctx().set_cursor_icon(cursor);
+    }
     response
 }
 
@@ -561,7 +569,7 @@ mod tests {
                                     egui::CursorIcon::Default
                                 } else if control == 4 {
                                     egui::CursorIcon::Text
-                                } else if control == 5 {
+                                } else if control == 1 || control == 5 {
                                     egui::CursorIcon::ResizeHorizontal
                                 } else {
                                     egui::CursorIcon::PointingHand

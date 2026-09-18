@@ -4,17 +4,19 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Stroke,
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Kind {
     Outline,
-    Filled,
+    FilledRight,
+    FilledLeft,
     Right,
     Left,
 }
 
 pub(super) fn paint(ui: &Ui, rect: Rect, selected: bool, direction: Option<bool>, color: Color32) {
-    let kind = match direction {
-        Some(true) => Kind::Left,
-        Some(false) => Kind::Right,
-        None if selected => Kind::Filled,
-        None => Kind::Outline,
+    let kind = match (selected, direction) {
+        (true, Some(true)) => Kind::FilledLeft,
+        (true, _) => Kind::FilledRight,
+        (false, Some(true)) => Kind::Left,
+        (false, Some(false)) => Kind::Right,
+        (false, None) => Kind::Outline,
     };
     let density = ui.ctx().pixels_per_point();
     let size = (16.0 * density).round().clamp(1.0, 256.0) as u32;
@@ -52,13 +54,20 @@ pub(super) fn paint(ui: &Ui, rect: Rect, selected: bool, direction: Option<bool>
     );
 }
 
-// Literal reference geometry, in its original 24-unit view box. The outline and
-// direction paths come from pfp_cropper; the filled path is Tabler's book icon.
-// See assets/reading-icons/README.md and the retained SVG/license sources.
+// Owner-supplied SVG geometry; normalize the optical bounds in a 24-unit
+// canvas. Outline strokes are one logical pixel in the 16-point glyph box.
+// See assets/reading-icons/README.md for the retained source artwork.
 fn render(kind: Kind, size: u32) -> Option<Pixmap> {
-    if kind == Kind::Left {
-        // Mirror the finished pixels to keep the two previews exactly symmetric.
-        let source = render(Kind::Right, size)?;
+    if matches!(kind, Kind::Left | Kind::FilledLeft) {
+        // Mirror final texels so left/right are exactly symmetric at every DPI.
+        let source = render(
+            if kind == Kind::Left {
+                Kind::Right
+            } else {
+                Kind::FilledRight
+            },
+            size,
+        )?;
         let mut result = Pixmap::new(size, size)?;
         for y in 0..size as usize {
             for x in 0..size as usize {
@@ -69,91 +78,65 @@ fn render(kind: Kind, size: u32) -> Option<Pixmap> {
         }
         return Some(result);
     }
+    let filled = kind == Kind::FilledRight;
     let mut image = Pixmap::new(size, size)?;
     let mut path = PathBuilder::new();
-    if kind == Kind::Filled {
-        path.move_to(21.5, 5.134);
-        arc(&mut path, [21.5, 5.134], [21.993, 5.882], 1.0, true);
-        path.line_to(22.0, 6.0);
-        path.line_to(22.0, 19.0);
-        arc(&mut path, [22.0, 19.0], [20.5, 19.866], 1.0, true);
-        arc(&mut path, [20.5, 19.866], [13.0, 19.6], 8.0, false);
-        path.line_to(13.0, 4.426);
-        arc(&mut path, [13.0, 4.426], [21.5, 5.134], 10.0, true);
+    if filled {
+        path.move_to(22.0, 3.0);
+        path.line_to(22.0, 15.0);
+        path.cubic_to(22.0, 16.66, 20.66, 18.0, 19.0, 18.0);
+        path.line_to(15.0, 18.0);
+        path.cubic_to(13.85, 18.0, 12.75, 18.5, 12.0, 19.36);
+        path.line_to(12.0, 0.81);
+        path.cubic_to(12.9, 0.29, 13.94, 0.01, 15.0, 0.01);
+        path.line_to(19.0, 0.01);
+        path.cubic_to(20.66, 0.0, 22.0, 1.35, 22.0, 3.0);
         path.close();
-        path.move_to(11.0, 4.427);
-        path.line_to(11.001, 19.601);
-        arc(&mut path, [11.001, 19.601], [3.767, 19.718], 8.0, false);
-        let mut point = [3.767, 19.718];
-        for delta in [
-            [-0.327, 0.18],
-            [-0.103, 0.044],
-            [-0.049, 0.016],
-            [-0.11, 0.026],
-            [-0.061, 0.01],
-            [-0.117, 0.006],
-            [-0.042, 0.0],
-            [-0.11, -0.012],
-            [-0.077, -0.014],
-            [-0.108, -0.032],
-            [-0.126, -0.056],
-            [-0.095, -0.056],
-            [-0.089, -0.067],
-            [-0.06, -0.056],
-            [-0.073, -0.082],
-            [-0.064, -0.089],
-            [-0.022, -0.036],
-            [-0.032, -0.06],
-            [-0.044, -0.103],
-            [-0.016, -0.049],
-            [-0.026, -0.11],
-            [-0.01, -0.061],
-            [-0.004, -0.049],
-            [-0.002, -13.068],
-        ] {
-            point = [point[0] + delta[0], point[1] + delta[1]];
-            path.line_to(point[0], point[1]);
-        }
-        let next = [point[0] + 0.5, point[1] - 0.866];
-        arc(&mut path, point, next, 1.0, true);
-        arc(
-            &mut path,
-            next,
-            [next[0] + 8.5, next[1] - 0.707],
-            10.0,
-            true,
-        );
+        path.move_to(7.0, 0.0);
+        path.line_to(3.0, 0.0);
+        path.cubic_to(1.35, 0.0, 0.0, 1.35, 0.0, 3.0);
+        path.line_to(0.0, 15.0);
+        path.cubic_to(0.0, 16.66, 1.35, 18.0, 3.0, 18.0);
+        path.line_to(7.0, 18.0);
+        path.cubic_to(8.15, 18.0, 9.25, 18.5, 10.0, 19.36);
+        path.line_to(10.0, 0.81);
+        path.cubic_to(9.1, 0.29, 8.06, 0.0, 7.0, 0.0);
+        path.close();
+        path.move_to(7.21, 9.71);
+        path.line_to(4.21, 12.71);
+        path.cubic_to(4.01, 12.91, 3.76, 13.0, 3.5, 13.0);
+        path.cubic_to(3.24, 13.0, 2.99, 12.9, 2.79, 12.71);
+        path.cubic_to(2.4, 12.32, 2.4, 11.69, 2.79, 11.3);
+        path.line_to(5.08, 9.01);
+        path.line_to(2.79, 6.72);
+        path.cubic_to(2.4, 6.33, 2.4, 5.7, 2.79, 5.31);
+        path.cubic_to(3.18, 4.92, 3.81, 4.92, 4.2, 5.31);
+        path.line_to(7.2, 8.31);
+        path.cubic_to(7.59, 8.7, 7.59, 9.33, 7.2, 9.72);
         path.close();
     } else {
-        for y in [19.0, 6.0] {
-            path.move_to(3.0, y);
-            if kind == Kind::Outline {
-                arc(&mut path, [3.0, y], [12.0, y], 9.0, true);
-                arc(&mut path, [12.0, y], [21.0, y], 9.0, true);
-            } else {
-                path.cubic_to(5.78, y - 1.61, 9.22, y - 1.61, 12.0, y);
-                if y == 6.0 {
-                    path.cubic_to(14.78, y - 1.61, 18.22, y - 1.61, 21.0, y);
-                }
-            }
-        }
-        for x in [3.0, 12.0, 21.0] {
-            path.move_to(x, 6.0);
-            path.line_to(
-                x,
-                if kind == Kind::Right && x == 21.0 {
-                    12.5
-                } else {
-                    19.0
-                },
-            );
-        }
+        path.move_to(11.0, 3.0);
+        path.line_to(11.0, 19.0);
+        path.move_to(19.0, 17.0);
+        path.cubic_to(20.1, 17.0, 21.0, 16.1, 21.0, 15.0);
+        path.line_to(21.0, 3.0);
+        path.cubic_to(21.0, 1.9, 20.11, 1.0, 19.0, 1.0);
+        path.line_to(15.0, 1.0);
+        path.cubic_to(13.43, 1.0, 11.94, 1.74, 11.0, 3.0);
+        path.cubic_to(10.06, 1.74, 8.57, 1.0, 7.0, 1.0);
+        path.line_to(3.0, 1.0);
+        path.cubic_to(1.9, 1.0, 1.0, 1.9, 1.0, 3.0);
+        path.line_to(1.0, 15.0);
+        path.cubic_to(1.0, 16.1, 1.89, 17.0, 3.0, 17.0);
+        path.line_to(7.0, 17.0);
+        path.cubic_to(8.57, 17.0, 10.06, 17.74, 11.0, 19.0);
+        path.cubic_to(11.94, 17.74, 13.43, 17.0, 15.0, 17.0);
+        path.line_to(19.0, 17.0);
+        path.close();
         if kind == Kind::Right {
-            path.move_to(18.0, 20.83);
-            path.line_to(21.0, 17.83);
-            path.line_to(18.0, 14.83);
-            path.move_to(21.0, 17.83);
-            path.line_to(15.53, 17.83);
+            path.move_to(4.5, 12.0);
+            path.line_to(7.5, 9.0);
+            path.line_to(4.5, 6.0);
         }
     }
     let mut paint = Paint {
@@ -161,16 +144,29 @@ fn render(kind: Kind, size: u32) -> Option<Pixmap> {
         ..Default::default()
     };
     paint.set_color_rgba8(255, 255, 255, 255);
-    let transform = Transform::from_scale(size as f32 / 24.0, size as f32 / 24.0);
+    let density = size as f32 / 24.0;
+    let (scale, x, y) = if filled {
+        (21.5 / 22.0, 1.25, 2.54)
+    } else {
+        (1.0, 1.0, 2.0)
+    };
+    let transform = Transform::from_row(
+        scale * density,
+        0.0,
+        0.0,
+        scale * density,
+        x * density,
+        y * density,
+    );
     let path = path.finish()?;
-    if kind == Kind::Filled {
+    if filled {
         image.fill_path(&path, &paint, FillRule::Winding, transform, None);
     } else {
         image.stroke_path(
             &path,
             &paint,
             &Stroke {
-                width: 2.0,
+                width: 1.5,
                 line_cap: LineCap::Round,
                 line_join: LineJoin::Round,
                 ..Default::default()
@@ -182,40 +178,6 @@ fn render(kind: Kind, size: u32) -> Option<Pixmap> {
     Some(image)
 }
 
-// These SVGs use only circular, small arcs. Subdivide at 90 degrees and retain
-// exact endpoints; cubic approximation error is far below one output pixel.
-fn arc(path: &mut PathBuilder, from: [f32; 2], to: [f32; 2], radius: f32, sweep: bool) {
-    let from = egui::vec2(from[0], from[1]);
-    let to = egui::vec2(to[0], to[1]);
-    let chord = to - from;
-    let height = (radius * radius - chord.length_sq() * 0.25).max(0.0).sqrt();
-    let center = (from + to) * 0.5
-        + egui::vec2(-chord.y, chord.x).normalized() * height * if sweep { 1.0 } else { -1.0 };
-    let start = (from - center).angle();
-    let end = (to - center).angle();
-    let delta = if sweep {
-        (end - start).rem_euclid(std::f32::consts::TAU)
-    } else {
-        -(start - end).rem_euclid(std::f32::consts::TAU)
-    };
-    let count = (delta.abs() / std::f32::consts::FRAC_PI_2).ceil() as usize;
-    let step = delta / count as f32;
-    let k = 4.0 / 3.0 * (step * 0.25).tan();
-    for index in 0..count {
-        let a = start + step * index as f32;
-        let b = a + step;
-        let p = center + egui::Vec2::angled(a) * radius;
-        let q = if index + 1 == count {
-            to
-        } else {
-            center + egui::Vec2::angled(b) * radius
-        };
-        let c1 = p + egui::vec2(-a.sin(), a.cos()) * (radius * k);
-        let c2 = q - egui::vec2(-b.sin(), b.cos()) * (radius * k);
-        path.cubic_to(c1.x, c1.y, c2.x, c2.y, q.x, q.y);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,8 +185,14 @@ mod tests {
     #[test]
     fn reference_icons_keep_gutter_round_strokes_and_mirrored_entry_arrows_at_each_density() {
         for size in [16, 20, 32] {
-            let images = [Kind::Outline, Kind::Filled, Kind::Right, Kind::Left]
-                .map(|kind| render(kind, size).expect("icon"));
+            let images = [
+                Kind::Outline,
+                Kind::FilledRight,
+                Kind::Right,
+                Kind::Left,
+                Kind::FilledLeft,
+            ]
+            .map(|kind| render(kind, size).expect("icon"));
             let alpha_sum = |image: &Pixmap| {
                 image
                     .data()
@@ -266,6 +234,80 @@ mod tests {
                     let a = ((y * size + x) * 4) as usize;
                     let b = ((y * size + size - 1 - x) * 4) as usize;
                     assert_eq!(&images[2].data()[a..a + 4], &images[3].data()[b..b + 4]);
+                    assert_eq!(&images[1].data()[a..a + 4], &images[4].data()[b..b + 4]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reading_mode_and_entry_keep_their_cursors_during_hover_and_owned_drag() {
+        for density in [1.0, 1.25, 2.0] {
+            for (selected, direction) in [
+                (false, None),
+                (false, Some(true)),
+                (false, Some(false)),
+                (true, Some(true)),
+                (true, Some(false)),
+            ] {
+                for enabled in [false, true] {
+                    let context = crate::fonts::test_context();
+                    context.global_style_mut(crate::chrome::style);
+                    let mut target = egui::Pos2::ZERO;
+                    for step in 0..5 {
+                        let pointer = if step < 3 {
+                            target
+                        } else {
+                            target + egui::vec2(80.0, 40.0)
+                        };
+                        let mut events = if step == 0 {
+                            vec![]
+                        } else {
+                            vec![egui::Event::PointerMoved(pointer)]
+                        };
+                        if step == 2 || step == 4 {
+                            events.push(egui::Event::PointerButton {
+                                pos: pointer,
+                                button: egui::PointerButton::Primary,
+                                pressed: step == 2,
+                                modifiers: egui::Modifiers::NONE,
+                            });
+                        }
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(320.0, 200.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        let output = context.run_ui(input, |ui| {
+                            let response =
+                                crate::chrome::reading_button(ui, enabled, selected, direction);
+                            target = response.rect.center();
+                            if step == 3 {
+                                assert_eq!(response.dragged(), enabled);
+                            }
+                        });
+                        if step > 0 {
+                            let expected = if !enabled || step == 4 {
+                                egui::CursorIcon::Default
+                            } else if selected {
+                                egui::CursorIcon::Move
+                            } else {
+                                egui::CursorIcon::ResizeHorizontal
+                            };
+                            assert_eq!(
+                                output.platform_output.cursor_icon, expected,
+                                "selected={selected} direction={direction:?} enabled={enabled} step={step} density={density}"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -280,7 +322,8 @@ mod tests {
                 (false, None),
                 (false, Some(false)),
                 (false, Some(true)),
-                (true, None),
+                (true, Some(false)),
+                (true, Some(true)),
             ] {
                 let mut ids = Vec::new();
                 for enabled in [true, true, false] {

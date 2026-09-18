@@ -5957,8 +5957,17 @@ where
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
                         let enabled = self.image_handoff.is_none() && (self.reading_mode || !self.command_context().has_unsaved_edits);
                         let direction = self.reading_drag.as_ref()
-                            .filter(|drag| !drag.was_enabled).and_then(|drag| drag.direction);
+                            .filter(|drag| !drag.was_enabled).and_then(|drag| drag.direction).or_else(|| self.reading_mode.then_some(self.reading_settings.reversed));
                         let response = chrome::reading_button(ui, enabled, self.reading_mode, direction);
+                        if let Some(drag) = &self.reading_drag {
+                            // A pending spread may temporarily disable the button, but
+                            // the pinned gesture still owns its cursor until release.
+                            ui.ctx().set_cursor_icon(if drag.was_enabled {
+                                egui::CursorIcon::Move
+                            } else {
+                                egui::CursorIcon::ResizeHorizontal
+                            });
+                        }
                         response.widget_info(|| egui::WidgetInfo::labeled(
                             egui::WidgetType::Button, response.enabled(), &label));
                         if response.drag_started_by(egui::PointerButton::Primary)
@@ -9872,14 +9881,24 @@ where
             && !drag.was_enabled
         {
             return match drag.direction {
-                Some(true) => "Reading left: release to enable".into(),
-                Some(false) => "Reading right: release to enable".into(),
-                None => "Reading: drag left or right to choose direction".into(),
+                Some(true) => "(\u{2194}) Reading left: release to enable".into(),
+                Some(false) => "(\u{2194}) Reading right: release to enable".into(),
+                None => "(\u{2194}) Reading: drag left or right to choose direction".into(),
             };
         }
         format!(
-            "Reading {} · first {}{}",
+            "{}Reading {} · {}first {}{}",
+            if self.reading_drag.is_some() {
+                "(\u{2195}) "
+            } else {
+                ""
+            },
             self.reading_settings.page_count,
+            if self.reading_drag.is_some() {
+                "(\u{2194}) "
+            } else {
+                ""
+            },
             self.reading_settings.first_page_count,
             if self.reading_settings.folder_reversed {
                 " · reverse folder"
@@ -18000,6 +18019,7 @@ mod tests {
                     "counts remain visible before any image can be decoded"
                 );
                 if app.reading_drag.is_some() {
+                    assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Move);
                     let values: Vec<_> = output
                         .shapes
                         .iter()
@@ -18055,7 +18075,10 @@ mod tests {
         app.reading_mode = true;
         app.move_reading_drag((0.0, -25.0));
         assert_eq!(app.reading_settings.page_count, 3);
-        assert_eq!(app.status_notice().as_deref(), Some("Reading 3 · first 3"));
+        assert_eq!(
+            app.status_notice().as_deref(),
+            Some("(\u{2195}) Reading 3 · (\u{2194}) first 3")
+        );
         draw(&mut app, vec![]);
         assert!(app.finish_reading_drag(true));
         assert!(app.reading_mode);

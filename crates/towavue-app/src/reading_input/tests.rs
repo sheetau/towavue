@@ -164,9 +164,9 @@ fn preview_commit_cancel_and_layout_changes_keep_the_leading_image_and_source_hi
                 assert_eq!(
                     app.status_notice().as_deref(),
                     Some(if reversed {
-                        "Reading left: release to enable"
+                        "(\u{2194}) Reading left: release to enable"
                     } else {
-                        "Reading right: release to enable"
+                        "(\u{2194}) Reading right: release to enable"
                     })
                 );
                 assert!(app.finish_reading_drag(cancel));

@@ -9,6 +9,7 @@ use crate::{Application, UiAction, gallery_rail, welcome};
 /// never queried here. Query/type changes rebuild the filtered projection once.
 #[derive(Default)]
 pub(super) struct Listing {
+    revision: u64,
     source_valid: bool,
     filter_valid: bool,
     available: Vec<PathBuf>,
@@ -19,6 +20,21 @@ pub(super) struct Listing {
 }
 
 impl Listing {
+    pub(super) fn contains(
+        &self,
+        path: &std::path::Path,
+        revision: u64,
+        query: &str,
+        filter: Option<MediaKind>,
+    ) -> bool {
+        self.source_valid
+            && self.filter_valid
+            && self.revision == revision
+            && self.query == query
+            && self.filter == filter
+            && self.filtered.iter().any(|item| item == path)
+    }
+
     pub fn invalidate(&mut self) {
         self.source_valid = false;
     }
@@ -45,6 +61,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         }
         let Listing {
             available,
+            revision,
             filtered,
             months,
             query: old_query,
@@ -84,13 +101,18 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             *old_query = query.to_owned();
                             *old_filter = filter;
                             *filter_valid = true;
+                            *revision = revision.wrapping_add(1);
                         }
                         if filtered.is_empty() && !available.is_empty() {
                             ui.label("No matching files.");
                         }
-                        let grid =
-                            self.filmstrip
-                                .show_recent(ui, filtered, ui.is_enabled(), actions);
+                        let grid = self.filmstrip.show_recent(
+                            ui,
+                            filtered,
+                            *revision,
+                            ui.is_enabled(),
+                            actions,
+                        );
                         months
                             .iter()
                             .map(|&(date, index)| gallery_rail::Month {

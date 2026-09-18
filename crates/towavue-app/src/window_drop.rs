@@ -83,7 +83,7 @@ impl WindowHost {
                     app.graphics_epoch,
                 ),
             );
-            let (point, local_drop, can_detach, filmstrip) =
+            let (point, local_drop, can_detach, thumbnail) =
                 if let Some((tab, point, local_drop)) = tab {
                     if !app.accepts_tab_drop() {
                         return None;
@@ -95,11 +95,21 @@ impl WindowHost {
                         false,
                     )
                 } else {
-                    let (path, generation, point) =
-                        app.filmstrip.active_drag(context, app.path.as_deref())?;
-                    if !app.can_open_filmstrip_window(path, generation) {
-                        return None;
-                    }
+                    let point = if let Some((path, revision, point)) =
+                        app.filmstrip.active_recent_drag(context)
+                    {
+                        if !app.can_open_gallery_window(path, revision) {
+                            return None;
+                        }
+                        point
+                    } else {
+                        let (path, generation, point) =
+                            app.filmstrip.active_drag(context, app.path.as_deref())?;
+                        if !app.can_open_filmstrip_window(path, generation) {
+                            return None;
+                        }
+                        point
+                    };
                     (
                         point,
                         tab_drag::over_incoming_client(context, point),
@@ -115,13 +125,13 @@ impl WindowHost {
                 point,
             };
             if local_drop {
-                if !filmstrip || (can_detach && app.incoming_gap(point).is_some()) {
+                if !thumbnail || (can_detach && app.incoming_gap(point).is_some()) {
                     feedback.cursor = egui::CursorIcon::Move;
-                    if filmstrip {
+                    if thumbnail {
                         feedback.target = Some((*key, point));
                     }
                 }
-            } else if (!filmstrip || !context.content_rect().contains(point)) && can_detach {
+            } else if (!thumbnail || !context.content_rect().contains(point)) && can_detach {
                 if let Some((target, point)) = pick(self, *key, point) {
                     if self
                         .windows
@@ -132,11 +142,11 @@ impl WindowHost {
                         feedback.target = Some((target, point));
                         feedback.cursor = egui::CursorIcon::Move;
                     }
-                } else if filmstrip || app.tabs.tab_ids().count() > 1 {
+                } else if thumbnail || app.tabs.tab_ids().count() > 1 {
                     feedback.cursor = egui::CursorIcon::Move;
                 }
             }
-            if filmstrip || !local_drop {
+            if thumbnail || !local_drop {
                 feedback.badge = Some(if feedback.cursor == egui::CursorIcon::NoDrop {
                     tab_drag::badge::Kind::Forbidden
                 } else if feedback.target.is_some() {

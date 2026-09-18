@@ -86,6 +86,7 @@ pub struct Filmstrip {
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
     drag: drag::State,
+    recent_drag: drag::State,
     swipe: swipe::State,
 }
 
@@ -109,6 +110,7 @@ impl Filmstrip {
             tab_navigation: None,
             scroll_offset: 0.0,
             drag: drag::State::default(),
+            recent_drag: drag::State::default(),
             swipe: swipe::State::default(),
         })
     }
@@ -122,12 +124,13 @@ impl Filmstrip {
 
     pub fn cancel_drag(&mut self) {
         self.drag.clear();
+        self.recent_drag.clear();
         self.swipe.clear();
     }
 
     pub(crate) fn cancel_native_drag(&mut self, context: &Context) -> bool {
         self.swipe.clear();
-        self.drag.cancel(context)
+        self.drag.cancel(context) | self.recent_drag.cancel(context)
     }
 
     pub(crate) fn active_drag(
@@ -138,10 +141,15 @@ impl Filmstrip {
         self.drag.active_pointer(context, current)
     }
 
+    pub(crate) fn active_recent_drag(&self, context: &Context) -> Option<(&Path, u64, egui::Pos2)> {
+        self.recent_drag.recent_pointer(context)
+    }
+
     pub fn clear_previews(&mut self) {
         self.preparation = None;
         self.warming = None;
         self.drag.clear();
+        self.recent_drag.clear();
         self.swipe.clear();
         self.focused_card = None;
         self.card_paths.clear();
@@ -803,9 +811,16 @@ impl Filmstrip {
         &mut self,
         ui: &mut egui::Ui,
         paths: &[PathBuf],
+        revision: u64,
         enabled: bool,
         actions: &mut Vec<UiAction>,
     ) -> RecentGrid {
+        self.recent_drag.begin_recent(
+            ui.ctx(),
+            revision,
+            Rect::from_min_size(ui.cursor().min, ui.clip_rect().size()),
+            enabled,
+        );
         let mut wanted = Vec::new();
         let origin = ui.cursor().top();
         let width = ui.available_width();
@@ -873,7 +888,8 @@ impl Filmstrip {
                     let mut card_ui =
                         ui.new_child(egui::UiBuilder::new().id_salt(path).max_rect(rect));
                     let ui = &mut card_ui;
-                    let response = ui.interact(rect, ui.id().with("card"), egui::Sense::click());
+                    let response =
+                        ui.interact(rect, ui.id().with("card"), egui::Sense::click_and_drag());
                     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -908,6 +924,7 @@ impl Filmstrip {
                         rect.min,
                         egui::vec2(cell_width, cell_width * 2.0 / 3.0),
                     );
+                    self.recent_drag.observe_recent(&response, path, image_rect);
                     ui.painter()
                         .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
                     match self.previews.get(path) {
@@ -996,6 +1013,7 @@ impl Filmstrip {
                 }
             }
         });
+        self.recent_drag.finish(ui.ctx(), None, actions);
         self.focused_card = focused_card;
         self.recent_focus = recent_focus;
         // Keep the same bounded preparation set while a menu or picker covers the grid.
@@ -1404,7 +1422,7 @@ mod tests {
                         },
                         |ui| {
                             let scroll = egui::ScrollArea::vertical().show_styled(ui, |ui| {
-                                strip.show_recent(ui, &paths, true, &mut actions)
+                                strip.show_recent(ui, &paths, 1, true, &mut actions)
                             });
                             bounds = scroll.inner_rect;
                             offset = scroll.state.offset.y;
@@ -1563,7 +1581,7 @@ mod tests {
                         &paths,
                         enabled,
                         |ui, _, _| {
-                            filmstrip.show_recent(ui, &paths, enabled, &mut actions);
+                            filmstrip.show_recent(ui, &paths, 1, enabled, &mut actions);
                             Vec::new()
                         },
                     );
@@ -1831,7 +1849,7 @@ mod tests {
                 |ui| {
                     let scroll = egui::ScrollArea::vertical()
                         .vertical_scroll_offset(offset)
-                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, 1, true, &mut vec![]));
                     offset = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
                 },
             );
@@ -1899,8 +1917,13 @@ mod tests {
                                 let scroll = egui::ScrollArea::vertical()
                                     .vertical_scroll_offset(max_offset * fraction)
                                     .show_styled(ui, |ui| {
-                                        grid =
-                                            Some(strip.show_recent(ui, &paths, true, &mut vec![]));
+                                        grid = Some(strip.show_recent(
+                                            ui,
+                                            &paths,
+                                            1,
+                                            true,
+                                            &mut vec![],
+                                        ));
                                     });
                                 max_offset =
                                     (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
@@ -2011,7 +2034,7 @@ mod tests {
                 |ui| {
                     let scroll = egui::ScrollArea::vertical()
                         .vertical_scroll_offset(offset)
-                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, true, &mut vec![]));
+                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, 1, true, &mut vec![]));
                     max_scroll = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
                 },
             );
@@ -3230,7 +3253,7 @@ mod tests {
                                     );
                                 }
                                 _ => {
-                                    strip.show_recent(ui, &paths, true, &mut vec![]);
+                                    strip.show_recent(ui, &paths, 1, true, &mut vec![]);
                                 }
                             },
                         );

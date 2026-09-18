@@ -1,10 +1,18 @@
 use super::*;
 
 #[derive(Clone, PartialEq)]
+enum Source {
+    Filmstrip {
+        folder: PathBuf,
+        generation: u64,
+        current: Option<PathBuf>,
+    },
+    Gallery(u64),
+}
+
+#[derive(Clone, PartialEq)]
 struct Scope {
-    folder: PathBuf,
-    generation: u64,
-    current: Option<PathBuf>,
+    source: Source,
     screen: Rect,
     media: Rect,
     density: f32,
@@ -16,6 +24,7 @@ struct Drag {
     origin: egui::Pos2,
     offset: Vec2,
     crossed: bool,
+    exclusion: Option<Rect>,
 }
 
 #[derive(Default)]
@@ -55,13 +64,38 @@ impl State {
         enabled: bool,
     ) {
         let scope = snapshot.map(|snapshot| Scope {
-            folder: snapshot.folder_path.clone(),
-            generation: snapshot.generation,
-            current: current.map(Path::to_owned),
+            source: Source::Filmstrip {
+                folder: snapshot.folder_path.clone(),
+                generation: snapshot.generation,
+                current: current.map(Path::to_owned),
+            },
             screen: context.content_rect(),
             media,
             density: context.pixels_per_point(),
         });
+        self.begin_scope(context, scope, enabled);
+    }
+
+    pub(super) fn begin_recent(
+        &mut self,
+        context: &Context,
+        revision: u64,
+        media: Rect,
+        enabled: bool,
+    ) {
+        self.begin_scope(
+            context,
+            Some(Scope {
+                source: Source::Gallery(revision),
+                screen: context.content_rect(),
+                media,
+                density: context.pixels_per_point(),
+            }),
+            enabled,
+        );
+    }
+
+    fn begin_scope(&mut self, context: &Context, scope: Option<Scope>, enabled: bool) {
         let frame = context.cumulative_frame_nr();
         self.eligible = enabled
             && scope.is_some()
@@ -82,11 +116,25 @@ impl State {
     }
 
     pub(super) fn observe(&mut self, response: &egui::Response, path: &Path) {
+        self.observe_region(response, path, None);
+    }
+
+    pub(super) fn observe_recent(
+        &mut self,
+        response: &egui::Response,
+        path: &Path,
+        thumbnail: Rect,
+    ) {
+        self.observe_region(response, path, Some(thumbnail));
+    }
+
+    fn observe_region(&mut self, response: &egui::Response, path: &Path, exclusion: Option<Rect>) {
         if self.eligible
             && self.drag.is_none()
             && self.claimed != Some(response.ctx.cumulative_frame_nr())
             && let Some(origin) =
                 crate::view_drag_button_positions(response, egui::PointerButton::Primary).0
+            && exclusion.is_none_or(|rect| rect.contains(origin))
         {
             self.drag = Some(Drag {
                 path: path.to_owned(),
@@ -94,6 +142,7 @@ impl State {
                 origin,
                 offset: origin - response.rect.min,
                 crossed: false,
+                exclusion,
             });
             self.claimed = Some(response.ctx.cumulative_frame_nr());
         }
@@ -104,11 +153,34 @@ impl State {
         context: &Context,
         current: Option<&Path>,
     ) -> Option<(&Path, u64, egui::Pos2)> {
+        let Source::Filmstrip {
+            generation,
+            current: owner,
+            ..
+        } = &self.scope.as_ref()?.source
+        else {
+            return None;
+        };
+        if owner.as_deref() != current {
+            return None;
+        }
+        self.pointer(context)
+            .map(|(path, point)| (path, *generation, point))
+    }
+
+    pub(super) fn recent_pointer(&self, context: &Context) -> Option<(&Path, u64, egui::Pos2)> {
+        let Source::Gallery(revision) = self.scope.as_ref()?.source else {
+            return None;
+        };
+        self.pointer(context)
+            .map(|(path, point)| (path, revision, point))
+    }
+
+    fn pointer(&self, context: &Context) -> Option<(&Path, egui::Pos2)> {
         let scope = self.scope.as_ref()?;
         let drag = self.drag.as_ref()?;
         if !self.eligible
             || !drag.crossed
-            || scope.current.as_deref() != current
             || scope.screen != context.content_rect()
             || scope.density != context.pixels_per_point()
             || context.cumulative_frame_nr() > self.last_frame + 1
@@ -122,7 +194,7 @@ impl State {
                         .pointer
                         .interact_pos()
                         .filter(|point| self.band.is_some_and(|band| !band.contains(*point)))
-                        .map(|point| (drag.path.as_path(), scope.generation, point))
+                        .map(|point| (drag.path.as_path(), point))
                 })
                 .flatten()
         })
@@ -134,6 +206,7 @@ impl State {
         band: Option<Rect>,
         actions: &mut Vec<UiAction>,
     ) {
+        let band = self.drag.as_ref().and_then(|drag| drag.exclusion).or(band);
         self.band = band;
         let (pointer, down, released) = context.input(|input| {
             (
@@ -163,12 +236,18 @@ impl State {
                         || crate::tab_drag::over_incoming_client(context, pointer)
                 })
             {
-                actions.push(UiAction::OpenWindow(
-                    drag.path.clone(),
-                    scope.generation,
-                    pointer.expect("drop point"),
-                    drag.offset,
-                ));
+                let point = pointer.expect("drop point");
+                actions.push(match &scope.source {
+                    Source::Filmstrip { generation, .. } => {
+                        UiAction::OpenWindow(drag.path.clone(), *generation, point, drag.offset)
+                    }
+                    Source::Gallery(revision) => UiAction::OpenGalleryWindow(
+                        drag.path.clone(),
+                        *revision,
+                        point,
+                        drag.offset,
+                    ),
+                });
             }
         }
         if released {

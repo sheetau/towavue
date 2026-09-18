@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) fn assert_filmstrip_feedback(
+pub(crate) fn assert_thumbnail_feedback(
     host: &WindowHost,
     target: Option<(WindowKey, egui::Pos2)>,
     cursor: egui::CursorIcon,

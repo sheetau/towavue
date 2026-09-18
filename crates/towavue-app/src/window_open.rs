@@ -1,13 +1,25 @@
 use super::*;
 
 #[derive(Clone)]
+enum Source {
+    Filmstrip(u64),
+    Gallery(u64),
+}
+
+#[derive(Clone)]
 pub(super) struct Request {
     pub path: PathBuf,
     pub point: egui::Pos2,
     pub anchor: egui::Vec2,
-    folder_generation: u64,
+    source: Source,
     tab: Option<TabId>,
     instance: u64,
+}
+
+impl Request {
+    pub(super) fn is_gallery(&self) -> bool {
+        matches!(self.source, Source::Gallery(_))
+    }
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
@@ -48,8 +60,62 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             path,
             point,
             anchor,
-            folder_generation: generation,
+            source: Source::Filmstrip(generation),
             tab: self.tabs.active().map(|tab| tab.id),
+            instance: self.media_generation,
+        });
+        self.request_redraw();
+    }
+
+    pub(super) fn can_open_gallery_window(&self, path: &Path, revision: u64) -> bool {
+        self.tabs
+            .gallery()
+            .is_some_and(|id| self.tabs.active_id() == Some(id))
+            && !self.exit_requested
+            && !self.modal_input_blocked()
+            && !self.palette_open
+            && !self.grid_open
+            && !self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+            && MediaKind::from_path(path).is_some()
+            && self.gallery_listing.contains(
+                path,
+                revision,
+                &self.gallery_search,
+                self.gallery_filter,
+            )
+            && self.recent_paths.iter().any(|item| item == path)
+            && !self.gallery_missing_files.iter().any(|item| item == path)
+    }
+
+    pub(super) fn request_gallery_window(
+        &mut self,
+        path: PathBuf,
+        revision: u64,
+        point: egui::Pos2,
+        anchor: egui::Vec2,
+    ) {
+        if !point.is_finite()
+            || !anchor.is_finite()
+            || !self.can_open_gallery_window(&path, revision)
+            || self.pending_window_open.is_some()
+        {
+            return;
+        }
+        if !self.hosted_graphics {
+            if let Err(error) = spawn_new_window(&path) {
+                self.set_status(format!("Could not open new window: {error}"));
+            }
+            return;
+        }
+        self.pending_window_open = Some(Request {
+            path,
+            point,
+            anchor,
+            source: Source::Gallery(revision),
+            tab: self.tabs.active_id(),
             instance: self.media_generation,
         });
         self.request_redraw();
@@ -57,9 +123,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn window_open_request_is_current(&self, request: &Request) -> bool {
         !self.exit_requested
-            && self.tabs.active().map(|tab| tab.id) == request.tab
+            && self.tabs.active_id() == request.tab
             && self.media_generation == request.instance
-            && self.can_open_filmstrip_window(&request.path, request.folder_generation)
+            && match request.source {
+                Source::Filmstrip(generation) => {
+                    self.can_open_filmstrip_window(&request.path, generation)
+                }
+                Source::Gallery(revision) => self.can_open_gallery_window(&request.path, revision),
+            }
     }
 
     pub(super) fn position_window_at_drop(

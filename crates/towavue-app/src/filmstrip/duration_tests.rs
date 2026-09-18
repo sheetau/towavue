@@ -59,7 +59,7 @@ fn gallery_media_durations_have_readable_backdrops_above_ready_thumbnails() {
                             ..Default::default()
                         },
                         |ui| {
-                            strip.show_recent(ui, &paths, enabled, &mut actions);
+                            strip.show_recent(ui, &paths, 1, enabled, &mut actions);
                         },
                     );
                     assert!(actions.is_empty());

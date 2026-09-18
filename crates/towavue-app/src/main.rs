@@ -21,6 +21,8 @@ mod fonts;
 mod frame_export;
 mod frame_step;
 mod gallery;
+#[cfg(test)]
+mod gallery_drag_tests;
 mod gallery_rail;
 #[cfg(test)]
 mod gallery_tests;
@@ -273,6 +275,7 @@ enum UiAction {
     OpenFilmstripMedia(PathBuf, bool),
     OpenFilmstripWindow(PathBuf),
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
+    OpenGalleryWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
     ResolveGuard(GuardDecision),
@@ -6758,6 +6761,9 @@ where
             UiAction::DropTab(id, point, anchor) => self.request_tab_drop(id, point, anchor),
             UiAction::OpenWindow(path, generation, point, anchor) => {
                 self.request_filmstrip_window(path, generation, point, anchor)
+            }
+            UiAction::OpenGalleryWindow(path, revision, point, anchor) => {
+                self.request_gallery_window(path, revision, point, anchor)
             }
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {

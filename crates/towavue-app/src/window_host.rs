@@ -468,7 +468,9 @@ impl WindowHost {
             .reorder(app.tabs.active().expect("new tab").id, gap);
         app.request_redraw();
         let app = self.windows.get_mut(&source).expect("source");
-        if source == target {
+        if request.is_gallery() {
+            app.filmstrip.cancel_drag();
+        } else if source == target {
             // Opening a local tab has already retained the source view. Close only its
             // saved overlay, without activating it again or copying its edits.
             if let Some(id) = source_tab {
@@ -542,10 +544,12 @@ impl WindowHost {
             .as_ref()
             .expect("started window")
             .set_visible(visible);
-        self.windows
-            .get_mut(&source)
-            .expect("source window")
-            .close_filmstrip();
+        let app = self.windows.get_mut(&source).expect("source window");
+        if request.is_gallery() {
+            app.filmstrip.cancel_drag();
+        } else {
+            app.close_filmstrip();
+        }
         Ok(Some(destination))
     }
 

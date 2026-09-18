@@ -1,6 +1,12 @@
 use super::*;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+struct FrameCost {
+    start: Instant,
+    phases: [Duration; 4],
+    final_original: bool,
+}
+
 // This opt-in submits private originals only to a hidden surface. It emits no
 // paths, pixels or screenshots, and never injects keyboard input into Windows.
 #[test]
@@ -50,6 +56,7 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
             let mut renderer = FrameRenderer::new(&window).expect("hardware D3D11");
             for (numerator, reverse) in [(2, false), (3, true)] {
                 let start = self.paths.len() * numerator / 4;
+                let final_index = if reverse { start - 91 } else { start + 91 };
                 let (send, events) = std::sync::mpsc::channel();
                 let mut app = Application::new(None, move |event| {
                     let _ = send.send(event);
@@ -63,11 +70,16 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
                 app.folder_snapshot = Some(self.snapshot.clone());
                 app.tabs
                     .open_new(self.paths[start].clone(), MediaKind::Image);
-                app.load_path(self.paths[start].clone(), MediaKind::Image);
                 let setup = Instant::now();
+                app.image_loader
+                    .verification_trace_path(self.paths[final_index].clone(), setup);
+                app.load_path(self.paths[start].clone(), MediaKind::Image);
                 let mut visited = vec![];
                 let mut folder_completions = 0;
+                let mut frame_costs = Vec::with_capacity(8192);
+                let mut dropped_costs = 0;
                 let mut tick = |app: &mut Application<_>, visited: &mut Vec<usize>| {
+                    let frame_started = Instant::now();
                     while let Ok(event) = events.try_recv() {
                         let previous = app
                             .folder_snapshot
@@ -88,6 +100,7 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
                         }
                     }
                     assert!(app.image_error.is_none(), "reference decoding failed");
+                    let events_done = Instant::now();
                     let output = context.run_ui(
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(
@@ -127,13 +140,29 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
                             .expect("reference membership")
                     });
                     let token = app.image_sequence_token(&output);
+                    let layout_done = Instant::now();
                     gpu::submit(app, &context, output, &mut renderer, false);
+                    let gpu_done = Instant::now();
                     if let Some(index) = current
                         && visited.last() != Some(&index)
                     {
                         visited.push(index);
                     }
                     app.finish_image_sequence_frame(token);
+                    if frame_costs.len() < 8192 {
+                        frame_costs.push(FrameCost {
+                            start: frame_started,
+                            phases: [
+                                events_done - frame_started,
+                                layout_done - events_done,
+                                gpu_done - layout_done,
+                                gpu_done.elapsed(),
+                            ],
+                            final_original: current == Some(final_index),
+                        });
+                    } else {
+                        dropped_costs += 1;
+                    }
                 };
                 while visited.is_empty()
                     || app.image_loading
@@ -174,11 +203,7 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
                 }
                 let released = Instant::now();
                 app.release_image_repeats(&identity, false);
-                let final_index = if reverse {
-                    start - sent as usize
-                } else {
-                    start + sent as usize
-                };
+                let release_dispatch = released.elapsed();
                 let mut settled = None;
                 loop {
                     tick(&mut app, &mut visited);
@@ -211,6 +236,75 @@ fn held_reference_reaches_release_destination_from_middle_and_late_positions() {
                         pair[1] > pair[0]
                     }),
                     "original presentations must progress monotonically"
+                );
+                let settled_at = settled.expect("settled");
+                let tail: Vec<_> = frame_costs
+                    .iter()
+                    .filter(|cost| cost.start >= released && cost.start < settled_at)
+                    .collect();
+                let milliseconds = |duration: Duration| duration.as_secs_f64() * 1000.0;
+                eprintln!(
+                    "HELD_TAIL_CLOCK reverse={reverse} input_started_ms={:.3} released_ms={:.3} settled_ms={:.3} release_dispatch_ms={:.3} measured_frames={} dropped_costs={dropped_costs}; same setup origin as loader trace; dispatch precedes frame phases; sleep/observer work excluded from phases",
+                    milliseconds(started - setup),
+                    milliseconds(released - setup),
+                    milliseconds(settled_at - setup),
+                    milliseconds(release_dispatch),
+                    tail.len(),
+                );
+                for (index, label) in [
+                    "events",
+                    "layout_and_inspection",
+                    "gpu_submit_present",
+                    "sequence_advance",
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    eprintln!(
+                        "HELD_TAIL_PHASE reverse={reverse} phase={label} total_ms={:.3} maximum_ms={:.3}",
+                        milliseconds(tail.iter().map(|cost| cost.phases[index]).sum()),
+                        milliseconds(
+                            tail.iter()
+                                .map(|cost| cost.phases[index])
+                                .max()
+                                .unwrap_or_default()
+                        ),
+                    );
+                }
+                if let Some(final_frame) = tail.iter().find(|cost| cost.final_original) {
+                    eprintln!(
+                        "HELD_TAIL_FINAL_FRAME reverse={reverse} start_ms={:.3} phase_ms={:?}",
+                        milliseconds(final_frame.start - setup),
+                        final_frame.phases.map(milliseconds)
+                    );
+                }
+                let trace = app
+                    .image_loader
+                    .verification_trace_snapshot()
+                    .expect("selected final trace");
+                for event in trace.events {
+                    eprintln!(
+                        "HELD_TAIL_LOADER reverse={reverse} at_ms={:.3} generation={} {:?}",
+                        milliseconds(event.elapsed),
+                        event.generation,
+                        event.kind
+                    );
+                }
+                assert_eq!(trace.dropped, 0, "final-source trace overflow");
+                assert_eq!(dropped_costs, 0, "frame phase trace overflow");
+                let decoded = &app.image.as_ref().expect("final original").decoded;
+                let encoded_bytes = std::fs::metadata(&self.paths[final_index])
+                    .expect("final metadata")
+                    .len();
+                eprintln!(
+                    "HELD_TAIL_SOURCE reverse={reverse} encoded_bytes={encoded_bytes} dimensions={}x{} frames={}; no source path or pixel output",
+                    decoded.frames[0].width,
+                    decoded.frames[0].height,
+                    decoded.frames.len()
+                );
+                eprintln!(
+                    "HELD_TAIL_TOTAL_LOADER reverse={reverse} {:?}; aggregate complete calls, overlaps are not additive",
+                    app.image_loader.verification_metrics()
                 );
                 // Full decode after timing verifies retained original pixels/dimensions,
                 // without prewarming the run or reading back the private GPU surface.

@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn last_window_closes_while_shell_retirement_keeps_the_event_loop_available() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::tests::last_window_closes_while_shell_retirement_keeps_the_event_loop_available",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    // Keep a separate idle worker alive so retirement cannot win the scheduling
+    // race. No Explorer UI, private media or deliberately blocked COM call.
+    let pending = FolderOrderProvider::new().expect("controlled Shell lifetime");
+    host.windows
+        .values_mut()
+        .next()
+        .expect("window")
+        .exit_requested = true;
+    assert!(matches!(host.prepare_wait(), ControlFlow::WaitUntil(_)));
+    assert!(host.windows.is_empty(), "closing the window must not wait");
+    assert!(towavue_runtime_windows::shell_workers_pending());
+
+    let reopened = host
+        .add_application(None)
+        .expect("launch during retirement");
+    host.prepare_wait();
+    assert!(host.windows.contains_key(&reopened));
+    host.windows
+        .get_mut(&reopened)
+        .expect("new window")
+        .exit_requested = true;
+    host.prepare_wait();
+    assert!(host.windows.is_empty());
+    drop(pending);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while towavue_runtime_windows::shell_workers_pending() {
+        assert!(Instant::now() < deadline, "Shell workers must finish");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(host.prepare_wait(), ControlFlow::Poll);
+}
+
+#[test]
 fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_existing_tabs() {
     let Some(root) = crate::tests::isolated_test_root(
         "window_host::tests::new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_existing_tabs",
@@ -351,8 +392,99 @@ fn close_guards_and_repaint_deadlines_are_window_local() {
         .get_mut(&second)
         .expect("second")
         .request_guarded(GuardedAction::Exit);
-    assert_eq!(host.prepare_wait(), ControlFlow::Poll);
+    let mut wait = host.prepare_wait();
     assert!(host.windows.is_empty());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while let ControlFlow::WaitUntil(retirement) = wait {
+        assert!(retirement <= Instant::now() + Duration::from_millis(10));
+        assert!(Instant::now() < deadline, "Shell retirement must finish");
+        std::thread::sleep(Duration::from_millis(1));
+        wait = host.prepare_wait();
+    }
+    assert_eq!(wait, ControlFlow::Poll);
+}
+
+#[test]
+#[ignore = "requires a hidden native window and D3D11; verifies final event-loop shutdown"]
+fn native_last_window_waits_for_shell_retirement_before_exiting() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::tests::native_last_window_waits_for_shell_retirement_before_exiting",
+    ) else {
+        return;
+    };
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+
+    struct Trial {
+        host: WindowHost,
+        pending: Option<FolderOrderProvider>,
+        deadline: Instant,
+        completed: bool,
+    }
+
+    impl ApplicationHandler<Event> for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.host.start_pending(event_loop, false);
+            let app = self.host.windows.values_mut().next().expect("native owner");
+            assert_eq!(
+                app.window.as_ref().expect("native window").is_visible(),
+                Some(false)
+            );
+            app.request_guarded(GuardedAction::Exit);
+            assert!(app.exit_requested);
+        }
+
+        fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
+            self.host.user_event(event_loop, event);
+        }
+
+        fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+            self.host.window_event(event_loop, id, event);
+        }
+
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            assert!(Instant::now() < self.deadline, "native shutdown deadline");
+            self.host.about_to_wait(event_loop);
+            assert!(
+                self.host.windows.is_empty(),
+                "native owner closes immediately"
+            );
+            if self.pending.is_some() {
+                assert!(
+                    !event_loop.exiting(),
+                    "keep the main STA alive for Shell work"
+                );
+                assert!(matches!(
+                    event_loop.control_flow(),
+                    ControlFlow::WaitUntil(_)
+                ));
+                self.pending.take();
+            } else if event_loop.exiting() {
+                assert!(!towavue_runtime_windows::shell_workers_pending());
+                self.completed = true;
+            }
+        }
+    }
+
+    let mut builder = EventLoop::<Event>::with_user_event();
+    builder.with_any_thread(true);
+    configure_mouse_input(&mut builder);
+    let event_loop = builder.build().expect("native event loop");
+    let mut trial = Trial {
+        host: WindowHost::new(None, Some(event_loop.create_proxy())).expect("host"),
+        pending: Some(FolderOrderProvider::new().expect("controlled Shell lifetime")),
+        deadline: Instant::now() + Duration::from_secs(10),
+        completed: false,
+    };
+    event_loop
+        .run_app(&mut trial)
+        .expect("native shutdown event loop");
+    assert!(
+        trial.completed,
+        "production exit gate must finish the event loop"
+    );
+    eprintln!(
+        "PASS native last-window shutdown: hidden owner closed before Shell retirement; event loop exited after native worker completion"
+    );
 }
 
 #[test]

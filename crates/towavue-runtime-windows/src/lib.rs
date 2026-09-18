@@ -120,6 +120,7 @@ pub use selection_outline::{paint_selection_outline, paint_time_selection};
 pub use shell::verification::ShellLifetimeTrial;
 pub use shell::{
     FolderOrderError, FolderOrderProvider, canonical_shell_path, reveal_file, reveal_license_guide,
+    shell_workers_pending,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
 pub use waveform::timeline_waveform;

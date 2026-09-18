@@ -719,7 +719,7 @@ impl WindowHost {
         self.recover_pending_graphics();
         self.remove_closed();
         if self.windows.is_empty() {
-            ControlFlow::Poll
+            exit_wait(towavue_runtime_windows::shell_workers_pending())
         } else {
             earliest_wait(wait, self.trim_idle_graphics(Instant::now()))
         }
@@ -738,6 +738,16 @@ impl WindowHost {
                 true
             }
         });
+    }
+}
+
+// Keep winit's main STA alive while detached Shell workers retire. Poll only
+// during final shutdown, without blocking UI messages or unrelated windows.
+fn exit_wait(shell_pending: bool) -> ControlFlow {
+    if shell_pending {
+        ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(10))
+    } else {
+        ControlFlow::Poll
     }
 }
 
@@ -794,8 +804,10 @@ impl ApplicationHandler<Event> for WindowHost {
         self.open_pending_windows(event_loop, true);
         self.update_tab_drops(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());
-        if self.windows.is_empty() {
-            // Windows winit waits once after AboutToWait; prepare_wait selects Poll.
+        if self.windows.is_empty() && !towavue_runtime_windows::shell_workers_pending() {
+            // A worker can finish between prepare_wait and this check. Windows
+            // winit still waits once after AboutToWait, so clear any old deadline.
+            event_loop.set_control_flow(ControlFlow::Poll);
             event_loop.exit();
         }
     }

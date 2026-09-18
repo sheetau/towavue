@@ -15070,6 +15070,28 @@ mod tests {
         Some(towavue_runtime_windows::ShellLifetimeTrial::new(hold_main))
     }
 
+    struct ShellTestCleanup;
+
+    impl Drop for ShellTestCleanup {
+        fn drop(&mut self) {
+            // Test locals (including every Application/provider) have dropped.
+            // Wait before the libtest thread can finish and main can enter
+            // ExitProcess; a printed assertion result alone is insufficient.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while towavue_runtime_windows::shell_workers_pending() {
+                assert!(
+                    Instant::now() < deadline,
+                    "Shell workers did not exit after test cleanup"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
+    thread_local! {
+        static SHELL_TEST_CLEANUP: ShellTestCleanup = const { ShellTestCleanup };
+    }
+
     pub(super) fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {
@@ -15097,6 +15119,7 @@ mod tests {
             finish_isolated_test(test_name, &root, result);
             return None;
         };
+        SHELL_TEST_CLEANUP.with(|_| {});
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
     }
 

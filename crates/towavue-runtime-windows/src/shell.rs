@@ -40,6 +40,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
+mod shutdown;
+pub use shutdown::shell_workers_pending;
+
 #[cfg(feature = "shell-lifecycle-verification")]
 pub(crate) mod verification;
 
@@ -74,30 +77,28 @@ fn reveal_path(
     resolve: impl FnOnce() -> std::io::Result<PathBuf> + Send + 'static,
     notify: impl FnOnce(std::io::Result<PathBuf>) + Send + 'static,
 ) -> std::io::Result<()> {
-    thread::Builder::new()
-        .name("towavue-reveal-sta".into())
-        .spawn(move || {
+    shutdown::spawn("towavue-reveal-sta", move || {
+        let result = (|| {
+            let guide = resolve()?;
+            // SAFETY: this fresh worker owns its STA. All PIDLs are created, borrowed and
+            // dropped on this thread before balancing initialization; none crosses to app.
+            unsafe { OleInitialize(None) }.map_err(std::io::Error::other)?;
             let result = (|| {
-                let guide = resolve()?;
-                // SAFETY: this fresh worker owns its STA. All PIDLs are created, borrowed and
-                // dropped on this thread before balancing initialization; none crosses to app.
-                unsafe { OleInitialize(None) }.map_err(std::io::Error::other)?;
-                let result = (|| {
-                    let pidl = parse_path(&guide).ok_or_else(|| {
-                        std::io::Error::other("Windows could not resolve the selected path.")
-                    })?;
-                    // SAFETY: the owned absolute PIDL stays live through the call. A zero item
-                    // count selects this file in its parent; it does not execute the file.
-                    unsafe { SHOpenFolderAndSelectItems(pidl.as_ptr(), None, 0) }
-                        .map_err(std::io::Error::other)?;
-                    Ok(guide)
-                })();
-                // SAFETY: balances this worker's successful initialization after PIDL drop.
-                unsafe { OleUninitialize() };
-                result
+                let pidl = parse_path(&guide).ok_or_else(|| {
+                    std::io::Error::other("Windows could not resolve the selected path.")
+                })?;
+                // SAFETY: the owned absolute PIDL stays live through the call. A zero item
+                // count selects this file in its parent; it does not execute the file.
+                unsafe { SHOpenFolderAndSelectItems(pidl.as_ptr(), None, 0) }
+                    .map_err(std::io::Error::other)?;
+                Ok(guide)
             })();
-            notify(result);
-        })?;
+            // SAFETY: balances this worker's successful initialization after PIDL drop.
+            unsafe { OleUninitialize() };
+            result
+        })();
+        notify(result);
+    })?;
     Ok(())
 }
 
@@ -180,14 +181,12 @@ impl FolderOrderProvider {
         // Count before spawning so verification cannot miss a not-yet-scheduled worker.
         #[cfg(feature = "shell-lifecycle-verification")]
         let lifetime = verification::Worker::new();
-        thread::Builder::new()
-            .name("towavue-shell-sta".into())
-            .spawn(move || {
-                #[cfg(feature = "shell-lifecycle-verification")]
-                let _lifetime = lifetime;
-                shell_worker(worker_shared, notify);
-            })
-            .map_err(|_| FolderOrderError::WorkerStopped)?;
+        shutdown::spawn("towavue-shell-sta", move || {
+            #[cfg(feature = "shell-lifecycle-verification")]
+            let _lifetime = lifetime;
+            shell_worker(worker_shared, notify);
+        })
+        .map_err(|_| FolderOrderError::WorkerStopped)?;
         Ok(Self { shared })
     }
 

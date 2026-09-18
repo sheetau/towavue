@@ -80,6 +80,7 @@ pub enum CommandId {
     RateDown,
     RateUp,
     ResetRate,
+    DeleteFile,
     RenameFile,
     MoveFile,
     Save,
@@ -251,6 +252,7 @@ impl CommandId {
             Self::RateDown => "rate_down",
             Self::RateUp => "rate_up",
             Self::ResetRate => "reset_rate",
+            Self::DeleteFile => "delete_file",
             Self::RenameFile => "rename_file",
             Self::MoveFile => "move_file",
             Self::Save => "save",
@@ -542,6 +544,7 @@ impl CommandDefinition {
                     | CommandId::FlipVertical
                     | CommandId::ResizeImage
                     | CommandId::FreeRotateImage
+                    | CommandId::DeleteFile
                     | CommandId::RenameFile
                     | CommandId::MoveFile
                     | CommandId::Save
@@ -618,6 +621,7 @@ impl CommandDefinition {
             && (self.id != CommandId::ApplyCrop
                 || !context.timeline_open
                 || !context.has_time_selection)
+            && (self.id != CommandId::DeleteFile || !context.timeline_open)
             && (self.id != CommandId::ToggleReadingMode
                 || context.reading_mode
                 || !context.has_unsaved_edits)
@@ -908,6 +912,7 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(CommandId::RateUp, "Increase playback rate", PLAYABLE_MEDIA),
     command(CommandId::ResetRate, "Reset playback rate", PLAYABLE_MEDIA),
+    command(CommandId::DeleteFile, "Delete file", ANY_MEDIA),
     command(CommandId::RenameFile, "Rename file...", ANY_MEDIA),
     command(CommandId::MoveFile, "Move file...", ANY_MEDIA),
     command(CommandId::Save, "Save exported media", ANY_MEDIA),

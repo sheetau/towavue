@@ -13,6 +13,12 @@ pub(super) struct AudioTab {
 }
 
 impl AudioTab {
+    pub(super) fn accept_after_recycling(&mut self, snapshot: FolderSnapshot) {
+        self.handled_eof = None;
+        self.requested_eof = None;
+        self.accept_snapshot(snapshot);
+    }
+
     pub(super) fn refresh_after_relocation(&mut self) {
         self.snapshot = None;
         if let Some(provider) = &self.provider {

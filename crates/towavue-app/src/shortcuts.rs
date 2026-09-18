@@ -132,6 +132,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::StepAudioBackward, ","),
         (CommandId::StepAudioForward, "."),
         (CommandId::ResetRate, "/"),
+        (CommandId::DeleteFile, "Delete"),
         (CommandId::RenameFile, "F2"),
         (CommandId::MoveFile, "F7"),
         (CommandId::Save, "Ctrl+S"),
@@ -398,6 +399,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
                         | CommandId::ReloadFolderOrder
+                        | CommandId::DeleteFile
                         | CommandId::RenameFile
                         | CommandId::MoveFile
                 ))
@@ -412,12 +414,14 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         ]
         .into_iter()
         .flat_map(|kind| {
-            [false, true].map(move |reading_mode| towavue_core::CommandContext {
-                media_kind: Some(kind),
-                reading_mode,
-                timeline_open: kind == towavue_core::MediaKind::Video,
-                has_time_selection: true,
-                ..Default::default()
+            [false, true].into_iter().flat_map(move |reading_mode| {
+                [false, true].map(move |timeline_open| towavue_core::CommandContext {
+                    media_kind: Some(kind),
+                    reading_mode,
+                    timeline_open,
+                    has_time_selection: true,
+                    ..Default::default()
+                })
             })
         })
         .chain(std::iter::once(towavue_core::CommandContext::default()))
@@ -1476,6 +1480,8 @@ mod tests {
                         ),
                         if enabled {
                             ShortcutMatch::Command(CommandId::DeleteTimeSelection)
+                        } else if !timeline_open {
+                            ShortcutMatch::Command(CommandId::DeleteFile)
                         } else {
                             ShortcutMatch::None
                         }
@@ -1667,6 +1673,30 @@ mod tests {
             reloaded.get(CommandId::ZoomIn),
             bindings.get(CommandId::ZoomIn)
         );
+    }
+
+    #[test]
+    fn delete_default_yields_to_explicit_keys_but_coexists_with_timeline_delete() {
+        for key in ["Delete", "Delete X"] {
+            let bindings = parse(
+                &format!("{CURRENT_BINDING_HEADER}\nopen_file = {key}\n"),
+                defaults(),
+            )
+            .expect("existing key");
+            assert!(bindings.get(CommandId::DeleteFile).is_none());
+        }
+        let bindings = parse(
+            &format!("{CURRENT_BINDING_HEADER}\ndelete_time_selection = Delete\n"),
+            defaults(),
+        )
+        .expect("disjoint timeline key");
+        assert!(bindings.get(CommandId::DeleteFile).is_some());
+        let removed = parse(
+            &format!("{CURRENT_BINDING_HEADER}\ndelete_file =\n"),
+            defaults(),
+        )
+        .expect("explicit removal");
+        assert!(removed.get(CommandId::DeleteFile).is_none());
     }
 
     #[test]

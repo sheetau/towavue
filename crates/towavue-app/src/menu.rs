@@ -83,7 +83,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 MetadataExportOptions,
                 ToggleHardwareEncode,
             ],
-            &[RenameFile, MoveFile],
+            &[RenameFile, MoveFile, DeleteFile],
             &[CopyFilePath, RevealFile],
             &[
                 CloseTab,

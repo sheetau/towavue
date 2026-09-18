@@ -3,8 +3,12 @@ use towavue_runtime_windows::{
     FileOperationAction, FileOperationOutcome, FileOperationSource, VideoResumeSource,
 };
 
-#[derive(Clone, Copy)]
+pub(crate) mod preferences;
+mod recycling;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Kind {
+    Delete,
     Rename,
     Move,
 }
@@ -37,10 +41,15 @@ impl State {
 pub(super) struct Completed {
     pub outcome: FileOperationOutcome,
     pub resume: Option<VideoResumeSource>,
+    pub recycle: Option<Box<towavue_runtime_windows::FileRecycleReport>>,
+    pub preference_warning: Option<String>,
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn begin_file_relocation(&mut self, kind: Kind) {
+        if kind == Kind::Delete && self.timeline_open {
+            return;
+        }
         if self.modal_input_blocked()
             || self.active_export.is_some()
             || self.image_loading
@@ -118,7 +127,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     .pending
                     .as_mut()
                     .expect("current request");
+                if pending.kind == Kind::Delete {
+                    self.file_operations.ready = Some((source, FileOperationAction::Recycle));
+                    self.request_redraw();
+                    return;
+                }
                 let kind = match pending.kind {
+                    Kind::Delete => unreachable!("handled above"),
                     Kind::Rename => FileDialogKind::RenameFile {
                         source: source.path().to_owned(),
                     },
@@ -154,6 +169,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     .expect("current request");
                 if let Some(source) = pending.source.take() {
                     let action = match pending.kind {
+                        Kind::Delete => unreachable!("delete has no destination dialog"),
                         Kind::Rename => FileOperationAction::RenameToPath(target),
                         Kind::Move => FileOperationAction::MoveToFolder(target),
                     };

@@ -231,6 +231,9 @@ fn when_label(command: &CommandDefinition) -> String {
         terms.push(base);
     }
     let mut label = terms.join(" || ");
+    if command.id == CommandId::DeleteFile {
+        return format!("({label}) && !timeline");
+    }
     if matches!(
         command.id,
         CommandId::DeleteTimeSelection

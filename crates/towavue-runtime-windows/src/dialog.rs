@@ -110,6 +110,7 @@ fn delete_confirmation(button: i32, checked: bool) -> DeleteConfirmation {
 pub fn confirm_file_delete(
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     source: PathBuf,
+    unsaved_edits: bool,
     notify: impl FnOnce(Result<DeleteConfirmation, DialogError>) + Send + 'static,
 ) -> Result<(), DialogError> {
     let handle = owner
@@ -123,8 +124,9 @@ pub fn confirm_file_delete(
         move || {
             let _owner = owner;
             let message: Vec<u16> = format!(
-                "{}\n\nThe file will be moved to the Recycle Bin.",
-                source.display()
+                "{}\n\nThe file will be moved to the Recycle Bin.{}",
+                source.display(),
+                if unsaved_edits { "\n\nUnsaved edits in all open tabs for this file will be discarded. Cancel to export them first." } else { "" }
             )
             .encode_utf16()
             .chain(Some(0))
@@ -136,7 +138,11 @@ pub fn confirm_file_delete(
             let buttons = [
                 TASKDIALOG_BUTTON {
                     nButtonID: IDYES.0,
-                    pszButtonText: w!("Delete file"),
+                    pszButtonText: if unsaved_edits {
+                        w!("Delete file and discard edits")
+                    } else {
+                        w!("Delete file")
+                    },
                 },
                 TASKDIALOG_BUTTON {
                     nButtonID: IDCANCEL.0,
@@ -150,7 +156,11 @@ pub fn confirm_file_delete(
                 pszWindowTitle: w!("Delete file - towavue"),
                 pszMainInstruction: w!("Delete this file?"),
                 pszContent: PCWSTR(message.as_ptr()),
-                pszVerificationText: w!("Don't ask again"),
+                pszVerificationText: if unsaved_edits {
+                    w!("Don't ask again for files without unsaved edits")
+                } else {
+                    w!("Don't ask again")
+                },
                 cButtons: buttons.len() as u32,
                 pButtons: buttons.as_ptr(),
                 nDefaultButton: IDCANCEL.0,

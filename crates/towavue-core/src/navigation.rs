@@ -60,6 +60,27 @@ pub struct FolderSnapshot {
 }
 
 impl FolderSnapshot {
+    /// Preserve the removed file's ordinal within its media kind, using the new
+    /// authoritative Shell view and clamping at the end. Never return the removed path.
+    pub fn replacement_after_removal(
+        &self,
+        before: &Self,
+        removed: &Path,
+        kind: MediaKind,
+    ) -> Option<PathBuf> {
+        let index = before
+            .items_of_kind(kind)
+            .position(|item| item.path == removed)
+            .unwrap_or(0);
+        let candidates: Vec<_> = self
+            .items_of_kind(kind)
+            .filter(|item| item.path != removed)
+            .collect();
+        candidates
+            .get(index.min(candidates.len().saturating_sub(1)))
+            .map(|item| item.path.clone())
+    }
+
     pub fn item_index(&self, path: &Path) -> Option<usize> {
         self.items.iter().position(|item| item.path == path)
     }
@@ -106,6 +127,44 @@ impl FolderSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deleted_item_replacement_uses_shell_kind_order_clamps_and_handles_empty_views() {
+        let mut before = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![0]),
+            folder_path: "media".into(),
+            items: vec![
+                item("z.jpg", MediaKind::Image),
+                item("clip.mp4", MediaKind::Video),
+                item("a.jpg", MediaKind::Image),
+                item("m.jpg", MediaKind::Image),
+            ],
+            sort_columns: Vec::new(),
+            source: FolderSnapshotSource::PersistedShellView,
+            generation: 1,
+            captured_at: SystemTime::UNIX_EPOCH,
+        };
+        for (removed, expected) in [("z.jpg", "a.jpg"), ("a.jpg", "m.jpg"), ("m.jpg", "a.jpg")] {
+            let mut after = before.clone();
+            after.items.retain(|item| item.path != Path::new(removed));
+            assert_eq!(
+                after.replacement_after_removal(&before, Path::new(removed), MediaKind::Image),
+                Some(expected.into())
+            );
+        }
+        let mut after = before.clone();
+        after.items.retain(|item| item.kind != MediaKind::Image);
+        assert_eq!(
+            after.replacement_after_removal(&before, Path::new("a.jpg"), MediaKind::Image),
+            None
+        );
+        // Even a lagging Shell view must never select the deleted source again.
+        before.items.retain(|item| item.path == Path::new("a.jpg"));
+        assert_eq!(
+            before.replacement_after_removal(&before, Path::new("a.jpg"), MediaKind::Image),
+            None
+        );
+    }
 
     #[test]
     fn kind_filters_preserve_shell_view_order() {

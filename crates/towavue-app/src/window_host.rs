@@ -60,6 +60,8 @@ type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
 
 pub(crate) struct WindowHost {
     file_operation: Option<file_operations::Transaction>,
+    delete_confirmation_suppressed: bool,
+    delete_preference_path: Option<PathBuf>,
     windows: BTreeMap<WindowKey, WindowApplication>,
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
@@ -79,7 +81,13 @@ impl WindowHost {
         initial_path: Option<PathBuf>,
         proxy: Option<EventLoopProxy<Event>>,
     ) -> Result<Self, Box<dyn Error>> {
+        let delete_preference_path = crate::file_operations::preferences::path();
+        let delete_confirmation_suppressed = delete_preference_path
+            .as_deref()
+            .is_some_and(crate::file_operations::preferences::suppressed);
         let mut host = Self {
+            delete_confirmation_suppressed,
+            delete_preference_path,
             file_operation: None,
             windows: BTreeMap::new(),
             proxy,
@@ -117,6 +125,7 @@ impl WindowHost {
                 AppEvent::VideoResume(_)
                     | AppEvent::FileOperationSource(..)
                     | AppEvent::FileOperationFinished(..)
+                    | AppEvent::FileDeleteConfirmed(..)
             ) && let Some(queue) = captured_events.lock().expect("test events").as_mut()
             {
                 queue.push_back(Event::Window(key, event));
@@ -373,6 +382,9 @@ impl WindowHost {
                 for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
                     app.handle_app_event(AppEvent::ShortcutsChanged(bindings.clone()));
                 }
+            }
+            Event::Window(key, AppEvent::FileDeleteConfirmed(serial, result)) => {
+                self.finish_delete_confirmation(key, serial, result)
             }
             Event::Window(key, AppEvent::FileOperationFinished(serial, result)) => {
                 self.finish_host_file_operation(key, serial, result)

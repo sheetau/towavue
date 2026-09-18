@@ -154,6 +154,40 @@ pub fn start_file_operation(
     worker(move || perform(&source, action), notify)
 }
 
+#[derive(Clone, Debug)]
+pub struct FileRecycleReport {
+    pub before: towavue_core::FolderSnapshot,
+    pub after: Option<towavue_core::FolderSnapshot>,
+}
+
+/// Enumerate on the Shell worker before and after the accepted recycle. A failed
+/// post-delete enumeration must not turn a completed deletion into a failed mutation.
+pub fn start_file_recycling(
+    source: FileOperationSource,
+    notify: impl FnOnce(Result<FileRecycleReport, FileOperationError>) + Send + 'static,
+) -> io::Result<()> {
+    worker(
+        move || {
+            let folder = source
+                .path
+                .parent()
+                .ok_or(FileOperationError::InvalidName)?;
+            let mut order = crate::FolderOrderProvider::new()
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            let before = order
+                .snapshot(folder)
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            perform(&source, FileOperationAction::Recycle)?;
+            let after =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| order.snapshot(folder)))
+                    .ok()
+                    .and_then(Result::ok);
+            Ok(FileRecycleReport { before, after })
+        },
+        notify,
+    )
+}
+
 fn worker<T: Send + 'static>(
     run: impl FnOnce() -> Result<T, FileOperationError> + Send + 'static,
     notify: impl FnOnce(Result<T, FileOperationError>) + Send + 'static,

@@ -298,6 +298,10 @@ enum AppEvent {
         Result<towavue_runtime_windows::FileOperationSource, String>,
     ),
     FileOperationFinished(u64, Result<file_operations::Completed, String>),
+    FileDeleteConfirmed(
+        u64,
+        Result<towavue_runtime_windows::DeleteConfirmation, String>,
+    ),
     ShortcutsChanged(ShortcutBindings),
     TaskbarReady,
     TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
@@ -3037,6 +3041,7 @@ where
             AppEvent::FileOperationSource(serial, result) => {
                 self.finish_file_source(serial, result)
             }
+            AppEvent::FileDeleteConfirmed(..) => {} // WindowHost owns the delete transaction.
             AppEvent::FileOperationFinished(..) => {} // WindowHost owns cross-window completion.
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
@@ -7456,6 +7461,7 @@ where
                 self.push_edit(EditOperation::SetRate(rate));
             }
             CommandId::ResetRate => self.push_edit(EditOperation::SetRate(1.0)),
+            CommandId::DeleteFile => self.begin_file_relocation(file_operations::Kind::Delete),
             CommandId::RenameFile => self.begin_file_relocation(file_operations::Kind::Rename),
             CommandId::MoveFile => self.begin_file_relocation(file_operations::Kind::Move),
             CommandId::Save => {

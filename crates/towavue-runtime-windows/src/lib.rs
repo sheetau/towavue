@@ -81,7 +81,7 @@ pub use export::{
 pub use file_details::FileDetails;
 pub use file_operation::{
     FileOperationAction, FileOperationError, FileOperationOutcome, FileOperationSource,
-    inspect_file_operation_source, start_file_operation,
+    FileRecycleReport, inspect_file_operation_source, start_file_operation, start_file_recycling,
 };
 pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
 pub use fonts::japanese_ui_font;

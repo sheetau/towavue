@@ -86,6 +86,10 @@ fn relocation_updates_all_tab_owners_without_discarding_edits_and_collision_roll
             .or_default()
             .push(EditOperation::FlipHorizontal, MediaKind::Image);
         app.export_paths.insert(id, root.join("export.bmp"));
+        app.source_versions.insert(
+            id,
+            Some(FileOperationSource::capture(&source).expect("loaded version")),
+        );
         app.closed_tabs
             .push_back(closed_tabs::ClosedTab::Media(source.clone(), 1));
     }
@@ -112,6 +116,12 @@ fn relocation_updates_all_tab_owners_without_discarding_edits_and_collision_roll
     for (app, (active, order, edits, view, instance, exports)) in host.windows.values().zip(&before)
     {
         assert_eq!(app.path.as_ref(), Some(&target));
+        assert_eq!(
+            app.source_versions.get(&active.expect("active")),
+            Some(&Some(
+                FileOperationSource::capture(&target).expect("moved version")
+            ))
+        );
         assert_eq!(app.tabs.active_id(), *active);
         assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), *order);
         assert_eq!(app.edits, *edits);
@@ -130,6 +140,14 @@ fn relocation_updates_all_tab_owners_without_discarding_edits_and_collision_roll
             .values()
             .all(|app| app.path.as_ref() == Some(&moved))
     );
+    for app in host.windows.values() {
+        assert_eq!(
+            app.source_versions.get(&app.tabs.active_id().expect("tab")),
+            Some(&Some(
+                FileOperationSource::capture(&moved).expect("moved version")
+            ))
+        );
+    }
     let occupied = folder.join("occupied.bmp");
     std::fs::write(&occupied, b"keep destination").expect("collision fixture");
     let instances: Vec<_> = host
@@ -150,6 +168,19 @@ fn relocation_updates_all_tab_owners_without_discarding_edits_and_collision_roll
         assert_eq!(app.path.as_ref(), Some(&moved));
         assert_eq!(app.media_generation, instance);
         assert!(!app.file_operations.busy());
+    }
+    std::fs::write(
+        &moved,
+        b"externally changed bytes after the loaded document",
+    )
+    .expect("external change");
+    choose(&mut host, owner, Kind::Rename, folder.join("external.bmp"));
+    for app in host.windows.values() {
+        assert_eq!(
+            app.source_versions.get(&app.tabs.active_id().expect("tab")),
+            Some(&None),
+            "moving an externally changed file must not authorize it for existing edits"
+        );
     }
 }
 
@@ -255,7 +286,14 @@ pub(crate) fn exercise(host: &mut WindowHost) {
         .collect();
     for target in [moved.clone(), source.clone()] {
         choose(host, owner, Kind::Rename, target.clone());
+        let version =
+            FileOperationSource::capture(&target).expect("relocated native source version");
         for (key, id, position, state, view, instance) in &retained {
+            assert_eq!(
+                host.windows[key].source_versions.get(id),
+                Some(&Some(version.clone())),
+                "retained native playback follows the verified source version"
+            );
             let saved = &host.windows[key].retained_playback[id];
             assert_eq!(saved.path, target);
             assert_eq!(saved.state, *state);
@@ -268,6 +306,14 @@ pub(crate) fn exercise(host: &mut WindowHost) {
         }
         for (key, position, state, view, edits, frame, _) in &before {
             let app = host.windows.get_mut(key).expect("window");
+            if app.path.as_ref() == Some(&target) && app.session.is_some() {
+                assert_eq!(
+                    app.source_versions
+                        .get(&app.displayed_tab.expect("active playback tab")),
+                    Some(&Some(version.clone())),
+                    "active native playback retains its verified document version"
+                );
+            }
             assert_eq!(app.current_position(), *position);
             assert_eq!(app.state, *state);
             assert_eq!(app.image_view, *view);

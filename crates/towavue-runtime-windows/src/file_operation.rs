@@ -53,8 +53,8 @@ pub enum FileOperationError {
     WorkerStopped,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Stamp {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct Stamp {
     volume: u32,
     index: u64,
     length: u64,
@@ -93,23 +93,58 @@ impl Stamp {
 /// A detached identity snapshot taken before presenting the operation's dialog.
 /// It owns no native resources and can cross threads. Inspection performs IO;
 /// use inspect_file_operation_source from the UI rather than blocking on capture.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FileOperationSource {
     path: PathBuf,
     stamp: Stamp,
 }
 
 impl FileOperationSource {
+    pub(crate) fn stamp(&self) -> Stamp {
+        self.stamp
+    }
+
+    pub(crate) fn from_stamp(path: PathBuf, stamp: Stamp) -> Self {
+        Self { path, stamp }
+    }
+
+    /// Follow a logical rename without authorizing newly observed bytes. The
+    /// original native identity/stamp must still pass verification at this path.
+    pub fn with_path(&self, path: PathBuf) -> Self {
+        Self {
+            path,
+            stamp: self.stamp,
+        }
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    pub(crate) fn capture(path: &Path) -> Result<Self, FileOperationError> {
+    /// Blocking inspection for worker callers. UI code should use the detached
+    /// inspect_file_operation_source service instead.
+    pub fn capture(path: &Path) -> Result<Self, FileOperationError> {
         let path = std::path::absolute(path)?;
         validate_name(path.file_name().ok_or(FileOperationError::InvalidName)?)?;
         let file = open_source(&path)?;
         let stamp = Stamp::read(&file)?;
         Ok(Self { path, stamp })
+    }
+
+    /// Inspect the destination on the mutation worker after a successful move.
+    /// Same-volume moves retain file identity; cross-volume copies can have a new
+    /// ID/creation time, but must retain the verified content length and write time.
+    /// This comparison is not a transaction against noncooperating external writers.
+    pub fn after_move(&self, path: &Path) -> Result<Self, FileOperationError> {
+        let current = Self::capture(path)?;
+        if current.stamp.length != self.stamp.length
+            || current.stamp.written != self.stamp.written
+            || (current.stamp.volume == self.stamp.volume
+                && current.stamp.index != self.stamp.index)
+        {
+            return Err(FileOperationError::SourceChanged);
+        }
+        Ok(current)
     }
 
     /// Replacement can inherit a different creation time; file identity, length

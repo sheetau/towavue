@@ -177,6 +177,7 @@ fn neighbor_prefetch_runs_before_current_texture_preparation() {
         .recv_timeout(Duration::from_secs(5))
         .expect("context lock");
     app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+        source: None,
         generation: app.image_generation,
         first_index: 0,
         total: 1,

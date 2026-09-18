@@ -211,6 +211,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                     );
                     let stale = app.image_generation;
                     app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        source: None,
                         generation: stale,
                         first_index: 0,
                         total: 3,
@@ -240,6 +241,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                         "supersession captured a partial spread",
                     );
                     app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                        source: None,
                         generation: stale,
                         first_index: 1,
                         total: 3,
@@ -254,6 +256,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                     );
                     for (index, path) in paths.iter().enumerate() {
                         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            source: None,
                             generation: app.image_generation,
                             first_index: index,
                             total: paths.len(),
@@ -332,6 +335,7 @@ fn reading_layout_changes_preserve_the_complete_gpu_surface_until_ready() {
                     app.image_loader.request(Vec::new());
                     for (index, (path, previous)) in paths.iter().zip(&retained).enumerate() {
                         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                            source: None,
                             generation: app.image_generation,
                             first_index: index,
                             total: paths.len(),

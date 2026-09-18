@@ -21,6 +21,9 @@ pub(crate) mod verification;
 use verification::ImageLoadTraceKind as TraceKind;
 
 pub struct LoadedImages {
+    /// Version observed before and after decoding the first requested image.
+    /// Missing for later chunks, changed inputs, or non-regular source files.
+    pub source: Option<crate::FileOperationSource>,
     pub generation: u64,
     pub first_index: usize,
     pub total: usize,
@@ -35,6 +38,7 @@ pub struct LoadedImagePreview {
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 struct ImageStamp {
+    identity: Option<crate::file_operation::Stamp>,
     bytes: u64,
     modified: SystemTime,
 }
@@ -43,6 +47,9 @@ impl ImageStamp {
     fn read(path: &Path) -> Option<Self> {
         let metadata = std::fs::metadata(path).ok()?;
         Some(Self {
+            identity: crate::FileOperationSource::capture(path)
+                .ok()
+                .map(|source| source.stamp()),
             bytes: metadata.len(),
             modified: metadata.modified().ok()?,
         })
@@ -938,6 +945,15 @@ fn run_worker(
                     );
                 }
             }
+            let source = (index == 0 && result.is_ok())
+                .then(|| stamp.filter(|before| ImageStamp::read(&path) == Some(*before)))
+                .flatten()
+                .and_then(|stamp| stamp.identity)
+                .and_then(|stamp| {
+                    std::path::absolute(&path)
+                        .ok()
+                        .map(|path| crate::FileOperationSource::from_stamp(path, stamp))
+                });
             let preview = result.as_ref().ok().map(Arc::clone);
             {
                 let mut mailbox = mutex.lock().expect("image mailbox");
@@ -951,6 +967,7 @@ fn run_worker(
                 mailbox
                     .completed
                     .get_or_insert_with(|| LoadedImages {
+                        source,
                         generation,
                         first_index: index,
                         total,
@@ -989,6 +1006,7 @@ mod tests {
     mod parallel;
     mod pressure;
     mod release;
+    mod source_version;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -1194,6 +1212,7 @@ mod tests {
             prefetch_worker: LatestTask::new("verification-cache-budget").expect("worker"),
         };
         let stamp = ImageStamp {
+            identity: None,
             bytes: 1,
             modified: SystemTime::UNIX_EPOCH,
         };
@@ -3084,6 +3103,7 @@ mod tests {
     #[test]
     fn decoded_cache_bounds_shared_pixels_and_invalidates_file_stamps() {
         let stamp = ImageStamp {
+            identity: None,
             bytes: 1,
             modified: SystemTime::UNIX_EPOCH,
         };

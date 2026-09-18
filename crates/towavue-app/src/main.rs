@@ -969,6 +969,9 @@ struct Application<N> {
     rotation_drag: Option<rotation::RotationDrag>,
     video_rotation_drag: Option<video_rotation::VideoRotationDrag>,
     edits: BTreeMap<TabId, EditHistory>,
+    // None is an observed but unverifiable source, never permission to recapture
+    // a newer disk version for existing edits. Cleared only for a new document.
+    source_versions: BTreeMap<TabId, Option<towavue_runtime_windows::FileOperationSource>>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
     loading_progress: export_progress::LoadingProgress,
@@ -1254,6 +1257,7 @@ where
             rotation_drag: None,
             video_rotation_drag: None,
             edits: BTreeMap::new(),
+            source_versions: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
             loading_progress: export_progress::LoadingProgress::default(),
@@ -2023,6 +2027,12 @@ where
             self.duration_workers.remove(&self.media_generation);
         }
         self.displayed_tab = self.tabs.active().map(|tab| tab.id);
+        if let Some(id) = self.displayed_tab
+            && let Some(Some(source)) = self.source_versions.get_mut(&id)
+            && source.path() != path
+        {
+            *source = source.with_path(path.clone());
+        }
         let saved_playback = self
             .displayed_tab
             .and_then(|id| self.retained_playback.remove(&id))
@@ -2169,6 +2179,11 @@ where
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
+                if let Some(id) = self.displayed_tab {
+                    self.source_versions
+                        .entry(id)
+                        .or_insert_with(|| session.source().cloned());
+                }
                 self.generation = session.generation();
                 self.audio_drained = !session.has_audio();
                 self.session = Some(session);
@@ -2472,6 +2487,11 @@ where
         {
             if let Some(tab) = self.tabs.active_mut() {
                 tab.target.set_current_path(path.clone(), kind);
+            }
+            if let Some(id) = self.displayed_tab
+                && let Some(Some(source)) = self.source_versions.get_mut(&id)
+            {
+                *source = source.with_path(path.clone());
             }
             self.path = Some(path);
             self.media_kind = Some(kind);
@@ -2799,6 +2819,9 @@ where
                 .and_then(|decoded| self.load_image_presentation(&context, &path, decoded, options))
             {
                 Ok(image) => {
+                    if let Some(id) = self.displayed_tab {
+                        self.source_versions.entry(id).or_insert(result.source);
+                    }
                     self.image = Some(image);
                     #[cfg(feature = "presentation-verification")]
                     {
@@ -8888,6 +8911,7 @@ where
         }
         self.tab_preview.clear();
         self.edits.remove(&id);
+        self.source_versions.remove(&id);
         self.retained_images.remove(&id);
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);
@@ -9231,6 +9255,7 @@ where
             let id = tab.id;
             tab.target.set_current_path(path.clone(), kind);
             self.edits.insert(id, EditHistory::default());
+            self.source_versions.remove(&id);
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);
@@ -16083,6 +16108,7 @@ mod tests {
         app.image_error = None;
         app.image_edit_pending = false;
         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: app.image_generation,
             first_index: 0,
             total: 1,
@@ -22291,6 +22317,7 @@ mod tests {
             "loading pixels do not accept selection drags"
         );
         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: app.image_generation,
             first_index: 0,
             total: 1,
@@ -22363,6 +22390,7 @@ mod tests {
             ],
         });
         app.apply_loaded_images(LoadedImages {
+            source: None,
             generation,
             first_index: 0,
             total: 3,
@@ -22406,6 +22434,7 @@ mod tests {
         );
         assert_eq!(app.status_notice().as_deref(), Some("Loading images…"));
         let error_chunk = |generation, first_index, path: &PathBuf| LoadedImages {
+            source: None,
             generation,
             first_index,
             total: 3,
@@ -22459,6 +22488,7 @@ mod tests {
         assert!(app.image_loading);
         assert!(matches!(&app.reading_pages[0], Err(error) if error.starts_with("first.png:")));
         app.apply_loaded_images(LoadedImages {
+            source: None,
             generation,
             first_index: 2,
             total: 3,
@@ -22699,6 +22729,7 @@ mod tests {
             let _ = context.tex_manager().write().take_delta();
             COLOR_IMAGE_CONVERSIONS.set(0);
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 0,
                 total: 3,
@@ -22714,6 +22745,7 @@ mod tests {
             assert!(app.image_loading);
             COLOR_IMAGE_CONVERSIONS.set(0);
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 1,
                 total: 3,

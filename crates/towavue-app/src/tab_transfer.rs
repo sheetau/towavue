@@ -21,6 +21,7 @@ pub(super) struct MediaTabTransfer {
     target: towavue_core::TabTarget,
     media: MediaTransfer,
     edits: Option<EditHistory>,
+    source_version: Option<Option<towavue_runtime_windows::FileOperationSource>>,
     export_path: Option<PathBuf>,
     audio_options: Option<AudioExportOptions>,
     metadata_options: Option<MetadataExportOptions>,
@@ -292,6 +293,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             target,
             media,
             edits: self.edits.remove(&id),
+            source_version: self.source_versions.remove(&id),
             export_path: self.export_paths.remove(&id),
             audio_options: self.audio_export_settings.remove(&id),
             metadata_options: self.metadata_export_settings.remove(&id),
@@ -352,6 +354,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 old
             }
         };
+        if let Some(version) = transfer.source_version {
+            self.source_versions.insert(id, version);
+        }
         if let Some(edits) = transfer.edits {
             self.edits.insert(id, edits);
         }

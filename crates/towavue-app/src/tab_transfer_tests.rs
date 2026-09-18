@@ -1393,6 +1393,7 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
             );
         }
         source.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: stale_generation,
             first_index: 0,
             total: 1,
@@ -1545,5 +1546,120 @@ fn unopened_transfer_identity_changes_on_activation_and_path_replacement() {
     assert_ne!(
         before.instance, loaded.instance,
         "unopened differs even from generation zero"
+    );
+}
+
+#[test]
+fn loaded_source_version_survives_retention_and_transfer_without_authorizing_new_disk_bytes() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::loaded_source_version_survives_retention_and_transfer_without_authorizing_new_disk_bytes",
+    ) else {
+        return;
+    };
+    let path = root.join("version.png");
+    std::fs::write(&path, b"owned original version").expect("source");
+    let initial =
+        towavue_runtime_windows::FileOperationSource::capture(&path).expect("initial version");
+    let (mut source, _) = app();
+    let (mut target, _) = app();
+    let id = install(&mut source, path.clone(), decoded(false));
+    source.image_loading = true;
+    let completion = |generation, version| towavue_runtime_windows::LoadedImages {
+        source: version,
+        generation,
+        first_index: 0,
+        total: 1,
+        images: vec![(path.clone(), Ok(decoded(false)))],
+    };
+    source.apply_loaded_images(completion(
+        source.image_generation.wrapping_sub(1),
+        Some(initial.clone()),
+    ));
+    assert!(
+        !source.source_versions.contains_key(&id),
+        "obsolete completion has no ownership"
+    );
+    source.apply_loaded_images(completion(source.image_generation, Some(initial.clone())));
+    assert_eq!(source.source_versions[&id], Some(initial.clone()));
+    source
+        .edits
+        .entry(id)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = source.edits[&id].clone();
+    std::fs::write(&path, b"externally changed file bytes").expect("external change");
+    let changed =
+        towavue_runtime_windows::FileOperationSource::capture(&path).expect("new disk version");
+    assert_ne!(changed, initial);
+    source.image_loading = true;
+    source.apply_loaded_images(completion(source.image_generation, Some(changed)));
+    assert_eq!(
+        source.source_versions[&id],
+        Some(initial.clone()),
+        "reloading pixels cannot authorize overwriting external changes for existing edits"
+    );
+    let other = install(&mut source, root.join("other.png"), decoded(false));
+    assert!(source.retained_images.contains_key(&id));
+    assert_eq!(source.source_versions[&id], Some(initial.clone()));
+    source.tabs.activate(id);
+    source.load_path(path.clone(), MediaKind::Image);
+    assert_eq!(source.source_versions[&id], Some(initial.clone()));
+    let request = source.capture_tab_transfer(id).expect("transfer identity");
+    let stage = source
+        .prepare_image_transfer(id, target.ui_context.as_ref().expect("target context"))
+        .expect("stage");
+    let transfer = source.take_tab_transfer(&request, stage);
+    assert!(!source.source_versions.contains_key(&id));
+    assert!(source.tabs.tabs().iter().any(|tab| tab.id == other));
+    let moved = target.accept_tab_transfer(transfer, 0);
+    assert_eq!(target.source_versions[&moved], Some(initial));
+    assert_eq!(target.edits[&moved], history);
+    target.navigate_to_unchecked(root.join("next.png"));
+    assert!(
+        !target.source_versions.contains_key(&moved),
+        "navigation begins a new document"
+    );
+    target.source_versions.insert(moved, None);
+    target.remove_tab(moved, true);
+    assert!(
+        !target.source_versions.contains_key(&moved),
+        "close retires unavailable versions too"
+    );
+}
+
+#[test]
+fn unavailable_source_version_is_preserved_through_tab_transfer() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::unavailable_source_version_is_preserved_through_tab_transfer",
+    ) else {
+        return;
+    };
+    let (mut source, _) = app();
+    let (mut target, _) = app();
+    let path = root.join("unverifiable.png");
+    std::fs::write(&path, b"owned bytes").expect("fixture");
+    let id = install(&mut source, path.clone(), decoded(false));
+    source.source_versions.insert(id, None);
+    let request = source.capture_tab_transfer(id).expect("identity");
+    let stage = source
+        .prepare_image_transfer(id, target.ui_context.as_ref().expect("context"))
+        .expect("stage");
+    let transfer = source.take_tab_transfer(&request, stage);
+    let moved = target.accept_tab_transfer(transfer, 0);
+    assert_eq!(target.source_versions.get(&moved), Some(&None));
+    target.image_loading = true;
+    target.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+        source: Some(
+            towavue_runtime_windows::FileOperationSource::capture(&path).expect("current bytes"),
+        ),
+        generation: target.image_generation,
+        first_index: 0,
+        total: 1,
+        images: vec![(path, Ok(decoded(false)))],
+    });
+    assert_eq!(
+        target.source_versions.get(&moved),
+        Some(&None),
+        "unknown original cannot acquire a later version"
     );
 }

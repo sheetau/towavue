@@ -172,6 +172,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         saved.prepared_only = false;
         match result {
             Ok(session) => {
+                self.source_versions
+                    .entry(id)
+                    .or_insert_with(|| session.source().cloned());
                 saved.origin = self.window_key.map(|key| (key, instance));
                 saved.audio_drained = !session.has_audio();
                 saved.clock = Some(PlaybackClock::paused(session.target(), session.rate()));

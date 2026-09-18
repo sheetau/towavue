@@ -135,6 +135,7 @@ fn reading_layout_reload_preserves_matching_animation_presentations() {
         let generation = app.image_generation;
         for index in 0..3 {
             app.apply_loaded_images(LoadedImages {
+                source: None,
                 generation,
                 first_index: index,
                 total: 3,
@@ -169,6 +170,7 @@ fn reading_layout_reload_preserves_matching_animation_presentations() {
         app.image_loader.request(Vec::new());
         let replacement = Arc::new((*originals[0]).clone());
         app.apply_loaded_images(LoadedImages {
+            source: None,
             generation: app.image_generation,
             first_index: 0,
             total: 2,
@@ -180,6 +182,7 @@ fn reading_layout_reload_preserves_matching_animation_presentations() {
         assert_eq!(image.plays_left, 3);
         assert_ne!(image.texture.id(), presentations[0].texture.id());
         app.apply_loaded_images(LoadedImages {
+            source: None,
             generation: app.image_generation,
             first_index: 1,
             total: 2,
@@ -289,6 +292,7 @@ fn reading_page_count_changes_hold_the_displayed_spread_through_partial_results(
                 (generation, 3, 4),
             ] {
                 app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                    source: None,
                     generation: ticket,
                     first_index: index,
                     total,
@@ -337,6 +341,7 @@ fn reading_page_count_changes_hold_the_displayed_spread_through_partial_results(
                 "entering reading holds the normal image until all pages resolve"
             );
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 0,
                 total: 4,
@@ -613,6 +618,7 @@ fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
             );
             let old_generation = app.image_generation;
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: old_generation,
                 first_index: 0,
                 total: 2,
@@ -639,6 +645,7 @@ fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
                 "keep displayed spread, not partial intermediate page"
             );
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: old_generation,
                 first_index: 1,
                 total: 2,
@@ -664,6 +671,7 @@ fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
                 );
             }
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 0,
                 total: 2,
@@ -674,6 +682,7 @@ fn reading_handoff_keeps_the_complete_spread_until_all_latest_pages_resolve() {
             });
             assert_eq!(bounds(&frame(&mut app, &context)), before);
             app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 1,
                 total: 2,
@@ -862,6 +871,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
         navigate_pending(&mut app, root.join("latest.png"));
         assert_eq!(bounds(&frame(&mut app, &context)), Some(before));
         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: first_generation,
             first_index: 0,
             total: 1,
@@ -869,6 +879,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
         });
         assert!(app.image_handoff.is_some() && app.image.is_none());
         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: app.image_generation,
             first_index: 0,
             total: 1,
@@ -905,6 +916,7 @@ fn handoff_does_not_survive_failure_departure_or_last_tab_close() {
         match ending {
             0 => {
                 app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                    source: None,
                     generation: app.image_generation,
                     first_index: 0,
                     total: 1,

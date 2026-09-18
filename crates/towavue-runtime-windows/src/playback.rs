@@ -134,6 +134,7 @@ pub enum PlaybackError {
 
 pub struct PlaybackSession {
     path: PathBuf,
+    source: Option<crate::FileOperationSource>,
     graphics_device: GraphicsDevice,
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
@@ -172,6 +173,12 @@ pub struct PlaybackSession {
 }
 
 impl PlaybackSession {
+    /// Detached version of the source opened by this document. Consumers must
+    /// retain it across reopens; recapturing later would authorize external edits.
+    pub fn source(&self) -> Option<&crate::FileOperationSource> {
+        self.source.as_ref()
+    }
+
     pub fn open(
         path: &Path,
         graphics_device: GraphicsDevice,
@@ -205,6 +212,9 @@ impl PlaybackSession {
         paused: bool,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
+        // Capture before probing/starting decoders, never at Save time. Viewing
+        // unsupported file identities (e.g. symlinks) remains available.
+        let source = crate::FileOperationSource::capture(path).ok();
         let audio_format = decode::probe_audio_format(path)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
@@ -215,6 +225,7 @@ impl PlaybackSession {
         });
         let mut session = Self {
             path: path.to_owned(),
+            source,
             graphics_device,
             notify: Arc::new(notify),
             audio_format,
@@ -250,6 +261,13 @@ impl PlaybackSession {
             seek_stage_ms: [0.0; 5],
         };
         session.start_pipeline()?;
+        if session
+            .source
+            .as_ref()
+            .is_some_and(|source| source.verify().is_err())
+        {
+            session.source = None;
+        }
         Ok(session)
     }
 
@@ -1151,6 +1169,78 @@ mod tests {
             assert!(Instant::now() < deadline, "video frame deadline");
             thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    #[test]
+    fn loaded_source_version_is_not_recaptured_after_playback_reopen() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "towavue-playback-source-version-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&root).expect("exclusive fixture");
+        let path = root.join("source.mp4");
+        let output = std::process::Command::new(
+            crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
+        )
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x48:rate=4:duration=1",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "mpeg4",
+        ])
+        .arg(&path)
+        .output()
+        .expect("generate owned video");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let initial = crate::FileOperationSource::capture(&path).expect("initial version");
+        let mut session = PlaybackSession::open_paused(
+            &path,
+            GraphicsDevice::warp_for_test().expect("WARP"),
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            |_| {},
+        )
+        .expect("paused video");
+        assert_eq!(session.source(), Some(&initial));
+        assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        session.suspend_for_file_operation(MediaTime::ZERO);
+        let old = root.join("old.mp4");
+        std::fs::rename(&path, &old).expect("external replacement removes old path");
+        std::fs::copy(&old, &path).expect("new file with identical playable content");
+        let replaced = crate::FileOperationSource::capture(&path).expect("new file identity");
+        assert_ne!(initial, replaced);
+        session
+            .resume_after_file_operation(&path, MediaTime::ZERO)
+            .expect("resume decoder");
+        assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        assert_eq!(
+            session.source(),
+            Some(&initial),
+            "decoder restart cannot authorize a newer original for existing edits"
+        );
+        assert!(matches!(
+            initial.verify(),
+            Err(crate::FileOperationError::SourceChanged)
+        ));
+        drop(session);
+        std::fs::remove_file(&path).expect("remove owned replacement");
+        std::fs::remove_file(&old).expect("remove owned original");
+        std::fs::remove_dir(root).expect("remove empty owned directory");
     }
 
     #[test]

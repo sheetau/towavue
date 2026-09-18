@@ -220,7 +220,18 @@ fn native_unopened_cards_seek_paused_play_and_keep_activation_position() {
                     app.retained_playback[&id].session.is_none(),
                     "stale/covered card cannot start media"
                 );
+                let version = towavue_runtime_windows::FileOperationSource::capture(path)
+                    .expect("loaded source version");
+                assert!(
+                    !app.source_versions.contains_key(&id),
+                    "metadata-only hover has no opened document version"
+                );
                 app.handle_preview_seek(id, instance, path, target);
+                assert_eq!(
+                    app.source_versions.get(&id),
+                    Some(&Some(version.clone())),
+                    "background seek binds the actual decoded source"
+                );
                 let saved = &app.retained_playback[&id];
                 assert_eq!(saved.state, PlaybackState::Paused, "{:?}", saved.error);
                 assert!(!saved.prepared_only);
@@ -263,6 +274,11 @@ fn native_unopened_cards_seek_paused_play_and_keep_activation_position() {
                     .expect("session")
                     .generation();
                 app.activate_tab(id);
+                assert_eq!(
+                    app.source_versions.get(&id),
+                    Some(&Some(version)),
+                    "activation retains the background source version"
+                );
                 assert_eq!(app.state, PlaybackState::Paused);
                 assert_eq!(app.current_position(), position);
                 assert_eq!(
@@ -285,6 +301,14 @@ fn native_unopened_cards_seek_paused_play_and_keep_activation_position() {
             app.handle_preview_transport(id, instance, self.audio.clone(), CommandId::NextMedia);
             let saved = &app.retained_playback[&id];
             assert_eq!(saved.path, self.audio.with_file_name("b.wav"));
+            assert_eq!(
+                app.source_versions.get(&id),
+                Some(&Some(
+                    towavue_runtime_windows::FileOperationSource::capture(&saved.path)
+                        .expect("next track version")
+                )),
+                "queue navigation captures the next source instead of the old track"
+            );
             assert_eq!(saved.state, PlaybackState::Playing, "{:?}", saved.error);
             assert!(!saved.prepared_only);
             assert_eq!(

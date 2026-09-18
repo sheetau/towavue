@@ -427,6 +427,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 tab.target.set_current_path(path.clone(), MediaKind::Audio);
             }
             self.edits.insert(id, EditHistory::default());
+            self.source_versions.remove(&id);
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);
@@ -442,6 +443,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 move |event| notify(AppEvent::Playback(instance, event)),
             ) {
                 Ok(session) => {
+                    self.source_versions.insert(id, session.source().cloned());
                     saved.audio_drained = !session.has_audio();
                     saved.session = Some(session);
                     saved.state = PlaybackState::Playing;

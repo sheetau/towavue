@@ -38,7 +38,14 @@ impl State {
 }
 
 #[derive(Clone)]
+pub(super) struct RelocatedVersions {
+    pub original: FileOperationSource,
+    pub current: Option<FileOperationSource>,
+}
+
+#[derive(Clone)]
 pub(super) struct Completed {
+    pub versions: Option<Box<RelocatedVersions>>,
     pub outcome: FileOperationOutcome,
     pub resume: Option<VideoResumeSource>,
     pub recycle: Option<Box<towavue_runtime_windows::FileRecycleReport>>,
@@ -233,6 +240,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(target) = target {
             let changed = self.tabs.relocate_file(source, target);
             for id in &changed {
+                if let Some(version) = self.source_versions.get_mut(id) {
+                    // Moving a newer externally replaced file must not rebase old
+                    // edits. Only a matching loaded version adopts the moved stamp.
+                    *version = completed
+                        .and_then(|result| result.versions.as_ref())
+                        .filter(|result| version.as_ref() == Some(&result.original))
+                        .and_then(|result| result.current.clone());
+                }
                 self.media_sequence = self
                     .media_sequence
                     .max(self.media_generation)

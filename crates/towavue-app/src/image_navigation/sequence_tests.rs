@@ -60,6 +60,7 @@ fn fixture_with_notify<N: Fn(AppEvent) + Send + Sync + 'static>(
 
 fn complete(app: &mut App) {
     app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+        source: None,
         generation: app.image_generation,
         first_index: 0,
         total: 1,
@@ -218,6 +219,7 @@ fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
         );
         let (old, path) = stale.expect("old target");
         app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+            source: None,
             generation: old,
             first_index: 0,
             total: 1,
@@ -810,6 +812,7 @@ fn sequence_is_cancelled_by_source_order_failure_departure_and_modal_changes() {
                 app.apply_folder_snapshot(snapshot);
             }
             5 => app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                source: None,
                 generation: app.image_generation,
                 first_index: 0,
                 total: 1,

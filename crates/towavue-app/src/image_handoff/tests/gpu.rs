@@ -229,6 +229,7 @@ fn gpu_handoff_preserves_pixels_through_supersession_and_renderer_recreation() {
                     }
                 }
                 app.apply_loaded_images(towavue_runtime_windows::LoadedImages {
+                    source: None,
                     generation: app.image_generation,
                     first_index: 0,
                     total: 1,

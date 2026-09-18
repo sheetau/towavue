@@ -167,6 +167,7 @@ impl WindowHost {
                         });
                         Completed {
                             outcome: FileOperationOutcome::Recycled,
+                            versions: None,
                             resume: None,
                             recycle: Some(Box::new(recycle)),
                             preference_warning,
@@ -176,6 +177,7 @@ impl WindowHost {
                 notify(AppEvent::FileOperationFinished(serial, result));
             })
         } else {
+            let original = source.clone();
             towavue_runtime_windows::start_file_operation(source, action, move |result| {
                 let result = result
                     .map(|outcome| {
@@ -185,7 +187,15 @@ impl WindowHost {
                             }
                             _ => None,
                         };
+                        let source = match &outcome {
+                            FileOperationOutcome::Moved(path) => original.after_move(path).ok(),
+                            _ => None,
+                        };
                         Completed {
+                            versions: Some(Box::new(crate::file_operations::RelocatedVersions {
+                                original,
+                                current: source,
+                            })),
                             outcome,
                             resume,
                             recycle: None,

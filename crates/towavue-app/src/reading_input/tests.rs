@@ -119,10 +119,10 @@ fn initial_jitter_diagonal_motion_and_switch_sign_changes_do_not_steal_an_axis()
 }
 
 #[test]
-fn preview_commit_cancel_and_layout_changes_keep_the_current_shell_image() {
+fn preview_commit_cancel_and_layout_changes_keep_the_leading_image_and_source_history() {
     use crate::*;
     let Some(root) = tests::isolated_test_root(
-        "reading_input::tests::preview_commit_cancel_and_layout_changes_keep_the_current_shell_image",
+        "reading_input::tests::preview_commit_cancel_and_layout_changes_keep_the_leading_image_and_source_history",
     ) else {
         return;
     };
@@ -188,7 +188,7 @@ fn preview_commit_cancel_and_layout_changes_keep_the_current_shell_image() {
                     (0.0, -24.0),
                 ] {
                     app.move_reading_drag((delta.0 * density, delta.1 * density));
-                    let range = app.reading_settings.spread(5, paths.len());
+                    let range = app.reading_settings.spread(4, paths.len());
                     let mut expected = vec![path.clone()];
                     expected.extend(paths[range].iter().filter(|p| **p != path).cloned());
                     assert_eq!(app.reading_request_paths(), expected);

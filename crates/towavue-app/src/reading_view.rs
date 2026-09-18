@@ -41,6 +41,65 @@ impl ReadingHandoff {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn reading_focus_path(&self) -> Option<&PathBuf> {
+        self.reading_focus
+            .as_ref()
+            .filter(|_| self.reading_mode)
+            .map(|item| &item.path)
+            .or(self.path.as_ref())
+    }
+
+    pub(super) fn ensure_reading_focus(&mut self) {
+        if self.reading_mode && self.reading_focus.is_none() {
+            self.reading_focus = self
+                .folder_snapshot
+                .as_ref()
+                .zip(self.path.as_ref())
+                .and_then(|(snapshot, path)| {
+                    snapshot
+                        .reading_items(
+                            path,
+                            ReadingSettings {
+                                reversed: false,
+                                ..self.reading_settings
+                            },
+                        )
+                        .first()
+                        .map(|item| (*item).clone())
+                });
+        }
+    }
+
+    pub(super) fn reading_source_visible(&self) -> bool {
+        !self.reading_mode
+            || self
+                .folder_snapshot
+                .as_ref()
+                .zip(self.reading_focus_path())
+                .is_none_or(|(snapshot, focus)| {
+                    let pages = snapshot.reading_items(focus, self.reading_settings);
+                    pages.is_empty()
+                        || pages
+                            .iter()
+                            .any(|item| Some(&item.path) == self.path.as_ref())
+                })
+    }
+
+    pub(super) fn reading_focused_image(&self) -> Option<&ImagePresentation> {
+        let Some(focus) = self.reading_focus_path().filter(|_| self.reading_mode) else {
+            return self.image.as_ref();
+        };
+        if Some(focus) == self.path.as_ref() {
+            return self.image.as_ref();
+        }
+        let index = self
+            .reading_request_paths()
+            .iter()
+            .skip(1)
+            .position(|path| path == focus)?;
+        self.reading_pages.get(index)?.as_ref().ok()
+    }
+
     pub(super) fn capture_reading_handoff(&self) -> ReadingHandoff {
         let pages = self.reading_page_views();
         let extent = self.reading_extent(&pages);
@@ -76,7 +135,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let ordered = self
             .folder_snapshot
             .as_ref()
-            .zip(self.path.as_ref())
+            .zip(self.reading_focus_path())
             .map(|(snapshot, path)| {
                 snapshot.reading_items(
                     path,
@@ -87,15 +146,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 )
             })
             .unwrap_or_default();
-        if first.is_some() || self.image_loading {
-            let index = ordered
-                .iter()
-                .position(|item| Some(&item.path) == self.path.as_ref())
-                .unwrap_or(0);
-            let count = ordered.len().max(1);
-            if self.image_loading {
-                pages.resize(count.saturating_sub(1), None);
-            }
+        let source_index = ordered
+            .iter()
+            .position(|item| Some(&item.path) == self.path.as_ref())
+            .or_else(|| ordered.is_empty().then_some(0));
+        if self.image_loading {
+            pages.resize(
+                ordered.len().max(1) - usize::from(source_index.is_some()),
+                None,
+            );
+        }
+        if let Some(index) = source_index
+            && (first.is_some() || self.image_loading)
+        {
             pages.insert(index.min(pages.len()), first);
         }
         for (index, page) in pages.iter_mut().enumerate() {
@@ -127,11 +190,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn reading_extent(&self, pages: &[(Option<egui::TextureId>, egui::Vec2)]) -> egui::Vec2 {
-        // Joined pages share the current source page's cross-axis pixel extent.
+        // Joined pages share the focused reading page's cross-axis pixel extent.
         // Actual size therefore remains literal for that page even with mixed sizes.
         let reference = self
-            .image
-            .as_ref()
+            .reading_focused_image()
             .map(|image| image.texture.size_vec2())
             .unwrap_or_else(|| pages.first().map_or(egui::Vec2::splat(1.0), |page| page.1));
         match self.reading_settings.axis {

@@ -14,7 +14,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn scrub_image(&mut self, path: PathBuf, generation: u64, owner: egui::Id) {
         if self.media_kind != Some(MediaKind::Image)
             || generation != self.media_generation
-            || self.path.as_ref() == Some(&path)
+            || (self.path.as_ref() == Some(&path) && self.reading_source_visible())
             || self.modal_input_blocked()
             || self.filmstrip_open
             || self.palette_open

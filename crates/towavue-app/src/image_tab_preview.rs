@@ -131,6 +131,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     view: ImageViewState::default(),
                     reading_mode: false,
                     reading_settings: ReadingSettings::default(),
+                    reading_focus: None,
                     filmstrip_open: false,
                     filmstrip_view: filmstrip::View::default(),
                     timeline_open: false,
@@ -262,6 +263,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn preview_folder(&self, id: TabId, path: &Path) -> Option<FolderPosition> {
         let (instance, snapshot, reading) = self.preview_image_snapshot(id, path)?;
+        let focus = if reading.is_some() {
+            if self.displayed_tab == Some(id) {
+                self.reading_focus.as_ref()
+            } else {
+                self.retained_images
+                    .get(&id)
+                    .and_then(|saved| saved.reading_focus.as_ref())
+            }
+        } else {
+            None
+        };
+        let path = focus.map_or(path, |item| item.path.as_path());
         let mut index = None;
         let mut count = 0;
         for item in
@@ -329,7 +342,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         source: &Path,
         path: &Path,
     ) -> bool {
-        source != path
+        (source != path
+            || self
+                .preview_folder(id, source)
+                .and_then(|position| position.reading_paths())
+                .is_some_and(|pages| !pages.iter().any(|page| page == source)))
             && self
                 .preview_image_snapshot(id, source)
                 .is_some_and(|(owner, snapshot, _)| {
@@ -366,6 +383,22 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .wrapping_add(1);
         saved.instance = self.media_sequence;
         saved.path = path.clone();
+        saved.reading_focus = saved
+            .folder_snapshot
+            .as_ref()
+            .filter(|_| saved.reading_mode)
+            .and_then(|snapshot| {
+                snapshot
+                    .reading_items(
+                        &path,
+                        ReadingSettings {
+                            reversed: false,
+                            ..saved.reading_settings
+                        },
+                    )
+                    .first()
+                    .map(|item| (*item).clone())
+            });
         saved.view = ImageViewState::default();
         saved.image = None;
         saved.reading_pages.clear();

@@ -79,7 +79,7 @@ impl RetainedPreview {
 
 impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
     pub(super) fn retained_tab_preview(&self, tab: TabId, path: &Path) -> Option<RetainedPreview> {
-        let (image, others, reading, settings, snapshot, loading) =
+        let (image, others, reading, settings, snapshot, loading, focus) =
             if self.displayed_tab == Some(tab) && self.path.as_deref() == Some(path) {
                 (
                     self.image.as_ref(),
@@ -88,6 +88,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                     self.reading_settings,
                     self.folder_snapshot.as_ref(),
                     self.image_loading,
+                    self.reading_focus.as_ref(),
                 )
             } else {
                 let saved = self.retained_images.get(&tab).filter(|saved| {
@@ -100,6 +101,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                     saved.reading_settings,
                     saved.folder_snapshot.as_ref(),
                     saved.resume_loading,
+                    saved.reading_focus.as_ref(),
                 )
             };
         if !reading {
@@ -118,7 +120,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
         let ordered = snapshot
             .map(|snapshot| {
                 snapshot.reading_items(
-                    path,
+                    focus.map_or(path, |item| item.path.as_path()),
                     towavue_core::ReadingSettings {
                         reversed: false,
                         ..settings
@@ -129,14 +131,19 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
         let index = ordered
             .iter()
             .position(|item| item.path == path)
-            .unwrap_or(0);
+            .or_else(|| ordered.is_empty().then_some(0));
         if loading {
-            pages.resize(ordered.len().max(1) - 1, (None, pending_size));
+            pages.resize(
+                ordered.len().max(1) - usize::from(index.is_some()),
+                (None, pending_size),
+            );
         }
-        pages.insert(
-            index.min(pages.len()),
-            (image.map(|image| image.texture.clone()), pending_size),
-        );
+        if let Some(index) = index {
+            pages.insert(
+                index.min(pages.len()),
+                (image.map(|image| image.texture.clone()), pending_size),
+            );
+        }
         pages
             .iter()
             .any(|page| page.0.is_some())

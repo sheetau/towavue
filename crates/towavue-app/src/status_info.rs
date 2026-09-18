@@ -75,7 +75,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 let mut count = 0;
                 let mut position = None;
                 for item in snapshot.reading_sequence(self.reading_settings.folder_reversed) {
-                    if &item.path == path {
+                    if Some(&item.path) == self.reading_focus_path() {
                         position = Some(count);
                     }
                     count += 1;

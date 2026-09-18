@@ -476,6 +476,8 @@ struct RetainedImageTab {
     view: ImageViewState,
     reading_mode: bool,
     reading_settings: ReadingSettings,
+    // Reading navigation is independent of the retained edit document.
+    reading_focus: Option<towavue_core::FolderMediaItem>,
     filmstrip_open: bool,
     filmstrip_view: filmstrip::View,
     timeline_open: bool,
@@ -983,6 +985,8 @@ struct Application<N> {
     track_drag: Option<track_drag::Drag>,
     reading_cursor: Option<towavue_runtime_windows::PinnedCursor>,
     reading_settings: ReadingSettings,
+    // Reading navigation is independent of the retained edit document.
+    reading_focus: Option<towavue_core::FolderMediaItem>,
     reading_pages: Vec<Result<ImagePresentation, String>>,
     preview_cache: PreviewCache,
     duration_workers: BTreeMap<u64, LatestTask>,
@@ -1260,6 +1264,7 @@ where
             track_drag: None,
             reading_cursor: None,
             reading_settings: ReadingSettings::default(),
+            reading_focus: None,
             reading_pages: Vec::new(),
             preview_cache,
             duration_workers: BTreeMap::new(),
@@ -1706,6 +1711,7 @@ where
             view: self.image_view,
             reading_mode: self.reading_mode,
             reading_settings: self.reading_settings,
+            reading_focus: self.reading_focus.take(),
             filmstrip_open: self.filmstrip_open,
             filmstrip_view: self.filmstrip.take_view(),
             timeline_open: self.timeline_open,
@@ -1737,6 +1743,7 @@ where
         if !saved.prepared_only {
             self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
             self.reading_settings = saved.reading_settings;
+            self.reading_focus = saved.reading_focus;
         }
         self.filmstrip_open = saved.filmstrip_open;
         self.filmstrip.restore_view(saved.filmstrip_view);
@@ -1755,6 +1762,7 @@ where
         self.status_message = saved.status_message;
         self.export_notice = saved.export_notice;
         self.restore_ui_textures |= saved.graphics_epoch != self.graphics_epoch;
+        self.ensure_reading_focus();
         self.restored_reading_pages = self.reading_mode;
         if saved.resume_loading {
             self.resume_image_load();
@@ -2053,6 +2061,7 @@ where
             self.image_view.zoom = ZoomMode::Actual;
         }
         self.path = Some(path.clone());
+        self.reading_focus = None;
         self.media_kind = Some(kind);
         self.ensure_audio_queue();
         self.pending_time = None;
@@ -2401,6 +2410,15 @@ where
         }
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 4);
+        self.reading_focus = self.reading_focus.as_ref().and_then(|focus| {
+            snapshot
+                .match_item(
+                    (!focus.identity.as_bytes().is_empty()).then_some(&focus.identity),
+                    &focus.path,
+                )
+                .filter(|item| item.kind == MediaKind::Image)
+                .cloned()
+        });
         self.folder_snapshot = Some(snapshot);
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 5);
@@ -2417,6 +2435,7 @@ where
                 self.rebuild_reading_pages();
             }
         }
+        self.ensure_reading_focus();
         let retained_pages_match = std::mem::take(&mut self.restored_reading_pages)
             && previous_reading_paths == self.reading_request_paths();
         if self.reading_mode && self.media_kind == Some(MediaKind::Image) && !retained_pages_match {
@@ -2449,7 +2468,7 @@ where
             paths.extend(
                 snapshot
                     .reading_items(
-                        path,
+                        self.reading_focus_path().unwrap_or(path),
                         ReadingSettings {
                             reversed: false,
                             ..self.reading_settings
@@ -2464,11 +2483,15 @@ where
     }
 
     fn set_reading_layout(&mut self, enabled: bool, settings: ReadingSettings) {
+        self.ensure_reading_focus();
         // Capture geometry before changing the settings that arrange the held pages.
         let handoff = enabled
             .then(|| self.take_navigation_handoff(MediaKind::Image))
             .flatten();
         self.reading_mode = enabled;
+        if !enabled {
+            self.reading_focus = None;
+        }
         self.reading_settings = settings;
         self.image_handoff = handoff;
         self.rebuild_reading_pages();
@@ -2479,6 +2502,7 @@ where
     }
 
     fn rebuild_reading_pages(&mut self) {
+        self.ensure_reading_focus();
         self.clear_image_previews();
         self.reading_pages.clear();
         self.image_loading = false;
@@ -2784,7 +2808,7 @@ where
 
     fn image_prefetch_paths(&self) -> Option<Vec<PathBuf>> {
         let snapshot = self.folder_snapshot.as_ref()?;
-        let path = self.path.as_ref()?;
+        let path = self.reading_focus_path()?;
         let images: Vec<_> = snapshot
             .reading_sequence(self.reading_mode && self.reading_settings.folder_reversed)
             .collect();
@@ -5992,7 +6016,7 @@ where
                 .collect();
             let Some(index) = images
                 .iter()
-                .position(|item| Some(item.path.as_path()) == self.path.as_deref())
+                .position(|item| Some(&item.path) == self.reading_focus_path())
             else {
                 return;
             };
@@ -6074,6 +6098,8 @@ where
                         )
                     })
             }) && target != index
+                && (self.path.as_ref() != Some(&images[target].path)
+                    || !self.reading_source_visible())
             {
                 let path = images[target].path.clone();
                 actions.push(if live && value.is_none() {
@@ -7299,12 +7325,17 @@ where
         if self.image_handoff.is_some() {
             return None;
         }
-        if self.image_edit_pending || self.image_error.is_some() {
+        if self.image_edit_pending || (!self.reading_mode && self.image_error.is_some()) {
             return None;
         }
-        let image = self.image.as_ref()?;
+        let image = self.reading_focused_image()?;
         let frame = image.decoded.frames.get(image.frame_index)?;
-        let mut transform = self.visual_transform((frame.width, frame.height));
+        let mut transform = if self.reading_mode && self.reading_focus_path() != self.path.as_ref()
+        {
+            ImageTransform::new((frame.width, frame.height), &[])
+        } else {
+            self.visual_transform((frame.width, frame.height))
+        };
         if !self.reading_mode
             && let Some(selection) = self.image_view.selection
         {
@@ -8350,7 +8381,8 @@ where
             self.set_status("Apply or cancel video resize before leaving.".into());
             return;
         }
-        if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path)) {
+        if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path) && self.reading_source_visible())
+        {
             return;
         }
         if !background_image {
@@ -8651,6 +8683,7 @@ where
         self.relative_seek_notice = None;
         self.close_filmstrip();
         self.reading_mode = false;
+        self.reading_focus = None;
         self.session.take();
         self.playback_origin = None;
         self.displayed_tab = None;
@@ -8802,7 +8835,8 @@ where
             self.navigate(forward, true);
             return;
         }
-        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
+        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, self.reading_focus_path())
+        else {
             return;
         };
         let images: Vec<_> = snapshot
@@ -8929,7 +8963,7 @@ where
                 .next()
         };
         if let Some(target) = target
-            && &target.path != path
+            && (&target.path != path || !self.reading_source_visible())
         {
             self.request_guarded(GuardedAction::Navigate(target.path.clone()));
         }
@@ -10453,6 +10487,7 @@ where
         }
         let images_visible = self.image_animation_visible();
         let mut image_changed = images_visible
+            && self.reading_source_visible()
             && self
                 .image
                 .as_mut()
@@ -10558,6 +10593,7 @@ where
         let next_image_frame = self
             .image
             .iter()
+            .filter(|_| self.reading_source_visible())
             .chain(
                 self.reading_pages
                     .iter()
@@ -22193,7 +22229,12 @@ mod tests {
         wait(&mut app);
         assert_eq!(app.reading_settings.page_count, 3);
         assert_eq!(app.reading_settings.first_page_count, 1);
-        assert_eq!(app.reading_pages.len(), 2);
+        assert_eq!(app.reading_focus_path(), Some(&paths[0]));
+        assert_eq!(
+            app.reading_request_paths(),
+            vec![paths[1].clone(), paths[0].clone()]
+        );
+        assert_eq!(app.reading_pages.len(), 1);
         assert_eq!(app.path, anchor);
         assert_eq!(app.edits, edits);
         app.dispatch(CommandId::ToggleReadingMode);

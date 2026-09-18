@@ -1209,9 +1209,20 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
     ) else {
         return;
     };
-    for (mode, folder_reversed) in [(0, false), (1, false), (2, false), (1, true), (2, true)] {
+    for (mode, folder_reversed) in [
+        (0, false),
+        (1, false),
+        (2, false),
+        (1, true),
+        (2, true),
+        (3, false),
+        (3, true),
+        (4, false),
+        (4, true),
+    ] {
         let partial = mode != 0;
-        let primary_failed = mode == 2;
+        let primary_failed = mode == 2 || mode == 4;
+        let hidden_source = mode >= 3;
         let (mut source, _) = app();
         let (mut destination, events) = app();
         let last = root.join("remaining.bmp");
@@ -1230,6 +1241,10 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
         let neighbor = decoded(true);
         let id = install(&mut source, paths[0].clone(), Arc::clone(&original));
         let mut shell_paths = paths.clone();
+        if hidden_source {
+            // The first three reading pages omit a retained source outside this spread.
+            shell_paths.rotate_left(1);
+        }
         if folder_reversed {
             shell_paths.reverse();
         }
@@ -1252,12 +1267,19 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
         };
         if partial {
             source.reading_mode = true;
-            source.reading_settings.page_count = 4;
-            source.reading_settings.first_page_count = 4;
+            source.reading_settings.page_count = if hidden_source { 3 } else { 4 };
+            source.reading_settings.first_page_count = source.reading_settings.page_count;
             source.reading_settings.axis = towavue_core::ReadingAxis::Vertical;
             source.reading_settings.reversed = true;
             source.reading_settings.folder_reversed = folder_reversed;
             source.folder_snapshot = Some(snapshot.clone());
+            if hidden_source {
+                source.reading_focus = snapshot
+                    .items
+                    .iter()
+                    .find(|item| item.path == paths[1])
+                    .cloned();
+            }
             source
                 .reading_pages
                 .push(Ok(ImagePresentation::from_decoded(
@@ -1292,12 +1314,22 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
         );
         let pixels = Arc::clone(&source.image_previews[&last].pixels);
         let stale_generation = source.image_generation;
-        transfer(&mut source, &mut destination, id);
+        let destination_id = transfer(&mut source, &mut destination, id);
         assert_eq!(
             destination.reading_settings.folder_reversed,
             folder_reversed
         );
         assert!(destination.image_loading);
+        if hidden_source {
+            assert_eq!(destination.reading_focus_path(), Some(&paths[1]));
+            let preview = destination
+                .retained_tab_preview(destination_id, &paths[0])
+                .expect("reading preview");
+            let tab_preview::RetainedPreview::Reading { pages, .. } = preview else {
+                panic!("reading")
+            };
+            assert_eq!(pages.len(), 3, "hidden original does not add a fourth page");
+        }
         assert_eq!(
             destination.image_request_offset,
             if partial { 3 } else { 0 }

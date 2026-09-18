@@ -4885,13 +4885,11 @@ where
             && self.incoming_tab_pointer.is_none()
             && !self.palette_open
             && !self.grid_open
-            && !self.filmstrip_open
             && !egui::Popup::is_any_open(root.ctx());
         let tab_menu_focus = (!self.modal_input_blocked()
             && self.active_export.is_none()
             && !self.palette_open
-            && !self.grid_open
-            && !self.filmstrip_open)
+            && !self.grid_open)
             .then(|| {
                 root.ctx().data_mut(|data| {
                     let key = "tab-menu-return-focus".into();
@@ -4953,7 +4951,7 @@ where
                             self.media_generation,
                             self.graphics_epoch,
                         ),
-                        !self.modal_input_blocked() && !self.filmstrip_open,
+                        !self.modal_input_blocked(),
                         &mut recent,
                     );
                     if let Some(action) = recent.action {
@@ -5278,7 +5276,6 @@ where
                                     if !self.modal_input_blocked()
                                         && !self.palette_open
                                         && !self.grid_open
-                                        && !self.filmstrip_open
                                         && let Some(command) =
                                             tab_menu::popup(&tab_ui, &response, &close, |ui| {
                                                 tab_menu::show(
@@ -6705,6 +6702,51 @@ where
             definition.id == command && definition.is_enabled(self.command_context())
         }) {
             return;
+        }
+        // Reveal the media surface before applying an edit or opening its editor.
+        // Navigation, tab controls and command overlays can coexist with filmstrip.
+        if self.filmstrip_open
+            && matches!(
+                command,
+                CommandId::Undo
+                    | CommandId::Redo
+                    | CommandId::ApplyCrop
+                    | CommandId::DeleteTimeSelection
+                    | CommandId::KeepTimeSelection
+                    | CommandId::PlayTimeSelection
+                    | CommandId::RotateClockwise
+                    | CommandId::RotateCounterclockwise
+                    | CommandId::RotateFineClockwise
+                    | CommandId::RotateFineCounterclockwise
+                    | CommandId::FlipHorizontal
+                    | CommandId::FlipVertical
+                    | CommandId::SetTrimStart
+                    | CommandId::SetTrimEnd
+                    | CommandId::ResizeImage
+                    | CommandId::FreeRotateImage
+                    | CommandId::FreeRotateVideo
+                    | CommandId::ResizeVideo
+                    | CommandId::AudioExportOptions
+                    | CommandId::MetadataExportOptions
+                    | CommandId::SelectAll
+                    | CommandId::ClearSelection
+                    | CommandId::SelectAspectSquare
+                    | CommandId::SelectAspectFourThree
+                    | CommandId::SelectAspectThreeFour
+                    | CommandId::SelectAspectThreeTwo
+                    | CommandId::SelectAspectTwoThree
+                    | CommandId::SelectAspectSixteenNine
+                    | CommandId::SelectAspectNineSixteen
+                    | CommandId::ZoomIn
+                    | CommandId::ZoomOut
+                    | CommandId::ActualSize
+                    | CommandId::FitToWindow
+                    | CommandId::CoverWindow
+                    | CommandId::ZoomSelection
+                    | CommandId::ToggleTimeline
+            )
+        {
+            self.close_filmstrip();
         }
         if command == CommandId::ToggleFilmstrip && !self.filmstrip_open {
             let focus = if self.palette_open || self.grid_open {

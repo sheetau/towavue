@@ -1343,9 +1343,9 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
 }
 
 #[test]
-fn filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility() {
+fn filmstrip_allows_logo_menu_for_pointer_keyboard_and_accessibility() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility",
+        "filmstrip::drag_tests::filmstrip_allows_logo_menu_for_pointer_keyboard_and_accessibility",
     ) else {
         return;
     };
@@ -1368,8 +1368,8 @@ fn filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility() {
             assert!(actions.is_empty(), "opening a menu dispatches no command");
             output
         };
-        for blocked in [true, false] {
-            app.filmstrip_open = blocked;
+        for open in [true, false] {
+            app.filmstrip_open = open;
             for _ in 0..3 {
                 render(&mut app, vec![]);
             }
@@ -1399,26 +1399,18 @@ fn filmstrip_blocks_logo_menu_equally_for_pointer_keyboard_and_accessibility() {
             render(&mut app, vec![egui::Event::PointerMoved(logo)]);
             render(&mut app, vec![pointer(logo, true)]);
             render(&mut app, vec![pointer(logo, false)]);
-            assert_eq!(egui::Popup::is_any_open(&context), !blocked, "pointer");
+            assert!(egui::Popup::is_any_open(&context), "pointer");
             render(&mut app, vec![key(egui::Key::Escape)]);
             render(&mut app, vec![action(egui::accesskit::Action::Click)]);
-            assert_eq!(
-                egui::Popup::is_any_open(&context),
-                !blocked,
-                "accessible activation"
-            );
+            assert!(egui::Popup::is_any_open(&context), "accessible activation");
             render(&mut app, vec![key(egui::Key::Escape)]);
             render(&mut app, vec![action(egui::accesskit::Action::Focus)]);
             render(&mut app, vec![key(egui::Key::Enter)]);
-            assert_eq!(
-                egui::Popup::is_any_open(&context),
-                !blocked,
-                "keyboard activation"
-            );
+            assert!(egui::Popup::is_any_open(&context), "keyboard activation");
             render(&mut app, vec![key(egui::Key::Escape)]);
-            assert_eq!(node.is_disabled(), blocked, "accessible availability");
+            assert!(!node.is_disabled(), "accessible availability");
             assert_eq!(
-                app.filmstrip_open, blocked,
+                app.filmstrip_open, open,
                 "menu input does not close filmstrip"
             );
         }

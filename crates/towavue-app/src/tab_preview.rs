@@ -1627,7 +1627,11 @@ mod tests {
                 },
                 |ui| {
                     let mut actions = Vec::new();
-                    app.draw_top_bar(ui, &mut actions);
+                    if app.filmstrip_open {
+                        app.draw_ui(ui, &mut actions);
+                    } else {
+                        app.draw_top_bar(ui, &mut actions);
+                    }
                     assert!(actions.is_empty(), "hover must not dispatch actions");
                 },
             )
@@ -1703,7 +1707,23 @@ mod tests {
                 2.5 + overlay as f64,
                 false,
             );
-            assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
+            if overlay == 2 {
+                assert!(
+                    app.tab_preview.target.is_some(),
+                    "filmstrip permits hover cards"
+                );
+                let output = frame(&mut app, egui::pos2(90.0, 16.0), 4.7, false);
+                assert!(
+                    output.shapes.iter().any(|shape| matches!(
+                        &shape.shape, egui::Shape::Text(text)
+                        if text.pos.y >= 32.0 && text.galley.text().contains("preview-image.png")
+                    )),
+                    "hover caption remains rendered above the filmstrip"
+                );
+                assert!(app.filmstrip_open);
+            } else {
+                assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
+            }
             app.palette_open = false;
             app.grid_open = false;
             app.filmstrip_open = false;

@@ -208,6 +208,18 @@ fn tab_context_rejects_modified_repeated_and_covered_requests() {
         tree(&mut app, events);
         if mode == 9 {
             assert!(egui::Popup::is_id_open(&context, "foreign-menu".into()));
+        } else if mode == 4 {
+            assert!(
+                egui::Popup::is_any_open(&context),
+                "filmstrip permits tab menus"
+            );
+            tree(
+                &mut app,
+                vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            );
+            settle(&mut app);
+            assert!(!egui::Popup::is_any_open(&context));
+            assert!(app.filmstrip_open);
         } else {
             assert!(!egui::Popup::is_any_open(&context), "mode {mode}");
         }
@@ -221,6 +233,12 @@ fn tab_context_rejects_modified_repeated_and_covered_requests() {
             );
             if mode == 9 {
                 assert!(egui::Popup::is_id_open(&context, "foreign-menu".into()));
+            } else if mode == 4 {
+                assert!(
+                    egui::Popup::is_any_open(&context),
+                    "accessible tab menu over filmstrip"
+                );
+                assert!(app.filmstrip_open);
             } else {
                 assert!(!egui::Popup::is_any_open(&context));
             }

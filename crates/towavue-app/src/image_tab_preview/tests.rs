@@ -207,10 +207,9 @@ fn folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources() {
         .or_default()
         .push(EditOperation::RotateClockwise, MediaKind::Image);
     let history = app.edits[&id].clone();
-    for blocked in 0..5 {
+    for blocked in [0, 1, 3, 4] {
         app.palette_open = blocked == 0;
         app.grid_open = blocked == 1;
-        app.filmstrip_open = blocked == 2;
         app.incoming_tab_pointer = (blocked == 3).then_some(egui::Pos2::ZERO);
         let token = if blocked == 4 { instance + 1 } else { instance };
         app.handle_preview_image_seek(id, token, paths[0].clone(), paths[1].clone());
@@ -226,6 +225,11 @@ fn folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources() {
         app.handle_preview_image_seek(id, instance, paths[0].clone(), path);
         assert!(app.pending_guard.is_none());
     }
+    app.filmstrip_open = true;
+    assert!(
+        !app.preview_input_blocked(),
+        "filmstrip permits card controls"
+    );
     app.handle_preview_image_seek(id, instance, paths[0].clone(), paths[1].clone());
     assert!(matches!(
         app.pending_guard,
@@ -746,4 +750,29 @@ fn image_card_export_and_background_dirty_guards_keep_source_ownership() {
             assert_eq!(std::fs::read(path).expect("unchanged source"), bytes);
         }
     }
+}
+
+#[test]
+fn filmstrip_command_overlays_reveal_edits_and_preserve_media_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::filmstrip_command_overlays_reveal_edits_and_preserve_media_history",
+    ) else {
+        return;
+    };
+    let (mut app, _, id, paths) = fixture(&root);
+    app.filmstrip_open = true;
+    app.dispatch(CommandId::ToggleCommandPalette);
+    assert!(app.palette_open && app.filmstrip_open);
+    app.dispatch(CommandId::RotateClockwise);
+    assert!(!app.palette_open && !app.filmstrip_open);
+    assert_eq!(
+        app.edits[&id].operations(),
+        &[EditOperation::RotateClockwise]
+    );
+    app.filmstrip_open = true;
+    app.dispatch(CommandId::Undo);
+    assert!(!app.filmstrip_open);
+    assert!(app.edits[&id].operations().is_empty());
+    assert_eq!(app.path.as_ref(), Some(&paths[0]));
+    assert_eq!(app.tabs.active_id(), Some(id));
 }

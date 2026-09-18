@@ -333,7 +333,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.modal_input_blocked()
             || self.palette_open
             || self.grid_open
-            || self.filmstrip_open
             || self.incoming_tab_pointer.is_some()
             || self.ui_context.as_ref().is_some_and(|context| {
                 egui::Popup::is_any_open(context)

@@ -3,6 +3,33 @@ use crate::*;
 #[cfg(test)]
 mod tests;
 
+#[derive(Default)]
+pub(super) struct Preparation {
+    provider: Option<FolderOrderProvider>,
+    pending: Option<(TabId, u64, PathBuf, u64)>,
+    failed: bool,
+}
+
+impl Preparation {
+    pub(super) fn cancel_for(&mut self, tab: TabId) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.0 == tab)
+        {
+            self.clear();
+        }
+    }
+
+    fn clear(&mut self) {
+        if self.pending.take().is_some()
+            && let Some(provider) = &self.provider
+        {
+            provider.request(None);
+        }
+    }
+}
+
 pub(super) struct FolderPosition {
     pub instance: u64,
     pub count: usize,
@@ -72,6 +99,135 @@ impl FolderPosition {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn prepare_image_tab(&mut self, tab: Option<TabId>) {
+        let target = tab.and_then(|id| {
+            self.tabs
+                .tabs()
+                .iter()
+                .find(|tab| tab.id == id)
+                .filter(|tab| {
+                    tab.target.media_kind() == MediaKind::Image && self.displayed_tab != Some(id)
+                })
+                .map(|tab| (id, tab.target.current_path().to_owned()))
+        });
+        let Some((id, path)) = target else {
+            self.image_tab_preparation.clear();
+            return;
+        };
+        if !self.retained_images.contains_key(&id) {
+            self.media_sequence = self
+                .media_sequence
+                .max(self.media_generation)
+                .wrapping_add(1);
+            // Only view identity and folder metadata are prepared here. Original
+            // image loading stays with explicit activation; the card has its own
+            // bounded thumbnail worker and never borrows the foreground loader.
+            self.retained_images.insert(
+                id,
+                RetainedImageTab {
+                    prepared_only: true,
+                    path: path.clone(),
+                    instance: self.media_sequence,
+                    view: ImageViewState::default(),
+                    reading_mode: false,
+                    reading_settings: ReadingSettings::default(),
+                    filmstrip_open: false,
+                    filmstrip_view: filmstrip::View::default(),
+                    timeline_open: false,
+                    image: None,
+                    reading_pages: Vec::new(),
+                    previews: BTreeMap::new(),
+                    folder_snapshot: self
+                        .folder_snapshot
+                        .as_ref()
+                        .filter(|snapshot| {
+                            Some(snapshot.folder_path.as_path()) == path.parent()
+                                && snapshot.items.iter().any(|item| item.path == path)
+                        })
+                        .cloned(),
+                    source: None,
+                    operations: None,
+                    comparison: None,
+                    materialized: false,
+                    error: None,
+                    resume_loading: true,
+                    resume_editing: false,
+                    state: PlaybackState::Loading,
+                    graphics_epoch: self.graphics_epoch,
+                    status_message: None,
+                    export_notice: None,
+                },
+            );
+            self.request_redraw();
+        }
+        let saved = &self.retained_images[&id];
+        if saved.path != path || saved.folder_snapshot.is_some() {
+            self.image_tab_preparation.clear();
+            return;
+        }
+        let instance = saved.instance;
+        let preparation = &mut self.image_tab_preparation;
+        if preparation
+            .pending
+            .as_ref()
+            .is_some_and(|pending| pending.0 == id && pending.1 == instance && pending.2 == path)
+            || preparation.failed
+        {
+            return;
+        }
+        let Some(folder) = path.parent() else {
+            return;
+        };
+        if preparation.provider.is_none() {
+            let notify = Arc::clone(&self.notify);
+            match FolderOrderProvider::with_notify(move || notify(AppEvent::FolderReady)) {
+                Ok(provider) => preparation.provider = Some(provider),
+                Err(error) => {
+                    eprintln!("towavue: image tab folder preparation unavailable: {error}");
+                    preparation.failed = true;
+                    return;
+                }
+            }
+        }
+        let generation = preparation
+            .provider
+            .as_ref()
+            .expect("provider")
+            .request(Some(folder.to_owned()));
+        preparation.pending = Some((id, instance, path, generation));
+    }
+
+    pub(super) fn finish_image_tab_preparation(&mut self) {
+        let preparation = &mut self.image_tab_preparation;
+        let Some(snapshot) = preparation
+            .provider
+            .as_ref()
+            .and_then(FolderOrderProvider::take_completed)
+        else {
+            return;
+        };
+        let Some((id, instance, path, generation)) = &preparation.pending else {
+            return;
+        };
+        if snapshot.generation != *generation {
+            return;
+        }
+        if let Some(saved) = self.retained_images.get_mut(id)
+            && saved.instance == *instance
+            && saved.path == *path
+            && Some(snapshot.folder_path.as_path()) == path.parent()
+            && self
+                .tabs
+                .tabs()
+                .iter()
+                .any(|tab| tab.id == *id && tab.target.current_path() == path)
+        {
+            saved.folder_snapshot = Some(snapshot);
+        }
+        preparation.pending = None;
+        self.request_redraw();
+    }
+
     fn preview_image_snapshot(
         &self,
         id: TabId,

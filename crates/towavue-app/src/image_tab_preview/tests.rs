@@ -776,3 +776,167 @@ fn filmstrip_command_overlays_reveal_edits_and_preserve_media_history() {
     assert_eq!(app.path.as_ref(), Some(&paths[0]));
     assert_eq!(app.tabs.active_id(), Some(id));
 }
+
+#[test]
+fn unopened_image_card_prepares_order_and_navigates_without_loading_or_activating() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::unopened_image_card_prepares_order_and_navigates_without_loading_or_activating",
+    ) else {
+        return;
+    };
+    let (mut app, context, active, paths) = fixture(&root);
+    let instance = app.media_generation;
+    let loader = app.image_generation;
+    let pixels = Arc::clone(&app.image.as_ref().expect("active pixels").decoded);
+    let id = app.tabs.open_new(paths[1].clone(), MediaKind::Image);
+    app.tabs.activate(active);
+    assert!(app.preview_folder(id, &paths[1]).is_none());
+    context.global_style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let frame = |app: &mut App, events| {
+        context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 576.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let mut actions = Vec::new();
+                app.draw_ui(ui, &mut actions);
+                assert!(
+                    actions.is_empty(),
+                    "hover prepares metadata without a media action"
+                );
+            },
+        )
+    };
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let output = frame(&mut app, vec![]);
+    let point = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "a.bmp" => {
+                Some(text.pos + text.galley.size() * 0.5)
+            }
+            _ => None,
+        })
+        .expect("background tab label");
+    for _ in 0..4 {
+        frame(&mut app, vec![egui::Event::PointerMoved(point)]);
+    }
+
+    let position = app
+        .preview_folder(id, &paths[1])
+        .expect("prepared folder position");
+    assert_eq!((position.index, position.count), (1, 4));
+    assert!(app.retained_images[&id].image.is_none());
+    assert!(app.retained_images[&id].resume_loading);
+    app.handle_preview_image_seek(id, position.instance, paths[1].clone(), paths[3].clone());
+    assert_eq!(
+        app.tabs
+            .get_mut(id)
+            .expect("background tab")
+            .target
+            .current_path(),
+        paths[3]
+    );
+    let changed = app.preview_folder(id, &paths[3]).expect("new card");
+    assert_ne!(changed.instance, position.instance);
+    assert_eq!(changed.index, 3);
+    app.handle_preview_image_seek(id, position.instance, paths[1].clone(), paths[2].clone());
+    assert_eq!(
+        app.tabs
+            .get_mut(id)
+            .expect("background tab")
+            .target
+            .current_path(),
+        paths[3]
+    );
+    assert_eq!(app.tabs.active_id(), Some(active));
+    assert_eq!(app.media_generation, instance);
+    assert_eq!(app.image_generation, loader);
+    assert!(app.session.is_none());
+    assert!(Arc::ptr_eq(
+        &app.image.as_ref().expect("unchanged foreground").decoded,
+        &pixels
+    ));
+    // Hovering must not freeze the defaults a fresh tab would inherit later.
+    app.reading_mode = true;
+    app.reading_settings.page_count = 2;
+    app.activate_tab(id);
+    wait_image(&mut app);
+    assert!(app.reading_mode);
+    assert_eq!(app.reading_settings.page_count, 2);
+    assert_eq!(app.path.as_ref(), Some(&paths[3]));
+    assert_eq!(
+        app.image
+            .as_ref()
+            .expect("selected original")
+            .decoded
+            .frames[0]
+            .rgba[0],
+        130
+    );
+}
+
+#[test]
+fn unopened_image_folder_preparation_is_latest_only_and_rejects_closed_owners() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_tab_preview::tests::unopened_image_folder_preparation_is_latest_only_and_rejects_closed_owners",
+    ) else {
+        return;
+    };
+    let (mut app, _, active, _) = fixture(&root);
+    let mut ids = Vec::new();
+    let mut paths = Vec::new();
+    for folder in ["first", "second"] {
+        let directory = root.join(folder);
+        std::fs::create_dir(&directory).expect("owned folder");
+        let path = directory.join("a.bmp");
+        write_bitmap(&path, 2, 2, [10, 20, 30, 255]);
+        write_bitmap(&directory.join("b.bmp"), 2, 2, [40, 50, 60, 255]);
+        let id = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.tabs.activate(active);
+        app.prepare_image_tab(Some(id));
+        ids.push(id);
+        paths.push(path);
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while app.preview_folder(ids[1], &paths[1]).is_none() {
+        app.finish_image_tab_preparation();
+        assert!(
+            Instant::now() < deadline,
+            "background Shell order completion"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        app.preview_folder(ids[1], &paths[1]).expect("folder").count,
+        2
+    );
+    assert!(
+        app.retained_images[&ids[0]].folder_snapshot.is_none(),
+        "superseded completion is not applied"
+    );
+    assert_eq!(app.tabs.active_id(), Some(active));
+    assert!(
+        app.retained_images
+            .values()
+            .all(|saved| saved.image.is_none())
+    );
+    app.prepare_image_tab(Some(ids[0]));
+    app.close_tab_unchecked(ids[0]);
+    app.finish_image_tab_preparation();
+    assert!(!app.retained_images.contains_key(&ids[0]));
+    assert!(app.image_tab_preparation.pending.is_none());
+    app.prepare_image_tab(None);
+    assert!(app.image_tab_preparation.pending.is_none());
+}

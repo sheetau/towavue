@@ -661,10 +661,11 @@ fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video:
         String::from_utf8_lossy(&output.stderr)
     );
     let audio = video.with_file_name("transfer-silence.wav");
-    for (path, kind) in [
-        (image, MediaKind::Image),
-        (video.to_owned(), MediaKind::Video),
-        (audio, MediaKind::Audio),
+    for (path, kind, prepared) in [
+        (image.clone(), MediaKind::Image, false),
+        (image, MediaKind::Image, true),
+        (video.to_owned(), MediaKind::Video, false),
+        (audio, MediaKind::Audio, false),
     ] {
         let source = host.add_application(None).expect("unopened source");
         let target = host.add_application(None).expect("unopened destination");
@@ -684,7 +685,14 @@ fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video:
             app.toggle_tab_mute(id);
         }
         assert!(app.session.is_none() && app.retained_playback.is_empty());
-        assert!(app.image.is_none() && app.retained_images.is_empty());
+        if prepared {
+            app.prepare_image_tab(Some(id));
+            assert!(app.retained_images[&id].image.is_none());
+            app.prepare_image_tab(None);
+        } else {
+            assert!(app.retained_images.is_empty());
+        }
+        assert!(app.image.is_none());
         let request = app.tab_detach_request(id).expect("unopened native request");
         app.validate_tab_transfer(&request)
             .expect("valid unopened owner");

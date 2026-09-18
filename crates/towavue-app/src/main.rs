@@ -459,6 +459,8 @@ struct ImagePreviewPresentation {
 }
 
 struct RetainedImageTab {
+    // Metadata-only hover preparation must not freeze fresh activation defaults.
+    prepared_only: bool,
     path: PathBuf,
     instance: u64,
     view: ImageViewState,
@@ -872,6 +874,7 @@ struct Application<N> {
     file_search: towavue_runtime_windows::FileSearch,
     native_ime_composing: bool,
     folder_order: FolderOrderProvider,
+    image_tab_preparation: image_tab_preview::Preparation,
     pending_folder: Option<(u64, FolderIntent)>,
     folder_refresh_started: Instant,
     folder_snapshot: Option<FolderSnapshot>,
@@ -1141,6 +1144,7 @@ where
             file_search,
             native_ime_composing: false,
             folder_order,
+            image_tab_preparation: image_tab_preview::Preparation::default(),
             pending_folder: None,
             folder_refresh_started: Instant::now(),
             folder_snapshot: None,
@@ -1686,6 +1690,7 @@ where
         self.image_handoff = None;
         self.cancel_view_drag();
         RetainedImageTab {
+            prepared_only: false,
             path: self.path.clone().expect("displayed image path"),
             instance: self.media_generation,
             view: self.image_view,
@@ -1719,8 +1724,10 @@ where
     fn restore_image_tab(&mut self, saved: RetainedImageTab) {
         self.media_generation = saved.instance;
         self.image_view = saved.view;
-        self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
-        self.reading_settings = saved.reading_settings;
+        if !saved.prepared_only {
+            self.reading_mode = saved.reading_mode && !self.command_context().has_unsaved_edits;
+            self.reading_settings = saved.reading_settings;
+        }
         self.filmstrip_open = saved.filmstrip_open;
         self.filmstrip.restore_view(saved.filmstrip_view);
         self.timeline_open = saved.timeline_open;
@@ -2923,6 +2930,7 @@ where
             AppEvent::FolderReady => {
                 self.finish_folder_load();
                 self.finish_audio_folder_loads();
+                self.finish_image_tab_preparation();
             }
             AppEvent::FilmstripReady => {
                 if let Some(context) = self.ui_context.clone() {
@@ -4881,6 +4889,7 @@ where
             .incoming_tab_pointer
             .filter(|_| self.accepts_tab_drop());
         let mut preview_target = None;
+        let mut image_preparation_target = None;
         let preview_allowed = !self.modal_input_blocked()
             && self.incoming_tab_pointer.is_none()
             && !self.palette_open
@@ -5308,6 +5317,9 @@ where
                                         response.rect.min.x = rect.min.x;
                                         response.interact_rect = response.rect.intersect(clip);
                                         let hovered = media_preview::tab_hovered(&response);
+                                        if hovered && tab.target.media_kind() == MediaKind::Image {
+                                            image_preparation_target = Some(tab.id);
+                                        }
                                         let background = hovered
                                             .then(|| self.retained_playback.get(&tab.id))
                                             .flatten()
@@ -5474,6 +5486,7 @@ where
             self.active_export.as_mut(),
             loading,
         );
+        self.prepare_image_tab(image_preparation_target);
         self.tab_preview.request(
             preview_target,
             &self.preview_cache,
@@ -8493,6 +8506,7 @@ where
     }
 
     fn remove_tab(&mut self, id: TabId, remember: bool) {
+        self.image_tab_preparation.cancel_for(id);
         resume::record(self, true);
         if self.tabs.gallery() == Some(id) {
             let was_active = self.tabs.active_id() == Some(id);

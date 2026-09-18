@@ -216,3 +216,149 @@ fn search_result_dismissal_is_query_local_and_recent_results_stay_deduplicated()
     assert!(picker_text(&output, "image-new.png").is_some());
     assert_eq!(output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "image-old.png")).count(), 1);
 }
+
+#[test]
+fn filename_priority_and_full_row_background_survive_hover_and_selection() {
+    for folders in [false, true] {
+        for density in [1.0, 1.25, 2.0] {
+            for width in [240.0, 600.0] {
+                for long in [false, true] {
+                    let context = crate::fonts::test_context();
+                    context.enable_accesskit();
+                    context.global_style_mut(|style| {
+                        crate::chrome::style(style);
+                        style.animation_time = 0.0;
+                        style.interaction.tooltip_delay = 60.0;
+                    });
+                    let name = if long {
+                        "long-filename-".repeat(20) + ".png"
+                    } else {
+                        "2026-09-18_holiday_photo_0123.png".into()
+                    };
+                    let parent =
+                        "C:/long-parent-directory/".to_owned() + &"nested-directory/".repeat(30);
+                    let paths = [
+                        PathBuf::from(format!("{parent}{name}")),
+                        PathBuf::from(format!("{parent}second.png")),
+                    ];
+                    let sources = OpenSources {
+                        files: &paths,
+                        folders: &paths,
+                        ..Default::default()
+                    };
+                    let mut palette = CommandPalette::default();
+                    palette.open_files(folders);
+                    let render = |palette: &mut CommandPalette, events| {
+                        open_frame_at(
+                            &context,
+                            palette,
+                            sources,
+                            events,
+                            (egui::vec2(width, 400.0), 0.0, density),
+                        )
+                        .0
+                    };
+                    let mut output = render(&mut palette, vec![]);
+                    for _ in 0..4 {
+                        output = render(&mut palette, vec![]);
+                    }
+                    let rect = |output: &egui::FullOutput, path: &Path| {
+                        let tree = output
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .expect("tree");
+                        let bounds = tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(path.to_string_lossy().as_ref()))
+                            .expect("path")
+                            .1
+                            .bounds()
+                            .expect("bounds");
+                        egui::Rect::from_min_max(
+                            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                        )
+                    };
+                    let body = rect(&output, &paths[0]);
+                    let (label, clip) = picker_text(&output, &name).expect("filename");
+                    let label_pos = label.pos;
+                    assert!(label.galley.size().x <= body.width() * 0.8 + 1.0 / density);
+                    if long {
+                        assert!(label.galley.elided);
+                        assert!(
+                            label.galley.size().x > body.width() * 0.6,
+                            "filename receives priority over the long parent"
+                        );
+                    } else if width == 600.0 {
+                        assert!(
+                            !label.galley.elided,
+                            "fitting filename must remain complete"
+                        );
+                    }
+                    assert!(
+                        clip.contains_rect(egui::Rect::from_min_size(
+                            label.pos,
+                            label.galley.size()
+                        ))
+                    );
+                    let assert_background =
+                        |output: &egui::FullOutput, body: egui::Rect, label: &str| {
+                            let point = button_position(output, label);
+                            let full = egui::Rect::from_min_max(
+                                body.min,
+                                body.max + egui::vec2(22.0, 0.0),
+                            );
+                            assert!(
+                                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                            egui::Shape::Rect(painted) if painted.fill == crate::chrome::HOVER
+                                && painted.rect.min.distance(full.min) < 0.1
+                                && painted.rect.max.distance(full.max) < 0.1
+                                && painted.rect.contains(point))),
+                                "background includes the independent removal button"
+                            );
+                        };
+                    assert_background(
+                        &output,
+                        body,
+                        &format!("Remove from Recently Opened: {}", paths[0].display()),
+                    );
+                    let second = rect(&output, &paths[1]);
+                    let before = picker_text(&output, "second.png").expect("second").0.pos;
+                    for point in [
+                        second.center(),
+                        second.right_center() + egui::vec2(11.0, 0.0),
+                    ] {
+                        render(&mut palette, vec![egui::Event::PointerMoved(point)]);
+                        output = render(&mut palette, vec![]);
+                        assert_eq!(rect(&output, &paths[1]), second);
+                        assert_eq!(
+                            picker_text(&output, "second.png").expect("second").0.pos,
+                            before
+                        );
+                        assert_eq!(picker_text(&output, &name).expect("first").0.pos, label_pos);
+                        assert_background(
+                            &output,
+                            second,
+                            &format!("Remove from Recently Opened: {}", paths[1].display()),
+                        );
+                    }
+                    output = render(
+                        &mut palette,
+                        vec![
+                            egui::Event::PointerGone,
+                            key(egui::Key::ArrowDown, egui::Modifiers::NONE),
+                        ],
+                    );
+                    assert_eq!(rect(&output, &paths[1]), second);
+                    assert_background(
+                        &output,
+                        second,
+                        &format!("Remove from Recently Opened: {}", paths[1].display()),
+                    );
+                }
+            }
+        }
+    }
+}

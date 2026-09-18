@@ -402,10 +402,14 @@ impl CommandPalette {
         if (up || down || query_changed || selection_moved)
             && let Some(index) = selected
         {
+            // Match ScrollArea's wrapped salt in egui 0.35. Loading the raw
+            // tuple gives a different ID and loses the saved viewport offset.
             // Reveal before virtualization, moving only far enough to expose the row.
-            let offset =
-                egui::scroll_area::State::load(ui.ctx(), ui.make_persistent_id(scroll_salt))
-                    .map_or(0.0, |state| state.offset.y);
+            let offset = egui::scroll_area::State::load(
+                ui.ctx(),
+                ui.make_persistent_id(egui::IdSalt::new(scroll_salt)),
+            )
+            .map_or(0.0, |state| state.offset.y);
             let top = index as f32 * row_height;
             let bottom = top + row_height;
             scroll = scroll
@@ -438,9 +442,8 @@ impl CommandPalette {
                 let selected_row = selected == Some(index);
                 let close = selected_row || ui.rect_contains_pointer(row);
                 let mut body = row;
-                if close {
-                    body.max.x -= 22.0;
-                }
+                body.max.x -= 22.0;
+                let background = ui.painter().add(egui::Shape::Noop);
                 let group = if self.folders && index == 0 {
                     "folders"
                 } else if !self.folders && index == 0 && recent_count > 0 {
@@ -457,31 +460,39 @@ impl CommandPalette {
                         egui::Stroke::new(1.0, crate::chrome::BORDER),
                     );
                 }
+                let (name_width, parent_width, group_width) =
+                    file_label_widths(ui, body.width(), &name, group);
                 let response = ui
                     .push_id(path, |ui| {
+                        row_content_style(ui);
                         ui.put(
                             body,
                             egui::Button::selectable(
                                 selected_row,
                                 (
-                                    name.as_ref().atom_max_width(body.width() * 0.65),
+                                    name.as_ref().atom_max_width(name_width),
                                     egui::RichText::new(parent.as_ref())
                                         .small()
                                         .color(crate::chrome::MUTED)
-                                        .atom_max_width(body.width() * 0.6),
+                                        .atom_max_width(parent_width)
+                                        .atom_shrink(true),
                                     egui::Atom::grow(),
                                     egui::RichText::new(group)
                                         .small()
                                         .color(crate::chrome::MUTED)
-                                        .atom_max_width(body.width() * 0.3),
+                                        .atom_max_width(group_width),
                                 ),
                             )
                             .truncate()
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::NONE)
                             .min_size(body.size()),
                         )
                     })
                     .inner
                     .help_text(path.to_string_lossy());
+                ui.painter()
+                    .set(background, row_background(ui, row, &response, selected_row));
                 ui.ctx().accesskit_node_builder(response.id, |node| {
                     node.clear_toggled();
                     node.set_label(path.to_string_lossy().as_ref());
@@ -540,6 +551,66 @@ impl CommandPalette {
         });
         chosen
     }
+}
+
+fn file_label_widths(ui: &egui::Ui, width: f32, name: &str, group: &str) -> (f32, f32, f32) {
+    let available =
+        (width - 2.0 * ui.spacing().button_padding.x - 3.0 * ui.spacing().icon_spacing).max(0.0);
+    let measure = |text: egui::WidgetText| {
+        text.into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+        .size()
+        .x
+    };
+    let name = measure(name.into()).min(available * 0.8);
+    let remainder = (available - name).max(0.0);
+    let group = measure(egui::RichText::new(group).small().into()).min(remainder * 0.6);
+    (name, remainder - group, group)
+}
+
+fn row_content_style(ui: &mut egui::Ui) {
+    // The row owns its complete background. Equal frameless content margins
+    // also keep glyphs stationary as the pointer moves to the close button.
+    let widgets = &mut ui.visuals_mut().widgets;
+    for visuals in [
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+        &mut widgets.noninteractive,
+    ] {
+        visuals.bg_stroke = egui::Stroke::NONE;
+        visuals.expansion = 0.0;
+    }
+}
+
+fn row_background(
+    ui: &egui::Ui,
+    row: egui::Rect,
+    response: &egui::Response,
+    selected: bool,
+) -> egui::Shape {
+    let hovered = response.enabled() && ui.rect_contains_pointer(row);
+    if !selected && !hovered && !response.has_focus() && !response.is_pointer_button_down_on() {
+        return egui::Shape::Noop;
+    }
+    let visuals = if hovered && !selected {
+        ui.visuals().widgets.hovered
+    } else {
+        ui.style().interact_selectable(response, selected)
+    };
+    egui::epaint::RectShape::new(
+        row,
+        visuals.corner_radius,
+        visuals.weak_bg_fill,
+        visuals.bg_stroke,
+        egui::StrokeKind::Inside,
+    )
+    .into()
 }
 
 fn open_target(modifiers: egui::Modifiers) -> OpenTarget {
@@ -1654,6 +1725,40 @@ mod tests {
                         }
                     }
                     assert!(unchanged_visible_steps > 0 && edge_steps > 0);
+                    let mut reverse_visible = 0;
+                    let mut reverse_edges = 0;
+                    for _ in 0..24 {
+                        let old_title = title(&palette);
+                        let (old, clip) = picker_text(&output, &old_title).expect("selected text");
+                        let old_y = old.pos.y;
+                        let old_index = palette.selected.expect("selected row");
+                        output = render(
+                            &mut palette,
+                            vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+                        );
+                        for _ in 0..3 {
+                            output = render(&mut palette, vec![]);
+                        }
+                        let index = palette.selected.expect("selected row");
+                        let (selected, selected_clip) =
+                            picker_text(&output, &title(&palette)).expect("revealed selection");
+                        if index < old_index {
+                            let expected = old_y - (old_index - index) as f32 * 22.0;
+                            if expected - 4.0 >= clip.top() {
+                                assert!(
+                                    (selected.pos.y - expected - selected_clip.top() + clip.top())
+                                        .abs()
+                                        <= 1.1,
+                                    "reverse inside viewport must not scroll: mode={mode}, {size:?}, {density}, {old_index}->{index}, expected={expected}, actual={}",
+                                    selected.pos.y
+                                );
+                                reverse_visible += 1;
+                            } else {
+                                reverse_edges += 1;
+                            }
+                        }
+                    }
+                    assert!(reverse_visible > 0 && reverse_edges > 0);
                     // Reopen and wrap directly from the first to last enabled row, then back.
                     if mode == 0 {
                         palette.reset();

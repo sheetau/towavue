@@ -74,11 +74,13 @@ impl CommandPalette {
                     let selected = self.selected == Some(index);
                     let close = index < recent_count && (selected || ui.rect_contains_pointer(row));
                     let mut body = row;
-                    if close {
+                    if index < recent_count {
                         body.max.x -= 22.0;
                     }
+                    let background = ui.painter().add(egui::Shape::Noop);
                     let response = ui
                         .push_id(definition.id, |ui| {
+                            row_content_style(ui);
                             ui.add_enabled_ui(enabled[index], |ui| {
                                 ui.put(
                                     body,
@@ -97,6 +99,8 @@ impl CommandPalette {
                                         ),
                                     )
                                     .truncate()
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE)
                                     .min_size(body.size()),
                                 )
                             })
@@ -112,6 +116,8 @@ impl CommandPalette {
                                     .wrap(),
                             );
                         });
+                    ui.painter()
+                        .set(background, row_background(ui, row, &response, selected));
                     context.accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
                         node.set_label(definition.title);

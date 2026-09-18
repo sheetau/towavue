@@ -180,10 +180,11 @@ impl Playlist {
                     let offset = self.scroll_offset;
                     let top = index as f32 * 32.0;
                     let height = ui.available_height();
+                    let bottom = top + 32.0 + if index + 1 == items.len() { 8.0 } else { 0.0 };
                     let offset = if top < offset {
                         top
-                    } else if top + 32.0 > offset + height {
-                        (top + 32.0 - height).max(0.0)
+                    } else if bottom > offset + height {
+                        (bottom - height).max(0.0)
                     } else {
                         offset
                     };
@@ -204,6 +205,11 @@ impl Playlist {
                 }
             }
             let output = scroll.show_rows_styled(ui, 32.0, items.len(), |ui, rows| {
+                // The virtual child begins at rows.start. Extend its minimum to the
+                // list end plus padding, keeping the scroll viewport at the media edge.
+                if !items.is_empty() {
+                    ui.set_min_height((items.len() - rows.start) as f32 * 32.0 + 8.0);
+                }
                 for index in rows {
                     let item = items[index];
                     self.visible.push(item.path.clone());
@@ -234,6 +240,7 @@ impl Playlist {
                                         (text, egui::Atom::grow(), duration),
                                     )
                                     .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE)
                                     .truncate(),
                                 );
                                 if response.hovered() {
@@ -728,13 +735,14 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
             context.global_style_mut(crate::chrome::style);
+            context.enable_accesskit();
             context.set_pixels_per_point(density);
             let snapshot = snapshot(100);
             for index in [0, 99] {
                 let mut playlist = Playlist::default();
                 let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 300.0));
                 let media = Rect::from_min_max(Pos2::new(0.0, 32.0), Pos2::new(480.0, 276.0));
-                for _ in 0..3 {
+                for pass in 0..3 {
                     let output = context.run_ui(
                         egui::RawInput {
                             screen_rect: Some(screen),
@@ -760,9 +768,153 @@ mod tests {
                         (scroll.bottom() - media.bottom()).abs() <= 1.0 / density,
                         "list reaches the status boundary"
                     );
+                    if pass == 2 {
+                        let tree = output
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .expect("tree");
+                        let label = format!("{}. track-{index}.wav", index + 1);
+                        let bounds = tree
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(label.as_str()))
+                            .expect("edge row")
+                            .1
+                            .bounds()
+                            .expect("row bounds");
+                        let gap = if index == 0 {
+                            bounds.y0 as f32 - media.top()
+                        } else {
+                            media.bottom() - bounds.y1 as f32
+                        };
+                        assert!(
+                            (gap - 8.0).abs() <= 1.0 / density,
+                            "matching edge padding: {index}, {density}, {gap}"
+                        );
+                        assert!(
+                            playlist.visible.len() < 12,
+                            "padding keeps rows virtualized"
+                        );
+                    }
                     assert_eq!(scroll.left(), media.left() + 8.0);
                     assert_eq!(scroll.right(), media.right() - 8.0);
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(_) if (shape.clip_rect.bottom() - media.bottom()).abs() <= 1.0 / density)), "rows paint to the media bottom");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn playlist_row_hover_is_borderless_and_both_captions_stay_centered() {
+        for density in [1.0, 1.25, 2.0] {
+            for width in [240.0, 960.0] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(|style| {
+                    crate::chrome::style(style);
+                    style.animation_time = 0.0;
+                    style.interaction.tooltip_delay = 60.0;
+                });
+                let snapshot = snapshot(2);
+                let mut playlist = Playlist::default();
+                let frame = |playlist: &mut Playlist, events| {
+                    context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(Rect::from_min_size(
+                                Pos2::ZERO,
+                                Vec2::new(width, 240.0),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            assert!(
+                                playlist
+                                    .show(ui, Some(&snapshot), Some(&snapshot.items[0].path), true)
+                                    .is_none()
+                            );
+                        },
+                    )
+                };
+                frame(&mut playlist, vec![]);
+                for _ in 0..2 {
+                    let request = playlist.duration_request().expect("row duration");
+                    playlist.finish_duration(request, Some(Duration::from_secs(123)));
+                }
+                for index in 0..2 {
+                    let output = frame(&mut playlist, vec![Event::PointerGone]);
+                    let label = format!("{}. track-{index}.wav", index + 1);
+                    let bounds = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label.as_str()))
+                        .expect("row")
+                        .1
+                        .bounds()
+                        .expect("bounds");
+                    let row = Rect::from_min_max(
+                        Pos2::new(bounds.x0 as f32, bounds.y0 as f32),
+                        Pos2::new(bounds.x1 as f32, bounds.y1 as f32),
+                    );
+                    for held in [false, true] {
+                        let mut events = vec![Event::PointerMoved(row.center())];
+                        if held {
+                            events.push(Event::PointerButton {
+                                pos: row.center(),
+                                button: egui::PointerButton::Primary,
+                                pressed: true,
+                                modifiers: egui::Modifiers::NONE,
+                            });
+                        }
+                        frame(&mut playlist, events);
+                        let output = frame(&mut playlist, vec![]);
+                        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                            Shape::Rect(rect) if rect.rect == row && rect.fill == crate::chrome::HOVER)),
+                            "hover bounds: density={density}, width={width}, index={index}, held={held}, row={row:?}, fills={:?}",
+                            output.shapes.iter().filter_map(|shape| match &shape.shape {
+                                Shape::Rect(rect) if rect.fill == crate::chrome::HOVER => Some(rect.rect), _ => None
+                            }).collect::<Vec<_>>());
+                        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                            Shape::Rect(rect) if rect.rect.intersects(row.shrink(2.0)) && rect.stroke.width > 0.0)),
+                            "hover and held backgrounds have no border");
+                        let captions: Vec<_> = texts(&output)
+                            .into_iter()
+                            .filter(|text| {
+                                row.contains(text.pos)
+                                    && (text.galley.text() == label
+                                        || text.galley.text() == "02:03")
+                            })
+                            .collect();
+                        assert_eq!(captions.len(), 2);
+                        for text in captions {
+                            assert!(
+                                (text.pos.y + text.galley.size().y * 0.5 - row.center().y).abs()
+                                    <= 1.0 / density,
+                                "centered filename and duration at {density}"
+                            );
+                        }
+                    }
+                    // Release outside every row so the next trial starts with no held button.
+                    let outside = Pos2::new(width + 10.0, 250.0);
+                    frame(
+                        &mut playlist,
+                        vec![
+                            Event::PointerMoved(outside),
+                            Event::PointerButton {
+                                pos: outside,
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                            Event::PointerGone,
+                        ],
+                    );
                 }
             }
         }

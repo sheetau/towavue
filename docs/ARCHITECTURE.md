@@ -231,7 +231,7 @@ Use live Explorer view order first, preferring a foreground matching window; oth
 
 Initialize the Shell worker's STA only for a current folder request; retain it across requests and balance it on the owning thread, including unwind. Close/invalidation checks stop stale work between native phases, while waiting for a hidden view, and between enumerated items. Cancellation does not trigger filename-order fallback. The request loop remains message-aware when idle; provider drop signals closure without joining a possibly blocked Shell extension on the UI thread. These checks do not interrupt an in-flight native call or prove process-wide shutdown safety.
 
-The audio playlist retains its top/side insets but extends its scroll and paint viewport to the media bottom, without a bottom margin above the status/timeline boundary.
+The audio playlist retains its top/side insets and extends its scroll and paint viewport to the media bottom without an outer bottom margin. Its virtual content ends eight logical points after the last row, matching the top inset; revealing the final row includes that trailing space. Hover fills have no button border, while filenames and durations stay vertically centered in their 32-point rows.
 
 A shared immutable FolderSnapshot feeds filmstrip, playlist, and navigation. Filter supported media after Shell enumeration. Only on Shell failure use Windows natural-name fallback and label it. Empty-folder Open must not replace current media/history/navigation.
 

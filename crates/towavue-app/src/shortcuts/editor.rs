@@ -70,7 +70,7 @@ fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, String> {
     if text.starts_with('\u{feff}') {
         output.push('\u{feff}');
     }
-    output.push_str(EDITOR_BINDING_HEADER);
+    output.push_str(CURRENT_BINDING_HEADER);
     output.push_str(newline);
     let mut written = std::collections::BTreeSet::new();
     for line in text.trim_start_matches('\u{feff}').lines() {

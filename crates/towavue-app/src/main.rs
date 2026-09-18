@@ -1409,6 +1409,7 @@ where
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(12);
         let context = egui::Context::default();
+        chrome::configure_input(&context);
         context.set_visuals(egui::Visuals::dark());
         fonts::install(&context);
         #[cfg(feature = "presentation-verification")]
@@ -15520,8 +15521,48 @@ mod tests {
                     (fitted - egui::vec2(800.0, 400.0)).length() < 0.1,
                     "density={density} selected={selected} fitted={fitted:?}"
                 );
-                app.zoom_image(1.25);
-                assert!((render(&mut app, density) - fitted * 1.25).length() < 0.1);
+                for (logical, physical, modifiers) in [
+                    ("+", winit::keyboard::KeyCode::Equal, ModifiersState::SHIFT),
+                    (
+                        "+",
+                        winit::keyboard::KeyCode::Semicolon,
+                        ModifiersState::SHIFT,
+                    ),
+                    (
+                        "+",
+                        winit::keyboard::KeyCode::NumpadAdd,
+                        ModifiersState::empty(),
+                    ),
+                    (
+                        "=",
+                        winit::keyboard::KeyCode::Equal,
+                        ModifiersState::empty(),
+                    ),
+                ] {
+                    app.image_view.fit();
+                    app.modifiers = modifiers;
+                    let stroke = app
+                        .key_stroke_for(
+                            &WinitKey::Character(logical.into()),
+                            PhysicalKey::Code(physical),
+                        )
+                        .expect("logical zoom key");
+                    assert_eq!(
+                        stroke.to_string(),
+                        if logical == "+" { "Plus" } else { "=" }
+                    );
+                    assert_eq!(
+                        app.shortcuts
+                            .resolve(std::slice::from_ref(&stroke), app.command_context()),
+                        ShortcutMatch::Command(CommandId::ZoomIn)
+                    );
+                    app.process_shortcut(stroke);
+                    assert!(
+                        (render(&mut app, density) - fitted * 1.25).length() < 0.1,
+                        "{logical} changes the actual image extent"
+                    );
+                }
+                app.modifiers = ModifiersState::empty();
                 for (start, delta) in [(0.9, 100.0), (1.1, -100.0), (0.9, 18.0), (1.1, -18.0)] {
                     app.image_view.zoom = ZoomMode::Custom(2.0 * start);
                     render(&mut app, density);

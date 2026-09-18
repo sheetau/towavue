@@ -7,6 +7,7 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v9";
 const EDITOR_BINDING_HEADER: &str = "# towavue shortcuts v8";
 
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
@@ -160,6 +161,7 @@ pub fn defaults() -> ShortcutBindings {
         );
     }
     for (command, key) in [
+        (CommandId::ZoomIn, "="),
         (CommandId::ToggleFullscreen, "Enter"),
         (CommandId::SeekBackward, "J"),
         (CommandId::TogglePause, "K"),
@@ -182,9 +184,14 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let text = text.trim_start_matches('\u{feff}');
-    let editor_bindings = text
+    let zoom_bindings = text
         .lines()
-        .any(|line| line.trim() == EDITOR_BINDING_HEADER);
+        .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let mut implicit_zoom = true;
+    let editor_bindings = zoom_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == EDITOR_BINDING_HEADER);
     let mut declared = std::collections::BTreeSet::new();
     let recent_folder_bindings = editor_bindings
         || text
@@ -223,6 +230,9 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
         declared.insert(command);
         if sequence.trim().is_empty() {
+            if command == CommandId::ZoomIn {
+                implicit_zoom = false;
+            }
             if command == CommandId::ToggleFullscreen {
                 implicit_fullscreen = false;
             }
@@ -246,6 +256,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 && sequences.len() == 1
                 && standard.get(command) == sequences.first();
         }
+        if command == CommandId::ZoomIn {
+            implicit_zoom = !zoom_bindings
+                && sequences.len() == 1
+                && standard.get(command) == sequences.first();
+        }
         let inherit = (legacy
             && matches!(
                 command,
@@ -259,7 +274,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ToggleReadingAxis
                         | CommandId::ReverseReadingOrder
                 )
-            || command == CommandId::ToggleFullscreen && implicit_fullscreen)
+            || command == CommandId::ToggleFullscreen && implicit_fullscreen
+            || command == CommandId::ZoomIn && implicit_zoom)
             && sequences.len() == 1
             && standard.get(command) == sequences.first();
         if inherit {
@@ -367,6 +383,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ReverseReadingFolderOrder
                 ))
                 && !declared.contains(&definition.id)
+                || definition.id == CommandId::ZoomIn && implicit_zoom
         })
     {
         let contexts: Vec<_> = [
@@ -391,8 +408,14 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .all(definition.id)
             .iter()
             .filter(|candidate| {
+                // Only the newly inherited Equals alternative may be pruned here.
+                // Preserve the old primary Plus binding and explicit custom choices.
+                if definition.id == CommandId::ZoomIn && candidate.to_string() != "=" {
+                    return true;
+                }
                 !towavue_core::command_definitions().iter().any(|other| {
-                    declared.contains(&other.id)
+                    other.id != definition.id
+                        && declared.contains(&other.id)
                         && !(matches!(
                             definition.id,
                             CommandId::ReadingLeft | CommandId::ReadingRight
@@ -416,7 +439,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{EDITOR_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{CURRENT_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
     for definition in towavue_core::command_definitions() {
         let command = definition.id;
@@ -1625,6 +1648,67 @@ mod tests {
             reloaded.get(CommandId::ZoomIn),
             bindings.get(CommandId::ZoomIn)
         );
+    }
+
+    #[test]
+    fn zoom_equals_migrates_only_old_defaults_and_preserves_custom_keys_and_prefixes() {
+        let keys = |bindings: &ShortcutBindings| {
+            bindings
+                .all(CommandId::ZoomIn)
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(keys(&defaults()), ["Plus", "="]);
+        for header in [
+            "",
+            MULTI_BINDING_HEADER,
+            RECENT_FOLDER_BINDING_HEADER,
+            EDITOR_BINDING_HEADER,
+        ] {
+            let migrated =
+                parse(&format!("{header}\nzoom_in = Plus\n"), defaults()).expect("old default");
+            assert_eq!(keys(&migrated), ["Plus", "="]);
+            assert_eq!(
+                parse(&serialize(&migrated), defaults()).expect("round trip"),
+                migrated
+            );
+            for custom in ["=", "= X"] {
+                for zoom in ["", "zoom_in = Plus\n"] {
+                    let bindings = parse(
+                        &format!("{header}\n{zoom}open_file = {custom}\n"),
+                        defaults(),
+                    )
+                    .expect("custom prefix");
+                    assert_eq!(keys(&bindings), ["Plus"]);
+                    assert_eq!(
+                        bindings
+                            .get(CommandId::OpenFile)
+                            .expect("custom key")
+                            .to_string(),
+                        custom
+                    );
+                }
+            }
+        }
+        for header in [EDITOR_BINDING_HEADER, CURRENT_BINDING_HEADER] {
+            for custom in ["", "=", "Ctrl+Z", "Plus | Ctrl+Q"] {
+                let bindings = parse(&format!("{header}\nzoom_in = {custom}\n"), defaults())
+                    .expect("custom zoom");
+                let expected: Vec<_> = custom.split(" | ").filter(|key| !key.is_empty()).collect();
+                assert_eq!(keys(&bindings), expected);
+                assert_eq!(
+                    parse(&serialize(&bindings), defaults()).expect("round trip"),
+                    bindings
+                );
+            }
+        }
+        let explicit = parse(
+            &format!("{CURRENT_BINDING_HEADER}\nzoom_in = Plus\n"),
+            defaults(),
+        )
+        .expect("removed alternative");
+        assert_eq!(keys(&explicit), ["Plus"]);
     }
 
     #[test]

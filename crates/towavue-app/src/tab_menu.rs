@@ -130,9 +130,9 @@ pub fn show(
         &[
             CloseTab,
             CloseOtherTabs,
+            CloseAllTabs,
             CloseTabsLeft,
             CloseTabsRight,
-            CloseAllTabs,
         ][..],
         &[ReopenClosedTab],
         &[ToggleMute],
@@ -163,7 +163,8 @@ pub fn show(
             };
             let response = ui.add_enabled(
                 enabled,
-                egui::Button::new(title).shortcut_text(
+                egui::Button::new(title).shortcut_text(crate::menu::shortcut_text(
+                    ui,
                     shortcuts.label(
                         *command,
                         towavue_core::CommandContext {
@@ -175,7 +176,8 @@ pub fn show(
                             ..Default::default()
                         },
                     ),
-                ),
+                    enabled,
+                )),
             );
             if enabled {
                 items.push(response.id);

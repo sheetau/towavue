@@ -3,6 +3,9 @@ use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
 use crate::hover_help::HoverHelp;
 
+#[cfg(test)]
+mod input_tests;
+
 mod reading_icon;
 mod tab_fade;
 pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade};
@@ -99,6 +102,13 @@ pub fn title_layout(top_inset: f32, top: f32, density: f32) -> TitleLayout {
         tab_height,
         drag_top: top + hidden,
     }
+}
+
+pub fn configure_input(context: &egui::Context) {
+    // Native monitor DPI still determines pixels per point. Application input
+    // may zoom media, but must never change the GUI's independent zoom factor.
+    context.options_mut(|options| options.zoom_with_keyboard = false);
+    context.set_zoom_factor(1.0);
 }
 
 pub fn style(style: &mut egui::Style) {

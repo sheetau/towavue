@@ -378,8 +378,8 @@ fn tab_context_right_click_keeps_pointer_anchor_and_keyboard_navigation_tracks_r
     );
     for expected in [
         "Close other tabs",
-        "Close tabs to the left",
         "Close all tabs",
+        "Close tabs to the left",
         "Copy file path",
     ] {
         let menu = tree(
@@ -440,6 +440,18 @@ fn tab_context_close_restores_a_surviving_tab_or_welcome_and_compact_menus_stay_
                 .iter()
                 .find(|(_, n)| n.label().is_some_and(|l| l.starts_with("Close tab ")))
                 .expect("close command");
+            let top = |label: &str| {
+                menu.nodes
+                    .iter()
+                    .find(|(_, node)| node.label().is_some_and(|text| text.starts_with(label)))
+                    .expect("tab command")
+                    .1
+                    .bounds()
+                    .expect("bounds")
+                    .y0
+            };
+            assert!(top("Close other tabs") < top("Close all tabs"));
+            assert!(top("Close all tabs") < top("Close tabs to the left"));
             let bounds = close.1.bounds().expect("bounds");
             assert!(
                 bounds.x0 >= 0.0

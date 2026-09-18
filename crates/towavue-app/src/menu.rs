@@ -6,6 +6,18 @@ use CommandId::*;
 mod choices;
 pub(crate) use choices::Choices;
 
+pub(crate) fn shortcut_text(ui: &egui::Ui, label: String, enabled: bool) -> egui::RichText {
+    let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
+    // Disabled rows already receive the UI's opacity adjustment. Enabled rows
+    // use that same disabled-label color even while their title is hovered.
+    let color = if enabled && ui.is_enabled() {
+        ui.visuals().disable(color)
+    } else {
+        color
+    };
+    egui::RichText::new(label).color(color)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OpenTarget {
     Tab,
@@ -333,10 +345,14 @@ fn show_items(
                         .iter()
                         .find(|definition| definition.id == *id)
                         .expect("menu command is registered");
+                    let enabled = definition.is_enabled(context);
                     let response = ui.add_enabled(
-                        definition.is_enabled(context),
-                        egui::Button::new(definition.title)
-                            .shortcut_text(shortcuts.label(*id, context)),
+                        enabled,
+                        egui::Button::new(definition.title).shortcut_text(shortcut_text(
+                            ui,
+                            shortcuts.label(*id, context),
+                            enabled,
+                        )),
                     );
                     if response.enabled() {
                         items.push(response.id);
@@ -1223,8 +1239,10 @@ mod tests {
     #[test]
     fn menu_opens_and_dispatches_file_action() {
         let context = egui::Context::default();
+        context.global_style_mut(crate::chrome::style);
         let mut shortcuts = ShortcutBindings::default();
         shortcuts.set(OpenFile, "Ctrl+K Ctrl+O".parse().expect("custom shortcut"));
+        shortcuts.set(ExportAs, "Ctrl+Alt+E".parse().expect("disabled shortcut"));
         let mut time = 0.0;
         let mut frame = |events| {
             let mut chosen = Vec::new();
@@ -1266,6 +1284,32 @@ mod tests {
         assert!(shortcut.x > open.x);
         let export =
             text_position(&output, "Export as").expect("disabled export stays discoverable");
+        let color = |output: &egui::FullOutput, label: &str| {
+            let shape = output.shapes.iter().find(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)).expect("menu text");
+            context
+                .tessellate(vec![shape.clone()], output.pixels_per_point)
+                .into_iter()
+                .find_map(|shape| match shape.primitive {
+                    egui::epaint::Primitive::Mesh(mesh) => {
+                        mesh.vertices.first().map(|vertex| vertex.color)
+                    }
+                    _ => None,
+                })
+                .expect("painted text color")
+        };
+        let disabled = color(&output, "Export as");
+        assert_eq!(color(&output, "Ctrl+K Ctrl+O"), disabled);
+        assert_eq!(
+            color(&output, "Ctrl+Alt+E"),
+            disabled,
+            "disabled shortcut is not dimmed twice"
+        );
+        let hovered = frame(vec![egui::Event::PointerMoved(open)]).0;
+        assert_eq!(
+            color(&hovered, "Ctrl+K Ctrl+O"),
+            disabled,
+            "hover changes the title, not the shortcut"
+        );
         assert!(
             click(&mut frame, export).is_empty(),
             "no media means no export action"

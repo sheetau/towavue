@@ -21,6 +21,10 @@ pub struct FileDetailsCache {
 }
 
 impl FileDetailsCache {
+    pub fn is_idle(&self) -> bool {
+        self.worker.is_idle()
+    }
+
     pub fn new() -> std::io::Result<Self> {
         Ok(Self {
             worker: LatestTask::new("towavue-status-file-details")?,

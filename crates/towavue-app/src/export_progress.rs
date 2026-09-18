@@ -97,7 +97,7 @@ fn taskbar_progress(export: Option<&ActiveExport>) -> towavue_runtime_windows::T
     let Some(export) = export else {
         return TaskbarProgress::Hidden;
     };
-    if export.cancelling {
+    if !export.job.cancellable() || export.cancelling {
         return TaskbarProgress::Indeterminate;
     }
     export
@@ -142,7 +142,9 @@ mod taskbar_tests {
             app.active_export = Some(ActiveExport {
                 progress: ExportProgress::new(&request, &options, Some(Duration::from_secs(100))),
                 // Same-source validation rejects this job without reading/writing media.
-                job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
+                job: ExportJob::start(request.clone(), |_| {})
+                    .expect("fixture worker")
+                    .into(),
                 tab,
                 request,
                 options,
@@ -318,8 +320,15 @@ fn preparation_label(analyzing: bool) -> &'static str {
 }
 
 pub(super) fn status(export: &ActiveExport, now: Instant) -> String {
+    if !export.job.cancellable() {
+        return "Saving the source file…".into();
+    }
     if export.cancelling {
-        "Cancelling export…".to_owned()
+        if export.job.is_save() {
+            "Cancelling save…".to_owned()
+        } else {
+            "Cancelling export…".to_owned()
+        }
     } else if export.encoded.is_zero() {
         format!(
             "{} · elapsed {}",

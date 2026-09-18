@@ -218,21 +218,25 @@ mod tests {
     }
 
     #[test]
-    fn group_save_continues_after_each_export_and_preserves_sources() {
-        let root =
-            std::env::temp_dir().join(format!("towavue-group-export-{}", std::process::id()));
-        std::fs::create_dir_all(&root).expect("owned fixture directory");
+    fn group_save_continues_after_each_source_save_and_preserves_originals() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "tab_menu::tests::group_save_continues_after_each_source_save_and_preserves_originals",
+        ) else {
+            return;
+        };
         let (sent, events) = std::sync::mpsc::channel();
         let mut app = Application::new(None, move |event| {
             let _ = sent.send(event);
         })
         .expect("app");
-        let bytes = b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00";
         let mut tabs = Vec::new();
+        let mut originals = Vec::new();
         for index in 0..2 {
-            let path = root.join(format!("{index}.ppm"));
-            std::fs::write(&path, bytes).expect("owned source");
-            let id = app.tabs.open_new(path, MediaKind::Image);
+            let path = root.join(format!("{index}.bmp"));
+            crate::tab_transfer::tests::bitmap(&path);
+            originals.push(std::fs::read(&path).expect("original"));
+            let id = app.tabs.open_new(path.clone(), MediaKind::Image);
+            crate::source_save::tests::loaded(&mut app, id, &path);
             app.edits
                 .entry(id)
                 .or_default()
@@ -242,43 +246,39 @@ mod tests {
             tabs.push(id);
         }
         app.dispatch_tab_command(tabs[1], CloseAllTabs);
-        for expected in &tabs {
+        for (index, expected) in tabs.iter().enumerate() {
             assert_eq!(app.tabs.active().expect("dirty tab").id, *expected);
+            // This headless fixture already owns the document identity; pixel
+            // upload is independent of the group-close continuation control.
+            app.image_loader.clear();
+            app.image_loading = false;
+            app.state = crate::PlaybackState::Paused;
             app.resolve_guard(GuardDecision::Save);
             assert!(app.active_export.is_some());
             app.request_guarded(GuardedAction::CloseTabs(tabs.clone()));
             assert_eq!(
                 app.tabs.tabs().len(),
                 2,
-                "active export blocks the whole close request"
+                "save blocks the whole close request"
             );
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while app.active_export.is_some() {
-                let event = events
-                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
-                    .expect("export event");
-                if let crate::AppEvent::Export(event) = event {
-                    app.handle_export_event(event);
-                }
-            }
+            crate::source_save::tests::finish(&mut app, &events);
             assert!(app.export_error.is_none(), "{:?}", app.export_error);
+            let source = root.join(format!("{index}.bmp"));
+            assert_ne!(
+                std::fs::read(&source).expect("saved source"),
+                originals[index]
+            );
+            if app.source_backings.contains_key(expected) {
+                assert_eq!(
+                    std::fs::read(app.media_input_for(Some(*expected), &source).path())
+                        .expect("retained original"),
+                    originals[index]
+                );
+            }
+            assert!(!root.join(format!("{index}.png")).exists());
         }
         assert!(app.tabs.tabs().is_empty() && app.pending_guard.is_none());
         assert_eq!(app.closed_tabs.len(), 3, "includes the closed Gallery");
-        drop(app);
-        for index in 0..2 {
-            let source = root.join(format!("{index}.ppm"));
-            let output = root.join(format!("{index}.png"));
-            assert_eq!(std::fs::read(&source).expect("source"), bytes);
-            assert!(
-                std::fs::read(&output)
-                    .expect("exported PNG")
-                    .starts_with(b"\x89PNG")
-            );
-            std::fs::remove_file(source).expect("remove owned source");
-            std::fs::remove_file(output).expect("remove owned output");
-        }
-        std::fs::remove_dir(root).expect("remove owned directory");
     }
 
     #[test]

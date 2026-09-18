@@ -177,7 +177,9 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     };
     // Same-source rejection makes this busy-state fixture incapable of writing output.
     app.active_export = Some(ActiveExport {
-        job: ExportJob::start(export_request.clone(), |_| {}).expect("rejected fixture job"),
+        job: ExportJob::start(export_request.clone(), |_| {})
+            .expect("rejected fixture job")
+            .into(),
         tab: id,
         progress: export_progress::ExportProgress::new(
             &export_request,

@@ -29,6 +29,7 @@ mod launch_tests;
 
 mod file_operations;
 mod idle_graphics;
+mod source_save;
 
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -60,6 +61,7 @@ type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
 
 pub(crate) struct WindowHost {
     file_operation: Option<file_operations::Transaction>,
+    source_save: Option<source_save::Publication>,
     delete_confirmation_suppressed: bool,
     delete_preference_path: Option<PathBuf>,
     windows: BTreeMap<WindowKey, WindowApplication>,
@@ -89,6 +91,7 @@ impl WindowHost {
             delete_confirmation_suppressed,
             delete_preference_path,
             file_operation: None,
+            source_save: None,
             windows: BTreeMap::new(),
             proxy,
             next_key: 1,
@@ -125,6 +128,8 @@ impl WindowHost {
                 AppEvent::VideoResume(_)
                     | AppEvent::FileOperationSource(..)
                     | AppEvent::FileOperationFinished(..)
+                    | AppEvent::SourceSave(..)
+                    | AppEvent::SourceSavePublished(..)
                     | AppEvent::FileDeleteConfirmed(..)
             ) && let Some(queue) = captured_events.lock().expect("test events").as_mut()
             {
@@ -187,7 +192,7 @@ impl WindowHost {
     }
 
     fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
-        if self.file_operation.is_some() {
+        if self.file_operation.is_some() || self.source_save.is_some() {
             return;
         }
         let local: Vec<_> = self
@@ -388,6 +393,9 @@ impl WindowHost {
             }
             Event::Window(key, AppEvent::FileOperationFinished(serial, result)) => {
                 self.finish_host_file_operation(key, serial, result)
+            }
+            Event::Window(key, AppEvent::SourceSavePublished(serial, result)) => {
+                self.finish_source_publication(key, serial, result)
             }
             Event::Window(key, event) => {
                 if let Some(app) = self.windows.get_mut(&key).filter(|app| !app.exit_requested) {
@@ -597,7 +605,7 @@ impl WindowHost {
     }
 
     fn recover_pending_graphics(&mut self) {
-        if self.file_operation.is_some() {
+        if self.file_operation.is_some() || self.source_save.is_some() {
             return;
         }
         self.recover_pending_graphics_with(|app, device| app.create_graphics_surface(device));
@@ -700,6 +708,7 @@ impl WindowHost {
     }
 
     fn prepare_wait(&mut self) -> ControlFlow {
+        self.advance_source_save();
         self.start_pending_file_operation();
         self.recover_pending_graphics();
         self.remove_closed();

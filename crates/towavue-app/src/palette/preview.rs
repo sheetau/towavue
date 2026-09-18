@@ -12,6 +12,10 @@ pub(super) struct FilePreview {
 }
 
 impl FilePreview {
+    pub fn is_idle(&self) -> bool {
+        self.loader.is_idle()
+    }
+
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
         Ok(Self {
             loader: PreviewLoader::new(cache, notify)?,

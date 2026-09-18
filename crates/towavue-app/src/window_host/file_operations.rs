@@ -14,7 +14,7 @@ pub(super) struct Transaction {
 
 impl WindowHost {
     pub(super) fn start_pending_file_operation(&mut self) {
-        if self.file_operation.is_some() {
+        if self.file_operation.is_some() || self.source_save.is_some() {
             return;
         }
         let Some(owner) = self

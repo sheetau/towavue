@@ -69,6 +69,12 @@ pub(crate) enum Choice {
 }
 
 impl CommandPalette {
+    pub fn preview_is_idle(&self) -> bool {
+        self.preview
+            .as_ref()
+            .is_none_or(|preview| preview.is_idle())
+    }
+
     pub fn outside_press(&self, context: &egui::Context) -> bool {
         !self.fresh
             && !egui::Popup::is_any_open(context)

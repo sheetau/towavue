@@ -578,6 +578,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     })
     .expect("app");
     let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    crate::source_save::tests::loaded(&mut app, tab, &source);
     app.path = Some(source.clone());
     app.media_kind = Some(MediaKind::Image);
     app.state = PlaybackState::Paused;
@@ -643,7 +644,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .any(|value| value.field == MetadataField::Title
                 && value.value == "日本語 exported title")
     );
-    app.dispatch(CommandId::Save);
+    assert!(app.export_current(false, None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert_eq!(app.export_paths.get(&tab), Some(&target));
@@ -668,7 +669,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         }
     }
     apply_ready(&mut app, &events, remove);
-    app.dispatch(CommandId::Save);
+    assert!(app.export_current(false, None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert!(
@@ -685,7 +686,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     }
     apply_ready(&mut app, &events, MetadataExportOptions::default());
     assert!(!app.metadata_export_settings.contains_key(&tab));
-    app.dispatch(CommandId::Save);
+    assert!(app.export_current(false, None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert_eq!(
@@ -731,8 +732,27 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     app.request_guarded(GuardedAction::Exit);
     app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Save));
     assert!(!app.exit_requested);
-    drain_export(&mut app, &events);
+    crate::source_save::tests::finish(&mut app, &events);
     assert!(app.exit_requested && app.export_error.is_none());
+    let saved_bytes = std::fs::read(&source).expect("saved source");
+    assert_ne!(saved_bytes, original);
+    assert_eq!(
+        std::fs::read(app.media_input_for(Some(tab), &source).path()).expect("retained original"),
+        original
+    );
+    assert_eq!(
+        towavue_runtime_windows::decode_image(&source)
+            .expect("saved image")
+            .frames
+            .len(),
+        frames
+    );
+    assert!(
+        values(&source)
+            .iter()
+            .any(|value| value.field == MetadataField::Title
+                && value.value == setting().get(MetadataField::Title).expect("title"))
+    );
     app.exit_requested = false;
     let other_path = root.join(format!("other.{extension}"));
     let other = app.tabs.open_new(other_path.clone(), MediaKind::Image);
@@ -751,7 +771,10 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     apply_ready(&mut app, &events, setting());
     app.request_guarded(GuardedAction::CloseTab(tab));
     assert!(!app.metadata_export_settings.contains_key(&tab));
-    assert_eq!(std::fs::read(&source).expect("source retained"), original);
+    assert_eq!(
+        std::fs::read(&source).expect("saved source retained"),
+        saved_bytes
+    );
 }
 
 #[test]
@@ -970,7 +993,7 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
             .frames,
         expected.frames
     );
-    app.dispatch(CommandId::Save);
+    assert!(app.export_current(false, None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert!(!app.edits[&tab].is_dirty());

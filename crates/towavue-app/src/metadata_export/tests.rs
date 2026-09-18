@@ -543,6 +543,7 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         })
         .expect("app");
         let tab = app.tabs.open_new(source.clone(), kind);
+        crate::source_save::tests::loaded(&mut app, tab, &source);
         app.path = Some(source.clone());
         app.media_kind = Some(kind);
         app.state = PlaybackState::Paused;
@@ -595,7 +596,7 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             towavue_runtime_windows::read_export_metadata(&target, kind).expect("saved metadata");
         assert!(tags.iter().any(|value| value.field == MetadataField::Title
             && value.value == setting().get(MetadataField::Title).expect("title")));
-        app.dispatch(CommandId::Save);
+        assert!(app.export_current(false, None));
         drain_export(&mut app, &events);
         assert!(app.export_error.is_none());
         assert_eq!(app.export_paths.get(&tab), Some(&target));
@@ -604,7 +605,7 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             .set(MetadataField::Title, Some(String::new()))
             .expect("remove title");
         apply(&mut app, removed.clone());
-        app.dispatch(CommandId::Save);
+        assert!(app.export_current(false, None));
         drain_export(&mut app, &events);
         assert!(app.export_error.is_none());
         assert!(
@@ -662,8 +663,22 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             setting()
         );
         assert!(!app.exit_requested);
-        drain_export(&mut app, &events);
+        crate::source_save::tests::finish(&mut app, &events);
         assert!(app.exit_requested && app.export_error.is_none());
+        let saved_bytes = std::fs::read(&source).expect("saved source");
+        assert_ne!(saved_bytes, original);
+        assert_eq!(
+            std::fs::read(app.media_input_for(Some(tab), &source).path())
+                .expect("retained original"),
+            original
+        );
+        assert!(
+            towavue_runtime_windows::read_export_metadata(&source, kind)
+                .expect("source tags")
+                .iter()
+                .any(|value| value.field == MetadataField::Title
+                    && value.value == setting().get(MetadataField::Title).expect("title"))
+        );
         app.exit_requested = false;
         let other = app.tabs.open_new(root.join("other.png"), MediaKind::Image);
         assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
@@ -674,7 +689,10 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         apply(&mut app, setting());
         app.request_guarded(GuardedAction::CloseTab(tab));
         assert!(!app.metadata_export_settings.contains_key(&tab));
-        assert_eq!(std::fs::read(&source).expect("source retained"), original);
+        assert_eq!(
+            std::fs::read(&source).expect("saved source retained"),
+            saved_bytes
+        );
     }
 }
 

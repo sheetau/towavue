@@ -78,7 +78,7 @@ pub enum PromptButtons {
     Ok,
     RetryCancel,
     YesNoCancel,
-    ExportDiscardCancel { discard_all: bool },
+    SaveDiscardCancel { discard_all: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,7 +195,7 @@ pub fn show_prompt(
         move || {
             let _owner = owner;
             let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
-            if let PromptButtons::ExportDiscardCancel { discard_all } = buttons {
+            if let PromptButtons::SaveDiscardCancel { discard_all } = buttons {
                 // SAFETY: this new worker owns its STA through the modal and releases it
                 // on the same thread, including errors. Native accessibility uses COM.
                 unsafe { OleInitialize(None) }?;
@@ -206,7 +206,7 @@ pub fn show_prompt(
                     hwndParent: HWND(native_owner as *mut _),
                     dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
                     pszWindowTitle: w!("Unsaved edits - towavue"),
-                    pszMainInstruction: w!("Export edits before continuing?"),
+                    pszMainInstruction: w!("Save edits before continuing?"),
                     pszContent: PCWSTR(message.as_ptr()),
                     cButtons: choices.len() as u32,
                     pButtons: choices.as_ptr(),
@@ -228,7 +228,7 @@ pub fn show_prompt(
                 PromptButtons::Ok => MB_OK,
                 PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
                 PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
-                PromptButtons::ExportDiscardCancel { .. } => unreachable!("handled above"),
+                PromptButtons::SaveDiscardCancel { .. } => unreachable!("handled above"),
             } | MB_ICONWARNING;
             // The worker retains the HWND owner and UTF-16 buffer for the modal call.
             // MessageBox owns its native UI; no COM or graphics resources cross threads.
@@ -259,7 +259,7 @@ fn unsaved_prompt_buttons(discard_all: bool) -> [TASKDIALOG_BUTTON; 3] {
     [
         TASKDIALOG_BUTTON {
             nButtonID: IDYES.0,
-            pszButtonText: w!("Export and continue"),
+            pszButtonText: w!("Save and continue"),
         },
         TASKDIALOG_BUTTON {
             nButtonID: IDNO.0,
@@ -576,7 +576,7 @@ mod tests {
                     unsafe { label.to_string() }.expect("static label")
                 }),
                 [
-                    "Export and continue",
+                    "Save and continue",
                     if all {
                         "Discard all edits and exit"
                     } else {

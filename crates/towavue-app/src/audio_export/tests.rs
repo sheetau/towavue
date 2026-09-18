@@ -2,14 +2,14 @@ use super::*;
 use crate::audio_export_tests::drain_export;
 use std::os::windows::process::CommandExt;
 
-fn setting() -> AudioExportOptions {
+pub(crate) fn setting() -> AudioExportOptions {
     AudioExportOptions {
         normalize_peak: true,
         channels: AudioChannels::Mono,
     }
 }
 
-fn apply<N: Fn(AppEvent) + Send + Sync + 'static>(
+pub(crate) fn apply<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     options: AudioExportOptions,
 ) {
@@ -420,7 +420,7 @@ fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
     assert_eq!(app.audio_export_settings.get(&tab), Some(&setting()));
 }
 
-fn tone(path: &Path, video: bool) {
+pub(crate) fn tone(path: &Path, video: bool) {
     let mut command = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     );
@@ -454,7 +454,7 @@ fn tone(path: &Path, video: bool) {
     );
 }
 
-fn decoded_samples(path: &Path) -> Vec<f32> {
+pub(crate) fn decoded_samples(path: &Path) -> Vec<f32> {
     let output = std::process::Command::new(
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe"),
     )
@@ -627,55 +627,6 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
             original
         );
     }
-}
-
-#[test]
-fn leaving_guard_saves_with_current_audio_options_before_allowing_exit() {
-    let Some(root) = crate::tests::isolated_test_root(
-        "audio_export::tests::leaving_guard_saves_with_current_audio_options_before_allowing_exit",
-    ) else {
-        return;
-    };
-    let source = root.join("source.wav");
-    let target = root.join("saved.wav");
-    tone(&source, false);
-    let (sender, events) = std::sync::mpsc::channel();
-    let mut app = Application::new(None, move |event| {
-        let _ = sender.send(event);
-    })
-    .expect("app");
-    let tab = app.tabs.open_new(source.clone(), MediaKind::Audio);
-    app.path = Some(source);
-    app.media_kind = Some(MediaKind::Audio);
-    app.edits
-        .entry(tab)
-        .or_default()
-        .push(EditOperation::SetVolume(0.25), MediaKind::Audio);
-    app.export_paths.insert(tab, target.clone());
-    apply(&mut app, setting());
-    app.request_guarded(GuardedAction::Exit);
-    assert!(app.pending_guard.is_some());
-    app.handle_ui_action(UiAction::ResolveGuard(GuardDecision::Save));
-    assert_eq!(
-        app.active_export
-            .as_ref()
-            .expect("guard export")
-            .options
-            .audio,
-        setting()
-    );
-    assert!(!app.exit_requested);
-    drain_export(&mut app, &events);
-    assert!(app.exit_requested);
-    assert!(app.export_error.is_none());
-    assert!(!app.edits[&tab].is_dirty());
-    let output = decoded_samples(&target);
-    assert_eq!(output.len(), 48000);
-    let peak = output
-        .iter()
-        .map(|sample| sample.abs())
-        .fold(0.0_f32, f32::max);
-    assert!((peak - 10_f32.powf(-0.05)).abs() < 0.00004);
 }
 
 pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(

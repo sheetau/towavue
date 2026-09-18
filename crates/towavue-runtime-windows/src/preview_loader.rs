@@ -49,6 +49,11 @@ pub struct PreviewLoader {
 }
 
 impl PreviewLoader {
+    pub fn is_idle(&self) -> bool {
+        let mailbox = self.shared.0.lock().expect("preview mailbox");
+        mailbox.active.is_none() && mailbox.pending.is_empty()
+    }
+
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
         let wic = crate::image::jpeg_wic_preview::worker_enabled();
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));

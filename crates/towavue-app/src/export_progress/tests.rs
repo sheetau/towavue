@@ -24,7 +24,9 @@ fn active(
     ActiveExport {
         progress: ExportProgress::new(&request, &options, duration),
         // Rejected source alias provides an owned, non-writing worker for UI-only state tests.
-        job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
+        job: ExportJob::start(request.clone(), |_| {})
+            .expect("fixture worker")
+            .into(),
         request,
         options,
         tab,

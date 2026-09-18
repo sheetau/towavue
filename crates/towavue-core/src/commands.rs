@@ -915,7 +915,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::DeleteFile, "Delete file", ANY_MEDIA),
     command(CommandId::RenameFile, "Rename file...", ANY_MEDIA),
     command(CommandId::MoveFile, "Move file...", ANY_MEDIA),
-    command(CommandId::Save, "Save exported media", ANY_MEDIA),
+    command(CommandId::Save, "Save", ANY_MEDIA),
     command(CommandId::ExportAs, "Export as", ANY_MEDIA),
     command(
         CommandId::AudioExportOptions,

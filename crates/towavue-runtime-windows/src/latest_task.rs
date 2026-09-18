@@ -8,6 +8,7 @@ type Task = Box<dyn FnOnce(Cancellation) + Send>;
 #[derive(Default)]
 struct Mailbox {
     pending: Option<Task>,
+    running: bool,
     closed: bool,
     cancellation: Cancellation,
 }
@@ -33,12 +34,14 @@ impl LatestTask {
                     if mailbox.closed {
                         return;
                     }
+                    mailbox.running = true;
                     (
                         mailbox.pending.take().expect("pending task"),
                         mailbox.cancellation.clone(),
                     )
                 };
                 task(cancellation);
+                mutex.lock().expect("task mailbox").running = false;
             }
         })?;
         Ok(Self { shared })
@@ -56,6 +59,13 @@ impl LatestTask {
         let mut mailbox = self.shared.0.lock().expect("task mailbox");
         mailbox.cancellation.cancel();
         mailbox.pending = None;
+    }
+
+    /// After clear, remains false until the cancelled closure and all its local
+    /// native readers have been destroyed. The caller must prevent new submits.
+    pub fn is_idle(&self) -> bool {
+        let mailbox = self.shared.0.lock().expect("task mailbox");
+        !mailbox.running && mailbox.pending.is_none()
     }
 }
 
@@ -92,6 +102,7 @@ mod tests {
             started_rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("first task");
+            assert!(!worker.is_idle());
             let (result_tx, result_rx) = mpsc::channel();
             for index in 0..1000 {
                 let tx = result_tx.clone();
@@ -101,6 +112,10 @@ mod tests {
             }
             if clear {
                 worker.clear();
+                assert!(
+                    !worker.is_idle(),
+                    "clear does not release an in-flight native reader"
+                );
             }
             drop(result_tx);
             release_tx.send(()).expect("release");
@@ -111,6 +126,14 @@ mod tests {
                 result_rx.recv_timeout(Duration::from_secs(5)),
                 Err(mpsc::RecvTimeoutError::Disconnected)
             );
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !worker.is_idle() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "closure destruction completes before idle"
+                );
+                std::thread::yield_now();
+            }
         }
     }
 

@@ -219,6 +219,8 @@ pub struct EditHistory {
     cursor: usize,
     saved_cursor: Option<usize>,
     saved_operations: Vec<EditOperation>,
+    saved_source_matches: bool,
+    source_available: bool,
     source_duration: Option<MediaTime>,
     timeline_matches_saved: bool,
     image_matches_saved: bool,
@@ -232,6 +234,8 @@ impl Default for EditHistory {
             cursor: 0,
             saved_cursor: Some(0),
             saved_operations: Vec::new(),
+            saved_source_matches: true,
+            source_available: true,
             source_duration: None,
             timeline_matches_saved: false,
             image_matches_saved: false,
@@ -339,13 +343,33 @@ impl EditHistory {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.saved_cursor != Some(self.cursor)
-            && !self.timeline_matches_saved
-            && !self.image_matches_saved
-            && !effective_edits(self.operations()).eq(effective_edits(&self.saved_operations))
+        !self.source_available
+            || !self.saved_source_matches
+            || (self.saved_cursor != Some(self.cursor)
+                && !self.timeline_matches_saved
+                && !self.image_matches_saved
+                && !effective_edits(self.operations()).eq(effective_edits(&self.saved_operations)))
+    }
+
+    /// Another document saved a different source baseline. Operation/pixel
+    /// equivalence against our old saved plan cannot prove that target is saved.
+    pub fn invalidate_saved_source(&mut self) {
+        self.saved_source_matches = false;
+    }
+
+    /// Retain the edit plan, but do not apply it to uncertain replacement bytes.
+    /// Opening a fresh document restores availability with a fresh history.
+    pub fn invalidate_source(&mut self) {
+        self.source_available = false;
+        self.saved_source_matches = false;
+    }
+
+    pub fn source_available(&self) -> bool {
+        self.source_available
     }
 
     pub fn mark_saved(&mut self) {
+        self.saved_source_matches = true;
         self.saved_cursor = Some(self.cursor);
         self.saved_operations = self.operations().to_vec();
         self.timeline_matches_saved = false;
@@ -353,6 +377,7 @@ impl EditHistory {
     }
 
     pub fn mark_exported(&mut self, operations: &[EditOperation]) {
+        self.saved_source_matches = true;
         self.saved_operations = operations.to_vec();
         // The composed plan length is not an undo cursor. An older exported
         // snapshot is still compared by content when Undo reaches it.
@@ -989,5 +1014,23 @@ mod tests {
 
         assert!(!history.push(EditOperation::SetVolume(0.5), MediaKind::Image));
         assert!(!history.is_dirty());
+    }
+
+    #[test]
+    fn changed_source_baseline_stays_dirty_despite_old_operation_and_pixel_equivalence() {
+        let mut history = EditHistory::default();
+        history.push(EditOperation::FlipHorizontal, MediaKind::Image);
+        history.mark_saved();
+        let saved = history.operations().to_vec();
+        history.invalidate_saved_source();
+        history.set_image_content_match(&saved, &saved, true);
+        assert!(history.is_dirty());
+        history.undo();
+        history.redo();
+        assert!(history.is_dirty());
+        history.mark_exported(&saved);
+        assert!(!history.is_dirty());
+        history.undo();
+        assert!(history.is_dirty());
     }
 }

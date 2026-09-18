@@ -138,6 +138,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn start_prepared_playback(&mut self, id: TabId) -> bool {
+        if !self.document_source_available(Some(id)) {
+            return false;
+        }
         let Some(saved) = self.retained_playback.get(&id) else {
             return false;
         };

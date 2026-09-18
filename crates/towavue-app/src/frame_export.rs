@@ -111,7 +111,7 @@ impl PendingFrameExport {
                 };
                 app.active_export = Some(ActiveExport {
                     progress: export_progress::ExportProgress::new(&request, &options, None),
-                    job,
+                    job: job.into(),
                     tab: self.tab,
                     request,
                     options,

@@ -77,6 +77,7 @@ mod selection;
 mod selection_aspect;
 mod shortcuts;
 mod source_backing;
+mod source_save;
 mod status_file_details;
 mod status_info;
 mod tab_drag;
@@ -299,6 +300,11 @@ enum AppEvent {
         Result<towavue_runtime_windows::FileOperationSource, String>,
     ),
     FileOperationFinished(u64, Result<file_operations::Completed, String>),
+    SourceSave(u64, towavue_runtime_windows::SourceSaveEvent),
+    SourceSavePublished(
+        u64,
+        Result<towavue_runtime_windows::SavedSource, source_save::PublicationError>,
+    ),
     FileDeleteConfirmed(
         u64,
         Result<towavue_runtime_windows::DeleteConfirmation, String>,
@@ -464,7 +470,7 @@ enum FallbackPrompt {
 }
 
 struct ActiveExport {
-    job: ExportJob,
+    job: source_save::Task,
     tab: TabId,
     request: ExportRequest,
     options: ExportOptions,
@@ -976,6 +982,7 @@ struct Application<N> {
     source_backings: BTreeMap<TabId, towavue_runtime_windows::SavedSource>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
+    source_save: source_save::State,
     loading_progress: export_progress::LoadingProgress,
     export_error: Option<String>,
     grid_layouts: grid::GridLayouts,
@@ -1263,6 +1270,7 @@ where
             source_backings: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
+            source_save: source_save::State::default(),
             loading_progress: export_progress::LoadingProgress::default(),
             export_error: None,
             grid_layouts,
@@ -2165,6 +2173,13 @@ where
         path: PathBuf,
         resume: Option<towavue_runtime_windows::VideoResume>,
     ) {
+        if !self.document_source_available(self.displayed_tab) {
+            self.fail(
+                "The original source needs recovery. Reopen the recovered file before playback."
+                    .into(),
+            );
+            return;
+        }
         let Some(renderer) = self.renderer.as_ref() else {
             self.fail("renderer is unavailable".to_owned());
             return;
@@ -2611,6 +2626,12 @@ where
     }
 
     fn request_image_paths(&mut self, paths: Vec<PathBuf>, offset: usize) {
+        if !self.document_source_available(self.displayed_tab) {
+            self.image_error = Some("The original source needs recovery. Reopen the recovered file before editing or exporting.".into());
+            self.image_loading = false;
+            self.request_redraw();
+            return;
+        }
         if !self.filmstrip_open {
             self.filmstrip.clear_previews();
         }
@@ -2989,6 +3010,10 @@ where
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
+        if self.source_save.frozen {
+            self.source_save.deferred.push(event);
+            return;
+        }
         match event {
             AppEvent::ShortcutsChanged(bindings) => {
                 self.shortcuts = bindings;
@@ -3168,6 +3193,8 @@ where
                 }
             }
             AppEvent::Export(event) => self.handle_export_event(event),
+            AppEvent::SourceSave(serial, event) => self.handle_source_save(serial, event),
+            AppEvent::SourceSavePublished(..) => {} // Host owns publication.
             AppEvent::Playback(generation, event) => {
                 if self.file_operations.locked
                     && (self.file_operations.position.is_some()
@@ -3769,6 +3796,14 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if self.source_save.frozen {
+            if self.active_export.is_some() {
+                self.draw_export_status(root.ctx(), actions);
+            } else {
+                root.label("Saving a file…");
+            }
+            return;
+        }
         let previous_selection = self.image_view.selection;
         if root.ctx().current_pass_index() == 0 && self.image_loading && self.ui_context.is_some() {
             // A redraw can overtake the queued decoder wakeup; use an already-ready original.
@@ -4059,7 +4094,14 @@ where
                 context.request_repaint_after(Duration::from_secs(1));
             }
             if ui
-                .add_enabled(!export.cancelling, egui::Button::new("Cancel export"))
+                .add_enabled(
+                    !export.cancelling && export.job.cancellable(),
+                    egui::Button::new(if export.job.is_save() {
+                        "Cancel save"
+                    } else {
+                        "Cancel export"
+                    }),
+                )
                 .clicked()
             {
                 actions.push(UiAction::CancelExport);
@@ -4068,16 +4110,27 @@ where
         if export.continuation.is_some() {
             egui::Modal::new("export-before-continuing".into()).show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
-                chrome::modal_heading(ui, "Exporting before continuing");
+                chrome::modal_heading(
+                    ui,
+                    if export.job.is_save() {
+                        "Saving before continuing"
+                    } else {
+                        "Exporting before continuing"
+                    },
+                );
                 contents(ui);
             });
         } else {
-            egui::Window::new("Exporting")
-                .id("export-progress".into())
-                .anchor(Align2::RIGHT_BOTTOM, [-12.0, -44.0])
-                .resizable(false)
-                .collapsible(false)
-                .show(context, contents);
+            egui::Window::new(if export.job.is_save() {
+                "Saving"
+            } else {
+                "Exporting"
+            })
+            .id("export-progress".into())
+            .anchor(Align2::RIGHT_BOTTOM, [-12.0, -44.0])
+            .resizable(false)
+            .collapsible(false)
+            .show(context, contents);
         }
     }
 
@@ -4090,19 +4143,19 @@ where
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
             chrome::modal_heading(ui, "Unsaved edits");
             ui.separator();
-            ui.label("Export edits before continuing?");
+            ui.label("Save over the source file?");
             ui.add(
                 egui::Label::new(&name)
                     .truncate()
                     .show_tooltip_when_elided(false),
             )
             .help_text(&name);
-            ui.label("Source file unchanged.");
+            ui.label("Undo is kept in open tabs.");
             ui.horizontal_wrapped(|ui| {
                 if ui
                     .add_enabled(
                         self.active_export.is_none(),
-                        egui::Button::new("Export and continue"),
+                        egui::Button::new("Save and continue"),
                     )
                     .clicked()
                 {
@@ -6931,7 +6984,11 @@ where
             UiAction::ToggleTabMute(id) => self.toggle_tab_mute(id),
             UiAction::ResolveGuard(decision) => self.resolve_guard(decision),
             UiAction::CancelExport => {
-                if let Some(export) = &mut self.active_export {
+                if let Some(export) = self
+                    .active_export
+                    .as_mut()
+                    .filter(|export| export.job.cancellable())
+                {
                     export.cancelling = true;
                     export.job.cancel();
                 }
@@ -7508,7 +7565,7 @@ where
             CommandId::RenameFile => self.begin_file_relocation(file_operations::Kind::Rename),
             CommandId::MoveFile => self.begin_file_relocation(file_operations::Kind::Move),
             CommandId::Save => {
-                self.export_current(false, None);
+                self.save_source(None);
             }
             CommandId::ExportAs => {
                 self.export_current(true, None);
@@ -8270,6 +8327,14 @@ where
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
+        if !self.document_source_available(Some(id)) {
+            self.export_error = Some(
+                "The original source needs recovery. Reopen the recovered file before exporting."
+                    .into(),
+            );
+            self.request_redraw();
+            return false;
+        }
         let operations = self
             .edits
             .get(&id)
@@ -8308,7 +8373,7 @@ where
                         self.media_duration,
                     ),
                     analyzing_audio: options.audio.normalize_peak,
-                    job,
+                    job: job.into(),
                     tab: id,
                     request,
                     options,
@@ -8732,7 +8797,7 @@ where
         };
         match decision {
             GuardDecision::Save => {
-                if !self.export_current(false, Some(action.clone())) {
+                if !self.save_source(Some(action.clone())) {
                     self.pending_guard = Some(action);
                 }
             }
@@ -9569,8 +9634,8 @@ where
             ),
             FallbackPrompt::Guard => {
                 let name = self.path.as_deref().map(display_name).unwrap_or_default();
-                (format!("{name}\n\nSource file unchanged. Cancel keeps your edits and stops this action."),
-                    PromptButtons::ExportDiscardCancel {
+                (format!("{name}\n\nSave replaces the source file. Cancel keeps your edits and stops this action."),
+                    PromptButtons::SaveDiscardCancel {
                         discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit)),
                     })
             }
@@ -9631,7 +9696,11 @@ where
             FallbackPrompt::ExportError => self.export_error = None,
             FallbackPrompt::ExportBusy => {
                 if response == PromptResponse::Yes {
-                    if let Some(export) = &mut self.active_export {
+                    if let Some(export) = self
+                        .active_export
+                        .as_mut()
+                        .filter(|export| export.job.cancellable())
+                    {
                         export.job.cancel();
                         export.cancelling = true;
                     } else {
@@ -9887,6 +9956,9 @@ where
     }
 
     fn check_eof(&mut self) {
+        if self.source_save.frozen {
+            return;
+        }
         if self.file_operations.position.is_some() {
             return;
         }
@@ -10174,7 +10246,12 @@ where
             && let Some(export) = &self.active_export
         {
             return format!(
-                "{name} — towavue (Exporting {:.1}s)",
+                "{name} — towavue ({} {:.1}s)",
+                if export.job.is_save() {
+                    "Saving"
+                } else {
+                    "Exporting"
+                },
                 export.encoded.as_secs_f64()
             );
         }
@@ -10819,6 +10896,10 @@ where
     }
 
     fn schedule(&mut self) -> ControlFlow {
+        if self.source_save.frozen {
+            self.sync_taskbar_progress();
+            return ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16));
+        }
         // Export notifications still update the Shell while drawing is suspended.
         self.sync_taskbar_progress();
         self.sync_taskbar_transport();
@@ -15201,7 +15282,9 @@ mod tests {
                         metadata,
                         ..Default::default()
                     },
-                    job: ExportJob::start(request.clone(), |_| {}).expect("fixture worker"),
+                    job: ExportJob::start(request.clone(), |_| {})
+                        .expect("fixture worker")
+                        .into(),
                     tab,
                     request,
                     encoded: Duration::ZERO,
@@ -15244,14 +15327,14 @@ mod tests {
                     6 => &["Encoded 00:02", "Cancel export"],
                     4 => &[
                         "Unsaved edits",
-                        "Export and continue",
+                        "Save and continue",
                         "Discard edits",
                         "Cancel",
                         "Cancel current export",
                     ],
                     _ => &[
                         "Unsaved edits",
-                        "Export and continue",
+                        "Save and continue",
                         "Discard edits",
                         "Cancel",
                     ],
@@ -20993,15 +21076,18 @@ mod tests {
                 let _ = notify.send(event);
             })
             .expect("headless application");
-            let source_bytes = b"P6\n2 1\n255\n\xff\x00\x00\x00\xff\x00";
+            let fixture = root.join("original.bmp");
+            crate::tab_transfer::tests::bitmap(&fixture);
+            let source_bytes = std::fs::read(fixture).expect("original BMP");
             let mut tabs = Vec::new();
             let mut outputs = Vec::new();
             for index in 0..2 {
-                let source = root.join(format!("{recovery}-{index}.ppm"));
+                let source = root.join(format!("{recovery}-{index}.bmp"));
                 let output = root.join(format!("{recovery}-{index}.png"));
-                std::fs::write(&source, source_bytes).expect("tiny export source");
+                std::fs::write(&source, &source_bytes).expect("tiny export source");
                 std::fs::write(&output, b"existing output").expect("existing target");
-                let tab = app.tabs.open_new(source, MediaKind::Image);
+                let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+                crate::source_save::tests::loaded(&mut app, tab, &source);
                 app.edits
                     .entry(tab)
                     .or_default()
@@ -21054,24 +21140,34 @@ mod tests {
             assert_eq!(app.tabs.active().expect("next unsaved tab").id, tabs[1]);
             assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
             assert!(!app.exit_requested);
+            // Headless document ownership is seeded above; this prompt control
+            // does not perform an image upload after switching the dirty tab.
+            app.image_loader.clear();
+            app.image_loading = false;
+            app.state = PlaybackState::Paused;
             app.native_prompt = Some(FallbackPrompt::Guard);
             app.finish_native_prompt(Ok(PromptResponse::Yes));
-            finish_export(&mut app);
+            crate::source_save::tests::finish(&mut app, &events);
             assert!(app.edits.values().all(|history| !history.is_dirty()));
             assert!(app.exit_requested);
-            for output in outputs {
-                assert!(
-                    std::fs::read(output)
-                        .expect("published PNG")
-                        .starts_with(b"\x89PNG")
-                );
-            }
-            for tab in app.tabs.tabs() {
-                assert_eq!(
-                    std::fs::read(tab.target.current_path()).expect("source retained"),
-                    source_bytes
-                );
-            }
+            assert!(
+                std::fs::read(&outputs[0])
+                    .expect("derivative PNG")
+                    .starts_with(b"\x89PNG")
+            );
+            assert_eq!(
+                std::fs::read(&outputs[1]).expect("unused derivative"),
+                b"existing output"
+            );
+            assert_eq!(
+                std::fs::read(app.tabs.tabs()[0].target.current_path()).expect("first source"),
+                source_bytes
+            );
+            assert_ne!(
+                std::fs::read(app.tabs.tabs()[1].target.current_path())
+                    .expect("second source saved"),
+                source_bytes
+            );
         }
     }
 
@@ -21135,12 +21231,15 @@ mod tests {
             let _ = notify.send(event);
         })
         .expect("headless application");
-        let source = root.join("missing.png");
+        let source = root.join("broken.png");
+        std::fs::write(&source, b"invalid image").expect("owned broken input");
         let target = root.join("existing.png");
         std::fs::write(&target, b"existing output").expect("existing target");
         let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
-        app.path = Some(source);
+        crate::source_save::tests::loaded(&mut app, tab, &source);
+        app.path = Some(source.clone());
         app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
         app.edits
             .entry(tab)
             .or_default()
@@ -21150,17 +21249,13 @@ mod tests {
         app.native_prompt = Some(FallbackPrompt::Guard);
         app.finish_native_prompt(Ok(PromptResponse::Yes));
         assert!(app.active_export.is_some());
-        assert!(app.title().contains("Exporting"));
+        assert!(app.title().contains("Saving"));
         assert!(!app.exit_requested);
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while app.active_export.is_some() {
-            let event = events
-                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .expect("export completion");
-            if let AppEvent::Export(event) = event {
-                app.handle_export_event(event);
-            }
-        }
+        crate::source_save::tests::finish(&mut app, &events);
+        assert_eq!(
+            std::fs::read(source).expect("failed source unchanged"),
+            b"invalid image"
+        );
         assert!(app.export_error.is_some());
         assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
         assert!(app.edits[&tab].is_dirty());

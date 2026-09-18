@@ -103,17 +103,32 @@ impl ExportJob {
         operations: Vec<EditOperation>,
         notify: impl Fn(ExportEvent) + Send + Sync + 'static,
     ) -> Result<Self, ExportError> {
+        let input = crate::MediaInput::new(frame.source_path().to_owned());
+        Self::start_video_frame_input(frame, input, target, operations, notify)
+    }
+
+    pub fn start_video_frame_input(
+        frame: VideoFrameSnapshot,
+        input: crate::MediaInput,
+        target: PathBuf,
+        operations: Vec<EditOperation>,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
             .name("towavue-frame-export".into())
             .spawn(move || {
-                notify(ExportEvent::Finished(frame::export_cancellable(
-                    &frame,
-                    &target,
-                    &operations,
-                    &worker_cancelled,
-                )));
+                let result = if frame.source_path() != input.path() {
+                    Err(ExportError::Failed(
+                        "The frame input changed before export".into(),
+                    ))
+                } else if same_path(input.logical_path(), &target) {
+                    Err(ExportError::SameAsSource)
+                } else {
+                    frame::export_cancellable(&frame, &target, &operations, &worker_cancelled)
+                };
+                notify(ExportEvent::Finished(result));
             })
             .map_err(ExportError::Start)?;
         Ok(Self {
@@ -149,11 +164,37 @@ impl ExportJob {
         options: ExportOptions,
         notify: impl Fn(ExportEvent) + Send + Sync + 'static,
     ) -> Result<Self, ExportError> {
+        let input = crate::MediaInput::new(request.source.clone());
+        Self::start_with_input(request, options, input, notify)
+    }
+
+    /// The request keeps its logical source for UI ownership; only this worker
+    /// substitutes the retained input. Derivative exports still cannot save over
+    /// either source path; source publication uses the separate save transaction.
+    pub fn start_with_input(
+        mut request: ExportRequest,
+        options: ExportOptions,
+        input: crate::MediaInput,
+        notify: impl Fn(ExportEvent) + Send + Sync + 'static,
+    ) -> Result<Self, ExportError> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let thread = thread::Builder::new()
             .name("towavue-export".into())
             .spawn(move || {
+                if request.source != input.logical_path() {
+                    notify(ExportEvent::Finished(Err(ExportError::Failed(
+                        "The export input changed".into(),
+                    ))));
+                    return;
+                }
+                if input.path() != input.logical_path()
+                    && same_path(input.logical_path(), &request.target)
+                {
+                    notify(ExportEvent::Finished(Err(ExportError::SameAsSource)));
+                    return;
+                }
+                request.source = input.path().to_owned();
                 let result = export_options_cancellable(
                     &request,
                     options,

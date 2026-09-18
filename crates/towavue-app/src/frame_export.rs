@@ -5,6 +5,7 @@ pub(super) struct PendingFrameExport {
     tab: TabId,
     generation: u64,
     frame: VideoFrameSnapshot,
+    input: towavue_runtime_windows::MediaInput,
     operations: Vec<EditOperation>,
 }
 
@@ -18,13 +19,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let tab = self.tabs.active()?;
         let frame = self.session.as_ref()?.current_video_snapshot()?;
-        if tab.target.current_path() != frame.source_path() {
+        let input = self.media_input_for(Some(tab.id), tab.target.current_path());
+        if input.path() != frame.source_path() {
             return None;
         }
         Some(PendingFrameExport {
             tab: tab.id,
             generation: self.media_generation,
             frame,
+            input,
             operations: self
                 .edits
                 .get(&tab.id)
@@ -42,8 +45,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         let stem = intent
-            .frame
-            .source_path()
+            .input
+            .logical_path()
             .file_stem()
             .unwrap_or_default()
             .to_string_lossy();
@@ -75,7 +78,9 @@ impl PendingFrameExport {
         if self.generation != app.media_generation
             || app.active_export.is_some()
             || !app.tabs.active().is_some_and(|tab| {
-                tab.id == self.tab && tab.target.current_path() == self.frame.source_path()
+                tab.id == self.tab
+                    && tab.target.current_path() == self.input.logical_path()
+                    && app.media_input_for(Some(tab.id), tab.target.current_path()) == self.input
             })
         {
             app.set_status(
@@ -85,15 +90,16 @@ impl PendingFrameExport {
             return;
         }
         let request = ExportRequest {
-            source: self.frame.source_path().to_owned(),
+            source: self.input.logical_path().to_owned(),
             target: target.clone(),
             kind: MediaKind::Video,
             operations: self.operations,
             hardware_encode: false,
         };
         let notify = Arc::clone(&app.notify);
-        match ExportJob::start_video_frame(
+        match ExportJob::start_video_frame_input(
             self.frame,
+            self.input,
             target,
             request.operations.clone(),
             move |event| notify(AppEvent::Export(event)),

@@ -123,7 +123,7 @@ pub(crate) fn install<N: Fn(AppEvent) + Send + Sync + 'static>(
     id
 }
 
-fn transfer(source: &mut App, destination: &mut App, id: TabId) -> TabId {
+pub(crate) fn transfer(source: &mut App, destination: &mut App, id: TabId) -> TabId {
     let request = DetachRequest {
         tab: id,
         path: Some(

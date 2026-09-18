@@ -181,6 +181,7 @@ struct Mailbox {
     trace: Option<verification::Trace>,
     generation: u64,
     pending: Option<(Vec<PathBuf>, usize, bool)>,
+    input_owners: Vec<crate::MediaInput>,
     decoding: bool,
     completed: Option<LoadedImages>,
     preview_ready: Option<LoadedImagePreview>,
@@ -302,7 +303,7 @@ impl ImageLoader {
 
     /// Decode missing pages within the same budget as the caller's already retained pages.
     pub fn request_with_retained_bytes(&self, paths: Vec<PathBuf>, retained_bytes: usize) -> u64 {
-        self.request_inner(paths, retained_bytes, false, true, &[])
+        self.request_inner(paths, retained_bytes, false, true, &[], Vec::new())
     }
 
     /// Skip interim previews while the caller keeps its previous presentation.
@@ -314,12 +315,38 @@ impl ImageLoader {
         retained_bytes: usize,
         prefetch_paths: &[PathBuf],
     ) -> u64 {
-        self.request_inner(paths, retained_bytes, false, false, prefetch_paths)
+        self.request_inner(
+            paths,
+            retained_bytes,
+            false,
+            false,
+            prefetch_paths,
+            Vec::new(),
+        )
     }
 
     /// Cancel image work and release cached originals on the decoder thread, without joining it.
     pub fn clear(&self) -> u64 {
-        self.request_inner(Vec::new(), 0, true, false, &[])
+        self.request_inner(Vec::new(), 0, true, false, &[], Vec::new())
+    }
+
+    /// Keep retained inputs alive until the decoder and its optional preview work finish.
+    pub fn request_inputs(
+        &self,
+        inputs: Vec<crate::MediaInput>,
+        retained_bytes: usize,
+        allow_preview: bool,
+        prefetch_paths: &[PathBuf],
+    ) -> u64 {
+        let paths = inputs.iter().map(|input| input.path().to_owned()).collect();
+        self.request_inner(
+            paths,
+            retained_bytes,
+            false,
+            allow_preview,
+            prefetch_paths,
+            inputs,
+        )
     }
 
     fn request_inner(
@@ -329,6 +356,7 @@ impl ImageLoader {
         clear_cache: bool,
         allow_preview: bool,
         prefetch_paths: &[PathBuf],
+        input_owners: Vec<crate::MediaInput>,
     ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("image mailbox");
@@ -365,6 +393,7 @@ impl ImageLoader {
                 mailbox.prefetch = None;
             }
         }
+        mailbox.input_owners = input_owners;
         mailbox.pending = (!paths.is_empty()).then_some((
             paths,
             IMAGE_BYTE_LIMIT.saturating_sub(retained_bytes),
@@ -743,7 +772,7 @@ fn run_worker(
     let cache = Arc::clone(&mutex.lock().expect("image mailbox").cache);
     let previews = mutex.lock().expect("image mailbox").previews.clone();
     loop {
-        let (generation, pending, clear_cache) = {
+        let (generation, pending, clear_cache, input_owners) = {
             let mut mailbox = ready
                 .wait_while(mutex.lock().expect("image mailbox"), |mailbox| {
                     !mailbox.closed && mailbox.pending.is_none() && !mailbox.clear_cache
@@ -757,6 +786,7 @@ fn run_worker(
                 mailbox.generation,
                 mailbox.pending.take(),
                 std::mem::take(&mut mailbox.clear_cache),
+                std::mem::take(&mut mailbox.input_owners),
             )
         };
         if clear_cache {
@@ -788,6 +818,9 @@ fn run_worker(
         };
         let total = paths.len();
         for (index, path) in paths.into_iter().enumerate() {
+            let logical = input_owners
+                .get(index)
+                .map_or(path.as_path(), crate::MediaInput::logical_path);
             if !is_current() {
                 break;
             }
@@ -830,7 +863,7 @@ fn run_worker(
                     // use their originals even if the UI has not consumed the wakeup yet.
                     mailbox.preview_ready = Some(LoadedImagePreview {
                         generation,
-                        path: path.clone(),
+                        path: logical.to_owned(),
                         preview,
                     });
                 }
@@ -974,7 +1007,7 @@ fn run_worker(
                         images: Vec::new(),
                     })
                     .images
-                    .push((path.clone(), result));
+                    .push((logical.to_owned(), result));
                 #[cfg(any(test, feature = "render-verification"))]
                 mailbox.trace(&path, TraceKind::OriginalPublished);
             }

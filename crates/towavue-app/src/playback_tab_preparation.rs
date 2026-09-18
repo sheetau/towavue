@@ -80,6 +80,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         let notify = Arc::clone(&self.notify);
         let cache = self.preview_cache.clone();
+        let input = self.media_input_for(Some(id), &path);
         worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             // Capture source identity on this worker too. Merely hovering never
@@ -87,7 +88,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let source = (kind == MediaKind::Video)
                 .then(|| VideoResumeSource::capture(&path).ok())
                 .flatten();
-            let duration = cache.duration(&path).map_err(|error| error.to_string());
+            let duration = cache
+                .duration(input.path())
+                .map_err(|error| error.to_string());
             notify(AppEvent::PreparedPlayback(
                 id, instance, path, duration, source,
             ));
@@ -157,12 +160,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .unwrap_or_default();
         let volume = self.playback_volume_for(id) * edit.volume;
         let notify = Arc::clone(&self.notify);
-        let result = PlaybackSession::open_paused(
-            &path,
+        let input = self.media_input_for(Some(id), &path);
+        let result = PlaybackSession::open_input(
+            input,
             device,
             volume,
             edit.rate,
             edit.playback_range(),
+            true,
             move |event| notify(AppEvent::Playback(instance, event)),
         );
         let saved = self

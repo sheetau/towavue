@@ -76,6 +76,7 @@ mod seekbar;
 mod selection;
 mod selection_aspect;
 mod shortcuts;
+mod source_backing;
 mod status_file_details;
 mod status_info;
 mod tab_drag;
@@ -972,6 +973,7 @@ struct Application<N> {
     // None is an observed but unverifiable source, never permission to recapture
     // a newer disk version for existing edits. Cleared only for a new document.
     source_versions: BTreeMap<TabId, Option<towavue_runtime_windows::FileOperationSource>>,
+    source_backings: BTreeMap<TabId, towavue_runtime_windows::SavedSource>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
     loading_progress: export_progress::LoadingProgress,
@@ -1258,6 +1260,7 @@ where
             video_rotation_drag: None,
             edits: BTreeMap::new(),
             source_versions: BTreeMap::new(),
+            source_backings: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
             loading_progress: export_progress::LoadingProgress::default(),
@@ -2170,12 +2173,13 @@ where
         let notify = Arc::clone(&self.notify);
         let media_generation = self.media_generation;
         self.playback_origin = self.window_key.map(|key| (key, media_generation));
-        match PlaybackSession::open(
-            &path,
+        match PlaybackSession::open_input(
+            self.media_input(&path),
             graphics_device,
             self.edit_state().volume * self.playback_volume(),
             self.edit_state().rate,
             self.edit_state().playback_range(),
+            false,
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
@@ -2218,10 +2222,11 @@ where
         let generation = self.media_generation;
         self.waveform_loading = true;
         self.waveform_detail.restart_pending();
+        let input = self.media_input(&path);
         self.waveform_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache
-                .waveform(&path, 640, 96)
+                .waveform(input.path(), 640, 96)
                 .map_err(|error| error.to_string());
             notify(AppEvent::Waveform(path, generation, result));
         });
@@ -2241,10 +2246,11 @@ where
         // A queued completion can outlive cancellation and a retry of the same bucket.
         self.thumbnail_request = self.thumbnail_request.wrapping_add(1);
         let request = self.thumbnail_request;
+        let input = self.media_input(&path);
         self.thumbnail_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
             let result = cache
-                .thumbnail(&path, position, 240)
+                .thumbnail(input.path(), position, 240)
                 .map_err(|error| error.to_string());
             notify(AppEvent::Thumbnail(
                 path, generation, bucket, request, result,
@@ -2267,8 +2273,10 @@ where
                 position,
             )?,
         };
-        self.video_sheets.request(
+        let input = self.media_input(&target.path);
+        self.video_sheets.request_input(
             target.clone(),
+            input,
             priority,
             &self.preview_cache,
             Arc::clone(&self.notify),
@@ -2296,9 +2304,12 @@ where
                 }
             }
         }
+        let input = self.media_input_for_instance(&path, generation);
         self.duration_workers[&generation].submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
-            let result = cache.duration(&path).map_err(|error| error.to_string());
+            let result = cache
+                .duration(input.path())
+                .map_err(|error| error.to_string());
             notify(AppEvent::Duration(path, generation, result));
         });
     }
@@ -2629,20 +2640,19 @@ where
                     .map(|image| image.decoded.retained_bytes())
                     .sum::<usize>()
         };
+        let inputs: Vec<_> = paths.iter().map(|path| self.media_input(path)).collect();
         if self.image_handoff.is_some() {
             let neighbors = self.image_prefetch_paths().unwrap_or_default();
-            self.image_generation = self.image_loader.request_originals_with_retained_bytes(
-                paths,
-                retained_bytes,
-                &neighbors,
-            );
+            self.image_generation =
+                self.image_loader
+                    .request_inputs(inputs, retained_bytes, false, &neighbors);
             self.clear_image_previews();
             self.request_redraw();
             return;
         }
-        self.image_generation = self
-            .image_loader
-            .request_with_retained_bytes(paths.clone(), retained_bytes);
+        self.image_generation =
+            self.image_loader
+                .request_inputs(inputs.clone(), retained_bytes, true, &[]);
         self.pending_image_previews = paths.iter().cloned().collect();
         self.image_previews
             .retain(|path, _| self.pending_image_previews.contains(path));
@@ -2651,11 +2661,12 @@ where
         let notify = Arc::clone(&self.notify);
         self.image_preview_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation.clone());
-            for path in paths {
+            for input in inputs {
+                let path = input.logical_path().to_owned();
                 if cancellation.is_cancelled() {
                     return;
                 }
-                if let Ok(Some(preview)) = cache.cached_image(&path)
+                if let Ok(Some(preview)) = cache.cached_image(input.path())
                     && !cancellation.is_cancelled()
                 {
                     notify(AppEvent::ImagePreview(path, generation, preview));
@@ -5550,8 +5561,13 @@ where
                                             } else {
                                                 preview_target = Some(target.clone());
                                                 // Select an already cached sheet cell before painting it.
-                                                self.tab_preview.request(
+                                                let input = self.media_input_for(
+                                                    Some(target.tab),
+                                                    &target.path,
+                                                );
+                                                self.tab_preview.request_input(
                                                     Some(target.clone()),
+                                                    Some(input),
                                                     &self.preview_cache,
                                                     Arc::clone(&self.notify),
                                                 );
@@ -5677,8 +5693,12 @@ where
         if let Some(tab) = playback_preparation_target {
             self.prepare_playback_tab(tab);
         }
-        self.tab_preview.request(
+        let input = preview_target
+            .as_ref()
+            .map(|target| self.media_input_for(Some(target.tab), &target.path));
+        self.tab_preview.request_input(
             preview_target,
+            input,
             &self.preview_cache,
             Arc::clone(&self.notify),
         );
@@ -8276,7 +8296,8 @@ where
                 .cloned()
                 .unwrap_or_default(),
         };
-        match ExportJob::start_with_options(request.clone(), options.clone(), move |event| {
+        let input = self.media_input_for(Some(id), &request.source);
+        match ExportJob::start_with_input(request.clone(), options.clone(), input, move |event| {
             notify(AppEvent::Export(event))
         }) {
             Ok(job) => {
@@ -8912,6 +8933,7 @@ where
         self.tab_preview.clear();
         self.edits.remove(&id);
         self.source_versions.remove(&id);
+        self.source_backings.remove(&id);
         self.retained_images.remove(&id);
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);
@@ -9256,6 +9278,7 @@ where
             tab.target.set_current_path(path.clone(), kind);
             self.edits.insert(id, EditHistory::default());
             self.source_versions.remove(&id);
+            self.source_backings.remove(&id);
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);

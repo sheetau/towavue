@@ -243,6 +243,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .cloned()
             .unwrap_or_default();
         let source = tab.target.current_path().to_owned();
+        let input = self.media_input_for(Some(tab.id), &source);
         let kind = tab.target.media_kind();
         let token = self.metadata_generation;
         self.metadata_dialog = Some(MetadataDialog {
@@ -280,7 +281,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 if cancellation.is_cancelled() {
                     return;
                 }
-                let result = towavue_runtime_windows::read_export_metadata(&source, kind)
+                let result = towavue_runtime_windows::read_export_metadata(input.path(), kind)
                     .map_err(|error| error.to_string());
                 if !cancellation.is_cancelled() {
                     notify(AppEvent::MetadataLoaded(token, result));

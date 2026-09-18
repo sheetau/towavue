@@ -170,9 +170,45 @@ pub struct PlaybackSession {
     timeline: Option<Arc<EditTimeline>>,
     #[cfg(test)]
     seek_stage_ms: [f64; 5],
+    // Drop after reusable decoder inputs and every other reader. Cleanup of the
+    // final retained source must not race native reader handle destruction.
+    input_owner: Option<crate::MediaInput>,
 }
 
 impl PlaybackSession {
+    /// Keep the original file alive through all decoder restarts and session teardown.
+    pub fn open_input(
+        input: crate::MediaInput,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
+        let mut session = Self::open_with_pause(
+            input.path(),
+            graphics_device,
+            volume,
+            rate,
+            range,
+            paused,
+            notify,
+        )?;
+        session.input_owner = Some(input);
+        Ok(session)
+    }
+
+    pub fn resume_after_file_operation_input(
+        &mut self,
+        input: crate::MediaInput,
+        position: MediaTime,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        let result = self.resume_after_file_operation(input.path(), position);
+        self.input_owner = Some(input);
+        result
+    }
+
     /// Detached version of the source opened by this document. Consumers must
     /// retain it across reopens; recapturing later would authorize external edits.
     pub fn source(&self) -> Option<&crate::FileOperationSource> {
@@ -226,6 +262,7 @@ impl PlaybackSession {
         let mut session = Self {
             path: path.to_owned(),
             source,
+            input_owner: None,
             graphics_device,
             notify: Arc::new(notify),
             audio_format,

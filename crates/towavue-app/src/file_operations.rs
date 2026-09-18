@@ -315,9 +315,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.tab_preview.clear();
         }
         let path = target.unwrap_or(source);
+        let input = self.media_input(path);
         if let Some(position) = self.file_operations.position.take() {
             if let Some(session) = &mut self.session {
-                match session.resume_after_file_operation(path, position) {
+                match session.resume_after_file_operation_input(input, position) {
                     Ok(generation) => {
                         self.generation = generation;
                         self.audio_drained = !session.has_audio();
@@ -333,14 +334,22 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 PlaybackClock::paused(position, self.playback_rate())
             });
         }
-        for saved in self
+        let inputs: BTreeMap<_, _> = self
             .retained_playback
-            .values_mut()
-            .filter(|saved| saved.path == path)
+            .iter()
+            .filter(|(_, saved)| saved.path == path)
+            .map(|(id, _)| (*id, self.media_input_for(Some(*id), path)))
+            .collect();
+        for (id, saved) in self
+            .retained_playback
+            .iter_mut()
+            .filter(|(_, saved)| saved.path == path)
         {
             if let Some(position) = saved.recovery_position.take() {
                 if let Some(session) = &mut saved.session {
-                    if let Err(error) = session.resume_after_file_operation(path, position) {
+                    if let Err(error) =
+                        session.resume_after_file_operation_input(inputs[id].clone(), position)
+                    {
                         saved.fail(error.to_string());
                     } else {
                         saved.audio_drained = !session.has_audio();

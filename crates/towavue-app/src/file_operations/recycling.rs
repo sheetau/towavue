@@ -27,6 +27,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .and_then(|after| after.replacement_after_removal(&report.before, source, kind));
             self.edits.remove(&id);
             self.source_versions.remove(&id);
+            self.source_backings.remove(&id);
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);

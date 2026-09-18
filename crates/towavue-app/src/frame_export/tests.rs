@@ -230,7 +230,110 @@ fn current_frame_export_keeps_clicked_picture_edits_save_state_and_owner_guards(
                 std::fs::read(&self.source).expect("source unchanged"),
                 original
             );
+            // Exercise the same command/dialog path after a real native source
+            // replacement. The host save handoff is simulated here; Ctrl+S is
+            // deliberately outside this retained-input regression.
+            drop(app.session.take());
+            let prepared = towavue_runtime_windows::prepare_source_save(
+                towavue_runtime_windows::FileOperationSource::capture(&self.source)
+                    .expect("loaded target version"),
+                ExportRequest {
+                    source: self.source.clone(),
+                    target: self.source.clone(),
+                    kind: MediaKind::Video,
+                    operations: vec![EditOperation::Crop(PixelCrop {
+                        x: 0,
+                        y: 0,
+                        width: 32,
+                        height: 48,
+                    })],
+                    hardware_encode: false,
+                },
+                ExportOptions::default(),
+                &std::sync::atomic::AtomicBool::new(false),
+                &|_| {},
+                &|_| {},
+            )
+            .expect("prepare source replacement");
+            let (saved_tx, saved_rx) = mpsc::channel();
+            towavue_runtime_windows::commit_source_save(prepared, move |result| {
+                saved_tx.send(result).ok();
+            })
+            .expect("publication worker");
+            let saved = saved_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("source publication")
+                .expect("saved source");
+            let backup = saved.original_path().to_owned();
+            let saved_bytes = std::fs::read(&self.source).expect("saved video");
+            assert_ne!(saved_bytes, original);
+            app.source_versions
+                .insert(tab, Some(saved.current_source().clone()));
+            app.source_backings.insert(tab, saved);
+            app.displayed_tab = Some(tab);
+            let mut session = PlaybackSession::open_input(
+                app.media_input(&self.source),
+                renderer.graphics_device(),
+                0.0,
+                1.0,
+                PlaybackRange::default(),
+                true,
+                |_| {},
+            )
+            .expect("retained source session");
+            advance(&mut session);
+            assert_eq!(session.video_geometry(), Some((64, 48, 1.0)));
+            app.session = Some(session);
+            let intent = app.capture_frame_export().expect("retained frame command");
+            assert_eq!(intent.input.logical_path(), self.source);
+            assert_eq!(intent.frame.source_path(), backup);
+            let expected = towavue_runtime_windows::edited_video_frame_png(
+                &backup,
+                intent.frame.source_time(),
+                &intent.operations,
+                &|| false,
+            )
+            .expect("original frame with current edits");
+            let retained_target = self.root.join("retained-frame.png");
+            intent.finish(&mut app, Ok(Some(retained_target.clone())));
+            assert_eq!(
+                app.active_export
+                    .as_ref()
+                    .expect("frame job")
+                    .request
+                    .source,
+                self.source,
+                "completion ownership stays logical"
+            );
+            crate::audio_export_tests::drain_export(&mut app, &rx);
+            assert!(app.export_error.is_none(), "{:?}", app.export_error);
+            assert_eq!(std::fs::read(retained_target).expect("frame PNG"), expected);
+            app.capture_frame_export()
+                .expect("source protection capture")
+                .finish(&mut app, Ok(Some(self.source.clone())));
+            crate::audio_export_tests::drain_export(&mut app, &rx);
+            assert!(app.export_error.take().is_some());
+            assert_eq!(
+                std::fs::read(&self.source).expect("protected source"),
+                saved_bytes
+            );
+            assert_eq!(app.edits[&tab], history);
+            assert_eq!(app.export_paths[&tab], previous);
+            // Changing only the retained input while the dialog is open invalidates
+            // the intent even when the logical path and media generation match.
+            let intent = app.capture_frame_export().expect("input ownership capture");
+            app.source_backings.remove(&tab);
+            let stale = self.root.join("stale-input.png");
+            intent.finish(&mut app, Ok(Some(stale.clone())));
+            assert!(app.active_export.is_none());
+            assert!(!stale.exists());
+            assert!(backup.exists(), "session still owns the retained original");
             drop(app);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while backup.exists() {
+                assert!(Instant::now() < deadline, "frame input cleanup");
+                std::thread::sleep(Duration::from_millis(2));
+            }
             drop(renderer);
             drop(window);
             event_loop.exit();

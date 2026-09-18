@@ -192,11 +192,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let notify = Arc::clone(&self.notify);
         let cache = Arc::clone(&self.frame_steps.cache);
+        let input = self.media_input_for(Some(tab), &path);
         self.frame_steps.worker.submit(move |cancellation| {
             let result = cache
                 .lock()
                 .expect("frame timestamp cache")
-                .adjacent(&path, base, forward, plan.as_ref(), &|| {
+                .adjacent(input.path(), base, forward, plan.as_ref(), &|| {
                     cancellation.is_cancelled()
                 })
                 .map_err(|error| error.to_string());

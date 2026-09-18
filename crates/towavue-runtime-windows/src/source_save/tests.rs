@@ -502,3 +502,239 @@ fn encoder_failure_keeps_the_source_and_cleans_the_unpublished_candidate() {
         std::thread::sleep(Duration::from_millis(2));
     }
 }
+
+#[test]
+fn retained_input_keeps_image_decode_alive_and_reports_the_logical_path() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("image.bmp");
+    bitmap(&path);
+    let saved = finish(prepare(&path)).expect("save");
+    let directory = saved.original._files.directory.clone();
+    let input = crate::MediaInput::retained(path.clone(), saved);
+    let (sent, ready) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let loader = crate::ImageLoader::new(
+        crate::PreviewCache::new(fixture.0.join("cache")).expect("cache"),
+        move || {
+            sent.send(()).expect("decode notification");
+            released
+                .recv_timeout(Duration::from_secs(5))
+                .expect("release image worker");
+        },
+    )
+    .expect("loader");
+    let generation = loader.request_inputs(vec![input], 0, false, &[]);
+    ready
+        .recv_timeout(Duration::from_secs(5))
+        .expect("decoded original");
+    let result = loader.take_completed().expect("completion");
+    assert_eq!(result.generation, generation);
+    assert_eq!(result.images[0].0, path, "UI identity stays logical");
+    assert_eq!(
+        result.images[0]
+            .1
+            .as_ref()
+            .expect("decoded original")
+            .frames[0]
+            .rgba,
+        [255, 0, 0, 255, 0, 0, 255, 255]
+    );
+    loader.clear();
+    assert!(
+        directory.exists(),
+        "cancelled/replaced request still owns its in-flight input"
+    );
+    release.send(()).expect("release worker");
+    drop(loader);
+    wait_removed(&directory);
+    assert_eq!(
+        crate::decode_image(&path).expect("saved file").frames[0].rgba,
+        [0, 0, 255, 255, 255, 0, 0, 255]
+    );
+}
+
+#[test]
+fn retained_input_exports_original_edits_and_protects_the_logical_source() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("image.bmp");
+    bitmap(&path);
+    let saved = finish(prepare(&path)).expect("save");
+    let original_path = saved.original_path().to_owned();
+    let directory = saved.original._files.directory.clone();
+    let input = crate::MediaInput::retained(path.clone(), saved);
+    let saved_bytes = fs::read(&path).expect("saved bytes");
+    for target in [path.clone(), fixture.0.join("IMAGE.BMP"), original_path] {
+        let (send, receive) = mpsc::channel();
+        let job = crate::ExportJob::start_with_input(
+            ExportRequest {
+                source: path.clone(),
+                target,
+                kind: MediaKind::Image,
+                operations: vec![EditOperation::FlipHorizontal],
+                hardware_encode: false,
+            },
+            ExportOptions::default(),
+            input.clone(),
+            move |event| {
+                send.send(event).ok();
+            },
+        )
+        .expect("job");
+        loop {
+            if let crate::ExportEvent::Finished(result) = receive
+                .recv_timeout(Duration::from_secs(5))
+                .expect("finish")
+            {
+                assert!(matches!(result, Err(ExportError::SameAsSource)));
+                break;
+            }
+        }
+        drop(job);
+        assert_eq!(fs::read(&path).expect("protected source"), saved_bytes);
+    }
+    let target = fixture.0.join("derivative.bmp");
+    let (sent, ready) = mpsc::channel();
+    let (release, released) = mpsc::channel();
+    let released = std::sync::Mutex::new(released);
+    let job = crate::ExportJob::start_with_input(
+        ExportRequest {
+            source: path.clone(),
+            target: target.clone(),
+            kind: MediaKind::Image,
+            operations: vec![EditOperation::FlipHorizontal],
+            hardware_encode: false,
+        },
+        ExportOptions::default(),
+        input,
+        move |event| {
+            if let crate::ExportEvent::Finished(result) = event {
+                sent.send(result).expect("result");
+                released
+                    .lock()
+                    .expect("release receiver")
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("release export");
+            }
+        },
+    )
+    .expect("job");
+    ready
+        .recv_timeout(Duration::from_secs(5))
+        .expect("result")
+        .expect("export");
+    assert!(
+        directory.exists(),
+        "export worker owns the last original reference"
+    );
+    assert_eq!(
+        crate::decode_image(&target)
+            .expect("exported pixels")
+            .frames[0]
+            .rgba,
+        [0, 0, 255, 255, 255, 0, 0, 255]
+    );
+    release.send(()).expect("release");
+    drop(job);
+    wait_removed(&directory);
+}
+
+#[test]
+fn retained_input_video_session_restarts_from_the_original_and_owns_its_lifetime() {
+    let fixture = Fixture::new();
+    let path = fixture.0.join("video.mp4");
+    let output = std::process::Command::new(
+        crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
+    )
+    .args([
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=size=64x48:rate=4:duration=1",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:v",
+        "mpeg4",
+    ])
+    .arg(&path)
+    .output()
+    .expect("generate owned video");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prepared = prepare_source_save(
+        FileOperationSource::capture(&path).expect("source"),
+        ExportRequest {
+            source: path.clone(),
+            target: path.clone(),
+            kind: MediaKind::Video,
+            operations: vec![EditOperation::Crop(towavue_core::PixelCrop {
+                x: 0,
+                y: 0,
+                width: 32,
+                height: 48,
+            })],
+            hardware_encode: false,
+        },
+        ExportOptions::default(),
+        &AtomicBool::new(false),
+        &|_| {},
+        &|_| {},
+    )
+    .expect("prepare");
+    let saved = finish(prepared).expect("save");
+    let original_path = saved.original_path().to_owned();
+    let directory = saved.original._files.directory.clone();
+    let mut session = crate::PlaybackSession::open_input(
+        crate::MediaInput::retained(path.clone(), saved),
+        crate::GraphicsDevice::warp_for_test().expect("WARP"),
+        0.0,
+        1.0,
+        Default::default(),
+        true,
+        |_| {},
+    )
+    .expect("retained playback");
+    for milliseconds in [0, 500] {
+        let position = towavue_core::MediaTime::from_nanoseconds(milliseconds * 1_000_000);
+        if milliseconds != 0 {
+            session
+                .set_rate_at(position, 1.0, false)
+                .expect("restart decoder");
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.pending_video_time().is_none() {
+            assert!(Instant::now() < deadline, "retained original frame");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(session.advance_pending());
+        assert_eq!(
+            session.video_geometry(),
+            Some((64, 48, 1.0)),
+            "read the pre-crop original, not the newly saved 32px file"
+        );
+        assert_eq!(
+            session
+                .current_video_snapshot()
+                .expect("exportable frame")
+                .source_path(),
+            original_path
+        );
+        assert!(
+            directory.exists(),
+            "session is the sole retained-source owner"
+        );
+    }
+    drop(session);
+    wait_removed(&directory);
+    crate::decode_file(&path, |item| {
+        if let crate::DecodeOutput::Video(frame) = item {
+            assert_eq!((frame.width, frame.height), (32, 48));
+        }
+        true
+    })
+    .expect("saved output remains intact");
+}

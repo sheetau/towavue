@@ -18,6 +18,7 @@ pub struct VideoSheets {
     pending: Option<Request>,
     textures: VecDeque<(Request, TextureHandle)>,
     failed: VecDeque<Request>,
+    input_path: Option<PathBuf>,
 }
 
 impl VideoSheets {
@@ -28,6 +29,7 @@ impl VideoSheets {
             pending: None,
             textures: VecDeque::new(),
             failed: VecDeque::new(),
+            input_path: None,
         })
     }
 
@@ -39,6 +41,7 @@ impl VideoSheets {
         self.failed.clear();
     }
 
+    #[cfg(test)]
     pub fn request<N>(
         &mut self,
         target: Request,
@@ -48,6 +51,24 @@ impl VideoSheets {
     ) where
         N: Fn(crate::AppEvent) + Send + Sync + 'static,
     {
+        let input = towavue_runtime_windows::MediaInput::new(target.path.clone());
+        self.request_input(target, input, priority, cache, notify);
+    }
+
+    pub fn request_input<N>(
+        &mut self,
+        target: Request,
+        input: towavue_runtime_windows::MediaInput,
+        priority: bool,
+        cache: &PreviewCache,
+        notify: Arc<N>,
+    ) where
+        N: Fn(crate::AppEvent) + Send + Sync + 'static,
+    {
+        if self.input_path.as_deref() != Some(input.path()) {
+            self.clear();
+            self.input_path = Some(input.path().to_owned());
+        }
         if let Some(index) = self
             .textures
             .iter()
@@ -70,7 +91,7 @@ impl VideoSheets {
         self.worker.submit(move |cancel| {
             let result = cache
                 .cancellable(cancel.clone())
-                .video_sheet(&target.path, target.layout)
+                .video_sheet(input.path(), target.layout)
                 .map_err(|error| error.to_string());
             if !cancel.is_cancelled() {
                 notify(crate::AppEvent::VideoSheet(target, generation, result));
@@ -260,6 +281,7 @@ mod tests {
         let cache = PreviewCache::new(root.clone()).expect("owned cache");
         let mut sheets = VideoSheets::new().expect("worker");
         let notify = Arc::new(|_| {});
+        sheets.input_path = Some(target(0).path);
         sheets.pending = Some(target(0));
         sheets.request(target(1), false, &cache, notify.clone());
         assert_eq!(sheets.pending, Some(target(0)));
@@ -277,7 +299,7 @@ mod tests {
                 Ok(pixels(&target(index))),
             );
         }
-        sheets.request(target(0), false, &cache, notify);
+        sheets.request(target(0), false, &cache, notify.clone());
         sheets.pending = Some(target(2));
         sheets.finish(
             &context,
@@ -288,6 +310,14 @@ mod tests {
         assert_eq!(sheets.textures.len(), 2);
         assert_eq!(sheets.textures[0].0, target(0));
         assert_eq!(sheets.textures[1].0, target(2));
+        // A retained input can change without changing the logical request.
+        let generation = sheets.generation;
+        sheets.input_path = Some(root.join("retained-original.mp4"));
+        sheets.request(target(2), false, &cache, notify);
+        assert!(sheets.textures.is_empty());
+        assert_ne!(sheets.generation, generation);
+        sheets.finish(&context, target(2), generation, Ok(pixels(&target(2))));
+        assert!(sheets.textures.is_empty(), "old input completion is stale");
         drop(sheets);
         std::fs::remove_dir_all(root).expect("remove owned cache");
     }

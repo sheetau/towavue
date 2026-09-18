@@ -172,6 +172,7 @@ pub struct TabPreview {
     sheet_uv: Option<egui::Rect>,
     sheet_layout: Option<towavue_runtime_windows::VideoSheetLayout>,
     positions: BTreeMap<TabId, LastPosition>,
+    input_path: Option<PathBuf>,
 }
 
 impl TabPreview {
@@ -184,6 +185,7 @@ impl TabPreview {
             sheet_uv: None,
             sheet_layout: None,
             positions: BTreeMap::new(),
+            input_path: None,
         })
     }
 
@@ -260,10 +262,34 @@ impl TabPreview {
         }
     }
 
+    #[cfg(test)]
     pub fn request<N>(&mut self, target: Option<Target>, cache: &PreviewCache, notify: Arc<N>)
     where
         N: Fn(crate::AppEvent) + Send + Sync + 'static,
     {
+        let input = target
+            .as_ref()
+            .map(|target| towavue_runtime_windows::MediaInput::new(target.path.clone()));
+        self.request_input(target, input, cache, notify);
+    }
+
+    pub fn request_input<N>(
+        &mut self,
+        target: Option<Target>,
+        input: Option<towavue_runtime_windows::MediaInput>,
+        cache: &PreviewCache,
+        notify: Arc<N>,
+    ) where
+        N: Fn(crate::AppEvent) + Send + Sync + 'static,
+    {
+        if self.input_path.as_deref()
+            != input
+                .as_ref()
+                .map(towavue_runtime_windows::MediaInput::path)
+        {
+            self.clear();
+            self.input_path = input.as_ref().map(|input| input.path().to_owned());
+        }
         if self.target == target {
             return;
         }
@@ -288,6 +314,9 @@ impl TabPreview {
         let Some(target) = target else {
             return;
         };
+        let Some(input) = input else {
+            return;
+        };
         self.target = Some(target.clone());
         let generation = self.generation;
         let cache = cache.clone();
@@ -296,18 +325,18 @@ impl TabPreview {
             if target.kind == MediaKind::Video {
                 let mut first_preview_sent = false;
                 let result = cache
-                    .duration(&target.path)
+                    .duration(input.path())
                     .and_then(|duration| {
                         let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
                             duration,
                             target.position,
                         )
                         .ok_or(towavue_runtime_windows::PreviewError::InvalidDuration)?;
-                        if let Some(sheet) = cache.cached_video_sheet(&target.path, layout)? {
+                        if let Some(sheet) = cache.cached_video_sheet(input.path(), layout)? {
                             return Ok(sheet);
                         }
                         let first = cache
-                            .thumbnail(&target.path, target.position, 240)
+                            .thumbnail(input.path(), target.position, 240)
                             .map_err(|error| error.to_string());
                         if !cancellation.is_cancelled() {
                             notify(crate::AppEvent::TabPreview(
@@ -317,7 +346,7 @@ impl TabPreview {
                             ));
                             first_preview_sent = true;
                         }
-                        cache.video_sheet(&target.path, layout)
+                        cache.video_sheet(input.path(), layout)
                     })
                     .map_err(|error| error.to_string());
                 if !cancellation.is_cancelled() {
@@ -329,7 +358,7 @@ impl TabPreview {
                         )),
                         Err(_) if !first_preview_sent => {
                             let result = cache
-                                .thumbnail(&target.path, target.position, 240)
+                                .thumbnail(input.path(), target.position, 240)
                                 .map_err(|error| error.to_string());
                             if !cancellation.is_cancelled() {
                                 notify(crate::AppEvent::TabPreview(target, generation, result));
@@ -341,7 +370,7 @@ impl TabPreview {
                 return;
             }
             let result = cache
-                .filmstrip(&target.path, target.kind)
+                .filmstrip(input.path(), target.kind)
                 .map(|media| media.image)
                 .map_err(|error| error.to_string());
             if !cancellation.is_cancelled() {
@@ -784,6 +813,7 @@ mod tests {
                 rgba: vec![255; 960 * 640 * 4].into(),
             },
         };
+        preview.input_path = Some(target.path.clone());
         preview.target = Some(target.clone());
         preview.finish_sheet(&context, target.clone(), preview.generation, Ok(sheet()));
         let stale = target.clone();
@@ -841,7 +871,8 @@ mod tests {
             "late sheet cannot revive a closed hover"
         );
 
-        for changed in 0..4 {
+        for changed in 0..5 {
+            preview.input_path = Some(target.path.clone());
             preview.target = Some(target.clone());
             preview.finish_sheet(&context, target.clone(), preview.generation, Ok(sheet()));
             let generation = preview.generation;
@@ -850,7 +881,8 @@ mod tests {
                 0 => next.position = Duration::from_secs(80),
                 1 => next.path = root.join("other.mp4"),
                 2 => next.tab = tabs.open_new(next.path.clone(), MediaKind::Video),
-                _ => next.kind = MediaKind::Image,
+                3 => next.kind = MediaKind::Image,
+                _ => preview.input_path = Some(root.join("retained-original.mp4")),
             }
             preview.request(Some(next.clone()), &cache, notify.clone());
             assert_ne!(preview.generation, generation, "different sheet or owner");

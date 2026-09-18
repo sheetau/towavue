@@ -694,6 +694,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 ..Default::default()
             };
         }
+        let input = self.media_input(path);
         let detail = &mut self.waveform_detail;
         if !detail.started
             && !self.waveform_loading
@@ -713,7 +714,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 detail.finished = false;
                 self.waveform_worker.submit(move |cancellation| {
                     let result = towavue_runtime_windows::timeline_waveform(
-                        &key.path,
+                        input.path(),
                         &key.plan,
                         key.rate,
                         key.volume,

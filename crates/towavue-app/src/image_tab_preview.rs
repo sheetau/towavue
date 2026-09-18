@@ -421,6 +421,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .set_current_path(path.clone(), MediaKind::Image);
         self.edits.insert(id, EditHistory::default());
         self.source_versions.remove(&id);
+        self.source_backings.remove(&id);
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
         self.metadata_export_settings.remove(&id);

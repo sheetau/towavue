@@ -127,7 +127,7 @@ fn pointer_panel_resize_releases_numeric_focus_on_press() {
             let mut value = None;
             let _ = context.run_ui(raw, |ui| {
                 super::begin(&context, Some(tab), true);
-                let resizable = timeline_edit::panel_resize_enabled(ui, panel, false);
+                let resizable = timeline_edit::panel_resize_enabled(ui, panel);
                 egui::Panel::bottom(panel)
                     .default_size(96.0)
                     .size_range(64.0..=240.0)

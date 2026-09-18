@@ -228,6 +228,7 @@ impl Playlist {
                         .scope_builder(
                             egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
                             |ui| {
+                                crate::chrome::flat_buttons(ui);
                                 if selected {
                                     ui.visuals_mut().widgets.inactive.fg_stroke.color =
                                         egui::Color32::WHITE;
@@ -862,6 +863,11 @@ mod tests {
                         Pos2::new(bounds.x0 as f32, bounds.y0 as f32),
                         Pos2::new(bounds.x1 as f32, bounds.y1 as f32),
                     );
+                    let original_positions: Vec<_> = texts(&output)
+                        .into_iter()
+                        .filter(|text| row.contains(text.pos))
+                        .map(|text| (text.galley.text().to_owned(), text.pos))
+                        .collect();
                     for held in [false, true] {
                         let mut events = vec![Event::PointerMoved(row.center())];
                         if held {
@@ -893,6 +899,12 @@ mod tests {
                             .collect();
                         assert_eq!(captions.len(), 2);
                         for text in captions {
+                            let original = original_positions
+                                .iter()
+                                .find(|(label, _)| label == text.galley.text())
+                                .expect("original caption")
+                                .1;
+                            assert_eq!(text.pos, original, "hover/press must not shift text");
                             assert!(
                                 (text.pos.y + text.galley.size().y * 0.5 - row.center().y).abs()
                                     <= 1.0 / density,

@@ -508,7 +508,7 @@ impl CommandPalette {
                     file_label_widths(ui, body.width(), &name, group);
                 let response = ui
                     .push_id(path, |ui| {
-                        row_content_style(ui);
+                        crate::chrome::flat_buttons(ui);
                         ui.put(
                             body,
                             egui::Button::selectable(
@@ -616,22 +616,6 @@ fn file_label_widths(ui: &egui::Ui, width: f32, name: &str, group: &str) -> (f32
     (name, remainder - group, group)
 }
 
-fn row_content_style(ui: &mut egui::Ui) {
-    // The row owns its complete background. Equal frameless content margins
-    // also keep glyphs stationary as the pointer moves to the close button.
-    let widgets = &mut ui.visuals_mut().widgets;
-    for visuals in [
-        &mut widgets.inactive,
-        &mut widgets.hovered,
-        &mut widgets.active,
-        &mut widgets.open,
-        &mut widgets.noninteractive,
-    ] {
-        visuals.bg_stroke = egui::Stroke::NONE;
-        visuals.expansion = 0.0;
-    }
-}
-
 fn row_background(
     ui: &egui::Ui,
     row: egui::Rect,
@@ -651,7 +635,7 @@ fn row_background(
         row,
         visuals.corner_radius,
         visuals.weak_bg_fill,
-        visuals.bg_stroke,
+        egui::Stroke::NONE,
         egui::StrokeKind::Inside,
     )
     .into()

@@ -315,7 +315,8 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                             egui::Shape::Rect(painted) if painted.fill == crate::chrome::HOVER
                                 && painted.rect.min.distance(full.min) < 0.1
                                 && painted.rect.max.distance(full.max) < 0.1
-                                && painted.rect.contains(point))),
+                                && painted.rect.contains(point)
+                                && painted.stroke == egui::Stroke::NONE)),
                                 "background includes the independent removal button"
                             );
                         };

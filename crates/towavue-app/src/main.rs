@@ -251,7 +251,6 @@ enum UiAction {
     PreviewTransport(TabId, u64, PathBuf, CommandId),
     PreviewSeek(TabId, u64, PathBuf, MediaTime),
     PreviewImageSeek(TabId, u64, PathBuf, PathBuf),
-    CollapseTimeline(TabId, u64),
     ReorderTab(TabId, usize),
     TimeSelection(TabId, PlaybackGeneration, Option<towavue_core::TimeRange>),
     TimeAdjustment(
@@ -6316,14 +6315,7 @@ where
         let max_height = root.available_height() * 0.6;
         let min_height = 64.0_f32.min(max_height);
         let panel = self.timeline_panel_id();
-        let original = egui::containers::panel::PanelState::load(root.ctx(), panel);
-        let collapse = timeline_edit::panel_collapse_requested(
-            root.ctx(),
-            panel,
-            root.available_rect_before_wrap().bottom(),
-            min_height,
-        );
-        let resizable = timeline_edit::panel_resize_enabled(root, panel, collapse);
+        let resizable = timeline_edit::panel_resize_enabled(root, panel);
         egui::Panel::bottom(panel)
             .default_size(96.0)
             .size_range(min_height..=max_height)
@@ -6403,21 +6395,6 @@ where
                 }
                 self.draw_waveform_activity(ui, rect);
             });
-        if resizable
-            && collapse
-            && let Some(tab) = self.tabs.active()
-        {
-            // egui retains this during a held drag but writes the clamped size on
-            // release. Preserve the pre-drag size for both cases and discarded passes.
-            if let Some(original) = original {
-                root.ctx()
-                    .data_mut(|data| data.insert_persisted(panel, original));
-            }
-            let action = UiAction::CollapseTimeline(tab.id, self.media_generation);
-            if !actions.contains(&action) {
-                actions.push(action);
-            }
-        }
     }
 
     fn timeline_panel_id(&self) -> egui::Id {
@@ -6665,7 +6642,6 @@ where
             UiAction::PreviewSeek(id, instance, path, target) => {
                 self.handle_preview_seek(id, instance, &path, target)
             }
-            UiAction::CollapseTimeline(id, instance) => self.collapse_timeline(id, instance),
             UiAction::TabCommand(id, command) => {
                 let focus = self
                     .ui_context

@@ -53,26 +53,8 @@ fn frame(app: &mut App, events: Vec<egui::Event>, repeat: bool) -> Vec<UiAction>
         },
         |ui| {
             app.draw_ui(ui, &mut actions);
-            if !app.timeline_open {
-                // The fixture has no native session. Exercise the actual compact
-                // widget against the resize's remaining pointer events nonetheless.
-                let (_, target, opened) = seekbar::show(
-                    &context,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 376.0), egui::pos2(640.0, 400.0)),
-                    0.2,
-                    None,
-                    true,
-                    true,
-                );
-                if target.is_some() {
-                    actions.push(UiAction::Seek(MediaTime::ZERO));
-                }
-                if opened {
-                    actions.push(UiAction::Command(CommandId::ToggleTimeline));
-                }
-            }
             if repeat && context.current_pass_index() == 0 {
-                context.request_discard("verify resize collapse across layout passes");
+                context.request_discard("verify bounded resize across layout passes");
             }
         },
     );
@@ -107,16 +89,16 @@ fn drag(app: &mut App, end: egui::Pos2) {
     ] {
         assert!(
             frame(app, events, false).is_empty(),
-            "resize stays within the collapse dead zone"
+            "resizing only changes panel height"
         );
         assert!(app.timeline_open);
     }
 }
 
 #[test]
-fn resize_below_minimum_collapses_once_without_changing_media_state() {
+fn resize_clamps_at_minimum_without_closing_timeline() {
     let Some(_) = crate::tests::isolated_test_root(
-        "timeline_edit::panel_tests::resize_below_minimum_collapses_once_without_changing_media_state",
+        "timeline_edit::panel_tests::resize_clamps_at_minimum_without_closing_timeline",
     ) else {
         return;
     };
@@ -130,57 +112,27 @@ fn resize_below_minimum_collapses_once_without_changing_media_state() {
                 let generation = app.generation;
                 let position = app.current_position();
                 let minimum = rect(&app).center_bottom() - egui::vec2(0.0, 64.0);
-                drag(&mut app, minimum);
-                assert!(frame(&mut app, vec![button(minimum, false)], true).is_empty());
-                assert!(app.timeline_open, "minimum alone does not collapse");
-                assert!((rect(&app).height() - 64.0).abs() <= 1.0);
                 let larger = minimum - egui::vec2(0.0, 80.0);
                 drag(&mut app, larger);
                 assert!(frame(&mut app, vec![button(larger, false)], false).is_empty());
-                let before = rect(&app);
-                assert!((before.height() - 144.0).abs() <= 1.0);
+                assert!((rect(&app).height() - 144.0).abs() <= 1.0);
                 drag(&mut app, minimum + egui::vec2(0.0, 4.0));
-                let below = minimum + egui::vec2(0.0, 16.0);
+                let below = minimum + egui::vec2(0.0, 80.0);
                 let events = if released {
                     vec![button(below, false)]
                 } else {
                     vec![egui::Event::PointerMoved(below)]
                 };
-                let actions = frame(&mut app, events, true);
+                assert!(frame(&mut app, events, true).is_empty());
                 assert!(
-                    matches!(actions.as_slice(), [UiAction::CollapseTimeline(id, 7)] if *id == tab),
-                    "one owner-bound action at the threshold, before release when held"
+                    app.timeline_is_visible(),
+                    "overshoot never closes the timeline"
                 );
-                assert_eq!(
-                    app.ui_context
-                        .as_ref()
-                        .expect("context")
-                        .input(|input| input.pointer.primary_down()),
-                    !released
-                );
-                assert_eq!(
-                    rect(&app),
-                    before,
-                    "collapse retains the pre-drag size, including a batched release"
-                );
-                let action = actions.into_iter().next().expect("collapse");
-                app.handle_ui_action(action.clone());
-                assert!(!app.timeline_is_visible());
-                app.handle_ui_action(action.clone());
-                assert!(!app.timeline_open, "duplicate delivery is idempotent");
+                if !released {
+                    assert!(frame(&mut app, vec![button(below, false)], true).is_empty());
+                }
                 assert!(frame(&mut app, vec![], true).is_empty());
-                let compact = egui::pos2(500.0, 376.0);
-                assert!(frame(&mut app, vec![egui::Event::PointerMoved(compact)], true).is_empty());
-                assert!(
-                    frame(&mut app, vec![button(compact, false)], true).is_empty(),
-                    "the resize tail cannot seek or reopen through the compact control"
-                );
-                assert!(frame(&mut app, vec![button(compact, true)], false).is_empty());
-                let fresh = frame(&mut app, vec![button(compact, false)], false);
-                assert!(
-                    matches!(fresh.as_slice(), [UiAction::Seek(_)]),
-                    "a fresh compact click still works"
-                );
+                assert!((rect(&app).height() - 64.0).abs() <= 1.0 / scale);
                 assert_eq!(app.edits[&tab], history);
                 assert_eq!(app.time_selection, selection);
                 assert_eq!(app.playback_selection, selection);
@@ -188,34 +140,22 @@ fn resize_below_minimum_collapses_once_without_changing_media_state() {
                 assert_eq!(app.generation, generation);
                 assert_eq!(app.state, PlaybackState::Paused);
                 app.dispatch(CommandId::ToggleTimeline);
+                assert!(!app.timeline_open, "explicit toggle still closes");
+                app.dispatch(CommandId::ToggleTimeline);
                 assert!(frame(&mut app, vec![], true).is_empty());
-                assert!(
-                    (rect(&app).height() - before.height()).abs() <= 1.0 / scale,
-                    "reopening restores the height before the closing gesture"
-                );
-                app.media_generation = 8;
-                app.handle_ui_action(action.clone());
-                assert!(
-                    app.timeline_open,
-                    "old media cannot collapse its replacement"
-                );
-                app.media_generation = 7;
-                let other = app.tabs.open_new("other.mp4".into(), MediaKind::Video);
-                app.handle_ui_action(action);
-                assert_eq!(app.tabs.active_id(), Some(other));
-                assert!(
-                    app.timeline_open,
-                    "old tab cannot collapse the new active tab"
-                );
+                assert!((rect(&app).height() - 64.0).abs() <= 1.0 / scale);
+                drag(&mut app, larger);
+                assert!(frame(&mut app, vec![button(larger, false)], true).is_empty());
+                assert!((rect(&app).height() - 144.0).abs() <= 1.0 / scale);
             }
         }
     }
 }
 
 #[test]
-fn collapse_respects_event_order_cancellation_and_the_dead_zone() {
+fn resize_preserves_cancellation_release_order_and_pointer_reentry() {
     let Some(_) = crate::tests::isolated_test_root(
-        "timeline_edit::panel_tests::collapse_respects_event_order_cancellation_and_the_dead_zone",
+        "timeline_edit::panel_tests::resize_preserves_cancellation_release_order_and_pointer_reentry",
     ) else {
         return;
     };
@@ -261,34 +201,18 @@ fn collapse_respects_event_order_cancellation_and_the_dead_zone() {
                 vec![egui::Event::PointerMoved(boundary), button(boundary, false)]
             }
         };
-        let actions = frame(&mut app, events, true);
-        if matches!(interruption, 5..=7) {
-            assert!(
-                matches!(actions.as_slice(), [UiAction::CollapseTimeline(..)]),
-                "a threshold crossing commits before later events"
-            );
-            for action in actions {
-                app.handle_ui_action(action);
-            }
-            assert!(!app.timeline_open);
-            assert_eq!(rect(&app), before);
+        assert!(frame(&mut app, events, true).is_empty());
+        app.pending_guard = None;
+        assert!(frame(&mut app, vec![], false).is_empty());
+        assert!(app.timeline_open);
+        let expected = if matches!(interruption, 0..=3 | 5) {
+            before.height()
         } else {
-            assert!(
-                actions.is_empty(),
-                "cancellation or an earlier release wins: {interruption}"
-            );
-            app.pending_guard = None;
-            assert!(frame(&mut app, vec![], false).is_empty());
-            assert!(app.timeline_open);
-            let expected = if matches!(interruption, 4 | 8) {
-                64.0
-            } else {
-                before.height()
-            };
-            assert!(
-                (rect(&app).height() - expected).abs() <= 1.0,
-                "cancelled resize restores its initial height: {interruption}"
-            );
-        }
+            64.0
+        };
+        assert!(
+            (rect(&app).height() - expected).abs() <= 1.0,
+            "cancelled resize restores its initial height: {interruption}"
+        );
     }
 }

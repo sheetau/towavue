@@ -23,39 +23,34 @@ pub(super) fn cancel_panel_resize(context: &egui::Context, panel: egui::Id) -> b
     true
 }
 
-pub(super) fn panel_resize_enabled(
-    ui: &egui::Ui,
-    panel: egui::Id,
-    collapse_requested: bool,
-) -> bool {
+pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
     let enabled = ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx());
-    let interrupted = !collapse_requested
-        && ui.input(|input| {
-            input
-                .events
-                .iter()
-                .take_while(|event| {
-                    !matches!(
-                        event,
-                        egui::Event::PointerButton {
-                            button: egui::PointerButton::Primary,
-                            pressed: false,
+    let interrupted = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .take_while(|event| {
+                !matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        ..
+                    }
+                )
+            })
+            .any(|event| {
+                matches!(
+                    event,
+                    egui::Event::WindowFocused(false)
+                        | egui::Event::Key {
+                            key: egui::Key::Escape,
+                            pressed: true,
                             ..
                         }
-                    )
-                })
-                .any(|event| {
-                    matches!(
-                        event,
-                        egui::Event::WindowFocused(false)
-                            | egui::Event::Key {
-                                key: egui::Key::Escape,
-                                pressed: true,
-                                ..
-                            }
-                    )
-                })
-        });
+                )
+            })
+    });
     if !enabled || interrupted {
         cancel_panel_resize(ui.ctx(), panel);
     }
@@ -79,68 +74,15 @@ pub(super) fn panel_resize_enabled(
     {
         tab_focus::observe_pointer_control(&response, "timeline-resize");
     }
-    enabled && !cancelled
+    enabled && !cancelled && context_resize_not_cancelled(ui.ctx(), panel)
 }
 
-pub(super) fn panel_collapse_requested(
-    context: &egui::Context,
-    panel: egui::Id,
-    bottom: f32,
-    minimum: f32,
-) -> bool {
-    if context
-        .data(|data| data.get_temp::<bool>(panel.with("cancel-resize")))
-        .unwrap_or(false)
-        || context.data(|data| data.get_temp::<u64>(panel.with("cancel-resize-frame")))
-            == Some(context.cumulative_frame_nr())
-        || !context
-            .read_response(panel.with("__resize"))
-            .is_some_and(|response| {
-                response.dragged_by(egui::PointerButton::Primary)
-                    || response.drag_stopped_by(egui::PointerButton::Primary)
-            })
-    {
-        return false;
-    }
-    // Resolve the first decisive event, not the final pointer location. Crossing
-    // the dead zone commits while held; an earlier cancellation/release wins.
-    context.input(|input| {
-        input
-            .events
-            .iter()
-            .find_map(|event| match event {
-                egui::Event::PointerMoved(pos) if bottom - pos.y < minimum - 8.0 => Some(true),
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    ..
-                } => Some(bottom - pos.y < minimum - 8.0),
-                egui::Event::WindowFocused(false)
-                | egui::Event::Key {
-                    key: egui::Key::Escape,
-                    pressed: true,
-                    ..
-                } => Some(false),
-                _ => None,
-            })
-            .unwrap_or(false)
-    })
+fn context_resize_not_cancelled(context: &egui::Context, panel: egui::Id) -> bool {
+    context.data(|data| data.get_temp::<u64>(panel.with("cancel-resize-frame")))
+        != Some(context.cumulative_frame_nr())
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    pub(super) fn collapse_timeline(&mut self, tab: TabId, instance: u64) {
-        if self.tabs.active_id() != Some(tab)
-            || self.media_generation != instance
-            || !self.timeline_is_visible()
-            || self.filmstrip_open
-            || self.preview_input_blocked()
-        {
-            return;
-        }
-        self.dispatch(CommandId::ToggleTimeline);
-    }
-
     pub(super) fn set_time_selection(&mut self, selection: Option<towavue_core::TimeRange>) {
         if self.time_selection != selection {
             let position = self.current_position();

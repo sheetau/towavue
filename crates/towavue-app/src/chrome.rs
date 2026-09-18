@@ -148,6 +148,22 @@ pub fn style(style: &mut egui::Style) {
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
 }
 
+pub fn flat_buttons(ui: &mut egui::Ui) {
+    // egui subtracts the themed stroke width from button padding before local
+    // stroke overrides. Clear it for every state to keep flat content stationary.
+    let widgets = &mut ui.visuals_mut().widgets;
+    for visuals in [
+        &mut widgets.inactive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+        &mut widgets.noninteractive,
+    ] {
+        visuals.bg_stroke = egui::Stroke::NONE;
+        visuals.expansion = 0.0;
+    }
+}
+
 pub fn bar() -> egui::Frame {
     egui::Frame::NONE
         .fill(BACKGROUND)

@@ -80,7 +80,7 @@ impl CommandPalette {
                     let background = ui.painter().add(egui::Shape::Noop);
                     let response = ui
                         .push_id(definition.id, |ui| {
-                            row_content_style(ui);
+                            crate::chrome::flat_buttons(ui);
                             ui.add_enabled_ui(enabled[index], |ui| {
                                 ui.put(
                                     body,

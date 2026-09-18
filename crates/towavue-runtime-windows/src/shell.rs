@@ -25,12 +25,13 @@ use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     DISPID_FILELISTENUMDONE, DShellFolderViewEvents, DShellFolderViewEvents_Impl, EBO_NOBORDER,
-    EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, IExplorerBrowser,
-    IExplorerBrowserEvents, IExplorerBrowserEvents_Impl, IFolderView2, IPersistFolder2,
-    IShellBrowser, IShellItem, IShellItemArray, IShellView, IShellWindows, IWebBrowserApp,
-    SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject, SHOpenFolderAndSelectItems,
-    SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH, SORT_ASCENDING, SORT_DESCENDING,
-    SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows, StrCmpLogicalW,
+    EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, FWF_NOBROWSERVIEWSTATE,
+    IExplorerBrowser, IExplorerBrowserEvents, IExplorerBrowserEvents_Impl, IFolderView2,
+    IPersistFolder2, IShellBrowser, IShellItem, IShellItemArray, IShellView, IShellWindows,
+    IWebBrowserApp, SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject,
+    SHOpenFolderAndSelectItems, SHParseDisplayName, SID_STopLevelBrowser, SIGDN_FILESYSPATH,
+    SORT_ASCENDING, SORT_DESCENDING, SORTCOLUMN, SVGIO_ALLVIEW, SVGIO_FLAG_VIEWORDER, ShellWindows,
+    StrCmpLogicalW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, MWMO_INPUTAVAILABLE,
@@ -618,7 +619,15 @@ impl HiddenEnumeration {
         }
         loop {
             match self.state.load(AtomicOrdering::Acquire) {
-                1 => return current().then_some(()),
+                1 => {
+                    if !current() {
+                        return None;
+                    }
+                    // SAFETY: settings have loaded on this STA. Protect the view
+                    // only after navigation has read the saved settings.
+                    unsafe { prevent_view_persistence(&self.browser) }.ok()?;
+                    return current().then_some(());
+                }
                 2 => return None,
                 _ => {}
             }
@@ -1012,8 +1021,36 @@ impl HiddenExplorerBrowser {
                 let _ = DestroyWindow(host);
                 return None;
             }
+            // Explicitly read Explorer's per-folder view state. An unnamed bag
+            // can resolve a template's name order instead of the saved sort.
+            // Keep the observer options explicit after selecting the bag. The
+            // view's separate no-save flag is applied after it reads this state.
+            if browser
+                .SetPropertyBag(w!("Shell"))
+                .and_then(|()| {
+                    browser.SetOptions(EBO_NOBORDER | EBO_NOPERSISTVIEWSTATE | EBO_NOTRAVELLOG)
+                })
+                .is_err()
+            {
+                eprintln!("towavue: IExplorerBrowser view-state selection failed");
+                let _ = browser.Destroy();
+                let _ = DestroyWindow(host);
+                return None;
+            }
             Some(Self { browser, host })
         }
+    }
+}
+
+// SAFETY: the caller must own this browser on the current STA.
+unsafe fn prevent_view_persistence(browser: &IExplorerBrowser) -> windows::core::Result<()> {
+    unsafe {
+        browser
+            .GetCurrentView::<IFolderView2>()?
+            .SetCurrentFolderFlags(
+                FWF_NOBROWSERVIEWSTATE.0 as u32,
+                FWF_NOBROWSERVIEWSTATE.0 as u32,
+            )
     }
 }
 
@@ -1021,6 +1058,9 @@ impl Drop for HiddenExplorerBrowser {
     fn drop(&mut self) {
         // SAFETY: both objects were created and are destroyed on this STA thread.
         unsafe {
+            // Also cover cancellation/error before enumeration completed. A
+            // missing view has no settings to save; never alter a live Explorer.
+            let _ = prevent_view_persistence(&self.browser);
             let _ = self.browser.Destroy();
             let _ = DestroyWindow(self.host);
         }
@@ -1040,6 +1080,7 @@ unsafe fn pump_messages() {
 #[cfg(test)]
 mod tests {
     mod lifetime_tests;
+    mod saved_order_tests;
     #[test]
     fn missing_reveal_target_reports_failure_without_opening_explorer() {
         let path = std::env::temp_dir()

@@ -436,3 +436,49 @@ fn browser_enumeration_sink_does_not_advertise_agility() {
         "native connection-point ownership must remain on the creating STA"
     );
 }
+
+#[test]
+#[ignore = "read-only hidden-view order settling for an explicitly selected reference folder"]
+fn reference_hidden_order_reports_settling() -> Result<(), String> {
+    let folder = std::env::var_os("TOWAVUE_SHELL_REFERENCE_DIR")
+        .map(PathBuf::from)
+        .ok_or("set TOWAVUE_SHELL_REFERENCE_DIR")?;
+    let expected = std::env::var_os("TOWAVUE_SHELL_EXPECTED_FIRST");
+    thread::spawn(move || {
+        let apartment = ShellApartment::new();
+        assert!(apartment.0, "reference STA");
+        let folder = canonical_shell_path(&folder).map_err(|error| error.to_string())?;
+        let pidl = parse_path(&folder).ok_or("reference PIDL")?;
+        // SAFETY: all browser/view/PIDL values stay on this STA; persistence is
+        // disabled and only enumeration/sort metadata are read from the reference.
+        unsafe {
+            let browser = HiddenExplorerBrowser::new().ok_or("hidden browser")?;
+            let enumeration = HiddenEnumeration::new(&browser.browser).ok_or("enumeration sink")?;
+            browser.browser.BrowseToIDList(pidl.as_ptr(), SBSP_ABSOLUTE)
+                .map_err(|error| error.to_string())?;
+            let deadline = Instant::now() + Duration::from_secs(30);
+            enumeration.wait(&|| Instant::now() < deadline).ok_or("enumeration failed")?;
+            let view = browser.browser.GetCurrentView::<IFolderView2>()
+                .map_err(|error| error.to_string())?;
+            let started = Instant::now();
+            let mut previous: Option<Vec<PathBuf>> = None;
+            for delay in [0, 20, 100, 500, 2000] {
+                while started.elapsed() < Duration::from_millis(delay) {
+                    pump_messages();
+                    thread::sleep(Duration::from_millis(2));
+                }
+                pump_messages();
+                let snapshot = capture_view(&view, &folder, &pidl,
+                    FolderSnapshotSource::PersistedShellView, 1, &|| true).ok_or("capture")?;
+                let paths: Vec<_> = snapshot.items.iter().map(|item| item.path.clone()).collect();
+                let first: Vec<_> = snapshot.items.iter().take(6).map(|item| item.path.file_name()).collect();
+                let expected_index = expected.as_ref().and_then(|name| snapshot.items.iter()
+                    .position(|item| item.path.file_name() == Some(name.as_os_str())));
+                println!("SHELL_SETTLING delay_ms={delay} count={} columns={:?} expected_index={expected_index:?} changed={} first={first:?}",
+                    paths.len(), snapshot.sort_columns, previous.as_ref().is_some_and(|old| *old != paths));
+                previous = Some(paths);
+            }
+        }
+        Ok(())
+    }).join().map_err(|_| "reference thread panicked")?
+}

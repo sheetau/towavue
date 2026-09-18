@@ -18,6 +18,16 @@ pub enum CommandId {
     TogglePause,
     SeekBackward,
     SeekForward,
+    SeekVideo0,
+    SeekVideo10,
+    SeekVideo20,
+    SeekVideo30,
+    SeekVideo40,
+    SeekVideo50,
+    SeekVideo60,
+    SeekVideo70,
+    SeekVideo80,
+    SeekVideo90,
     PreviousMedia,
     NextMedia,
     PreviousSameKind,
@@ -137,6 +147,22 @@ pub enum CommandId {
 }
 
 impl CommandId {
+    pub const fn video_seek_percent(self) -> Option<u8> {
+        match self {
+            Self::SeekVideo0 => Some(0),
+            Self::SeekVideo10 => Some(10),
+            Self::SeekVideo20 => Some(20),
+            Self::SeekVideo30 => Some(30),
+            Self::SeekVideo40 => Some(40),
+            Self::SeekVideo50 => Some(50),
+            Self::SeekVideo60 => Some(60),
+            Self::SeekVideo70 => Some(70),
+            Self::SeekVideo80 => Some(80),
+            Self::SeekVideo90 => Some(90),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OpenFile => "open_file",
@@ -158,6 +184,16 @@ impl CommandId {
             Self::TogglePause => "toggle_pause",
             Self::SeekBackward => "seek_backward",
             Self::SeekForward => "seek_forward",
+            Self::SeekVideo0 => "seek_video_0",
+            Self::SeekVideo10 => "seek_video_10",
+            Self::SeekVideo20 => "seek_video_20",
+            Self::SeekVideo30 => "seek_video_30",
+            Self::SeekVideo40 => "seek_video_40",
+            Self::SeekVideo50 => "seek_video_50",
+            Self::SeekVideo60 => "seek_video_60",
+            Self::SeekVideo70 => "seek_video_70",
+            Self::SeekVideo80 => "seek_video_80",
+            Self::SeekVideo90 => "seek_video_90",
             Self::PreviousMedia => "previous_media",
             Self::NextMedia => "next_media",
             Self::PreviousSameKind => "previous_same_kind",
@@ -483,7 +519,9 @@ impl CommandDefinition {
         if self.id == CommandId::ExportFrame && !context.has_video_frame {
             return false;
         }
-        if self.id == CommandId::TogglePause && context.playback_blocked {
+        if (self.id == CommandId::TogglePause || self.id.video_seek_percent().is_some())
+            && context.playback_blocked
+        {
             return false;
         }
         if context.image_transition
@@ -646,6 +684,56 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(CommandId::SeekBackward, "Seek backward", PLAYABLE_MEDIA),
     command(CommandId::SeekForward, "Seek forward", PLAYABLE_MEDIA),
+    command(
+        CommandId::SeekVideo0,
+        "Seek video to 0%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo10,
+        "Seek video to 10%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo20,
+        "Seek video to 20%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo30,
+        "Seek video to 30%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo40,
+        "Seek video to 40%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo50,
+        "Seek video to 50%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo60,
+        "Seek video to 60%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo70,
+        "Seek video to 70%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo80,
+        "Seek video to 80%",
+        &[MediaKind::Video],
+    ),
+    command(
+        CommandId::SeekVideo90,
+        "Seek video to 90%",
+        &[MediaKind::Video],
+    ),
     command(CommandId::PreviousMedia, "Previous media", ANY_MEDIA),
     command(CommandId::NextMedia, "Next media", ANY_MEDIA),
     command(

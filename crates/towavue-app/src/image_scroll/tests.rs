@@ -758,3 +758,172 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         }
     }
 }
+
+#[test]
+fn arrow_pan_owns_only_overflowing_axes_in_images_and_reading_at_three_densities() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_scroll::tests::arrow_pan_owns_only_overflowing_axes_in_images_and_reading_at_three_densities",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        for reading in [false, true] {
+            for (width, height, horizontal, vertical) in [
+                (600, 120, true, false),
+                (80, 600, false, true),
+                (600, 600, true, true),
+            ] {
+                app.reading_mode = false;
+                let decoded = Arc::new(DecodedImage {
+                    animation_plays: 0,
+                    format: "test",
+                    frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                        width,
+                        height,
+                        rgba: vec![255; (width * height * 4) as usize],
+                        delay: Duration::ZERO,
+                    }],
+                });
+                let path = root.join("arrows.png");
+                let tab =
+                    crate::tab_transfer::tests::install(&mut app, path.clone(), decoded.clone());
+                app.reading_mode = reading;
+                app.reading_pages = if reading {
+                    vec![Ok(ImagePresentation::from_decoded(
+                        &context,
+                        &root.join("second.png"),
+                        decoded,
+                    )
+                    .expect("page"))]
+                } else {
+                    vec![]
+                };
+                app.image_view = ImageViewState {
+                    zoom: ZoomMode::Custom(density),
+                    ..Default::default()
+                };
+                let frame = |app: &mut Application<_>| {
+                    let mut input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(240.0, 180.0),
+                        )),
+                        ..Default::default()
+                    };
+                    input
+                        .viewports
+                        .entry(egui::ViewportId::ROOT)
+                        .or_default()
+                        .native_pixels_per_point = Some(density);
+                    context.run_ui(input, |ui| {
+                        if reading {
+                            app.draw_reading_pages(ui);
+                        } else {
+                            app.draw_image(ui);
+                        }
+                    })
+                };
+                let output = frame(&mut app);
+                assert_eq!(output.pixels_per_point, density);
+                assert_eq!(app.image_viewport, egui::vec2(240.0, 180.0));
+                let generation = app.image_generation;
+                for (key, axis, positive, overflow) in [
+                    ("Right", 0, false, horizontal),
+                    ("Left", 0, true, horizontal),
+                    ("Down", 1, false, vertical),
+                    ("Up", 1, true, vertical),
+                ] {
+                    app.image_view.pan = (0.0, 0.0);
+                    let stroke = key.parse::<KeyStroke>().expect("key");
+                    assert_eq!(
+                        app.image_arrow_pan(&stroke).is_some(),
+                        overflow,
+                        "{key}, {width}x{height}, reading={reading}, density={density}; viewport={:?}, zoom={:?}, loading={}, edit={}, handoff={}, displayed={:?}/{:?}, drag={}/{}, allowed={}, focused={}, keyboard={}, image={}, error={}, keys={:?}",
+                        app.image_viewport,
+                        app.image_view.zoom,
+                        app.image_loading,
+                        app.image_edit_pending,
+                        app.image_handoff.is_some(),
+                        app.displayed_tab,
+                        app.tabs.active_id(),
+                        app.view_drag.is_some(),
+                        app.rotation_drag.is_some(),
+                        app.view_input_allowed(&context),
+                        context.input(|input| input.focused),
+                        context.egui_wants_keyboard_input(),
+                        app.image.is_some(),
+                        app.image_error.is_some(),
+                        app.entered_shortcut
+                    );
+                    if overflow {
+                        assert!(
+                            app.owns_focused_shortcut(&stroke),
+                            "route before egui arrow focus"
+                        );
+                        app.process_shortcut(stroke.clone());
+                        assert_eq!(
+                            egui::Vec2::from(app.image_view.pan)[axis],
+                            if positive { 40.0 } else { -40.0 }
+                        );
+                        for _ in 0..100 {
+                            app.repeat_media_shortcut(stroke.clone());
+                        }
+                        let edge = app.image_view.pan;
+                        app.process_shortcut(stroke);
+                        assert_eq!(app.image_view.pan, edge, "an edge keeps pan ownership");
+                        assert_eq!(app.path.as_ref(), Some(&path));
+                        assert_eq!(app.tabs.active_id(), Some(tab));
+                        assert_eq!(app.image_generation, generation);
+                        assert!(app.image_sequence.steps.is_empty());
+                    }
+                }
+                app.image_view.fit();
+                frame(&mut app);
+                assert!(
+                    app.image_arrow_pan(&"Right".parse().expect("key"))
+                        .is_none()
+                );
+                assert!(app.image_arrow_pan(&"Down".parse().expect("key")).is_none());
+                app.image_view.zoom = ZoomMode::Custom(density * 4.0);
+                let stroke = "Right".parse::<KeyStroke>().expect("key");
+                let original = app.shortcuts.clone();
+                app.shortcuts.remove(CommandId::NextImage);
+                app.shortcuts.remove(CommandId::ReadingRight);
+                app.shortcuts
+                    .set(CommandId::ZoomIn, "Right".parse().expect("custom arrow"));
+                assert!(!app.pan_image_arrow(&stroke));
+                app.shortcuts
+                    .set(CommandId::ZoomIn, "Right K".parse().expect("custom prefix"));
+                assert!(!app.pan_image_arrow(&stroke));
+                app.shortcuts = original;
+                app.palette_open = true;
+                assert!(!app.pan_image_arrow(&stroke));
+                app.palette_open = false;
+                app.native_ime_composing = true;
+                assert!(!app.pan_image_arrow(&stroke));
+                app.native_ime_composing = false;
+                app.entered_shortcut.push("Ctrl+K".parse().expect("prefix"));
+                assert!(!app.pan_image_arrow(&stroke));
+                app.entered_shortcut.clear();
+                assert!(!app.pan_image_arrow(&"Ctrl+Right".parse().expect("modified")));
+                app.image_error = Some("failed raster fixture".into());
+                assert!(!app.pan_image_arrow(&stroke));
+                app.image_error = None;
+                app.image_loading = true;
+                assert!(!app.pan_image_arrow(&stroke));
+                app.image_loading = false;
+                let input = egui::Id::new("arrow-test-editor");
+                let mut text = String::new();
+                let _ = context.run_ui(Default::default(), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut text).id(input))
+                        .request_focus();
+                });
+                assert!(!app.pan_image_arrow(&stroke));
+                context.memory_mut(|memory| memory.surrender_focus(input));
+            }
+        }
+    }
+}

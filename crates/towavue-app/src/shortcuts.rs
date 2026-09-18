@@ -63,6 +63,16 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::PlayTimeSelection, "Shift+Space"),
         (CommandId::SeekBackward, "Left"),
         (CommandId::SeekForward, "Right"),
+        (CommandId::SeekVideo0, "0"),
+        (CommandId::SeekVideo10, "1"),
+        (CommandId::SeekVideo20, "2"),
+        (CommandId::SeekVideo30, "3"),
+        (CommandId::SeekVideo40, "4"),
+        (CommandId::SeekVideo50, "5"),
+        (CommandId::SeekVideo60, "6"),
+        (CommandId::SeekVideo70, "7"),
+        (CommandId::SeekVideo80, "8"),
+        (CommandId::SeekVideo90, "9"),
         (CommandId::PreviousImage, "Left"),
         (CommandId::NextImage, "Right"),
         (CommandId::FirstImage, "Home"),
@@ -371,6 +381,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         .iter()
         .filter(|definition| {
             (definition.id.as_str().starts_with("jump_images_")
+                || definition.id.video_seek_percent().is_some()
                 || definition.id.as_str().starts_with("select_aspect_")
                 || matches!(
                     definition.id,
@@ -2275,3 +2286,72 @@ mod tests {
 
 #[cfg(test)]
 mod reading_tests;
+
+#[cfg(test)]
+mod percentage_tests {
+    use super::*;
+    use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn video_percentage_keys_are_contextual_and_preserve_custom_bindings_and_prefixes() {
+        let defaults = defaults();
+        for kind in [MediaKind::Image, MediaKind::Audio, MediaKind::Video] {
+            let context = CommandContext {
+                media_kind: Some(kind),
+                ..Default::default()
+            };
+            for digit in 0..10 {
+                let stroke = digit.to_string().parse().expect("digit");
+                let resolved = defaults.resolve(&[stroke], context);
+                if kind == MediaKind::Video {
+                    let ShortcutMatch::Command(command) = resolved else {
+                        panic!("video digit {digit}")
+                    };
+                    assert_eq!(command.video_seek_percent(), Some(digit * 10));
+                    assert!(matches!(
+                        defaults.resolve(
+                            &[digit.to_string().parse().expect("digit")],
+                            CommandContext {
+                                playback_blocked: true,
+                                ..context
+                            }
+                        ),
+                        ShortcutMatch::None
+                    ));
+                } else {
+                    assert_eq!(resolved, ShortcutMatch::None);
+                }
+            }
+        }
+        for declaration in [
+            "toggle_mute = 5",
+            "toggle_mute = 5 M",
+            "seek_video_50 =",
+            "seek_video_50 = Ctrl+5",
+        ] {
+            let parsed = parse(
+                &format!("{CURRENT_BINDING_HEADER}\n{declaration}\n"),
+                defaults.clone(),
+            )
+            .expect("custom config");
+            assert!(
+                parsed
+                    .all(CommandId::SeekVideo50)
+                    .iter()
+                    .all(|binding| binding.to_string() != "5")
+            );
+        }
+        let parsed = parse(
+            &format!("{CURRENT_BINDING_HEADER}\nnext_image = 5\n"),
+            defaults,
+        )
+        .expect("separate image context");
+        assert_eq!(
+            parsed
+                .get(CommandId::SeekVideo50)
+                .expect("nonoverlapping default")
+                .to_string(),
+            "5"
+        );
+    }
+}

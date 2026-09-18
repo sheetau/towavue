@@ -201,6 +201,21 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             ],
         ],
     ),
+    (
+        "Video seek",
+        &[&[
+            SeekVideo0,
+            SeekVideo10,
+            SeekVideo20,
+            SeekVideo30,
+            SeekVideo40,
+            SeekVideo50,
+            SeekVideo60,
+            SeekVideo70,
+            SeekVideo80,
+            SeekVideo90,
+        ]],
+    ),
     ("Help", &[&[ShowLicenses]]),
 ];
 
@@ -257,7 +272,10 @@ pub(crate) fn show_section_with_recent(
         .then(|| ui.memory(|memory| memory.focused()))
         .flatten();
     let mut categories = Vec::new();
-    for (title, _) in MENUS.iter().filter(|(title, _)| *title != "Image jump") {
+    for (title, _) in MENUS
+        .iter()
+        .filter(|(title, _)| !matches!(*title, "Image jump" | "Video seek"))
+    {
         let (response, command) =
             submenu(ui, title, context, shortcuts, requested_category, recent);
         categories.push(response.id);
@@ -368,6 +386,22 @@ fn show_items(
                         chosen = Some(*id);
                         ui.close();
                     }
+                }
+                if title == "View" && group.contains(&SeekForward) {
+                    let enabled = context.media_kind == Some(towavue_core::MediaKind::Video)
+                        && !context.playback_blocked;
+                    let (response, command) = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            submenu(ui, "Video seek", context, shortcuts, requested, recent)
+                        })
+                        .inner;
+                    if response.enabled() {
+                        items.push(response.id);
+                    }
+                    if response.gained_focus() {
+                        response.scroll_to_me(None);
+                    }
+                    chosen = chosen.or(command);
                 }
                 if title == "File" && index == 0 {
                     let category = ui.next_auto_id();
@@ -1390,6 +1424,14 @@ mod tests {
     fn image_jump_aspect_and_rotation_menus_scroll_and_dispatch_the_selected_command() {
         for (category, steps, leading, prefix, expected, kind) in [
             (
+                "Video seek",
+                2,
+                0,
+                "seek_video_",
+                SeekVideo90,
+                towavue_core::MediaKind::Video,
+            ),
+            (
                 "Image jump",
                 2,
                 0,
@@ -1546,6 +1588,28 @@ mod tests {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             frame(vec![key(egui::Key::ArrowRight)]);
+            if category == "Video seek" {
+                for step in 0..30 {
+                    let (output, _) = frame(vec![]);
+                    let focused = context
+                        .memory(|memory| memory.focused())
+                        .and_then(|id| context.read_response(id));
+                    if let Some(position) = text_position(&output, "Video seek")
+                        && focused.is_some_and(|response| {
+                            let rect = context
+                                .layer_transform_to_global(response.layer_id)
+                                .unwrap_or_default()
+                                * response.rect;
+                            rect.contains(position)
+                        })
+                    {
+                        break;
+                    }
+                    assert!(step < 29, "video seek submenu receives keyboard focus");
+                    frame(vec![key(egui::Key::ArrowDown)]);
+                }
+                frame(vec![key(egui::Key::ArrowRight)]);
+            }
             if category == "Image jump" {
                 frame(vec![egui::Event::Key {
                     key: egui::Key::Tab,
@@ -1596,7 +1660,7 @@ mod tests {
         let mut placed = BTreeSet::new();
         assert_eq!(
             MENUS.iter().map(|(title, _)| *title).collect::<Vec<_>>(),
-            ["File", "Edit", "View", "Image jump", "Help"]
+            ["File", "Edit", "View", "Image jump", "Video seek", "Help"]
         );
         for (_, groups) in MENUS {
             assert!(!groups.is_empty());

@@ -3,6 +3,89 @@ use crate::*;
 #[cfg(test)]
 mod tests;
 
+impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    /// Match the rendered scrollbar axes, including the joined reading extent.
+    /// An overflowing axis retains ownership at its ends; it must never turn a
+    /// held pan key into a file/page change merely because its offset is clamped.
+    pub(super) fn image_arrow_pan(&self, stroke: &KeyStroke) -> Option<(egui::Vec2, egui::Vec2)> {
+        if self.media_kind != Some(MediaKind::Image)
+            || stroke.modifiers != Modifiers::default()
+            || !self.entered_shortcut.is_empty()
+            || self.native_ime_composing
+            || self.image_loading
+            || self.image_edit_pending
+            || self.image_error.is_some()
+            || self.image_handoff.is_some()
+            || self.displayed_tab.is_none()
+            || self.displayed_tab != self.tabs.active_id()
+            || self.view_drag.is_some()
+            || self.rotation_drag.is_some()
+            || self.image_viewport.min_elem() <= 0.0
+        {
+            return None;
+        }
+        let direction = match stroke.key {
+            Key::ArrowLeft => egui::vec2(1.0, 0.0),
+            Key::ArrowRight => egui::vec2(-1.0, 0.0),
+            Key::ArrowUp => egui::vec2(0.0, 1.0),
+            Key::ArrowDown => egui::vec2(0.0, -1.0),
+            _ => return None,
+        };
+        // Preserve non-navigation custom bindings and prefixes on an arrow key.
+        if !matches!(
+            self.shortcuts
+                .resolve(std::slice::from_ref(stroke), self.command_context()),
+            ShortcutMatch::None
+                | ShortcutMatch::Command(
+                    CommandId::PreviousImage
+                        | CommandId::NextImage
+                        | CommandId::ReadingLeft
+                        | CommandId::ReadingRight
+                        | CommandId::PreviousMedia
+                        | CommandId::NextMedia
+                        | CommandId::PreviousSameKind
+                        | CommandId::NextSameKind
+                )
+        ) {
+            return None;
+        }
+        let context = self.ui_context.as_ref()?;
+        if !self.view_input_allowed(context)
+            || context.egui_wants_keyboard_input()
+            || !context.input(|input| input.focused)
+        {
+            return None;
+        }
+        let density = context.pixels_per_point();
+        let displayed = if self.reading_mode {
+            self.reading_displayed_extent(density)?
+        } else {
+            let transform = self.visual_transform(self.image.as_ref()?.dimensions());
+            let size = (transform.size.0 as u32, transform.size.1 as u32);
+            let scale = self
+                .image_view
+                .logical_scale(size, self.image_viewport.into(), density);
+            egui::vec2(transform.size.0, transform.size.1) * scale
+        };
+        let axis = usize::from(direction.y != 0.0);
+        (displayed[axis] > self.image_viewport[axis]).then_some((displayed, direction * 40.0))
+    }
+
+    pub(super) fn pan_image_arrow(&mut self, stroke: &KeyStroke) -> bool {
+        let Some((displayed, delta)) = self.image_arrow_pan(stroke) else {
+            return false;
+        };
+        let previous = self.image_view.pan;
+        self.image_view.pan = (egui::Vec2::from(previous) + delta).into();
+        clamp(&mut self.image_view, displayed, self.image_viewport);
+        if self.image_view.pan != previous {
+            self.qualify_current_history();
+        }
+        self.request_redraw();
+        true
+    }
+}
+
 fn bar_viewport(viewport: egui::Rect) -> egui::Rect {
     viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25))
 }

@@ -208,6 +208,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
+    pub(super) fn reading_displayed_extent(&self, density: f32) -> Option<egui::Vec2> {
+        let pages = self.reading_page_views();
+        if pages.is_empty() {
+            return None;
+        }
+        let extent = self.reading_extent(&pages);
+        Some(extent * scale(self.image_view, extent, self.image_viewport, density))
+    }
+
     pub(super) fn zoom_reading(&mut self, factor: f32) {
         let Some(context) = &self.ui_context else {
             return;

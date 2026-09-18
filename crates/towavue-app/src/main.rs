@@ -7040,6 +7040,22 @@ where
             CommandId::TogglePause => self.toggle_pause(),
             CommandId::SeekBackward => self.seek_relative(false),
             CommandId::SeekForward => self.seek_relative(true),
+            command @ (CommandId::SeekVideo0
+            | CommandId::SeekVideo10
+            | CommandId::SeekVideo20
+            | CommandId::SeekVideo30
+            | CommandId::SeekVideo40
+            | CommandId::SeekVideo50
+            | CommandId::SeekVideo60
+            | CommandId::SeekVideo70
+            | CommandId::SeekVideo80
+            | CommandId::SeekVideo90) => {
+                self.seek_video_percent(
+                    command
+                        .video_seek_percent()
+                        .expect("video percentage command"),
+                );
+            }
             CommandId::PreviousMedia => self.navigate(false, false),
             CommandId::NextMedia => self.navigate(true, false),
             CommandId::PreviousSameKind => self.navigate(false, true),
@@ -9276,6 +9292,21 @@ where
         }
     }
 
+    fn seek_video_percent(&mut self, percent: u8) {
+        if self.media_kind != Some(MediaKind::Video) || percent > 90 {
+            return;
+        }
+        let Some(duration) = self
+            .playback_duration()
+            .filter(|duration| !duration.is_zero())
+        else {
+            return;
+        };
+        let end = media_time(duration).as_nanoseconds();
+        let target = (i128::from(end) * i128::from(percent) / 100) as i64;
+        self.seek_to(MediaTime::from_nanoseconds(target));
+    }
+
     fn seek_to(&mut self, target: MediaTime) {
         self.relative_seek_notice = None;
         let _ = self.seek_to_target(target);
@@ -10315,6 +10346,7 @@ where
 
     fn owns_focused_shortcut(&self, stroke: &KeyStroke) -> bool {
         if self.owns_seek_shortcut(stroke)
+            || self.image_arrow_pan(stroke).is_some()
             || self.prefix_started.is_some() && self.list_owns_key(stroke)
         {
             return true;
@@ -10499,6 +10531,9 @@ where
     }
 
     fn repeat_media_shortcut(&mut self, stroke: KeyStroke) {
+        if self.pan_image_arrow(&stroke) {
+            return;
+        }
         if self.media_kind == Some(MediaKind::Image) {
             self.repeat_image_shortcut(stroke);
             return;
@@ -10568,6 +10603,9 @@ where
         if self.keyboard_capture_active() {
             self.keyboard_settings.capture(stroke);
             self.request_redraw();
+            return;
+        }
+        if self.pan_image_arrow(&stroke) {
             return;
         }
         self.entered_shortcut.push(stroke.clone());
@@ -24104,7 +24142,11 @@ mod tests {
                         return;
                     }
                 };
-                let mut app = Application::new(None, |_| {}).expect("test app");
+                let (tx, rx) = std::sync::mpsc::channel();
+                let mut app = Application::new(None, move |event| {
+                    let _ = tx.send(event);
+                })
+                .expect("test app");
                 app.window = Some(window);
                 app.renderer = Some(renderer);
                 app.load_path(self.0.clone(), MediaKind::Video);
@@ -24113,6 +24155,49 @@ mod tests {
                 let tab = app.tabs.open_new(self.0.clone(), MediaKind::Video);
                 let time = |seconds| media_time(Duration::from_secs(seconds));
                 taskbar::tests::playback_round_trip(&mut app);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while app.playback_duration().is_none() {
+                    for event in rx.try_iter() {
+                        if matches!(event, AppEvent::Duration(..)) {
+                            app.handle_app_event(event);
+                        }
+                    }
+                    app.load_next_frame();
+                    assert!(Instant::now() < deadline, "video metadata arrives");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                let duration = media_time(app.playback_duration().expect("video duration"));
+                for state in [
+                    PlaybackState::Playing,
+                    PlaybackState::Paused,
+                    PlaybackState::Ended,
+                ] {
+                    for digit in 0..10 {
+                        app.state = state;
+                        let generation = app.generation;
+                        app.process_shortcut(digit.to_string().parse().expect("percentage key"));
+                        let expected = MediaTime::from_nanoseconds(
+                            (i128::from(duration.as_nanoseconds()) * digit / 10) as i64,
+                        );
+                        assert_eq!(
+                            app.current_position(),
+                            expected,
+                            "percentage {digit}, {state:?}"
+                        );
+                        assert_eq!(app.generation, generation.next());
+                        assert_eq!(
+                            app.state,
+                            if state == PlaybackState::Ended {
+                                PlaybackState::Paused
+                            } else {
+                                state
+                            }
+                        );
+                        assert!(!app.edits.contains_key(&tab));
+                    }
+                }
+                app.state = PlaybackState::Paused;
+                app.toggle_pause();
                 for kind in [MediaKind::Video, MediaKind::Audio] {
                     app.media_kind = Some(kind);
                     for (key, forward) in
@@ -24201,6 +24286,26 @@ mod tests {
                     assert!(app.image_sequence.steps.is_empty());
                     assert!(!app.edits.contains_key(&tab));
                 }
+                app.media_kind = Some(MediaKind::Video);
+                let history = app.edits.entry(tab).or_default();
+                history.set_source_duration(Some(duration));
+                history.push(
+                    EditOperation::Timeline(towavue_core::TimelineEdit::Keep(
+                        towavue_core::TimeRange::new(time(2), time(12)).expect("edited range"),
+                    )),
+                    MediaKind::Video,
+                );
+                app.sync_playback_edits();
+                assert_eq!(app.playback_duration(), Some(Duration::from_secs(10)));
+                for digit in [0, 5, 9] {
+                    app.process_shortcut(digit.to_string().parse().expect("edited percentage key"));
+                    assert_eq!(
+                        app.current_position(),
+                        time(digit),
+                        "use the edited timeline duration"
+                    );
+                }
+                app.edits.remove(&tab);
                 // The notice sequence needs 20 seconds; retain the original real
                 // two-second EOF fixture for the terminal-frame checks below.
                 app.load_path(self.1.clone(), MediaKind::Video);

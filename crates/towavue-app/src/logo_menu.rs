@@ -220,6 +220,9 @@ pub(super) fn show_with_recent(
         shift,
         response.hovered() || response.has_focus() || egui::Popup::is_id_open(context, popup),
     );
+    if let Some(selected) = selected {
+        show_direction_label(ui, &response, selected);
+    }
     let set_open = if open.is_some() {
         Some(egui::SetOpenCommand::Bool(true))
     } else if response.clicked() && !suppress {
@@ -261,6 +264,41 @@ pub(super) fn show_with_recent(
         response,
         inner: inner.map(|inner| inner.inner),
     }
+}
+
+fn show_direction_label(ui: &egui::Ui, response: &egui::Response, section: Section) {
+    // Paint-only feedback appears during the captured drag without tooltip delay
+    // or a hit-test surface that could intercept its movement/release.
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        response.id.with("direction-label"),
+    ));
+    let frame = egui::Frame::popup(ui.style());
+    let galley = painter.layout_no_wrap(
+        section.title().into(),
+        egui::FontId::proportional(12.0),
+        chrome::FOREGROUND,
+    );
+    let size = galley.size() + frame.total_margin().sum();
+    let screen = ui.ctx().content_rect();
+    let top = if response.rect.bottom() + 6.0 + size.y <= screen.bottom() {
+        response.rect.bottom() + 6.0
+    } else {
+        response.rect.top() - size.y - 6.0
+    };
+    let outer = egui::Rect::from_min_size(
+        egui::pos2(response.rect.left(), top)
+            .clamp(screen.min, (screen.max - size).max(screen.min)),
+        size,
+    );
+    if screen.contains_rect(outer) && !outer.intersects(response.rect) {
+        let content = outer - frame.total_margin();
+        painter.add(frame.paint(content));
+        painter.galley(content.min, galley, chrome::FOREGROUND);
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_description(format!("Release to open the {} menu", section.title()));
+    });
 }
 
 #[cfg(test)]

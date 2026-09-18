@@ -526,7 +526,9 @@ impl MenuKeyboard {
     pub(crate) fn begin(ui: &egui::Ui) -> Self {
         let modality = ui.input(|input| {
             input.events.iter().rev().find_map(|event| match event {
-                egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. } => Some(false),
+                // Pointer motion alone must not erase keyboard selection. An
+                // actual button event hands ownership back to pointer interaction.
+                egui::Event::PointerButton { .. } => Some(false),
                 egui::Event::Key { pressed: true, .. } | egui::Event::AccessKitActionRequest(_) => {
                     Some(true)
                 }
@@ -1125,7 +1127,10 @@ mod tests {
         frame(vec![key(egui::Key::Tab, false)]);
         frame(vec![key(egui::Key::Enter, false)]);
         let mut navigate = |key_code, shift, label| {
-            let (_, chosen) = frame(vec![key(key_code, shift)]);
+            let (_, chosen) = frame(vec![
+                key(key_code, shift),
+                egui::Event::PointerMoved(egui::pos2(479.0, 1.0)),
+            ]);
             assert!(chosen.is_empty());
             for _ in 0..15 {
                 assert!(frame(vec![]).1.is_empty());
@@ -1149,6 +1154,16 @@ mod tests {
             assert!(
                 rect.top() >= 0.0 && rect.bottom() <= 300.0,
                 "focused {label} is visible: {rect:?}"
+            );
+            assert!(
+                frame(vec![egui::Event::PointerMoved(egui::pos2(478.0, 2.0))])
+                    .1
+                    .is_empty()
+            );
+            assert_eq!(
+                context.memory(|memory| memory.focused()),
+                Some(focused),
+                "pointer motion keeps the keyboard selection on {label}"
             );
         };
         navigate(egui::Key::ArrowRight, false, "Open file");

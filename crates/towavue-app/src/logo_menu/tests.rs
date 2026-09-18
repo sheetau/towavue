@@ -46,6 +46,121 @@ fn popup_bounds(output: &egui::FullOutput) -> Vec<egui::Rect> {
     bounds
 }
 
+fn direction_labels(output: &egui::FullOutput) -> Vec<String> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if ["File", "Edit", "View"].contains(&text.galley.text()) => {
+                Some(text.galley.text().to_owned())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn drag_direction_label_is_immediate_clear_of_the_button_and_input_transparent() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::drag_direction_label_is_immediate_clear_of_the_button_and_input_transparent",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut app, origin) = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 1_000.0);
+        let size = egui::vec2(640.0, 480.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        assert!(direction_labels(&output).is_empty());
+        let state = context
+            .data(|data| data.get_temp::<State>(state_id()))
+            .expect("gesture");
+        let owner = state.drag.expect("owned press").id;
+        let button = context.read_response(owner).expect("logo response").rect;
+        let output = frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin + egui::vec2(4.0, 0.0))],
+        );
+        assert!(
+            direction_labels(&output).is_empty(),
+            "below the direction threshold"
+        );
+        for (delta, section) in [
+            (egui::vec2(24.0, -12.0), Section::File),
+            (egui::vec2(24.0, 24.0), Section::Edit),
+            (egui::vec2(-12.0, 24.0), Section::View),
+        ] {
+            let output = frame(
+                &mut app,
+                size,
+                vec![egui::Event::PointerMoved(origin + delta)],
+            );
+            assert_eq!(
+                direction_labels(&output),
+                [section.title()],
+                "first direction frame, no tooltip timer"
+            );
+            assert!(!egui::Popup::is_any_open(&context));
+            let bounds = popup_bounds(&output);
+            assert_eq!(bounds.len(), 1);
+            assert!(
+                !bounds[0].intersects(button),
+                "label must not cover the menu button"
+            );
+            assert!(context.content_rect().contains_rect(bounds[0]));
+            assert_ne!(
+                context.layer_id_at(bounds[0].center()),
+                Some(egui::LayerId::new(
+                    egui::Order::Tooltip,
+                    owner.with("direction-label")
+                ))
+            );
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .expect("accessibility");
+            let node = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("towavue menu"))
+                .expect("logo")
+                .1
+                .clone();
+            assert_eq!(
+                node.description(),
+                Some(format!("Release to open the {} menu", section.title()).as_str())
+            );
+        }
+        for point in [origin, origin - egui::vec2(9.0, 9.0)] {
+            let output = frame(&mut app, size, vec![egui::Event::PointerMoved(point)]);
+            assert!(direction_labels(&output).is_empty());
+        }
+        let target = origin + egui::vec2(24.0, 24.0);
+        let output = frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
+        assert_eq!(direction_labels(&output), ["Edit"]);
+        frame(&mut app, size, vec![pointer(target, false)]);
+        let output = frame(&mut app, size, vec![]);
+        assert!(
+            direction_labels(&output).is_empty(),
+            "release removes the transient label"
+        );
+        assert!(
+            egui::Popup::is_any_open(&context),
+            "label must not consume the menu-opening release"
+        );
+    }
+}
+
 fn setup(root: &Path) -> (Application<fn(AppEvent)>, egui::Pos2) {
     let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
     let context = fonts::test_context();
@@ -164,14 +279,14 @@ fn check_menu_geometry(root: &Path, density: f32, size: egui::Vec2) {
                     ((second.y0 + second.y1) * 0.5) as f32,
                 ))],
             );
-            assert_ne!(
+            assert_eq!(
                 output
                     .platform_output
                     .accesskit_update
                     .expect("pointer return")
                     .focus,
                 *id,
-                "hovering another command releases the old keyboard highlight"
+                "hovering another command retains the keyboard highlight until a click"
             );
         }
         frame(&mut app, size, vec![key(egui::Key::Escape)]);
@@ -602,7 +717,7 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
             }
             _ => vec![],
         };
-        frame(
+        let output = frame(
             &mut app,
             if mode == 9 {
                 egui::vec2(480.0, 480.0)
@@ -610,6 +725,10 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
                 size
             },
             events,
+        );
+        assert!(
+            direction_labels(&output).is_empty(),
+            "cancelled gesture has no direction label: {mode}"
         );
         app.palette_open = false;
         app.fullscreen = false;

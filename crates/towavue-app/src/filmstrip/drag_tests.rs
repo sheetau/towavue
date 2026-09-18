@@ -2331,9 +2331,9 @@ pub(crate) fn hardware_drag_cancel<N: Fn(AppEvent) + Send + Sync + 'static>(
 }
 
 #[test]
-fn filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum() {
+fn filmstrip_blank_swipe_tracks_pointer_with_velocity_sensitive_brakeable_momentum() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum",
+        "filmstrip::drag_tests::filmstrip_blank_swipe_tracks_pointer_with_velocity_sensitive_brakeable_momentum",
     ) else {
         return;
     };
@@ -2400,10 +2400,7 @@ fn filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum() {
                 render(&mut strip, vec![pointer(end, false)], true);
                 let released = strip.scroll_offset;
                 render(&mut strip, vec![], true);
-                assert!(
-                    strip.scroll_offset > released,
-                    "a fast release coasts briefly"
-                );
+                assert!(strip.scroll_offset > released, "a fast release coasts");
                 match interrupt {
                     "press" => render(&mut strip, vec![pointer(end, true)], true),
                     "wheel" => render(
@@ -2421,15 +2418,20 @@ fn filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum() {
                     _ => {}
                 }
                 let stopped = strip.scroll_offset;
-                for _ in 0..20 {
+                for _ in 0..90 {
                     render(&mut strip, vec![], interrupt != "disabled");
                 }
                 assert!(
-                    strip.scroll_offset <= released + 72.1,
+                    strip.scroll_offset <= released + 2_000.1,
                     "bounded travel after release"
                 );
                 if interrupt != "settle" {
                     assert_eq!(strip.scroll_offset, stopped, "{interrupt} brakes momentum");
+                } else {
+                    assert!(
+                        strip.scroll_offset > released + 150.0,
+                        "a fast flick crosses multiple thumbnails"
+                    );
                 }
                 let settled = strip.scroll_offset;
                 for _ in 0..5 {
@@ -2445,6 +2447,36 @@ fn filmstrip_blank_swipe_tracks_pointer_with_short_brakeable_momentum() {
                     ],
                     true,
                 );
+            }
+            let mut previous_tail = 0.0;
+            for speed in [60.0, 600.0, 2_400.0] {
+                strip.scroll_offset = 1_000.0;
+                for _ in 0..12 {
+                    render(&mut strip, vec![egui::Event::PointerMoved(origin)], true);
+                }
+                let before = strip.scroll_offset;
+                render(&mut strip, vec![pointer(origin, true)], true);
+                let mut end = origin;
+                for step in 1..=6 {
+                    end = origin - egui::vec2(speed * step as f32 / 60.0, 0.0);
+                    render(&mut strip, vec![egui::Event::PointerMoved(end)], true);
+                }
+                render(&mut strip, vec![pointer(end, false)], true);
+                let released = strip.scroll_offset;
+                assert!(
+                    (released - before - speed / 10.0).abs() < 1.0,
+                    "slow and fast drags both track the pointer exactly"
+                );
+                for _ in 0..90 {
+                    render(&mut strip, vec![], true);
+                }
+                let tail = strip.scroll_offset - released;
+                if speed == 60.0 {
+                    assert_eq!(tail, 0.0, "slow dragging has no release drift");
+                } else {
+                    assert!(tail > previous_tail + 10.0, "faster flicks travel farther");
+                }
+                previous_tail = tail;
             }
             render(
                 &mut strip,

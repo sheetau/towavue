@@ -1,7 +1,9 @@
 use super::*;
 
-const COAST_SECONDS: f64 = 0.18;
-const MAX_SPEED: f32 = 800.0;
+// Logical points keep pointer tracking and momentum independent of display density.
+const MIN_SPEED: f32 = 120.0;
+const MAX_SPEED: f32 = 4_000.0;
+const DECELERATION: f32 = 4_000.0;
 
 #[derive(PartialEq)]
 struct Scope {
@@ -132,7 +134,7 @@ impl State {
                 previous = point;
                 if release {
                     let velocity = pointer.velocity().x.clamp(-MAX_SPEED, MAX_SPEED);
-                    self.coast = (velocity.abs() >= 20.0).then_some((time, velocity, *offset));
+                    self.coast = (velocity.abs() >= MIN_SPEED).then_some((time, velocity, *offset));
                     break;
                 }
             }
@@ -144,11 +146,13 @@ impl State {
             self.pointer = None;
         }
         if let Some((started, speed, initial)) = self.coast {
-            let elapsed = (time - started).clamp(0.0, COAST_SECONDS);
-            // A short linear deceleration travels at most 72 logical points.
-            let travel = speed * (elapsed - elapsed * elapsed / (2.0 * COAST_SECONDS)) as f32;
+            let duration = f64::from(speed.abs() / DECELERATION);
+            let elapsed = (time - started).clamp(0.0, duration);
+            // Constant deceleration gives faster flicks more time and distance.
+            // Integrate from release time so repaint frequency cannot alter travel.
+            let travel = speed * (elapsed - elapsed * elapsed / (2.0 * duration)) as f32;
             *offset = (initial - travel).clamp(0.0, maximum);
-            if elapsed >= COAST_SECONDS || *offset <= 0.0 || *offset >= maximum {
+            if elapsed >= duration || *offset <= 0.0 || *offset >= maximum {
                 self.coast = None;
             } else {
                 context.request_repaint();

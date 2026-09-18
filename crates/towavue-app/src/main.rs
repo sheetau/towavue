@@ -11,6 +11,7 @@ mod audio_view_tests;
 mod chrome;
 #[cfg(test)]
 mod chrome_resize_tests;
+mod closed_tabs;
 mod cursor;
 mod export_notice;
 mod export_progress;
@@ -899,7 +900,7 @@ struct Application<N> {
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
-    closed_tabs: VecDeque<PathBuf>,
+    closed_tabs: VecDeque<closed_tabs::ClosedTab>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     resume_history: Option<towavue_runtime_windows::VideoResumeHistory>,
     resume_owner: Option<resume::Owner>,
@@ -8232,17 +8233,6 @@ where
         }
     }
 
-    fn reopen_closed_tab(&mut self) {
-        if self.modal_input_blocked() {
-            return;
-        }
-        if let Some(path) = self.closed_tabs.pop_back() {
-            self.open_external(path, true);
-        } else {
-            self.set_status("No closed tabs to reopen.".into());
-        }
-    }
-
     fn dispatch_tab_command(&mut self, id: TabId, command: CommandId) {
         if self.modal_input_blocked() {
             return;
@@ -8534,6 +8524,12 @@ where
                 self.tabs.take_gallery(id)
             };
             if removed {
+                if remember {
+                    self.remember_closed_tab(closed_tabs::ClosedTab::Gallery {
+                        search: self.gallery_search.clone(),
+                        filter: self.gallery_filter,
+                    });
+                }
                 self.gallery_search.clear();
                 self.gallery_filter = None;
                 if !remember && self.tabs.is_empty() {
@@ -8564,11 +8560,9 @@ where
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
         if remember {
-            if self.closed_tabs.len() == 32 {
-                self.closed_tabs.pop_front();
-            }
-            self.closed_tabs
-                .push_back(removed.target.current_path().to_owned());
+            self.remember_closed_tab(closed_tabs::ClosedTab::Media(
+                removed.target.current_path().to_owned(),
+            ));
         }
         self.tab_preview.clear();
         self.edits.remove(&id);

@@ -262,7 +262,7 @@ mod tests {
             assert!(app.export_error.is_none(), "{:?}", app.export_error);
         }
         assert!(app.tabs.tabs().is_empty() && app.pending_guard.is_none());
-        assert_eq!(app.closed_tabs.len(), 2);
+        assert_eq!(app.closed_tabs.len(), 3, "includes the closed Gallery");
         drop(app);
         for index in 0..2 {
             let source = root.join(format!("{index}.ppm"));
@@ -320,11 +320,11 @@ mod tests {
         assert!(app.pending_guard.is_none());
         app.dispatch_tab_command(c, CloseAllTabs);
         assert!(app.tabs.tabs().is_empty() && app.path.is_none());
-        assert_eq!(app.closed_tabs.len(), 3);
+        assert_eq!(app.closed_tabs.len(), 4, "includes the closed Gallery");
     }
 
     #[test]
-    fn closed_history_is_bounded_path_only_and_reopen_forces_a_new_tab() {
+    fn closed_media_history_is_bounded_path_only_and_reopen_forces_a_new_tab() {
         let root = std::env::temp_dir().join(format!("towavue-reopen-{}", std::process::id()));
         std::fs::create_dir_all(&root).expect("fixture directory");
         let path = root.join("source.wav");
@@ -361,7 +361,10 @@ mod tests {
         app.reopen_closed_tab();
         assert_eq!(app.closed_tabs.len(), 31, "modal must not consume history");
         app.pending_guard = None;
-        app.closed_tabs.push_back(root.join("missing.png"));
+        app.closed_tabs
+            .push_back(crate::closed_tabs::ClosedTab::Media(
+                root.join("missing.png"),
+            ));
         app.reopen_closed_tab();
         assert_eq!(app.tabs.tabs().len(), 1);
         assert!(app.status_message.as_ref().is_some());

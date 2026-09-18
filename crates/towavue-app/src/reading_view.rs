@@ -224,6 +224,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.image_viewport,
             context.pixels_per_point(),
         );
+        self.qualify_current_history();
         self.request_redraw();
     }
 
@@ -257,6 +258,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         }
                         let center = viewport.center() + egui::Vec2::from(self.image_view.pan);
                         let before = scale(self.image_view, extent, viewport.size(), density);
+                        if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref()) {
+                            self.viewed_media.qualify(id, path);
+                        }
                         zoom(
                             &mut self.image_view,
                             factor,

@@ -428,9 +428,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);
         }
-        if let Some(recent) = &self.recent_files {
-            recent.record(path);
-        }
         self.request_redraw();
     }
 }

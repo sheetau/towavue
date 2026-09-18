@@ -415,9 +415,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Err(error) => saved.fail(error.to_string()),
             }
             self.load_duration_for(path.clone(), instance);
-            if let Some(recent) = &self.recent_files {
-                recent.record(path);
-            }
         }
         if saved.state == PlaybackState::Playing {
             self.arm_audio_queue(id);

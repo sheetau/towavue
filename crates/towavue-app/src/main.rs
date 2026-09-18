@@ -56,6 +56,7 @@ mod reading_input;
 mod reading_view;
 #[cfg(test)]
 mod recent_tests;
+mod recent_views;
 mod resize;
 mod resume;
 mod rotation;
@@ -417,6 +418,7 @@ enum GuardedAction {
     CloseTabs(Vec<TabId>),
     DetachTab(TabId),
     Navigate(PathBuf),
+    View(PathBuf),
     NavigateFromFolder(PathBuf, PathBuf),
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
@@ -908,6 +910,7 @@ struct Application<N> {
     restored_reading_pages: bool,
     closed_tabs: VecDeque<closed_tabs::ClosedTab>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
+    viewed_media: recent_views::Views,
     resume_history: Option<towavue_runtime_windows::VideoResumeHistory>,
     resume_owner: Option<resume::Owner>,
     resume_open: Option<towavue_runtime_windows::VideoResume>,
@@ -1067,6 +1070,11 @@ struct Application<N> {
 impl<N> Drop for Application<N> {
     fn drop(&mut self) {
         resume::record(self, true);
+        for path in self.viewed_media.take_pending() {
+            if let Some(recent) = &self.recent_files {
+                recent.record(path);
+            }
+        }
         // Join every media pipeline before releasing the shared renderer/device surface.
         self.session.take();
         self.retained_playback.clear();
@@ -1185,6 +1193,7 @@ where
             restored_reading_pages: false,
             closed_tabs: VecDeque::new(),
             recent_files: None,
+            viewed_media: recent_views::Views::default(),
             resume_history: None,
             resume_owner: None,
             resume_open: None,
@@ -1558,6 +1567,7 @@ where
             self.tabs.open_external(path.clone(), kind)
         };
         self.seed_playback_volume(id);
+        self.qualify_history(id, &path);
         if kind == MediaKind::Audio
             && self.displayed_tab == Some(id)
             && self.path.as_ref() == Some(&path)
@@ -1614,6 +1624,7 @@ where
                 }
                 match kind {
                     towavue_runtime_windows::RecentKind::File => {
+                        self.viewed_media.forget(Some(&path));
                         self.recent_paths.retain(|old| *old != path);
                         self.recent_months.remove(&path);
                         self.gallery_missing_files.retain(|old| *old != path);
@@ -1626,6 +1637,7 @@ where
                 self.request_redraw();
             }
             menu::RecentAction::Clear => {
+                self.viewed_media.forget(None);
                 self.clear_video_resume();
                 if let Some(recent) = &self.recent_files {
                     recent.clear();
@@ -1648,6 +1660,7 @@ where
                 {
                     // Loaded tabs remain usable even after their source is moved or removed.
                     self.activate_tab(id);
+                    self.qualify_history(id, &path);
                     return;
                 }
                 let path = match canonical_shell_path(&path) {
@@ -1671,7 +1684,7 @@ where
                         }
                     }
                     menu::OpenTarget::Replace if self.tabs.active().is_some() => {
-                        self.request_guarded(GuardedAction::Navigate(path));
+                        self.request_guarded(GuardedAction::View(path));
                     }
                     _ => {
                         let existing = self
@@ -1682,6 +1695,7 @@ where
                             .map(|tab| tab.id);
                         if let Some(id) = existing {
                             self.activate_tab(id);
+                            self.qualify_history(id, &path);
                         } else {
                             self.open_external(path, false);
                         }
@@ -2005,8 +2019,8 @@ where
             .filter(|saved| kind == MediaKind::Image && saved.path == path);
         self.restored_reading_pages = false;
         self.reset_image_edits();
-        if let Some(recent) = &self.recent_files {
-            recent.record(path.clone());
+        if let Some(id) = self.displayed_tab {
+            self.viewed_media.begin(id, &path);
         }
         self.tab_preview.clear();
         self.clear_image_previews();
@@ -3668,6 +3682,7 @@ where
             .is_empty()
             .then_some((self.media_generation, self.graphics_epoch));
         self.record_seek_presentation(media_drawn);
+        self.history_presented(media_drawn);
         self.restore_ui_textures = false;
         self.check_eof();
         // Consumed keys can emit actions only in an earlier, discarded layout pass.
@@ -4155,6 +4170,12 @@ where
                             viewport.size().into(),
                             pixels_per_point,
                         );
+                        if scale != old_scale
+                            && let (Some(id), Some(path)) =
+                                (self.displayed_tab, self.path.as_deref())
+                        {
+                            self.viewed_media.qualify(id, path);
+                        }
                         let correction = (pointer - center) * (1.0 - scale / old_scale);
                         self.image_view.pan.0 += correction.x;
                         self.image_view.pan.1 += correction.y;
@@ -6694,7 +6715,7 @@ where
                 if force_new {
                     self.open_external(path, true);
                 } else {
-                    self.request_guarded(GuardedAction::Navigate(path));
+                    self.request_guarded(GuardedAction::View(path));
                 }
             }
             UiAction::ScrubImage(path, generation, owner) => {
@@ -6731,8 +6752,9 @@ where
                 };
                 // Match filmstrip middle-click: register a fresh tab, without loading
                 // or activating media and without changing Gallery's view or focus.
-                let added = self.tabs.open_new(path, kind);
+                let added = self.tabs.open_new(path.clone(), kind);
                 self.seed_playback_volume(added);
+                self.qualify_history(added, &path);
                 self.edits.entry(added).or_default();
                 self.tabs.activate(gallery);
                 self.request_redraw();
@@ -6761,8 +6783,9 @@ where
                     return;
                 };
                 if background {
-                    let added = self.tabs.open_new(path, kind);
+                    let added = self.tabs.open_new(path.clone(), kind);
                     self.seed_playback_volume(added);
+                    self.qualify_history(added, &path);
                     self.edits.entry(added).or_default();
                     // Register only the path; activation loads it without interrupting this tab.
                     self.tabs.activate(active);
@@ -6770,7 +6793,9 @@ where
                 } else {
                     self.close_filmstrip();
                     if self.path.as_ref() != Some(&path) {
-                        self.request_guarded(GuardedAction::Navigate(path));
+                        self.request_guarded(GuardedAction::View(path));
+                    } else {
+                        self.qualify_history(active, &path);
                     }
                 }
             }
@@ -7087,14 +7112,17 @@ where
             CommandId::ZoomOut => self.zoom_image(0.8),
             CommandId::ActualSize => {
                 self.image_view.actual_size();
+                self.qualify_current_history();
                 self.request_redraw();
             }
             CommandId::FitToWindow => {
                 self.image_view.fit();
+                self.qualify_current_history();
                 self.request_redraw();
             }
             CommandId::CoverWindow => {
                 self.image_view.cover();
+                self.qualify_current_history();
                 self.request_redraw();
             }
             CommandId::ClearSelection => {
@@ -7741,6 +7769,7 @@ where
         let history = self.edits.entry(id).or_default();
         history.set_source_duration(self.media_duration.map(media_time));
         if history.push(operation, kind) {
+            self.qualify_current_history();
             if let Some(image) = &mut self.image {
                 image.held_edit_view = held;
             }
@@ -8315,6 +8344,7 @@ where
         if let Some(context) = &self.ui_context {
             selection::release_focus(context);
         }
+        self.qualify_current_history();
     }
 
     fn zoom_image(&mut self, factor: f32) {
@@ -8339,6 +8369,7 @@ where
             (transform.size.0 as u32, transform.size.1 as u32),
             (self.image_viewport * context.pixels_per_point()).into(),
         );
+        self.qualify_current_history();
         self.request_redraw();
     }
 
@@ -8450,8 +8481,13 @@ where
             self.set_status("Apply or cancel video resize before leaving.".into());
             return;
         }
-        if matches!(&action, GuardedAction::Navigate(path) if self.path.as_ref() == Some(path) && self.reading_source_visible())
+        if matches!(&action, GuardedAction::Navigate(path) | GuardedAction::View(path) if self.path.as_ref() == Some(path) && self.reading_source_visible())
         {
+            if let GuardedAction::View(path) = action
+                && let Some(id) = self.displayed_tab
+            {
+                self.qualify_history(id, &path);
+            }
             return;
         }
         if !background_image {
@@ -8478,7 +8514,9 @@ where
                 | GuardedAction::NavigateAudioTab(id, _, _)
                 | GuardedAction::NavigateImageTab(id, _, _, _) => *id == export.tab,
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
-                GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
+                GuardedAction::Navigate(_)
+                | GuardedAction::View(_)
+                | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
                 GuardedAction::Exit => true,
@@ -8511,14 +8549,14 @@ where
                 .get(&id)
                 .is_some_and(EditHistory::is_dirty)
                 .then_some(id),
-            GuardedAction::Navigate(_) | GuardedAction::NavigateFromFolder(_, _) => {
-                self.tabs.active().and_then(|tab| {
-                    self.edits
-                        .get(&tab.id)
-                        .is_some_and(EditHistory::is_dirty)
-                        .then_some(tab.id)
-                })
-            }
+            GuardedAction::Navigate(_)
+            | GuardedAction::View(_)
+            | GuardedAction::NavigateFromFolder(_, _) => self.tabs.active().and_then(|tab| {
+                self.edits
+                    .get(&tab.id)
+                    .is_some_and(EditHistory::is_dirty)
+                    .then_some(tab.id)
+            }),
             GuardedAction::Exit => self
                 .edits
                 .iter()
@@ -8580,6 +8618,12 @@ where
             }
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
+            GuardedAction::View(path) => {
+                self.navigate_to_unchecked(path.clone());
+                if let Some(id) = self.displayed_tab {
+                    self.qualify_history(id, &path);
+                }
+            }
             GuardedAction::NavigateAudioTab(id, source, path) => {
                 if self.tabs.tabs().iter().any(|tab| {
                     tab.id == id
@@ -8598,6 +8642,7 @@ where
             }
             GuardedAction::NavigateFromFolder(path, folder) => {
                 self.navigate_to_unchecked(path);
+                self.qualify_current_history();
                 if let Some(recent) = &self.recent_files {
                     recent.record_folder(folder);
                 }
@@ -10594,6 +10639,7 @@ where
         self.check_eof();
         let now = Instant::now();
         self.advance_audio_queues();
+        self.observe_viewed_history(now);
         let was_hidden = self.viewing_cursor.hidden;
         let pointer_ready = self
             .window
@@ -10743,6 +10789,7 @@ where
             .map(|(shown, _)| shown + STATUS_MESSAGE_DURATION);
         [
             self.background_wakeup(now),
+            self.viewed_media.deadline(),
             folder_poll,
             next_image_frame,
             self.ui_repaint_at,
@@ -13434,7 +13481,7 @@ mod tests {
         let (_, actions) = frame(&mut app, vec![request(3.0)]);
         app.handle_ui_action(actions[0].clone());
         assert!(
-            matches!(app.pending_guard, Some(GuardedAction::Navigate(ref path)) if path == &paths[2])
+            matches!(app.pending_guard, Some(GuardedAction::View(ref path)) if path == &paths[2])
         );
         assert_eq!(app.path.as_ref(), Some(&paths[0]));
         assert_eq!(app.edits[&tab], history);

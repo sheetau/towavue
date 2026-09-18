@@ -218,7 +218,7 @@ fn quick_open_dispatches_from_gallery_and_preserves_replacement_guards() {
     }
     frame(&mut app, enter(egui::Modifiers::ALT));
     assert!(!app.palette_open);
-    assert!(matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &second));
+    assert!(matches!(&app.pending_guard, Some(GuardedAction::View(path)) if path == &second));
     app.dispatch(CommandId::OpenRecentFolder);
     assert!(!app.palette_open, "pending guard blocks other pickers");
     app.resolve_guard(GuardDecision::Cancel);
@@ -311,7 +311,7 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
         RecentKind::File,
         OpenTarget::Replace,
     ));
-    assert!(matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &second));
+    assert!(matches!(&app.pending_guard, Some(GuardedAction::View(path)) if path == &second));
     app.resolve_guard(GuardDecision::Cancel);
     assert_eq!(app.path.as_ref(), Some(&first));
     assert_eq!(app.edits[&tab], edits);

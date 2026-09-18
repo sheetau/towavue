@@ -75,6 +75,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             size.1 as f32,
         ) * (after / context.pixels_per_point());
         image_scroll::clamp(&mut self.image_view, displayed, self.image_viewport);
+        self.qualify_current_history();
         self.request_redraw();
         after / before
     }

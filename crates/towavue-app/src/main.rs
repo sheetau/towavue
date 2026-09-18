@@ -6361,7 +6361,7 @@ where
                         waveform_painter.set(waveform_slot, egui::Shape::image(
                             waveform.id(), rect,
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            Color32::from_white_alpha(150),
+                            waveform_detail::color(),
                         ));
                     }
                     self.draw_waveform_activity(ui, rect);
@@ -6389,7 +6389,7 @@ where
                         self.edit_state().volume,
                         result.gain_preview,
                     ) {
-                        mesh.add_rect_with_uv(destination, uv, Color32::from_white_alpha(150));
+                        mesh.add_rect_with_uv(destination, uv, waveform_detail::color());
                     }
                     if !mesh.is_empty() {
                         waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));

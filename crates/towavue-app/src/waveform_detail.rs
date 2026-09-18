@@ -2,6 +2,9 @@ use super::*;
 use towavue_core::EditTimeline;
 
 const SETTLE_TIME: Duration = Duration::from_millis(150);
+pub(super) fn color() -> Color32 {
+    Color32::from_white_alpha(64)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Key {
@@ -11,6 +14,9 @@ pub(super) struct Key {
     volume: f32,
     columns: u32,
 }
+
+#[cfg(test)]
+mod hold_tests;
 
 #[cfg(test)]
 mod tests {
@@ -445,9 +451,101 @@ pub(super) struct Detail {
     started: bool,
     finished: bool,
     values: Option<Arc<[f32]>>,
+    held_gain: Option<Vec<Band>>,
+    last_gain_preview: Option<(towavue_core::TimeRange, f32)>,
+}
+
+#[derive(Clone, Copy)]
+struct Band {
+    from: f64,
+    to: f64,
+    value: f64,
+}
+
+impl Band {
+    fn scaled(self, preview: Option<(f64, f64, f32)>) -> [Self; 3] {
+        let mut cuts = [self.from, self.from, self.to, self.to];
+        if let Some((from, to, _)) = preview {
+            cuts[1] = from.clamp(self.from, self.to);
+            cuts[2] = to.clamp(self.from, self.to);
+        }
+        cuts.sort_by(f64::total_cmp);
+        std::array::from_fn(|index| {
+            let from = cuts[index];
+            let to = cuts[index + 1];
+            let factor = preview
+                .filter(|(start, end, _)| from >= *start && to <= *end)
+                .map_or(1.0, |(_, _, factor)| f64::from(factor));
+            Self {
+                from,
+                to,
+                value: self.value * factor,
+            }
+        })
+    }
 }
 
 impl Detail {
+    fn bands(&self) -> impl Iterator<Item = Band> + '_ {
+        let values = self.values.as_deref().unwrap_or_default();
+        values
+            .iter()
+            .enumerate()
+            .map(move |(column, value)| Band {
+                from: column as f64 / values.len() as f64,
+                to: (column + 1) as f64 / values.len() as f64,
+                value: f64::from(*value),
+            })
+            .chain(
+                self.held_gain
+                    .as_deref()
+                    .filter(|_| self.values.is_none())
+                    .unwrap_or_default()
+                    .iter()
+                    .copied(),
+            )
+    }
+
+    fn hold_committed_gain(&self, next: &Key) -> Option<Vec<Band>> {
+        let previous = self.key.as_ref()?;
+        let (range, factor) = self.last_gain_preview?;
+        if previous.path != next.path
+            || previous.rate != next.rate
+            || previous.volume != next.volume
+            || previous.columns != next.columns
+            || (self.values.is_none() && self.held_gain.is_none())
+        {
+            return None;
+        }
+        let mut expected = previous.plan.clone();
+        if !expected.apply(towavue_core::TimelineEdit::ScaleVolume(range, factor))
+            || expected != next.plan
+        {
+            return None;
+        }
+        let duration = previous.plan.duration().as_seconds_f64();
+        let preview = Some((
+            range.start().as_seconds_f64() / duration,
+            range.end().as_seconds_f64() / duration,
+            factor,
+        ));
+        let mut bands: Vec<Band> = Vec::new();
+        for band in self
+            .bands()
+            .flat_map(|band| band.scaled(preview))
+            .filter(|band| band.from < band.to)
+        {
+            if let Some(last) = bands.last_mut()
+                && last.to == band.from
+                && last.value == band.value
+            {
+                last.to = band.to;
+            } else {
+                bands.push(band);
+            }
+        }
+        Some(bands)
+    }
     pub(super) fn is_pending(&self) -> bool {
         self.started && !self.finished
     }
@@ -472,42 +570,39 @@ impl Detail {
         density: f32,
         preview: Option<(towavue_core::TimeRange, f32)>,
     ) -> Option<egui::Mesh> {
-        let values = self.values.as_ref()?;
+        if self.values.is_none() && self.held_gain.is_none() {
+            return None;
+        }
+        let duration = self.key.as_ref()?.plan.duration().as_seconds_f64();
+        let preview = preview.map(|(range, factor)| {
+            (
+                range.start().as_seconds_f64() / duration,
+                range.end().as_seconds_f64() / duration,
+                factor,
+            )
+        });
         let snap = |value: f32| (value * density).round() / density;
         let mut mesh = egui::Mesh::default();
-        for (column, value) in values.iter().enumerate() {
-            let duration = self.key.as_ref()?.plan.duration().as_seconds_f64();
-            let from = column as f64 / values.len() as f64;
-            let to = (column + 1) as f64 / values.len() as f64;
-            let mut cuts = [from, from, to, to];
-            if let Some((range, _)) = preview {
-                cuts[1] = (range.start().as_seconds_f64() / duration).clamp(from, to);
-                cuts[2] = (range.end().as_seconds_f64() / duration).clamp(from, to);
-            }
-            cuts.sort_by(f64::total_cmp);
-            for pair in cuts.windows(2).filter(|pair| pair[0] < pair[1]) {
-                let factor = preview
-                    .filter(|(range, _)| {
-                        pair[0] >= range.start().as_seconds_f64() / duration
-                            && pair[1] <= range.end().as_seconds_f64() / duration
-                    })
-                    .map_or(1.0, |(_, factor)| factor);
-                // Multiply the retained, unclipped envelope before clipping display height.
-                let half_height =
-                    rect.height() * (f64::from(*value) * f64::from(factor)).min(1.0) as f32 * 0.5;
-                let bar = egui::Rect::from_min_max(
-                    egui::pos2(
-                        snap(rect.left() + rect.width() * pair[0] as f32),
-                        snap(rect.center().y - half_height),
-                    ),
-                    egui::pos2(
-                        snap(rect.left() + rect.width() * pair[1] as f32),
-                        snap(rect.center().y + half_height),
-                    ),
-                );
-                if bar.is_positive() {
-                    mesh.add_colored_rect(bar, Color32::from_white_alpha(150));
-                }
+        for band in self
+            .bands()
+            .flat_map(|band| band.scaled(preview))
+            .filter(|band| band.from < band.to)
+        {
+            // Retain unclipped amplitudes across repeated commits, including
+            // selection boundaries inside a physical display column.
+            let half_height = rect.height() * band.value.min(1.0) as f32 * 0.5;
+            let bar = egui::Rect::from_min_max(
+                egui::pos2(
+                    snap(rect.left() + rect.width() * band.from as f32),
+                    snap(rect.center().y - half_height),
+                ),
+                egui::pos2(
+                    snap(rect.left() + rect.width() * band.to as f32),
+                    snap(rect.center().y + half_height),
+                ),
+            );
+            if bar.is_positive() {
+                mesh.add_colored_rect(bar, color());
             }
         }
         Some(mesh)
@@ -582,14 +677,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if self.waveform_detail.started && !self.waveform_loading {
                 self.waveform_worker.clear();
             }
+            let key = Arc::new(Key {
+                path: path.clone(),
+                plan: plan.clone(),
+                rate: state.rate,
+                volume: state.volume,
+                columns,
+            });
+            // Only an exact commit of the last displayed gain may bridge the
+            // asynchronous refinement. Other edits, widths and sources invalidate it.
+            let held_gain = self.waveform_detail.hold_committed_gain(&key);
             self.waveform_detail = Detail {
-                key: Some(Arc::new(Key {
-                    path: path.clone(),
-                    plan: plan.clone(),
-                    rate: state.rate,
-                    volume: state.volume,
-                    columns,
-                })),
+                key: Some(key),
+                held_gain,
                 changed: Some(Instant::now()),
                 ..Default::default()
             };
@@ -627,6 +727,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 context.request_repaint_after(remaining);
             }
         }
+        detail.last_gain_preview = gain_preview;
         detail.mesh(rect, context.pixels_per_point(), gain_preview)
     }
 
@@ -649,7 +750,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         self.waveform_detail.finished = true;
         match result {
-            Ok(values) => self.waveform_detail.values = Some(values.into()),
+            Ok(values) => {
+                self.waveform_detail.values = Some(values.into());
+                self.waveform_detail.held_gain = None;
+            }
             Err(error) => self.set_status(format!("Detailed waveform unavailable: {error}")),
         }
         self.request_redraw();

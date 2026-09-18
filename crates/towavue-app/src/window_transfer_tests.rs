@@ -87,6 +87,10 @@ fn assert_frame(
 pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let keys: Vec<_> = host.windows.keys().copied().collect();
     let source = keys[0];
+    let unopened_video = host.windows[&source]
+        .path
+        .clone()
+        .expect("owned video fixture");
     let target = keys[1];
     let target_active = host.windows[&target].tabs.active().expect("target tab").id;
     let app = host.windows.get_mut(&source).expect("source");
@@ -350,6 +354,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .activate_tab(target_active);
     exercise_audio(host, event_loop, source);
     exercise_images(host, event_loop, source, target);
+    exercise_unopened(host, event_loop, &unopened_video);
     exercise_gallery(host, event_loop);
     eprintln!(
         "PASS live video transfer: dirty state, exact paused frame/clock, unchanged session generation, shared-device draw with no CPU transfer, repeat moves, hidden detached HWND, Welcome source, failed startup/modal/stale/gap guards"
@@ -638,5 +643,113 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
     assert_eq!(host.playback_owner(origin), None);
     eprintln!(
         "PASS live audio transfer: generated silence only, playing/paused session and repeat/shuffle preserved, queued playback delivery after origin HWND removal, repeated detach and final owner removal"
+    );
+}
+
+fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video: &Path) {
+    let image = video.with_file_name("unopened-transfer.png");
+    let output = std::process::Command::new("ffmpeg.exe")
+        .args(["-v", "error", "-i"])
+        .arg(video)
+        .args(["-frames:v", "1"])
+        .arg(&image)
+        .output()
+        .expect("generated image");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let audio = video.with_file_name("transfer-silence.wav");
+    for (path, kind) in [
+        (image, MediaKind::Image),
+        (video.to_owned(), MediaKind::Video),
+        (audio, MediaKind::Audio),
+    ] {
+        let source = host.add_application(None).expect("unopened source");
+        let target = host.add_application(None).expect("unopened destination");
+        host.start_pending(event_loop, false);
+        // This transfer check starts at zero; persisted video-resume behavior has
+        // separate asynchronous tests and must not need the paused outer event loop.
+        host.windows
+            .get_mut(&target)
+            .expect("destination")
+            .resume_history = None;
+        let app = host.windows.get_mut(&source).expect("source");
+        let gallery = app.tabs.active_id().expect("Gallery");
+        let id = app.tabs.open_new(path.clone(), kind);
+        app.seed_playback_volume(id);
+        app.tabs.activate(gallery);
+        if app.tab_mute_state(id) == Some(false) {
+            app.toggle_tab_mute(id);
+        }
+        assert!(app.session.is_none() && app.retained_playback.is_empty());
+        assert!(app.image.is_none() && app.retained_images.is_empty());
+        let request = app.tab_detach_request(id).expect("unopened native request");
+        app.validate_tab_transfer(&request)
+            .expect("valid unopened owner");
+        let (target, moved) = if kind == MediaKind::Image {
+            app_close(host, target);
+            let detached = host
+                .detach_tab(
+                    event_loop,
+                    source,
+                    &request,
+                    false,
+                    winit::dpi::PhysicalPosition::new(100, 80),
+                    egui::Vec2::ZERO,
+                )
+                .expect("detach unopened image");
+            let app = &host.windows[&detached];
+            assert_eq!(
+                app.tabs.len(),
+                1,
+                "detached destination has only the moved tab"
+            );
+            assert_eq!(
+                app.window.as_ref().expect("window").is_visible(),
+                Some(false)
+            );
+            (detached, app.tabs.active_id().expect("detached tab"))
+        } else {
+            let moved = host
+                .move_tab(source, target, &request, 0)
+                .expect("move unopened tab");
+            (target, moved)
+        };
+        assert_eq!(host.windows[&source].tabs.active_id(), Some(gallery));
+        assert!(host.windows[&source].session.is_none());
+        assert!(
+            host.windows[&source]
+                .validate_tab_transfer(&request)
+                .is_err()
+        );
+        let app = host.windows.get_mut(&target).expect("destination");
+        assert_eq!(app.tabs.active_id(), Some(moved));
+        assert_eq!(app.path.as_ref(), Some(&path));
+        assert_eq!(app.media_kind, Some(kind));
+        if kind == MediaKind::Image {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app.image_loading {
+                app.finish_image_load();
+                assert!(Instant::now() < deadline, "transferred image loads");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            assert!(app.image.is_some(), "{:?}", app.image_error);
+        } else {
+            assert!(app.session.is_some(), "{:?}", app.playback_error);
+            assert_eq!(app.playback_volume(), 0.0, "unopened mute follows the tab");
+            app.toggle_pause();
+        }
+        let request = app
+            .tab_detach_request(moved)
+            .expect("loaded transfer request");
+        host.move_tab(target, source, &request, 1)
+            .expect("loaded return transfer");
+        app_close(host, target);
+        app_close(host, source);
+    }
+    eprintln!(
+        "PASS unopened image/video/audio native transfer: source never activated/decoded, destination loads normally, mute preserved, stale request rejected, loaded return works"
     );
 }

@@ -21,7 +21,7 @@ fn gallery_transfer_preserves_query_and_filter_when_reusing_the_destination() {
     let request = DetachRequest {
         tab: gallery,
         path: None,
-        instance: 0,
+        instance: None,
     };
     let transfer = source.take_tab_transfer(&request, None);
     assert!(source.gallery_search.is_empty() && source.gallery_filter.is_none());
@@ -88,11 +88,11 @@ fn transfer(source: &mut App, destination: &mut App, id: TabId) -> TabId {
                 .current_path()
                 .to_owned(),
         ),
-        instance: if source.displayed_tab == Some(id) {
+        instance: Some(if source.displayed_tab == Some(id) {
             source.media_generation
         } else {
             source.retained_images[&id].instance
-        },
+        }),
     };
     let stage = source
         .prepare_image_transfer(id, destination.ui_context.as_ref().expect("context"))
@@ -146,7 +146,7 @@ fn playback_volume_survives_navigation_transfer_and_close() {
         let request = DetachRequest {
             tab: id,
             path: Some(path),
-            instance: source.media_generation,
+            instance: Some(source.media_generation),
         };
         let packet = source.take_tab_transfer(&request, None);
         assert!(source.playback_volumes.is_empty());
@@ -1382,4 +1382,96 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
             );
         }
     }
+}
+
+#[test]
+fn unopened_transfer_preserves_source_view_and_moves_owned_settings_without_loading() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::unopened_transfer_preserves_source_view_and_moves_owned_settings_without_loading",
+    ) else {
+        return;
+    };
+    for (kind, name) in [
+        (MediaKind::Image, "new.png"),
+        (MediaKind::Video, "new.mp4"),
+        (MediaKind::Audio, "new.wav"),
+    ] {
+        let (mut source, _) = app();
+        let (destination, _) = app();
+        let pixels = decoded(false);
+        let active = install(&mut source, root.join("displayed.png"), Arc::clone(&pixels));
+        let generation = source.media_generation;
+        let path = root.join(name);
+        let id = source.tabs.open_new(path.clone(), kind);
+        source.seed_playback_volume(id);
+        source.tabs.activate(active);
+        let export = root.join("export-target");
+        source.export_paths.insert(id, export.clone());
+        let request = source.capture_tab_transfer(id).expect("unopened identity");
+        assert!(request.instance.is_none());
+        assert!(
+            source.tab_detach_request(id).is_err(),
+            "native readiness gate remains required"
+        );
+        let stage = source
+            .prepare_image_transfer(id, destination.ui_context.as_ref().expect("context"))
+            .expect("no staging needed");
+        assert!(stage.is_none());
+        let TabTransfer::Media(transfer) = source.take_tab_transfer(&request, stage) else {
+            panic!("media transfer")
+        };
+        assert!(matches!(transfer.media, MediaTransfer::Unopened));
+        assert_eq!(transfer.target.current_path(), path);
+        assert_eq!(transfer.export_path, Some(export));
+        assert_eq!(transfer.playback_volume.is_some(), kind != MediaKind::Image);
+        assert_eq!(source.tabs.active_id(), Some(active));
+        assert_eq!(source.displayed_tab, Some(active));
+        assert_eq!(source.media_generation, generation);
+        assert!(Arc::ptr_eq(
+            &source.image.as_ref().expect("foreground pixels").decoded,
+            &pixels
+        ));
+        assert!(source.session.is_none() && source.retained_playback.is_empty());
+        assert!(
+            source.capture_tab_transfer(id).is_err(),
+            "removed owner cannot replay"
+        );
+    }
+}
+
+#[test]
+fn unopened_transfer_identity_changes_on_activation_and_path_replacement() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::unopened_transfer_identity_changes_on_activation_and_path_replacement",
+    ) else {
+        return;
+    };
+    let (mut source, _) = app();
+    let gallery = source.tabs.active_id().expect("Gallery");
+    let path = root.join("unopened.png");
+    let id = source.tabs.open_new(path.clone(), MediaKind::Image);
+    source.tabs.activate(gallery);
+    let before = source.capture_tab_transfer(id).expect("unopened");
+    source
+        .tabs
+        .get_mut(id)
+        .expect("tab")
+        .target
+        .set_current_path(root.join("replaced.png"), MediaKind::Image);
+    let replaced = source.capture_tab_transfer(id).expect("replaced");
+    assert_ne!(before.path, replaced.path);
+    source
+        .tabs
+        .get_mut(id)
+        .expect("tab")
+        .target
+        .set_current_path(path.clone(), MediaKind::Image);
+    source.displayed_tab = Some(id);
+    source.path = Some(path);
+    source.media_generation = 0;
+    let loaded = source.capture_tab_transfer(id).expect("loaded");
+    assert_ne!(
+        before.instance, loaded.instance,
+        "unopened differs even from generation zero"
+    );
 }

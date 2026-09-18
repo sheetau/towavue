@@ -8,7 +8,7 @@ pub(crate) mod tests;
 pub(super) struct DetachRequest {
     pub tab: TabId,
     path: Option<PathBuf>,
-    instance: u64,
+    instance: Option<u64>,
 }
 
 pub(super) enum TabTransfer {
@@ -30,6 +30,7 @@ pub(super) struct MediaTabTransfer {
 }
 
 enum MediaTransfer {
+    Unopened,
     Playback(Box<playback_tab::RetainedPlaybackTab>),
     Image(Box<RetainedImageTab>),
 }
@@ -86,11 +87,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn tab_detach_request(&self, id: TabId) -> Result<DetachRequest, String> {
         self.validate_transfer_window()?;
+        self.capture_tab_transfer(id)
+    }
+
+    fn capture_tab_transfer(&self, id: TabId) -> Result<DetachRequest, String> {
         if self.tabs.gallery() == Some(id) {
             return Ok(DetachRequest {
                 tab: id,
                 path: None,
-                instance: 0,
+                instance: None,
             });
         }
         let tab = self
@@ -108,19 +113,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let path = tab.target.current_path();
         let instance = if self.displayed_tab == Some(id) && self.path.as_deref() == Some(path) {
-            self.media_generation
+            Some(self.media_generation)
+        } else if self.displayed_tab != Some(id)
+            && !self.retained_images.contains_key(&id)
+            && !self.retained_playback.contains_key(&id)
+        {
+            // A background-opened tab owns its path and settings before any decoder
+            // or retained view exists. Moving it must not activate the source first.
+            None
         } else if tab.target.media_kind() == MediaKind::Image {
-            self.retained_images
-                .get(&id)
-                .filter(|saved| saved.path == path)
-                .ok_or("the tab's image state is unavailable")?
-                .instance
+            Some(
+                self.retained_images
+                    .get(&id)
+                    .filter(|saved| saved.path == path)
+                    .ok_or("the tab's image state is unavailable")?
+                    .instance,
+            )
         } else {
-            self.retained_playback
-                .get(&id)
-                .filter(|saved| saved.path == path)
-                .ok_or("the tab's playback state is unavailable")?
-                .instance
+            Some(
+                self.retained_playback
+                    .get(&id)
+                    .filter(|saved| saved.path == path)
+                    .ok_or("the tab's playback state is unavailable")?
+                    .instance,
+            )
         };
         Ok(DetachRequest {
             tab: id,
@@ -158,7 +174,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let (image, pages, previews) = if self.displayed_tab == Some(id) {
             (&self.image, &self.reading_pages, &self.image_previews)
         } else {
-            let saved = &self.retained_images[&id];
+            let Some(saved) = self.retained_images.get(&id) else {
+                return Ok(None);
+            };
             (&saved.image, &saved.reading_pages, &saved.previews)
         };
         let image = image
@@ -221,7 +239,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .expect("validated tab")
             .target
             .clone();
-        let media = if target.media_kind() == MediaKind::Image {
+        let media = if request.instance.is_none() {
+            MediaTransfer::Unopened
+        } else if target.media_kind() == MediaKind::Image {
             let mut saved = if self.displayed_tab == Some(id) {
                 self.take_image_tab_state()
             } else {
@@ -300,6 +320,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .max(self.media_generation)
             .wrapping_add(1);
         let old_instance = match &mut transfer.media {
+            MediaTransfer::Unopened => 0,
             MediaTransfer::Playback(saved) => {
                 let old = saved.instance;
                 saved.instance = self.media_sequence;
@@ -336,6 +357,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.audio_queues.insert(id, queue);
         }
         match transfer.media {
+            MediaTransfer::Unopened => {}
             MediaTransfer::Playback(saved) => {
                 self.retained_playback.insert(id, *saved);
             }

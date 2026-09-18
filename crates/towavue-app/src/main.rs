@@ -269,6 +269,7 @@ enum UiAction {
     OpenGalleryBackground(PathBuf),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
+    OpenFilmstripWindow(PathBuf),
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
@@ -6550,6 +6551,27 @@ where
         self.request_redraw();
     }
 
+    fn filmstrip_target(&self, path: &Path) -> Option<(TabId, MediaKind)> {
+        if !self.filmstrip_open
+            || self.palette_open
+            || self.grid_open
+            || self
+                .ui_context
+                .as_ref()
+                .is_some_and(egui::Popup::is_any_open)
+        {
+            return None;
+        }
+        let kind = self
+            .folder_snapshot
+            .as_ref()?
+            .items
+            .iter()
+            .find(|item| item.path == path)?
+            .kind;
+        Some((self.tabs.active()?.id, kind))
+    }
+
     fn handle_ui_action(&mut self, action: UiAction) {
         if !matches!(action, UiAction::BeginTrackDrag(..)) {
             self.finish_track_drag(true);
@@ -6759,27 +6781,17 @@ where
                 self.tabs.activate(gallery);
                 self.request_redraw();
             }
-            UiAction::OpenFilmstripMedia(path, background) => {
-                if !self.filmstrip_open
-                    || self.palette_open
-                    || self.grid_open
-                    || self
-                        .ui_context
-                        .as_ref()
-                        .is_some_and(egui::Popup::is_any_open)
-                {
-                    return;
+            UiAction::OpenFilmstripWindow(path) => {
+                if self.filmstrip_target(&path).is_some() {
+                    self.handle_recent_action(menu::RecentAction::Open(
+                        path,
+                        towavue_runtime_windows::RecentKind::File,
+                        menu::OpenTarget::Window,
+                    ));
                 }
-                let Some(kind) = self.folder_snapshot.as_ref().and_then(|snapshot| {
-                    snapshot
-                        .items
-                        .iter()
-                        .find(|item| item.path == path)
-                        .map(|item| item.kind)
-                }) else {
-                    return;
-                };
-                let Some(active) = self.tabs.active().map(|tab| tab.id) else {
+            }
+            UiAction::OpenFilmstripMedia(path, background) => {
+                let Some((active, kind)) = self.filmstrip_target(&path) else {
                     return;
                 };
                 if background {

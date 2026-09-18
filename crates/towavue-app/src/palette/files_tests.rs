@@ -388,3 +388,74 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
         }
     }
 }
+
+#[test]
+fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(|style| {
+            style.animation_time = 0.0;
+            style.interaction.tooltip_delay = 60.0;
+        });
+        let mut palette = CommandPalette::default();
+        let history = [CommandId::OpenFile, CommandId::OpenFolder];
+        let sources = OpenSources {
+            commands: &history,
+            ..Default::default()
+        };
+        let render = |palette: &mut CommandPalette, events| {
+            open_frame_at(
+                &context,
+                palette,
+                sources,
+                events,
+                (egui::vec2(600.0, 400.0), 0.0, density),
+            )
+        };
+        let mut output = egui::FullOutput::default();
+        for _ in 0..5 {
+            output = render(&mut palette, vec![]).0;
+        }
+        let title = command_definitions()
+            .iter()
+            .find(|definition| definition.id == CommandId::OpenFolder)
+            .expect("folder command")
+            .title;
+        let bounds = |output: &egui::FullOutput| {
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree");
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(title))
+                .expect("row")
+                .1
+                .bounds()
+                .expect("bounds");
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        };
+        let idle = bounds(&output);
+        render(&mut palette, vec![egui::Event::PointerMoved(idle.center())]);
+        output = render(&mut palette, vec![]).0;
+        let hovered = bounds(&output);
+        assert!((idle.width() - hovered.width() - 22.0).abs() <= 1.0 / density);
+        let point = button_position(&output, &format!("Remove {title} from Recently Used"));
+        render(&mut palette, vec![egui::Event::PointerMoved(point)]);
+        let click = |pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        render(&mut palette, vec![click(true)]);
+        let choices = render(&mut palette, vec![click(false)]).1;
+        assert_eq!(choices, [Choice::RemoveCommand(CommandId::OpenFolder)]);
+    }
+}

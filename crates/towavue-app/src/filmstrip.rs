@@ -11,6 +11,26 @@ use towavue_runtime_windows::{PreviewCache, PreviewLoader, VISIBLE_PREVIEW_LIMIT
 use crate::hover_help::HoverHelp;
 use crate::{UiAction, display_name, format_time, media_time};
 
+// A key released later in this frame must not change the click's destination.
+fn click_modifiers(response: &egui::Response) -> egui::Modifiers {
+    response.ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers,
+                } if response.interact_rect.contains(*pos) => Some(*modifiers),
+                _ => None,
+            })
+            .unwrap_or(input.modifiers)
+    })
+}
+
 const STEP: f32 = 128.0;
 const HEIGHT: f32 = 118.0;
 
@@ -743,7 +763,11 @@ impl Filmstrip {
                             );
                         }
                         if response.clicked() {
-                            actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), false));
+                            actions.push(if click_modifiers(&response).ctrl {
+                                UiAction::OpenFilmstripWindow(item.path.clone())
+                            } else {
+                                UiAction::OpenFilmstripMedia(item.path.clone(), false)
+                            });
                         }
                         if response.middle_clicked() {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
@@ -929,7 +953,20 @@ impl Filmstrip {
                     if response.middle_clicked() {
                         actions.push(UiAction::OpenGalleryBackground(path.clone()));
                     } else if response.clicked() {
-                        actions.push(UiAction::OpenMedia(path.clone(), true));
+                        let modifiers = click_modifiers(&response);
+                        actions.push(if modifiers.ctrl || modifiers.alt {
+                            UiAction::Recent(crate::menu::RecentAction::Open(
+                                path.clone(),
+                                towavue_runtime_windows::RecentKind::File,
+                                if modifiers.ctrl {
+                                    crate::menu::OpenTarget::Window
+                                } else {
+                                    crate::menu::OpenTarget::Replace
+                                },
+                            ))
+                        } else {
+                            UiAction::OpenMedia(path.clone(), true)
+                        });
                     }
                     if enabled {
                         response.help_text(path.display().to_string());
@@ -1580,6 +1617,49 @@ mod tests {
                 },
                 "recent card step={step}, enabled={enabled}, position={position:?}"
             );
+        }
+        for modifiers in [
+            egui::Modifiers::NONE,
+            egui::Modifiers::CTRL,
+            egui::Modifiers::ALT,
+            egui::Modifiers::CTRL | egui::Modifiers::ALT,
+        ] {
+            for batched in [false, true] {
+                frame(
+                    &mut filmstrip,
+                    true,
+                    vec![egui::Event::PointerMoved(position)],
+                );
+                let click = |pressed| egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers,
+                };
+                let actions = if batched {
+                    frame(&mut filmstrip, true, vec![click(true), click(false)]).1
+                } else {
+                    frame(&mut filmstrip, true, vec![click(true)]);
+                    frame(&mut filmstrip, true, vec![click(false)]).1
+                };
+                let expected = if modifiers.ctrl || modifiers.alt {
+                    UiAction::Recent(crate::menu::RecentAction::Open(
+                        paths[0].clone(),
+                        towavue_runtime_windows::RecentKind::File,
+                        if modifiers.ctrl {
+                            crate::menu::OpenTarget::Window
+                        } else {
+                            crate::menu::OpenTarget::Replace
+                        },
+                    ))
+                } else {
+                    UiAction::OpenMedia(paths[0].clone(), true)
+                };
+                assert!(
+                    actions == [expected],
+                    "modifiers={modifiers:?}, batched={batched}"
+                );
+            }
         }
         let event = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
             action: egui::accesskit::Action::Click,
@@ -3380,10 +3460,43 @@ mod tests {
             assert!(filmstrip.visible.len() <= 9);
             assert!(filmstrip.visible.contains(&snapshot.items[selected].path));
         }
-        for (button, x, expected) in [
-            (egui::PointerButton::Primary, 480.0, Some((30_000, false))),
-            (egui::PointerButton::Primary, 608.0, Some((30_001, false))),
-            (egui::PointerButton::Middle, 480.0, Some((30_000, true))),
+        for (button, modifiers, x, index) in [
+            (
+                egui::PointerButton::Primary,
+                egui::Modifiers::NONE,
+                480.0,
+                30_000,
+            ),
+            (
+                egui::PointerButton::Primary,
+                egui::Modifiers::NONE,
+                608.0,
+                30_001,
+            ),
+            (
+                egui::PointerButton::Middle,
+                egui::Modifiers::CTRL,
+                480.0,
+                30_000,
+            ),
+            (
+                egui::PointerButton::Primary,
+                egui::Modifiers::CTRL,
+                608.0,
+                30_001,
+            ),
+            (
+                egui::PointerButton::Primary,
+                egui::Modifiers::ALT,
+                608.0,
+                30_001,
+            ),
+            (
+                egui::PointerButton::Primary,
+                egui::Modifiers::CTRL | egui::Modifiers::ALT,
+                608.0,
+                30_001,
+            ),
         ] {
             let pos = egui::pos2(x, 293.0);
             frame(&mut filmstrip, 30_000, vec![egui::Event::PointerMoved(pos)]);
@@ -3396,17 +3509,19 @@ mod tests {
                         pos,
                         button,
                         pressed,
-                        modifiers: egui::Modifiers::NONE,
+                        modifiers,
                     }],
                 ));
             }
-            if let Some((index, new_tab)) = expected {
-                assert!(
-                    matches!(actions.as_slice(), [UiAction::OpenFilmstripMedia(path, actual)] if path == &snapshot.items[index].path && *actual == new_tab)
-                );
+            let path = snapshot.items[index].path.clone();
+            let expected = if button == egui::PointerButton::Middle {
+                UiAction::OpenFilmstripMedia(path, true)
+            } else if modifiers.ctrl {
+                UiAction::OpenFilmstripWindow(path)
             } else {
-                assert!(actions.is_empty());
-            }
+                UiAction::OpenFilmstripMedia(path, false)
+            };
+            assert!(actions == [expected]);
         }
         let before_scroll = filmstrip.visible.clone();
         let above = egui::pos2(480.0, 80.0);

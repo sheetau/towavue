@@ -448,3 +448,66 @@ fn recent_delivery_projects_parent_folders_without_persisting_them_and_clear_per
         "clearing history leaves source media alone"
     );
 }
+
+#[test]
+fn filmstrip_window_click_preserves_dirty_origin_and_rejects_blocked_or_stale_targets() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::filmstrip_window_click_preserves_dirty_origin_and_rejects_blocked_or_stale_targets",
+    ) else {
+        return;
+    };
+    let first = root.join("first.bmp");
+    let second = root.join("second.bmp");
+    for path in [&first, &second] {
+        tab_transfer::tests::bitmap(path);
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    let tab =
+        tab_transfer::tests::install(&mut app, first.clone(), tab_transfer::tests::decoded(false));
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    let edits = app.edits[&tab].clone();
+    app.folder_snapshot = Some(towavue_core::FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(Vec::new()),
+        folder_path: root.clone(),
+        items: [&first, &second]
+            .into_iter()
+            .map(|path| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(Vec::new()),
+                path: path.clone(),
+                kind: MediaKind::Image,
+            })
+            .collect(),
+        sort_columns: Vec::new(),
+        source: towavue_core::FolderSnapshotSource::PersistedShellView,
+        generation: 1,
+        captured_at: std::time::SystemTime::now(),
+    });
+    for (strip, palette, grid, valid) in [
+        (false, false, false, true),
+        (true, true, false, true),
+        (true, false, true, true),
+        (true, false, false, false),
+        (true, false, false, true),
+    ] {
+        app.filmstrip_open = strip;
+        app.palette_open = palette;
+        app.grid_open = grid;
+        app.handle_ui_action(UiAction::OpenFilmstripWindow(if valid {
+            second.clone()
+        } else {
+            root.join("stale.bmp")
+        }));
+        let allowed = strip && !palette && !grid && valid;
+        assert_eq!(app.pending_window_launches.len(), usize::from(allowed));
+        if allowed {
+            assert_eq!(app.pending_window_launches, std::slice::from_ref(&second));
+        }
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        assert_eq!(app.path.as_ref(), Some(&first));
+        assert_eq!(app.edits[&tab], edits);
+        assert_eq!(app.filmstrip_open, strip);
+        assert!(app.pending_guard.is_none());
+        app.pending_window_launches.clear();
+    }
+}

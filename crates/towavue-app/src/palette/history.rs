@@ -74,7 +74,7 @@ impl CommandPalette {
                     let selected = self.selected == Some(index);
                     let close = index < recent_count && (selected || ui.rect_contains_pointer(row));
                     let mut body = row;
-                    if index < recent_count {
+                    if close {
                         body.max.x -= 22.0;
                     }
                     let background = ui.painter().add(egui::Shape::Noop);

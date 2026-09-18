@@ -364,6 +364,7 @@ mod tests {
         app.closed_tabs
             .push_back(crate::closed_tabs::ClosedTab::Media(
                 root.join("missing.png"),
+                0,
             ));
         app.reopen_closed_tab();
         assert_eq!(app.tabs.tabs().len(), 1);

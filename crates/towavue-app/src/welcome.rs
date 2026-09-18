@@ -175,6 +175,7 @@ pub fn show(
     }
     let mut output = scroll.show_styled(ui, |ui| {
         ui.set_style(content_style);
+        let scrolled_top = ui.max_rect().top();
         if gutter_scroll != 0.0 {
             ui.scroll_with_delta_animation(
                 egui::vec2(0.0, gutter_scroll),
@@ -187,6 +188,12 @@ pub fn show(
                 egui::vec2(width, 0.0),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
+                    // Preserve the existing initial grid inset. ScrollArea's shadow
+                    // margin must not paint above that unscrolled origin on later rows.
+                    let grid_top = body.top() + ui.max_rect().top() - scrolled_top;
+                    let grid_clip =
+                        egui::Rect::from_min_max(egui::pos2(body.left(), grid_top), body.max);
+                    ui.set_clip_rect(ui.clip_rect().intersect(grid_clip));
                     let months = recent(ui, query, *filter);
                     if paths.is_empty() {
                         ui.add(
@@ -419,6 +426,7 @@ mod tests {
             let original = context.global_style().visuals.widgets.clone();
             let overlay = std::cell::Cell::new(false);
             let grid_clip = std::cell::Cell::new(egui::Rect::NOTHING);
+            let grid_origin = std::cell::Cell::new(0.0);
             let frame = |events| {
                 context.run_ui(
                     egui::RawInput {
@@ -443,6 +451,7 @@ mod tests {
                             show(ui, &ShortcutBindings::default(), |ui| {
                                 assert_eq!(ui.visuals().widgets, original, "card style");
                                 grid_clip.set(ui.clip_rect());
+                                grid_origin.set(ui.max_rect().top());
                                 ui.set_min_height(1200.0);
                             })
                             .is_none()
@@ -470,6 +479,12 @@ mod tests {
             }
             let idle = frame(vec![]);
             let track = node_rect(&idle, "Date unknown");
+            let grid_top = grid_origin.get();
+            assert!(
+                (grid_clip.get().top() - grid_top).abs() <= 1.0 / density,
+                "initial clip {:?}, grid top {grid_top}, density {density}",
+                grid_clip.get()
+            );
             assert!(
                 (grid_clip.get().bottom() - screen.bottom()).abs() <= 1.0 / density,
                 "cards can reach the media bottom: {:?}",
@@ -510,6 +525,10 @@ mod tests {
                     frame(vec![]);
                 }
                 let scrolled = marker(&frame(vec![]));
+                assert!(
+                    (grid_clip.get().top() - grid_top).abs() <= 1.0 / density,
+                    "scrolling cannot paint into the header gap"
+                );
                 if gutter.y < track.top() {
                     assert_eq!(scrolled, after, "fixed header does not scroll");
                 } else {

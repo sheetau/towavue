@@ -1,9 +1,10 @@
 use crate::*;
 
 pub(super) enum ClosedTab {
-    Media(PathBuf),
-    KeyboardSettings(keyboard_settings::KeyboardSettings),
+    Media(PathBuf, usize),
+    KeyboardSettings(keyboard_settings::KeyboardSettings, usize),
     Gallery {
+        position: usize,
         search: String,
         filter: Option<MediaKind>,
     },
@@ -21,21 +22,46 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.modal_input_blocked() {
             return;
         }
-        match self.closed_tabs.pop_back() {
-            Some(ClosedTab::KeyboardSettings(state)) => {
+        let restored = match self.closed_tabs.pop_back() {
+            Some(ClosedTab::KeyboardSettings(state, position)) => {
                 self.dispatch(CommandId::OpenKeyboardSettings);
                 self.keyboard_settings = state;
+                self.tabs.keyboard_settings().map(|id| (id, position))
             }
-            Some(ClosedTab::Media(path)) => self.open_external(path, true),
-            Some(ClosedTab::Gallery { search, filter }) => {
-                // Open Gallery retains foreground media and reuses the window's
-                // one Gallery, including an automatically created last-tab fallback.
+            Some(ClosedTab::Media(path, position)) => {
+                let previous = self.tabs.active_id();
+                self.open_external(path, true);
+                self.tabs
+                    .active_id()
+                    .filter(|id| Some(*id) != previous)
+                    .map(|id| (id, position))
+            }
+            Some(ClosedTab::Gallery {
+                search,
+                filter,
+                position,
+            }) => {
+                // Reuse the window's singleton, including an automatic last-tab fallback.
                 self.dispatch(CommandId::OpenGallery);
                 self.gallery_search = search;
                 self.gallery_filter = filter;
-                self.request_redraw();
+                self.tabs.gallery().map(|id| (id, position))
             }
-            None => self.set_status("No closed tabs to reopen.".into()),
+            None => {
+                self.set_status("No closed tabs to reopen.".into());
+                None
+            }
+        };
+        if let Some((id, position)) = restored {
+            let from = self
+                .tabs
+                .tab_ids()
+                .position(|tab| tab == id)
+                .expect("restored tab");
+            let to = position.min(self.tabs.len().saturating_sub(1));
+            // reorder accepts a gap in the pre-removal order, not a final index.
+            self.tabs.reorder(id, to + usize::from(from < to));
+            self.request_redraw();
         }
     }
 }
@@ -116,6 +142,58 @@ mod tests {
         assert!(
             app.closed_tabs.is_empty(),
             "transfer removal is not a user close"
+        );
+    }
+
+    #[test]
+    fn reopening_restores_positions_for_media_and_utilities_and_clamps_shorter_strips() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "closed_tabs::tests::reopening_restores_positions_for_media_and_utilities_and_clamps_shorter_strips",
+        ) else {
+            return;
+        };
+        let path = root.join("source.wav");
+        std::fs::write(&path, b"owned undecodable fixture").expect("fixture");
+        for position in 0..4 {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let gallery = app.tabs.gallery().expect("Gallery");
+            let image = app.tabs.open_new(path.clone(), MediaKind::Audio);
+            let settings = app.tabs.open_keyboard_settings();
+            let last = app.tabs.open_new(path.clone(), MediaKind::Audio);
+            let mut expected = vec![gallery, image, settings, last];
+            app.remove_tab(expected[position], true);
+            app.reopen_closed_tab();
+            let restored = app.tabs.active_id().expect("restored tab");
+            assert_ne!(restored, expected[position]);
+            expected[position] = restored;
+            assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), expected);
+        }
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let gallery = app.tabs.gallery().expect("Gallery");
+        let first = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        let second = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        let last = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.remove_tab(last, true);
+        app.remove_tab(first, false);
+        app.remove_tab(second, false);
+        app.reopen_closed_tab();
+        let restored = app.tabs.active_id().expect("restored media");
+        assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [gallery, restored]);
+        // A utility opened since the close is reused, then moved in either direction.
+        app.tabs.reorder(gallery, app.tabs.len());
+        app.remove_tab(gallery, true);
+        app.dispatch(CommandId::OpenGallery);
+        let existing = app.tabs.gallery().expect("existing Gallery");
+        app.tabs.reorder(existing, 0);
+        app.reopen_closed_tab();
+        assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [restored, existing]);
+        let order = app.tabs.tab_ids().collect::<Vec<_>>();
+        app.remember_closed_tab(ClosedTab::Media(root.join("missing.wav"), 0));
+        app.reopen_closed_tab();
+        assert_eq!(
+            app.tabs.tab_ids().collect::<Vec<_>>(),
+            order,
+            "failed opens cannot move an unrelated active tab"
         );
     }
 

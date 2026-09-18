@@ -442,7 +442,9 @@ impl CommandPalette {
                 let selected_row = selected == Some(index);
                 let close = selected_row || ui.rect_contains_pointer(row);
                 let mut body = row;
-                body.max.x -= 22.0;
+                if close {
+                    body.max.x -= 22.0;
+                }
                 let background = ui.painter().add(egui::Shape::Noop);
                 let group = if self.folders && index == 0 {
                     "folders"

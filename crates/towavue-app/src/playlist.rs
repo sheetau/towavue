@@ -102,7 +102,13 @@ impl Playlist {
             .into_iter()
             .flat_map(|snapshot| snapshot.items_of_kind(MediaKind::Audio))
             .collect();
-        egui::Frame::new().inner_margin(8).show(ui, |ui| {
+        let margin = egui::Margin {
+            left: 8,
+            right: 8,
+            top: 8,
+            bottom: 0,
+        };
+        egui::Frame::new().inner_margin(margin).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             // The scrollbar is part of the list's wheel ownership too.
             self.scroll_rect = Some(ui.available_rect_before_wrap().intersect(ui.clip_rect()));
@@ -715,6 +721,51 @@ mod tests {
         snapshot.items[0].path = PathBuf::from("another-folder/track-1.wav");
         frame(&snapshot, vec![], false);
         assert!(frame(&snapshot, vec![click()], false).1.is_none());
+    }
+
+    #[test]
+    fn playlist_reaches_the_media_bottom_at_each_density_and_scroll_position() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
+            context.set_pixels_per_point(density);
+            let snapshot = snapshot(100);
+            for index in [0, 99] {
+                let mut playlist = Playlist::default();
+                let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 300.0));
+                let media = Rect::from_min_max(Pos2::new(0.0, 32.0), Pos2::new(480.0, 276.0));
+                for _ in 0..3 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(media));
+                            child.set_clip_rect(media);
+                            assert!(
+                                playlist
+                                    .show(
+                                        &mut child,
+                                        Some(&snapshot),
+                                        Some(&snapshot.items[index].path),
+                                        true
+                                    )
+                                    .is_none()
+                            );
+                        },
+                    );
+                    let scroll = playlist.scroll_rect.expect("list viewport");
+                    assert!(
+                        (scroll.bottom() - media.bottom()).abs() <= 1.0 / density,
+                        "list reaches the status boundary"
+                    );
+                    assert_eq!(scroll.left(), media.left() + 8.0);
+                    assert_eq!(scroll.right(), media.right() - 8.0);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(_) if (shape.clip_rect.bottom() - media.bottom()).abs() <= 1.0 / density)), "rows paint to the media bottom");
+                }
+            }
+        }
     }
 
     #[test]

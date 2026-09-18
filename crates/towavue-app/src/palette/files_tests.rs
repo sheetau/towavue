@@ -326,21 +326,41 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                     );
                     let second = rect(&output, &paths[1]);
                     let before = picker_text(&output, "second.png").expect("second").0.pos;
+                    let hovered =
+                        egui::Rect::from_min_max(second.min, second.max - egui::vec2(22.0, 0.0));
+                    let assert_rect = |actual: egui::Rect, expected: egui::Rect| {
+                        assert!(
+                            actual.min.distance(expected.min) <= 1.0 / density
+                                && actual.max.distance(expected.max) <= 1.0 / density,
+                            "close-slot geometry within one physical pixel: {actual:?} != {expected:?}"
+                        );
+                    };
                     for point in [
                         second.center(),
-                        second.right_center() + egui::vec2(11.0, 0.0),
+                        second.right_center() - egui::vec2(11.0, 0.0),
                     ] {
                         render(&mut palette, vec![egui::Event::PointerMoved(point)]);
                         output = render(&mut palette, vec![]);
-                        assert_eq!(rect(&output, &paths[1]), second);
-                        assert_eq!(
-                            picker_text(&output, "second.png").expect("second").0.pos,
-                            before
+                        assert_rect(rect(&output, &paths[1]), hovered);
+                        assert!(
+                            picker_text(&output, "second.png")
+                                .expect("second")
+                                .0
+                                .pos
+                                .distance(before)
+                                <= 1.0 / density
                         );
-                        assert_eq!(picker_text(&output, &name).expect("first").0.pos, label_pos);
+                        assert!(
+                            picker_text(&output, &name)
+                                .expect("first")
+                                .0
+                                .pos
+                                .distance(label_pos)
+                                <= 1.0 / density
+                        );
                         assert_background(
                             &output,
-                            second,
+                            rect(&output, &paths[1]),
                             &format!("Remove from Recently Opened: {}", paths[1].display()),
                         );
                     }
@@ -351,12 +371,17 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                             key(egui::Key::ArrowDown, egui::Modifiers::NONE),
                         ],
                     );
-                    assert_eq!(rect(&output, &paths[1]), second);
+                    assert_rect(rect(&output, &paths[1]), hovered);
                     assert_background(
                         &output,
-                        second,
+                        rect(&output, &paths[1]),
                         &format!("Remove from Recently Opened: {}", paths[1].display()),
                     );
+                    output = render(
+                        &mut palette,
+                        vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+                    );
+                    assert_rect(rect(&output, &paths[1]), second);
                 }
             }
         }

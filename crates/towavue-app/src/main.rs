@@ -8646,6 +8646,11 @@ where
     }
 
     fn remove_tab(&mut self, id: TabId, remember: bool) {
+        let position = self
+            .tabs
+            .tab_ids()
+            .position(|tab| tab == id)
+            .unwrap_or(self.tabs.len());
         self.image_tab_preparation.cancel_for(id);
         resume::record(self, true);
         if self.tabs.keyboard_settings() == Some(id) {
@@ -8655,7 +8660,9 @@ where
                 state.cancel_capture();
                 state.edit = None;
                 if remember {
-                    self.remember_closed_tab(closed_tabs::ClosedTab::KeyboardSettings(state));
+                    self.remember_closed_tab(closed_tabs::ClosedTab::KeyboardSettings(
+                        state, position,
+                    ));
                 }
                 if self.tabs.is_empty() {
                     if remember {
@@ -8689,6 +8696,7 @@ where
             if removed {
                 if remember {
                     self.remember_closed_tab(closed_tabs::ClosedTab::Gallery {
+                        position,
                         search: self.gallery_search.clone(),
                         filter: self.gallery_filter,
                     });
@@ -8729,6 +8737,7 @@ where
         if remember {
             self.remember_closed_tab(closed_tabs::ClosedTab::Media(
                 removed.target.current_path().to_owned(),
+                position,
             ));
         }
         self.tab_preview.clear();

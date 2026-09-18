@@ -1,4 +1,53 @@
 use super::*;
+
+#[test]
+fn keyboard_settings_transfer_reuses_one_utility_and_preserves_the_query_without_media_loading() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::keyboard_settings_transfer_reuses_one_utility_and_preserves_the_query_without_media_loading",
+    ) else {
+        return;
+    };
+    for existing in [false, true] {
+        let (mut source, _) = app();
+        let (mut destination, _) = app();
+        source.dispatch(CommandId::OpenKeyboardSettings);
+        let id = source
+            .tabs
+            .keyboard_settings()
+            .expect("keyboard transfer fixture");
+        source.keyboard_settings.query = "reading".into();
+        source
+            .tabs
+            .take_gallery(source.tabs.gallery().expect("keyboard transfer fixture"));
+        if existing {
+            destination.dispatch(CommandId::OpenKeyboardSettings);
+        }
+        let before = destination.tabs.keyboard_settings();
+        let request = source
+            .capture_tab_transfer(id)
+            .expect("keyboard transfer fixture");
+        let stage = source
+            .prepare_image_transfer(
+                id,
+                destination
+                    .ui_context
+                    .as_ref()
+                    .expect("keyboard transfer fixture"),
+            )
+            .expect("keyboard transfer fixture");
+        let packet = source.take_tab_transfer(&request, stage);
+        let target = destination.accept_tab_transfer(packet, 0);
+        assert!(source.tabs.is_empty() && source.exit_requested);
+        assert!(destination.keyboard_settings_active());
+        assert_eq!(destination.keyboard_settings.query, "reading");
+        assert_eq!(destination.tabs.keyboard_settings(), Some(target));
+        if existing {
+            assert_eq!(Some(target), before);
+        }
+        assert!(destination.path.is_none() && !destination.image_loading);
+        assert_eq!(destination.tabs.tabs().len(), 0);
+    }
+}
 use std::sync::mpsc;
 use towavue_runtime_windows::DecodedImageFrame;
 

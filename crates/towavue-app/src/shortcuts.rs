@@ -4,6 +4,11 @@ use std::path::{Path, PathBuf};
 
 use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 
+mod editor;
+pub use editor::save_command;
+
+const EDITOR_BINDING_HEADER: &str = "# towavue shortcuts v8";
+
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
 const FRAME_BINDING_HEADER: &str = "# towavue shortcuts v3";
 const IMAGE_BINDING_HEADER: &str = "# towavue shortcuts v4";
@@ -67,7 +72,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::NextMedia, "Alt+Right"),
         (CommandId::ToggleFilmstrip, "F"),
         (CommandId::ToggleCommandPalette, "Ctrl+Shift+P"),
-        (CommandId::ReloadShortcuts, "Ctrl+K Ctrl+S"),
+        (CommandId::OpenKeyboardSettings, "Ctrl+K Ctrl+S"),
         (CommandId::ZoomIn, "Plus"),
         (CommandId::ZoomOut, "Minus"),
         (CommandId::ActualSize, "Ctrl+H"),
@@ -176,10 +181,15 @@ pub fn defaults() -> ShortcutBindings {
 }
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
-    let mut declared = std::collections::BTreeSet::new();
-    let recent_folder_bindings = text
+    let text = text.trim_start_matches('\u{feff}');
+    let editor_bindings = text
         .lines()
-        .any(|line| line.trim() == RECENT_FOLDER_BINDING_HEADER);
+        .any(|line| line.trim() == EDITOR_BINDING_HEADER);
+    let mut declared = std::collections::BTreeSet::new();
+    let recent_folder_bindings = editor_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == RECENT_FOLDER_BINDING_HEADER);
     let reading_bindings = recent_folder_bindings
         || text
             .lines()
@@ -212,6 +222,13 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .parse::<CommandId>()
             .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
         declared.insert(command);
+        if sequence.trim().is_empty() {
+            if command == CommandId::ToggleFullscreen {
+                implicit_fullscreen = false;
+            }
+            bindings.remove(command);
+            continue;
+        }
         let parts = if legacy {
             vec![sequence]
         } else {
@@ -267,6 +284,15 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         for sequence in sequences.into_iter().skip(1) {
             bindings.add(command, sequence);
         }
+    }
+    if !editor_bindings
+        && bindings.all(CommandId::ReloadShortcuts)
+            == ["Ctrl+K Ctrl+S"
+                .parse::<KeySequence>()
+                .expect("old reload default")]
+    {
+        bindings.remove(CommandId::ReloadShortcuts);
+        declared.remove(&CommandId::ReloadShortcuts);
     }
     let recent_folder = CommandId::OpenRecentFolder;
     let old_recent: KeySequence = "Ctrl+Alt+O".parse().expect("legacy folder shortcut");
@@ -335,6 +361,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ToggleVideoRepeat
                         | CommandId::GoToFile
                         | CommandId::OpenRecentFolder
+                        | CommandId::OpenKeyboardSettings
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
                         | CommandId::ReverseReadingFolderOrder
@@ -389,9 +416,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
 
 fn serialize(bindings: &ShortcutBindings) -> String {
     let mut output = format!(
-        "{RECENT_FOLDER_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
+        "{EDITOR_BINDING_HEADER}\n# Separate alternatives with | and prefix chords with a space.\n# The first binding has priority over alternatives.\n# Example: seek_forward = Right | L\n"
     );
-    for (command, _) in bindings.iter() {
+    for definition in towavue_core::command_definitions() {
+        let command = definition.id;
         output.push_str(command.as_str());
         output.push_str(" = ");
         output.push_str(

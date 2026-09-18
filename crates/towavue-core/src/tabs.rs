@@ -55,13 +55,16 @@ enum ActiveTab {
     #[default]
     Empty,
     Gallery(TabId),
+    KeyboardSettings(TabId),
     Media(TabId),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TabSet {
     tabs: Vec<Tab>,
-    gallery: Option<(TabId, usize)>,
+    gallery: Option<TabId>,
+    keyboard_settings: Option<TabId>,
+    order: Vec<TabId>,
     active: ActiveTab,
     next_id: u64,
 }
@@ -70,7 +73,9 @@ impl Default for TabSet {
     fn default() -> Self {
         Self {
             tabs: Vec::new(),
-            gallery: Some((TabId(0), 0)),
+            gallery: Some(TabId(0)),
+            keyboard_settings: None,
+            order: vec![TabId(0)],
             active: ActiveTab::Gallery(TabId(0)),
             next_id: 1,
         }
@@ -80,14 +85,15 @@ impl Default for TabSet {
 impl TabSet {
     /// Gallery participates in tab ordering without acquiring media-only state.
     pub fn gallery(&self) -> Option<TabId> {
-        self.gallery.map(|(id, _)| id)
+        self.gallery
     }
 
     pub fn open_gallery(&mut self) -> TabId {
         let id = self.gallery().unwrap_or_else(|| {
             let id = TabId(self.next_id);
             self.next_id = self.next_id.wrapping_add(1);
-            self.gallery = Some((id, self.tabs.len()));
+            self.gallery = Some(id);
+            self.order.push(id);
             id
         });
         self.active = ActiveTab::Gallery(id);
@@ -97,12 +103,14 @@ impl TabSet {
     pub fn active_id(&self) -> Option<TabId> {
         match self.active {
             ActiveTab::Empty => None,
-            ActiveTab::Gallery(id) | ActiveTab::Media(id) => Some(id),
+            ActiveTab::Gallery(id) | ActiveTab::KeyboardSettings(id) | ActiveTab::Media(id) => {
+                Some(id)
+            }
         }
     }
 
     pub fn len(&self) -> usize {
-        self.tabs.len() + usize::from(self.gallery.is_some())
+        self.order.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -110,18 +118,14 @@ impl TabSet {
     }
 
     pub fn tab_ids(&self) -> impl Iterator<Item = TabId> + '_ {
-        (0..self.len()).map(|index| match self.gallery {
-            Some((id, position)) if index == position => id,
-            Some((_, position)) if index > position => self.tabs[index - 1].id,
-            _ => self.tabs[index].id,
-        })
+        self.order.iter().copied()
     }
 
     pub fn can_close(&self, id: TabId) -> bool {
         if self.gallery() == Some(id) {
             self.len() > 1
         } else {
-            self.tabs.iter().any(|tab| tab.id == id)
+            self.order.contains(&id)
         }
     }
 
@@ -136,13 +140,8 @@ impl TabSet {
         if self.gallery() != Some(id) {
             return false;
         }
-        let (_, index) = self.gallery.take().expect("checked Gallery");
-        if self.active == ActiveTab::Gallery(id) {
-            self.active = self
-                .tabs
-                .get(index.min(self.tabs.len().saturating_sub(1)))
-                .map_or(ActiveTab::Empty, |tab| ActiveTab::Media(tab.id));
-        }
+        self.gallery = None;
+        self.remove_order(id);
         true
     }
 
@@ -176,6 +175,7 @@ impl TabSet {
             TabTarget::Media { path, kind }
         };
         self.tabs.push(Tab { id, target });
+        self.order.push(id);
         self.active = ActiveTab::Media(id);
         id
     }
@@ -207,6 +207,10 @@ impl TabSet {
             self.active = ActiveTab::Gallery(id);
             return true;
         }
+        if self.keyboard_settings == Some(id) {
+            self.active = ActiveTab::KeyboardSettings(id);
+            return true;
+        }
         if self.tabs.iter().any(|tab| tab.id == id) {
             self.active = ActiveTab::Media(id);
             true
@@ -226,25 +230,8 @@ impl TabSet {
     /// Transfer removes a media tab without manufacturing a replacement Gallery.
     pub fn take(&mut self, id: TabId) -> Option<Tab> {
         let index = self.tabs.iter().position(|tab| tab.id == id)?;
-        let position = self
-            .tab_ids()
-            .position(|item| item == id)
-            .expect("media tab");
         let removed = self.tabs.remove(index);
-        if let Some((_, gallery_index)) = &mut self.gallery
-            && index < *gallery_index
-        {
-            *gallery_index -= 1;
-        }
-        if self.active == ActiveTab::Media(id) {
-            let next = self
-                .tab_ids()
-                .nth(position.min(self.len().saturating_sub(1)));
-            self.active = ActiveTab::Empty;
-            if let Some(next) = next {
-                self.activate(next);
-            }
-        }
+        self.remove_order(id);
         Some(removed)
     }
 
@@ -260,22 +247,59 @@ impl TabSet {
         if from == to {
             return false;
         }
-        if let Some((gallery, position)) = &mut self.gallery {
-            if *gallery == id {
-                *position = to;
-                return true;
-            }
-            let media_from = from - usize::from(from > *position);
-            *position -= usize::from(from < *position);
-            let media_to = to - usize::from(to > *position);
-            *position += usize::from(to <= *position);
-            let tab = self.tabs.remove(media_from);
-            self.tabs.insert(media_to, tab);
-        } else {
-            let tab = self.tabs.remove(from);
-            self.tabs.insert(to, tab);
-        }
+        self.order.remove(from);
+        self.order.insert(to, id);
+        self.tabs
+            .sort_by_key(|tab| self.order.iter().position(|id| *id == tab.id));
         true
+    }
+
+    pub fn keyboard_settings(&self) -> Option<TabId> {
+        self.keyboard_settings
+    }
+
+    pub fn is_utility(&self, id: TabId) -> bool {
+        self.gallery == Some(id) || self.keyboard_settings == Some(id)
+    }
+
+    pub fn open_keyboard_settings(&mut self) -> TabId {
+        let id = self.keyboard_settings.unwrap_or_else(|| {
+            let id = TabId(self.next_id);
+            self.next_id = self.next_id.wrapping_add(1);
+            self.keyboard_settings = Some(id);
+            self.order.push(id);
+            id
+        });
+        self.active = ActiveTab::KeyboardSettings(id);
+        id
+    }
+
+    pub fn take_keyboard_settings(&mut self, id: TabId) -> bool {
+        if self.keyboard_settings != Some(id) {
+            return false;
+        }
+        self.keyboard_settings = None;
+        self.remove_order(id);
+        true
+    }
+
+    fn remove_order(&mut self, id: TabId) {
+        let index = self
+            .order
+            .iter()
+            .position(|item| *item == id)
+            .expect("open tab");
+        self.order.remove(index);
+        if self.active_id() == Some(id) {
+            self.active = ActiveTab::Empty;
+            if let Some(next) = self
+                .order
+                .get(index.min(self.order.len().saturating_sub(1)))
+                .copied()
+            {
+                self.activate(next);
+            }
+        }
     }
 
     /// Media accessors exclude Gallery, even while it is selected.
@@ -290,6 +314,49 @@ impl TabSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyboard_settings_is_a_single_ordered_utility_with_no_media_target() {
+        let mut tabs = TabSet::default();
+        let gallery = tabs.gallery().expect("initial Gallery");
+        let image = tabs.open_new("a.png".into(), MediaKind::Image);
+        let keyboard = tabs.open_keyboard_settings();
+        let video = tabs.open_new("b.mp4".into(), MediaKind::Video);
+        assert_eq!(tabs.open_keyboard_settings(), keyboard);
+        assert_eq!(tabs.len(), 4);
+        assert!(tabs.active().is_none() && tabs.welcome().is_none());
+        for first_gap in 0..=tabs.len() {
+            let mut positioned = tabs.clone();
+            positioned.reorder(keyboard, first_gap);
+            let original: Vec<_> = positioned.tab_ids().collect();
+            for (from, id) in original.iter().copied().enumerate() {
+                for gap in 0..=original.len() {
+                    let mut changed = positioned.clone();
+                    let mut expected = original.clone();
+                    expected.remove(from);
+                    expected.insert(gap - usize::from(from < gap), id);
+                    changed.reorder(id, gap);
+                    assert_eq!(changed.tab_ids().collect::<Vec<_>>(), expected);
+                    assert_eq!(
+                        changed.tabs().iter().map(|tab| tab.id).collect::<Vec<_>>(),
+                        expected
+                            .into_iter()
+                            .filter(|id| *id == image || *id == video)
+                            .collect::<Vec<_>>()
+                    );
+                    assert_eq!(changed.active_id(), Some(keyboard));
+                }
+            }
+        }
+        tabs.close_gallery(gallery);
+        tabs.close(image);
+        tabs.close(video);
+        assert_eq!(tabs.tab_ids().collect::<Vec<_>>(), [keyboard]);
+        assert!(tabs.can_close(keyboard));
+        assert!(tabs.take_keyboard_settings(keyboard));
+        assert!(tabs.is_empty() && tabs.active_id().is_none());
+        assert_ne!(tabs.open_keyboard_settings(), keyboard);
+    }
 
     #[test]
     fn gallery_survives_media_opening_and_can_close_except_when_alone() {

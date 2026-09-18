@@ -2,6 +2,7 @@ use crate::*;
 
 pub(super) enum ClosedTab {
     Media(PathBuf),
+    KeyboardSettings(keyboard_settings::KeyboardSettings),
     Gallery {
         search: String,
         filter: Option<MediaKind>,
@@ -21,6 +22,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         match self.closed_tabs.pop_back() {
+            Some(ClosedTab::KeyboardSettings(state)) => {
+                self.dispatch(CommandId::OpenKeyboardSettings);
+                self.keyboard_settings = state;
+            }
             Some(ClosedTab::Media(path)) => self.open_external(path, true),
             Some(ClosedTab::Gallery { search, filter }) => {
                 // Open Gallery retains foreground media and reuses the window's

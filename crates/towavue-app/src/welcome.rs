@@ -11,6 +11,16 @@ pub(super) fn tab(
     active: bool,
     can_close: bool,
 ) -> (egui::Response, egui::Response) {
+    named_tab(ui, rect, active, can_close, "Gallery")
+}
+
+pub(super) fn named_tab(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    active: bool,
+    can_close: bool,
+    title: &str,
+) -> (egui::Response, egui::Response) {
     ui.painter().rect_filled(
         rect,
         3.0,
@@ -27,20 +37,24 @@ pub(super) fn tab(
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
-    let response = chrome::tab_title(ui, label_rect, "Gallery", active);
+    let response = chrome::tab_title(ui, label_rect, title, active);
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), "Gallery tab")
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            response.enabled(),
+            format!("{title} tab"),
+        )
     });
     let close_rect = egui::Rect::from_min_max(egui::pos2(label_rect.right(), rect.top()), rect.max);
     let close = ui
         .add_enabled_ui(can_close, |ui| chrome::tab_close(ui, close_rect, false))
         .inner
-        .help_text("Close Gallery");
+        .help_text(format!("Close {title}"));
     close.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             close.enabled(),
-            "Close tab: Gallery",
+            format!("Close tab: {title}"),
         )
     });
     crate::tab_focus::release_pointer_focus(&response);

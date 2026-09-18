@@ -719,3 +719,29 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
     event_loop.run_app(&mut trial).expect("native host trial");
     assert!(trial.completed || trial.skipped);
 }
+
+#[test]
+fn keyboard_shortcut_updates_reach_all_hosted_windows_and_cancel_old_prefixes() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::tests::keyboard_shortcut_updates_reach_all_hosted_windows_and_cancel_old_prefixes",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("shortcut host fixture");
+    let second = host.add_application(None).expect("shortcut host fixture");
+    for app in host.windows.values_mut() {
+        app.entered_shortcut
+            .push("Ctrl+K".parse().expect("valid test key"));
+        app.prefix_started = Some(Instant::now());
+    }
+    let mut bindings = shortcuts::defaults();
+    bindings.set(CommandId::OpenFile, "F2".parse().expect("valid test key"));
+    host.route(Event::Window(
+        second,
+        AppEvent::ShortcutsChanged(bindings.clone()),
+    ));
+    for app in host.windows.values() {
+        assert_eq!(app.shortcuts, bindings);
+        assert!(app.entered_shortcut.is_empty() && app.prefix_started.is_none());
+    }
+}

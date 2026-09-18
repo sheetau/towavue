@@ -80,7 +80,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 CloseAllTabs,
                 ReopenClosedTab,
             ],
-            &[ReloadShortcuts],
+            &[OpenKeyboardSettings, ReloadShortcuts],
         ],
     ),
     (
@@ -1175,6 +1175,7 @@ mod tests {
         navigate(egui::Key::ArrowDown, false, "Open Recent Folder");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
+        navigate(egui::Key::ArrowDown, false, "Keyboard Shortcuts");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
         navigate(egui::Key::Tab, false, "Open file");
         navigate(egui::Key::ArrowLeft, false, "File");

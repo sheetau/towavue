@@ -36,6 +36,7 @@ mod image_tab_preview;
 mod image_visibility_tests;
 #[cfg(test)]
 mod image_wheel_tests;
+mod keyboard_settings;
 mod logo_menu;
 mod media_preview;
 mod menu;
@@ -239,6 +240,7 @@ impl PlaybackClock {
 
 #[derive(Clone, PartialEq)]
 enum UiAction {
+    KeybindingChange(TabId, keyboard_settings::Change),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
     Command(CommandId),
     BeginReadingDrag(egui::Pos2, egui::Vec2),
@@ -283,6 +285,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    ShortcutsChanged(ShortcutBindings),
     TaskbarReady,
     TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
     TabVideoSheet(
@@ -1038,6 +1041,7 @@ struct Application<N> {
     drift_samples: Vec<Duration>,
     shortcuts: ShortcutBindings,
     shortcut_path: PathBuf,
+    keyboard_settings: keyboard_settings::KeyboardSettings,
     entered_shortcut: Vec<KeyStroke>,
     prefix_started: Option<Instant>,
     modifiers: ModifiersState,
@@ -1316,6 +1320,7 @@ where
             drift_samples: Vec::new(),
             shortcuts,
             shortcut_path,
+            keyboard_settings: keyboard_settings::KeyboardSettings::default(),
             entered_shortcut: Vec::new(),
             prefix_started: None,
             modifiers: ModifiersState::default(),
@@ -2913,6 +2918,11 @@ where
 
     fn handle_app_event(&mut self, event: AppEvent) {
         match event {
+            AppEvent::ShortcutsChanged(bindings) => {
+                self.shortcuts = bindings;
+                self.cancel_shortcut_prefix();
+                self.request_redraw();
+            }
             AppEvent::TaskbarReady => {
                 self.sync_taskbar_progress();
                 self.sync_taskbar_transport();
@@ -3786,7 +3796,24 @@ where
         let media_panel = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
-                if self.path.is_none() {
+                if self.keyboard_settings_active() {
+                    if let Some(change) = self.keyboard_settings.show(
+                        ui,
+                        &self.shortcuts,
+                        !modal_blocked
+                            && !self.grid_open
+                            && !self.palette_open
+                            && !egui::Popup::is_any_open(&context),
+                    ) {
+                        let action = UiAction::KeybindingChange(
+                            self.tabs.active_id().expect("keyboard settings"),
+                            change,
+                        );
+                        if !actions.contains(&action) {
+                            actions.push(action);
+                        }
+                    }
+                } else if self.path.is_none() {
                     let enabled = !modal_blocked && !self.grid_open;
                     self.draw_gallery(ui, enabled, actions);
                 } else if self.media_kind == Some(MediaKind::Audio) {
@@ -5089,7 +5116,7 @@ where
                                     !self.modal_input_blocked() && !self.grid_open,
                                 );
                                 for (index, id) in self.tabs.tab_ids().enumerate() {
-                                    if self.tabs.gallery() == Some(id) {
+                                    if self.tabs.is_utility(id) {
                                         let rect = tab_rects[index];
                                         let active = self.tabs.active_id() == Some(id);
                                         let mut tab_ui = ui.new_child(
@@ -5097,12 +5124,23 @@ where
                                                 .id(ui.id().with(("gallery-tab", id)))
                                                 .max_rect(rect),
                                         );
-                                        let (response, close) = welcome::tab(
-                                            &mut tab_ui,
-                                            rect,
-                                            active,
-                                            self.tabs.can_close(id),
-                                        );
+                                        let (response, close) =
+                                            if self.tabs.keyboard_settings() == Some(id) {
+                                                welcome::named_tab(
+                                                    &mut tab_ui,
+                                                    rect,
+                                                    active,
+                                                    self.tabs.can_close(id),
+                                                    "Keyboard Shortcuts",
+                                                )
+                                            } else {
+                                                welcome::tab(
+                                                    &mut tab_ui,
+                                                    rect,
+                                                    active,
+                                                    self.tabs.can_close(id),
+                                                )
+                                            };
                                         if response.clicked() {
                                             actions.push(UiAction::ActivateTab(id));
                                         }
@@ -5946,7 +5984,11 @@ where
                                     )
                                 } else {
                                     (
-                                        "Open a file or folder to begin".into(),
+                                        if self.keyboard_settings_active() {
+                                            "Double-click a command to edit its keybinding".into()
+                                        } else {
+                                            "Open a file or folder to begin".into()
+                                        },
                                         chrome::MUTED,
                                         format!("Shortcuts: {}", self.shortcut_path.display()),
                                     )
@@ -6506,6 +6548,13 @@ where
                     self.pending_guard.is_some() && self.export_error.is_none()
                 }
                 UiAction::DismissExportError => self.export_error.is_some(),
+                UiAction::KeybindingChange(id, _) => {
+                    self.tabs.active_id() == Some(id)
+                        && self.keyboard_settings_active()
+                        && self.keyboard_settings.edit.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::FinishResize(_) => {
                     self.resize_dialog.is_some()
                         && self.pending_guard.is_none()
@@ -6561,6 +6610,11 @@ where
                     self.push_visual_edit(EditOperation::Resize(value));
                 }
                 self.request_redraw();
+            }
+            UiAction::KeybindingChange(id, change) => {
+                if self.tabs.active_id() == Some(id) {
+                    self.apply_keybinding_change(change);
+                }
             }
             UiAction::Command(command) => self.dispatch(command),
             UiAction::BeginReadingDrag(position, delta) => self.begin_reading_drag(position, delta),
@@ -6877,6 +6931,18 @@ where
             CommandId::OpenFolder => {
                 self.begin_dialog(FileDialogKind::OpenFolder, DialogIntent::OpenFolder);
             }
+            CommandId::OpenKeyboardSettings => {
+                let previous = self.tabs.active_id();
+                let settings = self.tabs.open_keyboard_settings();
+                if previous != Some(settings) {
+                    self.cancel_hold_speed();
+                    self.retain_image_tab();
+                    self.retain_playback_tab();
+                    self.clear_active_media();
+                }
+                self.keyboard_settings.request_search_focus();
+                self.request_redraw();
+            }
             CommandId::OpenGallery => {
                 let previous = self.tabs.active_id();
                 let gallery = self.tabs.open_gallery();
@@ -7003,7 +7069,8 @@ where
             }
             CommandId::ReloadShortcuts => match shortcuts::load() {
                 Ok((bindings, path)) => {
-                    self.shortcuts = bindings;
+                    self.shortcuts = bindings.clone();
+                    (self.notify)(AppEvent::ShortcutsChanged(bindings));
                     self.shortcut_path = path;
                     match grid::load() {
                         Ok((layouts, grid_path)) => {
@@ -8278,6 +8345,7 @@ where
         if self.tabs.active_id() == Some(id) {
             return;
         }
+        self.keyboard_settings.cancel_capture();
         if !self.tabs.activate(id) {
             return;
         }
@@ -8302,7 +8370,7 @@ where
         }
         self.cancel_shortcut_prefix();
         self.cancel_view_drag();
-        if self.tabs.gallery() == Some(id) {
+        if self.tabs.is_utility(id) {
             match command {
                 CommandId::ReopenClosedTab => self.reopen_closed_tab(),
                 CommandId::CloseTab
@@ -8580,6 +8648,37 @@ where
     fn remove_tab(&mut self, id: TabId, remember: bool) {
         self.image_tab_preparation.cancel_for(id);
         resume::record(self, true);
+        if self.tabs.keyboard_settings() == Some(id) {
+            let was_active = self.tabs.active_id() == Some(id);
+            if self.tabs.take_keyboard_settings(id) {
+                let mut state = std::mem::take(&mut self.keyboard_settings);
+                state.cancel_capture();
+                state.edit = None;
+                if remember {
+                    self.remember_closed_tab(closed_tabs::ClosedTab::KeyboardSettings(state));
+                }
+                if self.tabs.is_empty() {
+                    if remember {
+                        self.tabs.open_gallery();
+                    } else {
+                        self.exit_requested = true;
+                    }
+                }
+                if was_active {
+                    if let Some(tab) = self.tabs.active() {
+                        self.load_path(
+                            tab.target.current_path().to_owned(),
+                            tab.target.media_kind(),
+                        );
+                    } else {
+                        self.clear_active_media();
+                    }
+                }
+                self.refresh_title();
+                self.request_redraw();
+            }
+            return;
+        }
         if self.tabs.gallery() == Some(id) {
             let was_active = self.tabs.active_id() == Some(id);
             let removed = if remember {
@@ -8599,11 +8698,15 @@ where
                 if !remember && self.tabs.is_empty() {
                     self.exit_requested = true;
                 }
-                if was_active && let Some(tab) = self.tabs.active() {
-                    self.load_path(
-                        tab.target.current_path().to_owned(),
-                        tab.target.media_kind(),
-                    );
+                if was_active {
+                    if let Some(tab) = self.tabs.active() {
+                        self.load_path(
+                            tab.target.current_path().to_owned(),
+                            tab.target.media_kind(),
+                        );
+                    } else {
+                        self.clear_active_media();
+                    }
                 }
                 self.request_redraw();
             }
@@ -8674,6 +8777,7 @@ where
     }
 
     fn clear_active_media(&mut self) {
+        self.keyboard_settings.cancel_capture();
         if let Some(recent) = &self.recent_files {
             recent.refresh_gallery();
         }
@@ -9829,11 +9933,14 @@ where
     }
 
     fn title(&self) -> String {
-        let mut name = self
-            .path
-            .as_deref()
-            .map(display_name)
-            .unwrap_or_else(|| "Gallery".to_owned());
+        let mut name = self.path.as_deref().map(display_name).unwrap_or_else(|| {
+            if self.keyboard_settings_active() {
+                "Keyboard Shortcuts"
+            } else {
+                "Gallery"
+            }
+            .to_owned()
+        });
         if self
             .tabs
             .active()
@@ -9885,7 +9992,8 @@ where
     }
 
     fn modal_input_blocked(&self) -> bool {
-        self.resize_dialog.is_some()
+        self.keyboard_settings.edit.is_some()
+            || self.resize_dialog.is_some()
             || self.rotation_dialog.is_some()
             || self.video_rotation_dialog.is_some()
             || self.video_resize_dialog.is_some()
@@ -10124,11 +10232,12 @@ where
         let Some(context) = &self.ui_context else {
             return false;
         };
-        // A modified picker chord can start from text focus. Once started, its
+        // A modified picker/settings chord can start from text focus. Once started, its
         // next stroke belongs to the chord (including cancellation/invalid keys),
         // not the text editor. IME and modal input still retain ownership.
-        let picker_prefix = |sequence: &[KeyStroke]| {
+        let entry_prefix = |sequence: &[KeyStroke]| {
             [
+                CommandId::OpenKeyboardSettings,
                 CommandId::GoToFile,
                 CommandId::OpenRecentFolder,
                 CommandId::ToggleCommandPalette,
@@ -10144,18 +10253,19 @@ where
         if !self.native_ime_composing
             && !self.modal_input_blocked()
             && !egui::Popup::is_any_open(context)
-            && (self.prefix_started.is_some() && picker_prefix(&self.entered_shortcut)
+            && (self.prefix_started.is_some() && entry_prefix(&self.entered_shortcut)
                 || (stroke.modifiers.control || stroke.modifiers.logo)
                     && match self
                         .shortcuts
                         .resolve(std::slice::from_ref(stroke), self.command_context())
                     {
                         ShortcutMatch::Command(
-                            CommandId::GoToFile
+                            CommandId::OpenKeyboardSettings
+                            | CommandId::GoToFile
                             | CommandId::OpenRecentFolder
                             | CommandId::ToggleCommandPalette,
                         ) => true,
-                        ShortcutMatch::Prefix => picker_prefix(std::slice::from_ref(stroke)),
+                        ShortcutMatch::Prefix => entry_prefix(std::slice::from_ref(stroke)),
                         _ => false,
                     })
         {
@@ -10341,6 +10451,11 @@ where
     }
 
     fn process_shortcut(&mut self, stroke: KeyStroke) {
+        if self.keyboard_capture_active() {
+            self.keyboard_settings.capture(stroke);
+            self.request_redraw();
+            return;
+        }
         self.entered_shortcut.push(stroke.clone());
         let context = self.command_context();
         let mut matched = self.shortcuts.resolve(&self.entered_shortcut, context);
@@ -10424,13 +10539,14 @@ where
             WinitKey::Named(NamedKey::ArrowDown) => (Key::ArrowDown, false),
             WinitKey::Named(NamedKey::Tab) => (Key::Tab, false),
             WinitKey::Named(NamedKey::Escape) => (Key::Escape, false),
-            WinitKey::Named(NamedKey::F11) => (Key::F11, false),
+            WinitKey::Named(NamedKey::F11) => (Key::Function(11), false),
             WinitKey::Named(NamedKey::Home) => (Key::Home, false),
             WinitKey::Named(NamedKey::End) => (Key::End, false),
             WinitKey::Named(NamedKey::Delete) => (Key::Delete, false),
             WinitKey::Named(NamedKey::PageUp) => (Key::PageUp, false),
             WinitKey::Named(NamedKey::PageDown) => (Key::PageDown, false),
             WinitKey::Named(NamedKey::Backspace) => (Key::Backspace, false),
+            WinitKey::Named(named) => (format!("{named:?}").parse::<KeyStroke>().ok()?.key, false),
             _ => return None,
         };
         Some(self.shifted_image_digit(
@@ -11085,6 +11201,7 @@ where
             }
         }
         if matches!(event, WindowEvent::Focused(false)) {
+            self.keyboard_settings.cancel_capture();
             self.finish_queued_media_release();
         }
         if (self.rotation_drag.is_some()
@@ -11243,6 +11360,22 @@ where
             && event.logical_key == WinitKey::Named(NamedKey::Escape)
         {
             self.process_key(event);
+            return;
+        }
+        if self.keyboard_capture_active()
+            && let WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } = &event
+        {
+            if event.state == ElementState::Pressed
+                && !event.repeat
+                && let Some(stroke) = self.key_stroke(event)
+            {
+                self.keyboard_settings.capture(stroke);
+                self.request_redraw();
+            }
             return;
         }
         // Keep bound Tab chords and non-value shortcuts out of egui's focus-wide key capture.
@@ -19065,6 +19198,8 @@ mod tests {
         });
         assert!(context.text_edit_focused());
         assert!(!app.owns_focused_shortcut(&stroke("K")));
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+K")));
+        app.shortcuts.remove(CommandId::OpenKeyboardSettings);
         assert!(!app.owns_focused_shortcut(&stroke("Ctrl+K")));
         for key in [
             "PageUp",
@@ -19242,7 +19377,7 @@ mod tests {
         let strokes = [prefix.clone(), "Ctrl+S".parse().expect("suffix stroke")];
         assert_eq!(
             app.shortcuts.resolve(&strokes, app.command_context()),
-            ShortcutMatch::Command(CommandId::ReloadShortcuts)
+            ShortcutMatch::Command(CommandId::OpenKeyboardSettings)
         );
         app.dispatch(CommandId::ToggleGridMenu);
         assert!(app.entered_shortcut.is_empty());

@@ -359,6 +359,11 @@ impl WindowHost {
                         .handle_app_event(AppEvent::Playback(instance, event));
                 }
             }
+            Event::Window(_, AppEvent::ShortcutsChanged(bindings)) => {
+                for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
+                    app.handle_app_event(AppEvent::ShortcutsChanged(bindings.clone()));
+                }
+            }
             Event::Window(key, event) => {
                 if let Some(app) = self.windows.get_mut(&key).filter(|app| !app.exit_requested) {
                     app.handle_app_event(event);

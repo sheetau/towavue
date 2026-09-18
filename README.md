@@ -39,6 +39,7 @@ Public installer distribution is not yet available. To run from source, see the 
 |---|---|
 | Open file / folder | Ctrl+O / Ctrl+Shift+O |
 | Command palette | Ctrl+Shift+P |
+| Keyboard Shortcuts settings | Ctrl+K Ctrl+S |
 | Switch tabs | Ctrl+Tab / Ctrl+Shift+Tab |
 | Close / reopen tab | Ctrl+W / Ctrl+Shift+T |
 | Fullscreen | F11 / Enter |
@@ -53,7 +54,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
 | Export as / save to the last export target | Ctrl+Shift+S / Ctrl+S |
 
-Available actions depend on the current media and editing mode. Enter retains its usual confirmation or activation behavior in text fields, menus, dialogs, and focused buttons. Menus show the active shortcuts. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`.
+Available actions depend on the current media and editing mode. Enter retains its usual confirmation or activation behavior in text fields, menus, dialogs, and focused buttons. Menus show the active shortcuts. Open the Keyboard Shortcuts tab to search, record, edit, remove or reset bindings. Saves apply to all windows in the current host. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`; manual file changes use **Reload keyboard shortcuts** from the menu or command palette. Grid layout customization remains in `grid.conf`.
 
 ## License
 

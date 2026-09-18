@@ -13,6 +13,7 @@ pub(super) struct DetachRequest {
 
 pub(super) enum TabTransfer {
     Gallery(String, Option<MediaKind>),
+    KeyboardSettings(keyboard_settings::KeyboardSettings),
     Media(Box<MediaTabTransfer>),
 }
 
@@ -91,7 +92,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn capture_tab_transfer(&self, id: TabId) -> Result<DetachRequest, String> {
-        if self.tabs.gallery() == Some(id) {
+        if self.tabs.is_utility(id) {
             return Ok(DetachRequest {
                 tab: id,
                 path: None,
@@ -158,7 +159,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         id: TabId,
         context: &egui::Context,
     ) -> Result<Option<ImageStage>, String> {
-        if self.tabs.gallery() == Some(id) {
+        if self.tabs.is_utility(id) {
             return Ok(None);
         }
         let tab = self
@@ -225,6 +226,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         stage: Option<ImageStage>,
     ) -> TabTransfer {
         let id = request.tab;
+        if self.tabs.keyboard_settings() == Some(id) {
+            let mut state = std::mem::take(&mut self.keyboard_settings);
+            state.cancel_capture();
+            state.edit = None;
+            self.remove_tab(id, false);
+            return TabTransfer::KeyboardSettings(state);
+        }
         if self.tabs.gallery() == Some(id) {
             let query = std::mem::take(&mut self.gallery_search);
             let filter = self.gallery_filter.take();
@@ -299,6 +307,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn accept_tab_transfer(&mut self, transfer: TabTransfer, gap: usize) -> TabId {
         let mut transfer = match transfer {
             TabTransfer::Media(transfer) => transfer,
+            TabTransfer::KeyboardSettings(state) => {
+                self.dispatch(CommandId::OpenKeyboardSettings);
+                self.keyboard_settings = state;
+                let id = self
+                    .tabs
+                    .keyboard_settings()
+                    .expect("opened keyboard settings");
+                self.tabs.reorder(id, gap);
+                return id;
+            }
             TabTransfer::Gallery(query, filter) => {
                 self.gallery_search = query;
                 self.gallery_filter = filter;

@@ -24,6 +24,7 @@ pub enum CommandId {
     NextSameKind,
     ToggleFilmstrip,
     ToggleCommandPalette,
+    OpenKeyboardSettings,
     ReloadShortcuts,
     ZoomIn,
     ZoomOut,
@@ -163,6 +164,7 @@ impl CommandId {
             Self::NextSameKind => "next_same_kind",
             Self::ToggleFilmstrip => "toggle_filmstrip",
             Self::ToggleCommandPalette => "toggle_command_palette",
+            Self::OpenKeyboardSettings => "open_keyboard_settings",
             Self::ReloadShortcuts => "reload_shortcuts",
             Self::ZoomIn => "zoom_in",
             Self::ZoomOut => "zoom_out",
@@ -302,7 +304,8 @@ pub enum Key {
     ArrowDown,
     Tab,
     Escape,
-    F11,
+    Function(u8),
+    Insert,
     Home,
     End,
     Delete,
@@ -383,7 +386,8 @@ impl fmt::Display for KeyStroke {
             Key::ArrowDown => formatter.write_str("Down"),
             Key::Tab => formatter.write_str("Tab"),
             Key::Escape => formatter.write_str("Escape"),
-            Key::F11 => formatter.write_str("F11"),
+            Key::Function(number) => write!(formatter, "F{number}"),
+            Key::Insert => formatter.write_str("Insert"),
             Key::Home => formatter.write_str("Home"),
             Key::End => formatter.write_str("End"),
             Key::Delete => formatter.write_str("Delete"),
@@ -426,7 +430,16 @@ impl FromStr for KeyStroke {
                 "pageup" | "pgup" if key.is_none() => key = Some(Key::PageUp),
                 "pagedown" | "pgdn" if key.is_none() => key = Some(Key::PageDown),
                 "backspace" if key.is_none() => key = Some(Key::Backspace),
-                "f11" if key.is_none() => key = Some(Key::F11),
+                "insert" if key.is_none() => key = Some(Key::Insert),
+                function
+                    if key.is_none()
+                        && function.starts_with('f')
+                        && function[1..]
+                            .parse::<u8>()
+                            .is_ok_and(|number| (1..=24).contains(&number)) =>
+                {
+                    key = Some(Key::Function(function[1..].parse().map_err(|_| ())?))
+                }
                 "home" if key.is_none() => key = Some(Key::Home),
                 "end" if key.is_none() => key = Some(Key::End),
                 "pipe" if key.is_none() => key = Some(Key::Character('|')),
@@ -647,6 +660,7 @@ const COMMANDS: &[CommandDefinition] = &[
     ),
     command(CommandId::ToggleFilmstrip, "Toggle filmstrip", ANY_MEDIA),
     command(CommandId::ToggleCommandPalette, "Show command palette", &[]),
+    command(CommandId::OpenKeyboardSettings, "Keyboard Shortcuts", &[]),
     command(CommandId::ReloadShortcuts, "Reload keyboard shortcuts", &[]),
     command(CommandId::ZoomIn, "Zoom in", VISUAL_MEDIA),
     command(CommandId::ZoomOut, "Zoom out", VISUAL_MEDIA),
@@ -1635,7 +1649,7 @@ mod tests {
             .parse::<KeySequence>()
             .expect("fullscreen prefix");
         assert_eq!(fullscreen.to_string(), "Ctrl+K F11");
-        assert_eq!(fullscreen.strokes()[1].key, Key::F11);
+        assert_eq!(fullscreen.strokes()[1].key, Key::Function(11));
         assert_eq!("toggle_fullscreen".parse(), Ok(CommandId::ToggleFullscreen));
         for key in ["Enter", "Ctrl+Enter", "Ctrl+K Enter"] {
             assert_eq!(

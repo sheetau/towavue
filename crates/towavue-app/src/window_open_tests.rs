@@ -330,6 +330,28 @@ fn exercise_tab_drops(
         );
         host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
         assert_eq!(host.windows[&target].incoming_tab_pointer, Some(drop));
+        assert!(host.tab_badge.is_some() && !host.tab_badge_failed);
+        drag_frame(
+            host.windows.get_mut(&source).expect("source"),
+            vec![egui::Event::PointerMoved(origin)],
+        );
+        host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+        assert!(host.tab_badge.is_none(), "band reentry removes the badge");
+        assert!(host.tab_cursor_owner.is_none());
+        assert!(host.windows[&target].incoming_tab_pointer.is_none());
+        drag_frame(
+            host.windows.get_mut(&source).expect("source"),
+            vec![egui::Event::PointerMoved(end)],
+        );
+        host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+        assert!(host.tab_badge.is_some() && !host.tab_badge_failed);
+        if target != source {
+            dropping::tests::assert_filmstrip_feedback(host, None, egui::CursorIcon::Move);
+            host.update_tab_drops_with(event_loop, false, |_, _, _| None);
+            assert!(host.tab_badge.is_some() && !host.tab_badge_failed);
+            assert!(host.windows[&target].incoming_tab_pointer.is_none());
+            host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, drop)));
+        }
         dropping::tests::assert_filmstrip_feedback(
             host,
             Some((target, drop)),
@@ -392,6 +414,10 @@ fn exercise_tab_drops(
         assert_eq!(host.windows[&source].edits[&original], history);
         assert_eq!(host.windows.len(), windows, "merge creates no HWND");
         assert!(host.tab_cursor_owner.is_none());
+        assert!(
+            host.tab_badge.is_none(),
+            "release disposes the transfer badge"
+        );
         host.open_pending_windows_with(event_loop, false, |_, _, _| panic!("release replay"));
         let app = host.windows.get_mut(&target).expect("target");
         app.close_tab_unchecked(added);

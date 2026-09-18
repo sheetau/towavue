@@ -136,7 +136,7 @@ impl WindowHost {
                     feedback.cursor = egui::CursorIcon::Move;
                 }
             }
-            if !filmstrip && !local_drop {
+            if filmstrip || !local_drop {
                 feedback.badge = Some(if feedback.cursor == egui::CursorIcon::NoDrop {
                     tab_drag::badge::Kind::Forbidden
                 } else if feedback.target.is_some() {

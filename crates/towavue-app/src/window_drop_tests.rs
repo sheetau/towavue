@@ -10,6 +10,17 @@ pub(crate) fn assert_filmstrip_feedback(
         .expect("filmstrip feedback");
     assert_eq!(feedback.cursor, cursor);
     assert_eq!(
+        feedback.badge,
+        Some(if cursor == egui::CursorIcon::NoDrop {
+            tab_drag::badge::Kind::Forbidden
+        } else if feedback.target.is_some() {
+            tab_drag::badge::Kind::Move
+        } else {
+            tab_drag::badge::Kind::New
+        }),
+        "filmstrip uses the same transfer badge as dragged tabs"
+    );
+    assert_eq!(
         feedback.target,
         target.filter(|_| cursor == egui::CursorIcon::Move)
     );
@@ -405,8 +416,17 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .ui_context
         .clone()
         .expect("target context");
+    // Age only the layout frame count. A default synthetic timestamp advances
+    // by 1/60 s and can overtake the native clock used by the next real frame.
+    let time = context.input(|input| input.time);
     for _ in 0..2 {
-        let _ = context.run_ui(egui::RawInput::default(), |_| {});
+        let _ = context.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |_| {},
+        );
     }
     assert_eq!(
         host.tab_drag_feedback(|_, _, _| Some((target, body)))

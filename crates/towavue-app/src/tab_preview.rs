@@ -1493,8 +1493,13 @@ mod tests {
             "steady hover does not churn jobs"
         );
         assert!(
+            painted(&frame(&mut app, egui::pos2(900.0, 400.0)), edited_texture),
+            "departure starts with the last borrowed image"
+        );
+        frame(&mut app, egui::pos2(900.0, 400.0));
+        assert!(
             !painted(&frame(&mut app, egui::pos2(900.0, 400.0)), edited_texture),
-            "leaving the tab hides its borrowed image"
+            "departure releases its borrowed image after the fade"
         );
         // A retained tab can lose its presentation after a load/recovery failure.
         let held = app
@@ -1554,17 +1559,17 @@ mod tests {
         app.close_tab_unchecked(tab);
         assert!(!app.retained_images.contains_key(&tab));
         assert!(
-            context.tex_manager().read().meta(edited_texture).is_none(),
-            "hover must not keep a closed tab's texture alive"
+            context.tex_manager().read().meta(edited_texture).is_some(),
+            "the departing paint owns the closed tab's image briefly"
         );
+        frame(&mut app, egui::pos2(900.0, 400.0));
+        frame(&mut app, egui::pos2(900.0, 400.0));
+        let closed = frame(&mut app, egui::pos2(900.0, 400.0));
         assert!(
-            context
-                .tex_manager()
-                .write()
-                .take_delta()
-                .free
-                .contains(&edited_texture)
+            context.tex_manager().read().meta(edited_texture).is_none(),
+            "the closed tab's image is released after the fade"
         );
+        assert!(closed.textures_delta.free.contains(&edited_texture));
         assert!(!painted(&frame(&mut app, pointer), edited_texture));
         app.tab_preview.finish(
             &context,

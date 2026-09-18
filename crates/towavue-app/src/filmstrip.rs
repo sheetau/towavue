@@ -3143,6 +3143,7 @@ mod tests {
                     for pass in 0..4 {
                         let output = context.run_ui(
                             egui::RawInput {
+                                time: Some(context.cumulative_frame_nr() as f64 * 0.2),
                                 screen_rect: Some(Rect::from_min_size(
                                     egui::Pos2::ZERO,
                                     egui::vec2(480.0, 300.0),

@@ -177,7 +177,9 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
         }
         let (output, _) = frame(app, egui::pos2(900.0, 400.0), None);
         let source = node_center(&output, &display_name(&path));
-        frame(app, source, None);
+        for _ in 0..16 {
+            frame(app, source, None);
+        }
         let (output, _) = frame(app, source, None);
         if tab == active {
             assert!(

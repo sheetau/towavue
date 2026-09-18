@@ -55,7 +55,7 @@ impl Transport {
                 thumbnail.center().x,
                 (thumbnail.bottom() / pixel).floor() * pixel - pixel * 0.5,
             ),
-            egui::vec2(thumbnail.width(), 12.0),
+            egui::vec2(thumbnail.width(), seekbar::HIT_HEIGHT),
         );
         let seek = ui
             .add_enabled_ui(self.enabled && duration.is_some(), |ui| {

@@ -194,7 +194,9 @@ fn tab_card_bridge_transport_clicks_and_progress_keep_layout_and_ownership() {
                 );
                 (result, output)
             };
-            frame(source.center(), None, true, false, true);
+            for _ in 0..16 {
+                frame(source.center(), None, true, false, true);
+            }
             let (card, (thumbnail, caption, action)) =
                 frame(source.center(), None, true, false, true)
                     .0

@@ -1,3 +1,5 @@
+pub(crate) mod fade;
+
 use egui::{Align2, InnerResponse, Response, Ui};
 
 pub struct Preview {
@@ -243,6 +245,7 @@ impl Preview {
         if previous.is_none_or(|size| (size - output.response.rect.size()).length() > 0.1) {
             context.request_discard("media preview size changed");
         }
+        fade::record(context, output.response.layer_id, self.seek.is_some());
         Some(output)
     }
 }

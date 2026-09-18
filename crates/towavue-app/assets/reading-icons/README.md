@@ -1,0 +1,7 @@
+# Reading button artwork
+
+`outline.svg` and `direction.svg` are the owner's requested pfp_cropper Image Merger reading-button paths, inspected at commit `7ad2340`. The outline matches Tabler's book icon. Direction preview mirrors the right-arrow artwork for left reading, as in the reference CSS. The reference's 14 available Image Merger history revisions contain no filled reading-button asset; `filled.svg` therefore retains the corresponding [Tabler filled book](https://github.com/tabler/tabler-icons/blob/main/icons/filled/book.svg), retrieved on 2026-09-18. The [Tabler MIT license](../drag-badge/TABLER-LICENSE.txt) applies.
+
+The SVGs are source references, not runtime files. `src/chrome/reading_icon.rs` transcribes their paths, including round strokes and the filled center gutter, into the already pinned tiny-skia rasterizer. Circular arcs use cubic segments with exact endpoints. Render at the current physical pixel size, align texels to physical pixels, cache one texture per control, and tint for enabled/disabled state. The 24-unit artwork fits the existing 16-point glyph area inside the unchanged 24-point button. No downloaded font, icon package, SVG parser, extra framework or runtime asset lookup is required.
+
+Outside reading mode the button shows the outline. A horizontal entry drag shows the requested left/right preview; release shows the filled icon after enabling reading mode, while cancellation restores the outline. Adjustments within reading mode keep the filled icon and the existing status-bar values.

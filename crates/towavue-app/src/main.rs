@@ -5856,7 +5856,9 @@ where
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
                         let enabled = self.image_handoff.is_none() && (self.reading_mode || !self.command_context().has_unsaved_edits);
-                        let response = chrome::reading_button(ui, enabled, self.reading_mode);
+                        let direction = self.reading_drag.as_ref()
+                            .filter(|drag| !drag.was_enabled).and_then(|drag| drag.direction);
+                        let response = chrome::reading_button(ui, enabled, self.reading_mode, direction);
                         response.widget_info(|| egui::WidgetInfo::labeled(
                             egui::WidgetType::Button, response.enabled(), &label));
                         if response.drag_started_by(egui::PointerButton::Primary)
@@ -17637,20 +17639,25 @@ mod tests {
                     .expect("reading button");
                 target = Some(*id);
                 assert!(node.is_disabled());
-                let pages: Vec<_> = output
+                let icons: Vec<_> = output
                     .shapes
                     .iter()
                     .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Path(page) => Some(page),
+                        egui::Shape::Mesh(mesh)
+                            if mesh.texture_id != egui::TextureId::default()
+                                && mesh.calc_bounds().size() == egui::Vec2::splat(16.0) =>
+                        {
+                            Some(mesh)
+                        }
                         _ => None,
                     })
                     .collect();
-                assert_eq!(pages.len(), 2);
+                assert_eq!(icons.len(), 1);
                 assert!(
-                    pages
+                    icons[0]
+                        .vertices
                         .iter()
-                        .all(|page| page.stroke.color
-                            == egui::epaint::ColorMode::Solid(chrome::MUTED))
+                        .all(|vertex| vertex.color == chrome::MUTED)
                 );
                 assert!(
                     actions.is_empty(),

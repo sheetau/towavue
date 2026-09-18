@@ -426,7 +426,7 @@ fn batched_cancelled_media_button_press_releases_prior_numeric_focus() {
                     response = Some(match control {
                         0 => chrome::button(ui, chrome::Icon::Play, "Play"),
                         1 => chrome::audio_button(ui, chrome::AudioIcon::Shuffle, false, "Shuffle"),
-                        _ => chrome::reading_button(ui, true, false),
+                        _ => chrome::reading_button(ui, true, false, None),
                     });
                     let value = ui.interact(
                         egui::Rect::from_min_size(
@@ -537,7 +537,7 @@ fn pointer_media_buttons_release_focus_without_removing_keyboard_activation() {
                                 true,
                                 "Shuffle",
                             ),
-                            _ => chrome::reading_button(ui, true, false),
+                            _ => chrome::reading_button(ui, true, false, None),
                         });
                         super::finish(&context, false, true);
                     });

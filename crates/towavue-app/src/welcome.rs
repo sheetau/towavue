@@ -291,7 +291,7 @@ fn search_field(
         .add_enabled_ui(!query.is_empty(), |ui| {
             ui.put(
                 clear_rect,
-                egui::Button::new(RichText::new("\u{ea76}").font(crate::fonts::icon_font()))
+                egui::Button::new(RichText::new("\u{eabf}").font(crate::fonts::icon_font()))
                     .stroke(egui::Stroke::NONE)
                     .frame_when_inactive(false),
             )

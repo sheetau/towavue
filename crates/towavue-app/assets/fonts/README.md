@@ -30,14 +30,16 @@ Run from the repository root. Ordinary Cargo builds need no Python, font tooling
 
 - Author: Microsoft Corporation and contributors.
 - Project: https://github.com/microsoft/vscode-codicons
-- Original: `codicon.ttf`, copied unchanged from monapad's Monaco Editor 0.55.1, `esm/vs/base/browser/ui/codicons/codicon/codicon.ttf`.
-- Monaco's recorded VS Code source revision: `86f5a62f058e3905f74a9fa65d04b2f3b533408e`.
-- SHA-256: `9d25513c861704be650eacef8c4588aceabdc8b668857747b5e42b299e926918` (121972 bytes).
-- Codepoint names come from that same Monaco package's `codiconsLibrary.js`.
+- Original: unmodified `dist/codicon.ttf` from `@vscode/codicons` **0.0.46-16**, the exact version in the owner's reference VS Code checkout's `package-lock.json`. That checkout copies the npm font during compilation and does not track the TTF itself.
+- Package: https://registry.npmjs.org/@vscode/codicons/-/codicons-0.0.46-16.tgz
+- Package integrity: `sha512-pjgpzU5fMIuI3atUdpbWiaUxZtpTak57vjp1hIEvmmmd1dSOTB++5DoKeQCtRLapbB9DU24EHk31njP2ayPvmA==`.
+- Font SHA-256: `841d1c28fd2de5af86d42894cace161203525c0a903e6615a1fe2d354839e676` (139084 bytes).
+- The font has 596 glyphs and 604 mapped codepoints, replacing the former Monaco-derived font's 516 glyphs and 525 mappings. Both include Gallery's `clear-all` U+EABF and `filter` U+EAF1; the replacement follows the owner's request to prefer the reference's larger inventory. Removed legacy mappings are unused by the app. The package's license is byte-identical to the retained Codicons notice.
+- Codepoint names are verified against the pinned Codicons package's `dist/codicon.css`; the app's existing mappings retain their VS Code names.
 - The tab's unsaved marker uses `close-dirty` / `circle-filled`, U+EA71, from the [matching VS Code mapping](https://github.com/microsoft/vscode/blob/86f5a62f058e3905f74a9fa65d04b2f3b533408e/src/vs/base/common/codiconsLibrary.ts). The existing U+EA76 close glyph replaces it on hover or keyboard focus.
 - Retain [Monaco's MIT notice](LICENSE-Monaco.txt) and the upstream [Codicons artwork license](LICENSE-Codicons.txt), CC BY 4.0, including its Git logo attribution and CC BY 3.0 link. The Codicons license was retrieved at commit `1c47ab36a4bb845c437866405c2fa67b8ca0fe36`.
 
-The app selects a named Codicon family only for icon widgets. It does not add Codicon as a general text fallback or modify the font. The reading button uses book-derived vector page contours in `chrome.rs`, adapted from the Codicon book outline into matching outlined/filled states; preserve the same attribution and CC BY 4.0 notice for this derivative. The reference is `src/icons/book.svg` at the Codicons commit above. Play/pause use solid vector counterparts to the bundled Codicon transport outlines in the same file, with the same attribution; no new font is bundled. The logo remains the owner's custom vector. Caption controls now use native Windows drawing.
+The app selects a named Codicon family only for icon widgets. It does not add Codicon as a general text fallback or modify the font. The reading button uses its separately attributed reference/Tabler artwork; see [reading icon provenance](../reading-icons/README.md). Play/pause use solid vector counterparts to the bundled Codicon transport outlines in `src/chrome.rs`, with the same attribution; no separate transport font is bundled. The logo remains the owner's custom vector. Caption controls now use native Windows drawing.
 
 Keep these notices, provenance and Figtree modification statement with any future package containing these assets. The older qualified local Setup and its material bindings have not been rebuilt or approved for this newer executable.
 

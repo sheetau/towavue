@@ -16,8 +16,8 @@ def main():
     if fontTools.__version__ != "4.59.2":
         raise RuntimeError("Use fonttools==4.59.2 for reproducible font output")
     directory = Path(__file__).resolve().parents[1] / "crates/towavue-app/assets/fonts"
-    if hashlib.sha256((directory / "codicon.ttf").read_bytes()).hexdigest() != "9d25513c861704be650eacef8c4588aceabdc8b668857747b5e42b299e926918":
-        raise RuntimeError("Unmodified Monaco Codicon hash changed")
+    if hashlib.sha256((directory / "codicon.ttf").read_bytes()).hexdigest() != "841d1c28fd2de5af86d42894cace161203525c0a903e6615a1fe2d354839e676":
+        raise RuntimeError("Unmodified Codicons 0.0.46-16 hash changed")
     source = directory / "source/Figtree-Regular.ttf"
     if hashlib.sha256(source.read_bytes()).hexdigest() != "9acc05654630d37003d6368c7bb33e3cc57b5dd3d9f9b4a753891016527112cf":
         raise RuntimeError("Figtree source hash changed")

@@ -2480,7 +2480,8 @@ where
             .flatten();
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 2);
-        if same_folder && (same_items || self.filmstrip_open) {
+        let preserve_filmstrip = self.filmstrip.take_preserved_refresh() && self.filmstrip_open;
+        if preserve_filmstrip || (same_folder && (same_items || self.filmstrip_open)) {
             if !same_items {
                 self.filmstrip.cancel_drag();
             }
@@ -4021,14 +4022,7 @@ where
         self.volume_wheel(&context, &volume_targets, actions);
         if self.filmstrip_open {
             if !modal_blocked {
-                self.filmstrip.show(
-                    &context,
-                    media_panel.response.rect,
-                    self.folder_snapshot.as_ref(),
-                    self.path.as_deref(),
-                    !self.palette_open && !self.grid_open,
-                    actions,
-                );
+                self.draw_filmstrip(&context, media_panel.response.rect, actions);
             }
         } else if !self.image_seek_preview_active && self.path.is_some() {
             self.prepare_filmstrip(&context);
@@ -6738,8 +6732,7 @@ where
             return None;
         }
         let kind = self
-            .folder_snapshot
-            .as_ref()?
+            .navigation_snapshot()?
             .items
             .iter()
             .find(|item| item.path == path)?
@@ -6968,7 +6961,9 @@ where
                 self.request_redraw();
             }
             UiAction::OpenFilmstripWindow(path) => {
-                if self.filmstrip_target(&path).is_some() {
+                if self.filmstrip_target(&path).is_some()
+                    && !(self.current_source_deleted() && self.path.as_ref() == Some(&path))
+                {
                     self.handle_recent_action(menu::RecentAction::Open(
                         path,
                         towavue_runtime_windows::RecentKind::File,
@@ -6981,6 +6976,9 @@ where
                     return;
                 };
                 if background {
+                    if self.current_source_deleted() && self.path.as_ref() == Some(&path) {
+                        return;
+                    }
                     let added = self.tabs.open_new(path.clone(), kind);
                     self.seed_playback_volume(added);
                     self.qualify_history(added, &path);
@@ -10496,6 +10494,32 @@ where
             }
             self.request_redraw();
         }
+    }
+
+    fn draw_filmstrip(
+        &mut self,
+        context: &egui::Context,
+        rect: egui::Rect,
+        actions: &mut Vec<UiAction>,
+    ) {
+        let deleted = self
+            .displayed_tab
+            .and_then(|id| self.deleted_sources.get(&id));
+        let held = deleted.map(|deleted| {
+            self.filmstrip
+                .deleted_snapshot(deleted, self.folder_snapshot.as_ref())
+        });
+        if deleted.is_none() {
+            self.filmstrip.set_held_deleted(None);
+        }
+        self.filmstrip.show(
+            context,
+            rect,
+            held.as_deref().or(self.folder_snapshot.as_ref()),
+            self.path.as_deref(),
+            !self.palette_open && !self.grid_open,
+            actions,
+        );
     }
 
     fn prepare_filmstrip(&mut self, context: &egui::Context) {

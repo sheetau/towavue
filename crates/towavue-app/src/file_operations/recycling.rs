@@ -55,6 +55,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.tab_preview.clear();
         self.image_previews.clear();
         self.status_file_details.invalidate();
+        self.filmstrip
+            .preserve_after_file_operation(self.ui_context.as_ref(), path, None);
+        self.filmstrip.set_held_deleted(
+            self.current_source_deleted()
+                .then_some(self.path.as_deref())
+                .flatten(),
+        );
         if let Some(after) = &report.after
             && self.path.as_deref().and_then(Path::parent) == Some(after.folder_path.as_path())
         {

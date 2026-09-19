@@ -2876,3 +2876,293 @@ fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
         }
     }
 }
+
+#[test]
+fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order",
+    ) else {
+        return;
+    };
+    for (trial, (density, active_source)) in [(1.0, false), (1.25, true), (2.0, false), (2.0, true)]
+        .into_iter()
+        .enumerate()
+    {
+        let folder = root.join(format!("trial-{trial}"));
+        let destination = folder.join("destination");
+        std::fs::create_dir_all(&destination).expect("owned folders");
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let mut listing = snapshot(&folder);
+        listing.items.clear();
+        for index in 0..50 {
+            let path = folder.join(format!("{index:02}.bmp"));
+            crate::tab_transfer::tests::bitmap(&path);
+            listing.items.push(FolderMediaItem {
+                identity: ShellIdentity::new(vec![index]),
+                path,
+                kind: MediaKind::Image,
+            });
+        }
+        let current = listing.items[10].path.clone();
+        let source = listing.items[if active_source { 10 } else { 9 }]
+            .path
+            .clone();
+        let renamed = folder.join("renamed.bmp");
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        let id = app.tabs.open_new(current.clone(), MediaKind::Image);
+        app.displayed_tab = Some(id);
+        app.path = Some(current.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.source_versions.insert(
+            id,
+            Some(towavue_runtime_windows::FileOperationSource::capture(&current).expect("version")),
+        );
+        app.folder_snapshot = Some(listing.clone());
+        app.filmstrip_open = true;
+        let draw = |app: &mut Application<_>, events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(input(events), |_| {
+                app.draw_filmstrip(&context, context.content_rect(), &mut actions);
+                if context.current_pass_index() == 0 {
+                    context.request_discard("mutation layout control");
+                }
+            });
+            assert!(actions.is_empty());
+            output
+        };
+        for _ in 0..3 {
+            draw(&mut app, vec![]);
+        }
+        let output = draw(&mut app, vec![]);
+        draw(
+            &mut app,
+            vec![egui::Event::PointerMoved(
+                card(&output, &display_name(&source)).center(),
+            )],
+        );
+        let offset = app.filmstrip.scroll_offset;
+        assert!(offset > 500.0, "fixture has a nontrivial viewport");
+        let original =
+            towavue_runtime_windows::FileOperationSource::capture(&source).expect("source");
+        app.quiesce_file_relocation(&source);
+        std::fs::rename(&source, &renamed).expect("owned rename");
+        let completed = crate::file_operations::Completed {
+            versions: Some(Box::new(crate::file_operations::RelocatedVersions {
+                original,
+                current: Some(
+                    towavue_runtime_windows::FileOperationSource::capture(&renamed)
+                        .expect("renamed"),
+                ),
+            })),
+            outcome: towavue_runtime_windows::FileOperationOutcome::Moved(renamed.clone()),
+            resume: None,
+            recycle: None,
+            preference_warning: None,
+        };
+        app.finish_file_relocation(&source, Some(&completed));
+        assert!(
+            app.folder_snapshot.is_some(),
+            "keep listing during replacement request"
+        );
+        assert!(app.pending_folder.is_some());
+        draw(&mut app, vec![]);
+        assert!(
+            (app.filmstrip.scroll_offset - offset).abs() < 1.0,
+            "pending rename retains offset"
+        );
+        let index = listing
+            .items
+            .iter()
+            .position(|item| item.path == source)
+            .expect("source row");
+        let mut item = listing.items.remove(index);
+        item.path = renamed.clone();
+        listing.items.push(item);
+        listing.generation += 1;
+        app.folder_order.request(None);
+        app.pending_folder = None;
+        app.apply_folder_snapshot(listing.clone());
+        for _ in 0..3 {
+            draw(&mut app, vec![]);
+        }
+        assert!(
+            (app.filmstrip.scroll_offset - offset).abs() < 1.0,
+            "renamed card does not pull the viewport to its new index"
+        );
+        assert!(app.filmstrip_open);
+        assert!(app.filmstrip_target(&renamed).is_some());
+        assert!(app.filmstrip_target(&source).is_none());
+        assert_eq!(
+            app.path.as_ref(),
+            Some(if active_source { &renamed } else { &current })
+        );
+
+        let moved = destination.join("renamed.bmp");
+        let original =
+            towavue_runtime_windows::FileOperationSource::capture(&renamed).expect("source");
+        app.quiesce_file_relocation(&renamed);
+        std::fs::rename(&renamed, &moved).expect("owned move");
+        app.finish_file_relocation(
+            &renamed,
+            Some(&crate::file_operations::Completed {
+                versions: Some(Box::new(crate::file_operations::RelocatedVersions {
+                    original,
+                    current: Some(
+                        towavue_runtime_windows::FileOperationSource::capture(&moved)
+                            .expect("moved"),
+                    ),
+                })),
+                outcome: towavue_runtime_windows::FileOperationOutcome::Moved(moved.clone()),
+                resume: None,
+                recycle: None,
+                preference_warning: None,
+            }),
+        );
+        draw(&mut app, vec![]);
+        assert!((app.filmstrip.scroll_offset - offset).abs() < 1.0);
+        listing.items.retain(|item| item.path != renamed);
+        if active_source {
+            listing.folder_path = destination.clone();
+            for item in &mut listing.items {
+                item.path = destination.join(item.path.file_name().expect("name"));
+                crate::tab_transfer::tests::bitmap(&item.path);
+            }
+            listing.items.insert(
+                0,
+                FolderMediaItem {
+                    identity: ShellIdentity::new(vec![100]),
+                    path: moved.clone(),
+                    kind: MediaKind::Image,
+                },
+            );
+        }
+        listing.generation += 1;
+        app.folder_order.request(None);
+        app.pending_folder = None;
+        app.apply_folder_snapshot(listing.clone());
+        for _ in 0..3 {
+            draw(&mut app, vec![]);
+        }
+        assert!(
+            (app.filmstrip.scroll_offset - offset).abs() < 1.0,
+            "move keeps the viewport, including a new current folder"
+        );
+        assert!(app.filmstrip_open);
+        assert_eq!(
+            app.path.as_ref(),
+            Some(if active_source { &moved } else { &current })
+        );
+        assert_eq!(app.tabs.active_id(), Some(id));
+        assert!(app.filmstrip_target(&renamed).is_none());
+        assert_eq!(app.filmstrip_target(&moved).is_some(), active_source);
+
+        let removed = if active_source {
+            moved.clone()
+        } else {
+            listing
+                .items
+                .iter()
+                .find(|item| Some(&item.path) != app.path.as_ref())
+                .expect("inactive file")
+                .path
+                .clone()
+        };
+        let expected =
+            towavue_runtime_windows::FileOperationSource::capture(&removed).expect("delete source");
+        app.quiesce_source_save(&removed);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.source_readers_idle() {
+            assert!(Instant::now() < deadline, "preview readers drained");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        let retained = active_source.then(|| {
+            towavue_runtime_windows::RetainedSource::capture(&expected).expect("held original")
+        });
+        let before = listing.clone();
+        listing.items.retain(|item| item.path != removed);
+        listing.generation += 1;
+        std::fs::remove_file(&removed).expect("owned deletion");
+        app.finish_file_recycling(
+            &expected,
+            &towavue_runtime_windows::FileRecycleReport {
+                retained_source: retained,
+                before,
+                after: Some(listing.clone()),
+            },
+        );
+        app.thaw_source_save(&removed);
+        app.folder_order.request(None);
+        app.pending_folder = None;
+        app.apply_folder_snapshot(listing.clone());
+        for _ in 0..3 {
+            draw(&mut app, vec![]);
+        }
+        assert!(app.filmstrip_open);
+        assert!(
+            (app.filmstrip.scroll_offset - offset).abs() < 1.0,
+            "deleted card must not reset the viewport"
+        );
+        assert_eq!(app.current_source_deleted(), active_source);
+        assert_eq!(app.filmstrip_target(&removed).is_some(), active_source);
+        assert!(
+            app.folder_snapshot
+                .as_ref()
+                .expect("disk listing")
+                .items
+                .iter()
+                .all(|item| item.path != removed)
+        );
+        if active_source {
+            let deleted = &app.deleted_sources[&id];
+            let first = app.filmstrip.deleted_snapshot(deleted, Some(&listing));
+            let repeated = app.filmstrip.deleted_snapshot(deleted, Some(&listing));
+            assert!(
+                std::sync::Arc::ptr_eq(&first, &repeated),
+                "idle paints reuse the merged held view"
+            );
+            listing.generation += 1;
+            listing.items.reverse();
+            let refreshed = app.filmstrip.deleted_snapshot(deleted, Some(&listing));
+            assert!(!std::sync::Arc::ptr_eq(&first, &refreshed));
+            assert_eq!(
+                refreshed
+                    .items
+                    .iter()
+                    .filter(|item| item.path == removed)
+                    .count(),
+                1
+            );
+            let real: Vec<_> = refreshed
+                .items
+                .iter()
+                .filter(|item| item.path != removed)
+                .map(|item| &item.path)
+                .collect();
+            assert_eq!(
+                real,
+                listing
+                    .items
+                    .iter()
+                    .map(|item| &item.path)
+                    .collect::<Vec<_>>(),
+                "held view follows the newest real order"
+            );
+        }
+        app.filmstrip
+            .preserve_after_file_operation(Some(&context), &removed, None);
+        assert!(app.filmstrip.preserve_refresh_view);
+        let view = app.filmstrip.take_view();
+        assert!(!app.filmstrip.preserve_refresh_view);
+        assert!(app.filmstrip.held_deleted.is_none() && app.filmstrip.held_snapshot.is_none());
+        app.filmstrip.restore_view(view);
+        assert!(
+            (app.filmstrip.scroll_offset - offset).abs() < 1.0,
+            "only the settled view survives tab transfer"
+        );
+        assert!(!app.filmstrip.preserve_refresh_view);
+    }
+}

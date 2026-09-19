@@ -8,8 +8,8 @@ pub(super) struct DeletedSource {
 }
 
 impl DeletedSource {
-    // Only document navigation includes this held position. Disk listings must
-    // continue to expose the real Shell snapshot without a deleted thumbnail.
+    // Document navigation and the active tab's filmstrip include this held
+    // position. The shared disk listing remains the actual Shell snapshot.
     pub fn navigation_snapshot(&self, current: &FolderSnapshot) -> FolderSnapshot {
         let mut result = current.clone();
         result.items.retain(|item| item.path != self.path);

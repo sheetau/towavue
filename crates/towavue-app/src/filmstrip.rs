@@ -57,6 +57,14 @@ pub struct View {
     offset: f32,
 }
 
+impl View {
+    pub fn relocate(&mut self, source: &Path, target: &Path) {
+        if self.focus.as_deref() == Some(source) {
+            self.focus = Some(target.to_owned());
+        }
+    }
+}
+
 pub struct RecentGrid {
     columns: usize,
     row_height: f32,
@@ -79,6 +87,12 @@ pub struct Filmstrip {
     preparation: Option<Preparation>,
     warming: Option<PathBuf>,
     focus: Option<PathBuf>,
+    held_deleted: Option<PathBuf>,
+    held_snapshot: Option<(
+        std::sync::Arc<FolderSnapshot>,
+        std::sync::Arc<FolderSnapshot>,
+    )>,
+    preserve_refresh_view: bool,
     focus_requested: bool,
     focused_card: Option<egui::Id>,
     recent_focus: Option<PathBuf>,
@@ -108,6 +122,9 @@ impl Filmstrip {
             preparation: None,
             warming: None,
             focus: None,
+            held_deleted: None,
+            held_snapshot: None,
+            preserve_refresh_view: false,
             focus_requested: false,
             focused_card: None,
             recent_focus: None,
@@ -122,10 +139,82 @@ impl Filmstrip {
     }
 
     pub fn clear(&mut self) {
+        self.held_deleted = None;
+        self.held_snapshot = None;
+        self.preserve_refresh_view = false;
         self.focus_requested = false;
         self.focus = None;
         self.scroll_offset = 0.0;
         self.clear_previews();
+    }
+
+    /// Native mutations keep the viewport, even if the operated card changes
+    /// index or the current file moves to another folder. Explicit navigation
+    /// takes ownership again on the next input gesture.
+    pub fn preserve_after_file_operation(
+        &mut self,
+        context: Option<&Context>,
+        source: &Path,
+        target: Option<&Path>,
+    ) {
+        self.cancel_drag();
+        if self.focus.as_deref() == Some(source)
+            && let Some(target) = target
+        {
+            self.focus = Some(target.to_owned());
+        }
+        if let Some(context) = context {
+            context.memory_mut(|memory| {
+                if let Some(id) = memory.focused()
+                    && (self.focused_card == Some(id)
+                        || self.card_paths.iter().any(|(card, _, _)| *card == id))
+                {
+                    memory.surrender_focus(id);
+                }
+            });
+        }
+        self.focus_requested = false;
+        self.focused_card = None;
+        self.card_paths.clear();
+        self.tab_navigation = None;
+        self.preserve_refresh_view = true;
+    }
+
+    pub fn take_preserved_refresh(&mut self) -> bool {
+        std::mem::take(&mut self.preserve_refresh_view)
+    }
+
+    pub fn set_held_deleted(&mut self, path: Option<&Path>) {
+        if self.held_deleted.as_deref() != path {
+            self.held_deleted = path.map(Path::to_owned);
+            self.held_snapshot = None;
+        }
+    }
+
+    pub fn deleted_snapshot(
+        &mut self,
+        deleted: &crate::source_backing::DeletedSource,
+        current: Option<&FolderSnapshot>,
+    ) -> std::sync::Arc<FolderSnapshot> {
+        self.set_held_deleted(Some(&deleted.path));
+        let current = current
+            .filter(|snapshot| snapshot.folder_path == deleted.before.folder_path)
+            .unwrap_or(&deleted.before);
+        // Folder worker generations identify immutable snapshots. Reuse the
+        // merged list across paints instead of cloning every folder path each frame.
+        if let Some((before, snapshot)) = &self.held_snapshot
+            && std::sync::Arc::ptr_eq(before, &deleted.before)
+            && snapshot.generation == current.generation
+            && snapshot.folder_path == current.folder_path
+        {
+            return std::sync::Arc::clone(snapshot);
+        }
+        let snapshot = std::sync::Arc::new(deleted.navigation_snapshot(current));
+        self.held_snapshot = Some((
+            std::sync::Arc::clone(&deleted.before),
+            std::sync::Arc::clone(&snapshot),
+        ));
+        snapshot
     }
 
     pub fn cancel_drag(&mut self) {
@@ -202,6 +291,7 @@ impl Filmstrip {
         self.generation = self.loader.request(
             self.visible
                 .iter()
+                .filter(|path| self.held_deleted.as_ref() != Some(*path))
                 .filter_map(|path| {
                     snapshot
                         .items
@@ -214,22 +304,22 @@ impl Filmstrip {
     }
 
     pub fn take_view(&mut self) -> View {
-        self.clear_previews();
-        self.focus_requested = false;
-        View {
+        let view = View {
             focus: self.focus.take(),
-            offset: std::mem::take(&mut self.scroll_offset),
-        }
+            offset: self.scroll_offset,
+        };
+        self.clear();
+        view
     }
 
     pub fn restore_view(&mut self, view: View) {
-        self.clear_previews();
-        self.focus_requested = false;
+        self.clear();
         self.focus = view.focus;
         self.scroll_offset = view.offset;
     }
 
     pub fn focus_current(&mut self) {
+        self.preserve_refresh_view = false;
         self.focus_requested = true;
     }
 
@@ -299,7 +389,9 @@ impl Filmstrip {
     pub fn finish(&mut self, context: &Context) -> bool {
         let mut changed = false;
         for preview in self.loader.take_completed() {
-            if preview.generation != self.generation {
+            if preview.generation != self.generation
+                || self.held_deleted.as_ref() == Some(&preview.path)
+            {
                 continue;
             }
             if self.warming.as_ref() == Some(&preview.path) {
@@ -670,19 +762,24 @@ impl Filmstrip {
                     self.card_paths.clear();
                     for index in range {
                         let item = &snapshot.items[index];
-                        wanted.push((item.path.clone(), item.kind));
+                        let deleted = self.held_deleted.as_ref() == Some(&item.path);
+                        if !deleted {
+                            wanted.push((item.path.clone(), item.kind));
+                        }
                         let rect = card_rect(index);
                         let response = ui
                             .interact(
                                 rect,
                                 ui.id().with(("filmstrip-item", &item.path)),
-                                egui::Sense::click_and_drag(),
+                                if deleted { egui::Sense::click() } else { egui::Sense::click_and_drag() },
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
                         self.card_paths
                             .push((response.id, item.path.clone(), index));
                         let active = selected == Some(index);
-                        self.drag.observe(&response, &item.path);
+                        if !deleted {
+                            self.drag.observe(&response, &item.path);
+                        }
                         if focus_target == Some(index)
                             && response.enabled()
                             && !egui::Popup::is_any_open(context)
@@ -702,7 +799,7 @@ impl Filmstrip {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 ui.is_enabled(),
-                                display_name(&item.path),
+                                filmstrip_label(&item.path, deleted),
                             )
                         });
                         context.accesskit_node_builder(response.id, |node| {
@@ -722,6 +819,7 @@ impl Filmstrip {
                         .or(selected);
                     for (index, response) in cards {
                         let item = &snapshot.items[index];
+                        let deleted = self.held_deleted.as_ref() == Some(&item.path);
                         let rect = response.rect;
                         ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
                         match self.previews.get(&item.path) {
@@ -747,6 +845,9 @@ impl Filmstrip {
                                     );
                                 }
                             }
+                            _ if deleted => {
+                                ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Deleted", FontId::proportional(12.0), Color32::GRAY);
+                            }
                             Some(Err(_)) => {
                                 ui.painter().text(
                                     rect.center(),
@@ -766,7 +867,7 @@ impl Filmstrip {
                                 egui::StrokeKind::Inside,
                             );
                             let mut label = egui::text::LayoutJob::simple(
-                                display_name(&item.path),
+                                filmstrip_label(&item.path, deleted),
                                 egui::TextStyle::Body.resolve(ui.style()),
                                 Color32::WHITE,
                                 screen.width().min(192.0),
@@ -781,21 +882,25 @@ impl Filmstrip {
                                 Color32::WHITE,
                             );
                         }
-                        crate::thumbnail_menu::show(ui, &response, &item.path, crate::thumbnail_menu::Scope::Filmstrip, self.menu_owner, actions);
+                        if !deleted {
+                            crate::thumbnail_menu::show(ui, &response, &item.path, crate::thumbnail_menu::Scope::Filmstrip, self.menu_owner, actions);
+                        }
                         if response.clicked() {
-                            actions.push(if click_modifiers(&response).ctrl {
+                            actions.push(if !deleted && click_modifiers(&response).ctrl {
                                 UiAction::OpenFilmstripWindow(item.path.clone())
                             } else {
                                 UiAction::OpenFilmstripMedia(item.path.clone(), false)
                             });
                         }
-                        if response.middle_clicked() {
+                        if !deleted && response.middle_clicked() {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
                         let mut tooltip = item.path.display().to_string();
-                        tooltip.push_str(
-                            "\nDrag beyond the thumbnail band, then outside the window to open in a new window.",
-                        );
+                        tooltip.push_str(if deleted {
+                            "\nDeleted file retained in this tab. Save to recreate it."
+                        } else {
+                            "\nDrag beyond the thumbnail band, then outside the window to open in a new window."
+                        });
                         if let Some(Err(error)) = self.previews.get(&item.path) {
                             tooltip.push_str(&format!("\nPreview unavailable: {error}"));
                         }
@@ -1078,6 +1183,14 @@ impl Filmstrip {
             self.generation = self.loader.request(wanted);
             self.visible = visible;
         }
+    }
+}
+
+fn filmstrip_label(path: &Path, deleted: bool) -> String {
+    if deleted {
+        format!("(deleted) {}", display_name(path))
+    } else {
+        display_name(path)
     }
 }
 

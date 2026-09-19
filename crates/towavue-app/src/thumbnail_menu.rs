@@ -160,6 +160,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Scope::Filmstrip if self.filmstrip_target(&path).is_none() => return,
             Scope::Filmstrip => {}
         }
+        if intent.scope == Scope::Filmstrip
+            && self.current_source_deleted()
+            && self.path.as_ref() == Some(&path)
+            && !matches!(intent.action, Action::Open | Action::Copy)
+        {
+            return;
+        }
         match intent.action {
             Action::Copy => {
                 if let Some(context) = &self.ui_context {

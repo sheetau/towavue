@@ -403,3 +403,144 @@ fn deleted_navigation_uses_surviving_shell_neighbors_and_releases_the_old_docume
     assert!(app.deleted_sources.is_empty());
     assert!(app.source_backings.is_empty());
 }
+
+#[test]
+fn deleted_filmstrip_keeps_a_local_held_entry_and_can_navigate_to_real_media() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "source_backing::tests::deleted_filmstrip_keeps_a_local_held_entry_and_can_navigate_to_real_media",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    let next = root.join("next.bmp");
+    for path in [&source, &next] {
+        crate::tab_transfer::tests::bitmap(path);
+    }
+    let (mut app, events) = self::app();
+    app.open_external(source.clone(), true);
+    finish(&mut app, &events);
+    let id = app.displayed_tab.expect("tab");
+    let before = deletion_snapshot(&root, &[source.clone(), next.clone()]);
+    app.apply_folder_snapshot(before.clone());
+    let context = app.ui_context.clone().expect("context");
+    context.enable_accesskit();
+    app.dispatch(CommandId::ToggleFilmstrip);
+    let draw = |app: &mut App, events| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 576.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |_| app.draw_filmstrip(&context, context.content_rect(), &mut actions),
+        );
+        (output, actions)
+    };
+    for _ in 0..3 {
+        draw(&mut app, vec![]);
+    }
+    let expected = FileOperationSource::capture(&source).expect("source");
+    app.quiesce_source_save(&source);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.source_readers_idle() {
+        assert!(Instant::now() < deadline, "readers drained");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let retained = towavue_runtime_windows::RetainedSource::capture(&expected).expect("retained");
+    std::fs::remove_file(&source).expect("owned deletion");
+    app.finish_file_recycling(
+        &expected,
+        &towavue_runtime_windows::FileRecycleReport {
+            retained_source: Some(retained),
+            before,
+            after: Some(deletion_snapshot(&root, std::slice::from_ref(&next))),
+        },
+    );
+    app.thaw_source_save(&source);
+    app.folder_order.request(None);
+    app.pending_folder = None;
+    assert!(app.filmstrip_open);
+    assert!(
+        app.folder_snapshot
+            .as_ref()
+            .expect("real Shell view")
+            .items
+            .iter()
+            .all(|item| item.path != source)
+    );
+    for density in [1.0, 1.25, 2.0] {
+        context.set_pixels_per_point(density);
+        for _ in 0..3 {
+            draw(&mut app, vec![]);
+        }
+        let (output, actions) = draw(&mut app, vec![]);
+        assert!(actions.is_empty());
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("(deleted) source.bmp"))
+        );
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("next.bmp"))
+        );
+    }
+    let count = app.tabs.tabs().len();
+    app.handle_ui_action(UiAction::OpenFilmstripMedia(source.clone(), true));
+    app.handle_ui_action(UiAction::OpenFilmstripWindow(source.clone()));
+    assert_eq!(
+        app.tabs.tabs().len(),
+        count,
+        "held path cannot open a new file-backed tab"
+    );
+    assert!(app.pending_window_launches.is_empty());
+    app.handle_ui_action(UiAction::OpenFilmstripMedia(source.clone(), false));
+    assert!(!app.filmstrip_open);
+    assert!(app.current_source_deleted());
+    assert_eq!(app.path.as_ref(), Some(&source));
+    app.dispatch(CommandId::ToggleFilmstrip);
+    for _ in 0..3 {
+        draw(&mut app, vec![]);
+    }
+    let output = draw(&mut app, vec![]).0;
+    let node = output
+        .platform_output
+        .accesskit_update
+        .expect("tree")
+        .nodes
+        .into_iter()
+        .find(|(_, node)| node.label() == Some("next.bmp"))
+        .expect("next card")
+        .0;
+    let (_, actions) = draw(
+        &mut app,
+        vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: node,
+                data: None,
+            },
+        )],
+    );
+    assert!(
+        actions.iter().any(
+            |action| matches!(action, UiAction::OpenFilmstripMedia(path, false) if path==&next)
+        )
+    );
+    for action in actions {
+        app.handle_ui_action(action);
+    }
+    finish(&mut app, &events);
+    assert_eq!(app.path.as_ref(), Some(&next));
+    assert_eq!(app.displayed_tab, Some(id));
+    assert!(app.deleted_sources.is_empty());
+    assert!(app.source_backings.is_empty());
+    assert!(!source.exists());
+}

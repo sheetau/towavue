@@ -217,6 +217,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn quiesce_file_relocation(&mut self, source: &Path) {
+        self.filmstrip
+            .preserve_after_file_operation(self.ui_context.as_ref(), source, None);
         self.file_operations.locked = true;
         self.cancel_hold_speed();
         self.cancel_frame_steps();
@@ -260,6 +262,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             _ => None,
         });
         if let Some(target) = target {
+            self.filmstrip.preserve_after_file_operation(
+                self.ui_context.as_ref(),
+                source,
+                Some(target),
+            );
             let changed = self.tabs.relocate_file(source, target);
             for id in &changed {
                 if let Some(version) = self.source_versions.get_mut(id) {
@@ -285,6 +292,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.duration_workers.remove(&saved.instance);
                     saved.instance = instance;
                     saved.path = target.to_owned();
+                    saved.filmstrip_view.relocate(source, target);
                     saved.folder_snapshot = None;
                     saved.previews.clear();
                     if let Some(focus) = &mut saved.reading_focus
@@ -297,6 +305,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.duration_workers.remove(&saved.instance);
                     saved.instance = instance;
                     saved.path = target.to_owned();
+                    saved.filmstrip_view.relocate(source, target);
                     saved.folder_snapshot = None;
                     if let (Some(owner), Some(stamp)) = (
                         &mut saved.resume,
@@ -311,7 +320,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             if self.path.as_deref() == Some(source) {
                 self.path = Some(target.to_owned());
-                self.folder_snapshot = None;
                 self.image_previews.clear();
                 if let Some(focus) = &mut self.reading_focus
                     && focus.path == source
@@ -404,7 +412,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         // Re-enumerate with final paths rather than accepting an intermediate listing.
         if completed.is_some_and(|result| matches!(result.outcome, FileOperationOutcome::Moved(_)))
         {
-            self.folder_snapshot = None;
+            // Keep the old view while the replacement Shell snapshot is pending.
+            // Clearing it here would reset an open filmstrip's scroll position.
             self.refresh_folder_snapshot();
             for queue in self.audio_queues.values_mut() {
                 queue.refresh_after_relocation();

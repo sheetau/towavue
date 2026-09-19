@@ -6235,8 +6235,9 @@ where
                 enabled,
                 reversed,
             );
-            if let Some(pointer) = response
-                .interact_pointer_pos()
+            if let Some(pointer) = drag
+                .position
+                .or(response.interact_pointer_pos())
                 .or_else(|| media_preview::hover_pos(&response))
             {
                 let target = seekbar::item_index(
@@ -6321,7 +6322,9 @@ where
         };
         let progress = (self.current_position().as_seconds_f64() / duration.as_secs_f64())
             .clamp(0.0, 1.0) as f32;
-        let (response, drag) = seekbar::show_drag(context, status, progress, parent, enabled, true);
+        let (response, drag) =
+            seekbar::show_drag(context, status, progress, parent, enabled, false);
+        // Retain the legacy action for a future opt-in; compact drags now always seek.
         if drag.open_timeline {
             actions.push(UiAction::Command(CommandId::ToggleTimeline));
             return;
@@ -10107,6 +10110,9 @@ where
     }
 
     fn status_notice(&self) -> Option<String> {
+        if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
+            return Some(message.into());
+        }
         if self.reading_drag.is_some() {
             return Some(self.reading_status());
         }

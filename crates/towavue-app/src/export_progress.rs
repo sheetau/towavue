@@ -16,7 +16,9 @@ pub(super) struct LoadingProgress {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn export_gesture_hint(&self) -> Option<String> {
-        if self.reading_drag.is_some() {
+        if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
+            Some(message.into())
+        } else if self.reading_drag.is_some() {
             Some(self.reading_status())
         } else if self.held_speed.is_some() || self.track_drag.is_some() {
             self.status_notice()

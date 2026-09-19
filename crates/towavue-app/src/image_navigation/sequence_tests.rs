@@ -1331,3 +1331,84 @@ fn queued_image_steps_stop_at_folder_ends_without_reloading_or_wrapping() {
 }
 
 mod held;
+
+#[test]
+fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_paint() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_navigation::sequence_tests::precision_image_scrub_retains_its_offset_across_live_navigation_and_status_paint",
+    ) else {
+        return;
+    };
+    let (mut app, context, paths) = fixture(&root);
+    for path in &paths {
+        tab_transfer::tests::bitmap(path);
+    }
+    for _ in 0..3 {
+        scrub_frame(&mut app, 1.0, vec![]);
+    }
+    scrub_frame(
+        &mut app,
+        1.0,
+        vec![
+            egui::Event::PointerMoved(scrub_point(0)),
+            scrub_button(0, true),
+        ],
+    );
+    scrub_frame(
+        &mut app,
+        1.0,
+        vec![egui::Event::PointerMoved(egui::pos2(4.0, 90.0))],
+    );
+    for (x, target) in [(204.0, 20), (304.0, 30)] {
+        let actions = scrub_frame(
+            &mut app,
+            1.0,
+            vec![egui::Event::PointerMoved(egui::pos2(x, 90.0))],
+        );
+        assert!(
+            matches!(actions.as_slice(), [UiAction::ScrubImage(path, ..)] if path == &paths[target])
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+        assert_eq!(app.path.as_ref(), Some(&paths[target]));
+        assert!(timeline_input::is_active(&context));
+        assert_eq!(app.status_notice().as_deref(), Some("Seeking · 1/2 speed"));
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(500.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+            },
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Seeking · 1/2 speed")));
+        // Resume drawing the owner before it retires from egui's response cache.
+        scrub_frame(&mut app, 1.0, vec![]);
+    }
+    let actions = scrub_frame(
+        &mut app,
+        1.0,
+        vec![egui::Event::PointerButton {
+            pos: egui::pos2(304.0, 90.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert!(
+        actions.is_empty(),
+        "release keeps the already displayed precision target"
+    );
+    assert!(!timeline_input::is_active(&context));
+    assert!(
+        app.status_notice()
+            .is_none_or(|text| !text.starts_with("Seeking"))
+    );
+    assert!(app.edits.values().all(|history| !history.is_dirty()));
+}

@@ -1,6 +1,12 @@
 use crate::timeline_input;
 use egui::{Context, Rect, Response};
 
+mod precision;
+
+pub(super) fn precision_status(context: &Context) -> Option<&'static str> {
+    precision::status(context)
+}
+
 pub(crate) const HIT_HEIGHT: f32 = 14.0;
 
 #[cfg(test)]
@@ -109,7 +115,7 @@ fn show_control(
     let drag = if allow_timeline {
         timeline_input::video_seek_drag(&response)
     } else {
-        timeline_input::seek_drag(&response)
+        precision::adjust(&response, timeline_input::seek_drag(&response))
     };
     // The app applies the committed seek after painting. Keep its position
     // for every pass of this release frame, without replaying the action.

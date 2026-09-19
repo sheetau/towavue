@@ -148,7 +148,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
         (actions, output)
     };
     for playing in [false, true] {
-        for cancel in 0..3 {
+        for (cancel, precise) in [(0, false), (1, false), (2, false), (0, true)] {
             app.state = PlaybackState::Paused;
             app.seek_to(media_time(Duration::from_millis(200)));
             let deadline = Instant::now() + Duration::from_secs(5);
@@ -183,12 +183,33 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 .is_empty()
             );
             assert!(app.video_scrub.is_none(), "a press is not a scrub");
+            let (end, handle_target) = if precise {
+                let above = start - vec2(0.0, 180.0);
+                assert!(
+                    frame(app, vec![egui::Event::PointerMoved(above)], false)
+                        .0
+                        .is_empty()
+                );
+                assert!(!app.timeline_open, "upward compact dragging always seeks");
+                (end - vec2(0.0, 180.0), (start.x + end.x) * 0.5)
+            } else {
+                (end, end.x)
+            };
             assert!(
                 frame(app, vec![egui::Event::PointerMoved(end)], false)
                     .0
                     .is_empty()
             );
             assert_eq!(app.state, PlaybackState::Paused);
+            assert!(!app.timeline_open);
+            assert_eq!(
+                app.status_notice().as_deref(),
+                Some(if precise {
+                    "Seeking · 1/2 speed"
+                } else {
+                    "Seeking · Normal speed"
+                })
+            );
             let frozen = app.current_position();
             assert_eq!(app.generation, generation, "drag must not seek");
             assert!(
@@ -263,7 +284,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                         .expect("compact seek handle")
                 };
                 assert!(
-                    (handle_x(&output) - end.x).abs() < 0.001,
+                    (handle_x(&output) - handle_target).abs() < 0.001,
                     "release paint stays at the target, not the old clock or later pointer"
                 );
                 assert!(
@@ -275,7 +296,14 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                     app.handle_ui_action(action);
                 }
                 assert_eq!(app.generation, generation.next());
-                assert!(app.current_position().as_seconds_f64() > 1.5);
+                let expected = f64::from(seekbar::compact_ratio(
+                    Rect::from_center_size(
+                        bar.center_top(),
+                        vec2(bar.width(), seekbar::HIT_HEIGHT),
+                    ),
+                    handle_target,
+                )) * 2.0;
+                assert!((app.current_position().as_seconds_f64() - expected).abs() < 0.001);
                 assert_eq!(
                     app.state,
                     if playing {
@@ -287,7 +315,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 let (actions, output) = frame(app, vec![], false);
                 assert!(actions.is_empty());
                 assert!(
-                    (handle_x(&output) - end.x).abs() < 0.001,
+                    (handle_x(&output) - handle_target).abs() < 0.001,
                     "committed transport takes over without a backward jump"
                 );
                 assert!(
@@ -326,6 +354,6 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
     );
     app.cancel_video_scrub();
     eprintln!(
-        "PASS video scrub: frozen transport, mesh, one release seek, multi-pass, cancel and EOF"
+        "PASS video scrub: frozen transport, mesh, precision upward seek without timeline opening, one release seek, multi-pass, cancel and EOF"
     );
 }

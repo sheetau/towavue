@@ -1,6 +1,10 @@
 //! Native update download, authentication and staging boundary.
 mod crypto;
+mod handoff;
 mod http;
+mod storage;
+pub use handoff::PendingHandoff;
+pub use storage::{CachedUpdate, StartupUpdate, UpdatePhase, UpdateStore};
 
 use crate::Cancellation;
 use std::{fs::File, io};
@@ -30,7 +34,16 @@ impl SignedUpdate {
             .step_by(2)
             .map(|index| u8::from_str_radix(&text[index..index + 2], 16).map_err(io::Error::other))
             .collect::<io::Result<Vec<_>>>()?;
-        crypto::verify(&key, manifest_bytes, signature)?;
+        Self::authenticate_with_key(manifest, manifest_bytes, signature, &key)
+    }
+
+    fn authenticate_with_key(
+        manifest: ReleaseManifest,
+        manifest_bytes: &[u8],
+        signature: &[u8],
+        key: &[u8],
+    ) -> io::Result<Self> {
+        crypto::verify(key, manifest_bytes, signature)?;
         Ok(Self {
             manifest,
             manifest_bytes: manifest_bytes.to_vec(),
@@ -79,7 +92,8 @@ impl SignedUpdate {
             ));
         }
         file.seek(SeekFrom::Start(0))?;
-        if crypto::sha256(file)? != self.manifest.sha256 {
+        use std::io::Read;
+        if crypto::sha256(file.take(self.manifest.bytes + 1))? != self.manifest.sha256 {
             return Err(io::Error::other(
                 "Update file hash does not match signed metadata",
             ));

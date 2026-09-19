@@ -91,6 +91,70 @@ pub(super) fn verify(public_blob: &[u8], manifest: &[u8], signature: &[u8]) -> i
 }
 
 #[cfg(test)]
+pub(super) struct TestSigner {
+    key: Key,
+    pub public: Vec<u8>,
+}
+
+#[cfg(test)]
+impl TestSigner {
+    pub fn new() -> Self {
+        // SAFETY: only the public half is exported. The private key is ephemeral,
+        // exclusively owned by Key, and never written to a file or the key store.
+        unsafe {
+            let mut handle = BCRYPT_KEY_HANDLE::default();
+            BCryptGenerateKeyPair(BCRYPT_RSA_ALG_HANDLE, &mut handle, 4096, 0)
+                .ok()
+                .expect("generate test key");
+            let key = Key(handle);
+            BCryptFinalizeKeyPair(key.0, 0)
+                .ok()
+                .expect("finalize test key");
+            let mut count = 0;
+            BCryptExportKey(key.0, None, BCRYPT_RSAPUBLIC_BLOB, None, &mut count, 0)
+                .ok()
+                .expect("public size");
+            let mut public = vec![0; count as usize];
+            BCryptExportKey(
+                key.0,
+                None,
+                BCRYPT_RSAPUBLIC_BLOB,
+                Some(&mut public),
+                &mut count,
+                0,
+            )
+            .ok()
+            .expect("public key");
+            Self { key, public }
+        }
+    }
+
+    pub fn sign(&self, message: &[u8]) -> Vec<u8> {
+        let digest = sha256(message).expect("digest");
+        let padding = BCRYPT_PKCS1_PADDING_INFO {
+            pszAlgId: BCRYPT_SHA256_ALGORITHM,
+        };
+        let mut signature = vec![0; 512];
+        let mut count = 0;
+        // SAFETY: the test key, digest, padding and output live for this call.
+        unsafe {
+            BCryptSignHash(
+                self.key.0,
+                Some((&raw const padding).cast()),
+                &digest,
+                Some(&mut signature),
+                &mut count,
+                BCRYPT_PAD_PKCS1,
+            )
+        }
+        .ok()
+        .expect("sign fixture");
+        assert_eq!(count, 512);
+        signature
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -2511,6 +2511,201 @@ fn filmstrip_blank_swipe_tracks_pointer_with_velocity_sensitive_brakeable_moment
 }
 
 #[test]
+fn filmstrip_repeated_swipes_accumulate_and_pointer_departure_keeps_momentum() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_repeated_swipes_accumulate_and_pointer_departure_keeps_momentum",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let mut snapshot = snapshot(&root);
+            for index in 3..2_000 {
+                let mut item = snapshot.items[0].clone();
+                item.path = root.join(format!("{index}.png"));
+                snapshot.items.push(item);
+            }
+            let current = &snapshot.items[20].path;
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("strip");
+            let mut time = 0.0;
+            let mut render = |strip: &mut Filmstrip, events: Vec<egui::Event>| {
+                time += 1.0 / 60.0;
+                let mut raw = input(events);
+                raw.time = Some(time);
+                let mut actions = Vec::new();
+                let _ = context.run_ui(raw, |_| {
+                    strip.show(
+                        &context,
+                        context.content_rect(),
+                        Some(&snapshot),
+                        Some(current),
+                        true,
+                        &mut actions,
+                    );
+                    if discard && context.current_pass_index() == 0 {
+                        context.request_discard("repeated swipe multipass control");
+                    }
+                });
+                assert!(actions.is_empty(), "background swipes never activate media");
+                assert!(strip.active_drag(&context, Some(current)).is_none());
+            };
+            let origin = egui::pos2(680.0, 100.0);
+            for _ in 0..4 {
+                render(&mut strip, vec![egui::Event::PointerMoved(origin)]);
+            }
+            let flick = |strip: &mut Filmstrip,
+                         render: &mut dyn FnMut(&mut Filmstrip, Vec<egui::Event>),
+                         direction: f32| {
+                render(
+                    strip,
+                    vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+                );
+                let before = strip.scroll_offset;
+                let mut end = origin;
+                for step in 1..=3 {
+                    end = origin - egui::vec2(direction * 40.0 * step as f32, 0.0);
+                    render(strip, vec![egui::Event::PointerMoved(end)]);
+                    assert!(
+                        (strip.scroll_offset - before - direction * 40.0 * step as f32).abs() < 1.0,
+                        "even an accumulated swipe tracks the pointer exactly"
+                    );
+                }
+                render(strip, vec![pointer(end, false)]);
+                let released = strip.scroll_offset;
+                render(strip, vec![]);
+                strip.scroll_offset - released
+            };
+            let first = flick(&mut strip, &mut render, 1.0);
+            let second = flick(&mut strip, &mut render, 1.0);
+            let third = flick(&mut strip, &mut render, 1.0);
+            assert!(first > 0.0);
+            assert!(
+                second > first * 1.25,
+                "second flick adds residual speed: {first}, {second}"
+            );
+            assert!(
+                third > second * 1.15,
+                "third flick keeps accumulating: {second}, {third}"
+            );
+            eprintln!(
+                "SWIPE density={density} discard={discard}: release-frame travel {first:.3} -> {second:.3} -> {third:.3} points"
+            );
+            let reverse = flick(&mut strip, &mut render, -1.0);
+            assert!(
+                reverse < 0.0 && (-reverse - first).abs() < 1.0,
+                "reversal starts at its own speed"
+            );
+            let mut latest = 0.0;
+            for _ in 0..30 {
+                latest = flick(&mut strip, &mut render, 1.0);
+                assert!(latest <= 201.0, "repeated flick speed stays bounded");
+            }
+            assert!(
+                latest > first * 3.0,
+                "rapid flicks exceed the old single-flick ceiling"
+            );
+
+            // A click still stops immediately; waiting before a later swipe must
+            // discard the saved speed even while the button remains down.
+            render(
+                &mut strip,
+                vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+            );
+            let stopped = strip.scroll_offset;
+            for _ in 0..30 {
+                render(&mut strip, vec![]);
+            }
+            assert_eq!(strip.scroll_offset, stopped);
+            render(&mut strip, vec![pointer(origin, false)]);
+            let fresh = flick(&mut strip, &mut render, 1.0);
+            assert!(
+                (fresh - first).abs() < 1.0,
+                "a held click discards accumulated speed"
+            );
+
+            // Leaving after release must keep the existing coast. Coming back
+            // without a new gesture neither resets its clock nor jumps the offset.
+            let released = strip.scroll_offset;
+            render(&mut strip, vec![egui::Event::PointerGone]);
+            assert!(strip.scroll_offset > released);
+            let outside = strip.scroll_offset;
+            for _ in 0..3 {
+                render(&mut strip, vec![]);
+            }
+            assert!(strip.scroll_offset > outside);
+            let outside = strip.scroll_offset;
+            render(&mut strip, vec![egui::Event::PointerMoved(origin)]);
+            assert!(strip.scroll_offset > outside && strip.scroll_offset < outside + first + 1.0);
+
+            for final_move in [false, true] {
+                // Start a separate drag; its last reported movement is still
+                // applied when PointerGone is batched into the same input frame.
+                strip.cancel_drag();
+                for _ in 0..12 {
+                    render(&mut strip, vec![egui::Event::PointerMoved(origin)]);
+                }
+                render(&mut strip, vec![pointer(origin, true)]);
+                for step in 1..=3 {
+                    render(
+                        &mut strip,
+                        vec![egui::Event::PointerMoved(
+                            origin - egui::vec2(40.0 * step as f32, 0.0),
+                        )],
+                    );
+                }
+                let before = strip.scroll_offset;
+                let mut events = Vec::new();
+                if final_move {
+                    events.push(egui::Event::PointerMoved(origin - egui::vec2(160.0, 0.0)));
+                }
+                events.push(egui::Event::PointerGone);
+                render(&mut strip, events);
+                assert!(
+                    (strip.scroll_offset - before - if final_move { 40.0 } else { 0.0 }).abs()
+                        < 1.0
+                );
+                let departed = strip.scroll_offset;
+                for _ in 0..3 {
+                    render(&mut strip, vec![]);
+                }
+                assert!(
+                    strip.scroll_offset > departed,
+                    "leaving during a held drag starts a coast"
+                );
+                let before = strip.scroll_offset;
+                render(
+                    &mut strip,
+                    vec![
+                        egui::Event::PointerMoved(egui::pos2(20.0, 100.0)),
+                        pointer(egui::pos2(20.0, 100.0), false),
+                    ],
+                );
+                assert!(
+                    strip.scroll_offset >= before && strip.scroll_offset < before + 67.0,
+                    "reentry release stays within one single-flick frame: before={before}, after={}, first_tail={first}, final_move={final_move}",
+                    strip.scroll_offset
+                );
+                for _ in 0..90 {
+                    render(&mut strip, vec![]);
+                }
+                let settled = strip.scroll_offset;
+                for _ in 0..5 {
+                    render(&mut strip, vec![]);
+                }
+                assert_eq!(
+                    strip.scroll_offset, settled,
+                    "departure momentum stops without idle drift"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn filmstrip_card_drag_enters_transfer_only_after_leaving_the_band() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_card_drag_enters_transfer_only_after_leaving_the_band",

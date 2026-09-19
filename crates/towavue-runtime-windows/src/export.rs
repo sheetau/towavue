@@ -1805,7 +1805,7 @@ fn tempo_filters(rate: f64, precision: usize) -> Vec<String> {
     crate::tempo::filters(rate, precision)
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
+pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     let normalize = |path: &Path| {
         path.canonicalize()
             .unwrap_or_else(|_| path.to_owned())

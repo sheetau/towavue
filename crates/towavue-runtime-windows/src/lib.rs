@@ -18,8 +18,10 @@ mod file_details;
 mod file_operation;
 mod source_save;
 pub use source_save::{
-    PreparedSourceSave, RetainedSource, SavedSource, SourceSaveError, SourceSaveEvent,
-    SourceSaveJob, commit_source_save, prepare_source_recreation, prepare_source_save,
+    PreparedSaveAs, PreparedSourceSave, RetainedSource, SaveAsEvent, SaveAsJob, SaveAsRequest,
+    SaveAsTarget, SavedAsSource, SavedSource, SourceSaveError, SourceSaveEvent, SourceSaveJob,
+    commit_save_as, commit_source_save, prepare_save_as, prepare_source_recreation,
+    prepare_source_save,
 };
 mod file_search;
 mod fonts;
@@ -80,7 +82,7 @@ pub use decode::{
 };
 pub use dialog::{
     DeleteConfirmation, DialogError, FileDialogKind, PromptButtons, PromptResponse,
-    confirm_file_delete, cursor_position_in_window, pick_path, show_prompt,
+    confirm_file_delete, cursor_position_in_window, pick_path, pick_save_as, show_prompt,
 };
 pub use export::{
     AudioChannels, AudioExportOptions, AudioNormalization, ExportDialogRequest, ExportError,

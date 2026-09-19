@@ -1,6 +1,11 @@
 //! Two-phase source saving. Preparation never changes the target. Publication
 //! requires the caller to quiesce every reader and revalidate its tab/edit owner.
 mod pasted;
+mod save_as;
+pub use save_as::{
+    PreparedSaveAs, SaveAsEvent, SaveAsJob, SaveAsRequest, SaveAsTarget, SavedAsSource,
+    commit_save_as, prepare_save_as,
+};
 
 use crate::{
     ExportError, ExportOptions, ExportOutcome, ExportOutput, ExportRequest, FileOperationError,

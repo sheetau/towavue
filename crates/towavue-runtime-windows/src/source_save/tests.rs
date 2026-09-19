@@ -3,9 +3,9 @@ use std::sync::mpsc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use towavue_core::{EditOperation, MediaKind};
 
-struct Fixture(PathBuf);
+pub(super) struct Fixture(pub(super) PathBuf);
 impl Fixture {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let root = std::env::temp_dir().join(format!(
             "towavue-source-save-{}-{}",
             std::process::id(),
@@ -34,7 +34,7 @@ impl Drop for Fixture {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
-fn bitmap(path: &Path) {
+pub(super) fn bitmap(path: &Path) {
     let mut bytes = vec![0_u8; 62];
     bytes[..2].copy_from_slice(b"BM");
     bytes[2..6].copy_from_slice(&62_u32.to_le_bytes());
@@ -79,7 +79,7 @@ fn finish(prepared: PreparedSourceSave) -> Result<SavedSource, SourceSaveError> 
     ));
     result
 }
-fn wait_removed(path: &Path) {
+pub(super) fn wait_removed(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
     while path.exists() {
         assert!(Instant::now() < deadline, "cleanup {}", path.display());

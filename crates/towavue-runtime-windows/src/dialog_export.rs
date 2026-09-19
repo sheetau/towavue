@@ -1,5 +1,7 @@
 use super::*;
 use crate::export::formats::{Choices, Format};
+use std::cell::RefCell;
+use std::rc::Rc;
 use windows::Win32::Foundation::S_FALSE;
 use windows::Win32::System::Ole::IOleWindow;
 use windows::Win32::UI::Shell::{
@@ -11,6 +13,7 @@ use windows::core::{Interface, Ref};
 pub(super) enum SaveFilter {
     Media { choices: Choices, audio_only: bool },
     Frame,
+    SaveAs { choices: Choices },
 }
 
 /// Lives and drops on the caller's initialized STA. The dialog owns its advised
@@ -19,6 +22,7 @@ pub(super) struct PreparedSave {
     dialog: IFileSaveDialog,
     choices: Choices,
     cookie: u32,
+    accepted: Option<Rc<RefCell<Option<crate::SaveAsTarget>>>>,
     // Keep every UTF-16 filter string alive through Show and Unadvise.
     _filters: Vec<(Vec<u16>, Vec<u16>)>,
 }
@@ -47,6 +51,8 @@ pub(super) unsafe fn prepare_save_dialog(
     suggested: &str,
     filter: SaveFilter,
 ) -> Result<PreparedSave, DialogError> {
+    let accepted =
+        matches!(&filter, SaveFilter::SaveAs { .. }).then(|| Rc::new(RefCell::new(None)));
     let (choices, title) = match filter {
         SaveFilter::Media {
             choices,
@@ -59,6 +65,7 @@ pub(super) unsafe fn prepare_save_dialog(
                 "Export as"
             },
         ),
+        SaveFilter::SaveAs { choices } => (choices, "Save as"),
         SaveFilter::Frame => (
             Choices::new(vec![Format::FramePng], std::path::Path::new("frame.png"))?,
             "Export current edited frame",
@@ -101,6 +108,7 @@ pub(super) unsafe fn prepare_save_dialog(
         dialog.SetFileName(PCWSTR(wide(&choices.filename(suggested)).as_ptr()))?;
         let events: IFileDialogEvents = SaveEvents {
             choices: choices.clone(),
+            accepted: accepted.clone(),
         }
         .into();
         let cookie = dialog.Advise(&events)?;
@@ -108,6 +116,7 @@ pub(super) unsafe fn prepare_save_dialog(
             dialog,
             choices,
             cookie,
+            accepted,
             _filters: filters,
         })
     }
@@ -121,6 +130,46 @@ pub(super) unsafe fn show_initialized_save_dialog(
     // SAFETY: caller retains the owner and STA until the native dialog closes.
     unsafe {
         let prepared = prepare_save_dialog(suggested, filter)?;
+        show_prepared(&prepared, owner)
+    }
+}
+
+pub(super) unsafe fn show_initialized_save_as_dialog(
+    suggested: &str,
+    owner: HWND,
+    choices: Choices,
+) -> Result<Option<crate::SaveAsTarget>, DialogError> {
+    // SAFETY: caller retains the owner and STA for preparation, Show and Drop.
+    unsafe {
+        let prepared = prepare_save_dialog(suggested, SaveFilter::SaveAs { choices })?;
+        let Some(path) = show_prepared(&prepared, owner)? else {
+            return Ok(None);
+        };
+        prepared.take_accepted(&path).map(Some)
+    }
+}
+
+impl PreparedSave {
+    fn take_accepted(&self, path: &std::path::Path) -> Result<crate::SaveAsTarget, DialogError> {
+        let target = self
+            .accepted
+            .as_ref()
+            .and_then(|accepted| accepted.borrow_mut().take());
+        match target {
+            Some(target) if target.path() == path => Ok(target),
+            _ => Err(DialogError::InvalidExportChoice(
+                "The Save as destination was not accepted; choose it again.".into(),
+            )),
+        }
+    }
+}
+
+unsafe fn show_prepared(
+    prepared: &PreparedSave,
+    owner: HWND,
+) -> Result<Option<PathBuf>, DialogError> {
+    // SAFETY: all interfaces stay in the caller's STA through the modal call.
+    unsafe {
         if let Err(error) = prepared.Show(Some(owner)) {
             if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
                 return Ok(None);
@@ -148,10 +197,29 @@ unsafe fn result_path(dialog: &IFileDialog) -> Result<PathBuf, DialogError> {
 #[windows::core::implement(IFileDialogEvents, Agile = false)]
 struct SaveEvents {
     choices: Choices,
+    // STA-local shared values only; no dialog interface or native lease is held.
+    accepted: Option<Rc<RefCell<Option<crate::SaveAsTarget>>>>,
+}
+
+impl SaveEvents {
+    fn accept(&self, index: u32, path: &std::path::Path) -> Result<(), String> {
+        if let Some(accepted) = &self.accepted {
+            accepted.borrow_mut().take();
+        }
+        self.choices.validate(index, path)?;
+        if let Some(accepted) = &self.accepted {
+            let target = crate::SaveAsTarget::capture(path).map_err(|error| error.to_string())?;
+            *accepted.borrow_mut() = Some(target);
+        }
+        Ok(())
+    }
 }
 
 impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFileOk(&self, dialog: Ref<IFileDialog>) -> windows_core::Result<()> {
+        if let Some(accepted) = &self.accepted {
+            accepted.borrow_mut().take();
+        }
         let dialog = dialog.ok()?;
         // SAFETY: Shell invokes this STA-local sink with a live dialog. GetResult
         // is valid in OnFileOk; all acquired interfaces stay in this callback.
@@ -161,7 +229,7 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
                 .map_err(DialogError::from)
                 .and_then(|index| Ok((index, result_path(dialog)?)))
                 .map_err(|error| error.to_string())
-                .and_then(|(index, path)| self.choices.validate(index, &path));
+                .and_then(|(index, path)| self.accept(index, &path));
             if let Err(message) = choice {
                 let owner = dialog
                     .cast::<IOleWindow>()
@@ -170,7 +238,14 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
                 MessageBoxW(
                     owner,
                     PCWSTR(wide(&message).as_ptr()),
-                    w!("Export file type"),
+                    PCWSTR(
+                        wide(if self.accepted.is_some() {
+                            "Save as"
+                        } else {
+                            "Export file type"
+                        })
+                        .as_ptr(),
+                    ),
                     MB_OK | MB_ICONWARNING,
                 );
                 // S_FALSE rejects this filename and leaves the native dialog open.
@@ -214,6 +289,96 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_as_dialog_acceptance_preserves_selected_identity_and_rejects_stale_results() {
+        std::thread::spawn(|| unsafe {
+            OleInitialize(None).expect("owned STA");
+            let _apartment = DialogApartment;
+            let folder = std::env::temp_dir().join(format!(
+                "towavue-save-as-dialog-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos(),
+            ));
+            std::fs::create_dir(&folder).expect("unique owned fixture");
+            let existing = folder.join("existing.png");
+            let missing = folder.join("new.png");
+            std::fs::write(&existing, b"selected version").expect("destination fixture");
+            let choices = Choices::new(vec![Format::Png], &existing).expect("formats");
+            let dialog = prepare_save_dialog("existing.png", SaveFilter::SaveAs { choices })
+                .expect("native Save as dialog");
+            assert_eq!(dialog.GetFileTypeIndex().expect("selected type"), 1);
+            let sink = SaveEvents {
+                choices: dialog.choices.clone(),
+                accepted: dialog.accepted.clone(),
+            };
+            assert!(dialog.take_accepted(&existing).is_err());
+            // Exercise the exact acceptance helper used by OnFileOk without
+            // showing a dialog or claiming a physical confirmation trial.
+            sink.accept(1, &existing)
+                .expect("accepted existing destination");
+            std::fs::write(&existing, b"a competing version after acceptance").expect("mutation");
+            let crate::SaveAsTarget::Existing(version) = dialog
+                .take_accepted(&existing)
+                .expect("the selected snapshot, not a new capture")
+            else {
+                panic!("existing destination");
+            };
+            assert!(version.verify().is_err());
+            assert!(
+                dialog.take_accepted(&existing).is_err(),
+                "single consumption"
+            );
+
+            sink.accept(1, &missing)
+                .expect("accepted missing destination");
+            std::fs::write(&missing, b"late arrival").expect("new competing file");
+            assert!(matches!(
+                dialog.take_accepted(&missing),
+                Ok(crate::SaveAsTarget::New(_))
+            ));
+
+            sink.accept(1, &existing).expect("retry");
+            assert!(sink.accept(2, &existing).is_err(), "invalid type");
+            assert!(
+                dialog.take_accepted(&existing).is_err(),
+                "reject old acceptance"
+            );
+            sink.accept(1, &existing).expect("retry");
+            assert!(sink.accept(1, &folder.join("wrong.jpg")).is_err());
+            assert!(dialog.take_accepted(&existing).is_err());
+            let directory = folder.join("directory.png");
+            std::fs::create_dir(&directory).expect("non-file destination");
+            assert!(sink.accept(1, &directory).is_err());
+            assert!(dialog.take_accepted(&directory).is_err());
+            sink.accept(1, &existing).expect("retry");
+            assert!(dialog.take_accepted(&missing).is_err(), "path mismatch");
+            assert!(
+                dialog.take_accepted(&existing).is_err(),
+                "mismatch consumes old state"
+            );
+
+            // Derivative export has no Save as snapshot and retains its path-only
+            // behavior, including no filesystem capture during type validation.
+            let derivative = SaveEvents {
+                choices: dialog.choices.clone(),
+                accepted: None,
+            };
+            derivative
+                .accept(1, &directory)
+                .expect("format-only validation");
+            drop(dialog);
+            std::fs::remove_file(existing).expect("owned fixture cleanup");
+            std::fs::remove_file(missing).expect("owned fixture cleanup");
+            std::fs::remove_dir(directory).expect("owned empty directory cleanup");
+            std::fs::remove_dir(folder).expect("owned empty fixture cleanup");
+        })
+        .join()
+        .expect("native dialog worker");
+    }
 
     #[test]
     fn export_formats_native_dialog_keeps_initial_aliases_and_scopes_file_type_validation() {

@@ -24,6 +24,9 @@ impl MediaInput {
     pub fn logical_path(&self) -> &Path {
         &self.logical
     }
+    pub fn retained_source(&self) -> Option<&RetainedSource> {
+        self.original.as_ref()
+    }
     pub fn path(&self) -> &Path {
         self.original
             .as_ref()

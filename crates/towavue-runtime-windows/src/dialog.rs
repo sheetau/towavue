@@ -85,6 +85,47 @@ pub fn pick_path(
     )
 }
 
+/// Selects a Save as destination and retains its identity at native acceptance.
+/// Only detached values cross the worker boundary; queued encoding must use this
+/// snapshot rather than recapturing whatever later occupies the chosen path.
+pub fn pick_save_as(
+    owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
+    suggested_name: String,
+    request: crate::ExportDialogRequest,
+    notify: impl FnOnce(Result<Option<crate::SaveAsTarget>, DialogError>) + Send + 'static,
+) -> Result<(), DialogError> {
+    let handle = owner
+        .window_handle()
+        .map_err(|_| DialogError::OwnerUnavailable)?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err(DialogError::OwnerUnavailable);
+    };
+    let native_owner = handle.hwnd.get();
+    start_dialog_worker(
+        move || {
+            let _owner = owner;
+            if request.options.output != crate::ExportOutput::Media {
+                return Err(DialogError::InvalidExportChoice(
+                    "Save as requires a complete media document.".into(),
+                ));
+            }
+            // SAFETY: the worker retains its owner and all native interfaces on
+            // this STA; the prepared dialog drops before the apartment guard.
+            unsafe {
+                OleInitialize(None)?;
+                let _apartment = DialogApartment;
+                let choices = request.choices(&std::sync::atomic::AtomicBool::new(false))?;
+                export_save::show_initialized_save_as_dialog(
+                    &suggested_name,
+                    HWND(native_owner as *mut _),
+                    choices,
+                )
+            }
+        },
+        notify,
+    )
+}
+
 #[derive(Clone, Copy)]
 pub enum PromptButtons {
     Ok,

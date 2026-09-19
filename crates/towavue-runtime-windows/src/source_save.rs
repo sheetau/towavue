@@ -411,6 +411,9 @@ pub fn commit_source_save(
                             directory: files.directory.clone(),
                         })
                     });
+            if let Ok(saved) = &result {
+                crate::shell::notify_published_file(saved.current_source().path());
+            }
             notify(result);
         })?;
     Ok(())

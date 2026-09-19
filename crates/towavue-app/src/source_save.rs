@@ -397,7 +397,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         }
         self.folder_snapshot = None;
-        self.refresh_folder_snapshot();
+        self.refresh_folder_snapshot_from_disk();
         self.status_file_details.invalidate();
         self.refresh_title();
     }

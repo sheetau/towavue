@@ -2343,6 +2343,14 @@ where
     }
 
     fn refresh_folder_snapshot(&mut self) {
+        self.refresh_folder_snapshot_mode(false);
+    }
+
+    fn refresh_folder_snapshot_from_disk(&mut self) {
+        self.refresh_folder_snapshot_mode(true);
+    }
+
+    fn refresh_folder_snapshot_mode(&mut self, refresh: bool) {
         if matches!(
             self.pending_folder,
             Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
@@ -2354,7 +2362,11 @@ where
         };
         let Some(folder) = path.parent() else { return };
         self.watch_folder(folder);
-        let generation = self.folder_order.request(Some(folder.to_owned()));
+        let generation = if refresh {
+            self.folder_order.request_refreshed(folder.to_owned())
+        } else {
+            self.folder_order.request(Some(folder.to_owned()))
+        };
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(
             towavue_runtime_windows::BurstEvent::FolderRequested,
@@ -7506,7 +7518,7 @@ where
                 self.reading_settings.toggle_axis();
                 self.request_redraw();
             }
-            CommandId::ReloadFolderOrder => self.refresh_folder_snapshot(),
+            CommandId::ReloadFolderOrder => self.refresh_folder_snapshot_from_disk(),
             CommandId::ReverseReadingOrder => {
                 self.reading_settings.reversed = !self.reading_settings.reversed;
                 self.request_redraw();
@@ -8500,6 +8512,7 @@ where
                                 self.refresh_image_edits();
                             }
                         }
+                        self.refresh_folder_snapshot_from_disk();
                         let encoder = if outcome.used_hardware_encoder {
                             "hardware"
                         } else {
@@ -11102,7 +11115,7 @@ where
             .as_mut()
             .is_some_and(|(_, watcher)| watcher.try_changed())
         {
-            self.refresh_folder_snapshot();
+            self.refresh_folder_snapshot_from_disk();
             self.request_redraw();
         }
         if self

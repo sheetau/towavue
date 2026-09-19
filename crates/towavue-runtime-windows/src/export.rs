@@ -136,6 +136,9 @@ impl ExportJob {
                 } else {
                     frame::export_cancellable(&frame, &target, &operations, &worker_cancelled)
                 };
+                if result.is_ok() {
+                    crate::shell::notify_published_file(&target);
+                }
                 notify(ExportEvent::Finished(result));
             })
             .map_err(ExportError::Start)?;
@@ -214,6 +217,9 @@ impl ExportJob {
                         notify(ExportEvent::AnalyzingAudio(time));
                     },
                 );
+                if result.is_ok() {
+                    crate::shell::notify_published_file(&request.target);
+                }
                 notify(ExportEvent::Finished(result));
             })
             .map_err(ExportError::Start)?;

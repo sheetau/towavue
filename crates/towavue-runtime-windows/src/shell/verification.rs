@@ -56,7 +56,11 @@ impl ShellLifetimeTrial {
                         .expect("query main STA");
                     assert_eq!(kind, APTTYPE_MAINSTA, "trial must own the first STA");
                     initialized.send(()).expect("main STA observer");
-                    run_requests(shared, || {}, |_, _| unreachable!("anchor has no requests"));
+                    run_requests(
+                        shared,
+                        || {},
+                        |_, _, _| unreachable!("anchor has no requests"),
+                    );
                     drop(apartment);
                     let _ = finished.send(());
                 })

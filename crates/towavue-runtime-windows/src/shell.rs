@@ -40,6 +40,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
+mod refresh;
+pub(crate) use refresh::notify_published_file;
 mod shutdown;
 pub use shutdown::shell_workers_pending;
 
@@ -122,6 +124,7 @@ fn license_guide(executable: &Path) -> std::io::Result<PathBuf> {
 
 struct Request {
     folder: PathBuf,
+    refresh: bool,
     generation: u64,
     reply: Option<mpsc::Sender<FolderSnapshot>>,
 }
@@ -130,6 +133,7 @@ struct Request {
 struct Mailbox {
     generation: u64,
     pending: Option<Request>,
+    refresh_folder: Option<PathBuf>,
     completed: Option<FolderSnapshot>,
     closed: bool,
 }
@@ -202,12 +206,36 @@ impl FolderOrderProvider {
         self.enqueue(folder, None)
     }
 
+    /// Re-enumerate current files with the live view's sort/group settings.
+    /// A live Explorer view can retain stale item properties after publication.
+    pub fn request_refreshed(&self, folder: PathBuf) -> u64 {
+        self.enqueue_mode(Some(folder), None, true)
+    }
+
     fn enqueue(&self, folder: Option<PathBuf>, reply: Option<mpsc::Sender<FolderSnapshot>>) -> u64 {
+        self.enqueue_mode(folder, reply, false)
+    }
+
+    fn enqueue_mode(
+        &self,
+        folder: Option<PathBuf>,
+        reply: Option<mpsc::Sender<FolderSnapshot>>,
+        refresh: bool,
+    ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("Shell mailbox");
         mailbox.generation = mailbox.generation.wrapping_add(1);
+        // A watcher/navigation request for the same folder must not replace an
+        // unfinished publication refresh with a stale live-view capture.
+        if refresh {
+            mailbox.refresh_folder = folder.clone();
+        } else if mailbox.refresh_folder != folder {
+            mailbox.refresh_folder = None;
+        }
+        let refresh = mailbox.refresh_folder.is_some();
         mailbox.pending = folder.map(|folder| Request {
             folder,
+            refresh,
             generation: mailbox.generation,
             reply,
         });
@@ -241,7 +269,7 @@ impl Drop for FolderOrderProvider {
 fn run_requests(
     shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
-    mut resolve: impl FnMut(&Path, u64) -> Option<FolderSnapshot>,
+    mut resolve: impl FnMut(&Path, u64, bool) -> Option<FolderSnapshot>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
@@ -262,7 +290,7 @@ fn run_requests(
             ready.wait();
             continue;
         };
-        let Some(snapshot) = resolve(&request.folder, request.generation) else {
+        let Some(snapshot) = resolve(&request.folder, request.generation, request.refresh) else {
             continue;
         };
         let publish = {
@@ -272,12 +300,15 @@ fn run_requests(
             }
             if mailbox.generation != request.generation {
                 false
-            } else if let Some(reply) = request.reply {
-                let _ = reply.send(snapshot);
-                false
             } else {
-                mailbox.completed = Some(snapshot);
-                true
+                mailbox.refresh_folder = None;
+                if let Some(reply) = request.reply {
+                    let _ = reply.send(snapshot);
+                    false
+                } else {
+                    mailbox.completed = Some(snapshot);
+                    true
+                }
             }
         };
         if publish {
@@ -292,14 +323,14 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
     let mut apartment = None;
     let mut last_live_window = None;
     let current_shared = Arc::clone(&shared);
-    run_requests(shared, notify, |folder, generation| {
+    run_requests(shared, notify, |folder, generation, refresh| {
         let current = || request_is_current(&current_shared, generation);
         if !current() {
             return None;
         }
         if apartment.get_or_insert_with(ShellApartment::new).0 {
             if let Some(snapshot) =
-                shell_snapshot(folder, generation, &mut last_live_window, &current)
+                shell_snapshot(folder, generation, &mut last_live_window, &current, refresh)
             {
                 return Some(snapshot);
             }
@@ -392,6 +423,7 @@ fn shell_snapshot(
     generation: u64,
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
+    refresh: bool,
 ) -> Option<FolderSnapshot> {
     if !current() {
         return None;
@@ -404,11 +436,28 @@ fn shell_snapshot(
 
     // SAFETY: all COM and PIDL values remain on the initialized STA worker.
     unsafe {
+        if refresh {
+            refresh::notify_folder(&folder_pidl);
+        }
         if let Some((view, window)) =
             matching_live_view(folder_pidl.as_ptr(), *last_live_window, current)
         {
             *last_live_window = Some(window);
-            if let Some(snapshot) = capture_view(
+            if refresh {
+                if let Some(order) = refresh::ViewOrder::read(&view)
+                    && let Some(snapshot) = hidden_snapshot_with_order(
+                        &folder,
+                        &folder_pidl,
+                        generation,
+                        current,
+                        Some(&order),
+                    )
+                {
+                    return Some(snapshot);
+                }
+                // A vanished/unavailable live view falls back to saved Shell
+                // settings, never to the stale rows that prompted this refresh.
+            } else if let Some(snapshot) = capture_view(
                 &view,
                 &folder,
                 &folder_pidl,
@@ -432,6 +481,19 @@ unsafe fn hidden_snapshot(
     generation: u64,
     current: &impl Fn() -> bool,
 ) -> Option<FolderSnapshot> {
+    // SAFETY: forward the caller's STA and owned PIDL invariants.
+    unsafe { hidden_snapshot_with_order(folder, folder_pidl, generation, current, None) }
+}
+
+// SAFETY: same STA ownership as hidden_snapshot. Settings are copied only to a
+// private, non-persisting view; the caller's live view is never rearranged.
+unsafe fn hidden_snapshot_with_order(
+    folder: &Path,
+    folder_pidl: &OwnedPidl,
+    generation: u64,
+    current: &impl Fn() -> bool,
+    order: Option<&refresh::ViewOrder>,
+) -> Option<FolderSnapshot> {
     unsafe {
         if !current() {
             return None;
@@ -449,6 +511,13 @@ unsafe fn hidden_snapshot(
             return None;
         }
         enumeration.wait(current)?;
+        if let Some(order) = order {
+            let view = browser.browser.GetCurrentView::<IFolderView2>().ok()?;
+            if !current() || !view_matches(&view, folder_pidl.as_ptr()) {
+                return None;
+            }
+            order.apply(&view)?;
+        }
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if !current() {
@@ -461,7 +530,11 @@ unsafe fn hidden_snapshot(
                     &view,
                     folder,
                     folder_pidl,
-                    FolderSnapshotSource::PersistedShellView,
+                    if order.is_some() {
+                        FolderSnapshotSource::LiveExplorerView
+                    } else {
+                        FolderSnapshotSource::PersistedShellView
+                    },
                     generation,
                     current,
                 )
@@ -1216,7 +1289,7 @@ mod tests {
             window_tx
                 .send(window.0 as usize)
                 .expect("test window identity");
-            run_requests(shared, || {}, |_, _| panic!("no folder requests"));
+            run_requests(shared, || {}, |_, _, _| panic!("no folder requests"));
             // SAFETY: the request loop has stopped; destroy this thread's retained window.
             unsafe { DestroyWindow(window).expect("destroy test window") };
         });
@@ -1318,7 +1391,14 @@ mod tests {
         let current = || request_is_current(&shared, generation);
         assert!(!current());
         assert!(
-            shell_snapshot(Path::new("never accessed"), generation, &mut None, &current).is_none()
+            shell_snapshot(
+                Path::new("never accessed"),
+                generation,
+                &mut None,
+                &current,
+                false
+            )
+            .is_none()
         );
         assert!(fallback_snapshot(Path::new("never accessed"), generation, &current).is_none());
 
@@ -1360,7 +1440,8 @@ mod tests {
                     || {
                         ready_tx.send(()).expect("completion notification");
                     },
-                    |path, generation| {
+                    |path, generation, refresh| {
+                        assert_eq!(refresh, path == Path::new("last"));
                         started_tx.send(path.to_owned()).expect("started request");
                         if path == Path::new("first") {
                             resume_rx
@@ -1390,6 +1471,7 @@ mod tests {
                 PathBuf::from("first")
             );
             provider.request(Some("middle".into()));
+            provider.request_refreshed("last".into());
             let generation = provider.request(Some("last".into()));
             assert!(provider.take_completed().is_none());
             resume_tx.send(()).expect("resume worker");
@@ -1436,7 +1518,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("completion notification");
                 },
-                |path, generation| {
+                |path, generation, _| {
                     started_tx.send(()).expect("started request");
                     resume_rx
                         .recv_timeout(Duration::from_secs(5))

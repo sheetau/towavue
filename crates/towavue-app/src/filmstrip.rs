@@ -69,6 +69,7 @@ impl RecentGrid {
 }
 
 pub struct Filmstrip {
+    pub(crate) menu_owner: Option<crate::thumbnail_menu::Owner>,
     loader: PreviewLoader,
     generation: u64,
     visible: Vec<PathBuf>,
@@ -97,6 +98,7 @@ impl Filmstrip {
 
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
         Ok(Self {
+            menu_owner: None,
             loader: PreviewLoader::new(cache, notify)?,
             generation: 0,
             visible: Vec::new(),
@@ -774,6 +776,7 @@ impl Filmstrip {
                                 Color32::WHITE,
                             );
                         }
+                        crate::thumbnail_menu::show(ui, &response, &item.path, crate::thumbnail_menu::Scope::Filmstrip, self.menu_owner, actions);
                         if response.clicked() {
                             actions.push(if click_modifiers(&response).ctrl {
                                 UiAction::OpenFilmstripWindow(item.path.clone())
@@ -993,6 +996,14 @@ impl Filmstrip {
                             egui::StrokeKind::Inside,
                         );
                     }
+                    crate::thumbnail_menu::show(
+                        ui,
+                        &response,
+                        path,
+                        crate::thumbnail_menu::Scope::Gallery,
+                        self.menu_owner,
+                        actions,
+                    );
                     if response.middle_clicked() {
                         actions.push(UiAction::OpenGalleryBackground(path.clone()));
                     } else if response.clicked() {

@@ -6,7 +6,7 @@ use towavue_runtime_windows::{
 pub(crate) mod preferences;
 mod recycling;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
     Delete,
     Rename,
@@ -17,6 +17,7 @@ pub(super) struct Pending {
     pub serial: u64,
     pub tab: TabId,
     pub path: PathBuf,
+    pub origin_path: PathBuf,
     pub instance: u64,
     pub kind: Kind,
     pub source: Option<FileOperationSource>,
@@ -57,6 +58,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if kind == Kind::Delete && self.timeline_open {
             return;
         }
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        self.begin_file_relocation_at(kind, path);
+    }
+
+    pub(super) fn begin_file_relocation_at(&mut self, kind: Kind, path: PathBuf) {
         if self.modal_input_blocked()
             || self.active_export.is_some()
             || self.image_loading
@@ -69,13 +77,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(tab) = self.tabs.active() else {
             return;
         };
-        let path = tab.target.current_path().to_owned();
+        let origin_path = tab.target.current_path().to_owned();
         self.file_operations.serial = self.file_operations.serial.wrapping_add(1);
         let serial = self.file_operations.serial;
         self.file_operations.pending = Some(Pending {
             serial,
             tab: tab.id,
             path: path.clone(),
+            origin_path,
             instance: self.media_generation,
             kind,
             source: None,
@@ -105,7 +114,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|pending| {
                 pending.instance == self.media_generation
                     && self.tabs.active().is_some_and(|tab| {
-                        tab.id == pending.tab && tab.target.current_path() == pending.path
+                        tab.id == pending.tab && tab.target.current_path() == pending.origin_path
                     })
             })
     }
@@ -129,6 +138,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         match result {
             Ok(source) => {
+                if self
+                    .file_operations
+                    .pending
+                    .as_ref()
+                    .is_none_or(|pending| source.path() != pending.path)
+                {
+                    self.file_operations.pending = None;
+                    self.set_status("The inspected file does not match this operation.".into());
+                    return;
+                }
                 let pending = self
                     .file_operations
                     .pending

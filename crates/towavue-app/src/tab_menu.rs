@@ -22,12 +22,12 @@ pub(crate) fn context_key_event(
         })
 }
 
-pub(crate) fn popup(
+pub(crate) fn popup<A>(
     ui: &egui::Ui,
     response: &egui::Response,
     close: &egui::Response,
-    contents: impl FnOnce(&mut egui::Ui) -> Option<CommandId>,
-) -> Option<(CommandId, Option<egui::Id>)> {
+    contents: impl FnOnce(&mut egui::Ui) -> Option<A>,
+) -> Option<(A, Option<egui::Id>)> {
     let context = ui.ctx();
     let popup_id = egui::Popup::default_response_id(response);
     let was_open = egui::Popup::is_id_open(context, popup_id);

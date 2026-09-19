@@ -86,6 +86,7 @@ mod tab_menu;
 mod tab_preview;
 mod tab_transfer;
 mod taskbar;
+mod thumbnail_menu;
 mod time_selection;
 mod timeline_edit;
 mod timeline_input;
@@ -277,6 +278,7 @@ enum UiAction {
     OpenMedia(PathBuf, bool),
     ScrubImage(PathBuf, u64, egui::Id),
     OpenGalleryBackground(PathBuf),
+    ThumbnailMenu(thumbnail_menu::Intent),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
     OpenFilmstripWindow(PathBuf),
@@ -3798,6 +3800,10 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.filmstrip.menu_owner = self.tabs.active_id().map(|tab| thumbnail_menu::Owner {
+            tab,
+            instance: self.media_generation,
+        });
         if self.source_save.frozen {
             if self.active_export.is_some() {
                 root.disable();
@@ -6877,6 +6883,7 @@ where
                 self.scrub_image(path, generation, owner);
             }
             UiAction::Recent(action) => self.handle_recent_action(action),
+            UiAction::ThumbnailMenu(intent) => self.handle_thumbnail_menu(intent),
             UiAction::RevealExport(shown) => {
                 if let Some(path) = self.export_notice_target(shown).map(Path::to_path_buf) {
                     self.reveal_path(path);

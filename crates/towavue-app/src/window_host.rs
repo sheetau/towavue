@@ -126,6 +126,7 @@ impl WindowHost {
             if matches!(
                 event,
                 AppEvent::VideoResume(_)
+                    | AppEvent::FolderReady
                     | AppEvent::FileOperationSource(..)
                     | AppEvent::FileOperationFinished(..)
                     | AppEvent::SourceSave(..)

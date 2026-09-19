@@ -69,6 +69,8 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image",
                     "image-reading",
                     "image-languages",
+                    "image-filmstrip-menu",
+                    "image-gallery-menu",
                     "image-modal-resize",
                     "image-modal-rotate",
                     "image-modal-error",
@@ -84,7 +86,25 @@ fn media_reference_layouts_reach_the_gpu() {
                     if matches!(scene, "image-reading" | "image-languages") {
                         fonts::install(&context);
                     }
+                    let menu_scene = scene.ends_with("-menu");
+                    if menu_scene {
+                        context.enable_accesskit();
+                    }
                     let mut app = fixture(&self.root, &context, scene);
+                    if scene == "image-filmstrip-menu" {
+                        app.filmstrip_open = true;
+                    } else if scene == "image-gallery-menu" {
+                        app.recent_paths = app
+                            .folder_snapshot
+                            .as_ref()
+                            .expect("listing")
+                            .items
+                            .iter()
+                            .map(|item| item.path.clone())
+                            .collect();
+                        let gallery = app.tabs.gallery().expect("Gallery");
+                        app.activate_tab(gallery);
+                    }
                     match scene {
                         "image-modal-resize" => app.dispatch(CommandId::ResizeImage),
                         "image-modal-rotate" => app.dispatch(CommandId::FreeRotateImage),
@@ -163,6 +183,7 @@ fn media_reference_layouts_reach_the_gpu() {
                         .resize_surface(width, height)
                         .expect("surface size");
                     let mut pixels = Vec::new();
+                    let mut menu_target = None;
                     for frame in 0..4 {
                         let mut input = egui::RawInput {
                             time: Some(frame as f64 * 0.25),
@@ -178,9 +199,47 @@ fn media_reference_layouts_reach_the_gpu() {
                             .entry(egui::ViewportId::ROOT)
                             .or_default()
                             .native_pixels_per_point = Some(density);
+                        if menu_scene && frame == 2 {
+                            input.events.push(egui::Event::AccessKitActionRequest(
+                                egui::accesskit::ActionRequest {
+                                    action: egui::accesskit::Action::ShowContextMenu,
+                                    target_tree: egui::accesskit::TreeId::ROOT,
+                                    target_node: menu_target.expect("thumbnail node"),
+                                    data: None,
+                                },
+                            ));
+                        }
                         let mut actions = Vec::new();
                         let ui = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
                         assert!(actions.is_empty(), "passive reference rendering");
+                        if menu_scene && frame == 1 {
+                            menu_target = ui
+                                .platform_output
+                                .accesskit_update
+                                .as_ref()
+                                .expect("tree")
+                                .nodes
+                                .iter()
+                                .find(|(_, node)| {
+                                    node.label() == Some("Portrait.png")
+                                        && node.bounds().is_some_and(|bounds| {
+                                            bounds.y0 >= 32.0 * f64::from(density)
+                                        })
+                                        && node.supports_action(
+                                            egui::accesskit::Action::ShowContextMenu,
+                                        )
+                                })
+                                .map(|(id, _)| *id);
+                        }
+                        if menu_scene && frame == 3 {
+                            assert!(egui::Popup::is_any_open(&context));
+                            let label = if scene == "image-gallery-menu" {
+                                "Remove from history"
+                            } else {
+                                "Delete file…"
+                            };
+                            assert!(ui.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)), "scope action is painted");
+                        }
                         if frame >= 2 && scene.starts_with("image-export") {
                             let text = ui
                                 .shapes
@@ -248,6 +307,17 @@ fn media_reference_layouts_reach_the_gpu() {
                                 .count()
                                 > 200,
                             "modal text reaches the GPU"
+                        );
+                    } else if menu_scene {
+                        assert!(
+                            pixels
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .filter(|p| p[0] > 180 && p[1] > 180 && p[2] > 180)
+                                .count()
+                                > 200,
+                            "thumbnail menu text reaches the GPU"
                         );
                     } else if scene.starts_with("image") {
                         assert_eq!(
@@ -338,7 +408,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/languages/reading/export status/modals, compact/editing audio and compact/editing video at 100/125/200%; thirty-six full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; forty-two full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }

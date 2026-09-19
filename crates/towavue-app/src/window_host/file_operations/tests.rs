@@ -3,8 +3,12 @@ use crate::file_operations::{Kind, Pending};
 use std::sync::mpsc;
 
 fn choose(host: &mut WindowHost, owner: WindowKey, kind: Kind, target: PathBuf) {
+    let path = host.windows[&owner].path.clone().expect("source path");
+    choose_at(host, owner, kind, path, target);
+}
+
+fn choose_at(host: &mut WindowHost, owner: WindowKey, kind: Kind, path: PathBuf, target: PathBuf) {
     let app = host.windows.get_mut(&owner).expect("owner");
-    let path = app.path.clone().expect("source path");
     let (send, receive) = mpsc::channel();
     towavue_runtime_windows::inspect_file_operation_source(path.clone(), move |result| {
         send.send(result).expect("snapshot receiver");
@@ -18,6 +22,7 @@ fn choose(host: &mut WindowHost, owner: WindowKey, kind: Kind, target: PathBuf) 
     app.file_operations.pending = Some(Pending {
         serial: app.file_operations.serial,
         tab: app.tabs.active_id().expect("source tab"),
+        origin_path: app.path.clone().expect("displayed origin"),
         path,
         instance: app.media_generation,
         kind,
@@ -203,6 +208,7 @@ fn cancelled_or_stale_destination_never_submits_a_mutation() {
             serial: 1,
             tab,
             path: source.clone(),
+            origin_path: source.clone(),
             instance: app.media_generation,
             kind: Kind::Rename,
             source: None,
@@ -352,5 +358,184 @@ pub(crate) fn exercise(host: &mut WindowHost) {
     }
     eprintln!(
         "PASS native file relocation: shared-device video owners release readers across rename round trips; active paused frames and edits/views, retained background positions/views, and fresh metadata ownership are verified"
+    );
+}
+
+#[test]
+fn inactive_relocation_keeps_displayed_owner_and_refreshes_the_current_folder() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::tests::inactive_relocation_keeps_displayed_owner_and_refreshes_the_current_folder",
+    ) else {
+        return;
+    };
+    let current = root.join("current.bmp");
+    let source = root.join("inactive.bmp");
+    let renamed = root.join("renamed.bmp");
+    let destination = root.join("other");
+    std::fs::create_dir(&destination).expect("owned destination");
+    std::fs::write(&current, b"current document").expect("current");
+    std::fs::write(&source, b"inactive document").expect("inactive");
+    let mut host = WindowHost::new(None, None).expect("host");
+    let owner = *host.windows.keys().next().expect("window");
+    *host.captured_events.lock().expect("events") = Some(VecDeque::new());
+    let app = host.windows.get_mut(&owner).expect("app");
+    let active = app.tabs.open_new(current.clone(), MediaKind::Image);
+    let background = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.tabs.activate(active);
+    app.path = Some(current.clone());
+    app.displayed_tab = Some(active);
+    app.media_kind = Some(MediaKind::Image);
+    app.state = PlaybackState::Paused;
+    app.image_view.zoom = ZoomMode::Custom(2.0);
+    app.edits
+        .entry(active)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = app.edits.clone();
+    let generation = app.media_generation;
+    choose_at(
+        &mut host,
+        owner,
+        Kind::Rename,
+        source.clone(),
+        renamed.clone(),
+    );
+    assert!(!source.exists() && renamed.exists());
+    assert_eq!(
+        host.windows[&owner]
+            .tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == background)
+            .expect("background")
+            .target
+            .current_path(),
+        renamed
+    );
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !host.windows[&owner]
+        .folder_snapshot
+        .as_ref()
+        .is_some_and(|s| s.items.iter().any(|item| item.path == renamed))
+    {
+        super::super::tests::drain_captured(&mut host);
+        assert!(
+            Instant::now() < deadline,
+            "refreshed Shell order after inactive rename"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    choose_at(
+        &mut host,
+        owner,
+        Kind::Move,
+        renamed.clone(),
+        destination.clone(),
+    );
+    assert!(!renamed.exists() && destination.join("renamed.bmp").exists());
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while !host.windows[&owner]
+        .folder_snapshot
+        .as_ref()
+        .is_some_and(|s| {
+            s.items.iter().any(|item| item.path == current)
+                && s.items.iter().all(|item| item.path != renamed)
+        })
+    {
+        super::super::tests::drain_captured(&mut host);
+        assert!(
+            Instant::now() < deadline,
+            "refreshed Shell order after inactive move"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let app = &host.windows[&owner];
+    assert_eq!(app.tabs.active_id(), Some(active));
+    assert_eq!(app.path.as_ref(), Some(&current));
+    assert_eq!(app.media_generation, generation);
+    assert_eq!(app.image_view.zoom, ZoomMode::Custom(2.0));
+    assert_eq!(app.edits, history);
+    assert_eq!(app.state, PlaybackState::Paused);
+    assert!(!app.image_loading);
+    assert_eq!(
+        std::fs::read(current).expect("current preserved"),
+        b"current document"
+    );
+}
+
+#[test]
+#[ignore = "recycles one owned unopened fixture through the host and native Shell"]
+fn inactive_recycling_keeps_current_media_and_refreshes_filmstrip_membership() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::tests::inactive_recycling_keeps_current_media_and_refreshes_filmstrip_membership",
+    ) else {
+        return;
+    };
+    let current = root.join("current.bmp");
+    let source = root.join("unopened.bmp");
+    std::fs::write(&current, b"current document").expect("current");
+    std::fs::write(&source, b"owned recycled fixture").expect("unopened");
+    let mut host = WindowHost::new(None, None).expect("host");
+    let owner = *host.windows.keys().next().expect("window");
+    *host.captured_events.lock().expect("events") = Some(VecDeque::new());
+    // No confirmation window or persistent preference write in this owned trial.
+    host.delete_confirmation_suppressed = true;
+    let app = host.windows.get_mut(&owner).expect("app");
+    let active = app.tabs.open_new(current.clone(), MediaKind::Image);
+    app.path = Some(current.clone());
+    app.displayed_tab = Some(active);
+    app.media_kind = Some(MediaKind::Image);
+    app.state = PlaybackState::Paused;
+    app.filmstrip_open = true;
+    app.image_view.zoom = ZoomMode::Custom(2.0);
+    app.edits
+        .entry(active)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = app.edits.clone();
+    let generation = app.media_generation;
+    app.begin_file_relocation_at(Kind::Delete, source.clone());
+    assert_eq!(
+        app.file_operations.pending.as_ref().expect("request").path,
+        source
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while host.windows[&owner].file_operations.ready.is_none() {
+        super::super::tests::drain_captured(&mut host);
+        assert!(Instant::now() < deadline, "source inspection");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    host.start_pending_file_operation();
+    assert!(host.file_operation.is_some());
+    while host.file_operation.is_some()
+        || !host.windows[&owner]
+            .folder_snapshot
+            .as_ref()
+            .is_some_and(|snapshot| {
+                snapshot.items.iter().any(|item| item.path == current)
+                    && snapshot.items.iter().all(|item| item.path != source)
+            })
+    {
+        super::super::tests::drain_captured(&mut host);
+        assert!(
+            Instant::now() < deadline,
+            "native recycle and refreshed Shell listing"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let app = &host.windows[&owner];
+    assert!(!source.exists());
+    assert_eq!(app.tabs.active_id(), Some(active));
+    assert_eq!(app.path.as_ref(), Some(&current));
+    assert_eq!(app.media_generation, generation);
+    assert_eq!(app.edits, history);
+    assert_eq!(app.image_view.zoom, ZoomMode::Custom(2.0));
+    assert!(app.filmstrip_open && !app.image_loading && !app.file_operations.busy());
+    assert_eq!(
+        std::fs::read(current).expect("current retained"),
+        b"current document"
+    );
+    eprintln!(
+        "PASS inactive recycle: exact owned target removed, current document/view/edits retained, real Shell listing refreshed; no dialog or physical input"
     );
 }

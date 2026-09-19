@@ -366,25 +366,18 @@ impl Animation {
         ))
     }
 
-    pub(super) fn export(
-        &self,
-        request: &ExportRequest,
-        staging: &StagedExport,
-        cancelled: &AtomicBool,
-        progress: &(impl Fn(Duration) + Sync),
-    ) -> Result<(), ExportError> {
-        use std::io::Write;
+    fn snapshot_output(&self, target: &Path) -> Result<Option<SnapshotOutput>, ExportError> {
         let plays = self.color().loops.unwrap_or(1);
-        let snapshots = if png_metadata::png_path(&request.target) {
+        let snapshots = if png_metadata::png_path(target) {
             Some(SnapshotOutput::Png(self.png_controls()?))
-        } else if webp_metadata::webp_path(&request.target) {
+        } else if webp_metadata::webp_path(target) {
             Some(SnapshotOutput::Webp {
                 plays: u16::try_from(plays).map_err(|_| {
                     invalid("WebP is limited to 65535 finite total plays; use AVIF output")
                 })?,
                 delays: self.integer_delays(1000, 0xffffff, "WebP")?,
             })
-        } else if gif_animation::gif_path(&request.target) {
+        } else if gif_animation::gif_path(target) {
             Some(SnapshotOutput::Gif(
                 gif_animation::Animation::from_centiseconds(
                     plays,
@@ -397,6 +390,22 @@ impl Animation {
         } else {
             None
         };
+        Ok(snapshots)
+    }
+
+    pub(super) fn validate_output(&self, target: &Path) -> Result<(), ExportError> {
+        self.snapshot_output(target).map(|_| ())
+    }
+
+    pub(super) fn export(
+        &self,
+        request: &ExportRequest,
+        staging: &StagedExport,
+        cancelled: &AtomicBool,
+        progress: &(impl Fn(Duration) + Sync),
+    ) -> Result<(), ExportError> {
+        use std::io::Write;
+        let snapshots = self.snapshot_output(&request.target)?;
         let single_duration = (self.samples[0].times.len() == 1)
             .then(|| u32::try_from(self.samples[0].times[0].1).map_err(invalid))
             .transpose()?;
@@ -912,3 +921,21 @@ fn same_timing(left: &Samples, right: &Samples) -> bool {
 #[cfg(test)]
 #[path = "export_avif_tests.rs"]
 mod tests;
+
+pub(super) fn has_alpha(
+    path: &Path,
+    animation: Option<&Animation>,
+    cancelled: &AtomicBool,
+) -> Result<bool, ExportError> {
+    if let Some(animation) = animation {
+        return Ok(animation.samples.len() == 2);
+    }
+    let mut file = fs::File::open(path).map_err(ExportError::Output)?;
+    let length = file.metadata().map_err(ExportError::Output)?.len();
+    let root = boxes(&mut file, 0, length, cancelled)?;
+    Ok(crate::avif_container::still::read(&mut file, &root, &|| {
+        !cancelled.load(Ordering::Relaxed)
+    })?
+    .alpha
+    .is_some())
+}

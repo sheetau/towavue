@@ -95,6 +95,17 @@ struct Container {
     animation: Option<animation::Animation>,
 }
 
+pub(super) fn export_traits(
+    path: &Path,
+    cancelled: &AtomicBool,
+) -> Result<(bool, bool), ExportError> {
+    let info = container(
+        BufReader::new(fs::File::open(path).map_err(ExportError::Output)?),
+        cancelled,
+    )?;
+    Ok((info.alpha, info.animation.is_some()))
+}
+
 fn u24(bytes: &[u8]) -> u32 {
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0])
 }

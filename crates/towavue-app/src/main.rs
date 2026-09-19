@@ -8310,14 +8310,34 @@ where
         match target {
             Some(target) => self.start_export(id, source, kind, target, continuation, output),
             None => {
-                let dialog = if output == ExportOutput::AudioOnly {
-                    FileDialogKind::SaveAudio {
-                        suggested_name: export_audio_name(&source),
-                    }
-                } else {
-                    FileDialogKind::SaveFile {
-                        suggested_name: export_name(&source),
-                    }
+                let dialog = FileDialogKind::SaveExport {
+                    suggested_name: if output == ExportOutput::AudioOnly {
+                        export_audio_name(&source)
+                    } else {
+                        export_name(&source)
+                    },
+                    request: Box::new(towavue_runtime_windows::ExportDialogRequest {
+                        input: self.media_input_for(Some(id), &source),
+                        kind,
+                        operations: self
+                            .edits
+                            .get(&id)
+                            .map_or_else(Vec::new, |history| history.operations().to_vec()),
+                        options: ExportOptions {
+                            output,
+                            audio: self
+                                .audio_export_settings
+                                .get(&id)
+                                .copied()
+                                .unwrap_or_default(),
+                            metadata: self
+                                .metadata_export_settings
+                                .get(&id)
+                                .cloned()
+                                .unwrap_or_default(),
+                            video_quality: self.effective_video_export_quality(kind, output),
+                        },
+                    }),
                 };
                 self.begin_dialog(
                     dialog,

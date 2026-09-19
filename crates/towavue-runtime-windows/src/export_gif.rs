@@ -118,6 +118,10 @@ impl Animation {
         result
     }
 
+    pub(super) fn has_timing(&self) -> bool {
+        self.delays != [0] || self.repeat != gif::Repeat::Finite(0)
+    }
+
     pub(super) fn is_animated(&self) -> bool {
         self.delays.len() > 1
     }

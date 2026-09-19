@@ -17,6 +17,10 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 mod video_encoding;
 pub use video_encoding::VideoExportQuality;
 
+#[path = "export_formats.rs"]
+pub(crate) mod formats;
+pub use formats::ExportDialogRequest;
+
 #[path = "export_rotation.rs"]
 mod rotation;
 

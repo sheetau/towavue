@@ -2590,3 +2590,60 @@ fn png_metadata_streaming_cancel_write_failure_and_bad_stage_do_not_publish() {
     assert_eq!(fs::read(&source).expect("source preserved"), original);
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
+
+#[test]
+fn export_formats_apng_keep_exact_delays_repetition_poster_and_full_alpha() {
+    use crate::export::formats::{ExportDialogRequest, Format};
+    let root = root("apng-format-choices");
+    let source = root.join("source.apng");
+    let cases = [
+        (
+            animation_fixture(3, &[[0, 1, 0, 10], [0, 2, 0, 10]]),
+            vec![Format::Png, Format::Webp, Format::Avif],
+        ),
+        (
+            animation_fixture(3, &[[0, 1, 0, 3], [0, 1, 0, 7]]),
+            vec![Format::Png, Format::Avif],
+        ),
+        (
+            animation_fixture(65536, &[[0, 1, 0, 10], [0, 2, 0, 10]]),
+            vec![Format::Png, Format::Avif],
+        ),
+        (
+            animation_fixture(3, &[[0, 0, 0, 100], [0, 2, 0, 100]]),
+            vec![Format::Png, Format::Webp],
+        ),
+        (poster_fixture(2), vec![Format::Png]),
+    ];
+    for (index, (data, expected)) in cases.into_iter().enumerate() {
+        fs::write(&source, data).expect("source");
+        let choices = ExportDialogRequest {
+            input: crate::MediaInput::new(source.clone()),
+            kind: MediaKind::Image,
+            operations: vec![],
+            options: ExportOptions::default(),
+        }
+        .choices(&AtomicBool::new(false))
+        .expect("choices");
+        assert_eq!(choices.formats, expected, "case {index}");
+        assert_eq!(choices.default_extension, "apng");
+        for format in choices.formats {
+            let target = root.join(format!("output-{index}.{}", format.extensions()[0]));
+            export_media(&request(&source, &target)).expect("offered animation format");
+            let converted = ExportDialogRequest {
+                input: crate::MediaInput::new(target.clone()),
+                kind: MediaKind::Image,
+                operations: vec![],
+                options: ExportOptions::default(),
+            }
+            .choices(&AtomicBool::new(false))
+            .expect("converted format choices");
+            assert_eq!(
+                converted.formats, expected,
+                "case {index}, source {format:?}"
+            );
+            assert_eq!(converted.formats[converted.initial], format);
+        }
+    }
+    fs::remove_dir_all(root).expect("owned fixtures");
+}

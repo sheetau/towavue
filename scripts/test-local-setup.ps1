@@ -246,6 +246,6 @@ Assert-True ([IO.File]::ReadAllText($extra) -eq 'Preserve this extra file.') 'Re
 foreach ($file in $binding.files) { Assert-File (Join-Path $payload $file.name) $file }
 Assert-File $setup $build.setup
 Assert-File $SourceCompanion $pins.companion
-Write-Output "PASS: 95 binary hashes, $($selected.Count) original mappings/bytes, $($links.Count) local links, $($names.Count) explicit install/delete paths, eight input rejections, five non-installing Setup probes and read-only packaged prerequisite inspection. Evidence: $trialRoot"
+Write-Output "PASS: 95 binary hashes, $($selected.Count) original mappings/bytes, $($links.Count) guide links (local targets and exact source URL, no network fetch), $($names.Count) explicit install/delete paths, eight input rejections, five non-installing Setup probes and read-only packaged prerequisite inspection. Evidence: $trialRoot"
 Write-Output "PASS: $($inventory.build_sources.Count) exact installer source files, source manifest, installed archive link/hash and four archive mutation refusals."
 Write-Output 'SKIP: actual application installation, native prerequisite UI/UAC/reboot and self-copy uninstall require an isolated supported-Windows environment. No application or redistributable was installed.'

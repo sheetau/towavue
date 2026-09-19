@@ -37,4 +37,24 @@ The installed guide links directly to the matching companion on the versioned Gi
 
 `scripts/test-release-materials.ps1` checks source archive equality against committed Git blobs, altered/missing/duplicate/extra source entries, dirty source, canonical version/path constraints, hashes, output overlap and reparse refusal. `test-candidate-material-archive.ps1` checks lossless deterministic ZIP packaging and interrupted-output protection. `test-release-signing.ps1` uses an isolated test key, never the production key.
 
-The builder runs `test-local-setup.ps1 -InputManifest <generated-manifest>` on its exact production result. This checks all payload and source bytes, original notice mappings, links, install/delete paths, source-archive mutations, invalid input refusal and read-only Setup/prerequisite/registration entry points. It does not install the application or VC runtime. Actual installed update/recovery, final media behavior and supported clean-machine evidence remain separate gates. No GitHub draft is created by this local assembly command yet.
+The builder runs `test-local-setup.ps1 -InputManifest <generated-manifest>` on its exact production result. This checks all payload and source bytes, original notice mappings, links, install/delete paths, source-archive mutations, invalid input refusal and read-only Setup/prerequisite/registration entry points. It does not install the application or VC runtime. Actual installed update/recovery, final media behavior and supported clean-machine evidence remain separate gates. No GitHub draft is created by the local assembly command.
+
+## Build and upload a draft
+
+After the final qualification gates in STATUS are satisfied, run `scripts/publish-release.ps1` with the same arguments as the builder. The command uses the authenticated GitHub CLI, requires the clean `main` branch and the `sheetau/towavue` origin, builds/verifies the artifacts, pushes the source without force, creates the exact version tag and uploads an unpublished stable draft. The committed notes come from `docs/releases/<version>.md`. It never publishes the release.
+
+Use `-CheckOnly` to build and perform read-only GitHub preflight without a push, tag or draft change. For an already completed build, use:
+
+```powershell
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.0-attempt1' -CheckOnly
+# After qualification, upload the same verified build:
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.0-attempt1'
+```
+
+The prepared build must match the current clean commit. Retrying that same command verifies the existing draft's source tag, ownership marker, stable channel, exact asset names, sizes and server SHA-256 digests. It uploads only missing assets. Identical uploaded files are kept; different files, unrelated/edited drafts and all published releases are refused. A known empty GitHub `starter` placeholder can be removed and retried only on the matching draft. There is no `--clobber`, forced tag update or published-asset replacement. If code or notes change, create and qualify a new build before attempting another draft; the command does not silently retarget an existing version.
+
+An incomplete draft says not to publish it. Normal release notes replace that notice only after every asset is verified. `DRAFT.json` is the local receipt for that completed draft; it records the release ID, commit and remote asset digests. The owner then publishes the stable release as latest in GitHub. Installed apps discover it on their next startup, manual or periodic update check; GitHub publication is not an immediate push to running apps.
+
+`test-release-publishing.ps1` exercises ownership, published/prerelease/tag refusal, missing-only retries, unchanged no-ops and empty-upload recovery without GitHub mutations. Add `-ArtifactDirectory <completed-build>` for signature/checksum/source-blob verification and seven actual local tampering/incomplete-asset controls. The production private key is not used by this test.
+
+The implementation follows the documented [draft creation options](https://cli.github.com/manual/gh_release_create), [upload behavior](https://cli.github.com/manual/gh_release_upload) and [release asset state/size/digest fields](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28). REST requests select API version 2022-11-28. Final remote execution and draft visibility still need their own evidence; pure planner tests are not an uploaded release.

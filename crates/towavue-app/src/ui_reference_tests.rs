@@ -68,6 +68,7 @@ fn media_reference_layouts_reach_the_gpu() {
                 for scene in [
                     "image",
                     "image-reading",
+                    "image-languages",
                     "image-export",
                     "image-export-wait",
                     "audio",
@@ -77,7 +78,7 @@ fn media_reference_layouts_reach_the_gpu() {
                 ] {
                     let context = fonts::test_context();
                     context.global_style_mut(chrome::style);
-                    if scene == "image-reading" {
+                    if matches!(scene, "image-reading" | "image-languages") {
                         fonts::install(&context);
                     }
                     let mut app = fixture(&self.root, &context, scene);
@@ -306,7 +307,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/reading/export status, compact/editing audio and compact/editing video at 100/125/200%; twenty-four full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/languages/reading/export status, compact/editing audio and compact/editing video at 100/125/200%; twenty-seven full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }
@@ -335,7 +336,15 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
     } else {
         MediaKind::Audio
     };
-    let names = if kind == MediaKind::Image {
+    let names = if scene == "image-languages" {
+        [
+            "日本語.png",
+            "한국어.png",
+            "العربية.png",
+            "हिन्दी.png",
+            "ภาษาไทย.png",
+        ]
+    } else if kind == MediaKind::Image {
         [
             "Landscape.png",
             "Study.png",

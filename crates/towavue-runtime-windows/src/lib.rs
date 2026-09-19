@@ -91,7 +91,7 @@ pub use file_operation::{
     FileRecycleReport, inspect_file_operation_source, start_file_operation, start_file_recycling,
 };
 pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
-pub use fonts::{japanese_ui_font, ui_symbol_font};
+pub use fonts::{UiFontFallback, japanese_ui_font, ui_font_fallbacks, ui_symbol_font};
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
 pub use image_color::{premultiplied_color_image, premultiplied_rgba_image};

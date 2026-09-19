@@ -102,7 +102,7 @@ fn audio_viewing_seek_and_editing_modes_preserve_live_state_without_hover_cards(
                 assert!((app.current_position().as_seconds_f64() - 4.0).abs() < 0.03);
                 assert!(!app.timeline_open);
                 assert_eq!(slider(&output).1.height(), bounds.height());
-                // The same vertical lift used by video enters editing without a seek.
+                // Upward compact dragging retains viewing mode; editing is explicit.
                 let before = app.current_position();
                 frame(&mut app, size, vec![pointer(point, true)]);
                 frame(
@@ -115,8 +115,10 @@ fn audio_viewing_seek_and_editing_modes_preserve_live_state_without_hover_cards(
                     size,
                     vec![pointer(point - egui::vec2(0.0, 40.0), false)],
                 );
-                assert!(app.timeline_open && app.timeline_is_visible());
+                assert!(!app.timeline_open && !app.timeline_is_visible());
                 assert_eq!(app.current_position(), before);
+                app.dispatch(CommandId::ToggleTimeline);
+                assert!(app.timeline_open && app.timeline_is_visible());
                 for _ in 0..4 {
                     frame(&mut app, size, vec![]);
                 }

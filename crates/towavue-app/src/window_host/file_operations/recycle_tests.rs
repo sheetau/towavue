@@ -231,6 +231,7 @@ fn recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open()
         ids.push((background, active));
     }
     let report = FileRecycleReport {
+        retained_source: None,
         before: snapshot(&root, &[source.clone(), next.clone()]),
         after: Some(snapshot(&root, std::slice::from_ref(&next))),
     };
@@ -253,6 +254,7 @@ fn recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open()
         }
         assert!(app.closed_tabs.is_empty());
         let empty = FileRecycleReport {
+            retained_source: None,
             before: snapshot(&root, std::slice::from_ref(&next)),
             after: Some(snapshot(&root, &[])),
         };
@@ -302,6 +304,7 @@ fn background_audio_recycling_preserves_modes_and_unrelated_dirty_foreground() {
     app.finish_file_recycling(
         &source,
         &FileRecycleReport {
+            retained_source: None,
             before,
             after: Some(after),
         },

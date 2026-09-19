@@ -738,3 +738,5 @@ fn retained_input_video_session_restarts_from_the_original_and_owns_its_lifetime
     })
     .expect("saved output remains intact");
 }
+
+mod recreation;

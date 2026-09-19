@@ -51,6 +51,10 @@ pub enum FileOperationError {
     NotCompleted,
     #[error("the file-operation worker stopped unexpectedly")]
     WorkerStopped,
+    #[error(
+        "file deletion failed and the original source cannot be verified: {message}; retained file directory: {directory}"
+    )]
+    RecoveryRequired { message: String, directory: PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,7 +174,17 @@ impl FileOperationSource {
     }
 
     pub(crate) fn verify(&self) -> Result<File, FileOperationError> {
-        let file = open_source(&self.path)?;
+        self.verify_with_share(FILE_SHARE_READ.0 | FILE_SHARE_DELETE.0)
+    }
+
+    // A snapshot copy must bind both its bytes and its path throughout CopyFile.
+    // Unlike rename/recycle verification, deny external renames as well as writes.
+    pub(crate) fn verify_for_copy(&self) -> Result<File, FileOperationError> {
+        self.verify_with_share(FILE_SHARE_READ.0)
+    }
+
+    fn verify_with_share(&self, share: u32) -> Result<File, FileOperationError> {
+        let file = open_source_with_share(&self.path, share)?;
         if Stamp::read(&file)? != self.stamp {
             return Err(FileOperationError::SourceChanged);
         }
@@ -179,6 +193,10 @@ impl FileOperationSource {
 }
 
 fn open_source(path: &Path) -> Result<File, FileOperationError> {
+    open_source_with_share(path, FILE_SHARE_READ.0 | FILE_SHARE_DELETE.0)
+}
+
+fn open_source_with_share(path: &Path, share: u32) -> Result<File, FileOperationError> {
     // Do not dereference a selected file symlink. Parent folders still follow
     // normal Windows resolution. Deny competing data writers during the action,
     // but permit Shell/MoveFileEx to rename or recycle the verified file.
@@ -189,7 +207,7 @@ fn open_source(path: &Path) -> Result<File, FileOperationError> {
     Ok(OpenOptions::new()
         .read(true)
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
-        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_DELETE.0)
+        .share_mode(share)
         .open(path)?)
 }
 
@@ -215,12 +233,31 @@ pub fn start_file_operation(
 pub struct FileRecycleReport {
     pub before: towavue_core::FolderSnapshot,
     pub after: Option<towavue_core::FolderSnapshot>,
+    pub retained_source: Option<crate::RetainedSource>,
 }
 
 /// Enumerate on the Shell worker before and after the accepted recycle. A failed
 /// post-delete enumeration must not turn a completed deletion into a failed mutation.
 pub fn start_file_recycling(
     source: FileOperationSource,
+    notify: impl FnOnce(Result<FileRecycleReport, FileOperationError>) + Send + 'static,
+) -> io::Result<()> {
+    start_recycling(source, false, notify)
+}
+
+/// Retain an immutable copy before recycling a file still owned by a document.
+/// Failure to retain leaves the source untouched. The report owns the copy until
+/// the final document/reader drops it; no recycle-bin lookup is needed afterward.
+pub fn start_file_recycling_retaining_source(
+    source: FileOperationSource,
+    notify: impl FnOnce(Result<FileRecycleReport, FileOperationError>) + Send + 'static,
+) -> io::Result<()> {
+    start_recycling(source, true, notify)
+}
+
+fn start_recycling(
+    source: FileOperationSource,
+    retain: bool,
     notify: impl FnOnce(Result<FileRecycleReport, FileOperationError>) + Send + 'static,
 ) -> io::Result<()> {
     worker(
@@ -234,15 +271,44 @@ pub fn start_file_recycling(
             let before = order
                 .snapshot(folder)
                 .map_err(|error| io::Error::other(error.to_string()))?;
-            perform(&source, FileOperationAction::Recycle)?;
+            let retained_source = retain
+                .then(|| crate::RetainedSource::capture(&source))
+                .transpose()?;
+            // Keep ownership outside the mutation's unwind boundary. A failed
+            // or panicking native call may already have removed the source.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                perform(&source, FileOperationAction::Recycle)
+            }))
+            .unwrap_or(Err(FileOperationError::WorkerStopped));
+            finish_retained_recycle(&source, retained_source.as_ref(), result)?;
             let after =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| order.snapshot(folder)))
                     .ok()
                     .and_then(Result::ok);
-            Ok(FileRecycleReport { before, after })
+            Ok(FileRecycleReport {
+                before,
+                after,
+                retained_source,
+            })
         },
         notify,
     )
+}
+
+pub(crate) fn finish_retained_recycle(
+    source: &FileOperationSource,
+    retained: Option<&crate::RetainedSource>,
+    result: Result<FileOperationOutcome, FileOperationError>,
+) -> Result<(), FileOperationError> {
+    match result {
+        Err(error) if retained.is_some() && source.verify().is_err() => {
+            Err(FileOperationError::RecoveryRequired {
+                message: error.to_string(),
+                directory: retained.expect("retained input").preserve_for_recovery(),
+            })
+        }
+        result => result.map(|_| ()),
+    }
 }
 
 fn worker<T: Send + 'static>(

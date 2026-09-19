@@ -1,12 +1,12 @@
-use crate::SavedSource;
+use crate::RetainedSource;
 use std::path::{Path, PathBuf};
 
-/// A logical media path plus an optional retained, immutable pre-save input.
+/// A logical media path plus an optional retained, immutable original input.
 /// Clone this into every worker/session that can outlive its tab's current state.
 #[derive(Clone)]
 pub struct MediaInput {
     logical: PathBuf,
-    original: Option<SavedSource>,
+    original: Option<RetainedSource>,
 }
 impl MediaInput {
     pub fn new(path: PathBuf) -> Self {
@@ -15,10 +15,10 @@ impl MediaInput {
             original: None,
         }
     }
-    pub fn retained(path: PathBuf, original: SavedSource) -> Self {
+    pub fn retained(path: PathBuf, original: impl Into<RetainedSource>) -> Self {
         Self {
             logical: path,
-            original: Some(original),
+            original: Some(original.into()),
         }
     }
     pub fn logical_path(&self) -> &Path {
@@ -27,7 +27,7 @@ impl MediaInput {
     pub fn path(&self) -> &Path {
         self.original
             .as_ref()
-            .map_or(self.logical.as_path(), SavedSource::original_path)
+            .map_or(self.logical.as_path(), RetainedSource::original_path)
     }
 }
 impl std::fmt::Debug for MediaInput {

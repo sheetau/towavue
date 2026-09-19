@@ -18,8 +18,8 @@ mod file_details;
 mod file_operation;
 mod source_save;
 pub use source_save::{
-    PreparedSourceSave, SavedSource, SourceSaveError, SourceSaveEvent, SourceSaveJob,
-    commit_source_save, prepare_source_save,
+    PreparedSourceSave, RetainedSource, SavedSource, SourceSaveError, SourceSaveEvent,
+    SourceSaveJob, commit_source_save, prepare_source_recreation, prepare_source_save,
 };
 mod file_search;
 mod fonts;
@@ -89,6 +89,7 @@ pub use file_details::FileDetails;
 pub use file_operation::{
     FileOperationAction, FileOperationError, FileOperationOutcome, FileOperationSource,
     FileRecycleReport, inspect_file_operation_source, start_file_operation, start_file_recycling,
+    start_file_recycling_retaining_source,
 };
 pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
 pub use fonts::{UiFontFallback, japanese_ui_font, ui_font_fallbacks, ui_symbol_font};

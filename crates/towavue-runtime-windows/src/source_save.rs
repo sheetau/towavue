@@ -51,14 +51,35 @@ impl SourceSaveJob {
         options: ExportOptions,
         notify: impl Fn(SourceSaveEvent) + Send + Sync + 'static,
     ) -> io::Result<Self> {
+        Self::spawn(expected, None, request, options, notify)
+    }
+
+    pub fn start_recreating(
+        expected: FileOperationSource,
+        original: RetainedSource,
+        request: ExportRequest,
+        options: ExportOptions,
+        notify: impl Fn(SourceSaveEvent) + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        Self::spawn(expected, Some(original), request, options, notify)
+    }
+
+    fn spawn(
+        expected: FileOperationSource,
+        original: Option<RetainedSource>,
+        request: ExportRequest,
+        options: ExportOptions,
+        notify: impl Fn(SourceSaveEvent) + Send + Sync + 'static,
+    ) -> io::Result<Self> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let worker_cancelled = Arc::clone(&cancelled);
         let thread = std::thread::Builder::new()
             .name("towavue-save-prepare".into())
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    prepare_source_save(
+                    prepare(
                         expected,
+                        original,
                         request,
                         options,
                         &worker_cancelled,
@@ -100,13 +121,17 @@ struct Files {
 
 impl Files {
     fn new(target: &Path) -> io::Result<Arc<Self>> {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
         let parent = target
             .parent()
             .ok_or_else(|| io::Error::other("source folder unavailable"))?;
+        Self::under(target, parent, "save")
+    }
+
+    fn under(target: &Path, parent: &Path, purpose: &str) -> io::Result<Arc<Self>> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
         loop {
             let directory = parent.join(format!(
-                ".towavue-save-{}-{}",
+                ".towavue-{purpose}-{}-{}",
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
@@ -154,6 +179,7 @@ pub struct PreparedSourceSave {
     candidate: FileOperationSource,
     files: Arc<Files>,
     outcome: ExportOutcome,
+    recreation: Option<RetainedSource>,
 }
 
 struct Original {
@@ -162,6 +188,66 @@ struct Original {
     _lease: File,
     source: FileOperationSource,
     _files: Arc<Files>,
+}
+
+/// Shared immutable bytes for an open document after Save or file deletion.
+/// Capture is blocking and belongs on a worker, before accepting deletion.
+#[derive(Clone)]
+pub struct RetainedSource(Arc<Original>);
+
+impl RetainedSource {
+    #[expect(
+        clippy::permissions_set_readonly_false,
+        reason = "Windows-only: clear FILE_ATTRIBUTE_READONLY on the owned copy for final cleanup; no Unix mode bits"
+    )]
+    pub fn capture(expected: &FileOperationSource) -> Result<Self, FileOperationError> {
+        let _source_lease = expected.verify_for_copy()?;
+        let files = Files::under(expected.path(), &std::env::temp_dir(), "retained")?;
+        // Windows CopyFile also keeps the source's named streams. The strong
+        // source lease prevents a path swap or write during the entire copy.
+        fs::copy(expected.path(), &files.original)?;
+        let mut permissions = fs::metadata(&files.original)?.permissions();
+        if permissions.readonly() {
+            permissions.set_readonly(false);
+            fs::set_permissions(&files.original, permissions)?;
+        }
+        let source = FileOperationSource::capture(&files.original)?;
+        let lease = source.verify_for_copy()?;
+        expected.verify()?;
+        Ok(Self(Arc::new(Original {
+            _lease: lease,
+            source,
+            _files: files,
+        })))
+    }
+
+    pub(crate) fn preserve_for_recovery(&self) -> PathBuf {
+        self.0._files.preserve.store(true, Ordering::Relaxed);
+        self.0._files.directory.clone()
+    }
+
+    pub fn original_path(&self) -> &Path {
+        self.0.source.path()
+    }
+
+    pub fn original_source(&self) -> &FileOperationSource {
+        &self.0.source
+    }
+}
+
+impl std::fmt::Debug for RetainedSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_tuple("RetainedSource")
+            .field(&self.original_path())
+            .finish()
+    }
+}
+
+impl From<SavedSource> for RetainedSource {
+    fn from(saved: SavedSource) -> Self {
+        Self(saved.original)
+    }
 }
 
 /// Keeps the pre-save source available to non-destructive Undo/other hosted owners.
@@ -174,6 +260,10 @@ pub struct SavedSource {
 }
 
 impl SavedSource {
+    pub fn retained_source(&self) -> RetainedSource {
+        RetainedSource(Arc::clone(&self.original))
+    }
+
     pub fn original_path(&self) -> &Path {
         self.original.source.path()
     }
@@ -191,6 +281,43 @@ impl SavedSource {
 /// The existing export path keeps its source-clobber rejection unchanged.
 pub fn prepare_source_save(
     expected: FileOperationSource,
+    request: ExportRequest,
+    options: ExportOptions,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    analyzing: &(impl Fn(Duration) + Sync),
+) -> Result<PreparedSourceSave, SourceSaveError> {
+    prepare(
+        expected, None, request, options, cancelled, progress, analyzing,
+    )
+}
+
+/// Prepare a Save that recreates a deleted document at its original path.
+/// The expected snapshot identifies that logical path, not an existing target;
+/// encoding must read the retained original and publication must never replace.
+pub fn prepare_source_recreation(
+    expected: FileOperationSource,
+    original: RetainedSource,
+    request: ExportRequest,
+    options: ExportOptions,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    analyzing: &(impl Fn(Duration) + Sync),
+) -> Result<PreparedSourceSave, SourceSaveError> {
+    prepare(
+        expected,
+        Some(original),
+        request,
+        options,
+        cancelled,
+        progress,
+        analyzing,
+    )
+}
+
+fn prepare(
+    expected: FileOperationSource,
+    recreation: Option<RetainedSource>,
     mut request: ExportRequest,
     options: ExportOptions,
     cancelled: &AtomicBool,
@@ -203,13 +330,37 @@ pub fn prepare_source_save(
     if cancelled.load(Ordering::Relaxed) {
         return Err(ExportError::Cancelled.into());
     }
-    let _source_lease = expected.verify()?;
+    let _source_lease = if let Some(original) = &recreation {
+        if request.source != original.original_path() {
+            return Err(SourceSaveError::InvalidRequest);
+        }
+        require_missing(expected.path())?;
+        original.original_source().verify()?
+    } else {
+        expected.verify()?
+    };
     let files = Files::new(expected.path())?;
     request.target = files.prepared.clone();
-    let outcome = crate::export::export_options_cancellable(
-        &request, options, cancelled, progress, analyzing,
-    )?;
-    expected.verify()?;
+    let outcome = if recreation.is_some()
+        && request.operations.is_empty()
+        && options == ExportOptions::default()
+    {
+        // Restore an untouched document byte-for-byte, including container data
+        // and named streams. A default Save must not add a lossy codec generation.
+        fs::copy(&request.source, &request.target)?;
+        ExportOutcome {
+            used_hardware_encoder: false,
+        }
+    } else {
+        crate::export::export_options_cancellable(
+            &request, options, cancelled, progress, analyzing,
+        )?
+    };
+    if recreation.is_some() {
+        require_missing(expected.path())?;
+    } else {
+        expected.verify()?;
+    }
     if cancelled.load(Ordering::Relaxed) {
         return Err(ExportError::Cancelled.into());
     }
@@ -219,7 +370,19 @@ pub fn prepare_source_save(
         candidate,
         files,
         outcome,
+        recreation,
     })
+}
+
+fn require_missing(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "the deleted document's path is occupied; use Export as or choose another location",
+        )),
+    }
 }
 
 /// One accepted, non-cancellable publication. The callback owns either the retained
@@ -231,7 +394,12 @@ pub fn commit_source_save(
     std::thread::Builder::new()
         .name("towavue-source-save".into())
         .spawn(move || {
-            let files = Arc::clone(&prepared.files);
+            let files = Arc::clone(
+                prepared
+                    .recreation
+                    .as_ref()
+                    .map_or(&prepared.files, |original| &original.0._files),
+            );
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| commit(prepared)))
                     .unwrap_or_else(|_| {
@@ -247,6 +415,9 @@ pub fn commit_source_save(
 }
 
 fn commit(prepared: PreparedSourceSave) -> Result<SavedSource, SourceSaveError> {
+    if prepared.recreation.is_some() {
+        return commit_recreation(prepared);
+    }
     // Both leases deny writes while identities are checked. ReplaceFile opens the
     // files without sharing; release our leases immediately before its call. This
     // revalidation is not a filesystem compare-and-swap against external renamers.
@@ -257,6 +428,36 @@ fn commit(prepared: PreparedSourceSave) -> Result<SavedSource, SourceSaveError> 
     prepared.files.preserve.store(true, Ordering::Relaxed);
     let result = replace(&prepared.expected, &prepared.files);
     finish_publication(prepared, result)
+}
+
+fn commit_recreation(prepared: PreparedSourceSave) -> Result<SavedSource, SourceSaveError> {
+    let original = prepared.recreation.as_ref().expect("recreation input");
+    let _original_lease = original.original_source().verify()?;
+    require_missing(prepared.expected.path())?;
+    let candidate = prepared.candidate.verify()?;
+    drop(candidate);
+    // Same-volume rename without replacement closes the destination-creation
+    // race. A late file, directory or reparse point wins without being modified.
+    restore_missing(&prepared.files.prepared, prepared.expected.path())?;
+    // A plain rename must preserve length, write time and same-volume file ID;
+    // unlike ReplaceFile, it does not merge timestamps or named streams.
+    let current = prepared.candidate.after_move(prepared.expected.path());
+    match current {
+        Ok(current) => Ok(SavedSource {
+            original: Arc::clone(&original.0),
+            current,
+            outcome: prepared.outcome,
+        }),
+        Err(error) => {
+            // Publication happened but its final identity cannot be certified.
+            // Preserve the immutable original even if the caller drops its owner.
+            original.0._files.preserve.store(true, Ordering::Relaxed);
+            Err(SourceSaveError::RecoveryRequired {
+                message: error.to_string(),
+                directory: original.0._files.directory.clone(),
+            })
+        }
+    }
 }
 
 fn replace(expected: &FileOperationSource, files: &Files) -> io::Result<()> {

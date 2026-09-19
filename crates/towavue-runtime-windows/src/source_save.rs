@@ -1,5 +1,7 @@
 //! Two-phase source saving. Preparation never changes the target. Publication
 //! requires the caller to quiesce every reader and revalidate its tab/edit owner.
+mod pasted;
+
 use crate::{
     ExportError, ExportOptions, ExportOutcome, ExportOutput, ExportRequest, FileOperationError,
     FileOperationSource,

@@ -28,6 +28,7 @@ mod image_clipboard;
 mod image_color;
 mod image_edits;
 mod image_loader;
+mod image_paste;
 mod input;
 mod latest_task;
 mod launch;
@@ -104,6 +105,7 @@ pub use image_loader::verification::{
     Outcome as ImageDecodeOutcome,
 };
 pub use image_loader::{ImageLoader, LoadedImagePreview, LoadedImages};
+pub use image_paste::{ImagePasteJob, PastedImage};
 pub use input::{WheelScrollSettings, configure_mouse_input, wheel_scroll_settings};
 pub use latest_task::LatestTask;
 pub use orientation::VideoOrientation;

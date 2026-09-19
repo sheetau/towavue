@@ -67,6 +67,7 @@ fn media_reference_layouts_reach_the_gpu() {
             for density in [1.0, 1.25, 2.0] {
                 for scene in [
                     "image",
+                    "image-deleted",
                     "image-reading",
                     "image-languages",
                     "image-filmstrip-menu",
@@ -91,6 +92,16 @@ fn media_reference_layouts_reach_the_gpu() {
                         context.enable_accesskit();
                     }
                     let mut app = fixture(&self.root, &context, scene);
+                    if scene == "image-deleted" {
+                        let id = app.displayed_tab.expect("document");
+                        app.deleted_sources.insert(
+                            id,
+                            source_backing::DeletedSource {
+                                path: app.path.clone().expect("logical path"),
+                                before: Arc::new(app.folder_snapshot.clone().expect("listing")),
+                            },
+                        );
+                    }
                     if scene == "image-filmstrip-menu" {
                         app.filmstrip_open = true;
                     } else if scene == "image-gallery-menu" {
@@ -239,6 +250,11 @@ fn media_reference_layouts_reach_the_gpu() {
                                 "Delete file…"
                             };
                             assert!(ui.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)), "scope action is painted");
+                        }
+                        if frame >= 2 && scene == "image-deleted" {
+                            assert!(ui.shapes.iter().any(|shape| matches!(&shape.shape,
+                                egui::Shape::Text(text) if text.galley.text().starts_with("(deleted) "))),
+                                "deleted prefix is painted in the status path");
                         }
                         if frame >= 2 && scene.starts_with("image-export") {
                             let text = ui
@@ -408,7 +424,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; forty-two full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; forty-five full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }

@@ -60,6 +60,9 @@ fn pending_confirmation(host: &mut WindowHost, owner: WindowKey) -> u64 {
         owner,
         serial,
         source: path,
+        expected: source.clone(),
+        waiting_since: None,
+        retain_copy: false,
         action: Some((source, action)),
         suppress_confirmation: false,
     });
@@ -73,6 +76,7 @@ fn wait(host: &mut WindowHost) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while host.file_operation.is_some() {
         super::super::tests::drain_captured(host);
+        host.advance_file_operation();
         assert!(Instant::now() < deadline, "recycle completion");
         std::thread::sleep(Duration::from_millis(2));
     }
@@ -198,13 +202,17 @@ fn recycle_failure_and_timeline_gate_preserve_source_and_dirty_history() {
 }
 
 #[test]
-fn recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open() {
+fn recycle_completion_retains_duplicate_documents_edits_and_navigation() {
     let Some(root) = crate::tests::isolated_test_root(
-        "window_host::file_operations::recycle_tests::recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open",
+        "window_host::file_operations::recycle_tests::recycle_completion_retains_duplicate_documents_edits_and_navigation",
     ) else {
         return;
     };
     let source = root.join("middle.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let expected = FileOperationSource::capture(&source).expect("source identity");
+    let retained =
+        towavue_runtime_windows::RetainedSource::capture(&expected).expect("retained bytes");
     let next = root.join("next.bmp");
     crate::tab_transfer::tests::bitmap(&next);
     let mut host = WindowHost::new(None, None).expect("host");
@@ -231,15 +239,16 @@ fn recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open()
         ids.push((background, active));
     }
     let report = FileRecycleReport {
-        retained_source: None,
+        retained_source: Some(retained),
         before: snapshot(&root, &[source.clone(), next.clone()]),
         after: Some(snapshot(&root, std::slice::from_ref(&next))),
     };
+    std::fs::remove_file(&source).expect("simulate completed recycle");
     for (key, (background, active)) in keys.iter().zip(&ids) {
         let app = host.windows.get_mut(key).expect("app");
-        app.finish_file_recycling(&source, &report);
+        app.finish_file_recycling(&expected, &report);
         assert_eq!(app.tabs.active_id(), Some(*active));
-        assert_eq!(app.path.as_ref(), Some(&next));
+        assert_eq!(app.path.as_ref(), Some(&source));
         for id in [background, active] {
             assert_eq!(
                 app.tabs
@@ -247,25 +256,46 @@ fn recycle_completion_retargets_duplicate_tabs_and_leaves_an_empty_window_open()
                     .expect("same tab")
                     .target
                     .current_path(),
-                next
+                source
             );
-            assert!(app.edits.get(id).is_none_or(|history| !history.is_dirty()));
-            assert!(!app.export_paths.contains_key(id));
+            assert!(app.edits[id].is_dirty());
+            assert!(app.export_paths.contains_key(id));
+            assert!(app.deleted_sources.contains_key(id));
+            assert_eq!(
+                std::fs::read(app.source_backings[id].original_path()).expect("retained bytes"),
+                std::fs::read(&next).expect("same fixture")
+            );
         }
         assert!(app.closed_tabs.is_empty());
-        let empty = FileRecycleReport {
-            retained_source: None,
-            before: snapshot(&root, std::slice::from_ref(&next)),
-            after: Some(snapshot(&root, &[])),
-        };
-        app.finish_file_recycling(&next, &empty);
-        assert!(app.tabs.tabs().is_empty());
+        assert_eq!(app.deleted_path_prefix(), "(deleted) ");
+        assert!(app.command_context().media_kind.is_some());
         assert!(
-            app.tabs.gallery().is_some(),
-            "unrelated Gallery is retained"
+            !towavue_core::command_definitions()
+                .iter()
+                .find(|command| command.id == CommandId::DeleteFile)
+                .expect("delete command")
+                .is_enabled(app.command_context())
         );
-        assert!(app.path.is_none());
-        assert!(app.session.is_none());
+        assert_eq!(
+            app.folder_snapshot
+                .as_ref()
+                .expect("real listing")
+                .items
+                .len(),
+            1
+        );
+        assert_eq!(
+            app.navigation_snapshot()
+                .expect("held position")
+                .items
+                .len(),
+            2
+        );
+        app.navigate(true, true);
+        assert!(
+            app.pending_guard.is_some(),
+            "leaving still protects dirty edits"
+        );
         assert!(!app.exit_requested);
     }
 }
@@ -278,6 +308,10 @@ fn background_audio_recycling_preserves_modes_and_unrelated_dirty_foreground() {
         return;
     };
     let source = root.join("source.wav");
+    std::fs::write(&source, b"owned audio document").expect("source");
+    let expected = FileOperationSource::capture(&source).expect("source identity");
+    let retained =
+        towavue_runtime_windows::RetainedSource::capture(&expected).expect("retained bytes");
     let next = root.join("next.wav");
     let image = root.join("view.bmp");
     let mut host = WindowHost::new(None, None).expect("host");
@@ -302,9 +336,9 @@ fn background_audio_recycling_preserves_modes_and_unrelated_dirty_foreground() {
     let mut after = before.clone();
     after.items.retain(|item| item.path != source);
     app.finish_file_recycling(
-        &source,
+        &expected,
         &FileRecycleReport {
-            retained_source: None,
+            retained_source: Some(retained),
             before,
             after: Some(after),
         },
@@ -318,13 +352,14 @@ fn background_audio_recycling_preserves_modes_and_unrelated_dirty_foreground() {
             .expect("retained audio tab")
             .target
             .current_path(),
-        next
+        source
     );
     let queue = &app.audio_queues[&audio].order;
     assert!(queue.shuffled());
     assert_eq!(queue.repeat(), towavue_core::RepeatMode::One);
     assert_eq!(queue.next(&next, true), Some(next.clone()));
-    assert_eq!(queue.next(&source, false), None);
+    assert_eq!(queue.next(&source, true), Some(source.clone()));
+    assert!(app.deleted_sources.contains_key(&audio));
 }
 
 #[test]
@@ -361,10 +396,20 @@ fn native_recycle_completion_persists_confirmation_choice_and_does_not_close_las
     wait(&mut host);
     assert!(!source.exists());
     let app = &host.windows[&owner];
-    assert!(app.tabs.is_empty() && app.path.is_none());
+    assert_eq!(app.path.as_ref(), Some(&source));
+    assert!(app.current_source_deleted());
+    assert!(app.media_input(&source).path().exists());
     assert!(!app.exit_requested);
     assert!(!app.file_operations.busy());
     assert!(host.delete_confirmation_suppressed);
+    let original = std::fs::read(app.media_input(&source).path()).expect("original retained bytes");
+    host.windows
+        .get_mut(&owner)
+        .expect("owner")
+        .dispatch(CommandId::Save);
+    finish_save(&mut host, owner);
+    assert_eq!(std::fs::read(&source).expect("recreated file"), original);
+    assert!(!host.windows[&owner].current_source_deleted());
     let mut restarted = WindowHost::new(None, None).expect("reloaded preference");
     assert!(restarted.delete_confirmation_suppressed);
     let second = media.join("second.bmp");
@@ -395,4 +440,383 @@ fn native_recycle_completion_persists_confirmation_choice_and_does_not_close_las
     eprintln!(
         "PASS native recycle: two owned files, real Shell mutations and final enumeration, last window retained, duplicate confirmation ignored, opt-out survives new host construction and bypasses the next clean prompt through command dispatch; first native prompt response injected"
     );
+}
+
+fn finish_save(host: &mut WindowHost, owner: WindowKey) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        super::super::tests::drain_captured(host);
+        host.advance_source_save();
+        if host.source_save.is_none() && host.windows[&owner].active_export.is_none() {
+            break;
+        }
+        assert!(Instant::now() < deadline, "recreation completion");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn deleted_document_save_rejects_collision_and_recreates_edits_without_losing_undo() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::recycle_tests::deleted_document_save_rejects_collision_and_recreates_edits_without_losing_undo",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let expected = FileOperationSource::capture(&source).expect("source");
+    let retained = towavue_runtime_windows::RetainedSource::capture(&expected).expect("copy");
+    let original = std::fs::read(&source).expect("original");
+    let mut host = WindowHost::new(None, None).expect("host");
+    let owner = source_app(&mut host, &source);
+    let id = host.windows[&owner].displayed_tab.expect("tab");
+    std::fs::remove_file(&source).expect("simulate completed recycle");
+    let app = host.windows.get_mut(&owner).expect("app");
+    app.finish_file_recycling(
+        &expected,
+        &FileRecycleReport {
+            retained_source: Some(retained),
+            before: snapshot(&root, std::slice::from_ref(&source)),
+            after: Some(snapshot(&root, &[])),
+        },
+    );
+    app.edits
+        .entry(id)
+        .or_default()
+        .push(EditOperation::RotateClockwise, MediaKind::Image);
+    std::fs::write(&source, b"another application's file").expect("collision");
+    app.dispatch(CommandId::Save);
+    finish_save(&mut host, owner);
+    let app = host.windows.get_mut(&owner).expect("app");
+    assert!(app.export_error.take().is_some());
+    assert!(app.current_source_deleted());
+    assert_eq!(
+        std::fs::read(&source).expect("collision intact"),
+        b"another application's file"
+    );
+    std::fs::remove_file(&source).expect("remove owned collision");
+    app.dispatch(CommandId::Save);
+    finish_save(&mut host, owner);
+    let app = host.windows.get_mut(&owner).expect("app");
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert!(!app.current_source_deleted());
+    assert!(!app.edits[&id].is_dirty());
+    assert_ne!(std::fs::read(&source).expect("edited file"), original);
+    assert_eq!(
+        std::fs::read(app.media_input(&source).path()).expect("original input"),
+        original
+    );
+    assert!(app.edits.get_mut(&id).expect("history").undo());
+    assert!(app.edits[&id].is_dirty());
+    let current = app.source_versions[&id].clone().expect("saved version");
+    let earliest = app.media_input(&source).path().to_owned();
+    std::fs::remove_file(&source).expect("simulate recycling saved file");
+    app.finish_file_recycling(
+        &current,
+        &FileRecycleReport {
+            retained_source: None,
+            before: snapshot(&root, std::slice::from_ref(&source)),
+            after: Some(snapshot(&root, &[])),
+        },
+    );
+    assert_eq!(app.media_input(&source).path(), earliest);
+    app.dispatch(CommandId::Save);
+    finish_save(&mut host, owner);
+    assert!(host.windows[&owner].export_error.is_none());
+    assert_eq!(
+        std::fs::read(&source).expect("recreated original after undo"),
+        original
+    );
+    assert!(!host.windows[&owner].current_source_deleted());
+}
+
+#[test]
+fn recycling_waits_for_real_readers_and_times_out_without_deleting() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::recycle_tests::recycling_waits_for_real_readers_and_times_out_without_deleting",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let mut host = WindowHost::new(None, None).expect("host");
+    let owner = source_app(&mut host, &source);
+    let serial = pending_confirmation(&mut host, owner);
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let path = source.clone();
+    host.windows[&owner].thumbnail_worker.submit(move |_| {
+        let _reader = std::fs::File::open(path).expect("reader");
+        ready_tx.send(()).expect("ready");
+        release_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("release");
+    });
+    ready_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("running reader");
+    host.finish_delete_confirmation(
+        owner,
+        serial,
+        Ok(DeleteConfirmation {
+            confirmed: true,
+            dont_ask_again: false,
+        }),
+    );
+    assert!(
+        host.file_operation
+            .as_ref()
+            .expect("draining")
+            .action
+            .is_some()
+    );
+    assert!(source.exists());
+    host.file_operation
+        .as_mut()
+        .expect("draining")
+        .waiting_since = Some(Instant::now() - Duration::from_secs(11));
+    host.advance_file_operation();
+    assert!(host.file_operation.is_none());
+    assert!(source.exists());
+    assert!(!host.windows[&owner].source_save.frozen);
+    assert!(host.windows[&owner].deleted_sources.is_empty());
+    release_tx.send(()).expect("release owned reader");
+}
+
+#[test]
+fn recycling_rejects_stale_unbacked_documents_before_mutation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::recycle_tests::recycling_rejects_stale_unbacked_documents_before_mutation",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let mut host = WindowHost::new(None, None).expect("host");
+    let owner = source_app(&mut host, &source);
+    let id = host.windows[&owner].displayed_tab.expect("tab");
+    host.windows
+        .get_mut(&owner)
+        .expect("app")
+        .source_versions
+        .insert(id, None);
+    let serial = pending_confirmation(&mut host, owner);
+    host.finish_delete_confirmation(
+        owner,
+        serial,
+        Ok(DeleteConfirmation {
+            confirmed: true,
+            dont_ask_again: false,
+        }),
+    );
+    assert!(host.file_operation.is_none());
+    assert!(source.exists());
+    assert!(host.windows[&owner].deleted_sources.is_empty());
+}
+
+#[test]
+#[ignore = "recycles an owned video through the real host and Shell with two native paused readers"]
+fn native_recycle_video_retains_hosted_readers_positions_and_recreates_edits() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::recycle_tests::native_recycle_video_retains_hosted_readers_positions_and_recreates_edits",
+    ) else {
+        return;
+    };
+    let source = root.join("source.mp4");
+    assert!(
+        std::process::Command::new(
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe")
+        )
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=64x48:rate=4:duration=2",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:v",
+            "mpeg4"
+        ])
+        .arg(&source)
+        .status()
+        .expect("fixture video")
+        .success()
+    );
+    struct Trial {
+        source: PathBuf,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            let renderer = FrameRenderer::new(&window).expect("D3D11");
+            let mut host = WindowHost::new(None, None).expect("host");
+            let owner = source_app(&mut host, &self.source);
+            let id = host.windows[&owner].displayed_tab.expect("tab");
+            let other = host.add_application(None).expect("other owner");
+            let app = host.windows.get_mut(&other).expect("other app");
+            let other_id = app.tabs.open_new(self.source.clone(), MediaKind::Video);
+            app.path = Some(self.source.clone());
+            app.displayed_tab = Some(other_id);
+            app.state = PlaybackState::Paused;
+            for (key, tab) in [(owner, id), (other, other_id)] {
+                let app = host.windows.get_mut(&key).expect("app");
+                app.tabs
+                    .get_mut(tab)
+                    .expect("tab")
+                    .target
+                    .set_current_path(self.source.clone(), MediaKind::Video);
+                app.media_kind = Some(MediaKind::Video);
+                app.source_versions.insert(
+                    tab,
+                    Some(FileOperationSource::capture(&self.source).expect("loaded version")),
+                );
+                let mut session = PlaybackSession::open_input(
+                    app.media_input(&self.source),
+                    renderer.graphics_device(),
+                    0.0,
+                    1.0,
+                    Default::default(),
+                    true,
+                    |_| {},
+                )
+                .expect("native session");
+                let position = if key == owner {
+                    MediaTime::ZERO
+                } else {
+                    MediaTime::from_nanoseconds(500_000_000)
+                };
+                if position != MediaTime::ZERO {
+                    session
+                        .set_rate_at(position, 1.0, false)
+                        .expect("paused seek");
+                }
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while session.pending_video_time().is_none() {
+                    assert!(Instant::now() < deadline, "initial frame");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                assert!(session.advance_pending());
+                app.generation = session.generation();
+                app.clock = Some(PlaybackClock::paused(position, 1.0));
+                app.session = Some(session);
+            }
+            let app = host.windows.get_mut(&owner).expect("owner");
+            app.edits.entry(id).or_default().push(
+                EditOperation::Crop(PixelCrop {
+                    x: 0,
+                    y: 0,
+                    width: 32,
+                    height: 48,
+                }),
+                MediaKind::Video,
+            );
+            let serial = pending_confirmation(&mut host, owner);
+            host.finish_delete_confirmation(
+                owner,
+                serial,
+                Ok(DeleteConfirmation {
+                    confirmed: true,
+                    dont_ask_again: false,
+                }),
+            );
+            wait(&mut host);
+            assert!(!self.source.exists());
+            for (key, tab) in [(owner, id), (other, other_id)] {
+                let app = host.windows.get_mut(&key).expect("held owner");
+                assert!(app.deleted_sources.contains_key(&tab));
+                let session = app.session.as_mut().expect("held session");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while session.pending_video_time().is_none() {
+                    assert!(Instant::now() < deadline, "deleted video frame");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                assert!(session.advance_pending());
+                assert_eq!(
+                    session
+                        .current_video_snapshot()
+                        .expect("frame")
+                        .source_path(),
+                    app.source_backings[&tab].original_path()
+                );
+                assert_eq!(app.state, PlaybackState::Paused);
+                assert_eq!(
+                    app.current_position(),
+                    if key == owner {
+                        MediaTime::ZERO
+                    } else {
+                        MediaTime::from_nanoseconds(500_000_000)
+                    }
+                );
+            }
+            host.windows
+                .get_mut(&owner)
+                .expect("owner")
+                .dispatch(CommandId::Save);
+            finish_save(&mut host, owner);
+            assert!(
+                host.windows
+                    .values()
+                    .all(|app| app.deleted_sources.is_empty())
+            );
+            assert!(
+                host.windows[&owner].export_error.is_none(),
+                "{:?}",
+                host.windows[&owner].export_error
+            );
+            for (key, tab) in [(owner, id), (other, other_id)] {
+                let app = host.windows.get_mut(&key).expect("app");
+                let backup = app.source_backings[&tab].original_path().to_owned();
+                let session = app.session.as_mut().expect("resumed session");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while session.pending_video_time().is_none() {
+                    assert!(Instant::now() < deadline, "resumed frame");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                assert!(session.advance_pending());
+                assert_eq!(session.video_geometry(), Some((64, 48, 1.0)));
+                assert_eq!(
+                    session
+                        .current_video_snapshot()
+                        .expect("frame")
+                        .source_path(),
+                    backup
+                );
+                assert_eq!(app.state, PlaybackState::Paused);
+                assert_eq!(
+                    app.current_position(),
+                    if key == owner {
+                        MediaTime::ZERO
+                    } else {
+                        MediaTime::from_nanoseconds(500_000_000)
+                    }
+                );
+            }
+            let mut frames = 0;
+            towavue_runtime_windows::decode_file(&self.source, |item| {
+                if let towavue_runtime_windows::DecodeOutput::Video(frame) = item {
+                    assert_eq!((frame.width, frame.height), (32, 48));
+                    frames += 1;
+                }
+                true
+            })
+            .expect("saved video");
+            assert_eq!(frames, 8);
+            drop(host);
+            drop(renderer);
+            drop(window);
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    EventLoop::builder()
+        .with_any_thread(true)
+        .build()
+        .expect("event loop")
+        .run_app(&mut Trial { source })
+        .expect("native trial");
 }

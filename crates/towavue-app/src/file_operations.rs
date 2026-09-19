@@ -55,7 +55,7 @@ pub(super) struct Completed {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn begin_file_relocation(&mut self, kind: Kind) {
-        if kind == Kind::Delete && self.timeline_open {
+        if self.current_source_deleted() || (kind == Kind::Delete && self.timeline_open) {
             return;
         }
         let Some(path) = self.path.clone() else {
@@ -65,6 +65,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn begin_file_relocation_at(&mut self, kind: Kind, path: PathBuf) {
+        if self.path.as_ref() == Some(&path) && self.current_source_deleted() {
+            return;
+        }
         if self.modal_input_blocked()
             || self.active_export.is_some()
             || self.image_loading

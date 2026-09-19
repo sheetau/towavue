@@ -22,7 +22,8 @@ pub(super) struct MediaTabTransfer {
     media: MediaTransfer,
     edits: Option<EditHistory>,
     source_version: Option<Option<towavue_runtime_windows::FileOperationSource>>,
-    source_backing: Option<towavue_runtime_windows::SavedSource>,
+    source_backing: Option<towavue_runtime_windows::RetainedSource>,
+    deleted_source: Option<source_backing::DeletedSource>,
     export_path: Option<PathBuf>,
     audio_options: Option<AudioExportOptions>,
     metadata_options: Option<MetadataExportOptions>,
@@ -296,6 +297,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             edits: self.edits.remove(&id),
             source_version: self.source_versions.remove(&id),
             source_backing: self.source_backings.remove(&id),
+            deleted_source: self.deleted_sources.remove(&id),
             export_path: self.export_paths.remove(&id),
             audio_options: self.audio_export_settings.remove(&id),
             metadata_options: self.metadata_export_settings.remove(&id),
@@ -358,6 +360,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         if let Some(backing) = transfer.source_backing {
             self.source_backings.insert(id, backing);
+        }
+        if let Some(deleted) = transfer.deleted_source {
+            self.deleted_sources.insert(id, deleted);
         }
         if let Some(version) = transfer.source_version {
             self.source_versions.insert(id, version);

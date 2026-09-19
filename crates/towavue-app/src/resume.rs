@@ -155,6 +155,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn request_resume_or_open(&mut self, path: PathBuf) {
         if self.media_kind == Some(MediaKind::Video)
+            && !self
+                .displayed_tab
+                .is_some_and(|id| self.source_backings.contains_key(&id))
             && let Some(history) = &self.resume_history
         {
             self.state = PlaybackState::Loading;
@@ -173,7 +176,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 path,
                 result,
             } => {
-                if token != self.resume_revision
+                if self
+                    .displayed_tab
+                    .is_some_and(|id| self.source_backings.contains_key(&id))
+                    || token != self.resume_revision
                     || self.path.as_ref() != Some(&path)
                     || self.media_kind != Some(MediaKind::Video)
                     || self.state != PlaybackState::Loading
@@ -206,6 +212,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn install_resume(&mut self, resume: VideoResume) {
+        if self
+            .displayed_tab
+            .is_some_and(|id| self.source_backings.contains_key(&id))
+        {
+            return;
+        }
         let position = resume.position;
         self.resume_owner = Some(Owner {
             source: resume.source,

@@ -124,7 +124,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         match duration {
             Ok(duration) => {
                 saved.duration = Some(duration);
-                saved.resume = source.map(resume::Owner::for_preview);
+                saved.resume = source
+                    .filter(|_| !self.source_backings.contains_key(&id))
+                    .map(resume::Owner::for_preview);
                 self.edits
                     .entry(id)
                     .or_default()

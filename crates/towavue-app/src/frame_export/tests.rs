@@ -269,7 +269,7 @@ fn current_frame_export_keeps_clicked_picture_edits_save_state_and_owner_guards(
             assert_ne!(saved_bytes, original);
             app.source_versions
                 .insert(tab, Some(saved.current_source().clone()));
-            app.source_backings.insert(tab, saved);
+            app.source_backings.insert(tab, saved.into());
             app.displayed_tab = Some(tab);
             let mut session = PlaybackSession::open_input(
                 app.media_input(&self.source),

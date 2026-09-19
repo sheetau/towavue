@@ -64,7 +64,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.media_kind != Some(MediaKind::Image) {
             return;
         }
-        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
+        let navigation = self.navigation_snapshot();
+        let (Some(snapshot), Some(path)) = (navigation.as_deref(), &self.path) else {
             return;
         };
         let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
@@ -76,8 +77,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if target == current {
             return;
         }
-        self.image_navigation_forward = offset > 0;
         let path = images[target].path.clone();
+        self.image_navigation_forward = offset > 0;
         self.request_guarded(GuardedAction::Navigate(path));
     }
 

@@ -96,7 +96,7 @@ fn retained_source_backing_reloads_undoes_exports_and_transfers_without_double_a
     let backup = saved.original_path().to_owned();
     app.source_versions
         .insert(id, Some(saved.current_source().clone()));
-    app.source_backings.insert(id, saved);
+    app.source_backings.insert(id, saved.into());
     app.edits.get_mut(&id).expect("history").mark_saved();
     app.request_image_paths(vec![path.clone()], 0);
     finish(&mut app, &events);
@@ -199,4 +199,207 @@ fn retained_source_backing_reloads_undoes_exports_and_transfers_without_double_a
         );
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+fn deletion_snapshot(folder: &Path, paths: &[PathBuf]) -> FolderSnapshot {
+    FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![0]),
+        folder_path: folder.to_owned(),
+        items: paths
+            .iter()
+            .enumerate()
+            .map(|(i, path)| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![i as u8 + 1]),
+                path: path.clone(),
+                kind: MediaKind::Image,
+            })
+            .collect(),
+        sort_columns: Vec::new(),
+        source: FolderSnapshotSource::PersistedShellView,
+        generation: 1,
+        captured_at: std::time::SystemTime::UNIX_EPOCH,
+    }
+}
+
+#[test]
+fn deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "source_backing::tests::deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    let next = root.join("next.bmp");
+    for path in [&source, &next] {
+        crate::tab_transfer::tests::bitmap(path);
+    }
+    let (mut app, events) = self::app();
+    app.open_external(source.clone(), true);
+    finish(&mut app, &events);
+    let id = app.displayed_tab.expect("tab");
+    let before = deletion_snapshot(&root, &[source.clone(), next.clone()]);
+    app.apply_folder_snapshot(before.clone());
+    app.set_reading_layout(true, app.reading_settings);
+    finish(&mut app, &events);
+    let held_paths = app.reading_request_paths();
+    let held_pages = app.reading_page_views().len();
+    let original = app.image.as_ref().expect("image").decoded.frames[0]
+        .rgba
+        .clone();
+    let expected = app.source_versions[&id].clone().expect("loaded version");
+    app.quiesce_source_save(&source);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.source_readers_idle() {
+        assert!(Instant::now() < deadline, "readers drained");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let retained =
+        towavue_runtime_windows::RetainedSource::capture(&expected).expect("retained original");
+    let backup = retained.original_path().to_owned();
+    std::fs::remove_file(&source).expect("simulate accepted deletion");
+    app.finish_file_recycling(
+        &expected,
+        &towavue_runtime_windows::FileRecycleReport {
+            retained_source: Some(retained),
+            before,
+            after: Some(deletion_snapshot(&root, std::slice::from_ref(&next))),
+        },
+    );
+    app.thaw_source_save(&source);
+    assert_eq!(app.path.as_ref(), Some(&source));
+    assert_eq!(app.reading_request_paths(), held_paths);
+    assert_eq!(app.reading_page_views().len(), held_pages);
+    assert_eq!(
+        app.image.as_ref().expect("held image").decoded.frames[0].rgba,
+        original
+    );
+    app.set_reading_layout(false, app.reading_settings);
+    app.edits.entry(id).or_default().push(
+        EditOperation::Resize(
+            towavue_core::ImageResize::new(4, 2, towavue_core::ResampleFilter::Nearest)
+                .expect("resize"),
+        ),
+        MediaKind::Image,
+    );
+    app.refresh_image_edits();
+    finish(&mut app, &events);
+    let edited = app.image.as_ref().expect("edited image").decoded.frames[0]
+        .rgba
+        .clone();
+    assert_ne!(edited, original);
+    let export = root.join("export.bmp");
+    assert!(app.start_export(
+        id,
+        source.clone(),
+        MediaKind::Image,
+        export.clone(),
+        None,
+        ExportOutput::Media
+    ));
+    finish(&mut app, &events);
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert!(app.current_source_deleted());
+    assert!(!source.exists());
+    assert_eq!(
+        towavue_runtime_windows::decode_image(&export)
+            .expect("derivative")
+            .frames[0]
+            .rgba,
+        edited
+    );
+    app.open_external(next.clone(), true);
+    finish(&mut app, &events);
+    app.activate_tab(id);
+    finish(&mut app, &events);
+    assert!(app.current_source_deleted());
+    assert_eq!(
+        app.image.as_ref().expect("reactivated").decoded.frames[0].rgba,
+        edited
+    );
+    let (mut target, target_events) = self::app();
+    let moved = crate::tab_transfer::tests::transfer(&mut app, &mut target, id);
+    finish(&mut target, &target_events);
+    assert!(!app.deleted_sources.contains_key(&id));
+    assert!(target.current_source_deleted());
+    assert_eq!(target.media_input(&source).path(), backup);
+    target.edits.get_mut(&moved).expect("history").undo();
+    target.refresh_image_edits();
+    finish(&mut target, &target_events);
+    assert_eq!(
+        target
+            .image
+            .as_ref()
+            .expect("undo after transfer")
+            .decoded
+            .frames[0]
+            .rgba,
+        original
+    );
+    target.qualify_current_history();
+    assert!(target.viewed_media.take_pending().is_empty());
+    target.close_tab_unchecked(moved);
+    assert!(target.deleted_sources.is_empty());
+    assert!(
+        target.tabs.gallery().is_some(),
+        "closing the last deleted tab preserves normal Gallery behavior"
+    );
+    assert!(target.source_backings.is_empty());
+    assert!(
+        !target.closed_tabs.iter().any(
+            |closed| matches!(closed, closed_tabs::ClosedTab::Media(path, _) if path == &source)
+        )
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while backup.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "last deleted document releases original"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn deleted_navigation_uses_surviving_shell_neighbors_and_releases_the_old_document() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "source_backing::tests::deleted_navigation_uses_surviving_shell_neighbors_and_releases_the_old_document",
+    ) else {
+        return;
+    };
+    let source = root.join("source.bmp");
+    let first = root.join("first.bmp");
+    let last = root.join("last.bmp");
+    for path in [&source, &first, &last] {
+        crate::tab_transfer::tests::bitmap(path);
+    }
+    let expected = FileOperationSource::capture(&source).expect("source");
+    let retained = towavue_runtime_windows::RetainedSource::capture(&expected).expect("copy");
+    let (mut app, events) = self::app();
+    app.open_external(source.clone(), true);
+    finish(&mut app, &events);
+    let id = app.displayed_tab.expect("tab");
+    std::fs::remove_file(&source).expect("owned removal");
+    app.finish_file_recycling(
+        &expected,
+        &towavue_runtime_windows::FileRecycleReport {
+            retained_source: Some(retained),
+            before: deletion_snapshot(&root, &[first.clone(), source.clone(), last.clone()]),
+            after: Some(deletion_snapshot(&root, &[first.clone(), last.clone()])),
+        },
+    );
+    let snapshot = app.navigation_snapshot().expect("position");
+    assert_eq!(
+        snapshot
+            .items
+            .iter()
+            .map(|item| &item.path)
+            .collect::<Vec<_>>(),
+        vec![&first, &source, &last]
+    );
+    app.jump_images(1);
+    finish(&mut app, &events);
+    assert_eq!(app.path.as_ref(), Some(&last));
+    assert_eq!(app.displayed_tab, Some(id));
+    assert!(app.deleted_sources.is_empty());
+    assert!(app.source_backings.is_empty());
 }

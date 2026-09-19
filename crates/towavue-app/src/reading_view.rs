@@ -51,30 +51,28 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn ensure_reading_focus(&mut self) {
         if self.reading_mode && self.reading_focus.is_none() {
-            self.reading_focus = self
-                .folder_snapshot
-                .as_ref()
-                .zip(self.path.as_ref())
-                .and_then(|(snapshot, path)| {
-                    snapshot
-                        .reading_items(
-                            path,
-                            ReadingSettings {
-                                reversed: false,
-                                ..self.reading_settings
-                            },
-                        )
-                        .first()
-                        .map(|item| (*item).clone())
-                });
+            self.reading_focus =
+                self.reading_snapshot()
+                    .zip(self.path.as_ref())
+                    .and_then(|(snapshot, path)| {
+                        snapshot
+                            .reading_items(
+                                path,
+                                ReadingSettings {
+                                    reversed: false,
+                                    ..self.reading_settings
+                                },
+                            )
+                            .first()
+                            .map(|item| (*item).clone())
+                    });
         }
     }
 
     pub(super) fn reading_source_visible(&self) -> bool {
         !self.reading_mode
             || self
-                .folder_snapshot
-                .as_ref()
+                .reading_snapshot()
                 .zip(self.reading_focus_path())
                 .is_none_or(|(snapshot, focus)| {
                     let pages = snapshot.reading_items(focus, self.reading_settings);
@@ -116,7 +114,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
-    fn reading_page_views(&self) -> Vec<(Option<egui::TextureId>, egui::Vec2)> {
+    pub(super) fn reading_page_views(&self) -> Vec<(Option<egui::TextureId>, egui::Vec2)> {
         let first = self
             .image
             .as_ref()
@@ -133,8 +131,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             })
             .collect();
         let ordered = self
-            .folder_snapshot
-            .as_ref()
+            .reading_snapshot()
             .zip(self.reading_focus_path())
             .map(|(snapshot, path)| {
                 snapshot.reading_items(
@@ -267,7 +264,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         }
                         let center = viewport.center() + egui::Vec2::from(self.image_view.pan);
                         let before = scale(self.image_view, extent, viewport.size(), density);
-                        if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref()) {
+                        if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref())
+                            && !self.deleted_sources.contains_key(&id)
+                        {
                             self.viewed_media.qualify(id, path);
                         }
                         zoom(

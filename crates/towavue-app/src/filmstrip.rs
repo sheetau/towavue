@@ -360,46 +360,51 @@ impl Filmstrip {
         paths: &[PathBuf],
         caption: &str,
         axis: ReadingAxis,
+        held: Option<(&Path, &TextureHandle)>,
     ) {
         self.set_visible(
             paths
                 .iter()
+                .filter(|path| held.is_none_or(|(current, _)| current != *path))
                 .map(|path| (path.clone(), MediaKind::Image))
                 .collect(),
         );
+        let texture = |path: &Path| {
+            held.filter(|(current, _)| *current == path)
+                .map(|(_, texture)| texture)
+                .or_else(|| {
+                    self.previews
+                        .get(path)
+                        .and_then(|preview| preview.as_ref().ok())
+                        .map(|(texture, _)| texture)
+                })
+        };
         crate::seekbar::preview_tooltip(response, ratio).show(|ui| {
             let height =
                 (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
             let sizes: Vec<_> = paths
                 .iter()
-                .map(|path| match self.previews.get(path) {
-                    Some(Ok((texture, _))) => texture.size_vec2(),
-                    _ => Vec2::splat(1.0),
-                })
+                .map(|path| texture(path).map_or(Vec2::splat(1.0), TextureHandle::size_vec2))
                 .collect();
             let cells = crate::reading_page_rects(rect, &sizes, axis, false);
             for (path, cell) in paths.iter().zip(cells) {
-                match self.previews.get(path) {
-                    Some(Ok((texture, _))) => {
-                        crate::media_preview::image(
-                            ui,
-                            texture.id(),
-                            cell,
-                            Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            rect,
-                        );
-                    }
-                    Some(Err(_)) => {
-                        ui.painter().with_clip_rect(cell).text(
-                            cell.center(),
-                            Align2::CENTER_CENTER,
-                            "No preview",
-                            FontId::proportional(11.0),
-                            Color32::GRAY,
-                        );
-                    }
-                    None => {}
+                if let Some(texture) = texture(path) {
+                    crate::media_preview::image(
+                        ui,
+                        texture.id(),
+                        cell,
+                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                        rect,
+                    );
+                } else if self.previews.get(path).is_some_and(Result::is_err) {
+                    ui.painter().with_clip_rect(cell).text(
+                        cell.center(),
+                        Align2::CENTER_CENTER,
+                        "No preview",
+                        FontId::proportional(11.0),
+                        Color32::GRAY,
+                    );
                 }
             }
             crate::media_preview::caption(ui, |ui| {
@@ -3265,6 +3270,7 @@ mod tests {
                                         &paths,
                                         "1 / 1  fixture.png",
                                         ReadingAxis::Horizontal,
+                                        None,
                                     );
                                 }
                                 _ => {
@@ -3329,7 +3335,7 @@ mod tests {
         }
         let track = Rect::from_min_max(egui::pos2(8.0, 260.0), egui::pos2(472.0, 272.0));
         let mut time = 0.0;
-        let mut draw = |strip: &mut Filmstrip, paths: &[PathBuf], axis| {
+        let mut draw = |strip: &mut Filmstrip, paths: &[PathBuf], axis, held: bool| {
             let mut output = egui::FullOutput::default();
             for _ in 0..5 {
                 time += 1.0;
@@ -3345,7 +3351,14 @@ mod tests {
                     },
                     |ui| {
                         let response = ui.allocate_rect(track, egui::Sense::hover());
-                        strip.show_seek_preview(&response, 0.5, paths, "2–3 / 4  first.png", axis);
+                        strip.show_seek_preview(
+                            &response,
+                            0.5,
+                            paths,
+                            "2–3 / 4  first.png",
+                            axis,
+                            held.then_some((first.as_path(), &textures[0])),
+                        );
                     },
                 );
             }
@@ -3358,7 +3371,7 @@ mod tests {
                 } else {
                     [first.clone(), second.clone()]
                 };
-                let output = draw(&mut strip, &paths, axis);
+                let output = draw(&mut strip, &paths, axis, false);
                 assert_eq!(strip.visible, paths);
                 let bounds = textures.each_ref().map(|texture| {
                     output
@@ -3393,13 +3406,30 @@ mod tests {
                 };
                 assert_eq!(coordinate(bounds[0]) > coordinate(bounds[1]), reversed);
                 let generation = strip.generation;
-                draw(&mut strip, &paths, axis);
+                draw(&mut strip, &paths, axis, false);
                 assert_eq!(
                     strip.generation, generation,
                     "unchanged hover must not request again"
                 );
             }
         }
+        strip.previews.remove(&first);
+        let output = draw(
+            &mut strip,
+            &[first.clone(), second.clone()],
+            ReadingAxis::Horizontal,
+            true,
+        );
+        assert_eq!(
+            strip.visible,
+            vec![second.clone()],
+            "held source is not requested from disk"
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[0].id())), "deleted page uses its held texture");
+        assert!(!first.exists());
+        strip
+            .previews
+            .insert(first.clone(), Ok((textures[0].clone(), None)));
         let snapshot = FolderSnapshot {
             folder_identity: ShellIdentity::new(Vec::new()),
             folder_path: root.clone(),
@@ -3454,11 +3484,12 @@ mod tests {
             &mut strip,
             &[first.clone(), second],
             ReadingAxis::Horizontal,
+            false,
         );
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "No preview")));
         let generation = strip.generation;
         let paths = strip.visible.clone();
-        draw(&mut strip, &paths, ReadingAxis::Horizontal);
+        draw(&mut strip, &paths, ReadingAxis::Horizontal, false);
         assert_eq!(strip.generation, generation, "failed page must not loop");
         strip.clear();
         assert!(strip.visible.is_empty() && strip.previews.is_empty());

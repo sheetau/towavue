@@ -258,6 +258,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     saved.reading_settings,
                 )
             };
+        let snapshot = self
+            .deleted_sources
+            .get(&id)
+            .map(|deleted| deleted.before.as_ref())
+            .or(snapshot);
         Some((instance, snapshot?, reading.then_some(settings)))
     }
 
@@ -422,6 +427,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.edits.insert(id, EditHistory::default());
         self.source_versions.remove(&id);
         self.source_backings.remove(&id);
+        self.deleted_sources.remove(&id);
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
         self.metadata_export_settings.remove(&id);

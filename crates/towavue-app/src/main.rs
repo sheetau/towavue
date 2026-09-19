@@ -983,7 +983,8 @@ struct Application<N> {
     // None is an observed but unverifiable source, never permission to recapture
     // a newer disk version for existing edits. Cleared only for a new document.
     source_versions: BTreeMap<TabId, Option<towavue_runtime_windows::FileOperationSource>>,
-    source_backings: BTreeMap<TabId, towavue_runtime_windows::SavedSource>,
+    source_backings: BTreeMap<TabId, towavue_runtime_windows::RetainedSource>,
+    deleted_sources: BTreeMap<TabId, source_backing::DeletedSource>,
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
     source_save: source_save::State,
@@ -1272,6 +1273,7 @@ where
             edits: BTreeMap::new(),
             source_versions: BTreeMap::new(),
             source_backings: BTreeMap::new(),
+            deleted_sources: BTreeMap::new(),
             export_paths: BTreeMap::new(),
             active_export: None,
             source_save: source_save::State::default(),
@@ -2466,8 +2468,7 @@ where
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 1);
         self.sync_audio_snapshot(&snapshot);
         let previous_reading_paths = self.reading_request_paths();
-        let reading_handoff = self
-            .reading_mode
+        let reading_handoff = (self.reading_mode && !self.current_source_deleted())
             .then(|| self.take_navigation_handoff(MediaKind::Image))
             .flatten();
         #[cfg(feature = "presentation-verification")]
@@ -2500,16 +2501,21 @@ where
         }
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 4);
-        self.reading_focus = self.reading_focus.as_ref().and_then(|focus| {
-            snapshot
-                .match_item(
-                    (!focus.identity.as_bytes().is_empty()).then_some(&focus.identity),
-                    &focus.path,
-                )
-                .filter(|item| item.kind == MediaKind::Image)
-                .cloned()
-        });
+        if !self.current_source_deleted() {
+            self.reading_focus = self.reading_focus.as_ref().and_then(|focus| {
+                snapshot
+                    .match_item(
+                        (!focus.identity.as_bytes().is_empty()).then_some(&focus.identity),
+                        &focus.path,
+                    )
+                    .filter(|item| item.kind == MediaKind::Image)
+                    .cloned()
+            });
+        }
         self.folder_snapshot = Some(snapshot);
+        if self.current_source_deleted() {
+            return;
+        }
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 5);
         if let Some((path, kind)) = remapped
@@ -2558,7 +2564,7 @@ where
         };
         let mut paths = vec![path.clone()];
         if self.reading_mode
-            && let Some(snapshot) = &self.folder_snapshot
+            && let Some(snapshot) = self.reading_snapshot()
         {
             paths.extend(
                 snapshot
@@ -4256,6 +4262,7 @@ where
                         if scale != old_scale
                             && let (Some(id), Some(path)) =
                                 (self.displayed_tab, self.path.as_deref())
+                            && !self.deleted_sources.contains_key(&id)
                         {
                             self.viewed_media.qualify(id, path);
                         }
@@ -6130,9 +6137,9 @@ where
                                         .unwrap_or_default();
                                     let suffix = self.visual_selection_status().map_or_else(String::new, |value| format!(" · {value}"));
                                     (
-                                        format!("{parent}\\{}{suffix}", display_name(path)),
+                                        format!("{}{parent}\\{}{suffix}", self.deleted_path_prefix(), display_name(path)),
                                         chrome::MUTED,
-                                        format!("{}{suffix}", path.display()),
+                                        format!("{}{}{suffix}", self.deleted_path_prefix(), path.display()),
                                     )
                                 } else {
                                     (
@@ -6215,7 +6222,15 @@ where
     ) {
         let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
         if self.media_kind == Some(MediaKind::Image) {
-            let Some(snapshot) = &self.folder_snapshot else {
+            let held_order = self
+                .displayed_tab
+                .and_then(|id| self.deleted_sources.get(&id))
+                .map(|deleted| {
+                    deleted.navigation_snapshot(
+                        self.folder_snapshot.as_ref().unwrap_or(&deleted.before),
+                    )
+                });
+            let Some(snapshot) = held_order.as_ref().or(self.folder_snapshot.as_ref()) else {
                 return;
             };
             let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
@@ -6277,6 +6292,14 @@ where
                         (target + 1).to_string()
                     };
                     self.image_seek_preview_active = true;
+                    let held = self
+                        .current_source_deleted()
+                        .then(|| {
+                            self.path
+                                .as_deref()
+                                .zip(self.image.as_ref().map(|image| &image.texture))
+                        })
+                        .flatten();
                     self.filmstrip.show_seek_preview(
                         &response,
                         seekbar::compact_ratio(response.rect, pointer.x),
@@ -6287,6 +6310,7 @@ where
                             display_name(&images[target].path)
                         ),
                         self.reading_settings.axis,
+                        held,
                     );
                 }
             }
@@ -8953,6 +8977,7 @@ where
             return;
         }
         let was_active = self.tabs.active().is_some_and(|tab| tab.id == id);
+        let deleted = self.deleted_sources.contains_key(&id);
         let removed = if remember {
             self.tabs.close(id)
         } else {
@@ -8966,7 +8991,7 @@ where
         }
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
-        if remember {
+        if remember && !deleted {
             self.remember_closed_tab(closed_tabs::ClosedTab::Media(
                 removed.target.current_path().to_owned(),
                 position,
@@ -8976,6 +9001,7 @@ where
         self.edits.remove(&id);
         self.source_versions.remove(&id);
         self.source_backings.remove(&id);
+        self.deleted_sources.remove(&id);
         self.retained_images.remove(&id);
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);
@@ -9114,7 +9140,10 @@ where
             towavue_runtime_windows::BurstEvent::Navigate,
             u64::from(forward) | (u64::from(same_kind) << 1),
         );
-        let sequence = same_kind && self.media_kind == Some(MediaKind::Image) && !self.reading_mode;
+        let sequence = same_kind
+            && self.media_kind == Some(MediaKind::Image)
+            && !self.reading_mode
+            && !self.current_source_deleted();
         if sequence && self.queue_image_step(forward) {
             return;
         }
@@ -9125,11 +9154,10 @@ where
         if self.media_kind == Some(MediaKind::Image) {
             self.image_navigation_forward = forward;
         }
-        let (Some(snapshot), Some(path), Some(kind)) = (
-            self.folder_snapshot.as_ref(),
-            self.path.as_ref(),
-            self.media_kind,
-        ) else {
+        let navigation = self.navigation_snapshot();
+        let (Some(snapshot), Some(path), Some(kind)) =
+            (navigation.as_deref(), self.path.as_ref(), self.media_kind)
+        else {
             return;
         };
         let items = &snapshot.items;
@@ -9182,7 +9210,8 @@ where
             self.navigate(forward, true);
             return;
         }
-        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, self.reading_focus_path())
+        let navigation = self.navigation_snapshot();
+        let (Some(snapshot), Some(path)) = (navigation.as_deref(), self.reading_focus_path())
         else {
             return;
         };
@@ -9289,7 +9318,8 @@ where
     }
 
     fn navigate_image_boundary(&mut self, last: bool) {
-        let (Some(snapshot), Some(path)) = (&self.folder_snapshot, &self.path) else {
+        let navigation = self.navigation_snapshot();
+        let (Some(snapshot), Some(path)) = (navigation.as_deref(), &self.path) else {
             return;
         };
         if !snapshot
@@ -9319,6 +9349,11 @@ where
     }
 
     fn navigate_to_unchecked(&mut self, path: PathBuf) {
+        if self.current_source_deleted() && self.path.as_ref() == Some(&path) {
+            self.reading_focus = None;
+            self.rebuild_reading_pages();
+            return;
+        }
         let Some(kind) = MediaKind::from_path(&path) else {
             return;
         };
@@ -9349,6 +9384,10 @@ where
             self.edits.insert(id, EditHistory::default());
             self.source_versions.remove(&id);
             self.source_backings.remove(&id);
+            self.deleted_sources.remove(&id);
+            if let Some(queue) = self.audio_queues.get_mut(&id) {
+                queue.clear_deleted_source();
+            }
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);
@@ -10290,6 +10329,7 @@ where
             palette_open: self.palette_open,
             filmstrip_open: self.filmstrip_open,
             reading_mode: self.reading_mode,
+            source_deleted: self.current_source_deleted(),
             has_unsaved_edits: self
                 .tabs
                 .active()

@@ -2,87 +2,68 @@ use super::*;
 use towavue_runtime_windows::FileRecycleReport;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    pub(crate) fn finish_file_recycling(&mut self, source: &Path, report: &FileRecycleReport) {
+    pub(crate) fn finish_file_recycling(
+        &mut self,
+        source: &FileOperationSource,
+        report: &FileRecycleReport,
+    ) {
+        let path = source.path();
         let affected: Vec<_> = self
             .tabs
             .tabs()
             .iter()
-            .filter(|tab| tab.target.current_path() == source)
-            .map(|tab| (tab.id, tab.target.media_kind()))
+            .filter(|tab| tab.target.current_path() == path)
+            .map(|tab| tab.id)
             .collect();
-        let active_affected = self.path.as_deref() == Some(source);
-        self.file_operations.position = None;
-        self.file_operations.locked = false;
-        // Do not restart deleted readers, or retain a closed-tab/history route to
-        // the removed file. Dirty state is discarded only after confirmed success.
-        if active_affected {
-            self.duration_workers.remove(&self.media_generation);
-            self.resume_owner = None;
-            self.clear_active_media();
-        }
-        for (id, kind) in affected {
-            let replacement = report
-                .after
-                .as_ref()
-                .and_then(|after| after.replacement_after_removal(&report.before, source, kind));
-            self.edits.remove(&id);
-            self.source_versions.remove(&id);
-            self.source_backings.remove(&id);
-            self.export_paths.remove(&id);
-            self.audio_export_settings.remove(&id);
-            self.metadata_export_settings.remove(&id);
-            if replacement.is_none() {
-                self.audio_queues.remove(&id);
-            } else if let (Some(queue), Some(after)) =
-                (self.audio_queues.get_mut(&id), report.after.as_ref())
+        let deleted = source_backing::DeletedSource {
+            path: path.to_owned(),
+            before: Arc::new(report.before.clone()),
+        };
+        for id in affected {
+            // Keep each loaded document's earliest original, including edits
+            // predating a previous Save. The host validated unbacked versions.
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                self.source_backings.entry(id)
             {
-                queue.accept_after_recycling(after.clone());
+                entry.insert(
+                    report
+                        .retained_source
+                        .as_ref()
+                        .expect("host retained every unbacked document")
+                        .clone(),
+                );
             }
-            self.retained_images.remove(&id);
-            if let Some(saved) = self.retained_playback.remove(&id) {
-                self.duration_workers.remove(&saved.instance);
+            self.source_versions
+                .entry(id)
+                .or_insert_with(|| Some(source.clone()));
+            self.deleted_sources.insert(id, deleted.clone());
+            if let Some(queue) = self.audio_queues.get_mut(&id) {
+                queue.retain_deleted_source(deleted.clone());
             }
-            if let Some(context) = &self.ui_context {
-                tab_focus::forget(context, id);
+            if self.displayed_tab == Some(id) {
+                self.resume_owner = None;
+                self.resume_open = None;
             }
-            if let Some(path) = replacement {
-                self.tabs
-                    .get_mut(id)
-                    .expect("existing deleted-file tab")
-                    .target
-                    .set_current_path(path.clone(), kind);
-                self.viewed_media.begin(id, &path);
-            } else {
-                self.tabs.take(id);
-                self.playback_volumes.remove(&id);
+            if let Some(saved) = self.retained_playback.get_mut(&id) {
+                saved.resume = None;
             }
         }
         self.closed_tabs.retain(
-            |closed| !matches!(closed, closed_tabs::ClosedTab::Media(path, _) if path == source),
+            |closed| !matches!(closed, closed_tabs::ClosedTab::Media(closed, _) if closed == path),
         );
-        self.viewed_media.forget(Some(source));
+        self.viewed_media.forget(Some(path));
         self.tab_preview.clear();
         self.image_previews.clear();
-        self.folder_snapshot = None;
+        self.status_file_details.invalidate();
+        if let Some(after) = &report.after
+            && self.path.as_deref().and_then(Path::parent) == Some(after.folder_path.as_path())
+        {
+            self.apply_folder_snapshot(after.clone());
+        }
         for queue in self.audio_queues.values_mut() {
             queue.refresh_after_relocation();
         }
-        if active_affected {
-            if let Some(tab) = self.tabs.active() {
-                self.load_path(
-                    tab.target.current_path().to_owned(),
-                    tab.target.media_kind(),
-                );
-            } else {
-                // A deleted last item leaves the existing window open and empty.
-                self.clear_active_media();
-            }
-        } else {
-            self.refresh_folder_snapshot();
-        }
-        if report.after.is_none() {
-            self.set_status("File recycled; the folder could not be refreshed.".into());
-        }
+        self.refresh_folder_snapshot();
         self.refresh_title();
         self.request_redraw();
     }

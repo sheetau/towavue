@@ -711,6 +711,7 @@ impl WindowHost {
     fn prepare_wait(&mut self) -> ControlFlow {
         self.advance_source_save();
         self.start_pending_file_operation();
+        self.advance_file_operation();
         self.recover_pending_graphics();
         self.remove_closed();
         let mut wait = ControlFlow::Wait;

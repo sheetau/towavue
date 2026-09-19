@@ -44,6 +44,7 @@ pub(super) struct Pending {
     pub serial: u64,
     pub expected: FileOperationSource,
     pub input: MediaInput,
+    pub recreating: bool,
     pub prepared: Option<PreparedSourceSave>,
 }
 
@@ -149,19 +150,26 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let serial = self.source_save.serial;
         let notify = Arc::clone(&self.notify);
         // The pending owner survives until the preparation job has been joined.
-        match SourceSaveJob::start(
-            expected.clone(),
-            worker_request,
-            options.clone(),
-            move |event| {
-                notify(AppEvent::SourceSave(serial, event));
-            },
-        ) {
+        let recreating = self.deleted_sources.contains_key(&id);
+        let notify = move |event| notify(AppEvent::SourceSave(serial, event));
+        let job = if recreating {
+            SourceSaveJob::start_recreating(
+                expected.clone(),
+                self.source_backings[&id].clone(),
+                worker_request,
+                options.clone(),
+                notify,
+            )
+        } else {
+            SourceSaveJob::start(expected.clone(), worker_request, options.clone(), notify)
+        };
+        match job {
             Ok(job) => {
                 self.source_save.pending = Some(Pending {
                     serial,
                     expected,
                     input,
+                    recreating,
                     prepared: None,
                 });
                 self.active_export = Some(ActiveExport {
@@ -205,6 +213,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .and_then(Option::as_ref)
                 == Some(&pending.expected)
             && self.media_input_for(Some(export.tab), &export.request.source) == pending.input
+            && self.deleted_sources.contains_key(&export.tab) == pending.recreating
     }
 
     pub(super) fn handle_source_save(&mut self, serial: u64, event: SourceSaveEvent) {
@@ -345,7 +354,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let same_input = self.media_input_for(Some(id), source) == *input;
             self.source_backings
                 .entry(id)
-                .or_insert_with(|| saved.clone());
+                .or_insert_with(|| saved.retained_source());
+            self.deleted_sources.remove(&id);
+            if let Some(queue) = self.audio_queues.get_mut(&id) {
+                queue.clear_deleted_source();
+            }
             self.source_versions
                 .insert(id, Some(saved.current_source().clone()));
             let history = self.edits.entry(id).or_default();

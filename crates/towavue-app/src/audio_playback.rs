@@ -10,13 +10,19 @@ pub(super) struct AudioTab {
     handled_eof: Option<u64>,
     requested_eof: Option<(u64, PlaybackGeneration)>,
     refreshing: bool,
+    deleted: Option<source_backing::DeletedSource>,
 }
 
 impl AudioTab {
-    pub(super) fn accept_after_recycling(&mut self, snapshot: FolderSnapshot) {
-        self.handled_eof = None;
-        self.requested_eof = None;
-        self.accept_snapshot(snapshot);
+    pub(super) fn retain_deleted_source(&mut self, deleted: source_backing::DeletedSource) {
+        self.deleted = Some(deleted);
+    }
+
+    pub(super) fn clear_deleted_source(&mut self) {
+        self.deleted = None;
+        if let Some(snapshot) = self.snapshot.clone() {
+            self.accept_snapshot(snapshot);
+        }
     }
 
     pub(super) fn refresh_after_relocation(&mut self) {
@@ -74,8 +80,14 @@ impl AudioTab {
 
     fn accept_snapshot(&mut self, snapshot: FolderSnapshot) {
         if snapshot.folder_path == self.folder {
+            let navigation = self
+                .deleted
+                .as_ref()
+                .map(|deleted| deleted.navigation_snapshot(&snapshot));
             self.order.set_items(
-                snapshot
+                navigation
+                    .as_ref()
+                    .unwrap_or(&snapshot)
                     .items_of_kind(MediaKind::Audio)
                     .map(|item| item.path.clone())
                     .collect(),
@@ -167,6 +179,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             handled_eof: None,
             requested_eof: None,
             refreshing: false,
+            deleted: self.deleted_sources.get(&id).cloned(),
         };
         if let Some(snapshot) = &self.folder_snapshot {
             queue.accept_snapshot(snapshot.clone());
@@ -429,6 +442,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.edits.insert(id, EditHistory::default());
             self.source_versions.remove(&id);
             self.source_backings.remove(&id);
+            self.deleted_sources.remove(&id);
+            if let Some(queue) = self.audio_queues.get_mut(&id) {
+                queue.clear_deleted_source();
+            }
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
             self.metadata_export_settings.remove(&id);

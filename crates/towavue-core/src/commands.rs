@@ -510,6 +510,7 @@ pub struct CommandContext {
     pub filmstrip_open: bool,
     pub reading_mode: bool,
     pub has_unsaved_edits: bool,
+    pub source_deleted: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -621,6 +622,11 @@ impl CommandDefinition {
             && (self.id != CommandId::ApplyCrop
                 || !context.timeline_open
                 || !context.has_time_selection)
+            && (!context.source_deleted
+                || !matches!(
+                    self.id,
+                    CommandId::DeleteFile | CommandId::RenameFile | CommandId::MoveFile
+                ))
             && (self.id != CommandId::DeleteFile || !context.timeline_open)
             && (self.id != CommandId::ToggleReadingMode
                 || context.reading_mode

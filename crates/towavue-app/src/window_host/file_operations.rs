@@ -10,6 +10,9 @@ pub(super) struct Transaction {
     source: PathBuf,
     action: Option<(FileOperationSource, FileOperationAction)>,
     suppress_confirmation: bool,
+    expected: FileOperationSource,
+    waiting_since: Option<Instant>,
+    retain_copy: bool,
 }
 
 impl WindowHost {
@@ -62,6 +65,9 @@ impl WindowHost {
             owner,
             serial,
             source: path.clone(),
+            expected: source.clone(),
+            waiting_since: None,
+            retain_copy: false,
             action: Some((source, action)),
             suppress_confirmation: false,
         });
@@ -104,6 +110,9 @@ impl WindowHost {
             return;
         };
         for app in self.windows.values_mut() {
+            if pending.waiting_since.is_some() {
+                app.thaw_source_save(&pending.source);
+            }
             app.file_operations.locked = false;
             app.finish_folder_load();
             app.finish_audio_folder_loads();
@@ -139,6 +148,76 @@ impl WindowHost {
     }
 
     fn run_file_operation(&mut self) {
+        let pending = self.file_operation.as_ref().expect("accepted transaction");
+        if pending.waiting_since.is_some() || pending.action.is_none() {
+            return;
+        }
+        let deleting = matches!(pending.action, Some((_, FileOperationAction::Recycle)));
+        if !deleting {
+            self.launch_file_operation();
+            return;
+        }
+        let path = pending.source.clone();
+        let mut retain_copy = false;
+        for app in self.windows.values() {
+            for tab in app
+                .tabs
+                .tabs()
+                .iter()
+                .filter(|tab| tab.target.current_path() == path)
+            {
+                if app.source_backings.contains_key(&tab.id) {
+                    continue;
+                }
+                let version = app.source_versions.get(&tab.id);
+                let loaded = (app.displayed_tab == Some(tab.id)
+                    && (app.image.is_some() || app.session.is_some()))
+                    || app
+                        .retained_images
+                        .get(&tab.id)
+                        .is_some_and(|saved| saved.image.is_some())
+                    || app
+                        .retained_playback
+                        .get(&tab.id)
+                        .is_some_and(|saved| saved.session.is_some());
+                if version.is_some_and(|version| version.as_ref() != Some(&pending.expected))
+                    || (version.is_none() && loaded)
+                {
+                    self.cancel_file_operation("Deletion cancelled because an open document has an outdated or unavailable source version. Export or reopen that document first.".into());
+                    return;
+                }
+                retain_copy = true;
+            }
+        }
+        let pending = self.file_operation.as_mut().expect("accepted transaction");
+        pending.retain_copy = retain_copy;
+        pending.waiting_since = Some(Instant::now());
+        for app in self.windows.values_mut() {
+            app.quiesce_source_save(&path);
+        }
+        self.advance_file_operation();
+    }
+
+    pub(super) fn advance_file_operation(&mut self) {
+        let Some(pending) = self.file_operation.as_ref() else {
+            return;
+        };
+        let Some(waiting_since) = pending.waiting_since else {
+            return;
+        };
+        if pending.action.is_none() {
+            return;
+        }
+        if !self.windows.values().all(|app| app.source_readers_idle()) {
+            if waiting_since.elapsed() >= Duration::from_secs(10) {
+                self.cancel_file_operation("Deletion cancelled because a media reader did not stop. The file was not deleted.".into());
+            }
+            return;
+        }
+        self.launch_file_operation();
+    }
+
+    fn launch_file_operation(&mut self) {
         let pending = self.file_operation.as_mut().expect("accepted transaction");
         let Some((source, action)) = pending.action.take() else {
             return;
@@ -146,15 +225,22 @@ impl WindowHost {
         let owner = pending.owner;
         let serial = pending.serial;
         let path = pending.source.clone();
+        let frozen = pending.waiting_since.is_some();
+        let retain_copy = pending.retain_copy;
         let preference = pending
             .suppress_confirmation
             .then(|| self.delete_preference_path.clone());
         let notify = Arc::clone(&self.windows[&owner].notify);
-        for app in self.windows.values_mut() {
-            app.quiesce_file_relocation(&path);
+        if !frozen {
+            for app in self.windows.values_mut() {
+                app.quiesce_file_relocation(&path);
+            }
         }
         let result = if matches!(action, FileOperationAction::Recycle) {
-            towavue_runtime_windows::start_file_recycling(source, move |result| {
+            let complete = move |result: Result<
+                towavue_runtime_windows::FileRecycleReport,
+                towavue_runtime_windows::FileOperationError,
+            >| {
                 let result = result
                     .map(|recycle| {
                         let preference_warning = preference.and_then(|path| {
@@ -175,7 +261,12 @@ impl WindowHost {
                     })
                     .map_err(|error| error.to_string());
                 notify(AppEvent::FileOperationFinished(serial, result));
-            })
+            };
+            if retain_copy {
+                towavue_runtime_windows::start_file_recycling_retaining_source(source, complete)
+            } else {
+                towavue_runtime_windows::start_file_recycling(source, complete)
+            }
         } else {
             let original = source.clone();
             towavue_runtime_windows::start_file_operation(source, action, move |result| {
@@ -227,7 +318,10 @@ impl WindowHost {
             if let Ok(completed) = &result
                 && let Some(recycle) = &completed.recycle
             {
-                app.finish_file_recycling(&pending.source, recycle);
+                app.finish_file_recycling(&pending.expected, recycle);
+            }
+            if pending.waiting_since.is_some() {
+                app.thaw_source_save(&pending.source);
             } else {
                 app.finish_file_relocation(&pending.source, result.as_ref().ok());
             }

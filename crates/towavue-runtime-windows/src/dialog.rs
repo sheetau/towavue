@@ -126,7 +126,7 @@ pub fn confirm_file_delete(
             let message: Vec<u16> = format!(
                 "{}\n\nThe file will be moved to the Recycle Bin.{}",
                 source.display(),
-                if unsaved_edits { "\n\nUnsaved edits in all open tabs for this file will be discarded. Cancel to export them first." } else { "" }
+                if unsaved_edits { "\n\nOpen tabs keep this media and its edits until you leave or close them. Save recreates the file at its original location." } else { "" }
             )
             .encode_utf16()
             .chain(Some(0))
@@ -138,11 +138,7 @@ pub fn confirm_file_delete(
             let buttons = [
                 TASKDIALOG_BUTTON {
                     nButtonID: IDYES.0,
-                    pszButtonText: if unsaved_edits {
-                        w!("Delete file and discard edits")
-                    } else {
-                        w!("Delete file")
-                    },
+                    pszButtonText: w!("Delete file"),
                 },
                 TASKDIALOG_BUTTON {
                     nButtonID: IDCANCEL.0,

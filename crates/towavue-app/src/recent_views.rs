@@ -100,6 +100,9 @@ impl Views {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn qualify_history(&mut self, id: TabId, path: &Path) {
+        if self.deleted_sources.contains_key(&id) {
+            return;
+        }
         // A new explicit open also restores an item the owner removed from history.
         self.viewed_media.visits.remove(&id);
         self.viewed_media.qualify(id, path);
@@ -109,6 +112,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn qualify_current_history(&mut self) {
         if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref())
             && self.tabs.active_id() == Some(id)
+            && !self.deleted_sources.contains_key(&id)
         {
             self.viewed_media.qualify(id, path);
             self.flush_viewed_history();
@@ -126,6 +130,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn history_presented(&mut self, video_drawn: bool) {
         if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref())
             && self.tabs.active_id() == Some(id)
+            && !self.deleted_sources.contains_key(&id)
             && !self.image_loading
             && self.image_handoff.is_none()
             && self.image_error.is_none()
@@ -149,7 +154,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             visit.observed = false;
         }
         for tab in self.tabs.tabs() {
-            if self.tabs.is_utility(tab.id) {
+            if self.tabs.is_utility(tab.id) || self.deleted_sources.contains_key(&tab.id) {
                 continue;
             }
             let path = tab.target.current_path();

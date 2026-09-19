@@ -7,10 +7,10 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **One app for your media.** Browse images, watch videos, and play music in tabs.
 - **Familiar folder browsing.** Navigate in Windows Explorer's folder order, with a thumbnail filmstrip and recent files.
 - **Flexible viewing.** Zoom, pan, fit or fill the window, and switch to fullscreen.
-- **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, direction, and independent folder-order reversal.
+- **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, and direction.
 - **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
 - **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
-- **Undo, save, and export.** Edit without changing the source, then save over it or export a separate result. Undo remains available after saving while the tab stays open.
+- **Undo, save, and export.** Edit without changing the source, then save over it or export a separate result. Undo remains available after saving while the tab stays open. Deleting an open file keeps its media editable until you leave or close the document; Save can recreate it at the original location.
 - **Video frame images.** Export the current edited frame to PNG, without window zoom or changing the video's save state.
 - **Keyboard-friendly controls.** Use menus, the command palette, or customizable shortcuts.
 - **Multiple windows.** Move tabs between windows while retaining their edits and playback state.

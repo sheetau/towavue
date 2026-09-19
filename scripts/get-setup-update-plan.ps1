@@ -2,11 +2,16 @@
 param(
     [Parameter(Mandatory)][string]$InstallDirectory,
     [Parameter(Mandatory)][string]$IncomingPayloadDirectory,
-    [Parameter(Mandatory)][ValidatePattern('^towavue-local-[0-9a-f]{64}$')][string]$IncomingOwnershipId
+    [Parameter(Mandatory)][ValidatePattern('^towavue-(local|release)-[0-9a-f]{64}$')][string]$IncomingOwnershipId
 )
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'setup-update-paths.ps1')
+function Assert-InventoryVersion([string]$Version) {
+    # Match the canonical three-component Windows resource version contract.
+    if ($Version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'A canonical stable product version is required.' }
+    foreach ($part in $Version.Split('.')) { if ([uint64]$part -gt 65535) { throw 'Product version exceeds Windows resource limits.' } }
+}
 foreach ($name in @('InstallDirectory','IncomingPayloadDirectory')) {
     $path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Get-Variable -Name $name -ValueOnly)).TrimEnd('\','/')
     Assert-LocalPath $path
@@ -20,9 +25,16 @@ if ($InstallDirectory -eq $IncomingPayloadDirectory -or
 
 function Read-Inventory([string]$Root,[string]$OwnershipId) {
     $record = Get-Record $Root 'licenses/INSTALLED-FILES.json'
-    if ('towavue-local-' + $record.sha256 -cne $OwnershipId) { throw 'Update inventory does not match its ownership identity.' }
     $inventory = Get-Content -LiteralPath (Join-Path $Root $record.name) -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($inventory.schema_version -ne 1 -or -not $inventory.files -or $inventory.files -isnot [array]) { throw 'Invalid update inventory schema.' }
+    if ($inventory.schema_version -notin @(1,2) -or -not $inventory.files -or $inventory.files -isnot [array]) { throw 'Invalid update inventory schema.' }
+    $prefix = if ($inventory.schema_version -eq 2) { 'towavue-release-' } else { 'towavue-local-' }
+    if ($prefix + $record.sha256 -cne $OwnershipId) { throw 'Update inventory does not match its ownership identity.' }
+    $version = $null
+    if ($inventory.schema_version -eq 2) {
+        Assert-InventoryVersion $inventory.product_version
+        if ($inventory.channel -cne 'stable' -or $inventory.platform -cne 'windows-x64') { throw 'Unsupported production inventory channel or platform.' }
+        $version = $inventory.product_version
+    }
     $files = @{}
     foreach ($file in $inventory.files) {
         Assert-Name $file.name
@@ -42,7 +54,8 @@ function Read-Inventory([string]$Root,[string]$OwnershipId) {
         if ($actual.bytes -ne $files[$name].bytes -or $actual.sha256 -cne $files[$name].sha256) { throw "Update file differs from its recorded bytes; preserve the replacement: $name" }
     }
     $files.Add($record.name,$record)
-    return $files
+    if ($version -and [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $Root 'towavue.exe')).ProductVersion -cne $version) { throw 'Application version differs from its production inventory.' }
+    return [pscustomobject]@{files=$files;version=$version}
 }
 
 $marker = Get-Record $InstallDirectory 'towavue-install.ini'
@@ -62,9 +75,13 @@ if (-not $sameDirectory -and $values.directory -match '^[A-Za-z]:\\' -and (Test-
     Assert-LocalPath $values.directory
     $sameDirectory = [TowavueUpdatePaths]::Expand($values.directory) -eq $InstallDirectory
 }
-if ($values.id -cnotmatch '^towavue-local-[0-9a-f]{64}$' -or -not $sameDirectory) { throw 'Installation marker belongs to another payload or directory.' }
-$oldFiles = Read-Inventory $InstallDirectory $values.id
-$newFiles = Read-Inventory $IncomingPayloadDirectory $IncomingOwnershipId
+if ($values.id -cnotmatch '^towavue-(local|release)-[0-9a-f]{64}$' -or -not $sameDirectory) { throw 'Installation marker belongs to another payload or directory.' }
+$oldInventory = Read-Inventory $InstallDirectory $values.id
+$newInventory = Read-Inventory $IncomingPayloadDirectory $IncomingOwnershipId
+if ([bool]$oldInventory.version -ne [bool]$newInventory.version) { throw 'Production and evaluation payloads cannot replace each other.' }
+if ($newInventory.version -and [version]$newInventory.version -le [version]$oldInventory.version) { throw 'Production updates must have a newer version.' }
+$oldFiles = $oldInventory.files
+$newFiles = $newInventory.files
 # Incoming staging is owned build output: unlike the installed folder, extra files
 # are not user data and would make the proposed replacement incomplete/ambiguous.
 $pending = [Collections.Generic.Queue[string]]::new()
@@ -104,7 +121,7 @@ foreach ($name in $oldFiles.Keys) {
     $stream = [IO.File]::Open((Join-Path $InstallDirectory $name),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     $stream.Dispose()
 }
-[pscustomobject]@{
+$plan = [ordered]@{
     schema_version=1
     scope='Read-only update snapshot, not authorization or an executed update. Revalidate before a recoverable transaction; no old uninstaller was executed.'
     install_directory=$InstallDirectory
@@ -117,4 +134,10 @@ foreach ($name in $oldFiles.Keys) {
     old_uninstaller_scope='Current bytes captured for backup only; original uninstaller identity was not recorded by this marker format.'
     backup_bytes=($oldFiles.Values | Measure-Object bytes -Sum).Sum
     incoming_bytes=($newFiles.Values | Measure-Object bytes -Sum).Sum
-} | ConvertTo-Json -Depth 8
+}
+if ($newInventory.version) {
+    $plan.schema_version = 2
+    $plan.installed_version = $oldInventory.version
+    $plan.incoming_version = $newInventory.version
+}
+[pscustomobject]$plan | ConvertTo-Json -Depth 8

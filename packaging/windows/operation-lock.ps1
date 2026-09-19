@@ -5,7 +5,7 @@ param(
 )
 
 function Get-TowavueOperationName([string]$RegistrySubKey) {
-    if ($RegistrySubKey -ne 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation' -and
+    if ($RegistrySubKey -notin @('Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation','Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue') -and
         $RegistrySubKey -ne 'towavue-setup-fixture-v1' -and
         $RegistrySubKey -notmatch '^Software\\towavue\\InstallerTests\\[0-9a-f]{32}$') { throw 'Operation identity is outside the owned namespace.' }
     $user = [Security.Principal.WindowsIdentity]::GetCurrent()

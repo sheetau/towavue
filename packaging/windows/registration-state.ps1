@@ -1,6 +1,11 @@
+function Assert-TowavueProductVersion([string]$Version) {
+    if ($Version -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw 'A canonical stable product version is required.' }
+    foreach ($part in $Version.Split('.')) { if ([uint64]$part -gt 65535) { throw 'Product version exceeds Windows resource limits.' } }
+}
+
 function Assert-TowavueRegistrationLocation([string]$InstallDirectory,[string]$RegistrySubKey,[string]$ShortcutPath) {
     # Shared by registration and pending-update discovery before registry access.
-    if ($RegistrySubKey -ne 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation' -and
+    if ($RegistrySubKey -notin @('Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation','Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue') -and
         $RegistrySubKey -notmatch '^Software\\towavue\\InstallerTests\\[0-9a-f]{32}$') { throw 'Registration key is outside the owned namespace.' }
     foreach ($path in @($InstallDirectory,$ShortcutPath)) {
         if ($path -notmatch '^[A-Za-z]:[\\/]' -or [IO.Path]::GetFullPath($path) -ne $path) { throw 'Registration paths must be absolute and normalized.' }
@@ -19,17 +24,26 @@ function Invoke-TowavueRegistration {
     param(
         [Parameter(Mandatory)][ValidateSet('Inspect','Install','VerifyRemoval','Remove','VerifyUpdate','Update')][string]$Mode,
         [Parameter(Mandatory)][string]$InstallDirectory,
-        [Parameter(Mandatory)][ValidatePattern('^towavue-local-[0-9a-f]{64}$')][string]$OwnershipId,
+        [Parameter(Mandatory)][ValidatePattern('^towavue-(local|release)-[0-9a-f]{64}$')][string]$OwnershipId,
         [Parameter(Mandatory)][string]$RegistrySubKey,
         [Parameter(Mandatory)][string]$ShortcutPath,
         [Parameter(Mandatory)][ValidateRange(1,2147483647)][int]$SizeKiB,
         [string]$PreviousOwnershipId,
-        [int]$PreviousSizeKiB
+        [int]$PreviousSizeKiB,
+        [string]$ProductVersion,
+        [string]$PreviousProductVersion
     )
 
     Assert-TowavueRegistrationLocation $InstallDirectory $RegistrySubKey $ShortcutPath
     $updating = $Mode -in @('VerifyUpdate','Update')
-    if ($updating -and ($PreviousOwnershipId -cnotmatch '^towavue-local-[0-9a-f]{64}$' -or $PreviousSizeKiB -lt 1)) { throw 'An update requires the recorded previous identity and size.' }
+    $release = $OwnershipId.StartsWith('towavue-release-',[StringComparison]::Ordinal)
+    if (($RegistrySubKey -eq 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue' -and -not $release) -or
+        ($RegistrySubKey -eq 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue-evaluation' -and $release)) { throw 'Production and evaluation registrations cannot take over each other.' }
+    if ($updating -and ($PreviousOwnershipId -cnotmatch '^towavue-(local|release)-[0-9a-f]{64}$' -or $PreviousSizeKiB -lt 1)) { throw 'An update requires the recorded previous identity and size.' }
+    if ($updating -and $PreviousOwnershipId.StartsWith('towavue-release-',[StringComparison]::Ordinal) -ne $release) { throw 'Production and evaluation payloads cannot replace each other.' }
+    if ($release -and ($updating -or $Mode -in @('Inspect','Install'))) { Assert-TowavueProductVersion $ProductVersion }
+    if ($release -and $updating) { Assert-TowavueProductVersion $PreviousProductVersion }
+    if (-not $release -and ($ProductVersion -or $PreviousProductVersion)) { throw 'Evaluation registration cannot claim a production version.' }
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
     $key = $null
     try {
@@ -42,13 +56,15 @@ function Invoke-TowavueRegistration {
             $currentId = $key.GetValue('TowavueOwnershipId')
             $currentSize = $key.GetValue('EstimatedSize')
             if (@($PreviousOwnershipId,$OwnershipId) -cnotcontains $currentId -or @($PreviousSizeKiB,$SizeKiB) -notcontains $currentSize) { throw 'Update registration has an unknown identity or size; preserve it.' }
+            if ($release -and ($key.GetValueKind('DisplayVersion') -ne 'String' -or @($PreviousProductVersion,$ProductVersion) -cnotcontains $key.GetValue('DisplayVersion'))) { throw 'Update registration has an unknown product version or type; preserve it.' }
             if ($Mode -eq 'VerifyUpdate') { return 'Registration transition verified; no changes made.' }
-            # Two writes are not atomic. The caller retains both typed states;
+            # Separate writes are not atomic. The caller retains both typed states;
             # retry or reversed arguments can complete a known partial transition.
             if ($currentSize -ne $SizeKiB) { $key.SetValue('EstimatedSize',$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord) }
+            if ($release -and $key.GetValue('DisplayVersion') -cne $ProductVersion) { $key.SetValue('DisplayVersion',$ProductVersion,[Microsoft.Win32.RegistryValueKind]::String) }
             if ($currentId -cne $OwnershipId) { $key.SetValue('TowavueOwnershipId',$OwnershipId,[Microsoft.Win32.RegistryValueKind]::String) }
             $key.Flush()
-            return 'Updated ownership and size; shortcut and all other registration values were preserved.'
+            return 'Updated recorded ownership, size and production version; shortcut and unrelated values were preserved.'
         }
         if ($Mode -in @('Inspect','Install')) {
             if ($key -or (Test-Path -LiteralPath $ShortcutPath)) { throw 'An existing registration or shortcut occupies this application identity. It was not changed.' }
@@ -59,12 +75,13 @@ function Invoke-TowavueRegistration {
             foreach ($path in @($executable,$uninstaller)) {
                 if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Application files must exist before registration.' }
             }
+            if ($release -and [Diagnostics.FileVersionInfo]::GetVersionInfo($executable).ProductVersion -cne $ProductVersion) { throw 'Registered version must match the installed executable.' }
             $key = $base.CreateSubKey($RegistrySubKey)
             $strings = [ordered]@{
                 TowavueOwnershipId=$OwnershipId
                 InstallLocation=$InstallDirectory
-                DisplayName='towavue (local evaluation)'
-                DisplayVersion='0.0.0 (local evaluation)'
+                DisplayName=$(if ($release) { 'towavue' } else { 'towavue (local evaluation)' })
+                DisplayVersion=$(if ($release) { $ProductVersion } else { '0.0.0 (local evaluation)' })
                 DisplayIcon=('"' + $executable + '",0')
                 UninstallString=('"' + $uninstaller + '"')
             }

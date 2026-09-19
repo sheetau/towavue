@@ -18,6 +18,11 @@ function New-TowavueUpdateRegistrationRecord($Plan,[hashtable]$Registration) {
         if (-not $key) { throw 'The existing update registration is missing.' }
         if ($key.GetValue('TowavueOwnershipId') -cne $Plan.installed_ownership_id -or $key.GetValueKind('EstimatedSize') -ne 'DWord') { throw 'Previous update registration changed or has an invalid size type.' }
         $arguments.PreviousSizeKiB = $key.GetValue('EstimatedSize')
+        if ($Plan.schema_version -eq 2) {
+            if ($key.GetValueKind('DisplayVersion') -ne 'String' -or $key.GetValue('DisplayVersion') -cne $Plan.installed_version) { throw 'Previous registered version differs from the installed executable.' }
+            $arguments.PreviousProductVersion = $Plan.installed_version
+            $arguments.ProductVersion = $Plan.incoming_version
+        }
     } finally { if ($key) { $key.Dispose() }; $base.Dispose() }
     $arguments.PreviousOwnershipId = $Plan.installed_ownership_id
     $arguments.OwnershipId = $Plan.incoming_ownership_id
@@ -30,11 +35,19 @@ function Invoke-TowavueUpdateRegistration($Record,[string]$Direction,[switch]$Ve
     . (Join-Path $PSScriptRoot '../packaging/windows/registration-state.ps1')
     $arguments = @{}
     foreach ($name in @('InstallDirectory','RegistrySubKey','ShortcutPath','OwnershipId','SizeKiB','PreviousOwnershipId','PreviousSizeKiB')) { $arguments[$name] = $Record.$name }
+    if ($Record.ProductVersion -or $Record.PreviousProductVersion) {
+        $arguments.ProductVersion = $Record.ProductVersion
+        $arguments.PreviousProductVersion = $Record.PreviousProductVersion
+    }
     if ($Direction -eq 'Rollback') {
         $arguments.OwnershipId = $Record.PreviousOwnershipId
         $arguments.SizeKiB = $Record.PreviousSizeKiB
         $arguments.PreviousOwnershipId = $Record.OwnershipId
         $arguments.PreviousSizeKiB = $Record.SizeKiB
+        if ($arguments.ContainsKey('ProductVersion')) {
+            $arguments.ProductVersion = $Record.PreviousProductVersion
+            $arguments.PreviousProductVersion = $Record.ProductVersion
+        }
     }
     $mode = if ($VerifyOnly) { 'VerifyUpdate' } else { 'Update' }
     Invoke-TowavueRegistration @arguments -Mode $mode | Out-Null

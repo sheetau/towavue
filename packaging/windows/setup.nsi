@@ -21,11 +21,33 @@ SetOverwrite off
 
 !ifdef TOWAVUE_SETUP_APPLICATION
 !include "x64.nsh"
+!include "WinVer.nsh"
 !include "${TRIAL_ROOT}\payload.nsh"
+!ifdef TOWAVUE_SETUP_RELEASE
+!ifndef PRODUCT_VERSION
+!error "Production Setup requires PRODUCT_VERSION."
+!endif
+Name "towavue"
+OutFile "${TRIAL_ROOT}\towavue-${PRODUCT_VERSION}-windows-x64-setup.exe"
+InstallDir "$LOCALAPPDATA\Programs\towavue"
+BrandingText "towavue"
+VIProductVersion "${PRODUCT_VERSION}.0"
+VIAddVersionKey /LANG=1033 "ProductName" "towavue"
+VIAddVersionKey /LANG=1033 "CompanyName" "sheeta"
+VIAddVersionKey /LANG=1033 "LegalCopyright" "Copyright (c) 2026 sheetau"
+VIAddVersionKey /LANG=1033 "FileDescription" "towavue Setup"
+VIAddVersionKey /LANG=1033 "FileVersion" "${PRODUCT_VERSION}"
+VIAddVersionKey /LANG=1033 "ProductVersion" "${PRODUCT_VERSION}"
+!define VERSION_ARGUMENT '-ProductVersion "${PRODUCT_VERSION}"'
+!define APPLICATION_LABEL "towavue"
+!else
 Name "towavue (local evaluation)"
 OutFile "${TRIAL_ROOT}\Setup-local.exe"
 InstallDir "$LOCALAPPDATA\Programs\towavue-evaluation"
 BrandingText "Local evaluation - not a published release"
+!define VERSION_ARGUMENT ""
+!define APPLICATION_LABEL "towavue (local evaluation)"
+!endif
 !define MARKER_FILE "towavue-install.ini"
 !define MARKER_SECTION "installation"
 !define UNINSTALL_FILE "Uninstall.exe"
@@ -33,11 +55,18 @@ Var CompletionTitle
 Var CompletionText
 !define MUI_FINISHPAGE_TITLE "$CompletionTitle"
 !define MUI_FINISHPAGE_TEXT "$CompletionText"
-!define MUI_WELCOMEPAGE_TITLE "towavue local evaluation Setup"
+!define MUI_WELCOMEPAGE_TITLE "${APPLICATION_LABEL} Setup"
+!ifdef TOWAVUE_SETUP_RELEASE
+!define MUI_WELCOMEPAGE_TEXT "Install towavue for the current user on Windows 11 x64.$\r$\n$\r$\nChoose an empty folder or this user's registered production installation to update. Close towavue before continuing. Evaluation installations are separate.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. Licenses and matching source links are installed with the app. Setup will not restart Windows."
+!else
 !define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nChoose an empty folder or this user's registered installation to update. Interrupted updates must be restored first. Close towavue and any uninstallers before continuing.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. No automatic restart or application launch follows. This is a local evaluation; source archives are supplied separately."
+!endif
 ; Never let the Finish page request a system restart.
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 !else
+!ifdef TOWAVUE_SETUP_RELEASE
+!error "Production mode requires an application payload."
+!endif
 Name "towavue Setup fixture (not the application)"
 OutFile "${TRIAL_ROOT}\Setup-fixture.exe"
 InstallDir "${TRIAL_ROOT}\manual-trial"
@@ -156,7 +185,11 @@ Function ${Prefix}AcquireOperation
 !ifdef TOWAVUE_SETUP_FIXTURE
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\operation-lock.ps1" -EmitName -RegistrySubKey "towavue-setup-fixture-v1"'
 !else
+!ifdef TOWAVUE_SETUP_RELEASE
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\operation-lock.ps1" -EmitName -RegistrySubKey "Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue"'
+!else
   nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\operation-lock.ps1" -EmitName'
+!endif
 !endif
   Pop $1
   Pop $0
@@ -247,7 +280,7 @@ FunctionEnd
 Function .onInit
 !ifdef TOWAVUE_SETUP_APPLICATION
   StrCpy $CompletionTitle "Installation completed"
-  StrCpy $CompletionText "towavue (local evaluation) is installed.$\r$\n$\r$\nNo application was launched. Click Finish to close Setup."
+  StrCpy $CompletionText "${APPLICATION_LABEL} is installed.$\r$\n$\r$\nNo application was launched. Click Finish to close Setup."
 !endif
   ${GetParameters} $0
   ClearErrors
@@ -277,18 +310,31 @@ Function .onInit
     StrCpy $INSTDIR $1
   ${EndIf}
 !ifdef TOWAVUE_SETUP_APPLICATION
+!ifdef TOWAVUE_SETUP_RELEASE
+  ${If} ${Silent}
+    ClearErrors
+    ${GetOptions} $0 "/TOWAVUEUPDATE=" $1
+    ${If} ${Errors}
+    ${OrIf} $1 != "1"
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+  ${EndIf}
+!else
   ${If} ${Silent}
     SetErrorLevel 2
     Quit
   ${EndIf}
+!endif
   ${IfNot} ${IsNativeAMD64}
-    MessageBox MB_OK|MB_ICONSTOP "This evaluation requires native x86-64 Windows."
+    MessageBox MB_OK|MB_ICONSTOP "Native Windows 11 x64 is required." /SD IDOK
     SetErrorLevel 2
     Quit
   ${EndIf}
   GetWinVer $0 Build
-  ${If} $0 < 19045
-    MessageBox MB_OK|MB_ICONSTOP "Windows 10 22H2 or later is required."
+  ${If} $0 < 22000
+  ${OrIf} ${IsServerOS}
+    MessageBox MB_OK|MB_ICONSTOP "Windows 11 is required." /SD IDOK
     SetErrorLevel 2
     Quit
   ${EndIf}
@@ -321,7 +367,7 @@ Function CallUpdate
   ; framework reference when Windows PowerShell compiles the native bridge.
   SetOutPath "$PLUGINSDIR\update\scripts"
   System::Call 'kernel32::SetEnvironmentVariableW(w "PSModulePath", p 0)'
-  StrCpy $0 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\update\packaging\windows\update.ps1" -Mode $UpdateMode -InstallDirectory "$INSTDIR" -IncomingPayloadDirectory "$PLUGINSDIR\update\payload" -IncomingOwnershipId "${OWNERSHIP_ID}" -NewUninstaller "$PLUGINSDIR\update\New-Uninstall.exe"'
+  StrCpy $0 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\update\packaging\windows\update.ps1" -Mode $UpdateMode -InstallDirectory "$INSTDIR" -IncomingPayloadDirectory "$PLUGINSDIR\update\payload" -IncomingOwnershipId "${OWNERSHIP_ID}" -NewUninstaller "$PLUGINSDIR\update\New-Uninstall.exe" ${VERSION_ARGUMENT}'
   ${If} $UpdateMode == "Inspect"
     nsExec::ExecToStack $0
     Pop $UpdateResult
@@ -378,7 +424,7 @@ Function UpdateInstallation
     StrCpy $CompletionText "The previous installation has been restored. The new version has not been installed.$\r$\n$\r$\nClick Finish, then run Setup again to retry the update.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched."
   ${Else}
     StrCpy $CompletionTitle "Update completed"
-    StrCpy $CompletionText "towavue (local evaluation) has been updated.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched. Click Finish to close Setup."
+    StrCpy $CompletionText "${APPLICATION_LABEL} has been updated.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched. Click Finish to close Setup."
   ${EndIf}
   SetErrorLevel 0
   ${If} $PrerequisiteResult == 3010
@@ -399,7 +445,7 @@ Function ${Prefix}Registration
     StrCpy $RegistrationResult 20
     Return
   ${EndIf}
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\registration\registration.ps1" -Mode $RegistrationMode -InstallDirectory "$INSTDIR" -OwnershipId "${OWNERSHIP_ID}" -SizeKiB ${PAYLOAD_SIZE_KIB}'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\registration\registration.ps1" -Mode $RegistrationMode -InstallDirectory "$INSTDIR" -OwnershipId "${OWNERSHIP_ID}" -SizeKiB ${PAYLOAD_SIZE_KIB} ${VERSION_ARGUMENT}'
   Pop $RegistrationResult
   Pop $0
   DetailPrint "$0"
@@ -430,6 +476,10 @@ Function CheckPrerequisite
   Pop $0
   DetailPrint "$0"
   ${If} $PrerequisiteResult == 10
+    ${If} ${Silent}
+      SetErrorLevel 3
+      Abort "Run Setup interactively to review and install the required Visual C++ runtime."
+    ${EndIf}
     MessageBox MB_OKCANCEL|MB_ICONINFORMATION "The Microsoft Visual C++ x64 runtime is required. Open its original installer to review the terms and choose whether to install? Cancelling stops towavue Setup without installing the application." IDOK install_prerequisite
     SetErrorLevel 2
     Abort "Prerequisite cancelled. No application files were installed."
@@ -441,7 +491,7 @@ Function CheckPrerequisite
   ${EndIf}
   ${If} $PrerequisiteResult == 3010
     DetailPrint "The prerequisite requests a restart. Restart manually before launching towavue. Setup will not restart Windows."
-    MessageBox MB_OK|MB_ICONINFORMATION "The prerequisite requests a restart. Restart Windows manually before launching towavue. Setup will not restart Windows or launch the application."
+    MessageBox MB_OK|MB_ICONINFORMATION "The prerequisite requests a restart. Restart Windows manually before launching towavue. Setup will not restart Windows or launch the application." /SD IDOK
   ${ElseIf} $PrerequisiteResult != 0
     SetErrorLevel 3
     Abort "Prerequisite did not pass (checker result $PrerequisiteResult). See the details. No application files were installed."
@@ -475,6 +525,13 @@ FunctionEnd
 Section "Files"
   ; Repeat after the page so silent mode and late directory changes cannot bypass it.
   Call CheckDestination
+!ifdef TOWAVUE_SETUP_RELEASE
+  ${If} ${Silent}
+  ${AndIf} $UpdateMode != "Apply"
+    SetErrorLevel 2
+    Abort "Automatic updates require an existing production installation with no pending recovery. Run Setup interactively."
+  ${EndIf}
+!endif
   ${If} $PathError != ""
     DetailPrint "$PathError"
     SetErrorLevel 2

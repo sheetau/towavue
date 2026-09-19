@@ -38,6 +38,7 @@ function New-TowavueUpdateTransaction {
     Write-Verbose 'Verifying installed and incoming file inventories. Large payloads can take several minutes.'
     $plan = & (Join-Path $PSScriptRoot 'get-setup-update-plan.ps1') -InstallDirectory $InstallDirectory -IncomingPayloadDirectory $IncomingPayloadDirectory -IncomingOwnershipId $IncomingOwnershipId | ConvertFrom-Json
     $registrationRecord = if ($null -ne $Registration) { New-TowavueUpdateRegistrationRecord $plan $Registration } else { $null }
+    if ($plan.schema_version -eq 2 -and -not $registrationRecord) { throw 'Production updates require a registered version transition.' }
     $NewUninstaller = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($NewUninstaller)
     # NSIS may inherit a DOS-short temporary directory. This caller-supplied
     # source is not an inventory name; expand it before the strict name check.
@@ -77,7 +78,7 @@ function New-TowavueUpdateTransaction {
     # Immutable journal, published only after every backup and staged file. The
     # independently retained digest detects corruption, not a hostile same user.
     # Older readers must not resume the two-guard retirement/publication protocol.
-    $schema = 3
+    $schema = if ($plan.schema_version -eq 2) { 4 } else { 3 }
     $journal = [ordered]@{schema_version=$schema;directory=$directory;plan=$plan;entries=$entries;registration=$registrationRecord}
     $journalPath = Join-Path $directory 'journal.json'
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($journal | ConvertTo-Json -Depth 12))
@@ -110,15 +111,21 @@ function Invoke-TowavueUpdateTransaction {
         try { $journal = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         $install = $journal.plan.install_directory
         Assert-LocalPath $install
-        if ($journal.schema_version -notin @(1,2,3) -or ($journal.schema_version -eq 2 -and -not $journal.registration) -or $journal.directory -cne $directory -or
+        if ($journal.schema_version -notin @(1,2,3,4) -or ($journal.schema_version -in @(2,4) -and -not $journal.registration) -or $journal.directory -cne $directory -or
             (Split-Path -Parent $install) -ine (Split-Path -Parent $directory) -or
             [TowavueUpdatePaths]::Expand($install) -ine $install -or $install -ieq $directory -or
             $journal.entries.Count -lt 2 -or $journal.entries[-1].name -ine 'towavue.exe' -or
             $journal.entries[-2].name -ine 'Uninstall.exe') { throw 'Update journal location or schema differs.' }
+        if (($journal.schema_version -eq 4) -ne ($journal.plan.schema_version -eq 2) -or
+            ($journal.schema_version -ne 4 -and $journal.plan.incoming_ownership_id -cnotmatch '^towavue-local-[0-9a-f]{64}$')) { throw 'Journal schema cannot describe this production version transition.' }
         if ($journal.registration) {
             $record = $journal.registration
             if ($record.InstallDirectory -cne $install -or $record.OwnershipId -cne $journal.plan.incoming_ownership_id -or
                 $record.PreviousOwnershipId -cne $journal.plan.installed_ownership_id -or $record.SizeKiB -ne [Math]::Ceiling($journal.plan.incoming_bytes / 1024)) { throw 'Update registration does not match the file journal.' }
+            if ($journal.schema_version -eq 4) {
+                if ($journal.plan.schema_version -ne 2 -or $record.OwnershipId -cnotmatch '^towavue-release-[0-9a-f]{64}$' -or
+                    $record.ProductVersion -cne $journal.plan.incoming_version -or $record.PreviousProductVersion -cne $journal.plan.installed_version) { throw 'Production versions do not match the file journal.' }
+            } elseif ($journal.plan.schema_version -ne 1 -or $record.ProductVersion -or $record.PreviousProductVersion -or $record.OwnershipId -cnotmatch '^towavue-local-[0-9a-f]{64}$') { throw 'Legacy journal cannot perform a production version transition.' }
             Invoke-TowavueUpdateRegistration $record $Mode -VerifyOnly
         }
         if ($null -ne $ExpectedRegistration -and (-not $journal.registration -or

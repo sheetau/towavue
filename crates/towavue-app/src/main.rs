@@ -5991,7 +5991,8 @@ where
         actions: &mut Vec<UiAction>,
         volume_targets: &mut Vec<egui::Response>,
     ) -> egui::Rect {
-        let frame = chrome::bar();
+        let mut frame = chrome::bar();
+        frame.inner_margin.left = chrome::STATUS_BUTTON_GAP as i8;
         let density = root.ctx().pixels_per_point();
         // Anchor to the physical edge, not the sum of independently rounded child widths.
         let info_right = ((root.max_rect().right() * density).round()
@@ -6002,8 +6003,14 @@ where
             .show_separator_line(!self.timeline_is_visible())
             .frame(frame)
             .show(root, |ui| {
+                // Give padding its own non-focusable target before the controls,
+                // so egui's nearest-widget hit assistance cannot click a nearby button.
+                ui.interact(ui.max_rect() + frame.inner_margin, ui.id().with("status-padding"),
+                    egui::Sense::CLICK | egui::Sense::DRAG);
                 ui.horizontal_centered(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
+                    ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
+                    ui.spacing_mut().button_padding = egui::Vec2::ZERO;
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
                         let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::transport_button(
@@ -6077,7 +6084,7 @@ where
                         }
                         if compact {
                             // Keep volume and mode controls visible before truncating a long clock.
-                            let controls_width = 46.0;
+                            let controls_width = 40.0 + ui.spacing().item_spacing.x;
                             let time_width = (ui.available_width() - controls_width).max(0.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(time_width, 24.0),
@@ -6142,7 +6149,7 @@ where
                     } else {
                         remaining * 0.52
                     };
-                    let path_width = (remaining - info_width - 6.0).max(0.0);
+                    let path_width = (remaining - info_width - ui.spacing().item_spacing.x).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(path_width, 24.0),
                         egui::Layout::left_to_right(egui::Align::Center),

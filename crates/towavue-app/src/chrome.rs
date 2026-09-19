@@ -57,6 +57,8 @@ pub const BORDER: Color32 = Color32::from_gray(24);
 pub const HOVER: Color32 = Color32::from_gray(44);
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
+pub const STATUS_BUTTON_SIZE: f32 = 20.0;
+pub const STATUS_BUTTON_GAP: f32 = (STATUS_HEIGHT - STATUS_BUTTON_SIZE) * 0.5;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
 pub const TAB_PADDING: f32 = 10.0;
 
@@ -275,19 +277,31 @@ pub fn tab_audio_button(
 }
 
 pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
-    button_with_sense(ui, icon, label, egui::Sense::click())
+    button_with_sense(ui, icon, label, egui::Sense::click(), 24.0)
 }
 
 pub fn transport_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
-    button_with_sense(ui, icon, label, egui::Sense::click_and_drag())
+    button_with_sense(
+        ui,
+        icon,
+        label,
+        egui::Sense::click_and_drag(),
+        STATUS_BUTTON_SIZE,
+    )
 }
 
-fn button_with_sense(ui: &mut Ui, icon: Icon, label: &str, sense: egui::Sense) -> egui::Response {
+fn button_with_sense(
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    sense: egui::Sense,
+    size: f32,
+) -> egui::Response {
     let response = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = egui::Vec2::ZERO;
             ui.add_sized(
-                [24.0, 24.0],
+                [size, size],
                 egui::Button::new(icon.text()).frame(false).sense(sense),
             )
         })
@@ -330,7 +344,7 @@ pub enum AudioIcon {
 pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -> egui::Response {
     let response = ui
         .add_sized(
-            [24.0, 24.0],
+            [STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE],
             egui::Button::new("").frame(false).selected(selected),
         )
         .help_text(label);
@@ -360,7 +374,7 @@ pub fn reading_button(
     let response = ui
         .add_enabled_ui(enabled, |ui| {
             ui.add_sized(
-                [24.0, 24.0],
+                [STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE],
                 egui::Button::new("")
                     .frame(false)
                     .sense(egui::Sense::click_and_drag())

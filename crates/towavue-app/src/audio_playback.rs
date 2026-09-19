@@ -664,13 +664,16 @@ mod tests {
                             .then(|| node.bounds().expect("play bounds"))
                     })
                     .expect("leading transport control");
-                assert!((play.x0 - 6.0).abs() < 0.1);
+                assert!((play.x0 - 5.0).abs() < 0.1);
+                assert!((play.width() - 20.0).abs() < 0.1);
+                assert!((play.y0 - 275.0).abs() < 0.1);
+                assert!((play.y1 - 295.0).abs() < 0.1);
                 assert!((play.width() - play.height()).abs() < 0.1);
                 assert!((bounds.width() - bounds.height()).abs() < 0.1);
                 let expected_x = if label == "Repeat off" {
-                    play.x1 + 6.0
+                    play.x1 + 5.0
                 } else {
-                    play.x1 + 36.0
+                    play.x1 + 30.0
                 };
                 assert!(
                     (bounds.x0 - expected_x).abs() < 0.1,
@@ -684,6 +687,36 @@ mod tests {
                     bounds.x0 >= 0.0 && bounds.x1 <= width as f64,
                     "{label} outside {width}: {bounds:?}"
                 );
+                // The gaps must be inactive, including egui's nearest-widget hit assistance.
+                let center = egui::pos2(
+                    (bounds.x0 + bounds.x1) as f32 * 0.5,
+                    (bounds.y0 + bounds.y1) as f32 * 0.5,
+                );
+                for point in [
+                    egui::pos2(center.x, bounds.y0 as f32 - 2.0),
+                    egui::pos2(center.x, bounds.y1 as f32 + 2.0),
+                    egui::pos2(bounds.x0 as f32 - 2.0, center.y),
+                    egui::pos2(bounds.x1 as f32 + 2.0, center.y),
+                ] {
+                    for pressed in [true, false] {
+                        let (_, actions) = frame(
+                            &mut app,
+                            vec![
+                                egui::Event::PointerMoved(point),
+                                egui::Event::PointerButton {
+                                    pos: point,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                        );
+                        assert!(
+                            actions.is_empty(),
+                            "padding must not activate a control: {point:?}"
+                        );
+                    }
+                }
                 let actions = frame(
                     &mut app,
                     vec![egui::Event::AccessKitActionRequest(
@@ -715,6 +748,11 @@ mod tests {
                         .find(|(_, node)| node.label().is_some_and(|name| name.starts_with(label)))
                         .expect("video repeat button");
                     let bounds = node.bounds().expect("repeat bounds");
+                    let tolerance = 1.0 / f64::from(density);
+                    assert!((bounds.width() - 20.0).abs() <= tolerance);
+                    assert!((bounds.height() - 20.0).abs() <= tolerance);
+                    assert!((bounds.y0 - 275.0).abs() <= tolerance);
+                    assert!((300.0 - bounds.y1 - 5.0).abs() <= tolerance);
                     assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width));
                     assert!(!node.is_disabled());
                     let (_, actions) = frame(

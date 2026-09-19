@@ -309,10 +309,18 @@ fn media_reference_layouts_reach_the_gpu() {
                     };
                     if scene.starts_with("image-modal") {
                         for y in [35.0, 674.0] {
-                            assert!(
-                                at(614.0, y)[2] < 140,
-                                "modal backdrop covers the media edges outside its placement bounds"
-                            );
+                            if scene == "image-modal-error" {
+                                assert!(
+                                    at(614.0, y)[2] < 140,
+                                    "error modal dims media outside its placement bounds"
+                                );
+                            } else {
+                                assert_eq!(
+                                    at(614.0, y),
+                                    [32, 96, 160, 255],
+                                    "image preview remains undimmed outside the bottom-right panel"
+                                );
+                            }
                         }
                         assert!(
                             pixels

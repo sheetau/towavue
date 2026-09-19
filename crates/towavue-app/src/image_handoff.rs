@@ -30,6 +30,7 @@ impl ImageHandoff {
             transform: self.transform,
             view: self.view,
             rotation_tenths: 0,
+            resized_size: None,
         }
         .draw(ui, self.image.texture.id());
     }
@@ -41,16 +42,28 @@ pub(super) struct ImageEditView {
     transform: ImageTransform,
     view: ImageViewState,
     pub(super) rotation_tenths: i16,
+    resized_size: Option<(u32, u32)>,
 }
 
 impl ImageEditView {
+    pub fn resized(mut self, size: (u32, u32)) -> Self {
+        // Keep source dimensions for the cropped texture's half-pixel sampling bands.
+        self.resized_size = Some(size);
+        self.view.fit();
+        self.view.selection = None;
+        self.rotation_tenths = 0;
+        self
+    }
+
     pub fn draw(self, ui: &mut egui::Ui, texture: egui::TextureId) {
         let viewport = ui.max_rect();
         let density = ui.ctx().pixels_per_point();
         let mut view = self.view;
-        let size = (self.transform.size.0 as u32, self.transform.size.1 as u32);
+        let size = self
+            .resized_size
+            .unwrap_or((self.transform.size.0 as u32, self.transform.size.1 as u32));
         let scale = view.logical_scale(size, viewport.size().into(), density);
-        let displayed = egui::vec2(self.transform.size.0, self.transform.size.1) * scale;
+        let displayed = egui::vec2(size.0 as f32, size.1 as f32) * scale;
         image_scroll::clamp(&mut view, displayed, viewport.size());
         let rect = egui::Rect::from_center_size(
             viewport.center() + egui::vec2(view.pan.0, view.pan.1),
@@ -85,6 +98,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 transform: self.visual_transform(image.dimensions()),
                 view,
                 rotation_tenths: 0,
+                resized_size: None,
             }
         }))
     }

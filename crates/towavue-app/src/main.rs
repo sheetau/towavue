@@ -4192,6 +4192,10 @@ where
             return;
         };
         let texture = image.texture.id();
+        if let Some(preview) = self.image_modal_preview() {
+            preview.draw(ui, texture);
+            return;
+        }
         let transform = self.visual_transform(image.dimensions());
         let viewport = ui.max_rect();
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
@@ -6815,10 +6819,19 @@ where
             UiAction::FinishVideoResize(token, value) => self.finish_video_resize(token, value),
             UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
             UiAction::FinishResize(value) => {
+                let held = value.and_then(|value| {
+                    self.capture_image_edit_view()
+                        .map(|view| view.resized(value.size()))
+                });
                 if self.resize_dialog.take().is_some()
                     && let Some(value) = value
                 {
                     self.push_visual_edit(EditOperation::Resize(value));
+                    if self.image_edit_pending
+                        && let Some(image) = &mut self.image
+                    {
+                        image.held_edit_view = held.or(image.held_edit_view);
+                    }
                 }
                 self.request_redraw();
             }

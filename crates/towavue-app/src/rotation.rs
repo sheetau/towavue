@@ -45,15 +45,16 @@ impl RotationDialog {
     }
 
     pub(super) fn show(&mut self, context: &egui::Context) -> Option<Option<ImageRotation>> {
+        let previous_angle = self.angle.clone();
         let mut action = None;
-        let modal = chrome::modal(context, "free-rotate-image".into(), false).show(context, |ui| {
+        let modal = chrome::modal(context, "free-rotate-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
                 420.0,
                 "Free rotate image",
                 &["Apply rotation", "Cancel"],
                 |ui| {
-                    ui.label("Preview only. Apply adds one undoable edit.");
+                    ui.label("Preview on the image. Apply adds one undoable edit.");
                     ui.label("Tip: hold Alt and drag horizontally on the image.");
                     ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
                     let response =
@@ -85,13 +86,6 @@ impl RotationDialog {
                             size.0,
                             size.1,
                         ));
-                        let preview_height =
-                            (context.content_rect().height() - 230.0).clamp(60.0, 240.0);
-                        let (rect, _) = ui.allocate_exact_size(
-                            egui::vec2(ui.available_width(), preview_height),
-                            egui::Sense::hover(),
-                        );
-                        paint_preview(ui.painter(), rect, self.texture.id(), self.transform, value);
                         ui.label("Placement preview; final pixels are resampled on Apply.");
                     } else {
                         ui.label(concat!(
@@ -122,23 +116,11 @@ impl RotationDialog {
         {
             action = Some(None);
         }
+        if self.angle != previous_angle {
+            context.request_repaint();
+        }
         action
     }
-}
-
-fn preview_mesh(
-    rect: egui::Rect,
-    texture: egui::TextureId,
-    transform: ImageTransform,
-    rotation: ImageRotation,
-) -> egui::Mesh {
-    let (width, height) = rotation.size();
-    let scale = (rect.width() / width as f32).min(rect.height() / height as f32);
-    let source = egui::Rect::from_center_size(
-        rect.center(),
-        egui::vec2(transform.size.0, transform.size.1) * scale,
-    );
-    rotated_mesh(texture, source, transform, rotation.tenths())
 }
 
 pub(super) fn rotated_mesh(
@@ -153,18 +135,6 @@ pub(super) fn rotated_mesh(
         vertex.pos = source.center() + angle * (vertex.pos - source.center());
     }
     mesh
-}
-
-fn paint_preview(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    texture: egui::TextureId,
-    transform: ImageTransform,
-    rotation: ImageRotation,
-) {
-    let painter = painter.with_clip_rect(rect);
-    paint_checkerboard(&painter, rect);
-    painter.add(preview_mesh(rect, texture, transform, rotation));
 }
 
 pub(super) fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
@@ -265,7 +235,38 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .rotation_dialog
             .take()
             .expect("matching rotation dialog");
+        let held = value
+            .filter(|_| self.rotation_is_current(&dialog))
+            .and_then(|value| {
+                self.capture_image_edit_view().map(|mut held| {
+                    held.rotation_tenths = value.tenths();
+                    held
+                })
+            });
         self.commit_rotation(dialog, value);
+        if self.image_edit_pending
+            && let Some(image) = &mut self.image
+        {
+            image.held_edit_view = held.or(image.held_edit_view);
+        }
+    }
+
+    pub(super) fn image_modal_preview(&self) -> Option<image_handoff::ImageEditView> {
+        if let Some(dialog) = &self.rotation_dialog {
+            if !self.rotation_is_current(dialog) {
+                return None;
+            }
+            let mut held = self.capture_image_edit_view()?;
+            held.rotation_tenths = dialog.value().map_or(0, |value| value.tenths());
+            return Some(held);
+        }
+        let dialog = self.resize_dialog.as_ref()?;
+        let held = self.capture_image_edit_view()?;
+        Some(
+            dialog
+                .value()
+                .map_or(held, |value| held.resized(value.size())),
+        )
     }
 
     fn rotation_is_current(&self, dialog: &RotationDialog) -> bool {

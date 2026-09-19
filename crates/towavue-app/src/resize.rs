@@ -132,17 +132,22 @@ impl ResizeDialog {
 
     pub fn show(&mut self, context: &egui::Context) -> Option<Option<ImageResize>> {
         let mut action = None;
-        let modal = chrome::modal(context, "resize-image".into(), false).show(context, |ui| {
+        let modal = chrome::modal(context, "resize-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
                 360.0,
                 "Resize / resample image",
                 &["Apply resize", "Cancel"],
                 |ui| {
-                    ui.label("Original file is kept. Apply adds one undoable edit.");
+                    ui.label("Preview on the image. Apply adds one undoable edit.");
                     self.controls(ui);
                     let value = self.value();
-                    if value.is_none() {
+                    if let Some(value) = value {
+                        ui.label(format!("{} x {} pixels", value.size().0, value.size().1));
+                        ui.label(
+                            "Size preview; the selected resampling filter is applied on Apply.",
+                        );
+                    } else {
                         ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");
                         if self.frame_count > 1 {
                             ui.label(format!(

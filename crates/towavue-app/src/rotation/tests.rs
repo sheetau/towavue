@@ -402,7 +402,7 @@ fn numeric_rotation_dialog_validates_accessible_input_apply_and_escape_without_m
 }
 
 #[test]
-fn rotation_preview_mesh_fits_the_canvas_and_preserves_edited_source_uvs() {
+fn rotation_preview_mesh_preserves_view_scale_and_edited_source_uvs() {
     let transform = ImageTransform::new(
         (8, 6),
         &[
@@ -423,13 +423,13 @@ fn rotation_preview_mesh_fits_the_canvas_and_preserves_edited_source_uvs() {
         .map(|v| v.uv)
         .collect::<Vec<_>>();
     for angle in [-1800, -900, -317, -1, 0, 1, 317, 900, 1800] {
-        let rotation = ImageRotation::new(angle, (4, 6)).expect("angle");
-        let mesh = preview_mesh(rect, egui::TextureId::Managed(0), transform, rotation);
+        let mesh = rotated_mesh(egui::TextureId::Managed(0), rect, transform, angle);
         assert_eq!(mesh.vertices.iter().map(|v| v.uv).collect::<Vec<_>>(), uv);
         assert!(
-            mesh.vertices
-                .iter()
-                .all(|v| rect.expand(0.001).contains(v.pos))
+            ((mesh.vertices[3].pos - mesh.vertices[0].pos).length() - rect.width()).abs() < 0.001
+        );
+        assert!(
+            ((mesh.vertices[12].pos - mesh.vertices[0].pos).length() - rect.height()).abs() < 0.001
         );
         assert!((mesh.calc_bounds().center() - rect.center()).length() < 0.001);
         let actual = (mesh.vertices[3].pos - mesh.vertices[0].pos).normalized();
@@ -786,4 +786,278 @@ fn rotation_dialog_commit_is_atomic_cancel_and_identity_preserve_state_and_old_t
         app.edits[&tab].operations(),
         &[EditOperation::RotateClockwise]
     );
+}
+
+#[test]
+fn image_edit_modals_use_the_media_preview_and_keep_cancel_apply_and_undo_consistent() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "rotation::tests::image_edit_modals_use_the_media_preview_and_keep_cancel_apply_and_undo_consistent",
+    ) else {
+        return;
+    };
+    use crate::video_rotation::tests::{access, node};
+    for density in [1.0, 1.25, 2.0] {
+        for resize in [false, true] {
+            for compact in [false, true] {
+                let (mut app, events) = application();
+                let context = app.ui_context.clone().expect("context");
+                context.set_pixels_per_point(density);
+                let size = if compact {
+                    egui::vec2(320.0, 240.0)
+                } else {
+                    egui::vec2(960.0, 708.0)
+                };
+                let frame = |app: &mut Application<_>, input| {
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                            events: input,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_ui(ui, &mut actions);
+                            if context.current_pass_index() == 0 {
+                                context.request_discard("image modal placement control");
+                            }
+                        },
+                    );
+                    for action in actions {
+                        app.handle_ui_action(action);
+                    }
+                    output
+                };
+                app.push_visual_edit(EditOperation::FlipHorizontal);
+                app.image_view.zoom = ZoomMode::Custom(90.0);
+                app.image_view.pan = (19.0, -13.0);
+                app.image_view.selection = Some(UnitRect::FULL);
+                let texture = app.image.as_ref().expect("image").texture.id();
+                let meshes = |output: &egui::FullOutput| {
+                    output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                                Some((shape.clip_rect, mesh.clone()))
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let baseline = meshes(&frame(&mut app, vec![]));
+                assert_eq!(baseline.len(), 1);
+                let view = app.image_view;
+                let history = app.edits.clone();
+                let decoded = app.image.as_ref().expect("original").decoded.clone();
+                let command = if resize {
+                    CommandId::ResizeImage
+                } else {
+                    CommandId::FreeRotateImage
+                };
+                let modal_id = if resize {
+                    "resize-image"
+                } else {
+                    "free-rotate-image"
+                };
+                let apply = if resize {
+                    "Apply resize"
+                } else {
+                    "Apply rotation"
+                };
+                app.dispatch(command);
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let tree = frame(&mut app, vec![])
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree");
+                if resize {
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Keep aspect ratio"), None)],
+                    );
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Width in pixels"), Some("20"))],
+                    );
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Height in pixels"), Some("4"))],
+                    );
+                } else {
+                    frame(
+                        &mut app,
+                        vec![access(
+                            node(&tree, "Rotation angle in degrees"),
+                            Some("31.7"),
+                        )],
+                    );
+                }
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let preview_output = frame(&mut app, vec![]);
+                let preview = meshes(&preview_output);
+                assert_eq!(
+                    preview.len(),
+                    1,
+                    "one preview replaces the image, with no duplicate inside the panel"
+                );
+                assert_eq!(
+                    preview[0]
+                        .1
+                        .vertices
+                        .iter()
+                        .map(|v| v.uv)
+                        .collect::<Vec<_>>(),
+                    baseline[0]
+                        .1
+                        .vertices
+                        .iter()
+                        .map(|v| v.uv)
+                        .collect::<Vec<_>>(),
+                    "existing source sampling and flip mapping survive preview"
+                );
+                if resize {
+                    let bounds = preview[0].1.calc_bounds();
+                    assert!((bounds.width() / bounds.height() - 5.0).abs() < 0.001);
+                    assert!(preview[0].0.expand(0.1).contains_rect(bounds));
+                } else {
+                    let edge = preview[0].1.vertices[3].pos - preview[0].1.vertices[0].pos;
+                    assert!((edge.angle().to_degrees() - 31.7).abs() < 0.01);
+                    assert!(
+                        (edge.length()
+                            - (baseline[0].1.vertices[3].pos - baseline[0].1.vertices[0].pos)
+                                .length())
+                        .abs()
+                            < 0.01
+                    );
+                }
+                let panel = context
+                    .memory(|memory| memory.area_rect(modal_id))
+                    .expect("panel");
+                let media = preview[0].0;
+                assert!(
+                    media.expand(0.1).contains_rect(panel),
+                    "panel={panel:?}, media={media:?}"
+                );
+                assert!(
+                    (media.right() - panel.right()).abs() <= 9.0
+                        && (media.bottom() - panel.bottom()).abs() <= 9.0,
+                    "preview controls anchor at bottom right"
+                );
+                assert_eq!(app.image_view, view);
+                assert_eq!(app.edits, history);
+                assert!(Arc::ptr_eq(
+                    &app.image.as_ref().expect("preview source").decoded,
+                    &decoded
+                ));
+                assert!(!app.image_edit_pending);
+                let cancel = node(
+                    preview_output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree"),
+                    "Cancel",
+                );
+                frame(&mut app, vec![access(cancel, None)]);
+                assert!(app.rotation_dialog.is_none() && app.resize_dialog.is_none());
+                assert_eq!(app.image_view, view);
+                assert_eq!(app.edits, history);
+                assert_eq!(
+                    meshes(&frame(&mut app, vec![])),
+                    baseline,
+                    "Cancel restores the exact prior presentation"
+                );
+                if compact {
+                    continue;
+                }
+                app.dispatch(command);
+                for _ in 0..3 {
+                    frame(&mut app, vec![]);
+                }
+                let tree = frame(&mut app, vec![])
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree");
+                if resize {
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Keep aspect ratio"), None)],
+                    );
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Width in pixels"), Some("20"))],
+                    );
+                    frame(
+                        &mut app,
+                        vec![access(node(&tree, "Height in pixels"), Some("4"))],
+                    );
+                } else {
+                    frame(
+                        &mut app,
+                        vec![access(
+                            node(&tree, "Rotation angle in degrees"),
+                            Some("31.7"),
+                        )],
+                    );
+                }
+                let output = frame(&mut app, vec![]);
+                let preview = meshes(&output);
+                let apply = node(
+                    output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree"),
+                    apply,
+                );
+                frame(&mut app, vec![access(apply, None)]);
+                assert!(app.image_edit_pending);
+                for _ in 0..3 {
+                    assert_eq!(
+                        meshes(&frame(&mut app, vec![])),
+                        preview,
+                        "Apply holds the on-media preview until resampled pixels arrive"
+                    );
+                }
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while app.image_edit_pending {
+                    app.handle_app_event(
+                        events
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                            .expect("materialized edit"),
+                    );
+                }
+                assert!(app.image_error.is_none());
+                let id = app.tabs.active_id().expect("tab");
+                assert_eq!(
+                    app.edits[&id].operations().len(),
+                    history[&id].operations().len() + 1
+                );
+                let expected = if resize {
+                    (20, 4)
+                } else {
+                    ImageRotation::new(317, (8, 6)).expect("angle").size()
+                };
+                assert_eq!(app.image.as_ref().expect("result").dimensions(), expected);
+                app.dispatch(CommandId::Undo);
+                while app.image_edit_pending {
+                    app.handle_app_event(
+                        events.recv_timeout(Duration::from_secs(10)).expect("Undo"),
+                    );
+                }
+                assert_eq!(app.edits[&id].operations(), history[&id].operations());
+                assert_eq!(
+                    app.image.as_ref().expect("restored source").decoded.frames[0].rgba,
+                    decoded.frames[0].rgba
+                );
+            }
+        }
+    }
 }

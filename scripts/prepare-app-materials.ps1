@@ -3,12 +3,13 @@ param(
     [Parameter(Mandatory = $true)][string]$RustNotices,
     [Parameter(Mandatory = $true)][string]$RuntimeNotices,
     [Parameter(Mandatory = $true)][string]$Executable,
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [string]$InputManifest
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$manifestPath = Join-Path $repositoryRoot 'docs/app-material-inputs.json'
+$manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/app-material-inputs.json' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Use a fresh application materials output directory.' }
@@ -74,9 +75,10 @@ foreach ($name in $copies.Keys) {
     # Output copies are expected inside OutputDirectory; compare bytes directly.
     if ((Get-Item -LiteralPath $target).Length -ne $copies[$name].record.bytes -or (Get-FileHash -LiteralPath $target).Hash -ne $copies[$name].record.sha256) { throw 'Application material copy mismatch.' }
 }
-Copy-Item -LiteralPath (Join-Path $OutputDirectory 'third-party/APP-MATERIALS-README.txt') -Destination "$OutputDirectory/README.txt"
+$readme = if ($manifest.release_version) { 'third-party/RELEASE-MATERIALS-README.txt' } else { 'third-party/APP-MATERIALS-README.txt' }
+Copy-Item -LiteralPath (Join-Path $OutputDirectory $readme) -Destination "$OutputDirectory/README.txt"
 Copy-Item -LiteralPath $manifestPath -Destination "$OutputDirectory/INPUTS.json"
 $evidence = [ordered]@{schema_version=1;candidate=$manifest.candidate;cargo_lock_sha256=$licenses.cargo_lock_sha256;dependency_count=$licenses.packages.Count;runtime_version=$manifest.version;runtime_target=$manifest.target;runtime_notice_count=$files.Count;distribution_approved=$false}
 [IO.File]::WriteAllText("$OutputDirectory/EVIDENCE.json", ($evidence | ConvertTo-Json -Depth 5) + "`n", [Text.UTF8Encoding]::new($false))
 Write-Output "Verified application materials: $OutputDirectory"
-Write-Output '146 dependency entries with embedded font notices; 18 matching MSVC Rust originals. No executable copied or distribution approved.'
+Write-Output "$($licenses.packages.Count) dependency entries with embedded font notices; $($files.Count) matching MSVC Rust originals. No executable copied or distribution approved."

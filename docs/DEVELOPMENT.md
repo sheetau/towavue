@@ -234,6 +234,7 @@ The old README, architecture, roadmap, UX ledger, and known-gaps snapshots are r
 Use the current owner request and STATUS for packaging scope. Historical evaluation records do not authorize public publication; the current launch goal targets a reviewed first-release draft.
 
 - [DISTRIBUTION](DISTRIBUTION.md): packaging decisions and audit entry point.
+- [RELEASING](RELEASING.md): clean-source production asset assembly, generated material bindings, signing and exact-package checks.
 - [LOCAL_SETUP](LOCAL_SETUP.md): per-user install/update/rollback/uninstall contracts and lifecycle evidence.
 - [NATIVE_FFMPEG_BUILD](NATIVE_FFMPEG_BUILD.md), [FFMPEG_REBUILD](FFMPEG_REBUILD.md), [MABS_BUILD](MABS_BUILD.md): native Windows FFmpeg options, reproducibility, rejected inputs.
 - [CANDIDATE_MATERIALS](CANDIDATE_MATERIALS.md), [APP_MATERIALS](APP_MATERIALS.md), [NATIVE_MATERIAL_CATALOG](NATIVE_MATERIAL_CATALOG.md): candidate/source/notice correspondence and specialized audits.

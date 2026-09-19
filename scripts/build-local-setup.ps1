@@ -5,15 +5,25 @@ param(
     [Parameter(Mandatory)][string]$SourceCompanion,
     [Parameter(Mandatory)][string]$VcRedist,
     [Parameter(Mandatory)][string]$NsisArchive,
-    [Parameter(Mandatory)][string]$OutputDirectory
+    [Parameter(Mandatory)][string]$OutputDirectory,
+    [string]$InputManifest
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$manifest = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/setup-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/setup-inputs.json' }
+$manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $nsis = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/nsis-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($manifest.schema_version -ne 1 -or $manifest.distribution_approved -ne $false -or
-    $manifest.binary_files -ne 95 -or $manifest.companion_files -ne 2879) { throw 'Invalid local Setup manifest.' }
+$production = $manifest.schema_version -eq 2
+if ($manifest.schema_version -notin @(1,2) -or $manifest.distribution_approved -ne $false -or
+    $manifest.binary_files -ne 95 -or $manifest.companion_files -lt 1 -or
+    (-not $production -and $manifest.companion_files -ne 2879)) { throw 'Invalid Setup manifest.' }
+if ($production) {
+    if ($manifest.release_version -cnotmatch '^(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\.(0|[1-9][0-9]{0,4})\z' -or
+        @($manifest.release_version.Split('.') | Where-Object { [int]$_ -gt 65535 }).Count -or
+        $manifest.source_commit -cnotmatch '^[0-9a-f]{40}$' -or
+        $manifest.companion.name -cne ('towavue-' + $manifest.release_version + '-sources.zip')) { throw 'Invalid production Setup identity.' }
+}
 function Assert-NoLink([string]$Path) {
     $current = $Path
     while ($current) {
@@ -48,6 +58,7 @@ function Get-Record([string]$Path,[string]$Name) {
 }
 Assert-File $SourceCompanion $manifest.companion
 Assert-File $NsisArchive $nsis.archive
+if ($production -and [Diagnostics.FileVersionInfo]::GetVersionInfo($Executable).ProductVersion -cne $manifest.release_version) { throw 'Production Setup and executable versions differ.' }
 $vcState = & (Join-Path $PSScriptRoot 'get-vc-redist-status.ps1') -PackagePath $VcRedist | ConvertFrom-Json
 if (-not $vcState.package_verified) { throw 'VC redistributable was not verified.' }
 
@@ -64,6 +75,7 @@ try {
     $reader = [IO.StreamReader]::new($entries['BINDING.json'].Open(),[Text.Encoding]::UTF8)
     try { $binding = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
     if ($binding.files.Count -ne $manifest.binary_files -or $binding.distribution_approved -ne $false) { throw 'Invalid candidate binary binding.' }
+    if ($production -and ($binding.release_version -cne $manifest.release_version -or $binding.application_source_commit -cne $manifest.source_commit)) { throw 'Production source binding differs.' }
     $binaries = @{}
     foreach ($file in $binding.files) {
         Assert-Name $file.name
@@ -140,14 +152,20 @@ foreach ($name in $updateSources) {
 $utf8 = [Text.UTF8Encoding]::new($false)
 $buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json','LICENSE-MIT','LICENSE-APACHE','packaging/windows/SOURCES-README.txt')
 $buildSources = @(($buildSources + $updateSources) | Sort-Object -Unique)
-$sourceRecords = @($buildSources | ForEach-Object { Assert-NoLink (Join-Path $repositoryRoot $_); Get-Record (Join-Path $repositoryRoot $_) $_ })
+$buildSourcePaths = @{}
+foreach ($name in $buildSources) { $buildSourcePaths[$name] = Join-Path $repositoryRoot $name }
+if ($production) {
+    $buildSourcePaths.Remove('docs/setup-inputs.json')
+    $buildSourcePaths['docs/release-setup-inputs.json'] = $manifestPath
+}
+$sourceRecords = @($buildSourcePaths.Keys | Sort-Object | ForEach-Object { Assert-NoLink $buildSourcePaths[$_]; Get-Record $buildSourcePaths[$_] $_ })
 $installerSourcePath = Join-Path $licenses 'INSTALLER-SOURCES.zip'
 $sourceArchive = [IO.Compression.ZipFile]::Open($installerSourcePath,[IO.Compression.ZipArchiveMode]::Create)
 try {
     foreach ($record in $sourceRecords) {
         $entry = $sourceArchive.CreateEntry($record.name)
         $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)
-        $source = [IO.File]::OpenRead((Join-Path $repositoryRoot $record.name))
+        $source = [IO.File]::OpenRead($buildSourcePaths[$record.name])
         $destination = $entry.Open()
         try { $source.CopyTo($destination) } finally { $destination.Dispose(); $source.Dispose() }
     }
@@ -183,11 +201,25 @@ foreach ($name in $noticeFiles) {
     $page.Add('<li><a href="' + $link + '">' + [Net.WebUtility]::HtmlEncode($label) + '</a></li>')
 }
 $page.Add('</ul></details></html>')
+if ($production) {
+    for ($i = 0; $i -lt $page.Count; $i++) {
+        $page[$i] = $page[$i].Replace('Local evaluation only, not an approved or published release.', 'towavue ' + $manifest.release_version + ' for Windows 11 x64.')
+        $page[$i] = $page[$i].Replace('This local evaluation has no public download URL. A public release must provide this matching companion alongside Setup.', 'Download this matching companion from <a href="https://github.com/sheetau/towavue/releases/download/v' + $manifest.release_version + '/' + $manifest.companion.name + '">the versioned GitHub release</a>. Draft files become available after owner publication.')
+    }
+}
 [IO.File]::WriteAllText((Join-Path $licenses 'START-HERE.html'),($page -join "`n") + "`n",$utf8)
 
 $records = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force | ForEach-Object { Get-Record $_.FullName $_.FullName.Substring($payload.Length + 1).Replace('\','/') })
 $records = @($records | Sort-Object name)
 $inventory = [ordered]@{schema_version=1;scope='Installed payload only; excludes this inventory itself, generated uninstaller and path-bound marker. Local evaluation, not release approval.';companion=$manifest.companion;companion_entries=@($companionEntries);build_sources=$sourceRecords;files=$records}
+if ($production) {
+    $inventory.schema_version = 2
+    $inventory.scope = 'Installed payload; excludes this inventory, generated uninstaller and path-bound marker. Artifact identity is not installed-lifecycle qualification.'
+    $inventory.product_version = $manifest.release_version
+    $inventory.source_commit = $manifest.source_commit
+    $inventory.channel = 'stable'
+    $inventory.platform = 'windows-x64'
+}
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
 [IO.File]::WriteAllText($inventoryPath,($inventory | ConvertTo-Json -Depth 8) + "`n",$utf8)
 $records += Get-Record $inventoryPath 'licenses/INSTALLED-FILES.json'
@@ -202,7 +234,8 @@ $directoryNames = [string[]]@($directories.Keys)
 [Array]::Sort($directoryNames,[StringComparer]::Ordinal)
 function Nsis-Literal([string]$Text) { return $Text.Replace('$','$$').Replace('/','\') }
 $include = [Collections.Generic.List[string]]::new()
-$include.Add('!define OWNERSHIP_ID "towavue-local-' + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant() + '"')
+$ownershipPrefix = if ($production) { 'towavue-release-' } else { 'towavue-local-' }
+$include.Add('!define OWNERSHIP_ID "' + $ownershipPrefix + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant() + '"')
 $include.Add('!define PAYLOAD_MAX_PATH ' + (($names | ForEach-Object { $_.Length + 1 } | Measure-Object -Maximum).Maximum))
 $include.Add('!define PAYLOAD_SIZE_KIB ' + [int][Math]::Ceiling(($records | Measure-Object bytes -Sum).Sum / 1024))
 $include.Add('!macro InstallApplicationFiles')
@@ -229,11 +262,13 @@ $include.Add('!macro RemoveApplicationDirectories')
 foreach ($name in $directoryNames) { $include.Add('  RMDir "$INSTDIR\' + (Nsis-Literal $name) + '"') }
 $include.Add('!macroend')
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'payload.nsh'),($include -join "`n") + "`n",$utf8)
-& $compiler /NOCONFIG /WX /V2 /DTOWAVUE_SETUP_APPLICATION ("/DTRIAL_ROOT=" + $OutputDirectory.Replace('$','$$')) (Join-Path $repositoryRoot 'packaging/windows/setup.nsi')
+$defines = @('/DTOWAVUE_SETUP_APPLICATION',('/DTRIAL_ROOT=' + $OutputDirectory.Replace('$','$$')))
+if ($production) { $defines += '/DTOWAVUE_SETUP_RELEASE'; $defines += '/DPRODUCT_VERSION=' + $manifest.release_version }
+& $compiler /NOCONFIG /WX /V2 @defines (Join-Path $repositoryRoot 'packaging/windows/setup.nsi')
 if ($LASTEXITCODE -ne 0) { throw 'Local application Setup compilation failed; output is incomplete.' }
 foreach ($record in $records) { Assert-File (Join-Path $payload $record.name) $record }
 foreach ($file in $binding.files) { Assert-File $binaries[$file.name] $file }
-foreach ($record in $sourceRecords) { Assert-File (Join-Path $repositoryRoot $record.name) $record }
+foreach ($record in $sourceRecords) { Assert-File $buildSourcePaths[$record.name] $record }
 foreach ($name in $updateSources) { Assert-File (Join-Path $OutputDirectory "update/$name") @($sourceRecords | Where-Object { $_.name -eq $name })[0] }
 foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLink.cs')) {
     $record = @($sourceRecords | Where-Object { $_.name -eq "packaging/windows/$name" })[0]
@@ -241,9 +276,11 @@ foreach ($name in @('registration.ps1','registration-state.ps1','UnicodeShellLin
 }
 Assert-File $SourceCompanion $manifest.companion
 Assert-File $NsisArchive $nsis.archive
-$setup = Get-Record (Join-Path $OutputDirectory 'Setup-local.exe') 'Setup-local.exe'
+$setupName = if ($production) { 'towavue-' + $manifest.release_version + '-windows-x64-setup.exe' } else { 'Setup-local.exe' }
+$setup = Get-Record (Join-Path $OutputDirectory $setupName) $setupName
 Assert-File (Join-Path $OutputDirectory 'operation-lock.ps1') @($sourceRecords | Where-Object { $_.name -eq 'packaging/windows/operation-lock.ps1' })[0]
 $result = [ordered]@{schema_version=1;scope='Compiled only; not installed, published or approved. Update and supported-Windows registration/lifecycle verification are pending.';setup=$setup;payload_files=$records.Count;payload_bytes=($records | Measure-Object bytes -Sum).Sum;source_companion=$manifest.companion;installer_sources=$installerSource}
+if ($production) { $result.schema_version = 2; $result.product_version = $manifest.release_version; $result.source_commit = $manifest.source_commit }
 # Completion is recorded only after compilation and final input/staging verification.
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'BUILD.json'),($result | ConvertTo-Json -Depth 6) + "`n",$utf8)
 $result | ConvertTo-Json -Depth 6

@@ -4,14 +4,16 @@ param(
     [Parameter(Mandatory = $true)][string]$RuntimeDirectory,
     [Parameter(Mandatory = $true)][string]$CatalogDirectory,
     [Parameter(Mandatory = $true)][string]$ApplicationSource,
-    [Parameter(Mandatory = $true)][string]$OutputDirectory
+    [Parameter(Mandatory = $true)][string]$OutputDirectory,
+    [string]$InputManifest
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$manifestPath = Join-Path $repositoryRoot 'docs/candidate-material-inputs.json'
+$manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/candidate-material-inputs.json' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($manifest.schema_version -ne 1 -or $manifest.catalog_files -ne 2875 -or
+if ($manifest.schema_version -ne 1 -or $manifest.catalog_files -lt 1 -or
+    (-not $InputManifest -and $manifest.catalog_files -ne 2875) -or
     $manifest.application_source_commit -notmatch '^[0-9a-f]{40}$') { throw 'Incomplete candidate material inventory.' }
 foreach ($name in @('Executable','RuntimeDirectory','CatalogDirectory','ApplicationSource','OutputDirectory')) {
     Set-Variable -Name $name -Value ($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath((Get-Variable -Name $name -ValueOnly)))
@@ -141,8 +143,18 @@ $page += @('</ul>',
     '<table><tr><th>File / bytes</th><th>SHA256</th><th>Materials</th></tr>')
 foreach ($binding in $bindings) { $page += '<tr><td>' + (Html $binding.name) + '<br>' + $binding.bytes + '</td><td><code>' + $binding.sha256 + '</code></td><td><a href="' + (Link $binding.material) + '">Originals / guide</a></td></tr>' }
 $page += '</table></html>'
+if ($manifest.release_version) {
+    $page = @($page | ForEach-Object {
+        $line = $_.Replace('Local evaluation candidate &#8212; not a published or approved release.', 'Source companion for towavue ' + (Html $manifest.release_version) + '.')
+        $line = $line.Replace('recorded for the evaluated executable', 'recorded for this executable')
+        $line = $line.Replace('identify the evaluated candidate', 'identify this payload')
+        $line = $line.Replace('Installation, supported-Windows lifecycle, final quality, owner acceptance and same-release public delivery remain unverified.', 'The matching Setup and source companion are available together from https://github.com/sheetau/towavue/releases/tag/v' + (Html $manifest.release_version) + ' after owner publication. Historical evaluation statements inside unchanged kits describe their original collection.')
+        $line.Replace('Evaluated executable and runtime files', 'Application and runtime files')
+    })
+}
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'START-HERE.html'),($page -join "`n") + "`n",$utf8)
 $binding = [ordered]@{schema_version=1;distribution_approved=$false;application_source_commit=$manifest.application_source_commit;catalog_inventory=$manifest.catalog_inventory;files=@($bindings)}
+if ($manifest.release_version) { $binding.release_version = $manifest.release_version }
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'BINDING.json'),($binding | ConvertTo-Json -Depth 10) + "`n",$utf8)
 # Written last so a failed copy cannot be mistaken for completed candidate materials.
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $OutputDirectory 'INPUTS.json')

@@ -1,4 +1,4 @@
-towavue local Setup sources
+towavue Setup sources
 
 This archive contains the exact installer build sources and input manifests
 recorded in SOURCES.json, plus towavue's original MIT and Apache-2.0 licenses.
@@ -16,6 +16,13 @@ the exact 94 runtime files; do not use a whole compiler prefix/bin directory.
 docs/nsis-inputs.json and docs/vc-redist-inputs.json identify the original
 portable compiler and Microsoft prerequisite package by size/hash/version.
 Those external binaries and archives are not included in this source ZIP.
+
+For a production source ZIP, docs/release-setup-inputs.json replaces
+docs/setup-inputs.json. Add -InputManifest 'docs/release-setup-inputs.json'
+to the command above. It binds the release version, committed source and
+matching companion. The builder selects the production namespace, Windows 11
+x64 gate and unattended existing-install update entry from that manifest.
+It still does not install or publish anything.
 
 The builder verifies inputs, generates the explicit payload include/inventory,
 and invokes the portable NSIS compiler. No Git checkout, development FFmpeg

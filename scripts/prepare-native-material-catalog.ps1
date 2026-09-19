@@ -3,12 +3,13 @@ param(
     [Parameter(Mandatory = $true)][string]$MaterialsDirectory,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
     [string]$PackageDirectory,
-    [string]$RecipeDirectory
+    [string]$RecipeDirectory,
+    [string]$InputManifest
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$inventoryPath = Join-Path $repositoryRoot 'docs/native-material-catalog.json'
+$inventoryPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/native-material-catalog.json' }
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $auditPath = Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json'
 $audit = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -134,6 +135,15 @@ $readme += @('', '## Accessing source', '',
     'This directory is an offline review copy, not a published download or source offer. The final approved application and required corresponding sources/notices must be made available through the same release delivery. No public endpoint is asserted here.', '',
     '## Work still required', '')
 $readme += @($inventory.open_items | ForEach-Object { '- ' + $_ })
+if ($inventory.release_version) {
+    $readme = @('# towavue application and native source/notice catalog', '',
+        ('Materials for towavue ' + $inventory.release_version + '. The companion BINDING.json identifies the exact application and runtime. Source archives, patches, original notices and component build instructions are retained below. Historical evaluation statements inside unchanged native kits describe their original collection, not this release status.'), '',
+        'The application uses MIT OR Apache-2.0. Other components retain their own terms. Open each component README and its input inventory before rebuilding. Package recipes describe provenance, not a complete linked-code SBOM.', '',
+        'See [PACKAGES.md](PACKAGES.md) for the original package owners and notices. The excluded original ZVBI package is replaced by the scoped ZVBI kit.', '',
+        '## Component guide', '', '| Component | Contents and scope |', '|---|---|')
+    foreach ($kit in $inventory.kits) { $readme += '| [' + $kit.title + '](' + (Get-Link ('materials/' + $kit.name + '/README.txt')) + ') | ' + $kit.description + ' |' }
+    $readme += @('', 'The matching Setup and this complete companion are delivered together at https://github.com/sheetau/towavue/releases/tag/v' + $inventory.release_version + '. Draft assets become public only when the owner publishes the release. Collection alone does not certify installed behavior or a bit-identical rebuild.')
+}
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'README.md'), ($readme -join "`n") + "`n", $utf8)
 [IO.File]::WriteAllText((Join-Path $OutputDirectory 'PACKAGES.md'), ($packageLines -join "`n") + "`n", $utf8)
 Copy-Item -LiteralPath $auditPath -Destination (Join-Path $OutputDirectory 'native-runtime-package-audit.json')

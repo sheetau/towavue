@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory)][string]$BuildDirectory,
     [Parameter(Mandatory)][string]$SourceCompanion,
-    [Parameter(Mandatory)][string]$NsisArchive
+    [Parameter(Mandatory)][string]$NsisArchive,
+    [string]$InputManifest
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,9 @@ $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $SourceCompanion = (Resolve-Path -LiteralPath $SourceCompanion).Path
 $NsisArchive = (Resolve-Path -LiteralPath $NsisArchive).Path
 $build = Get-Content -LiteralPath (Join-Path $BuildDirectory 'BUILD.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-$pins = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/setup-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$manifestPath = if ($InputManifest) { (Resolve-Path -LiteralPath $InputManifest).Path } else { Join-Path $repositoryRoot 'docs/setup-inputs.json' }
+$pins = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$production = $pins.schema_version -eq 2
 $payload = Join-Path $BuildDirectory 'payload'
 $licenses = Join-Path $payload 'licenses'
 $inventoryPath = Join-Path $licenses 'INSTALLED-FILES.json'
@@ -23,15 +26,23 @@ function Assert-File([string]$Path,$Record) {
     Assert-True ((Get-Item -LiteralPath $Path).Length -eq $Record.bytes -and (Get-FileHash -LiteralPath $Path).Hash -eq $Record.sha256) "File identity mismatch: $Path"
 }
 Assert-File $SourceCompanion $pins.companion
-$setup = Join-Path $BuildDirectory 'Setup-local.exe'
+$setup = Join-Path $BuildDirectory $build.setup.name
 Assert-File $setup $build.setup
+if ($production) {
+    Assert-True ($inventory.schema_version -eq 2 -and $inventory.product_version -ceq $pins.release_version -and $inventory.source_commit -ceq $pins.source_commit -and $inventory.channel -ceq 'stable' -and $inventory.platform -ceq 'windows-x64') 'Production inventory identity differs.'
+    Assert-True ([Diagnostics.FileVersionInfo]::GetVersionInfo($setup).ProductVersion -ceq $pins.release_version) 'Production Setup version differs.'
+    Assert-True ($build.setup.name -ceq ('towavue-' + $pins.release_version + '-windows-x64-setup.exe')) 'Production Setup filename differs.'
+}
 $actual = @(Get-ChildItem -LiteralPath $payload -File -Recurse -Force)
 Assert-True ($actual.Count -eq $inventory.files.Count + 1 -and $actual.Count -eq $build.payload_files) 'Installed payload coverage mismatch.'
 $names = @{}
 foreach ($file in $inventory.files) { $names.Add($file.name,$true); Assert-File (Join-Path $payload $file.name) $file }
 $names.Add('licenses/INSTALLED-FILES.json',$true)
 foreach ($file in $actual) { Assert-True ($names.ContainsKey($file.FullName.Substring($payload.Length + 1).Replace('\','/'))) 'Unexpected payload file.' }
-foreach ($file in $inventory.build_sources) { Assert-File (Join-Path $repositoryRoot $file.name) $file }
+foreach ($file in $inventory.build_sources) {
+    $sourcePath = if ($production -and $file.name -eq 'docs/release-setup-inputs.json') { $manifestPath } else { Join-Path $repositoryRoot $file.name }
+    Assert-File $sourcePath $file
+}
 Assert-File (Join-Path $BuildDirectory 'operation-lock.ps1') @($inventory.build_sources | Where-Object { $_.name -eq 'packaging/windows/operation-lock.ps1' })[0]
 foreach ($name in @('scripts/get-setup-update-plan.ps1','scripts/setup-update-paths.ps1','scripts/setup-update-native.cs','scripts/setup-update-registration.ps1','scripts/setup-update-transaction.ps1','scripts/setup-registered-update.ps1','packaging/windows/registration-state.ps1','packaging/windows/operation-lock.ps1','packaging/windows/update.ps1')) {
     Assert-File (Join-Path $BuildDirectory "update/$name") @($inventory.build_sources | Where-Object { $_.name -eq $name })[0]
@@ -124,6 +135,10 @@ $html = Get-Content -LiteralPath (Join-Path $licenses 'START-HERE.html') -Raw -E
 $links = [regex]::Matches($html,'href="([^"]+)"')
 foreach ($link in $links) {
     $relative = [uri]::UnescapeDataString($link.Groups[1].Value)
+    if ($production -and $relative.StartsWith('https://')) {
+        Assert-True ($relative -ceq ('https://github.com/sheetau/towavue/releases/download/v' + $pins.release_version + '/' + $pins.companion.name)) 'Wrong public source URL.'
+        continue
+    }
     $path = [IO.Path]::GetFullPath((Join-Path $licenses $relative))
     Assert-True ($path.StartsWith($licenses + '\',[StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $path -PathType Leaf)) 'Guide link is missing or escapes installed licenses.'
 }
@@ -141,7 +156,9 @@ foreach ($matches in @($installed,$removed)) {
         $seen.Add($name,$true)
     }
 }
-Assert-True ($include.Contains('towavue-local-' + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant())) 'Ownership marker is not bound to this payload inventory.'
+$ownershipPrefix = if ($production) { 'towavue-release-' } else { 'towavue-local-' }
+Assert-True ($include.Contains($ownershipPrefix + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant())) 'Ownership marker is not bound to this payload inventory.'
+if ($production) { Assert-True ($html.Contains('Windows 11 x64') -and -not $html.Contains('no public download URL')) 'Production source guide is stale.' }
 
 function Invoke-Probe([string]$Arguments,[int]$Expected) {
     $process = Start-Process -FilePath $setup -ArgumentList $Arguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru
@@ -171,9 +188,10 @@ foreach ($relative in @('System32','SysWOW64')) {
     $expected = if ($before.state -eq 'satisfied') { 0 } elseif ($before.state -eq 'required') { 10 } else { 20 }
     Assert-True ($process.ExitCode -eq $expected) 'Packaged prerequisite wrapper differs from the registry reader.'
     $registrationWrapper = Join-Path $BuildDirectory 'registration/registration.ps1'
-    $ownership = 'towavue-local-' + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant()
+    $ownership = $ownershipPrefix + (Get-FileHash -LiteralPath $inventoryPath).Hash.ToLowerInvariant()
     $sizeKiB = [int][Math]::Ceiling($build.payload_bytes / 1024)
     $registrationArguments = '-STA -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -Mode Inspect -InstallDirectory "{1}" -OwnershipId {2} -SizeKiB {3}' -f $registrationWrapper,$payload,$ownership,$sizeKiB
+    if ($production) { $registrationArguments += ' -ProductVersion ' + $pins.release_version }
     $registrationOutput = Join-Path $trialRoot "$relative-registration.txt"
     $process = Start-Process -FilePath $powershell -ArgumentList $registrationArguments -WorkingDirectory $trialRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput $registrationOutput -RedirectStandardError (Join-Path $trialRoot "$relative-registration-error.txt")
     [void]$process.Handle
@@ -199,13 +217,14 @@ $badInput = Join-Path $trialRoot 'invalid-input.bin'
 [IO.File]::WriteAllText($badInput,'Deliberately invalid local Setup input.',[Text.UTF8Encoding]::new($false))
 $builder = Join-Path $PSScriptRoot 'build-local-setup.ps1'
 $arguments = @{Executable=(Join-Path $payload 'towavue.exe');RuntimeDirectory=$runtime;SourceCompanion=$SourceCompanion;VcRedist=$package;NsisArchive=$NsisArchive;OutputDirectory=(Join-Path $trialRoot 'rejected-output')}
+if ($InputManifest) { $arguments.InputManifest = $manifestPath }
 $failures = @(
     @{field='OutputDirectory';value=$BuildDirectory;message='Use a fresh Setup output directory.'},
     @{field='OutputDirectory';value=(Join-Path $runtime 'nested-output');message='Setup output overlaps an input.'},
     @{field='SourceCompanion';value=(Join-Path $trialRoot 'missing.zip');message='Missing Setup input:'},
     @{field='SourceCompanion';value=$badInput;message='Setup input identity mismatch:'},
     @{field='NsisArchive';value=$badInput;message='Setup input identity mismatch:'},
-    @{field='Executable';value=$badInput;message='Setup input identity mismatch:'},
+    @{field='Executable';value=$badInput;message=$(if ($production) { 'Production Setup and executable versions differ.' } else { 'Setup input identity mismatch:' })},
     @{field='VcRedist';value=$badInput;message='VC redistributable package identity mismatch.'}
 )
 foreach ($failure in $failures) {

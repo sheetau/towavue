@@ -117,6 +117,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         let options = ExportOptions {
             output: ExportOutput::Media,
+            video_quality: self.effective_video_export_quality(request.kind, ExportOutput::Media),
             audio: self
                 .audio_export_settings
                 .get(&id)
@@ -129,6 +130,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .unwrap_or_default(),
         };
         if request.operations.is_empty()
+            && options.video_quality == towavue_runtime_windows::VideoExportQuality::High
             && options.audio == AudioExportOptions::default()
             && options.metadata.is_empty()
             && !self.source_backings.contains_key(&id)
@@ -361,8 +363,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             self.source_versions
                 .insert(id, Some(saved.current_source().clone()));
+            let same_quality = self.effective_video_export_quality(request.kind, options.output)
+                == options.video_quality;
             let history = self.edits.entry(id).or_default();
             if same_input
+                && same_quality
                 && self
                     .audio_export_settings
                     .get(&id)

@@ -15,6 +15,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[path = "export_video_encoding.rs"]
 mod video_encoding;
+pub use video_encoding::VideoExportQuality;
 
 #[path = "export_rotation.rs"]
 mod rotation;
@@ -63,6 +64,7 @@ pub enum ExportOutput {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExportOptions {
+    pub video_quality: VideoExportQuality,
     pub output: ExportOutput,
     pub audio: AudioExportOptions,
     pub metadata: MetadataExportOptions,
@@ -299,6 +301,7 @@ pub(crate) fn export_options_cancellable(
         return export_audio_cancellable(
             request,
             options.audio,
+            options.video_quality,
             &options.metadata,
             cancelled,
             progress,
@@ -351,6 +354,7 @@ pub(crate) fn export_options_cancellable(
     export_audio_cancellable(
         &audio,
         options.audio,
+        VideoExportQuality::High,
         &options.metadata,
         cancelled,
         progress,
@@ -366,6 +370,7 @@ fn export_cancellable(
     export_audio_cancellable(
         request,
         AudioExportOptions::default(),
+        VideoExportQuality::High,
         &MetadataExportOptions::default(),
         cancelled,
         progress,
@@ -376,6 +381,7 @@ fn export_cancellable(
 fn export_audio_cancellable(
     request: &ExportRequest,
     options: AudioExportOptions,
+    video_quality: VideoExportQuality,
     metadata: &MetadataExportOptions,
     cancelled: &AtomicBool,
     progress: &(impl Fn(Duration) + Sync),
@@ -537,6 +543,7 @@ fn export_audio_cancellable(
     .flatten();
     let mut streams = ExportStreams::probe(request)?;
     streams.video_encoding = video_encoding::HighDepth::probe(request)?;
+    streams.video_quality = video_quality;
     streams.gif_animation = gif_animation.is_some();
     streams.png_animation = png_metadata
         .as_ref()
@@ -1146,6 +1153,7 @@ struct ExportStreams {
     png_image_sequence: bool,
     video: Option<(usize, ffmpeg::Rational)>,
     video_encoding: Option<video_encoding::HighDepth>,
+    video_quality: VideoExportQuality,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
     audio_output_samples: Option<u64>,
@@ -1158,8 +1166,8 @@ struct ExportStreams {
 impl ExportStreams {
     fn codec_arguments(&self, request: &ExportRequest, hardware: bool) -> Vec<String> {
         self.video_encoding.as_ref().map_or_else(
-            || codec_arguments(request, hardware),
-            |encoding| encoding.arguments(&request.target),
+            || codec_arguments(request, hardware, self.video_quality),
+            |encoding| encoding.arguments(&request.target, self.video_quality),
         )
     }
 
@@ -1217,6 +1225,7 @@ impl ExportStreams {
                 png_image_sequence: false,
                 video,
                 video_encoding: None,
+                video_quality: VideoExportQuality::High,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),
                 audio_channels: audio.map(|(_, _, channels)| channels),
                 audio_output_samples: None,
@@ -1550,12 +1559,11 @@ fn timeline_filters(
     filters.join(";")
 }
 
-// OpenH264 otherwise targets a fixed 2 Mbps at every resolution. Bound its
-// quantizer instead of allowing that budget to erase detail. This is lossy
-// 8-bit output, not source-depth preservation; complex footage can be much larger.
-const SOFTWARE_H264_QUALITY: &[&str] = &["-profile:v", "high", "-qmin:v", "1", "-qmax:v", "20"];
-
-fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
+fn codec_arguments(
+    request: &ExportRequest,
+    hardware: bool,
+    quality: VideoExportQuality,
+) -> Vec<String> {
     let extension = request
         .target
         .extension()
@@ -1584,9 +1592,10 @@ fn codec_arguments(request: &ExportRequest, hardware: bool) -> Vec<String> {
         (MediaKind::Image, _, _) => &[],
     };
     let mut arguments: Vec<String> = codecs.iter().map(|argument| (*argument).into()).collect();
-    if codecs.contains(&"libopenh264") {
+    if request.kind == MediaKind::Video {
         arguments.extend(
-            SOFTWARE_H264_QUALITY
+            quality
+                .codec_arguments(codecs[1])
                 .iter()
                 .map(|argument| (*argument).into()),
         );

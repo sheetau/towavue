@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn video_export_quality_is_shared_across_existing_and_new_windows_without_affecting_images_or_audio()
+ {
+    use towavue_runtime_windows::VideoExportQuality;
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::tests::video_export_quality_is_shared_across_existing_and_new_windows_without_affecting_images_or_audio",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    *host.captured_events.lock().expect("events") = Some(VecDeque::new());
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("second");
+    assert_eq!(
+        host.windows[&first].video_export_quality(),
+        VideoExportQuality::High
+    );
+    host.windows
+        .get_mut(&first)
+        .expect("first")
+        .set_video_export_quality(VideoExportQuality::Balanced);
+    drain_captured(&mut host);
+    assert_eq!(
+        host.windows[&second].video_export_quality(),
+        VideoExportQuality::Balanced
+    );
+    let third = host.add_application(None).expect("third");
+    assert_eq!(
+        host.windows[&third].video_export_quality(),
+        VideoExportQuality::Balanced
+    );
+    host.windows
+        .get_mut(&second)
+        .expect("second")
+        .set_video_export_quality(VideoExportQuality::Smaller);
+    drain_captured(&mut host);
+    for app in host.windows.values() {
+        assert_eq!(
+            app.effective_video_export_quality(MediaKind::Video, ExportOutput::Media),
+            VideoExportQuality::Smaller
+        );
+        for (kind, output) in [
+            (MediaKind::Image, ExportOutput::Media),
+            (MediaKind::Audio, ExportOutput::Media),
+            (MediaKind::Video, ExportOutput::AudioOnly),
+            (MediaKind::Video, ExportOutput::VideoFrame),
+        ] {
+            assert_eq!(
+                app.effective_video_export_quality(kind, output),
+                VideoExportQuality::High
+            );
+        }
+        assert!(app.edits.values().all(|history| !history.is_dirty()));
+    }
+}
+
+#[test]
 fn last_window_closes_while_shell_retirement_keeps_the_event_loop_available() {
     let Some(_root) = crate::tests::isolated_test_root(
         "window_host::tests::last_window_closes_while_shell_retirement_keeps_the_event_loop_available",

@@ -70,6 +70,7 @@ pub(crate) struct WindowHost {
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
+    video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
     tab_badge: Option<tab_drag::badge::Badge>,
@@ -98,6 +99,7 @@ impl WindowHost {
             pending_launches: Vec::new(),
             preview_cache: PreviewCache::local()?,
             last_playback_volume: Arc::default(),
+            video_export_quality: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
             tab_badge: None,
@@ -125,7 +127,8 @@ impl WindowHost {
             #[cfg(test)]
             if matches!(
                 event,
-                AppEvent::VideoResume(_)
+                AppEvent::VideoExportQualityChanged
+                    | AppEvent::VideoResume(_)
                     | AppEvent::FolderReady
                     | AppEvent::FileOperationSource(..)
                     | AppEvent::FileOperationFinished(..)
@@ -144,6 +147,7 @@ impl WindowHost {
         let mut app =
             Application::new_with_preview_cache(initial_path, notify, self.preview_cache.clone())?;
         app.last_playback_volume = Arc::clone(&self.last_playback_volume);
+        app.video_export_quality = Arc::clone(&self.video_export_quality);
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;
@@ -382,6 +386,11 @@ impl WindowHost {
                         .get_mut(&owner)
                         .expect("live playback owner")
                         .handle_app_event(AppEvent::Playback(instance, event));
+                }
+            }
+            Event::Window(_, AppEvent::VideoExportQualityChanged) => {
+                for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
+                    app.handle_app_event(AppEvent::VideoExportQualityChanged);
                 }
             }
             Event::Window(_, AppEvent::ShortcutsChanged(bindings)) => {

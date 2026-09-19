@@ -1,8 +1,10 @@
 use super::*;
 use towavue_core::RepeatMode;
+use towavue_runtime_windows::VideoExportQuality;
 
 pub(crate) struct Choices {
     pub volume_step: u8,
+    pub video_quality: VideoExportQuality,
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
 }
@@ -11,6 +13,7 @@ impl Default for Choices {
     fn default() -> Self {
         Self {
             volume_step: 2,
+            video_quality: VideoExportQuality::High,
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
         }
@@ -21,6 +24,14 @@ type Options = (&'static str, &'static [(CommandId, &'static str)]);
 
 pub(super) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
+        ExportQualityHigh => (
+            "Export quality",
+            &[
+                (ExportQualityHigh, "High quality"),
+                (ExportQualityBalanced, "Balanced"),
+                (ExportQualitySmaller, "Smaller file"),
+            ],
+        ),
         CycleVolumeStep => (
             "Listening volume step",
             &[
@@ -70,11 +81,15 @@ fn row_width(ui: &egui::Ui, rows: &[(CommandId, &str)]) -> f32 {
 pub(super) fn reserve_cascade(
     ui: &mut egui::Ui,
     groups: &[&[CommandId]],
+    context: CommandContext,
     ancestor: Option<egui::Rect>,
 ) {
     let child = groups
         .iter()
         .flat_map(|group| group.iter())
+        .filter(|id| {
+            **id != ExportQualityHigh || context.media_kind == Some(towavue_core::MediaKind::Video)
+        })
         .filter_map(|id| options(*id))
         .map(|(_, rows)| row_width(ui, rows))
         .fold(0.0, f32::max);
@@ -103,6 +118,11 @@ pub(super) fn submenu(
 ) -> Option<(egui::Response, Option<CommandId>)> {
     let (title, rows) = options(command)?;
     let selected = match command {
+        ExportQualityHigh => match choices.video_quality {
+            VideoExportQuality::High => ExportQualityHigh,
+            VideoExportQuality::Balanced => ExportQualityBalanced,
+            VideoExportQuality::Smaller => ExportQualitySmaller,
+        },
         CycleVolumeStep => match choices.volume_step {
             5 => VolumeStepFive,
             10 => VolumeStepTen,
@@ -187,11 +207,95 @@ mod tests {
     use egui::accesskit::{Action, ActionRequest, TreeId};
 
     #[test]
+    fn video_quality_submenu_does_not_reserve_or_show_controls_for_other_media() {
+        for kind in [
+            None,
+            Some(towavue_core::MediaKind::Image),
+            Some(towavue_core::MediaKind::Audio),
+        ] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            let frame = |events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 1100.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        ui.menu_button("Menu", |ui| {
+                            show_section_with_recent(
+                                ui,
+                                CommandContext {
+                                    media_kind: kind,
+                                    ..Default::default()
+                                },
+                                &crate::shortcuts::defaults(),
+                                Some(Section::File),
+                                &mut MenuData::default(),
+                            );
+                        });
+                    },
+                )
+            };
+            let output = frame(vec![]);
+            let id = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Menu"))
+                .expect("menu")
+                .0;
+            frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                action: Action::Click,
+                target_tree: TreeId::ROOT,
+                target_node: id,
+                data: None,
+            })]);
+            for _ in 0..4 {
+                frame(vec![]);
+            }
+            let output = frame(vec![]);
+            assert!(
+                !output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node
+                        .label()
+                        .is_some_and(|text| text.contains("Export quality")))
+            );
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "Export current frame (PNG)" && !text.galley.elided)),
+                "a hidden video submenu must not shrink the File menu");
+        }
+    }
+
+    #[test]
     fn choice_submenus_check_current_values_dispatch_and_size_independently() {
         for density in [1.0, 1.25, 2.0] {
             for width in [480.0, 1200.0] {
                 for (nested, right_edge) in [(false, false), (false, true), (true, false)] {
                     for (section, title, labels, selected, target, expected, kind) in [
+                        (
+                            Section::File,
+                            "Export quality",
+                            vec!["High quality", "Balanced", "Smaller file"],
+                            "Balanced",
+                            "Smaller file",
+                            ExportQualitySmaller,
+                            towavue_core::MediaKind::Video,
+                        ),
                         (
                             Section::Edit,
                             "Listening volume step",
@@ -244,6 +348,7 @@ mod tests {
                                         ui.menu_button("Menu", |ui| {
                                             let mut data = MenuData {
                                                 choices: Choices {
+                                                    video_quality: VideoExportQuality::Balanced,
                                                     volume_step: 5,
                                                     audio_repeat: RepeatMode::One,
                                                     folder_loop: false,

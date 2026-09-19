@@ -97,6 +97,7 @@ mod ui_reference_tests;
 #[cfg(test)]
 mod video_context_tests;
 mod video_edit;
+mod video_export;
 mod video_resize;
 mod video_rotation;
 mod video_scrub;
@@ -314,6 +315,7 @@ enum AppEvent {
         Result<towavue_runtime_windows::DeleteConfirmation, String>,
     ),
     ShortcutsChanged(ShortcutBindings),
+    VideoExportQualityChanged,
     TaskbarReady,
     TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
     TabVideoSheet(
@@ -933,6 +935,7 @@ struct Application<N> {
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
+    video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     volume_step_percent: u8,
     folder_navigation_loop: bool,
     graphics_epoch: u64,
@@ -1223,6 +1226,7 @@ where
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
             last_playback_volume: Arc::default(),
+            video_export_quality: Arc::default(),
             volume_step_percent: 2,
             folder_navigation_loop: true,
             graphics_epoch: 0,
@@ -3025,6 +3029,7 @@ where
             return;
         }
         match event {
+            AppEvent::VideoExportQualityChanged => self.request_redraw(),
             AppEvent::ShortcutsChanged(bindings) => {
                 self.shortcuts = bindings;
                 self.cancel_shortcut_prefix();
@@ -5136,6 +5141,7 @@ where
                         files: &self.recent_paths,
                         action: None,
                         choices: menu::Choices {
+                            video_quality: self.video_export_quality(),
                             volume_step: self.volume_step_percent,
                             audio_repeat: self.audio_mode().0,
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
@@ -7600,6 +7606,15 @@ where
                 }
                 self.request_redraw();
             }
+            CommandId::ExportQualityHigh => {
+                self.set_video_export_quality(towavue_runtime_windows::VideoExportQuality::High)
+            }
+            CommandId::ExportQualityBalanced => {
+                self.set_video_export_quality(towavue_runtime_windows::VideoExportQuality::Balanced)
+            }
+            CommandId::ExportQualitySmaller => {
+                self.set_video_export_quality(towavue_runtime_windows::VideoExportQuality::Smaller)
+            }
             CommandId::ToggleHardwareEncode => {
                 self.prefer_hardware_encode = !self.prefer_hardware_encode;
                 self.set_status(if self.prefer_hardware_encode {
@@ -8351,6 +8366,7 @@ where
         let notify = Arc::clone(&self.notify);
         let options = ExportOptions {
             output,
+            video_quality: self.effective_video_export_quality(kind, output),
             audio: self
                 .audio_export_settings
                 .get(&id)

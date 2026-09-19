@@ -82,7 +82,7 @@ pub use dialog::{
 pub use export::{
     AudioChannels, AudioExportOptions, ExportError, ExportEvent, ExportJob, ExportOptions,
     ExportOutcome, ExportOutput, ExportRequest, ImageMetadataFormat, MetadataExportOptions,
-    MetadataField, MetadataSourceValue, VideoFrameSnapshot, export_media,
+    MetadataField, MetadataSourceValue, VideoExportQuality, VideoFrameSnapshot, export_media,
     export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
 };
 pub use file_details::FileDetails;

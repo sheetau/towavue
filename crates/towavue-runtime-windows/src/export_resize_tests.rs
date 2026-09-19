@@ -104,7 +104,12 @@ fn video_resize_exports_all_filters_exact_dimensions_sar_and_identity() {
                 Some(&source),
                 &["-vf", &filter, "-c:v", "libopenh264"]
                     .into_iter()
-                    .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                    .chain(
+                        VideoExportQuality::High
+                            .codec_arguments("libopenh264")
+                            .iter()
+                            .copied(),
+                    )
                     .collect::<Vec<_>>(),
                 &reference,
             );
@@ -179,7 +184,12 @@ fn video_resize_composes_with_rotation_crop_and_refuses_stale_or_wrong_media_bef
         Some(&source),
         &["-vf", filter, "-c:v", "libopenh264"]
             .into_iter()
-            .chain(SOFTWARE_H264_QUALITY.iter().copied())
+            .chain(
+                VideoExportQuality::High
+                    .codec_arguments("libopenh264")
+                    .iter()
+                    .copied(),
+            )
             .collect::<Vec<_>>(),
         &reference,
     );

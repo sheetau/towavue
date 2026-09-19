@@ -192,7 +192,11 @@ fn trial(long: bool) {
             let mut args = ffmpeg_arguments(&request, false, &streams);
             // The lossless control changes codec, so H.264-only options must not
             // be passed to FFV1. The public-export comparison below retains them.
-            for option in SOFTWARE_H264_QUALITY.as_chunks::<2>().0 {
+            for option in VideoExportQuality::High
+                .codec_arguments("libopenh264")
+                .as_chunks::<2>()
+                .0
+            {
                 if let Some(index) = args.iter().position(|argument| argument == option[0]) {
                     args.drain(index..index + 2);
                 }

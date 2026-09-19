@@ -1,6 +1,94 @@
 use super::*;
 use towavue_runtime_windows::FileOperationSource;
 
+#[test]
+fn video_export_quality_save_uses_the_started_preset_and_retains_original_when_global_choice_changes()
+ {
+    use std::os::windows::process::CommandExt;
+    use towavue_runtime_windows::VideoExportQuality;
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::source_save::tests::video_export_quality_save_uses_the_started_preset_and_retains_original_when_global_choice_changes",
+    ) else {
+        return;
+    };
+    let source = root.join("source.mp4");
+    let fixture = std::process::Command::new(
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe"),
+    )
+    .creation_flags(0x0800_0000)
+    .args([
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=96x64:rate=8:duration=1",
+        "-c:v",
+        "mpeg4",
+    ])
+    .arg(&source)
+    .output()
+    .expect("fixture");
+    assert!(
+        fixture.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixture.stderr)
+    );
+    let original = std::fs::read(&source).expect("original");
+    let (mut host, owner, id) = setup(&source);
+    let app = host.windows.get_mut(&owner).expect("owner");
+    app.tabs
+        .get_mut(id)
+        .expect("tab")
+        .target
+        .set_current_path(source.clone(), MediaKind::Video);
+    app.media_kind = Some(MediaKind::Video);
+    app.dispatch(CommandId::ExportQualityBalanced);
+    app.dispatch(CommandId::Save);
+    let export = app
+        .active_export
+        .as_ref()
+        .expect("quality-only Save encodes");
+    assert_eq!(export.request.target, source);
+    assert!(export.request.operations.is_empty());
+    assert_eq!(export.options.video_quality, VideoExportQuality::Balanced);
+    app.dispatch(CommandId::ExportQualitySmaller);
+    assert_eq!(app.video_export_quality(), VideoExportQuality::Smaller);
+    assert_eq!(
+        app.active_export
+            .as_ref()
+            .expect("unchanged worker options")
+            .options
+            .video_quality,
+        VideoExportQuality::Balanced
+    );
+    finish(&mut host, owner);
+    let app = host.windows.get_mut(&owner).expect("owner");
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert_ne!(std::fs::read(&source).expect("saved video"), original);
+    assert!(
+        app.edits[&id].is_dirty(),
+        "the currently selected output differs from the saved snapshot"
+    );
+    app.dispatch(CommandId::Save);
+    assert_eq!(
+        app.active_export
+            .as_ref()
+            .expect("next Save")
+            .options
+            .video_quality,
+        VideoExportQuality::Smaller
+    );
+    finish(&mut host, owner);
+    let app = &host.windows[&owner];
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert!(!app.edits[&id].is_dirty());
+    assert_eq!(
+        std::fs::read(app.media_input_for(Some(id), &source).path()).expect("retained original"),
+        original
+    );
+}
+
 fn attach(host: &mut WindowHost, owner: WindowKey, source: &Path) -> TabId {
     let app = host.windows.get_mut(&owner).expect("window");
     let id = app.tabs.open_new(source.to_owned(), MediaKind::Image);

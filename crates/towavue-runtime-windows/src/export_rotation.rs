@@ -316,7 +316,12 @@ mod tests {
                 Some(&source),
                 &["-vf", &filter, "-c:v", "libopenh264"]
                     .into_iter()
-                    .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                    .chain(
+                        VideoExportQuality::High
+                            .codec_arguments("libopenh264")
+                            .iter()
+                            .copied(),
+                    )
                     .collect::<Vec<_>>(),
                 &reference,
             );
@@ -432,7 +437,12 @@ mod tests {
             Some(&source),
             &["-vf", filter, "-c:v", "libopenh264"]
                 .into_iter()
-                .chain(SOFTWARE_H264_QUALITY.iter().copied())
+                .chain(
+                    VideoExportQuality::High
+                        .codec_arguments("libopenh264")
+                        .iter()
+                        .copied(),
+                )
                 .collect::<Vec<_>>(),
             &reference,
         );

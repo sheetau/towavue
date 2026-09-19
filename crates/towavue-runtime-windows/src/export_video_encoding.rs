@@ -1,6 +1,81 @@
 use super::*;
 use ffmpeg::format::Pixel;
 
+/// Compression presets preserve the requested geometry, timing and sample depth.
+/// Encoder-specific controls are deliberately not a common numeric quality scale.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VideoExportQuality {
+    #[default]
+    High,
+    Balanced,
+    Smaller,
+}
+
+impl VideoExportQuality {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::High => "High quality",
+            Self::Balanced => "Balanced",
+            Self::Smaller => "Smaller file",
+        }
+    }
+
+    pub(super) fn av1_crf(self, svt: bool) -> &'static str {
+        match (self, svt) {
+            (Self::High, _) => "12",
+            (Self::Balanced, true) => "24",
+            (Self::Smaller, true) => "36",
+            (Self::Balanced, false) => "28",
+            (Self::Smaller, false) => "40",
+        }
+    }
+
+    pub(super) fn codec_arguments(self, codec: &str) -> &'static [&'static str] {
+        match (codec, self) {
+            ("libopenh264", Self::High) => &[
+                "-profile:v",
+                "high",
+                "-rc_mode",
+                "quality",
+                "-qmin:v",
+                "1",
+                "-qmax:v",
+                "20",
+            ],
+            ("libopenh264", Self::Balanced) => &[
+                "-profile:v",
+                "high",
+                "-rc_mode",
+                "quality",
+                "-qmin:v",
+                "18",
+                "-qmax:v",
+                "32",
+            ],
+            ("libopenh264", Self::Smaller) => &[
+                "-profile:v",
+                "high",
+                "-rc_mode",
+                "quality",
+                "-qmin:v",
+                "28",
+                "-qmax:v",
+                "42",
+            ],
+            ("libvpx-vp9", Self::High) => &["-crf", "18", "-b:v", "0"],
+            ("libvpx-vp9", Self::Balanced) => &["-crf", "30", "-b:v", "0"],
+            ("libvpx-vp9", Self::Smaller) => &["-crf", "42", "-b:v", "0"],
+            ("mpeg4" | "wmv2", Self::High) => &["-q:v", "2"],
+            ("mpeg4" | "wmv2", Self::Balanced) => &["-q:v", "5"],
+            ("mpeg4" | "wmv2", Self::Smaller) => &["-q:v", "10"],
+            ("h264_mf", Self::High) => &["-rate_control", "quality", "-quality", "95"],
+            ("h264_mf", Self::Balanced) => &["-rate_control", "quality", "-quality", "75"],
+            ("h264_mf", Self::Smaller) => &["-rate_control", "quality", "-quality", "50"],
+            _ => &[],
+        }
+    }
+}
+
 /// A worker-owned encoding plan containing values only, never borrowed codec state.
 #[derive(Clone)]
 pub(super) struct HighDepth {
@@ -174,7 +249,7 @@ impl HighDepth {
         filters
     }
 
-    pub(super) fn arguments(&self, target: &Path) -> Vec<String> {
+    pub(super) fn arguments(&self, target: &Path, quality: VideoExportQuality) -> Vec<String> {
         let encoder: &[&str] = if self.svt {
             &[
                 "-c:v",
@@ -182,7 +257,7 @@ impl HighDepth {
                 "-preset",
                 "6",
                 "-crf",
-                "12",
+                quality.av1_crf(self.svt),
                 "-svtav1-params",
                 "lp=4:tune=0",
             ]
@@ -193,7 +268,7 @@ impl HighDepth {
                 "-cpu-used",
                 "6",
                 "-crf",
-                "12",
+                quality.av1_crf(self.svt),
                 "-b:v",
                 "0",
                 "-row-mt",

@@ -29,6 +29,7 @@ fn software_h264_quality_is_explicit_and_does_not_change_other_codecs() {
                 hardware_encode: hardware,
             },
             hardware,
+            VideoExportQuality::High,
         );
         for pair in [["-profile:v", "high"], ["-qmin:v", "1"], ["-qmax:v", "20"]] {
             assert_eq!(arguments.windows(2).any(|actual| actual == pair), expected);
@@ -582,7 +583,7 @@ fn high_depth_gradient_quality_survives_resize_without_an_eight_bit_intermediate
             "-c:v",
             "libopenh264",
         ];
-        old_args.extend_from_slice(SOFTWARE_H264_QUALITY);
+        old_args.extend_from_slice(VideoExportQuality::High.codec_arguments("libopenh264"));
         old_args.push(baseline.to_str().expect("path"));
         run("ffmpeg.exe", &old_args);
         export_media(&ExportRequest {
@@ -700,7 +701,7 @@ fn live_high_depth_export_cancellation_preserves_targets_cleans_staging_and_allo
                     .expect("source depth")
                     .expect("AV1 plan");
                 assert!(
-                    plan.arguments(&target)
+                    plan.arguments(&target, VideoExportQuality::High)
                         .windows(2)
                         .any(|pair| pair == ["-c:v", encoder])
                 );
@@ -1185,3 +1186,6 @@ fn high_depth_trim_preserves_declared_chroma_location() {
     }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
+
+#[path = "export_video_preset_tests.rs"]
+mod presets;

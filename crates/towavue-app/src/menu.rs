@@ -81,6 +81,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
                 ExportFrame,
                 AudioExportOptions,
                 MetadataExportOptions,
+                ExportQualityHigh,
                 ToggleHardwareEncode,
             ],
             &[RenameFile, MoveFile, DeleteFile],
@@ -327,7 +328,7 @@ fn show_items(
         .find(|(name, _)| *name == title)
         .expect("registered menu")
         .1;
-    choices::reserve_cascade(ui, groups, ancestor);
+    choices::reserve_cascade(ui, groups, context, ancestor);
     let keyboard = MenuKeyboard::begin(ui);
     let back = keyboard.left;
     let requested = keyboard
@@ -345,6 +346,11 @@ fn show_items(
                     crate::chrome::separator(ui);
                 }
                 for id in *group {
+                    if *id == ExportQualityHigh
+                        && context.media_kind != Some(towavue_core::MediaKind::Video)
+                    {
+                        continue;
+                    }
                     if let Some((response, command)) =
                         choices::submenu(ui, *id, context, &recent.choices, requested, ancestor)
                     {

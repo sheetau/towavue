@@ -44,6 +44,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 
 pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
+    PlaybackVolumePreferenceFailed(String),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
 }
@@ -70,6 +71,7 @@ pub(crate) struct WindowHost {
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
+    playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
@@ -88,6 +90,8 @@ impl WindowHost {
         let delete_confirmation_suppressed = delete_preference_path
             .as_deref()
             .is_some_and(crate::file_operations::preferences::suppressed);
+        let (volume, playback_volume_preferences) =
+            playback_volume::open_preferences(proxy.clone());
         let mut host = Self {
             delete_confirmation_suppressed,
             delete_preference_path,
@@ -98,7 +102,8 @@ impl WindowHost {
             next_key: 1,
             pending_launches: Vec::new(),
             preview_cache: PreviewCache::local()?,
-            last_playback_volume: Arc::default(),
+            last_playback_volume: Arc::new(std::sync::Mutex::new(volume)),
+            playback_volume_preferences,
             video_export_quality: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
@@ -147,6 +152,7 @@ impl WindowHost {
         let mut app =
             Application::new_with_preview_cache(initial_path, notify, self.preview_cache.clone())?;
         app.last_playback_volume = Arc::clone(&self.last_playback_volume);
+        app.playback_volume_preferences = self.playback_volume_preferences.clone();
         app.video_export_quality = Arc::clone(&self.video_export_quality);
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
@@ -380,6 +386,12 @@ impl WindowHost {
     fn route(&mut self, event: Event) {
         match event {
             Event::Launch(request) => self.pending_launches.push(request),
+            Event::PlaybackVolumePreferenceFailed(error) => {
+                if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
+                    app.set_status(format!("Could not save playback volume: {error}"));
+                    app.request_redraw();
+                }
+            }
             Event::Window(origin, AppEvent::Playback(instance, event)) => {
                 if let Some((owner, instance)) = self.playback_owner((origin, instance)) {
                     self.windows

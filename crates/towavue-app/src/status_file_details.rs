@@ -456,6 +456,32 @@ mod tests {
                         modified_local: Some("2024-02-29 12:34:56".into()),
                     })
                 ));
+                for nearest in [false, true] {
+                    app.nearest_images = nearest;
+                    let help = app.status_info().tooltip();
+                    let file = help
+                        .lines()
+                        .find(|line| line.starts_with("\u{2022} File:"))
+                        .expect("grouped file details");
+                    assert!(
+                        file.contains(&format_size(12_345_678))
+                            && file.contains("PNG")
+                            && file.contains("4\u{00d7}2 pixels")
+                    );
+                    assert!(help.lines().all(|line| line.starts_with("\u{2022} ")));
+                    assert!(help.contains(if nearest {
+                        "Nearest-neighbor image scaling"
+                    } else {
+                        "Smooth image scaling"
+                    }));
+                    assert!(
+                        help.contains("Fit within the window") && help.contains("Unsaved changes")
+                    );
+                    assert_eq!(help.contains("animation speed"), frames > 1);
+                    assert_eq!(help.contains("animation frames"), frames > 1);
+                    assert!(help.lines().count() <= 5, "compact grouping: {help}");
+                }
+                app.nearest_images = false;
                 let details = app.status_details();
                 assert_eq!(details[0], "Fit");
                 assert_eq!(details[1], if frames == 1 { "Unsaved" } else { "1.00×" });
@@ -663,5 +689,11 @@ mod tests {
             .join("\n");
         assert!(text.contains("2024-02-29 12:34:56"));
         assert!(!text.contains("2026-09-14 00:00:00"));
+        let help = app.status_info().tooltip();
+        assert!(help.contains("2024-02-29 12:34:56"));
+        assert!(
+            !help.contains("2026-09-14 00:00:00"),
+            "help shares the held image snapshot"
+        );
     }
 }

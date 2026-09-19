@@ -15,7 +15,51 @@ impl Default for PlaybackVolume {
     }
 }
 
+pub(super) fn open_preferences(
+    proxy: Option<winit::event_loop::EventLoopProxy<window_host::Event>>,
+) -> (
+    PlaybackVolume,
+    Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
+) {
+    let Some(root) = std::env::var_os("APPDATA") else {
+        return (PlaybackVolume::default(), None);
+    };
+    let path = PathBuf::from(root)
+        .join("towavue")
+        .join("playback-volume.conf");
+    match towavue_runtime_windows::PlaybackVolumePreferences::open(path, move |error| {
+        eprintln!("towavue: could not save playback volume: {error}");
+        if let Some(proxy) = &proxy {
+            let _ = proxy.send_event(window_host::Event::PlaybackVolumePreferenceFailed(error));
+        }
+    }) {
+        Ok(preferences) => {
+            let (level, unmuted) = preferences.initial();
+            (
+                PlaybackVolume { level, unmuted },
+                Some(Arc::new(preferences)),
+            )
+        }
+        Err(error) => {
+            eprintln!("towavue: could not load playback volume: {error}");
+            (PlaybackVolume::default(), None)
+        }
+    }
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    fn remember_playback_volume(&mut self, volume: PlaybackVolume) {
+        *self
+            .last_playback_volume
+            .lock()
+            .expect("last listening volume") = volume;
+        if let Some(preferences) = &self.playback_volume_preferences
+            && let Err(error) = preferences.remember(volume.level, volume.unmuted)
+        {
+            self.set_status(format!("Could not save playback volume: {error}"));
+        }
+    }
+
     pub(super) fn playback_volume_for(&self, tab: TabId) -> f32 {
         self.playback_volumes
             .get(&tab)
@@ -135,10 +179,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             0.0
         };
-        *self
-            .last_playback_volume
-            .lock()
-            .expect("last listening volume") = *volume;
+        let volume = *volume;
+        self.remember_playback_volume(volume);
         let gain = self
             .edits
             .get(&id)
@@ -174,10 +216,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if level > 0.0 {
             volume.unmuted = level;
         }
-        *self
-            .last_playback_volume
-            .lock()
-            .expect("last listening volume") = *volume;
+        let volume = *volume;
+        self.remember_playback_volume(volume);
         // Existing saved gain remains independent; changing the listening level
         // never re-decodes the timeline, modifies history, or changes export.
         let gain = self.edit_state().volume * level;

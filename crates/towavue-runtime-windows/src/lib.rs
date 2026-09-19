@@ -38,6 +38,8 @@ pub use media_input::MediaInput;
 mod orientation;
 mod pinned_cursor;
 mod playback;
+mod playback_preferences;
+pub use playback_preferences::PlaybackVolumePreferences;
 #[cfg(feature = "presentation-verification")]
 mod presentation_verification;
 mod preview;

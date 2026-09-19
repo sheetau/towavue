@@ -936,6 +936,7 @@ struct Application<N> {
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
+    playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     volume_step_percent: u8,
     folder_navigation_loop: bool,
@@ -1227,6 +1228,7 @@ where
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
             last_playback_volume: Arc::default(),
+            playback_volume_preferences: None,
             video_export_quality: Arc::default(),
             volume_step_percent: 2,
             folder_navigation_loop: true,
@@ -6096,8 +6098,9 @@ where
                             ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
                         }).disabled_help_text("Save or undo unsaved edits before entering reading mode");
                     }
-                    let details = self.status_details();
-                    let full_info = details.join("   ");
+                    let info = self.status_info();
+                    let full_info = info.tooltip();
+                    let details = info.fields;
                     let remaining = ui.available_width();
                     let info_width = if details.is_empty() {
                         0.0
@@ -6219,9 +6222,7 @@ where
                         },
                     );
                     if !full_info.is_empty() {
-                        let source = self.folder_snapshot.as_ref()
-                            .map_or("", |snapshot| snapshot_source(snapshot.source));
-                        info_response.inner.help_text(format!("{full_info}\n{source}"));
+                        info_response.inner.help_text(full_info);
                     }
                 });
             })

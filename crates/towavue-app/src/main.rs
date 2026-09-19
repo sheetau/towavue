@@ -3800,7 +3800,8 @@ where
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
         if self.source_save.frozen {
             if self.active_export.is_some() {
-                self.draw_export_status(root.ctx(), actions);
+                root.disable();
+                self.draw_status_bar(root, actions, &mut Vec::new());
             } else {
                 root.label("Saving a file…");
             }
@@ -4017,9 +4018,6 @@ where
         if !modal_blocked {
             self.draw_grid_menu(&context, actions);
         }
-        if self.export_error.is_none() {
-            self.draw_export_status(&context, actions);
-        }
         if let Some(error) = &self.export_error {
             let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
                 ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
@@ -4071,70 +4069,6 @@ where
         if self.image_view.selection != previous_selection {
             // Windowed status is laid out before the media processes input.
             context.request_repaint();
-        }
-    }
-
-    fn draw_export_status(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
-        let Some(export) = &self.active_export else {
-            return;
-        };
-        let mut contents = |ui: &mut egui::Ui| {
-            chrome::flat_buttons(ui);
-            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
-            ui.add(
-                egui::Label::new(display_name(&export.request.target))
-                    .truncate()
-                    .show_tooltip_when_elided(false),
-            )
-            .help_text(export.request.target.display().to_string());
-            if export.options.audio != AudioExportOptions::default() {
-                ui.label(audio_export::summary(export.options.audio));
-            }
-            if !export.options.metadata.is_empty() {
-                ui.label("Metadata changes: verified before replacing the target");
-            }
-            ui.label(export_progress::status(export, Instant::now()));
-            if !export.cancelling && export.encoded.is_zero() {
-                context.request_repaint_after(Duration::from_secs(1));
-            }
-            if ui
-                .add_enabled(
-                    !export.cancelling && export.job.cancellable(),
-                    egui::Button::new(if export.job.is_save() {
-                        "Cancel save"
-                    } else {
-                        "Cancel export"
-                    }),
-                )
-                .clicked()
-            {
-                actions.push(UiAction::CancelExport);
-            }
-        };
-        if export.continuation.is_some() {
-            egui::Modal::new("export-before-continuing".into()).show(context, |ui| {
-                ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 340.0));
-                chrome::modal_heading(
-                    ui,
-                    if export.job.is_save() {
-                        "Saving before continuing"
-                    } else {
-                        "Exporting before continuing"
-                    },
-                );
-                contents(ui);
-            });
-        } else {
-            egui::Window::new(if export.job.is_save() {
-                "Saving"
-            } else {
-                "Exporting"
-            })
-            .id("export-progress".into())
-            .anchor(Align2::RIGHT_BOTTOM, [-12.0, -44.0])
-            .resizable(false)
-            .collapsible(false)
-            .show(context, contents);
         }
     }
 
@@ -5924,7 +5858,10 @@ where
         // Only hover opens the bar. An existing pointer gesture retains it through
         // release, but a new press in the content must not inherit that ownership.
         self.fullscreen_controls_visible =
-            eligible && focused && ((!held && at_edge) || (was_visible && held && !outside_press));
+            (self.fullscreen && self.active_export.is_some() && self.export_error.is_none())
+                || (eligible
+                    && focused
+                    && ((!held && at_edge) || (was_visible && held && !outside_press)));
         if self.fullscreen
             && !self.fullscreen_controls_visible
             && controls_have_focus()
@@ -5948,6 +5885,11 @@ where
             .show(context, |ui| {
                 ui.set_width(rect.width());
                 ui.set_height(rect.height());
+                if self.modal_input_blocked() {
+                    let opacity = ui.opacity();
+                    ui.disable();
+                    ui.set_opacity(opacity);
+                }
                 let status = self.draw_status_bar(ui, actions, volume_targets);
                 self.draw_seek_bar(context, status, Some(ui.layer_id()), actions);
             });
@@ -6084,7 +6026,8 @@ where
                         }
                         if compact {
                             // Keep volume and mode controls visible before truncating a long clock.
-                            let controls_width = 40.0 + ui.spacing().item_spacing.x;
+                            let controls_width = 40.0 + ui.spacing().item_spacing.x
+                                + if self.active_export.is_some() { 100.0 } else { 0.0 };
                             let time_width = (ui.available_width() - controls_width).max(0.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(time_width, 24.0),
@@ -6149,12 +6092,22 @@ where
                     } else {
                         remaining * 0.52
                     };
+                    let info_width = if self.active_export.is_some() {
+                        info_width.min((remaining - 80.0 - ui.spacing().item_spacing.x).max(0.0))
+                    } else { info_width };
                     let path_width = (remaining - info_width - ui.spacing().item_spacing.x).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(path_width, 24.0),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(path_width);
+                            if let Some(export) = self.active_export.as_ref().filter(|_| self.export_error.is_none()) {
+                                let (slot, _) = ui.allocate_exact_size(egui::vec2(path_width, 24.0), egui::Sense::hover());
+                                export_progress::show_status(ui.ctx(), slot,
+                                    (ui.layer_id().order == egui::Order::Middle).then_some(ui.layer_id()),
+                                    export, self.export_gesture_hint(), !self.dialog_input_blocked(), actions);
+                                return;
+                            }
                             let selection_hint = (!self.modal_input_blocked() && self.reading_drag.is_none()).then(|| {
                                 selection::focus_hint(ui.ctx()).or_else(|| {
                                     self.timeline_is_visible()
@@ -6170,7 +6123,7 @@ where
                                 } else if let Some(message) = self.status_notice() {
                                     export_link = self.export_notice.as_ref().map(|(shown, _)| *shown)
                                         .filter(|shown| self.export_notice_target(*shown).is_some());
-                                    (message.clone(), chrome::FOREGROUND, message)
+                                    (self.compact_export_notice(&message).unwrap_or_else(|| message.clone()), chrome::FOREGROUND, message)
                                 } else if let Some(path) = self.displayed_image_path() {
                                     let parent = path
                                         .parent()
@@ -6206,7 +6159,7 @@ where
                                     .show_tooltip_when_elided(false)
                                     .sense(if export_link.is_some() { egui::Sense::click() } else { egui::Sense::hover() }),
                             )
-                            .help_ui(|ui| {
+                            .help_ui_above(|ui| {
                                 ui.set_max_width(ui.spacing().tooltip_width);
                                 if reading_hint {
                                     ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
@@ -10344,6 +10297,14 @@ where
     }
 
     fn modal_input_blocked(&self) -> bool {
+        self.dialog_input_blocked()
+            || self
+                .active_export
+                .as_ref()
+                .is_some_and(|export| export.continuation.is_some())
+    }
+
+    fn dialog_input_blocked(&self) -> bool {
         self.file_operations.busy()
             || self.keyboard_settings.edit.is_some()
             || self.resize_dialog.is_some()
@@ -10356,10 +10317,6 @@ where
             || self.native_prompt.is_some()
             || self.pending_guard.is_some()
             || self.export_error.is_some()
-            || self
-                .active_export
-                .as_ref()
-                .is_some_and(|export| export.continuation.is_some())
     }
 
     fn resize_window(&mut self, size: winit::dpi::PhysicalSize<u32>) {
@@ -15328,7 +15285,29 @@ mod tests {
         )));
         let path = app.path.clone().expect("fixture path");
         let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
-        for mode in 0..7 {
+        let audio_tab = app
+            .tabs
+            .open_new(_root.join("current.wav"), MediaKind::Audio);
+        let video_tab = app
+            .tabs
+            .open_new(_root.join("current.mp4"), MediaKind::Video);
+        for mode in 0..9 {
+            let (shown, kind) = match mode {
+                2 => (audio_tab, MediaKind::Audio),
+                5 => (video_tab, MediaKind::Video),
+                _ => (tab, MediaKind::Image),
+            };
+            assert!(app.tabs.activate(shown));
+            app.path = Some(
+                app.tabs
+                    .active()
+                    .expect("shown tab")
+                    .target
+                    .current_path()
+                    .into(),
+            );
+            app.media_kind = Some(kind);
+            app.source_save.frozen = mode == 7;
             app.pending_guard = matches!(mode, 0 | 1 | 4).then_some(GuardedAction::Exit);
             app.export_error = (mode == 1).then(|| "Long export error with details. ".repeat(200));
             app.active_export = (mode >= 2).then(|| {
@@ -15359,18 +15338,22 @@ mod tests {
                         metadata,
                         ..Default::default()
                     },
-                    job: ExportJob::start(request.clone(), |_| {})
-                        .expect("fixture worker")
-                        .into(),
+                    job: if mode == 7 {
+                        source_save::Task::Publishing
+                    } else {
+                        ExportJob::start(request.clone(), |_| {})
+                            .expect("fixture worker")
+                            .into()
+                    },
                     tab,
                     request,
                     encoded: Duration::ZERO,
                     analyzing_audio: false,
-                    cancelling: false,
+                    cancelling: mode == 8,
                     continuation: (mode == 3).then_some(GuardedAction::Exit),
                 }
             });
-            if mode >= 5 {
+            if (5..=7).contains(&mode) {
                 app.handle_export_event(ExportEvent::AnalyzingAudio(Duration::from_secs(1)));
                 assert!(app.active_export.as_ref().expect("export").analyzing_audio);
                 if mode == 6 {
@@ -15378,13 +15361,17 @@ mod tests {
                     assert!(!app.active_export.as_ref().expect("export").analyzing_audio);
                 }
             }
-            for size in [
+            for (size, fullscreen) in [
                 egui::vec2(960.0, 576.0),
                 egui::vec2(480.0, 300.0),
                 egui::vec2(320.0, 200.0),
                 egui::vec2(240.0, 150.0),
                 egui::vec2(960.0, 576.0),
-            ] {
+            ]
+            .into_iter()
+            .flat_map(|size| [(size, false), (size, true)])
+            {
+                app.fullscreen = fullscreen;
                 let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
                 let mut output = egui::FullOutput::default();
                 for _ in 0..4 {
@@ -15398,10 +15385,7 @@ mod tests {
                 }
                 let expected: &[&str] = match mode {
                     1 => &["Export failed", "OK"],
-                    2 => &["Cancel export"],
-                    3 => &["Exporting before continuing", "Cancel export"],
-                    5 => &["Analyzing audio 00:01", "Cancel export"],
-                    6 => &["Encoded 00:02", "Cancel export"],
+                    2 | 3 | 5..=8 => &[],
                     4 => &[
                         "Unsaved edits",
                         "Save and continue",
@@ -15426,8 +15410,9 @@ mod tests {
                     .iter()
                     .filter(|(_, node)| node.role() == egui::accesskit::Role::Dialog)
                     .collect();
-                if matches!(mode, 2 | 5 | 6) {
-                    assert!(dialogs.is_empty(), "background export is not modal");
+                let progress = matches!(mode, 2 | 3 | 5..=8);
+                if progress {
+                    assert!(dialogs.is_empty(), "export progress never opens a modal");
                 } else {
                     assert_eq!(dialogs.len(), 1, "one named active modal");
                     let (_, dialog) = dialogs[0];
@@ -15457,6 +15442,71 @@ mod tests {
                     }
                 }
                 let mut target = egui::Pos2::ZERO;
+                if progress {
+                    let cancel = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.label()
+                                == Some(if mode == 7 {
+                                    "Cancel save"
+                                } else {
+                                    "Cancel export"
+                                })
+                        })
+                        .expect("status cancel");
+                    assert_eq!(
+                        cancel.1.is_disabled(),
+                        mode >= 7,
+                        "cancel availability follows the export phase"
+                    );
+                    let bounds = cancel.1.bounds().expect("cancel bounds");
+                    assert!(bounds.y0 >= f64::from(size.y - chrome::STATUS_HEIGHT));
+                    assert!(bounds.y1 <= f64::from(size.y));
+                    assert!(
+                        ((bounds.y0 + bounds.y1) * 0.5
+                            - f64::from(size.y - chrome::STATUS_HEIGHT * 0.5))
+                        .abs()
+                            <= 1.0,
+                        "cancel is vertically centered"
+                    );
+                    assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(size.x));
+                    target = egui::pos2(
+                        (bounds.x0 + bounds.x1) as f32 * 0.5,
+                        (bounds.y0 + bounds.y1) as f32 * 0.5,
+                    );
+                    let hint = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text)
+                                if (text.galley.text().starts_with("Exporting")
+                                    || text.galley.text().starts_with("Saving")) =>
+                            {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("status progress label");
+                    assert!(hint.pos.y >= size.y - chrome::STATUS_HEIGHT);
+                    assert!(
+                        hint.pos.y + hint.galley.rect.bottom() <= size.y,
+                        "progress text fits above the lower edge"
+                    );
+                    assert!(!hint.galley.text().contains("long-file-name"));
+                    if mode == 3 {
+                        assert!(hint.galley.text().contains("before continuing"));
+                    }
+                    if mode == 5 {
+                        assert!(hint.galley.text().contains("Analyzing audio 00:01"));
+                    }
+                    if mode == 6 {
+                        assert!(hint.galley.text().contains("Encoded 00:02"));
+                    }
+                    if mode >= 5 {
+                        assert!(hint.galley.text().contains("Metadata changes"));
+                    }
+                }
                 for label in expected {
                     let shape = output
                         .shapes
@@ -15501,8 +15551,13 @@ mod tests {
                     _ => UiAction::CancelExport,
                 };
                 assert!(
-                    actions == [action],
-                    "one confirmation action for mode {mode}"
+                    if mode >= 7 {
+                        actions.is_empty()
+                    } else {
+                        actions == [action]
+                    },
+                    "one confirmation action for mode {mode}, size {size:?}, fullscreen {fullscreen}; got {} actions",
+                    actions.len()
                 );
             }
         }

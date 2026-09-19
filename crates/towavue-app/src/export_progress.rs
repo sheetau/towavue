@@ -15,6 +15,18 @@ pub(super) struct LoadingProgress {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn export_gesture_hint(&self) -> Option<String> {
+        if self.reading_drag.is_some() {
+            Some(self.reading_status())
+        } else if self.held_speed.is_some() || self.track_drag.is_some() {
+            self.status_notice()
+        } else if self.view_drag.is_some() {
+            self.visual_selection_status()
+        } else {
+            None
+        }
+    }
+
     pub(super) fn folder_notice_delay(&self, now: Instant) -> Option<Duration> {
         if !matches!(self.pending_folder, Some((_, FolderIntent::Refresh(_)))) {
             return None;
@@ -317,6 +329,103 @@ fn preparation_label(analyzing: bool) -> &'static str {
     } else {
         "Preparing output"
     }
+}
+
+/// The separate nonmodal area keeps Cancel usable while a save continuation
+/// disables the main UI. Other dialogs still disable it and native modal layers
+/// retain their normal input priority.
+pub(super) fn show_status(
+    context: &egui::Context,
+    rect: egui::Rect,
+    parent: Option<egui::LayerId>,
+    export: &ActiveExport,
+    gesture: Option<String>,
+    enabled: bool,
+    actions: &mut Vec<UiAction>,
+) {
+    let operation = if export.job.is_save() {
+        "Saving"
+    } else {
+        "Exporting"
+    };
+    let heading = if export.continuation.is_some() {
+        format!("{operation} before continuing")
+    } else {
+        operation.into()
+    };
+    let mut parts = vec![heading, status(export, Instant::now())];
+    if export.options.audio != AudioExportOptions::default() {
+        parts.push(audio_export::summary(export.options.audio));
+    }
+    if !export.options.metadata.is_empty() {
+        parts.push("Metadata changes: verified before replacing the target".into());
+    }
+    if let Some(gesture) = gesture {
+        parts.insert(0, gesture);
+    }
+    let message = parts.join(" · ");
+    let tooltip = format!("{}\n{}", export.request.target.display(), parts.join("\n"));
+    if !export.cancelling && export.encoded.is_zero() {
+        context.request_repaint_after(Duration::from_secs(1));
+    }
+    let area = egui::Area::new("export-status".into());
+    if let Some(parent) = parent {
+        context.set_sublayer(parent, area.layer());
+    }
+    area.order(egui::Order::Middle)
+        .fixed_pos(rect.min)
+        .default_size(rect.size())
+        .movable(false)
+        .constrain(false)
+        .enabled(enabled)
+        .show(context, |ui| {
+            ui.set_width(rect.width());
+            ui.set_height(rect.height());
+            ui.set_clip_rect(rect.intersect(context.content_rect()));
+            ui.interact(
+                rect,
+                ui.id().with("padding"),
+                egui::Sense::CLICK | egui::Sense::DRAG,
+            );
+            chrome::flat_buttons(ui);
+            ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
+            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+            ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
+            ui.horizontal_centered(|ui| {
+                let label = if export.job.is_save() {
+                    "Cancel save"
+                } else {
+                    "Cancel export"
+                };
+                let cancel = ui.add_enabled(
+                    !export.cancelling && export.job.cancellable(),
+                    egui::Button::new(egui::RichText::new("\u{ea76}").font(fonts::icon_font()))
+                        .frame(false)
+                        .min_size(egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE)),
+                );
+                cancel.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, cancel.enabled(), label)
+                });
+                let cancel = cancel
+                    .help_text(label)
+                    .disabled_help_text(if export.cancelling {
+                        "Cancellation requested"
+                    } else {
+                        "Replacing the source file"
+                    });
+                if cancel.clicked() {
+                    actions.push(UiAction::CancelExport);
+                }
+                ui.add(
+                    egui::Label::new(fonts::reading_hint(&message, 12.0, chrome::FOREGROUND))
+                        .truncate()
+                        .show_tooltip_when_elided(false),
+                )
+                .help_ui_above(|ui| {
+                    ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
+                });
+            });
+        });
 }
 
 pub(super) fn status(export: &ActiveExport, now: Instant) -> String {

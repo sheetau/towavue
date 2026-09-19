@@ -23,6 +23,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         Some(path)
     }
 
+    /// Keep the full notice for its tooltip and reveal identity; omit only the
+    /// exact destination from the compact status label.
+    pub(super) fn compact_export_notice(&self, message: &str) -> Option<String> {
+        let (shown, target) = self.export_notice.as_ref()?;
+        let (_, current) = self.status_message.as_ref()?;
+        if shown != current {
+            return None;
+        }
+        let target = target.display().to_string();
+        let (before, after) = message.split_once(&target)?;
+        let before = before.trim_end_matches([' ', ':']);
+        Some(if after.trim().is_empty() {
+            before.into()
+        } else {
+            format!("{before} {}", after.trim_start())
+        })
+    }
+
     pub(super) fn reveal_path(&mut self, path: PathBuf) {
         let notify = Arc::clone(&self.notify);
         if let Err(error) = reveal_file(path, move |result| notify(AppEvent::FileRevealed(result)))
@@ -105,11 +123,16 @@ mod tests {
             for width in [240.0, 640.0] {
                 let context = fonts::test_context();
                 context.set_pixels_per_point(density);
+                context.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
                 context.enable_accesskit();
                 app.ui_context = Some(context);
                 let shown = notice(&mut app, &target);
                 paint(&app, width, vec![]);
                 let (output, _) = paint(&app, width, vec![]);
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "Exported")));
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text().contains("long exported file name"))));
                 let (id, rect) = link(&output).expect("export link");
                 let pos = rect.center();
                 let (hover, _) = paint(&app, width, vec![egui::Event::PointerMoved(pos)]);
@@ -117,6 +140,9 @@ mod tests {
                     hover.platform_output.cursor_icon,
                     egui::CursorIcon::PointingHand
                 );
+                let (help, _) = paint(&app, width, vec![egui::Event::PointerMoved(pos)]);
+                assert!(help.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text().contains(&target.display().to_string()))), "full path stays in hover help");
                 let button = |pressed| egui::Event::PointerButton {
                     pos,
                     pressed,

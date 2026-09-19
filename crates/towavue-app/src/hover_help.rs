@@ -4,6 +4,7 @@ pub trait HoverHelp {
     fn help_text(self, text: impl Into<WidgetText>) -> Self;
     fn disabled_help_text(self, text: impl Into<WidgetText>) -> Self;
     fn help_ui(self, content: impl FnOnce(&mut Ui)) -> Self;
+    fn help_ui_above(self, content: impl FnOnce(&mut Ui)) -> Self;
 }
 
 impl HoverHelp for Response {
@@ -13,14 +14,21 @@ impl HoverHelp for Response {
 
     fn disabled_help_text(self, text: impl Into<WidgetText>) -> Self {
         if !self.enabled() {
-            show(&self, |ui| text_content(ui, text));
+            show(&self, false, |ui| text_content(ui, text));
         }
         self
     }
 
     fn help_ui(self, content: impl FnOnce(&mut Ui)) -> Self {
         if self.enabled() {
-            show(&self, content);
+            show(&self, false, content);
+        }
+        self
+    }
+
+    fn help_ui_above(self, content: impl FnOnce(&mut Ui)) -> Self {
+        if self.enabled() {
+            show(&self, true, content);
         }
         self
     }
@@ -31,7 +39,7 @@ fn text_content(ui: &mut Ui, text: impl Into<WidgetText>) {
     ui.label(text);
 }
 
-fn show(response: &Response, content: impl FnOnce(&mut Ui)) {
+fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
     if response
         .ctx
         .input(|input| !input.raw.hovered_files.is_empty())
@@ -56,7 +64,29 @@ fn show(response: &Response, content: impl FnOnce(&mut Ui)) {
         return;
     }
     if Tooltip::should_show_tooltip(response, false) {
-        Tooltip::for_widget(response).show(content);
+        let mut tooltip = Tooltip::for_widget(response);
+        if above {
+            // A bottom-bar label can be much narrower than its full-path help.
+            // Keep the popup above it instead of letting fallback placement cover the source.
+            let width = response
+                .ctx
+                .global_style()
+                .spacing
+                .tooltip_width
+                .min((response.ctx.content_rect().width() - 16.0).max(1.0));
+            tooltip.popup = tooltip
+                .popup
+                .align(egui::RectAlign::TOP_START)
+                .align_alternatives(&[egui::RectAlign::TOP_END])
+                .width(width);
+            tooltip.show(|ui| {
+                ui.spacing_mut().tooltip_width = width;
+                ui.set_max_width(width);
+                content(ui);
+            });
+        } else {
+            tooltip.show(content);
+        }
     }
 }
 

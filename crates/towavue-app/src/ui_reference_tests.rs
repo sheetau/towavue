@@ -68,6 +68,8 @@ fn media_reference_layouts_reach_the_gpu() {
                 for scene in [
                     "image",
                     "image-reading",
+                    "image-export",
+                    "image-export-wait",
                     "audio",
                     "audio-timeline",
                     "video",
@@ -86,6 +88,37 @@ fn media_reference_layouts_reach_the_gpu() {
                             true,
                             f64::from(density),
                         ));
+                    }
+                    if scene.starts_with("image-export") {
+                        let path = app.path.clone().expect("export source");
+                        let tab = app.tabs.active().expect("export tab").id;
+                        let request = ExportRequest {
+                            source: path.clone(),
+                            target: path,
+                            kind: MediaKind::Image,
+                            operations: vec![],
+                            hardware_encode: false,
+                        };
+                        let options = ExportOptions::default();
+                        app.active_export = Some(ActiveExport {
+                            progress: export_progress::ExportProgress::new(
+                                &request,
+                                &options,
+                                Some(Duration::from_secs(10)),
+                            ),
+                            // Same-source validation rejects the fixture without file mutation.
+                            job: ExportJob::start(request.clone(), |_| {})
+                                .expect("export fixture")
+                                .into(),
+                            tab,
+                            request,
+                            options,
+                            encoded: Duration::from_secs(4),
+                            analyzing_audio: false,
+                            cancelling: false,
+                            continuation: (scene == "image-export-wait")
+                                .then_some(GuardedAction::CloseTab(tab)),
+                        });
                     }
                     if !scene.starts_with("image") {
                         app.session = Some(
@@ -133,6 +166,25 @@ fn media_reference_layouts_reach_the_gpu() {
                         let mut actions = Vec::new();
                         let ui = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
                         assert!(actions.is_empty(), "passive reference rendering");
+                        if frame >= 2 && scene.starts_with("image-export") {
+                            let text = ui
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Text(text)
+                                        if text.galley.text().starts_with("Exporting") =>
+                                    {
+                                        Some(text)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("export status text");
+                            let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                            assert!(
+                                bounds.top() >= 678.0 && bounds.bottom() <= 708.0,
+                                "export text fits the GPU status viewport: {scene}, {density}: {bounds:?}"
+                            );
+                        }
                         if !scene.starts_with("image") {
                             // Populate only requested visible durations through the production
                             // delivery interface, independently of asynchronous disk inspection.
@@ -254,7 +306,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/reading hint, compact/editing audio and compact/editing video at 100/125/200%; eighteen full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/reading/export status, compact/editing audio and compact/editing video at 100/125/200%; twenty-four full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }

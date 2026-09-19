@@ -100,7 +100,7 @@ impl AudioExportDialog {
                     reveal_focus(&response);
                 }
                 crate::chrome::separator(ui);
-                ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
+                ui.label("Applies to the next Save, Save as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
                 ui.label("Peak applies one common gain to reach -1 dBFS sample peak; lossy encoding may change peaks. Loudness analyzes edited audio after channel conversion, preserves dynamics when gain alone fits, and otherwise limits peaks without imposing a fixed loudness range. Normalization can override overall volume edits.");
                 ui.label("Mono averages left/right; Stereo duplicates mono. Conversion requires a mono or stereo input; use Keep for multichannel audio. The source must contain audio.");
                 ui.label("Settings last while this file stays in this tab. Apply does not export a file.");

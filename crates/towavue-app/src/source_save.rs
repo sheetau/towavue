@@ -10,6 +10,7 @@ pub(crate) mod tests;
 pub(super) enum Task {
     Export(ExportJob),
     Save(SourceSaveJob),
+    SaveAs(towavue_runtime_windows::SaveAsJob),
     Publishing,
 }
 impl From<ExportJob> for Task {
@@ -28,6 +29,7 @@ impl Task {
         match self {
             Self::Export(job) => job.cancel(),
             Self::Save(job) => job.cancel(),
+            Self::SaveAs(job) => job.cancel(),
             Self::Publishing => {}
         }
     }
@@ -37,6 +39,7 @@ impl Task {
 pub(super) struct State {
     pub serial: u64,
     pub pending: Option<Pending>,
+    pub save_as: Option<crate::save_as::Pending>,
     pub frozen: bool,
     pub deferred: Vec<AppEvent>,
 }
@@ -101,7 +104,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .and_then(Option::as_ref)
             .cloned()
         else {
-            self.export_error = Some("The loaded source version is unavailable. Reopen the file before saving, or use Export as to keep the current edits.".into());
+            self.export_error = Some("The loaded source version is unavailable. Reopen the file before saving, or use Save as to keep the current edits.".into());
             self.request_redraw();
             return false;
         };
@@ -258,17 +261,22 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn finish_source_save(&mut self, result: Result<(), String>) {
         let pending = self.source_save.pending.take();
+        let save_as = self.source_save.save_as.take();
         let export = self.active_export.take();
         if let Some(export) = export {
             match result {
                 Ok(()) => {
-                    self.set_status(format!("Saved {}", export.request.source.display()));
+                    self.set_status(format!("Saved {}", export.request.target.display()));
                     self.export_notice = self
                         .status_message
                         .as_ref()
-                        .map(|(_, shown)| (*shown, export.request.source.clone()));
+                        .map(|(_, shown)| (*shown, export.request.target.clone()));
                     if let Some(action) = export.continuation {
-                        self.request_guarded(action);
+                        if self.native_prompt.is_some() {
+                            self.pending_guard = Some(action);
+                        } else {
+                            self.request_guarded(action);
+                        }
                     }
                 }
                 Err(error) => {
@@ -282,6 +290,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         }
         drop(pending);
+        drop(save_as);
         self.refresh_title();
         self.request_redraw();
     }
@@ -347,6 +356,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .map(|tab| tab.id)
             .collect();
         for id in ids {
+            if let Some(queue) = self.audio_queues.get_mut(&id) {
+                queue.refresh_after_save();
+            }
             // An unopened tab has no old document to retain: its first load reads
             // the newly saved disk file. Already loaded documents keep their base.
             if !self.source_versions.contains_key(&id) {

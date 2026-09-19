@@ -791,6 +791,9 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     context(&mut app);
     let tab = app.tabs.open_new(source.into(), MediaKind::Video);
     app.path = Some(source.into());
+    app.displayed_tab = Some(tab);
+    app.state = PlaybackState::Paused;
+    crate::source_save::tests::loaded(&mut app, tab, source);
     app.media_kind = Some(MediaKind::Video);
     app.media_duration = Some(Duration::from_secs(1));
     app.audio_export_settings.insert(
@@ -809,14 +812,18 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     } else {
         "saved.wav"
     });
-    assert!(app.start_export(
-        tab,
-        source.into(),
-        MediaKind::Video,
-        target.clone(),
-        None,
-        output
-    ));
+    if output == ExportOutput::Media {
+        assert!(app.start_test_save_as(target.clone(), None));
+    } else {
+        assert!(app.start_export(
+            tab,
+            source.into(),
+            MediaKind::Video,
+            target.clone(),
+            None,
+            output
+        ));
+    }
     assert_eq!(
         app.active_export.as_ref().expect("job").progress.duration,
         Some(Duration::from_millis(500))
@@ -824,6 +831,7 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     assert!(app.active_export.as_ref().expect("job").analyzing_audio);
     let other = app.tabs.open_new(root.join("other.jpg"), MediaKind::Image);
     app.path = Some(root.join("other.jpg"));
+    app.displayed_tab = Some(other);
     app.media_kind = Some(MediaKind::Image);
     app.media_duration = Some(Duration::from_secs(300));
     let size = egui::vec2(640.0, 480.0);
@@ -832,13 +840,22 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     let deadline = Instant::now() + Duration::from_secs(10);
     let mut time = 0.0;
     while app.active_export.is_some() {
-        if let AppEvent::Export(event) = events
+        let event = events
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .expect("worker event")
+            .expect("worker event");
         {
-            analyzed |= matches!(event, ExportEvent::AnalyzingAudio(_));
-            encoded |= matches!(event, ExportEvent::Progress(_));
-            app.handle_export_event(event);
+            analyzed |= matches!(
+                &event,
+                AppEvent::Export(ExportEvent::AnalyzingAudio(_))
+                    | AppEvent::SaveAs(_, towavue_runtime_windows::SaveAsEvent::AnalyzingAudio(_))
+            );
+            encoded |= matches!(
+                &event,
+                AppEvent::Export(ExportEvent::Progress(_))
+                    | AppEvent::SaveAs(_, towavue_runtime_windows::SaveAsEvent::Progress(_))
+            );
+            app.handle_app_event(event);
+            crate::source_save::tests::publish_ready(&mut app);
             time += 0.1;
             let output = paint(&mut app, size, 1.0, time, vec![]);
             if let Some(export) = &app.active_export {

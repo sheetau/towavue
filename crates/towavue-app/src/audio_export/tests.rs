@@ -504,7 +504,9 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
         })
         .expect("app");
         let tab = app.tabs.open_new(source.clone(), kind);
+        crate::source_save::tests::loaded(&mut app, tab, &source);
         app.path = Some(source.clone());
+        app.displayed_tab = Some(tab);
         app.media_kind = Some(kind);
         app.state = PlaybackState::Paused;
         app.edits
@@ -516,12 +518,17 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
             channels: AudioChannels::Stereo,
         };
         apply(&mut app, options);
-        let generation = app.media_generation;
-        let intent = |output| DialogIntent::Export {
+        let intent = |app: &Application<_>, output| DialogIntent::Export {
             tab,
-            source: source.clone(),
+            source: app
+                .tabs
+                .active()
+                .expect("dialog document")
+                .target
+                .current_path()
+                .to_owned(),
             kind,
-            generation,
+            generation: app.media_generation,
             output,
             continuation: None,
         };
@@ -530,8 +537,8 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
         } else {
             "audio.wav"
         });
-        app.pending_dialog = Some(intent(ExportOutput::Media));
-        app.finish_dialog(Ok(Some(target.clone())));
+        app.pending_dialog = Some(intent(&app, ExportOutput::Media));
+        app.finish_test_dialog(Ok(Some(target.clone())));
         assert_eq!(
             app.active_export.as_ref().expect("job").options.audio,
             options
@@ -558,7 +565,7 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
             .map(|value| value.abs())
             .fold(0.0_f32, f32::max);
         assert!((peak - 10_f32.powf(-0.05)).abs() < 0.00004);
-        assert!(app.export_current(false, None));
+        assert!(app.save_source(None));
         assert_eq!(
             app.active_export
                 .as_ref()
@@ -575,16 +582,21 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
                 .expect("history")
                 .push(EditOperation::SetVolume(0.25), kind);
             let derivative = root.join("derivative.wav");
-            app.pending_dialog = Some(intent(ExportOutput::AudioOnly));
-            app.finish_dialog(Ok(Some(derivative.clone())));
+            app.pending_dialog = Some(intent(&app, ExportOutput::AudioOnly));
+            app.finish_test_dialog(Ok(Some(derivative.clone())));
             drain_export(&mut app, &events);
             assert!(app.edits[&tab].is_dirty());
-            assert_eq!(app.export_paths.get(&tab), Some(&target));
+            assert_eq!(
+                app.tabs
+                    .get_mut(tab)
+                    .map(|tab| tab.target.current_path().to_owned()),
+                Some(target.clone())
+            );
             assert_eq!(app.audio_export_settings.get(&tab), Some(&options));
             assert_eq!(decoded_samples(&derivative).len(), 48000 * 2);
             let before = std::fs::read(&target).expect("existing video target");
-            app.pending_dialog = Some(intent(ExportOutput::AudioOnly));
-            app.finish_dialog(Ok(Some(target.clone())));
+            app.pending_dialog = Some(intent(&app, ExportOutput::AudioOnly));
+            app.finish_test_dialog(Ok(Some(target.clone())));
             drain_export(&mut app, &events);
             assert!(app.export_error.is_some(), "audio-only AVI is refused");
             app.handle_ui_action(UiAction::DismissExportError);
@@ -594,13 +606,13 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
             );
             assert_eq!(app.audio_export_settings.get(&tab), Some(&options));
         }
-        app.pending_dialog = Some(intent(ExportOutput::Media));
-        app.finish_dialog(Ok(None));
+        app.pending_dialog = Some(intent(&app, ExportOutput::Media));
+        app.finish_test_dialog(Ok(None));
         assert_eq!(app.audio_export_settings.get(&tab), Some(&options));
         let before = std::fs::read(&target).expect("before stale dialog");
-        app.pending_dialog = Some(intent(ExportOutput::Media));
+        app.pending_dialog = Some(intent(&app, ExportOutput::Media));
         app.next_media_instance();
-        app.finish_dialog(Ok(Some(target.clone())));
+        app.finish_test_dialog(Ok(Some(target.clone())));
         assert!(app.active_export.is_none());
         assert_eq!(
             std::fs::read(&target).expect("stale target retained"),

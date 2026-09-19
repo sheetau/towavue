@@ -545,6 +545,7 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         let tab = app.tabs.open_new(source.clone(), kind);
         crate::source_save::tests::loaded(&mut app, tab, &source);
         app.path = Some(source.clone());
+        app.displayed_tab = Some(tab);
         app.media_kind = Some(kind);
         app.state = PlaybackState::Paused;
         app.edits
@@ -569,17 +570,22 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         } else {
             "video.avi"
         });
-        let generation = app.media_generation;
-        let intent = |output| DialogIntent::Export {
+        let intent = |app: &Application<_>, output| DialogIntent::Export {
             tab,
-            source: source.clone(),
+            source: app
+                .tabs
+                .active()
+                .expect("dialog document")
+                .target
+                .current_path()
+                .to_owned(),
             kind,
-            generation,
+            generation: app.media_generation,
             output,
             continuation: None,
         };
-        app.pending_dialog = Some(intent(ExportOutput::Media));
-        app.finish_dialog(Ok(Some(target.clone())));
+        app.pending_dialog = Some(intent(&app, ExportOutput::Media));
+        app.finish_test_dialog(Ok(Some(target.clone())));
         assert_eq!(
             app.active_export.as_ref().expect("job").options.metadata,
             setting()
@@ -596,16 +602,21 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             towavue_runtime_windows::read_export_metadata(&target, kind).expect("saved metadata");
         assert!(tags.iter().any(|value| value.field == MetadataField::Title
             && value.value == setting().get(MetadataField::Title).expect("title")));
-        assert!(app.export_current(false, None));
+        assert!(app.save_source(None));
         drain_export(&mut app, &events);
         assert!(app.export_error.is_none());
-        assert_eq!(app.export_paths.get(&tab), Some(&target));
+        assert_eq!(
+            app.tabs
+                .get_mut(tab)
+                .map(|tab| tab.target.current_path().to_owned()),
+            Some(target.clone())
+        );
         let mut removed = MetadataExportOptions::default();
         removed
             .set(MetadataField::Title, Some(String::new()))
             .expect("remove title");
         apply(&mut app, removed.clone());
-        assert!(app.export_current(false, None));
+        assert!(app.save_source(None));
         drain_export(&mut app, &events);
         assert!(app.export_error.is_none());
         assert!(
@@ -621,12 +632,17 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             .push(EditOperation::SetVolume(0.25), kind);
         if kind == MediaKind::Video {
             let derivative = root.join("derivative.wav");
-            app.pending_dialog = Some(intent(ExportOutput::AudioOnly));
-            app.finish_dialog(Ok(Some(derivative.clone())));
+            app.pending_dialog = Some(intent(&app, ExportOutput::AudioOnly));
+            app.finish_test_dialog(Ok(Some(derivative.clone())));
             drain_export(&mut app, &events);
             assert!(app.export_error.is_none());
             assert!(app.edits[&tab].is_dirty());
-            assert_eq!(app.export_paths.get(&tab), Some(&target));
+            assert_eq!(
+                app.tabs
+                    .get_mut(tab)
+                    .map(|tab| tab.target.current_path().to_owned()),
+                Some(target.clone())
+            );
             assert!(
                 towavue_runtime_windows::read_export_metadata(&derivative, MediaKind::Audio)
                     .expect("derivative tags")
@@ -641,15 +657,15 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             "audio-bad.aac"
         });
         std::fs::write(&bad_target, b"existing").expect("owned target");
-        app.pending_dialog = Some(intent(ExportOutput::AudioOnly));
-        app.finish_dialog(Ok(Some(bad_target.clone())));
+        app.pending_dialog = Some(intent(&app, ExportOutput::AudioOnly));
+        app.finish_test_dialog(Ok(Some(bad_target.clone())));
         drain_export(&mut app, &events);
         assert!(app.export_error.is_some());
         assert!(app.edits[&tab].is_dirty());
         assert_eq!(std::fs::read(&bad_target).expect("target"), b"existing");
         app.handle_ui_action(UiAction::DismissExportError);
-        app.pending_dialog = Some(intent(ExportOutput::Media));
-        app.finish_dialog(Ok(None));
+        app.pending_dialog = Some(intent(&app, ExportOutput::Media));
+        app.finish_test_dialog(Ok(None));
         assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
         app.request_guarded(GuardedAction::Exit);
         assert!(app.pending_guard.is_some());
@@ -665,15 +681,19 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         assert!(!app.exit_requested);
         crate::source_save::tests::finish(&mut app, &events);
         assert!(app.exit_requested && app.export_error.is_none());
-        let saved_bytes = std::fs::read(&source).expect("saved source");
+        assert_eq!(
+            std::fs::read(&source).expect("original unchanged"),
+            original
+        );
+        let saved_bytes = std::fs::read(&target).expect("saved source");
         assert_ne!(saved_bytes, original);
         assert_eq!(
-            std::fs::read(app.media_input_for(Some(tab), &source).path())
+            std::fs::read(app.media_input_for(Some(tab), &target).path())
                 .expect("retained original"),
             original
         );
         assert!(
-            towavue_runtime_windows::read_export_metadata(&source, kind)
+            towavue_runtime_windows::read_export_metadata(&target, kind)
                 .expect("source tags")
                 .iter()
                 .any(|value| value.field == MetadataField::Title
@@ -684,13 +704,13 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
         assert!(!app.metadata_export_settings.contains_key(&other));
         app.tabs.activate(tab);
-        app.navigate_to_unchecked(source.clone());
+        app.navigate_to_unchecked(target.clone());
         assert!(!app.metadata_export_settings.contains_key(&tab));
         apply(&mut app, setting());
         app.request_guarded(GuardedAction::CloseTab(tab));
         assert!(!app.metadata_export_settings.contains_key(&tab));
         assert_eq!(
-            std::fs::read(&source).expect("saved source retained"),
+            std::fs::read(&target).expect("saved source retained"),
             saved_bytes
         );
     }

@@ -15,6 +15,9 @@ fn app() -> (App, mpsc::Receiver<AppEvent>) {
 fn finish(app: &mut App, receiver: &mpsc::Receiver<AppEvent>) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
+        if app.active_export.is_some() {
+            crate::source_save::tests::finish(app, receiver);
+        }
         while let Ok(event) = receiver.try_recv() {
             app.handle_app_event(event);
         }
@@ -119,20 +122,13 @@ fn retained_source_backing_reloads_undoes_exports_and_transfers_without_double_a
     app.refresh_image_edits();
     finish(&mut app, &events);
     let export = root.join("export.bmp");
-    assert!(app.start_export(
-        id,
-        path.clone(),
-        MediaKind::Image,
-        export.clone(),
-        None,
-        ExportOutput::Media
-    ));
+    assert!(app.start_test_save_as(export.clone(), None));
     finish(&mut app, &events);
     assert!(app.export_error.is_none(), "{:?}", app.export_error);
     assert_eq!(
-        app.export_paths.get(&id),
+        app.path.as_ref(),
         Some(&export),
-        "logical export ownership remains intact"
+        "the same document adopts its Save as path"
     );
     assert_eq!(
         towavue_runtime_windows::decode_image(&export)
@@ -141,7 +137,7 @@ fn retained_source_backing_reloads_undoes_exports_and_transfers_without_double_a
             .rgba,
         edited
     );
-    assert!(app.start_export(
+    assert!(!app.start_export(
         id,
         path.clone(),
         MediaKind::Image,
@@ -165,8 +161,8 @@ fn retained_source_backing_reloads_undoes_exports_and_transfers_without_double_a
     let moved = crate::tab_transfer::tests::transfer(&mut app, &mut target, id);
     finish(&mut target, &target_events);
     assert!(!app.source_backings.contains_key(&id));
-    assert_eq!(target.media_input(&path).path(), backup);
-    assert_eq!(target.path.as_ref(), Some(&path));
+    assert_eq!(target.media_input(&export).path(), backup);
+    assert_eq!(target.path.as_ref(), Some(&export));
     target
         .edits
         .get_mut(&moved)
@@ -288,17 +284,10 @@ fn deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed() {
         .clone();
     assert_ne!(edited, original);
     let export = root.join("export.bmp");
-    assert!(app.start_export(
-        id,
-        source.clone(),
-        MediaKind::Image,
-        export.clone(),
-        None,
-        ExportOutput::Media
-    ));
+    assert!(app.start_test_save_as(export.clone(), None));
     finish(&mut app, &events);
     assert!(app.export_error.is_none(), "{:?}", app.export_error);
-    assert!(app.current_source_deleted());
+    assert!(!app.current_source_deleted());
     assert!(!source.exists());
     assert_eq!(
         towavue_runtime_windows::decode_image(&export)
@@ -311,7 +300,7 @@ fn deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed() {
     finish(&mut app, &events);
     app.activate_tab(id);
     finish(&mut app, &events);
-    assert!(app.current_source_deleted());
+    assert!(!app.current_source_deleted());
     assert_eq!(
         app.image.as_ref().expect("reactivated").decoded.frames[0].rgba,
         edited
@@ -320,8 +309,8 @@ fn deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed() {
     let moved = crate::tab_transfer::tests::transfer(&mut app, &mut target, id);
     finish(&mut target, &target_events);
     assert!(!app.deleted_sources.contains_key(&id));
-    assert!(target.current_source_deleted());
-    assert_eq!(target.media_input(&source).path(), backup);
+    assert!(!target.current_source_deleted());
+    assert_eq!(target.media_input(&export).path(), backup);
     target.edits.get_mut(&moved).expect("history").undo();
     target.refresh_image_edits();
     finish(&mut target, &target_events);
@@ -336,7 +325,7 @@ fn deleted_image_keeps_reading_pixels_edits_export_and_transfer_until_closed() {
         original
     );
     target.qualify_current_history();
-    assert!(target.viewed_media.take_pending().is_empty());
+    assert!(!target.viewed_media.take_pending().contains(&source));
     target.close_tab_unchecked(moved);
     assert!(target.deleted_sources.is_empty());
     assert!(

@@ -37,15 +37,7 @@ pub(super) fn drain_export<F: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<F>,
     events: &mpsc::Receiver<AppEvent>,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while app.active_export.is_some() {
-        if let AppEvent::Export(event) = events
-            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .expect("export event")
-        {
-            app.handle_export_event(event);
-        }
-    }
+    crate::source_save::tests::finish(app, events);
 }
 
 #[test]

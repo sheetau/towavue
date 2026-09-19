@@ -1325,8 +1325,7 @@ mod tests {
         let open = text_position(&output, "Open file").expect("Open command is visible");
         let shortcut = text_position(&output, "Ctrl+K Ctrl+O").expect("custom shortcut is visible");
         assert!(shortcut.x > open.x);
-        let export =
-            text_position(&output, "Export as").expect("disabled export stays discoverable");
+        let export = text_position(&output, "Save as").expect("disabled export stays discoverable");
         let color = |output: &egui::FullOutput, label: &str| {
             let shape = output.shapes.iter().find(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == label)).expect("menu text");
             context
@@ -1340,7 +1339,7 @@ mod tests {
                 })
                 .expect("painted text color")
         };
-        let disabled = color(&output, "Export as");
+        let disabled = color(&output, "Save as");
         assert_eq!(color(&output, "Ctrl+K Ctrl+O"), disabled);
         assert_eq!(
             color(&output, "Ctrl+Alt+E"),

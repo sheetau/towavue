@@ -10,7 +10,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, and direction.
 - **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
 - **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
-- **Undo, save, and export.** Edit without changing the source, then save over it or export a separate result. Undo remains available after saving while the tab stays open. Deleting an open file keeps its media editable until you leave or close the document; Save can recreate it at the original location.
+- **Undo, save, and export.** Edit without changing the source, then save it or use Save as to continue with another file. Undo remains available after saving while the tab stays open, and keeps the saved destination as the current file. Deleting an open file keeps its media editable until you leave or close the document; Save can recreate it at the original location.
 - **Video frame images.** Export the current edited frame to PNG, without window zoom or changing the video's save state.
 - **Keyboard-friendly controls.** Use menus, the command palette, or customizable shortcuts.
 - **Multiple windows.** Move tabs between windows while retaining their edits and playback state.
@@ -52,7 +52,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Play / pause video or audio | Space |
 | Seek backward / forward | Left / Right |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
-| Export as / save over the source | Ctrl+Shift+S / Ctrl+S |
+| Save as / save current file | Ctrl+Shift+S / Ctrl+S |
 
 Available actions depend on the current media and editing mode. Enter retains its usual confirmation or activation behavior in text fields, menus, dialogs, and focused buttons. Menus show the active shortcuts. Open the Keyboard Shortcuts tab to search, record, edit, remove or reset bindings. Saves apply to all windows in the current host. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`; manual file changes use **Reload keyboard shortcuts** from the menu or command palette. Grid layout customization remains in `grid.conf`.
 

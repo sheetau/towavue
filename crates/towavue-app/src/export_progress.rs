@@ -425,7 +425,7 @@ pub(super) fn show_status(
                     .disabled_help_text(if export.cancelling {
                         "Cancellation requested"
                     } else {
-                        "Replacing the source file"
+                        "Publishing the saved file"
                     });
                 if cancel.clicked() {
                     actions.push(UiAction::CancelExport);
@@ -444,7 +444,7 @@ pub(super) fn show_status(
 
 pub(super) fn status(export: &ActiveExport, now: Instant) -> String {
     if !export.job.cancellable() {
-        return "Saving the source file…".into();
+        return "Publishing the saved file…".into();
     }
     if export.cancelling {
         if export.job.is_save() {

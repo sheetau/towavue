@@ -33,6 +33,14 @@ impl AudioTab {
         }
     }
 
+    pub(super) fn refresh_after_save(&mut self) {
+        self.snapshot = None;
+        if let Some(provider) = &self.provider {
+            provider.request_refreshed(self.folder.clone());
+            self.refreshing = true;
+        }
+    }
+
     pub(super) fn relocate(&mut self, source: &Path, target: &Path) {
         self.order.relocate_file(source, target);
         if let Some(folder) = target.parent() {

@@ -129,7 +129,9 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
     context.enable_accesskit();
     app.ui_context = Some(context.clone());
     let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    crate::source_save::tests::loaded(&mut app, tab, &source);
     app.path = Some(source.clone());
+    app.displayed_tab = Some(tab);
     app.media_kind = Some(MediaKind::Image);
     let size = egui::vec2(640.0, 900.0);
     app.open_metadata_export_options();
@@ -580,6 +582,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
     crate::source_save::tests::loaded(&mut app, tab, &source);
     app.path = Some(source.clone());
+    app.displayed_tab = Some(tab);
     app.media_kind = Some(MediaKind::Image);
     app.state = PlaybackState::Paused;
     let edits = app.edits.entry(tab).or_default();
@@ -588,11 +591,17 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     }
     let history = app.edits.clone();
     let generation = app.media_generation;
-    let intent = || DialogIntent::Export {
+    let intent = |app: &Application<_>| DialogIntent::Export {
         tab,
-        source: source.clone(),
+        source: app
+            .tabs
+            .active()
+            .expect("dialog document")
+            .target
+            .current_path()
+            .to_owned(),
         kind: MediaKind::Image,
-        generation,
+        generation: app.media_generation,
         output: ExportOutput::Media,
         continuation: None,
     };
@@ -600,11 +609,11 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     assert_eq!(app.edits, history);
     assert_eq!(app.state, PlaybackState::Paused);
     assert_eq!(app.media_generation, generation);
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(None));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(None));
     assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(Some(target.clone())));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(Some(target.clone())));
     assert_eq!(
         app.active_export.as_ref().expect("job").options.metadata,
         setting()
@@ -644,10 +653,15 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .any(|value| value.field == MetadataField::Title
                 && value.value == "日本語 exported title")
     );
-    assert!(app.export_current(false, None));
+    assert!(app.save_source(None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
-    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(
+        app.tabs
+            .get_mut(tab)
+            .map(|tab| tab.target.current_path().to_owned()),
+        Some(target.clone())
+    );
     for field in MetadataField::ALL {
         if let Some(expected) = setting().get(field) {
             assert!(
@@ -669,7 +683,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         }
     }
     apply_ready(&mut app, &events, remove);
-    assert!(app.export_current(false, None));
+    assert!(app.save_source(None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert!(
@@ -686,7 +700,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     }
     apply_ready(&mut app, &events, MetadataExportOptions::default());
     assert!(!app.metadata_export_settings.contains_key(&tab));
-    assert!(app.export_current(false, None));
+    assert!(app.save_source(None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert_eq!(
@@ -711,8 +725,8 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
         "unsupported.png"
     });
     std::fs::write(&bad, b"existing target").expect("sentinel");
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(Some(bad.clone())));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(Some(bad.clone())));
     drain_export(&mut app, &events);
     assert!(
         app.export_error
@@ -725,7 +739,12 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             })
     );
     assert_eq!(std::fs::read(&bad).expect("protected"), b"existing target");
-    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(
+        app.tabs
+            .get_mut(tab)
+            .map(|tab| tab.target.current_path().to_owned()),
+        Some(target.clone())
+    );
     assert!(app.edits[&tab].is_dirty());
     assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
     app.handle_ui_action(UiAction::DismissExportError);
@@ -734,21 +753,25 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     assert!(!app.exit_requested);
     crate::source_save::tests::finish(&mut app, &events);
     assert!(app.exit_requested && app.export_error.is_none());
-    let saved_bytes = std::fs::read(&source).expect("saved source");
+    assert_eq!(
+        std::fs::read(&source).expect("original path unchanged"),
+        original
+    );
+    let saved_bytes = std::fs::read(&target).expect("saved source");
     assert_ne!(saved_bytes, original);
     assert_eq!(
-        std::fs::read(app.media_input_for(Some(tab), &source).path()).expect("retained original"),
+        std::fs::read(app.media_input_for(Some(tab), &target).path()).expect("retained original"),
         original
     );
     assert_eq!(
-        towavue_runtime_windows::decode_image(&source)
+        towavue_runtime_windows::decode_image(&target)
             .expect("saved image")
             .frames
             .len(),
         frames
     );
     assert!(
-        values(&source)
+        values(&target)
             .iter()
             .any(|value| value.field == MetadataField::Title
                 && value.value == setting().get(MetadataField::Title).expect("title"))
@@ -756,7 +779,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     app.exit_requested = false;
     let other_path = root.join(format!("other.{extension}"));
     let other = app.tabs.open_new(other_path.clone(), MediaKind::Image);
-    std::fs::copy(&source, &other_path).expect("other image");
+    std::fs::copy(&target, &other_path).expect("other image");
     app.tabs.activate(tab);
     app.displayed_tab = Some(tab);
     app.activate_tab(other);
@@ -764,15 +787,15 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
     assert!(!app.metadata_export_settings.contains_key(&other));
     app.activate_tab(tab);
-    assert_eq!(app.path.as_deref(), Some(source.as_path()));
+    assert_eq!(app.path.as_deref(), Some(target.as_path()));
     assert_eq!(app.metadata_export_settings.get(&tab), Some(&setting()));
-    app.navigate_to_unchecked(source.clone());
+    app.navigate_to_unchecked(target.clone());
     assert!(!app.metadata_export_settings.contains_key(&tab));
     apply_ready(&mut app, &events, setting());
     app.request_guarded(GuardedAction::CloseTab(tab));
     assert!(!app.metadata_export_settings.contains_key(&tab));
     assert_eq!(
-        std::fs::read(&source).expect("saved source retained"),
+        std::fs::read(&target).expect("saved source retained"),
         saved_bytes
     );
 }
@@ -949,7 +972,9 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
     })
     .expect("app");
     let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    crate::source_save::tests::loaded(&mut app, tab, &source);
     app.path = Some(source.clone());
+    app.displayed_tab = Some(tab);
     app.media_kind = Some(MediaKind::Image);
     app.state = PlaybackState::Paused;
     app.edits
@@ -963,21 +988,26 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
     )
     .expect("edited display");
     let target = root.join("saved").with_extension(extension);
-    let generation = app.media_generation;
-    let intent = || DialogIntent::Export {
+    let intent = |app: &Application<_>| DialogIntent::Export {
         tab,
-        source: source.clone(),
+        source: app
+            .tabs
+            .active()
+            .expect("dialog document")
+            .target
+            .current_path()
+            .to_owned(),
         kind: MediaKind::Image,
-        generation,
+        generation: app.media_generation,
         output: ExportOutput::Media,
         continuation: None,
     };
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(None));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(None));
     assert!(!target.exists());
     assert!(app.edits[&tab].is_dirty());
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(Some(target.clone())));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(Some(target.clone())));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none(), "{:?}", app.export_error);
     assert!(!app.edits[&tab].is_dirty());
@@ -985,15 +1015,20 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
         app.edits[&tab].operations(),
         &[EditOperation::RotateClockwise]
     );
-    assert_eq!(app.path.as_ref(), Some(&source));
-    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(app.path.as_ref(), Some(&target));
+    assert_eq!(
+        app.tabs
+            .get_mut(tab)
+            .map(|tab| tab.target.current_path().to_owned()),
+        Some(target.clone())
+    );
     assert_eq!(
         towavue_runtime_windows::decode_image(&target)
             .expect("converted animation")
             .frames,
         expected.frames
     );
-    assert!(app.export_current(false, None));
+    assert!(app.save_source(None));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert!(!app.edits[&tab].is_dirty());
@@ -1005,12 +1040,17 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
     );
     let saved = std::fs::read(&target).expect("saved APNG bytes");
     let unsupported = root.join("unsupported.jpg");
-    app.pending_dialog = Some(intent());
-    app.finish_dialog(Ok(Some(unsupported.clone())));
+    app.pending_dialog = Some(intent(&app));
+    app.finish_test_dialog(Ok(Some(unsupported.clone())));
     drain_export(&mut app, &events);
     assert!(app.export_error.is_some());
     assert!(!unsupported.exists());
-    assert_eq!(app.export_paths.get(&tab), Some(&target));
+    assert_eq!(
+        app.tabs
+            .get_mut(tab)
+            .map(|tab| tab.target.current_path().to_owned()),
+        Some(target.clone())
+    );
     assert_eq!(
         std::fs::read(&target).expect("previous output retained"),
         saved
@@ -1076,6 +1116,7 @@ fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
     context.enable_accesskit();
     app.ui_context = Some(context);
     let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    crate::source_save::tests::loaded(&mut app, tab, &source);
     app.path = Some(source);
     app.media_kind = Some(MediaKind::Image);
     app.open_metadata_export_options();

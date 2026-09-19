@@ -831,16 +831,9 @@ fn image_card_export_and_background_dirty_guards_keep_source_ownership() {
             .map(|path| std::fs::read(path).expect("source bytes"))
             .collect();
         let instance = app.media_generation;
-        // Same-source publication is rejected by the real worker; keep the app's
-        // export slot until its event is handled, without creating an output.
-        assert!(app.start_export(
-            id,
-            paths[0].clone(),
-            MediaKind::Image,
-            paths[0].clone(),
-            None,
-            ExportOutput::Media
-        ));
+        // Retain an unpublished Save as slot until its event is handled. The
+        // source-version guard or dropping the candidate prevents publication.
+        assert!(app.start_test_save_as(root.join("unpublished.png"), None));
         if background {
             app.tabs
                 .open_new(root.join("foreground.bmp"), MediaKind::Image);

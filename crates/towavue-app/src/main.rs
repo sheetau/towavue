@@ -67,6 +67,7 @@ mod resume;
 mod rotation;
 #[cfg(test)]
 mod rotation_tests;
+mod save_as;
 mod scroll_style;
 #[cfg(test)]
 mod seek_notice_tests;
@@ -307,6 +308,11 @@ enum AppEvent {
     ),
     FileOperationFinished(u64, Result<file_operations::Completed, String>),
     SourceSave(u64, towavue_runtime_windows::SourceSaveEvent),
+    SaveAs(u64, towavue_runtime_windows::SaveAsEvent),
+    SaveAsPublished(
+        u64,
+        Result<towavue_runtime_windows::SavedAsSource, source_save::PublicationError>,
+    ),
     SourceSavePublished(
         u64,
         Result<towavue_runtime_windows::SavedSource, source_save::PublicationError>,
@@ -352,6 +358,7 @@ enum AppEvent {
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
     DialogFinished(Result<Option<PathBuf>, DialogError>),
+    SaveAsDialogFinished(Result<Option<towavue_runtime_windows::SaveAsTarget>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
@@ -3134,6 +3141,7 @@ where
             AppEvent::FileDeleteConfirmed(..) => {} // WindowHost owns the delete transaction.
             AppEvent::FileOperationFinished(..) => {} // WindowHost owns cross-window completion.
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
+            AppEvent::SaveAsDialogFinished(result) => self.finish_save_as_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
             AppEvent::LicenseGuideRevealed(result) => {
                 self.license_guide_pending = false;
@@ -3225,7 +3233,8 @@ where
             }
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::SourceSave(serial, event) => self.handle_source_save(serial, event),
-            AppEvent::SourceSavePublished(..) => {} // Host owns publication.
+            AppEvent::SaveAs(serial, event) => self.handle_save_as(serial, event),
+            AppEvent::SourceSavePublished(..) | AppEvent::SaveAsPublished(..) => {} // Host owns publication.
             AppEvent::Playback(generation, event) => {
                 if self.file_operations.locked
                     && (self.file_operations.position.is_some()
@@ -8213,9 +8222,23 @@ where
             self.pending_folder = None;
         }
         let notify = Arc::clone(&self.notify);
-        match pick_path(window, kind, move |result| {
-            notify(AppEvent::DialogFinished(result))
-        }) {
+        let started = match kind {
+            FileDialogKind::SaveExport {
+                suggested_name,
+                request,
+            } if request.options.output == ExportOutput::Media => {
+                towavue_runtime_windows::pick_save_as(
+                    window,
+                    suggested_name,
+                    *request,
+                    move |result| notify(AppEvent::SaveAsDialogFinished(result)),
+                )
+            }
+            kind => pick_path(window, kind, move |result| {
+                notify(AppEvent::DialogFinished(result))
+            }),
+        };
+        match started {
             Ok(()) => {
                 self.file_dialog_return_focus = self.ui_context.as_ref().and_then(|context| {
                     context.memory(egui::Memory::focused).map(|id| {
@@ -8253,6 +8276,29 @@ where
     }
 
     fn finish_dialog(&mut self, result: Result<Option<PathBuf>, DialogError>) {
+        self.finish_dialog_choice(result, None);
+    }
+
+    fn finish_save_as_dialog(
+        &mut self,
+        result: Result<Option<towavue_runtime_windows::SaveAsTarget>, DialogError>,
+    ) {
+        let mut selected = None;
+        let path = result.map(|target| {
+            target.map(|target| {
+                let path = target.path().to_owned();
+                selected = Some(target);
+                path
+            })
+        });
+        self.finish_dialog_choice(path, selected);
+    }
+
+    fn finish_dialog_choice(
+        &mut self,
+        result: Result<Option<PathBuf>, DialogError>,
+        selected: Option<towavue_runtime_windows::SaveAsTarget>,
+    ) {
         self.refresh_pointer_position();
         let return_focus = self.file_dialog_return_focus.take();
         let Some(intent) = self.pending_dialog.take() else {
@@ -8286,7 +8332,18 @@ where
                             active.id == tab && active.target.current_path() == source
                         }) =>
                 {
-                    self.start_export(tab, source, kind, target, continuation, output);
+                    if output == ExportOutput::Media {
+                        if let Some(selected) = selected {
+                            self.start_save_as(tab, source, kind, selected, continuation);
+                        } else {
+                            self.pending_guard = continuation;
+                            self.set_status(
+                                "The Save as destination was not accepted; choose it again.".into(),
+                            );
+                        }
+                    } else {
+                        self.start_export(tab, source, kind, target, continuation, output);
+                    }
                 }
                 other => {
                     self.pending_guard = continuation;
@@ -8319,7 +8376,7 @@ where
 
     fn export_current_output(
         &mut self,
-        force_dialog: bool,
+        _force_dialog: bool,
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
@@ -8341,56 +8398,46 @@ where
         }) else {
             return false;
         };
-        let target = if !force_dialog && output == ExportOutput::Media {
-            self.export_paths.get(&id).cloned()
-        } else {
-            None
+        let dialog = FileDialogKind::SaveExport {
+            suggested_name: if output == ExportOutput::AudioOnly {
+                export_audio_name(&source)
+            } else {
+                export_name(&source)
+            },
+            request: Box::new(towavue_runtime_windows::ExportDialogRequest {
+                input: self.media_input_for(Some(id), &source),
+                kind,
+                operations: self
+                    .edits
+                    .get(&id)
+                    .map_or_else(Vec::new, |history| history.operations().to_vec()),
+                options: ExportOptions {
+                    output,
+                    audio: self
+                        .audio_export_settings
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_default(),
+                    metadata: self
+                        .metadata_export_settings
+                        .get(&id)
+                        .cloned()
+                        .unwrap_or_default(),
+                    video_quality: self.effective_video_export_quality(kind, output),
+                },
+            }),
         };
-        match target {
-            Some(target) => self.start_export(id, source, kind, target, continuation, output),
-            None => {
-                let dialog = FileDialogKind::SaveExport {
-                    suggested_name: if output == ExportOutput::AudioOnly {
-                        export_audio_name(&source)
-                    } else {
-                        export_name(&source)
-                    },
-                    request: Box::new(towavue_runtime_windows::ExportDialogRequest {
-                        input: self.media_input_for(Some(id), &source),
-                        kind,
-                        operations: self
-                            .edits
-                            .get(&id)
-                            .map_or_else(Vec::new, |history| history.operations().to_vec()),
-                        options: ExportOptions {
-                            output,
-                            audio: self
-                                .audio_export_settings
-                                .get(&id)
-                                .copied()
-                                .unwrap_or_default(),
-                            metadata: self
-                                .metadata_export_settings
-                                .get(&id)
-                                .cloned()
-                                .unwrap_or_default(),
-                            video_quality: self.effective_video_export_quality(kind, output),
-                        },
-                    }),
-                };
-                self.begin_dialog(
-                    dialog,
-                    DialogIntent::Export {
-                        tab: id,
-                        source,
-                        kind,
-                        generation: self.media_generation,
-                        output,
-                        continuation,
-                    },
-                )
-            }
-        }
+        self.begin_dialog(
+            dialog,
+            DialogIntent::Export {
+                tab: id,
+                source,
+                kind,
+                generation: self.media_generation,
+                output,
+                continuation,
+            },
+        )
     }
 
     fn start_export(
@@ -8402,6 +8449,12 @@ where
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
+        if output == ExportOutput::Media {
+            self.export_error =
+                Some("Save as requires an accepted destination. Choose Save as again.".into());
+            self.request_redraw();
+            return false;
+        }
         if !self.document_source_available(Some(id)) {
             self.export_error = Some(
                 "The original source needs recovery. Reopen the recovered file before exporting."
@@ -8494,24 +8547,6 @@ where
                 };
                 match result {
                     Ok(outcome) => {
-                        if export.options.output == ExportOutput::Media
-                            && self.tabs.tabs().iter().any(|tab| {
-                                tab.id == export.tab
-                                    && tab.target.current_path() == export.request.source
-                            })
-                        {
-                            self.export_paths
-                                .insert(export.tab, export.request.target.clone());
-                            self.edits
-                                .entry(export.tab)
-                                .or_default()
-                                .mark_exported(&export.request.operations);
-                            if self.media_kind == Some(MediaKind::Image)
-                                && self.tabs.active().is_some_and(|tab| tab.id == export.tab)
-                            {
-                                self.refresh_image_edits();
-                            }
-                        }
                         self.refresh_folder_snapshot_from_disk();
                         let encoder = if outcome.used_hardware_encoder {
                             "hardware"
@@ -21274,7 +21309,10 @@ mod tests {
             let blocked = std::sync::atomic::AtomicBool::new(false);
             let mut app = Application::new(None, move |event| {
                 let hold = phase == 0
-                    && matches!(event, AppEvent::Export(ExportEvent::Progress(_)))
+                    && matches!(
+                        event,
+                        AppEvent::SaveAs(_, towavue_runtime_windows::SaveAsEvent::Progress(_))
+                    )
                     && !blocked.swap(true, std::sync::atomic::Ordering::Relaxed);
                 let _ = notify.send(event);
                 if hold {
@@ -21292,24 +21330,30 @@ mod tests {
             std::fs::write(&target, b"existing output").expect("target");
             let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
             app.path = Some(source.clone());
+            app.displayed_tab = Some(tab);
+            app.state = PlaybackState::Paused;
+            crate::source_save::tests::loaded(&mut app, tab, &source);
             app.media_kind = Some(MediaKind::Image);
             app.edits
                 .entry(tab)
                 .or_default()
                 .push(EditOperation::RotateClockwise, MediaKind::Image);
             app.export_paths.insert(tab, target.clone());
-            assert!(app.export_current(false, Some(GuardedAction::Exit)));
+            assert!(app.start_test_save_as(target.clone(), Some(GuardedAction::Exit)));
             app.native_prompt = Some(FallbackPrompt::ExportBusy);
             let next_export = || loop {
-                if let AppEvent::Export(event) = events
+                if let AppEvent::SaveAs(serial, event) = events
                     .recv_timeout(Duration::from_secs(10))
                     .expect("export event")
                 {
-                    break event;
+                    break (serial, event);
                 }
             };
             if phase == 0 {
-                assert!(matches!(next_export(), ExportEvent::Progress(_)));
+                assert!(matches!(
+                    next_export().1,
+                    towavue_runtime_windows::SaveAsEvent::Progress(_)
+                ));
                 app.finish_native_prompt(Ok(PromptResponse::Yes));
                 assert!(
                     app.active_export
@@ -21320,16 +21364,17 @@ mod tests {
                 release.send(()).expect("release worker after cancellation");
             }
             let finished = loop {
-                let event = next_export();
-                if matches!(event, ExportEvent::Finished(_)) {
-                    break event;
+                let (serial, event) = next_export();
+                if matches!(event, towavue_runtime_windows::SaveAsEvent::Prepared(_)) {
+                    break (serial, event);
                 }
             };
             if phase == 1 {
                 app.native_prompt = None;
                 app.handle_ui_action(UiAction::CancelExport);
             }
-            app.handle_export_event(finished);
+            app.handle_save_as(finished.0, finished.1);
+            crate::source_save::tests::publish_ready(&mut app);
             if phase == 2 {
                 app.finish_native_prompt(Ok(PromptResponse::Yes));
             }
@@ -21343,7 +21388,7 @@ mod tests {
                 source_bytes
             );
             let output = std::fs::read(target).expect("output");
-            if phase == 0 {
+            if phase < 2 {
                 assert_eq!(output, b"existing output");
                 assert!(app.edits[&tab].is_dirty());
                 assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
@@ -21400,7 +21445,9 @@ mod tests {
                     .to_owned(),
             );
             app.media_kind = Some(MediaKind::Image);
-            assert!(app.export_current(false, Some(GuardedAction::Exit)));
+            app.displayed_tab = Some(tabs[0]);
+            app.state = PlaybackState::Paused;
+            assert!(app.start_test_save_as(outputs[0].clone(), Some(GuardedAction::Exit)));
             app.native_prompt = Some(if recovery {
                 FallbackPrompt::Recovery {
                     position: MediaTime::ZERO,
@@ -21411,15 +21458,7 @@ mod tests {
                 FallbackPrompt::ExportBusy
             });
             let finish_export = |app: &mut Application<_>| {
-                let deadline = Instant::now() + Duration::from_secs(10);
-                while app.active_export.is_some() {
-                    let event = events
-                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                        .expect("export event");
-                    if let AppEvent::Export(event) = event {
-                        app.handle_export_event(event);
-                    }
-                }
+                crate::source_save::tests::finish(app, &events);
                 assert!(app.export_error.is_none(), "{:?}", app.export_error);
             };
             finish_export(&mut app);
@@ -21453,8 +21492,9 @@ mod tests {
                 std::fs::read(&outputs[1]).expect("unused derivative"),
                 b"existing output"
             );
-            assert_eq!(
-                std::fs::read(app.tabs.tabs()[0].target.current_path()).expect("first source"),
+            assert_ne!(
+                std::fs::read(app.tabs.tabs()[0].target.current_path())
+                    .expect("adopted Save as destination"),
                 source_bytes
             );
             assert_ne!(

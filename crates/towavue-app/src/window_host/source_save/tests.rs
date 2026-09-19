@@ -655,3 +655,6 @@ fn source_save_native_video_reopens_all_hosted_readers_on_their_retained_origina
         .run_app(&mut Trial { source })
         .expect("native trial");
 }
+
+#[path = "save_as_tests.rs"]
+mod save_as;

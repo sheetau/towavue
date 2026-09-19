@@ -1037,9 +1037,21 @@ mod tests {
             app.dispatch(CommandId::VolumeUp);
             app.dispatch(CommandId::ToggleMute);
             assert_eq!(app.edits[&tab], history, "saved gain remains independent");
-            // Same-source rejection prevents this request-capture job writing a file.
+            // Save as preparation remains unpublished when the request-capture
+            // slot is dropped. Audio-only still rejects its source as destination.
             for output in [ExportOutput::Media, ExportOutput::AudioOnly] {
-                assert!(app.start_export(tab, source.clone(), kind, source.clone(), None, output));
+                if output == ExportOutput::Media {
+                    assert!(app.start_test_save_as(source.with_file_name("unpublished.mp4"), None));
+                } else {
+                    assert!(app.start_export(
+                        tab,
+                        source.clone(),
+                        kind,
+                        source.clone(),
+                        None,
+                        output
+                    ));
+                }
                 app.set_playback_volume(2.0);
                 app.toggle_playback_mute();
                 let export = app.active_export.as_ref().expect("export request");
@@ -1052,6 +1064,7 @@ mod tests {
                     }
                 );
                 app.active_export.take();
+                app.source_save.save_as.take();
             }
         }
     }

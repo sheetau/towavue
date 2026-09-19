@@ -345,7 +345,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.tab_preview.clear();
         }
         let path = target.unwrap_or(source);
-        let input = self.media_input(path);
+        let input = self.media_input(self.path.as_deref().unwrap_or(path));
         if let Some(position) = self.file_operations.position.take() {
             if let Some(session) = &mut self.session {
                 match session.resume_after_file_operation_input(input, position) {

@@ -139,6 +139,8 @@ impl WindowHost {
                     | AppEvent::FileOperationFinished(..)
                     | AppEvent::SourceSave(..)
                     | AppEvent::SourceSavePublished(..)
+                    | AppEvent::SaveAs(..)
+                    | AppEvent::SaveAsPublished(..)
                     | AppEvent::FileDeleteConfirmed(..)
             ) && let Some(queue) = captured_events.lock().expect("test events").as_mut()
             {
@@ -415,6 +417,9 @@ impl WindowHost {
             }
             Event::Window(key, AppEvent::FileOperationFinished(serial, result)) => {
                 self.finish_host_file_operation(key, serial, result)
+            }
+            Event::Window(key, AppEvent::SaveAsPublished(serial, result)) => {
+                self.finish_save_as_publication(key, serial, result)
             }
             Event::Window(key, AppEvent::SourceSavePublished(serial, result)) => {
                 self.finish_source_publication(key, serial, result)

@@ -97,6 +97,7 @@ mod track_drag;
 mod trim;
 #[cfg(test)]
 mod ui_reference_tests;
+mod updates;
 #[cfg(test)]
 mod video_context_tests;
 mod video_edit;
@@ -178,7 +179,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         towavue_runtime_windows::LaunchRole::Primary(server) => server,
     };
     let mut application =
-        window_host::WindowHost::new(initial_path, Some(event_loop.create_proxy()))?;
+        window_host::WindowHost::new(initial_path.clone(), Some(event_loop.create_proxy()))?;
+    application.start_updates(initial_path)?;
     event_loop.run_app(&mut application)?;
     Ok(())
 }
@@ -296,6 +298,7 @@ enum UiAction {
     OpenExport(Instant),
     DismissExportError,
     About(about::Action),
+    Update(updates::Action),
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
@@ -326,6 +329,7 @@ enum AppEvent {
         Result<towavue_runtime_windows::DeleteConfirmation, String>,
     ),
     ShortcutsChanged(ShortcutBindings),
+    Update(updates::Action),
     VideoExportQualityChanged,
     TaskbarReady,
     TaskbarClick(u64, towavue_runtime_windows::TaskbarAction),
@@ -466,6 +470,7 @@ enum GuardedAction {
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
     Exit,
+    UpdateExit(u64),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1020,6 +1025,8 @@ struct Application<N> {
     loading_progress: export_progress::LoadingProgress,
     export_error: Option<String>,
     about_open: bool,
+    update_notice: Option<updates::Notice>,
+    update_close: Option<updates::Close>,
     grid_layouts: grid::GridLayouts,
     grid_path: PathBuf,
     path: Option<PathBuf>,
@@ -1313,6 +1320,8 @@ where
             loading_progress: export_progress::LoadingProgress::default(),
             export_error: None,
             about_open: false,
+            update_notice: None,
+            update_close: None,
             grid_layouts,
             grid_path,
             path: None,
@@ -3075,6 +3084,7 @@ where
         }
         match event {
             AppEvent::VideoExportQualityChanged => self.request_redraw(),
+            AppEvent::Update(_) => {} // Routed by the shared host.
             AppEvent::ShortcutsChanged(bindings) => {
                 self.shortcuts = bindings;
                 self.cancel_shortcut_prefix();
@@ -4092,6 +4102,8 @@ where
             }
         } else if self.pending_guard.is_some() && self.native_prompt.is_none() {
             self.draw_unsaved_guard(&context, actions);
+        } else if self.update_notice.is_some() || self.update_is_held() {
+            self.draw_update(&context, actions);
         } else if self.about_open {
             self.draw_about(&context, actions);
         } else if self.audio_export_dialog.is_some() {
@@ -6824,6 +6836,11 @@ where
                     self.pending_guard.is_some() && self.export_error.is_none()
                 }
                 UiAction::DismissExportError => self.export_error.is_some(),
+                UiAction::Update(_) => {
+                    (self.update_notice.is_some() || self.update_is_held())
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::About(_) => {
                     self.about_open && self.pending_guard.is_none() && self.export_error.is_none()
                 }
@@ -7093,6 +7110,7 @@ where
                 self.request_redraw();
             }
             UiAction::About(action) => self.handle_about(action),
+            UiAction::Update(action) => self.handle_update_action(action),
             UiAction::DismissExportError => {
                 self.export_error = None;
                 self.request_redraw();
@@ -7258,6 +7276,7 @@ where
                     recent.refresh_gallery();
                 }
             }
+            CommandId::CheckForUpdates => (self.notify)(AppEvent::Update(updates::Action::Check)),
             CommandId::ShowLicenses => self.show_licenses(),
             CommandId::About => {
                 self.about_open = true;
@@ -8419,6 +8438,9 @@ where
                 }
             },
         }
+        if cancelled_or_failed && matches!(self.pending_guard, Some(GuardedAction::UpdateExit(_))) {
+            self.handle_update_action(updates::Action::Cancel);
+        }
         if cancelled_or_failed
             && !self.modal_input_blocked()
             && let Some((generation, tab, id)) = return_focus
@@ -8833,6 +8855,19 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        if matches!(action, GuardedAction::UpdateExit(token) if self.update_close.as_ref().is_none_or(|close| close.token != token))
+        {
+            return;
+        }
+        if self.update_close.is_some() {
+            if matches!(action, GuardedAction::Exit) {
+                self.handle_update_action(updates::Action::Cancel);
+                return;
+            }
+            if self.update_is_held() || !matches!(action, GuardedAction::UpdateExit(_)) {
+                return;
+            }
+        }
         if self.file_operations.busy() {
             self.set_status(
                 "Wait for the file operation or close its dialog before leaving.".into(),
@@ -8907,7 +8942,7 @@ where
                 | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
-                GuardedAction::Exit => true,
+                GuardedAction::Exit | GuardedAction::UpdateExit(_) => true,
             };
             if affects_export {
                 if self.renderer.is_none() {
@@ -8945,7 +8980,7 @@ where
                     .is_some_and(EditHistory::is_dirty)
                     .then_some(tab.id)
             }),
-            GuardedAction::Exit => self
+            GuardedAction::Exit | GuardedAction::UpdateExit(_) => self
                 .edits
                 .iter()
                 .find_map(|(id, history)| history.is_dirty().then_some(*id)),
@@ -8981,7 +9016,12 @@ where
                 }
             }
             GuardDecision::Discard => self.perform_guarded(action),
-            GuardDecision::Cancel => self.request_redraw(),
+            GuardDecision::Cancel => {
+                if self.update_close.is_some() {
+                    self.handle_update_action(updates::Action::Cancel);
+                }
+                self.request_redraw();
+            }
         }
     }
 
@@ -9034,6 +9074,14 @@ where
                 if let Some(recent) = &self.recent_files {
                     recent.record_folder(folder);
                 }
+            }
+            GuardedAction::UpdateExit(token) => {
+                if let Some(close) = &mut self.update_close
+                    && close.token == token
+                {
+                    close.approved = Some(self.edits.clone());
+                }
+                self.request_redraw();
             }
             GuardedAction::Exit => {
                 self.exit_requested = true;
@@ -9863,7 +9911,7 @@ where
                 let name = self.path.as_deref().map(display_name).unwrap_or_default();
                 (format!("{name}\n\nSave replaces the source file. Cancel keeps your edits and stops this action."),
                     PromptButtons::SaveDiscardCancel {
-                        discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit)),
+                        discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit | GuardedAction::UpdateExit(_))),
                     })
             }
             FallbackPrompt::ExportError => (
@@ -10536,8 +10584,21 @@ where
     }
 
     fn dialog_input_blocked(&self) -> bool {
+        self.dialog_input_blocked_for_update_save(None)
+    }
+
+    fn dialog_input_blocked_for_update_save(&self, update: Option<u64>) -> bool {
+        // A coordinated save may pass another window's update-only hold/guard.
+        // Every ordinary modal, native prompt and file operation still blocks it.
+        let same_update = update.is_some_and(|token| {
+            self.update_close
+                .as_ref()
+                .is_some_and(|close| close.token == token)
+        });
         self.image_paste.pending.is_some()
             || self.about_open
+            || self.update_notice.is_some()
+            || self.update_is_held() && !same_update
             || self.file_operations.busy()
             || self.keyboard_settings.edit.is_some()
             || self.resize_dialog.is_some()
@@ -10548,7 +10609,7 @@ where
             || self.audio_export_dialog.is_some()
             || self.metadata_dialog.is_some()
             || self.native_prompt.is_some()
-            || self.pending_guard.is_some()
+            || self.pending_guard.as_ref().is_some_and(|action| !matches!(action, GuardedAction::UpdateExit(token) if same_update && Some(*token) == update))
             || self.export_error.is_some()
     }
 

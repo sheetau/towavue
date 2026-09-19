@@ -102,6 +102,7 @@ impl WindowHost {
 
     fn begin_source_publication(&mut self, owner: WindowKey) {
         let app = &self.windows[&owner];
+        let update = app.update_save_token();
         let pending = app.source_save.pending.as_ref().expect("prepared save");
         let source = pending.expected.path().to_owned();
         let blocked = !app.source_save_is_current()
@@ -116,7 +117,9 @@ impl WindowHost {
                     || app.image_loading
                     || app.image_edit_pending
                     || app.state == PlaybackState::Loading
-                    || (*key != owner && (app.active_export.is_some() || app.modal_input_blocked()))
+                    || (*key != owner
+                        && (app.active_export.is_some()
+                            || app.dialog_input_blocked_for_update_save(update)))
                     || app.tabs.tabs().iter().any(|tab| {
                         tab.target.current_path() == Some(source.as_ref())
                             && !app.source_backings.contains_key(&tab.id)
@@ -203,6 +206,7 @@ impl WindowHost {
 impl WindowHost {
     fn begin_save_as_publication(&mut self, owner: WindowKey) {
         let app = &self.windows[&owner];
+        let update = app.update_save_token();
         let pending = app.source_save.save_as.as_ref().expect("prepared Save as");
         let export = app.active_export.as_ref().expect("Save as progress");
         let source = export.request.target.clone();
@@ -221,7 +225,9 @@ impl WindowHost {
                     || app.image_loading
                     || app.image_edit_pending
                     || app.state == PlaybackState::Loading
-                    || (*key != owner && (app.active_export.is_some() || app.modal_input_blocked()))
+                    || (*key != owner
+                        && (app.active_export.is_some()
+                            || app.dialog_input_blocked_for_update_save(update)))
                     || app.tabs.tabs().iter().any(|tab| {
                         tab.target.current_path() == Some(source.as_ref())
                             && !app.source_backings.contains_key(&tab.id)

@@ -218,7 +218,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             SeekVideo90,
         ]],
     ),
-    ("Help", &[&[ShowLicenses], &[About]]),
+    ("Help", &[&[ShowLicenses], &[CheckForUpdates], &[About]]),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

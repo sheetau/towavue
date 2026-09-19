@@ -2,13 +2,13 @@ use super::*;
 use crate::update::crypto::{TestSigner, sha256};
 use towavue_core::release::ReleaseManifest;
 
-struct Fixture {
-    store: UpdateStore,
+pub(in crate::update) struct Fixture {
+    pub(in crate::update) store: UpdateStore,
     signer: TestSigner,
 }
 
 impl Fixture {
-    fn new() -> Self {
+    pub(in crate::update) fn new() -> Self {
         let signer = TestSigner::new();
         let root = std::env::temp_dir().join(format!(
             "towavue-update-{}",
@@ -39,7 +39,7 @@ impl Fixture {
         .expect("owned fixture")
     }
 
-    fn stage(&self, version: u32) -> CachedUpdate {
+    pub(in crate::update) fn stage(&self, version: u32) -> CachedUpdate {
         self.store
             .prepare(self.signed(version, b"test payload"), |f| {
                 f.write_all(b"test payload")

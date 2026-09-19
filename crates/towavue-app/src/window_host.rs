@@ -30,6 +30,7 @@ mod launch_tests;
 mod file_operations;
 mod idle_graphics;
 mod source_save;
+mod updates;
 
 // Never reused, even after the native HWND or a window-local session ID is reused.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -44,6 +45,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 
 pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
+    Update(u64, towavue_runtime_windows::update::UpdateEvent),
     PlaybackVolumePreferenceFailed(String),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
@@ -61,6 +63,7 @@ type WindowApplication = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
 
 pub(crate) struct WindowHost {
+    updates: updates::Updates,
     file_operation: Option<file_operations::Transaction>,
     source_save: Option<source_save::Publication>,
     delete_confirmation_suppressed: bool,
@@ -93,6 +96,7 @@ impl WindowHost {
         let (volume, playback_volume_preferences) =
             playback_volume::open_preferences(proxy.clone());
         let mut host = Self {
+            updates: updates::Updates::default(),
             delete_confirmation_suppressed,
             delete_preference_path,
             file_operation: None,
@@ -133,6 +137,7 @@ impl WindowHost {
             if matches!(
                 event,
                 AppEvent::VideoExportQualityChanged
+                    | AppEvent::Update(_)
                     | AppEvent::VideoResume(_)
                     | AppEvent::FolderReady
                     | AppEvent::FileOperationSource(..)
@@ -174,6 +179,9 @@ impl WindowHost {
     }
 
     fn start_pending(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        if self.updates.startup {
+            return;
+        }
         let mut device = self
             .windows
             .values()
@@ -205,7 +213,11 @@ impl WindowHost {
     }
 
     fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
-        if self.file_operation.is_some() || self.source_save.is_some() {
+        if self.updates.startup
+            || self.update_committing()
+            || self.file_operation.is_some()
+            || self.source_save.is_some()
+        {
             return;
         }
         let local: Vec<_> = self
@@ -387,7 +399,21 @@ impl WindowHost {
 
     fn route(&mut self, event: Event) {
         match event {
-            Event::Launch(request) => self.pending_launches.push(request),
+            Event::Launch(request) => {
+                if self.update_committing() {
+                    request.acknowledge(false);
+                } else {
+                    self.cancel_update("Update cancelled because another launch was requested.");
+                    self.updates.startup = false;
+                    self.pending_launches.push(request);
+                }
+            }
+            Event::Update(epoch, event) => {
+                if epoch == self.updates.worker_epoch {
+                    self.update_event(event);
+                }
+            }
+            Event::Window(origin, AppEvent::Update(action)) => self.update_choice(origin, action),
             Event::PlaybackVolumePreferenceFailed(error) => {
                 if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
                     app.set_status(format!("Could not save playback volume: {error}"));
@@ -435,6 +461,7 @@ impl WindowHost {
                 }
             }
         }
+        self.clear_stale_update_guards();
         self.recover_pending_graphics();
     }
 
@@ -735,19 +762,23 @@ impl WindowHost {
     }
 
     fn prepare_wait(&mut self) -> ControlFlow {
+        self.clear_stale_update_guards();
+        self.advance_update();
         self.advance_source_save();
         self.start_pending_file_operation();
         self.advance_file_operation();
         self.recover_pending_graphics();
         self.remove_closed();
-        let mut wait = ControlFlow::Wait;
+        let mut wait = self.update_wait();
         for app in self.windows.values_mut() {
             wait = earliest_wait(wait, app.schedule());
         }
         self.recover_pending_graphics();
         self.remove_closed();
         if self.windows.is_empty() {
-            exit_wait(towavue_runtime_windows::shell_workers_pending())
+            exit_wait(
+                towavue_runtime_windows::shell_workers_pending() || self.update_worker_pending(),
+            )
         } else {
             earliest_wait(wait, self.trim_idle_graphics(Instant::now()))
         }
@@ -794,6 +825,7 @@ impl ApplicationHandler<Event> for WindowHost {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Event) {
         self.route(event);
+        self.start_pending(event_loop, true);
         self.open_pending_launches(event_loop, true);
         self.open_pending_windows(event_loop, true);
         self.update_tab_drops(event_loop, true);
@@ -828,11 +860,15 @@ impl ApplicationHandler<Event> for WindowHost {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.start_pending(event_loop, true);
         self.open_pending_launches(event_loop, true);
         self.open_pending_windows(event_loop, true);
         self.update_tab_drops(event_loop, true);
         event_loop.set_control_flow(self.prepare_wait());
-        if self.windows.is_empty() && !towavue_runtime_windows::shell_workers_pending() {
+        if self.windows.is_empty()
+            && !towavue_runtime_windows::shell_workers_pending()
+            && !self.update_worker_pending()
+        {
             // A worker can finish between prepare_wait and this check. Windows
             // winit still waits once after AboutToWait, so clear any old deadline.
             event_loop.set_control_flow(ControlFlow::Poll);

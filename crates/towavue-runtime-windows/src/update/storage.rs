@@ -24,7 +24,7 @@ const SETUP: &str = "setup.exe";
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UpdatePhase {

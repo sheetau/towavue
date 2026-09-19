@@ -2,8 +2,10 @@
 mod crypto;
 mod handoff;
 mod http;
+mod service;
 mod storage;
 pub use handoff::PendingHandoff;
+pub use service::{UpdateEvent, UpdateService};
 pub use storage::{CachedUpdate, StartupUpdate, UpdatePhase, UpdateStore};
 
 use crate::Cancellation;

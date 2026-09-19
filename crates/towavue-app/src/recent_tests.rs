@@ -241,6 +241,28 @@ fn quick_open_dispatches_from_gallery_and_preserves_replacement_guards() {
     assert_eq!(app.pending_window_launches, [root]);
     assert_eq!(app.tabs.active_id(), Some(gallery));
     assert_eq!(app.edits[&tab], edits);
+    let gallery_position = app
+        .tabs
+        .tab_ids()
+        .position(|id| id == gallery)
+        .expect("Gallery slot");
+    app.recent_paths = vec![second.clone()];
+    app.dispatch(CommandId::GoToFile);
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    frame(&mut app, enter(egui::Modifiers::ALT));
+    let replacement = app.tabs.active_id().expect("replacement");
+    assert_ne!(replacement, tab);
+    assert!(app.tabs.gallery().is_none());
+    assert_eq!(
+        app.tabs.tab_ids().position(|id| id == replacement),
+        Some(gallery_position)
+    );
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(app.path.as_ref(), Some(&second));
+    assert_eq!(app.edits[&tab], edits);
+    assert!(app.pending_guard.is_none());
 }
 
 #[test]
@@ -384,10 +406,13 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
     assert_ne!(
         app.tabs.active_id(),
         Some(tab),
-        "Gallery is not overwritten by a media path"
+        "replacing Gallery does not overwrite another media tab"
     );
     assert_eq!(app.path.as_ref(), Some(&first));
-    assert!(app.tabs.gallery().is_some());
+    assert!(
+        app.tabs.gallery().is_none(),
+        "Gallery becomes the media tab"
+    );
 }
 
 #[test]
@@ -510,4 +535,169 @@ fn filmstrip_window_click_preserves_dirty_origin_and_rejects_blocked_or_stale_ta
         assert!(app.pending_guard.is_none());
         app.pending_window_launches.clear();
     }
+}
+
+#[test]
+fn gallery_replacement_keeps_its_slot_and_other_dirty_tabs_and_rejects_invalid_paths() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::gallery_replacement_keeps_its_slot_and_other_dirty_tabs_and_rejects_invalid_paths",
+    ) else {
+        return;
+    };
+    let source = root.join("first.bmp");
+    tab_transfer::tests::bitmap(&source);
+    let unsupported = root.join("unsupported.txt");
+    std::fs::write(&unsupported, b"not media").expect("fixture");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    let original = tab_transfer::tests::install(
+        &mut app,
+        source.clone(),
+        tab_transfer::tests::decoded(false),
+    );
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    let history = app.edits[&original].clone();
+    app.dispatch(CommandId::OpenKeyboardSettings);
+    let settings = app.tabs.keyboard_settings().expect("settings");
+    let gallery = app.tabs.gallery().expect("Gallery");
+    assert!(app.tabs.reorder(gallery, 2));
+    app.activate_tab(gallery);
+    app.gallery_search = "first".into();
+    app.gallery_filter = Some(MediaKind::Image);
+    let before: Vec<_> = app.tabs.tab_ids().collect();
+    assert_eq!(before, [original, gallery, settings]);
+    for target in [unsupported, root.join("missing.bmp")] {
+        app.handle_recent_action(RecentAction::Open(
+            target,
+            RecentKind::File,
+            OpenTarget::Replace,
+        ));
+        assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), before);
+        assert_eq!(app.tabs.active_id(), Some(gallery));
+        assert_eq!(app.gallery_search, "first");
+        assert_eq!(app.gallery_filter, Some(MediaKind::Image));
+        assert_eq!(app.edits[&original], history);
+    }
+    // Replacement is explicit: a matching open source must not redirect to its dirty owner.
+    app.handle_recent_action(RecentAction::Open(
+        source.clone(),
+        RecentKind::File,
+        OpenTarget::Replace,
+    ));
+    let replacement = app.tabs.active_id().expect("media tab");
+    assert_ne!(replacement, original);
+    assert_ne!(replacement, gallery);
+    assert_eq!(
+        app.tabs.tab_ids().collect::<Vec<_>>(),
+        [original, replacement, settings]
+    );
+    assert!(app.tabs.gallery().is_none());
+    assert_eq!(app.path.as_ref(), Some(&source));
+    assert_eq!(app.displayed_tab, Some(replacement));
+    assert_eq!(app.edits[&original], history);
+    assert!(!app.edits[&replacement].is_dirty());
+    assert!(app.retained_images.contains_key(&original));
+    assert!(
+        app.closed_tabs.is_empty(),
+        "conversion is not a user tab close"
+    );
+    assert!(app.gallery_search.is_empty() && app.gallery_filter.is_none());
+    assert!(!app.exit_requested);
+    app.close_tab_unchecked(replacement);
+    assert_eq!(app.edits[&original], history);
+    app.dispatch(CommandId::OpenGallery);
+    assert!(app.tabs.gallery().is_some());
+}
+
+#[test]
+fn gallery_folder_replacement_checks_its_origin_and_keeps_the_slot() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::gallery_folder_replacement_checks_its_origin_and_keeps_the_slot",
+    ) else {
+        return;
+    };
+    let path = root.join("only.bmp");
+    tab_transfer::tests::bitmap(&path);
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    let wait = |app: &mut Application<_>| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.pending_folder.is_some() {
+            app.finish_folder_load();
+            assert!(Instant::now() < deadline, "folder completion");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let gallery = app.tabs.gallery().expect("Gallery");
+    app.handle_recent_action(RecentAction::Open(
+        root.clone(),
+        RecentKind::Folder,
+        OpenTarget::Replace,
+    ));
+    app.dispatch(CommandId::OpenKeyboardSettings);
+    let settings = app.tabs.keyboard_settings().expect("settings");
+    wait(&mut app);
+    assert_eq!(app.tabs.active_id(), Some(settings));
+    assert_eq!(app.tabs.gallery(), Some(gallery));
+    assert!(
+        app.tabs.tabs().is_empty(),
+        "late folder result cannot replace a utility tab"
+    );
+    app.activate_tab(gallery);
+    app.handle_recent_action(RecentAction::Open(
+        root,
+        RecentKind::Folder,
+        OpenTarget::Replace,
+    ));
+    wait(&mut app);
+    let media = app.tabs.active_id().expect("media");
+    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [media, settings]);
+    assert!(app.tabs.gallery().is_none());
+    assert_eq!(app.path.as_ref(), Some(&path));
+    assert!(!app.exit_requested);
+}
+
+#[test]
+fn gallery_replacement_does_not_reuse_an_unopened_audio_playlist() {
+    let Some(root) = tests::isolated_test_root(
+        "recent_tests::gallery_replacement_does_not_reuse_an_unopened_audio_playlist",
+    ) else {
+        return;
+    };
+    let path = root.join("silence.wav");
+    let mut wav = Vec::from(&b"RIFF"[..]);
+    wav.extend_from_slice(&164_u32.to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt \x10\0\0\0\x01\0\x01\0");
+    wav.extend_from_slice(&8_000_u32.to_le_bytes());
+    wav.extend_from_slice(&16_000_u32.to_le_bytes());
+    wav.extend_from_slice(b"\x02\0\x10\0data");
+    wav.extend_from_slice(&128_u32.to_le_bytes());
+    wav.resize(172, 0);
+    std::fs::write(&path, wav).expect("silent PCM");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    app.recent_paths = vec![path.clone()];
+    app.handle_ui_action(UiAction::OpenGalleryBackground(path.clone()));
+    let background = app.tabs.tabs()[0].id;
+    let target = app.tabs.tabs()[0].target.clone();
+    app.handle_ui_action(UiAction::Recent(RecentAction::Open(
+        path.clone(),
+        RecentKind::File,
+        OpenTarget::Replace,
+    )));
+    let active = app.tabs.active_id().expect("replacement");
+    assert_ne!(active, background);
+    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [active, background]);
+    assert!(app.tabs.gallery().is_none());
+    assert_eq!(
+        app.tabs
+            .tabs()
+            .iter()
+            .find(|tab| tab.id == background)
+            .expect("background")
+            .target,
+        target
+    );
+    assert_eq!(app.path.as_ref(), Some(&path));
+    assert_eq!(app.media_kind, Some(MediaKind::Audio));
 }

@@ -1721,7 +1721,7 @@ where
                             );
                         }
                     }
-                    menu::OpenTarget::Replace if self.tabs.active().is_some() => {
+                    menu::OpenTarget::Replace if self.can_replace_active_tab() => {
                         self.request_guarded(GuardedAction::View(path));
                     }
                     _ => {
@@ -2386,7 +2386,7 @@ where
                 if let Some(first) = snapshot.items.first() {
                     let path = first.path.clone();
                     let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _))
-                        && self.tabs.active().is_some();
+                        && self.can_replace_active_tab();
                     if replacing {
                         self.request_guarded(GuardedAction::NavigateFromFolder(
                             path.clone(),
@@ -9339,10 +9339,38 @@ where
         }
     }
 
+    fn can_replace_active_tab(&self) -> bool {
+        self.tabs.active().is_some()
+            || self
+                .tabs
+                .gallery()
+                .is_some_and(|id| self.tabs.active_id() == Some(id))
+    }
+
     fn navigate_to_unchecked(&mut self, path: PathBuf) {
         let Some(kind) = MediaKind::from_path(&path) else {
             return;
         };
+        if let Some(gallery) = self
+            .tabs
+            .gallery()
+            .filter(|id| self.tabs.active_id() == Some(*id))
+        {
+            let position = self
+                .tabs
+                .tab_ids()
+                .position(|id| id == gallery)
+                .expect("active Gallery position");
+            // A replacement owns a fresh media tab even if the same source or audio
+            // folder is already open elsewhere. Retire Gallery only after Open has
+            // accepted a supported, existing source; invalid paths keep its state.
+            self.open_external(path, true);
+            if let Some(id) = self.tabs.active().map(|tab| tab.id) {
+                self.tabs.reorder(id, position);
+                self.remove_tab(gallery, false);
+            }
+            return;
+        }
         let handoff = self.take_navigation_handoff(kind);
         if let Some(tab) = self.tabs.active_mut() {
             let id = tab.id;

@@ -436,16 +436,27 @@ pub(super) fn paint_logo(
     ] {
         painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke(Some(section)));
     }
+    // Preserve the supplied SVG's cubic corners instead of beveling them.
+    // Flatten to a physical-pixel tolerance and join the straight arms in one
+    // path, so the shared button/drop guide has no separate-stroke seams.
     for (coordinates, section) in [
         (
-            [(9.82, 1.0), (5.0, 1.0), (2.2, 2.2), (1.0, 5.0), (1.0, 9.82)],
+            [
+                (9.82, 1.0),
+                (5.0, 1.0),
+                (2.79, 1.0),
+                (1.0, 2.79),
+                (1.0, 5.0),
+                (1.0, 9.82),
+            ],
             None,
         ),
         (
             [
                 (17.47, 1.0),
                 (22.68, 1.0),
-                (25.5, 2.2),
+                (24.89, 1.0),
+                (26.68, 2.79),
                 (26.68, 5.0),
                 (26.68, 10.21),
             ],
@@ -455,7 +466,8 @@ pub(super) fn paint_logo(
             [
                 (26.68, 17.47),
                 (26.68, 22.68),
-                (25.5, 25.5),
+                (26.68, 24.89),
+                (24.89, 26.68),
                 (22.68, 26.68),
                 (17.47, 26.68),
             ],
@@ -465,17 +477,26 @@ pub(super) fn paint_logo(
             [
                 (1.0, 17.86),
                 (1.0, 22.68),
-                (2.2, 25.5),
+                (1.0, 24.89),
+                (2.79, 26.68),
                 (5.0, 26.68),
                 (9.82, 26.68),
             ],
             Some(Section::View),
         ),
     ] {
-        painter.add(egui::Shape::line(
-            coordinates.into_iter().map(|(x, y)| point(x, y)).collect(),
-            stroke(section),
-        ));
+        let [start, a, b, c, d, end] = coordinates.map(|(x, y)| point(x, y));
+        let stroke = stroke(section);
+        let mut points = egui::epaint::CubicBezierShape::from_points_stroke(
+            [a, b, c, d],
+            false,
+            Color32::TRANSPARENT,
+            stroke,
+        )
+        .flatten(Some(0.05 / painter.ctx().pixels_per_point()));
+        points.insert(0, start);
+        points.push(end);
+        painter.add(egui::Shape::line(points, stroke));
     }
 }
 

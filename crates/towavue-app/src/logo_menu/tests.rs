@@ -983,6 +983,53 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
 }
 
 #[test]
+fn logo_corners_follow_the_supplied_round_outline_at_button_and_drop_guide_sizes() {
+    for density in [1.0, 1.25, 2.0] {
+        for size in [16.0, 48.0] {
+            let context = egui::Context::default();
+            context.set_pixels_per_point(density);
+            let rect = egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::Vec2::splat(size));
+            let output = context.run_ui(Default::default(), |ui| {
+                chrome::paint_logo(ui.painter(), rect, None, 0.0, true);
+            });
+            let corners: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Path(path) = &shape.shape {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(corners.len(), 4);
+            let scale = size / 27.68;
+            for (path, center) in corners.into_iter().zip([
+                egui::pos2(5.0, 5.0),
+                egui::pos2(22.68, 5.0),
+                egui::pos2(22.68, 22.68),
+                egui::pos2(5.0, 22.68),
+            ]) {
+                let center = rect.min + center.to_vec2() * scale;
+                // The supplied SVG uses radius-four rounded corners. Check segment
+                // midpoints too: vertices on the arc alone also admit visible bevels.
+                let arc = &path.points[1..path.points.len() - 1];
+                for segment in arc.windows(2) {
+                    for point in [segment[0], segment[0].lerp(segment[1], 0.5), segment[1]] {
+                        let error = ((point - center).length() - 4.0 * scale).abs() * density;
+                        assert!(
+                            error < 0.075,
+                            "rounded outline error {error} px at {size} / {density}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
     for density in [1.0, 1.25, 2.0] {
         let context = egui::Context::default();

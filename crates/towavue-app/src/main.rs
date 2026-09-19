@@ -6187,13 +6187,26 @@ where
                                         format!("Shortcuts: {}", self.shortcut_path.display()),
                                     )
                                 };
+                            let reading_hint = self.reading_drag.is_some();
+                            let label: egui::WidgetText = if reading_hint {
+                                fonts::reading_hint(&text, 12.0, color).into()
+                            } else {
+                                RichText::new(text).size(12.0).color(color).into()
+                            };
                             let response = ui.add(
-                                egui::Label::new(RichText::new(text).size(12.0).color(color))
+                                egui::Label::new(label)
                                     .truncate()
                                     .show_tooltip_when_elided(false)
                                     .sense(if export_link.is_some() { egui::Sense::click() } else { egui::Sense::hover() }),
                             )
-                            .help_text(if export_link.is_some() { format!("{tooltip}\nShow exported file in Explorer") } else { tooltip });
+                            .help_ui(|ui| {
+                                ui.set_max_width(ui.spacing().tooltip_width);
+                                if reading_hint {
+                                    ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
+                                } else {
+                                    ui.label(if export_link.is_some() { format!("{tooltip}\nShow exported file in Explorer") } else { tooltip });
+                                }
+                            });
                             if let Some(shown) = export_link {
                                 response.widget_info(|| egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button, response.enabled(), "Show exported file in Explorer"));

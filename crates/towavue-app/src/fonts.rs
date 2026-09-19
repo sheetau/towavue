@@ -6,11 +6,17 @@ pub fn install(context: &egui::Context) -> bool {
             "towavue: no installed Japanese UI font was found; using bundled UI and default fallback fonts"
         );
     }
-    context.set_fonts(definitions(japanese));
+    context.set_fonts(definitions(
+        japanese,
+        towavue_runtime_windows::ui_symbol_font(),
+    ));
     available
 }
 
-fn definitions(japanese: Option<(Vec<u8>, u32)>) -> egui::FontDefinitions {
+fn definitions(
+    japanese: Option<(Vec<u8>, u32)>,
+    symbols: Option<Vec<u8>>,
+) -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "figtree".into(),
@@ -46,7 +52,47 @@ fn definitions(japanese: Option<(Vec<u8>, u32)>) -> egui::FontDefinitions {
         .entry(egui::FontFamily::Proportional)
         .or_default()
         .insert(0, "figtree".into());
+    // A Japanese fallback may supply only U+2194, leaving U+2195 to the
+    // heavier emoji fallback. Keep both reading arrows in one symbol face.
+    let mut arrows = vec!["Hack".into()];
+    if let Some(bytes) = symbols {
+        fonts.font_data.insert(
+            "windows-symbols".into(),
+            egui::FontData::from_owned(bytes).into(),
+        );
+        arrows.insert(0, "windows-symbols".into());
+    }
     fonts
+        .families
+        .insert(egui::FontFamily::Name("reading-arrows".into()), arrows);
+    fonts
+}
+
+pub fn reading_hint(text: &str, size: f32, color: egui::Color32) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    for part in text.split_inclusive(['\u{2194}', '\u{2195}']) {
+        let split = part
+            .char_indices()
+            .next_back()
+            .filter(|(_, chr)| matches!(chr, '\u{2194}' | '\u{2195}'));
+        let (plain, arrow) = split.map_or((part, ""), |(index, _)| part.split_at(index));
+        job.append(
+            plain,
+            0.0,
+            egui::TextFormat::simple(egui::FontId::proportional(size), color),
+        );
+        if !arrow.is_empty() {
+            job.append(
+                arrow,
+                0.0,
+                egui::TextFormat::simple(
+                    egui::FontId::new(size, egui::FontFamily::Name("reading-arrows".into())),
+                    color,
+                ),
+            );
+        }
+    }
+    job
 }
 
 pub fn icon_font() -> egui::FontId {
@@ -56,7 +102,7 @@ pub fn icon_font() -> egui::FontId {
 #[cfg(test)]
 pub fn test_context() -> egui::Context {
     let context = egui::Context::default();
-    context.set_fonts(definitions(None));
+    context.set_fonts(definitions(None, None));
     context
 }
 
@@ -67,7 +113,7 @@ mod tests {
     #[test]
     fn installed_font_covers_japanese_without_replacing_bundled_latin_metrics() {
         let context = egui::Context::default();
-        context.set_fonts(definitions(None));
+        context.set_fonts(definitions(None, None));
         let mut original = 0.0;
         let _ = context.run_ui(Default::default(), |ui| {
             original =
@@ -111,7 +157,7 @@ mod tests {
     #[test]
     fn bundled_ui_font_has_tabular_digits_and_isolated_icons_without_os_fonts() {
         let context = egui::Context::default();
-        let fonts = definitions(None);
+        let fonts = definitions(None, None);
         assert_eq!(
             fonts.families[&egui::FontFamily::Proportional][0],
             "figtree"
@@ -134,6 +180,22 @@ mod tests {
                     let narrow = fonts.layout_no_wrap("11:11 / 1111".into(), font.clone(), egui::Color32::WHITE);
                     let wide = fonts.layout_no_wrap("88:88 / 8888".into(), font, egui::Color32::WHITE);
                     assert!((narrow.size().x - wide.size().x).abs() < 0.01);
+                }
+                let text = "(\u{2195}) Reading 3 · (\u{2194}) first 3";
+                let job = reading_hint(text, 12.0, egui::Color32::WHITE);
+                assert_eq!(job.text, text);
+                let arrows = egui::FontId::new(12.0, egui::FontFamily::Name("reading-arrows".into()));
+                // Compare atlas glyphs, as in the Japanese fallback control above:
+                // has_glyphs rejects a face that also supplies the replacement glyph.
+                let missing = fonts.layout_no_wrap("\u{10ffff}".into(), arrows.clone(), egui::Color32::WHITE);
+                for chr in ['\u{2194}', '\u{2195}'] {
+                    let glyph = fonts.layout_no_wrap(chr.to_string(), arrows.clone(), egui::Color32::WHITE);
+                    assert_ne!(glyph.rows[0].glyphs[0].uv_rect, missing.rows[0].glyphs[0].uv_rect);
+                }
+                for section in &job.sections {
+                    let run = &job.text[section.byte_range.start.0..section.byte_range.end.0];
+                    let expected = if run == "\u{2194}" || run == "\u{2195}" { arrows.clone() } else { egui::FontId::proportional(12.0) };
+                    assert_eq!(section.format.font_id, expected);
                 }
                 assert!(fonts.has_glyphs(&icon_font(), "\u{eabf}\u{eaf1}\u{ea71}\u{ea76}\u{eaa4}\u{eab8}\u{eab9}\u{eaba}\u{eabb}\u{ead1}\u{eb2c}\u{eb31}\u{eb4d}\u{eaee}\u{eaf7}"));
             });

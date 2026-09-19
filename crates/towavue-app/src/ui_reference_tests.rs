@@ -67,6 +67,7 @@ fn media_reference_layouts_reach_the_gpu() {
             for density in [1.0, 1.25, 2.0] {
                 for scene in [
                     "image",
+                    "image-reading",
                     "audio",
                     "audio-timeline",
                     "video",
@@ -74,8 +75,19 @@ fn media_reference_layouts_reach_the_gpu() {
                 ] {
                     let context = fonts::test_context();
                     context.global_style_mut(chrome::style);
+                    if scene == "image-reading" {
+                        fonts::install(&context);
+                    }
                     let mut app = fixture(&self.root, &context, scene);
-                    if scene != "image" {
+                    if scene == "image-reading" {
+                        // Seed only the model; no native cursor capture or physical input.
+                        app.reading_drag = Some(reading_input::ReadingDrag::new(
+                            app.reading_settings,
+                            true,
+                            f64::from(density),
+                        ));
+                    }
+                    if !scene.starts_with("image") {
                         app.session = Some(
                             PlaybackSession::open_paused(
                                 app.path.as_deref().expect("media path"),
@@ -121,7 +133,7 @@ fn media_reference_layouts_reach_the_gpu() {
                         let mut actions = Vec::new();
                         let ui = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
                         assert!(actions.is_empty(), "passive reference rendering");
-                        if scene != "image" {
+                        if !scene.starts_with("image") {
                             // Populate only requested visible durations through the production
                             // delivery interface, independently of asynchronous disk inspection.
                             while let Some(request) = app.playlist.duration_request() {
@@ -153,7 +165,7 @@ fn media_reference_layouts_reach_the_gpu() {
                             * 4;
                         &pixels[offset..offset + 4]
                     };
-                    if scene == "image" {
+                    if scene.starts_with("image") {
                         assert_eq!(
                             at(614.0, 354.0),
                             [32, 96, 160, 255],
@@ -242,7 +254,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image, compact/editing audio and compact/editing video at 100/125/200%; fifteen full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/reading hint, compact/editing audio and compact/editing video at 100/125/200%; eighteen full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }
@@ -264,7 +276,7 @@ fn media_reference_layouts_reach_the_gpu() {
 
 fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(AppEvent)> {
     let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("reference app");
-    let kind = if scene == "image" {
+    let kind = if scene.starts_with("image") {
         MediaKind::Image
     } else if scene.starts_with("video") {
         MediaKind::Video

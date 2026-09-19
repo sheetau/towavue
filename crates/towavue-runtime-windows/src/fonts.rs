@@ -11,3 +11,9 @@ pub fn japanese_ui_font() -> Option<(Vec<u8>, u32)> {
                 .map(|data| (data, index))
         })
 }
+
+/// Reads the installed Windows symbol face without copying or modifying it.
+pub fn ui_symbol_font() -> Option<Vec<u8>> {
+    let directory = PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
+    std::fs::read(directory.join("seguisym.ttf")).ok()
+}

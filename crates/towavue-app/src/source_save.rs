@@ -97,7 +97,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return false;
         };
         let id = tab.id;
-        let source = tab.target.current_path().to_owned();
+        let Some(source) = tab.target.current_path().map(Path::to_owned) else {
+            return self.export_current(true, continuation);
+        };
         let Some(expected) = self
             .source_versions
             .get(&id)
@@ -208,15 +210,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let (Some(pending), Some(export)) = (&self.source_save.pending, &self.active_export) else {
             return false;
         };
-        self.tabs
-            .tabs()
-            .iter()
-            .any(|tab| tab.id == export.tab && tab.target.current_path() == export.request.source)
-            && self
-                .source_versions
-                .get(&export.tab)
-                .and_then(Option::as_ref)
-                == Some(&pending.expected)
+        self.tabs.tabs().iter().any(|tab| {
+            tab.id == export.tab
+                && tab.target.current_path() == Some(export.request.source.as_ref())
+        }) && self
+            .source_versions
+            .get(&export.tab)
+            .and_then(Option::as_ref)
+            == Some(&pending.expected)
             && self.media_input_for(Some(export.tab), &export.request.source) == pending.input
             && self.deleted_sources.contains_key(&export.tab) == pending.recreating
     }
@@ -352,7 +353,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs
             .tabs()
             .iter()
-            .filter(|tab| tab.target.current_path() == source)
+            .filter(|tab| tab.target.current_path() == Some(source))
             .map(|tab| tab.id)
             .collect();
         for id in ids {
@@ -449,7 +450,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs
             .tabs()
             .iter()
-            .filter(|tab| tab.target.current_path() == source)
+            .filter(|tab| tab.target.current_path() == Some(source))
             .map(|tab| tab.id)
             .collect();
         for id in ids {

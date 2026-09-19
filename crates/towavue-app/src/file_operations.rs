@@ -80,7 +80,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(tab) = self.tabs.active() else {
             return;
         };
-        let origin_path = tab.target.current_path().to_owned();
+        let Some(origin_path) = tab.target.current_path().map(Path::to_owned) else {
+            return;
+        };
         self.file_operations.serial = self.file_operations.serial.wrapping_add(1);
         let serial = self.file_operations.serial;
         self.file_operations.pending = Some(Pending {
@@ -117,7 +119,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|pending| {
                 pending.instance == self.media_generation
                     && self.tabs.active().is_some_and(|tab| {
-                        tab.id == pending.tab && tab.target.current_path() == pending.origin_path
+                        tab.id == pending.tab
+                            && tab.target.current_path() == Some(pending.origin_path.as_ref())
                     })
             })
     }
@@ -291,7 +294,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 if let Some(saved) = self.retained_images.get_mut(id) {
                     self.duration_workers.remove(&saved.instance);
                     saved.instance = instance;
-                    saved.path = target.to_owned();
+                    saved.path = Some(target.to_owned());
                     saved.filmstrip_view.relocate(source, target);
                     saved.folder_snapshot = None;
                     saved.previews.clear();

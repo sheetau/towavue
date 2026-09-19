@@ -9,7 +9,7 @@ pub(super) struct RotationDialog {
     tab: TabId,
     media_generation: u64,
     edit_generation: u64,
-    path: PathBuf,
+    path: Option<PathBuf>,
     source: Arc<DecodedImage>,
     operations: Vec<EditOperation>,
     texture: TextureHandle,
@@ -190,9 +190,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn capture_rotation(&mut self) -> Option<RotationDialog> {
-        let (Some(tab), Some(path), Some(image)) =
-            (self.tabs.active(), self.path.as_ref(), self.image.as_ref())
-        else {
+        let (Some(tab), Some(image)) = (self.tabs.active(), self.image.as_ref()) else {
             return None;
         };
         if self.media_kind != Some(MediaKind::Image)
@@ -209,7 +207,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             tab: tab.id,
             media_generation: self.media_generation,
             edit_generation: self.image_edit_generation,
-            path: path.clone(),
+            path: self.path.clone(),
             source: Arc::clone(&image.decoded),
             operations: self
                 .edits
@@ -277,7 +275,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.image_error.is_none()
             && self.media_generation == dialog.media_generation
             && self.image_edit_generation == dialog.edit_generation
-            && self.path.as_ref() == Some(&dialog.path)
+            && self.path == dialog.path
             && self
                 .image
                 .as_ref()

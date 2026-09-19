@@ -121,7 +121,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let tab = self.tabs.active().expect("fixture document");
         self.start_save_as(
             tab.id,
-            tab.target.current_path().to_owned(),
+            self.document_input(tab.id)
+                .expect("fixture input")
+                .logical_path()
+                .to_owned(),
             tab.target.media_kind(),
             towavue_runtime_windows::SaveAsTarget::capture(&target)
                 .expect("injected destination choice"),

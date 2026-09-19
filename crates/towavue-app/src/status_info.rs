@@ -109,6 +109,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         {
             let value = extension.to_uppercase();
             details.push(Group::File, &value, &value);
+        } else if self.current_document_untitled() {
+            details.push(
+                Group::Document,
+                "Untitled",
+                "Pasted image without a saved file",
+            );
         } else if let Some(image) = image {
             let value = image.decoded.format.to_uppercase();
             details.push(Group::File, &value, &value);

@@ -13,7 +13,9 @@ fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_pad
             let mut tabs = TabSet::default();
             tabs.open_new("video.mp4".into(), MediaKind::Video);
             let mut preview = TabPreview::new().expect("preview worker");
-            let target = preview.target(tabs.active().expect("tab"));
+            let target = preview
+                .target(tabs.active().expect("tab"))
+                .expect("file-backed preview");
             preview.target = Some(target.clone());
             preview.finish(
                 &context,

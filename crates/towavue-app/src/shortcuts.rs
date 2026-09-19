@@ -108,6 +108,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::Redo, "Ctrl+Shift+Z"),
         (CommandId::ApplyCrop, "Ctrl+Y"),
         (CommandId::CopyImage, "Ctrl+C"),
+        (CommandId::PasteImage, "Ctrl+V"),
         (CommandId::ResizeImage, "Ctrl+R"),
         (CommandId::ResizeVideo, "Ctrl+R"),
         (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
@@ -388,7 +389,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 || definition.id.as_str().starts_with("select_aspect_")
                 || matches!(
                     definition.id,
-                    CommandId::FreeRotateImage
+                    CommandId::PasteImage
+                        | CommandId::FreeRotateImage
                         | CommandId::FreeRotateVideo
                         | CommandId::RotateFineClockwise
                         | CommandId::RotateFineCounterclockwise
@@ -483,6 +485,32 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn paste_default_preserves_custom_keys_prefixes_and_explicit_removal() {
+        for header in ["", CURRENT_BINDING_HEADER] {
+            for key in ["Ctrl+V", "Ctrl+V X"] {
+                let text = format!("{header}\nopen_file = {key}\n");
+                let custom = parse(&text, defaults()).expect("existing custom binding");
+                assert!(custom.all(CommandId::PasteImage).is_empty());
+                assert_eq!(
+                    custom.get(CommandId::OpenFile).expect("custom").to_string(),
+                    key
+                );
+            }
+        }
+        let removed = parse(
+            &format!("{CURRENT_BINDING_HEADER}\npaste_image = \n"),
+            defaults(),
+        )
+        .expect("explicit removal");
+        assert!(removed.all(CommandId::PasteImage).is_empty());
+        let custom = parse("paste_image = Ctrl+K V\n", defaults()).expect("custom paste");
+        assert_eq!(
+            parse(&serialize(&custom), defaults()).expect("roundtrip"),
+            custom
+        );
+    }
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
 

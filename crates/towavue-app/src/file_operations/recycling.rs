@@ -12,7 +12,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs
             .tabs()
             .iter()
-            .filter(|tab| tab.target.current_path() == path)
+            .filter(|tab| tab.target.current_path() == Some(path))
             .map(|tab| tab.id)
             .collect();
         let deleted = source_backing::DeletedSource {

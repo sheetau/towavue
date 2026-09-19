@@ -13,20 +13,23 @@ impl TabId {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TabTarget {
+    UntitledImage,
     Media { path: PathBuf, kind: MediaKind },
     AudioFolder { folder: PathBuf, current: PathBuf },
 }
 
 impl TabTarget {
-    pub fn current_path(&self) -> &Path {
+    pub fn current_path(&self) -> Option<&Path> {
         match self {
-            Self::Media { path, .. } => path,
-            Self::AudioFolder { current, .. } => current,
+            Self::UntitledImage => None,
+            Self::Media { path, .. } => Some(path),
+            Self::AudioFolder { current, .. } => Some(current),
         }
     }
 
     pub fn media_kind(&self) -> MediaKind {
         match self {
+            Self::UntitledImage => MediaKind::Image,
             Self::Media { kind, .. } => *kind,
             Self::AudioFolder { .. } => MediaKind::Audio,
         }
@@ -163,9 +166,20 @@ impl TabSet {
         self.open_new(path, kind)
     }
 
-    pub fn open_new(&mut self, path: PathBuf, kind: MediaKind) -> TabId {
+    pub fn open_untitled_image(&mut self) -> TabId {
+        self.open_target(TabTarget::UntitledImage)
+    }
+
+    pub fn open_target(&mut self, target: TabTarget) -> TabId {
         let id = TabId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
+        self.tabs.push(Tab { id, target });
+        self.order.push(id);
+        self.active = ActiveTab::Media(id);
+        id
+    }
+
+    pub fn open_new(&mut self, path: PathBuf, kind: MediaKind) -> TabId {
         let target = if kind == MediaKind::Audio {
             TabTarget::AudioFolder {
                 folder: path.parent().unwrap_or_else(|| Path::new("")).to_owned(),
@@ -174,17 +188,14 @@ impl TabSet {
         } else {
             TabTarget::Media { path, kind }
         };
-        self.tabs.push(Tab { id, target });
-        self.order.push(id);
-        self.active = ActiveTab::Media(id);
-        id
+        self.open_target(target)
     }
 
     /// A filesystem relocation preserves tab identity, kind, order and selection.
     pub fn relocate_file(&mut self, source: &Path, target: &Path) -> Vec<TabId> {
         let mut changed = Vec::new();
         for tab in &mut self.tabs {
-            if tab.target.current_path() == source {
+            if tab.target.current_path() == Some(source) {
                 tab.target
                     .set_current_path(target.to_owned(), tab.target.media_kind());
                 changed.push(tab.id);
@@ -500,7 +511,8 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(tabs.tabs().len(), 1);
         assert_eq!(
-            tabs.active().map(|tab| tab.target.current_path()),
+            tabs.active()
+                .map(|tab| tab.target.current_path().expect("file-backed tab")),
             Some(Path::new("album/two.flac"))
         );
     }

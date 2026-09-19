@@ -94,13 +94,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn tab_audio_indicator(&self, tab: &towavue_core::Tab) -> Option<bool> {
         let id = tab.id;
         let (state, drained, session) = if self.tabs.active().is_some_and(|tab| tab.id == id) {
-            if self.path.as_deref() != Some(tab.target.current_path()) {
+            if self.path.as_deref() != tab.target.current_path() {
                 return None;
             }
             (self.state, self.audio_drained, self.session.as_ref())
         } else {
             let saved = self.retained_playback.get(&id)?;
-            if saved.path != tab.target.current_path() {
+            if Some(saved.path.as_path()) != tab.target.current_path() {
                 return None;
             }
             (saved.state, saved.audio_drained, saved.session.as_ref())
@@ -133,13 +133,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return None;
         }
         let session = if self.tabs.active().is_some_and(|tab| tab.id == id) {
-            (self.path.as_deref() == Some(tab.target.current_path()))
+            (self.path.as_deref() == tab.target.current_path())
                 .then_some(self.session.as_ref())
                 .flatten()
         } else {
             self.retained_playback
                 .get(&id)
-                .filter(|saved| saved.path == tab.target.current_path())
+                .filter(|saved| Some(saved.path.as_path()) == tab.target.current_path())
                 .and_then(|saved| saved.session.as_ref())
         };
         if session.is_some_and(|session| !session.has_audio()) {
@@ -168,6 +168,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .expect("eligible media tab")
             .target
             .current_path()
+            .expect("audio/video tab")
             .to_owned();
         if self.tabs.active().is_some_and(|tab| tab.id == id) && self.path.as_ref() == Some(&path) {
             self.toggle_playback_mute();

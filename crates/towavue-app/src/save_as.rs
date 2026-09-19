@@ -24,12 +24,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.active_export.is_some() || !self.document_source_available(Some(id)) {
             return false;
         }
-        if !self
-            .tabs
-            .tabs()
-            .iter()
-            .any(|tab| tab.id == id && tab.target.current_path() == source)
-        {
+        if !self.tabs.tabs().iter().any(|tab| {
+            tab.id == id
+                && self
+                    .document_input(id)
+                    .is_some_and(|input| input.logical_path() == source)
+        }) {
             return false;
         }
         if selected.path() == source {
@@ -122,11 +122,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let (Some(pending), Some(export)) = (&self.source_save.save_as, &self.active_export) else {
             return false;
         };
-        self.tabs
-            .tabs()
-            .iter()
-            .any(|tab| tab.id == export.tab && tab.target.current_path() == export.request.source)
-            && export.request.target == pending.selected.path()
+        self.tabs.tabs().iter().any(|tab| {
+            tab.id == export.tab
+                && self
+                    .document_input(tab.id)
+                    .is_some_and(|input| input.logical_path() == export.request.source)
+        }) && export.request.target == pending.selected.path()
             && self.media_input_for(Some(export.tab), &export.request.source) == pending.input
             && self
                 .source_versions
@@ -177,7 +178,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs
             .tabs()
             .iter()
-            .filter(|tab| tab.target.current_path() == target)
+            .filter(|tab| tab.target.current_path() == Some(target))
             .map(|tab| tab.id)
             .collect();
         for id in ids {
@@ -262,7 +263,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(retained) = self.retained_images.get_mut(&id) {
             self.duration_workers.remove(&retained.instance);
             retained.instance = instance;
-            retained.path = target.to_owned();
+            retained.path = Some(target.to_owned());
             retained.filmstrip_view.relocate(source, target);
             retained.folder_snapshot = None;
             retained.previews.clear();

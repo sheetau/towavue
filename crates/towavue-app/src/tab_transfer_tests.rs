@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn untitled_transfer_preserves_pixels_edits_view_and_private_original_until_final_close() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::untitled_transfer_preserves_pixels_edits_view_and_private_original_until_final_close",
+    ) else {
+        return;
+    };
+    let (mut source, events) = app();
+    let (mut destination, _) = app();
+    let id = crate::image_paste::tests::inject(&mut source, &events);
+    source.dispatch(CommandId::FlipHorizontal);
+    source.image_view.zoom = ZoomMode::Actual;
+    let pixels = Arc::clone(&source.image.as_ref().expect("image").decoded);
+    let private = source.document_input(id).expect("input").path().to_owned();
+    let request = source.capture_tab_transfer(id).expect("untitled owner");
+    assert!(request.path.is_none() && request.instance.is_some());
+    let stage = source
+        .prepare_image_transfer(id, destination.ui_context.as_ref().expect("context"))
+        .expect("texture rebind");
+    let packet = source.take_tab_transfer(&request, stage);
+    assert!(private.exists());
+    let target = destination.accept_tab_transfer(packet, 0);
+    assert!(destination.path.is_none());
+    assert_eq!(destination.image_view.zoom, ZoomMode::Actual);
+    assert!(Arc::ptr_eq(
+        &pixels,
+        &destination.image.as_ref().expect("transferred").decoded
+    ));
+    assert_eq!(
+        destination.edits[&target].operations(),
+        [EditOperation::FlipHorizontal]
+    );
+    assert!(destination.edits[&target].is_dirty());
+    assert_eq!(
+        destination
+            .document_input(target)
+            .expect("transferred input")
+            .path(),
+        private
+    );
+    destination.close_tab_unchecked(target);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while private.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "final close retires private paste storage"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(destination.closed_tabs.is_empty());
+}
+
+#[test]
 fn keyboard_settings_transfer_reuses_one_utility_and_preserves_the_query_without_media_loading() {
     let Some(_root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::keyboard_settings_transfer_reuses_one_utility_and_preserves_the_query_without_media_loading",
@@ -135,6 +187,7 @@ pub(crate) fn transfer(source: &mut App, destination: &mut App, id: TabId) -> Ta
                 .expect("tab")
                 .target
                 .current_path()
+                .expect("file-backed tab")
                 .to_owned(),
         ),
         instance: Some(if source.displayed_tab == Some(id) {
@@ -1494,7 +1547,10 @@ fn unopened_transfer_preserves_source_view_and_moves_owned_settings_without_load
             panic!("media transfer")
         };
         assert!(matches!(transfer.media, MediaTransfer::Unopened));
-        assert_eq!(transfer.target.current_path(), path);
+        assert_eq!(
+            transfer.target.current_path().expect("file-backed tab"),
+            path
+        );
         assert_eq!(transfer.export_path, Some(export));
         assert_eq!(transfer.playback_volume.is_some(), kind != MediaKind::Image);
         assert_eq!(source.tabs.active_id(), Some(active));

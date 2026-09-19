@@ -73,13 +73,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
+    pub(super) fn document_input(&self, id: TabId) -> Option<MediaInput> {
+        let tab = self.tabs.tabs().iter().find(|tab| tab.id == id)?;
+        if let Some(path) = tab.target.current_path() {
+            return Some(self.media_input_for(Some(id), path));
+        }
+        let original = self.source_backings.get(&id)?.clone();
+        Some(MediaInput::retained(
+            original.original_path().to_owned(),
+            original,
+        ))
+    }
+
     pub(super) fn media_input_for(&self, id: Option<TabId>, path: &Path) -> MediaInput {
         let original = id
             .filter(|id| {
-                self.tabs
-                    .tabs()
-                    .iter()
-                    .any(|tab| tab.id == *id && tab.target.current_path() == path)
+                self.tabs.tabs().iter().any(|tab| {
+                    tab.id == *id
+                        && (tab.target.current_path() == Some(path)
+                            || (tab.target.current_path().is_none()
+                                && self
+                                    .source_backings
+                                    .get(id)
+                                    .is_some_and(|original| original.original_path() == path)))
+                })
             })
             .and_then(|id| self.source_backings.get(&id))
             .cloned();

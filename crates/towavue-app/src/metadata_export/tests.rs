@@ -578,6 +578,7 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
                 .expect("dialog document")
                 .target
                 .current_path()
+                .expect("file-backed tab")
                 .to_owned(),
             kind,
             generation: app.media_generation,
@@ -606,9 +607,11 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
         drain_export(&mut app, &events);
         assert!(app.export_error.is_none());
         assert_eq!(
-            app.tabs
-                .get_mut(tab)
-                .map(|tab| tab.target.current_path().to_owned()),
+            app.tabs.get_mut(tab).map(|tab| tab
+                .target
+                .current_path()
+                .expect("file-backed tab")
+                .to_owned()),
             Some(target.clone())
         );
         let mut removed = MetadataExportOptions::default();
@@ -638,9 +641,11 @@ fn metadata_settings_read_save_resave_derivative_guard_and_reset_with_source() {
             assert!(app.export_error.is_none());
             assert!(app.edits[&tab].is_dirty());
             assert_eq!(
-                app.tabs
-                    .get_mut(tab)
-                    .map(|tab| tab.target.current_path().to_owned()),
+                app.tabs.get_mut(tab).map(|tab| tab
+                    .target
+                    .current_path()
+                    .expect("file-backed tab")
+                    .to_owned()),
                 Some(target.clone())
             );
             assert!(

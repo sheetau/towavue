@@ -1780,7 +1780,10 @@ fn filmstrip_clicks_dismiss_and_background_open_preserves_the_current_edit() {
             assert_eq!(app.filmstrip_return_focus, return_focus);
             assert_eq!(app.tabs.tabs().len(), 2);
             let added = &app.tabs.tabs()[1];
-            assert_eq!(added.target.current_path(), target);
+            assert_eq!(
+                added.target.current_path().expect("file-backed tab"),
+                target
+            );
             assert!(!app.edits[&added.id].is_dirty());
             assert!(app.pending_guard.is_none());
             assert!(

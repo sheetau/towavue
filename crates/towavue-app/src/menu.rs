@@ -101,7 +101,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "Edit",
         &[
             &[Undo, Redo],
-            &[CopyImage],
+            &[CopyImage, PasteImage],
             &[ResizeImage, ResizeVideo],
             &[FreeRotateImage, FreeRotateVideo],
             &[SelectAll, ApplyCrop, ClearSelection],
@@ -1239,7 +1239,8 @@ mod tests {
         navigate(egui::Key::Tab, false, "Open file");
         navigate(egui::Key::ArrowLeft, false, "File");
         navigate(egui::Key::ArrowDown, false, "Edit");
-        navigate(egui::Key::ArrowRight, false, "Listening volume step");
+        navigate(egui::Key::ArrowRight, false, "Paste image");
+        navigate(egui::Key::ArrowDown, false, "Listening volume step");
         navigate(egui::Key::ArrowRight, false, "2%");
         navigate(egui::Key::ArrowDown, false, "5%");
         navigate(egui::Key::ArrowLeft, false, "Listening volume step");
@@ -1628,7 +1629,9 @@ mod tests {
                 }]);
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
-            for _ in 0..leading + 4 * usize::from(category == "File") {
+            for _ in
+                0..leading + usize::from(category == "Edit") + 4 * usize::from(category == "File")
+            {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }
             for (index, definition) in command_definitions()

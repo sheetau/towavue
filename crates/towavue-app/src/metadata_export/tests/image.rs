@@ -599,6 +599,7 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
             .expect("dialog document")
             .target
             .current_path()
+            .expect("file-backed tab")
             .to_owned(),
         kind: MediaKind::Image,
         generation: app.media_generation,
@@ -657,9 +658,11 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     drain_export(&mut app, &events);
     assert!(app.export_error.is_none());
     assert_eq!(
-        app.tabs
-            .get_mut(tab)
-            .map(|tab| tab.target.current_path().to_owned()),
+        app.tabs.get_mut(tab).map(|tab| tab
+            .target
+            .current_path()
+            .expect("file-backed tab")
+            .to_owned()),
         Some(target.clone())
     );
     for field in MetadataField::ALL {
@@ -740,9 +743,11 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     );
     assert_eq!(std::fs::read(&bad).expect("protected"), b"existing target");
     assert_eq!(
-        app.tabs
-            .get_mut(tab)
-            .map(|tab| tab.target.current_path().to_owned()),
+        app.tabs.get_mut(tab).map(|tab| tab
+            .target
+            .current_path()
+            .expect("file-backed tab")
+            .to_owned()),
         Some(target.clone())
     );
     assert!(app.edits[&tab].is_dirty());
@@ -996,6 +1001,7 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
             .expect("dialog document")
             .target
             .current_path()
+            .expect("file-backed tab")
             .to_owned(),
         kind: MediaKind::Image,
         generation: app.media_generation,
@@ -1017,9 +1023,11 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
     );
     assert_eq!(app.path.as_ref(), Some(&target));
     assert_eq!(
-        app.tabs
-            .get_mut(tab)
-            .map(|tab| tab.target.current_path().to_owned()),
+        app.tabs.get_mut(tab).map(|tab| tab
+            .target
+            .current_path()
+            .expect("file-backed tab")
+            .to_owned()),
         Some(target.clone())
     );
     assert_eq!(
@@ -1046,9 +1054,11 @@ fn animation_conversion_lifecycle(root: &Path, source_extension: &str, extension
     assert!(app.export_error.is_some());
     assert!(!unsupported.exists());
     assert_eq!(
-        app.tabs
-            .get_mut(tab)
-            .map(|tab| tab.target.current_path().to_owned()),
+        app.tabs.get_mut(tab).map(|tab| tab
+            .target
+            .current_path()
+            .expect("file-backed tab")
+            .to_owned()),
         Some(target.clone())
     );
     assert_eq!(

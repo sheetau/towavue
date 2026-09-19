@@ -16,7 +16,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if !matches!(kind, MediaKind::Video | MediaKind::Audio) {
             return;
         }
-        let path = tab.target.current_path().to_owned();
+        let Some(path) = tab.target.current_path().map(Path::to_owned) else {
+            return;
+        };
         self.seed_playback_volume(id);
         self.media_sequence = self
             .media_sequence
@@ -112,7 +114,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs
             .tabs()
             .iter()
-            .any(|tab| tab.id == id && tab.target.current_path() == path)
+            .any(|tab| tab.id == id && tab.target.current_path() == Some(path.as_ref()))
         {
             return;
         }

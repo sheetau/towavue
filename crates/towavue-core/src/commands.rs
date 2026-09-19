@@ -111,6 +111,7 @@ pub enum CommandId {
     CopyFilePath,
     RevealFile,
     CopyImage,
+    PasteImage,
     ResizeImage,
     ToggleImageInterpolation,
     CycleAudioRepeat,
@@ -276,6 +277,7 @@ impl CommandId {
             Self::FirstImage => "first_image",
             Self::LastImage => "last_image",
             Self::CopyImage => "copy_image",
+            Self::PasteImage => "paste_image",
             Self::ResizeImage => "resize_image",
             Self::CycleAudioRepeat => "cycle_audio_repeat",
             Self::ToggleVideoRepeat => "toggle_video_repeat",
@@ -517,6 +519,7 @@ pub struct CommandContext {
     pub reading_mode: bool,
     pub has_unsaved_edits: bool,
     pub source_deleted: bool,
+    pub source_untitled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -529,6 +532,53 @@ pub struct CommandDefinition {
 
 impl CommandDefinition {
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if context.source_untitled
+            && matches!(
+                self.id,
+                CommandId::CopyFilePath
+                    | CommandId::RevealFile
+                    | CommandId::RenameFile
+                    | CommandId::MoveFile
+                    | CommandId::DeleteFile
+                    | CommandId::ToggleFilmstrip
+                    | CommandId::ReloadFolderOrder
+                    | CommandId::GoToFile
+                    | CommandId::ToggleReadingMode
+                    | CommandId::PreviousMedia
+                    | CommandId::NextMedia
+                    | CommandId::PreviousSameKind
+                    | CommandId::NextSameKind
+                    | CommandId::FolderNavigationStop
+                    | CommandId::FolderNavigationLoop
+                    | CommandId::PreviousImage
+                    | CommandId::NextImage
+                    | CommandId::FirstImage
+                    | CommandId::LastImage
+                    | CommandId::JumpImagesBackward1
+                    | CommandId::JumpImagesBackward2
+                    | CommandId::JumpImagesBackward3
+                    | CommandId::JumpImagesBackward4
+                    | CommandId::JumpImagesBackward5
+                    | CommandId::JumpImagesBackward6
+                    | CommandId::JumpImagesBackward7
+                    | CommandId::JumpImagesBackward8
+                    | CommandId::JumpImagesBackward9
+                    | CommandId::JumpImagesBackward10
+                    | CommandId::JumpImagesForward1
+                    | CommandId::JumpImagesForward2
+                    | CommandId::JumpImagesForward3
+                    | CommandId::JumpImagesForward4
+                    | CommandId::JumpImagesForward5
+                    | CommandId::JumpImagesForward6
+                    | CommandId::JumpImagesForward7
+                    | CommandId::JumpImagesForward8
+                    | CommandId::JumpImagesForward9
+                    | CommandId::JumpImagesForward10
+            )
+        {
+            return false;
+        }
+
         if self.id == CommandId::ExportFrame && !context.has_video_frame {
             return false;
         }
@@ -674,6 +724,7 @@ const ANY_MEDIA: &[MediaKind] = &[MediaKind::Image, MediaKind::Video, MediaKind:
 
 const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::OpenFile, "Open file", &[]),
+    command(CommandId::PasteImage, "Paste image", &[]),
     command(CommandId::ToggleFullscreen, "Toggle fullscreen", &[]),
     command(CommandId::OpenFolder, "Open folder", &[]),
     command(CommandId::OpenGallery, "Open Gallery", &[]),

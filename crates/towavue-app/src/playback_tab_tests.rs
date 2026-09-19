@@ -81,6 +81,7 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
         .expect("preview tab")
         .target
         .current_path()
+        .expect("file-backed tab")
         .to_owned();
     let history = app.edits[&tab].clone();
     assert_eq!(

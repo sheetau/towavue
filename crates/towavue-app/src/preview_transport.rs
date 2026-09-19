@@ -333,7 +333,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs()
             .iter()
             .find(|item| item.id == tab)
-            .is_none_or(|tab| tab.target.current_path() != path)
+            .is_none_or(|tab| tab.target.current_path() != Some(path))
         {
             return None;
         }

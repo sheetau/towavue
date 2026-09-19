@@ -57,7 +57,7 @@ impl WindowHost {
         let path = source.path().to_owned();
         let dirty = self.windows.values().any(|app| {
             app.tabs.tabs().iter().any(|tab| {
-                tab.target.current_path() == path
+                tab.target.current_path() == Some(path.as_ref())
                     && app.edits.get(&tab.id).is_some_and(EditHistory::is_dirty)
             })
         });
@@ -164,7 +164,7 @@ impl WindowHost {
                 .tabs
                 .tabs()
                 .iter()
-                .filter(|tab| tab.target.current_path() == path)
+                .filter(|tab| tab.target.current_path() == Some(path.as_ref()))
             {
                 if app.source_backings.contains_key(&tab.id) {
                     continue;

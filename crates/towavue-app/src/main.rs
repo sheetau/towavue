@@ -33,6 +33,7 @@ mod hover_help;
 mod image_color;
 mod image_handoff;
 mod image_navigation;
+mod image_paste;
 mod image_scroll;
 mod image_tab_preview;
 #[cfg(test)]
@@ -309,6 +310,7 @@ enum AppEvent {
     FileOperationFinished(u64, Result<file_operations::Completed, String>),
     SourceSave(u64, towavue_runtime_windows::SourceSaveEvent),
     SaveAs(u64, towavue_runtime_windows::SaveAsEvent),
+    ImagePasted(u64, Result<towavue_runtime_windows::PastedImage, String>),
     SaveAsPublished(
         u64,
         Result<towavue_runtime_windows::SavedAsSource, source_save::PublicationError>,
@@ -515,7 +517,7 @@ struct ImagePreviewPresentation {
 struct RetainedImageTab {
     // Metadata-only hover preparation must not freeze fresh activation defaults.
     prepared_only: bool,
-    path: PathBuf,
+    path: Option<PathBuf>,
     instance: u64,
     view: ImageViewState,
     reading_mode: bool,
@@ -650,6 +652,22 @@ impl ImagePresentation {
         frame_index: usize,
         options: TextureOptions,
     ) -> Result<Self, String> {
+        Self::from_named_frame(
+            context,
+            &path.display().to_string(),
+            decoded,
+            frame_index,
+            options,
+        )
+    }
+
+    fn from_named_frame(
+        context: &egui::Context,
+        label: &str,
+        decoded: Arc<DecodedImage>,
+        frame_index: usize,
+        options: TextureOptions,
+    ) -> Result<Self, String> {
         let frame = decoded
             .frames
             .get(frame_index)
@@ -664,11 +682,7 @@ impl ImagePresentation {
                 "Image dimensions exceed this graphics device's {limit}px texture limit"
             ));
         }
-        let texture = context.load_texture(
-            format!("image:{}", path.display()),
-            color_image(frame),
-            options,
-        );
+        let texture = context.load_texture(format!("image:{label}"), color_image(frame), options);
         let next_frame_at = decoded.is_animated().then(|| Instant::now() + frame.delay);
         Ok(Self {
             plays_left: decoded.animation_plays,
@@ -1000,6 +1014,7 @@ struct Application<N> {
     export_paths: BTreeMap<TabId, PathBuf>,
     active_export: Option<ActiveExport>,
     source_save: source_save::State,
+    image_paste: image_paste::State,
     loading_progress: export_progress::LoadingProgress,
     export_error: Option<String>,
     grid_layouts: grid::GridLayouts,
@@ -1291,6 +1306,7 @@ where
             export_paths: BTreeMap::new(),
             active_export: None,
             source_save: source_save::State::default(),
+            image_paste: image_paste::State::default(),
             loading_progress: export_progress::LoadingProgress::default(),
             export_error: None,
             grid_layouts,
@@ -1616,7 +1632,7 @@ where
                 .find(|tab| {
                     matches!(&tab.target, TabTarget::AudioFolder { folder: open, .. } if open == folder)
                 })
-                .is_some_and(|tab| tab.target.current_path() != path);
+                .is_some_and(|tab| tab.target.current_path() != Some(path.as_ref()));
         let id = if force_new_tab || dirty_playlist {
             self.tabs.open_new(path.clone(), kind)
         } else {
@@ -1711,7 +1727,7 @@ where
                         .tabs
                         .tabs()
                         .iter()
-                        .find(|tab| tab.target.current_path() == path)
+                        .find(|tab| tab.target.current_path() == Some(path.as_ref()))
                         .map(|tab| tab.id)
                 {
                     // Loaded tabs remain usable even after their source is moved or removed.
@@ -1747,7 +1763,7 @@ where
                             .tabs
                             .tabs()
                             .iter()
-                            .find(|tab| tab.target.current_path() == path)
+                            .find(|tab| tab.target.current_path() == Some(path.as_ref()))
                             .map(|tab| tab.id);
                         if let Some(id) = existing {
                             self.activate_tab(id);
@@ -1763,7 +1779,7 @@ where
     }
 
     fn retain_image_tab(&mut self) {
-        let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_ref()) else {
+        let Some(id) = self.displayed_tab else {
             return;
         };
         if self.media_kind != Some(MediaKind::Image)
@@ -1771,7 +1787,7 @@ where
                 .tabs
                 .tabs()
                 .iter()
-                .any(|tab| tab.id == id && tab.target.current_path() == path)
+                .any(|tab| tab.id == id && tab.target.current_path() == self.path.as_deref())
             || self.tabs.active().is_some_and(|tab| tab.id == id)
         {
             return;
@@ -1786,7 +1802,7 @@ where
         self.cancel_view_drag();
         RetainedImageTab {
             prepared_only: false,
-            path: self.path.clone().expect("displayed image path"),
+            path: self.path.clone(),
             instance: self.media_generation,
             view: self.image_view,
             reading_mode: self.reading_mode,
@@ -1874,7 +1890,7 @@ where
                 .tabs
                 .tabs()
                 .iter()
-                .any(|tab| tab.id == id && tab.target.current_path() == path)
+                .any(|tab| tab.id == id && tab.target.current_path() == Some(path.as_ref()))
             || self.tabs.active().is_some_and(|tab| tab.id == id)
         {
             return;
@@ -2078,7 +2094,9 @@ where
         let saved = self
             .displayed_tab
             .and_then(|id| self.retained_images.remove(&id))
-            .filter(|saved| kind == MediaKind::Image && saved.path == path);
+            .filter(|saved| {
+                kind == MediaKind::Image && saved.path.as_deref() == Some(path.as_path())
+            });
         self.restored_reading_pages = false;
         self.reset_image_edits();
         if let Some(id) = self.displayed_tab {
@@ -3064,12 +3082,9 @@ where
             }
             AppEvent::TaskbarClick(revision, action) => self.handle_taskbar_click(revision, action),
             AppEvent::TabVideoSheet(target, generation, result) => {
-                if self
-                    .tabs
-                    .tabs()
-                    .iter()
-                    .any(|tab| tab.id == target.tab && tab.target.current_path() == target.path)
-                    && let Some(context) = &self.ui_context
+                if self.tabs.tabs().iter().any(|tab| {
+                    tab.id == target.tab && tab.target.current_path() == Some(target.path.as_ref())
+                }) && let Some(context) = &self.ui_context
                 {
                     self.tab_preview
                         .finish_sheet(context, target, generation, result);
@@ -3095,12 +3110,9 @@ where
             }
             AppEvent::ImagesReady => self.finish_image_load(),
             AppEvent::TabPreview(target, generation, result) => {
-                if self
-                    .tabs
-                    .tabs()
-                    .iter()
-                    .any(|tab| tab.id == target.tab && tab.target.current_path() == target.path)
-                    && let Some(context) = &self.ui_context
+                if self.tabs.tabs().iter().any(|tab| {
+                    tab.id == target.tab && tab.target.current_path() == Some(target.path.as_ref())
+                }) && let Some(context) = &self.ui_context
                     && self.tab_preview.finish(context, target, generation, result)
                 {
                     self.request_redraw();
@@ -3234,6 +3246,7 @@ where
             AppEvent::Export(event) => self.handle_export_event(event),
             AppEvent::SourceSave(serial, event) => self.handle_source_save(serial, event),
             AppEvent::SaveAs(serial, event) => self.handle_save_as(serial, event),
+            AppEvent::ImagePasted(serial, result) => self.finish_image_paste(serial, result),
             AppEvent::SourceSavePublished(..) | AppEvent::SaveAsPublished(..) => {} // Host owns publication.
             AppEvent::Playback(generation, event) => {
                 if self.file_operations.locked
@@ -4005,7 +4018,7 @@ where
                             actions.push(action);
                         }
                     }
-                } else if self.path.is_none() {
+                } else if self.media_kind.is_none() {
                     let enabled = !modal_blocked && !self.grid_open;
                     self.draw_gallery(ui, enabled, actions);
                 } else if self.media_kind == Some(MediaKind::Audio) {
@@ -5242,8 +5255,10 @@ where
                                                     .tabs()
                                                     .iter()
                                                     .find(|tab| tab.id == id)
-                                                    .map(|tab| {
-                                                        tab.target.current_path().to_owned()
+                                                    .and_then(|tab| {
+                                                        tab.target
+                                                            .current_path()
+                                                            .map(Path::to_owned)
                                                     }),
                                             )
                                         })
@@ -5367,7 +5382,11 @@ where
                                         rect.min,
                                         rect.max - egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
                                     );
-                                    let label = display_name(tab.target.current_path());
+                                    let label = tab
+                                        .target
+                                        .current_path()
+                                        .map(display_name)
+                                        .unwrap_or_else(|| "Untitled".into());
                                     let audio = self.tab_audio_indicator(tab);
                                     let audio_rect = audio.map(|_| {
                                         let mut bounds = label_rect;
@@ -5492,14 +5511,20 @@ where
                                             tab_ui.is_enabled(),
                                             format!(
                                                 "Close tab: {}",
-                                                display_name(tab.target.current_path())
+                                                tab.target
+                                                    .current_path()
+                                                    .map(display_name)
+                                                    .unwrap_or_else(|| "Untitled".into())
                                             ),
                                         )
                                     });
                                     tab_ui.ctx().accesskit_node_builder(close.id, |node| {
                                         node.set_description(format!(
                                             "{}{}",
-                                            tab.target.current_path().display(),
+                                            tab.target
+                                                .current_path()
+                                                .map(|path| path.display().to_string())
+                                                .unwrap_or_else(|| "Untitled".into()),
                                             if dirty { " — Unsaved changes" } else { "" }
                                         ));
                                     });
@@ -5523,13 +5548,19 @@ where
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if preview_allowed && active {
+                                    if preview_allowed
+                                        && (active || tab.target.current_path().is_none())
+                                    {
                                         response.clone().help_text(
-                                            tab.target.current_path().display().to_string(),
+                                            tab.target
+                                                .current_path()
+                                                .map(|path| path.display().to_string())
+                                                .unwrap_or_else(|| "Untitled".into()),
                                         );
                                     }
                                     if preview_allowed
                                         && !active
+                                        && tab.target.current_path().is_some()
                                         && !egui::Popup::is_any_open(tab_ui.ctx())
                                     {
                                         // Playing audio changes the label's leading inset, not
@@ -5548,10 +5579,13 @@ where
                                             .flatten()
                                             .filter(|saved| {
                                                 saved.kind == MediaKind::Video
-                                                    && saved.path == tab.target.current_path()
+                                                    && Some(saved.path.as_path())
+                                                        == tab.target.current_path()
                                             });
-                                        let target =
-                                            self.tab_preview.target_with_playback(tab, background);
+                                        let target = self
+                                            .tab_preview
+                                            .target_with_playback(tab, background)
+                                            .expect("file-backed hover card");
                                         let folder = hovered
                                             .then(|| self.preview_folder(tab.id, &target.path))
                                             .flatten();
@@ -7461,6 +7495,7 @@ where
             CommandId::RotateFineClockwise => self.step_rotation(true),
             CommandId::RotateFineCounterclockwise => self.step_rotation(false),
             CommandId::ResizeVideo => self.open_video_resize(),
+            CommandId::PasteImage => self.paste_image(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
                     self.set_status("Image copy is already in progress".into());
@@ -7772,7 +7807,7 @@ where
     }
 
     fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
-        let (Some(context), Some(path)) = (&self.ui_context, &self.path) else {
+        let Some(context) = &self.ui_context else {
             return Err("Image view is unavailable".into());
         };
         let frame_index = self.image.as_ref().map_or(0, |previous| {
@@ -7781,8 +7816,17 @@ where
                 .min(decoded.frames.len().saturating_sub(1))
         });
         let options = self.image_sampling();
-        let mut image =
-            ImagePresentation::from_decoded_frame(context, path, decoded, frame_index, options)?;
+        let mut image = ImagePresentation::from_named_frame(
+            context,
+            &self
+                .path
+                .as_deref()
+                .map(display_name)
+                .unwrap_or_else(|| "Untitled".into()),
+            decoded,
+            frame_index,
+            options,
+        )?;
         if let Some(previous) = &self.image {
             image.next_frame_at = previous.next_frame_at;
             image.plays_left = previous.plays_left;
@@ -8329,7 +8373,10 @@ where
                 Ok(Some(target))
                     if generation == self.media_generation
                         && self.tabs.active().is_some_and(|active| {
-                            active.id == tab && active.target.current_path() == source
+                            active.id == tab
+                                && self
+                                    .document_input(tab)
+                                    .is_some_and(|input| input.logical_path() == source)
                         }) =>
                 {
                     if output == ExportOutput::Media {
@@ -8389,17 +8436,21 @@ where
             );
             return false;
         }
-        let Some((id, source, kind)) = self.tabs.active().map(|tab| {
-            (
-                tab.id,
-                tab.target.current_path().to_owned(),
-                tab.target.media_kind(),
-            )
+        let Some((id, source, kind)) = self.tabs.active().and_then(|tab| {
+            self.document_input(tab.id).map(|input| {
+                (
+                    tab.id,
+                    input.logical_path().to_owned(),
+                    tab.target.media_kind(),
+                )
+            })
         }) else {
             return false;
         };
         let dialog = FileDialogKind::SaveExport {
-            suggested_name: if output == ExportOutput::AudioOnly {
+            suggested_name: if self.current_document_untitled() {
+                "Untitled.png".into()
+            } else if output == ExportOutput::AudioOnly {
                 export_audio_name(&source)
             } else {
                 export_name(&source)
@@ -8698,11 +8749,11 @@ where
         }
         if let Some((path, kind)) = self.tabs.active().map(|tab| {
             (
-                tab.target.current_path().to_owned(),
+                tab.target.current_path().map(Path::to_owned),
                 tab.target.media_kind(),
             )
         }) {
-            self.load_path(path, kind);
+            self.load_document(path, kind, false);
         } else {
             self.cancel_hold_speed();
             self.retain_image_tab();
@@ -8737,7 +8788,7 @@ where
             .tabs()
             .iter()
             .find(|tab| tab.id == id)
-            .map(|tab| tab.target.current_path().to_owned())
+            .map(|tab| tab.target.current_path().map(Path::to_owned))
         else {
             return;
         };
@@ -8745,13 +8796,15 @@ where
             CommandId::ReopenClosedTab => self.reopen_closed_tab(),
             CommandId::ToggleMute => self.toggle_tab_mute(id),
             CommandId::CopyFilePath => {
-                if let Some(context) = &self.ui_context {
+                if let (Some(context), Some(path)) = (&self.ui_context, path) {
                     context.copy_text(path.display().to_string());
                     self.set_status("File path copied.".into());
                 }
             }
             CommandId::RevealFile => {
-                self.reveal_path(path);
+                if let Some(path) = path {
+                    self.reveal_path(path);
+                }
             }
             CommandId::CloseTab => self.request_guarded(GuardedAction::CloseTab(id)),
             CommandId::CloseOtherTabs
@@ -8948,7 +9001,7 @@ where
             GuardedAction::NavigateAudioTab(id, source, path) => {
                 if self.tabs.tabs().iter().any(|tab| {
                     tab.id == id
-                        && tab.target.current_path() == source
+                        && tab.target.current_path() == Some(source.as_ref())
                         && tab.target.media_kind() == MediaKind::Audio
                 }) {
                     if self.displayed_tab == Some(id) {
@@ -8981,8 +9034,11 @@ where
             .tabs()
             .iter()
             .find(|tab| tab.id == id)
-            .map(|tab| tab.target.current_path().to_owned())
+            .map(|tab| tab.target.current_path().map(Path::to_owned))
         else {
+            return;
+        };
+        let Some(path) = path else {
             return;
         };
         let result = spawn_new_window(&path);
@@ -9040,9 +9096,10 @@ where
                 }
                 if was_active {
                     if let Some(tab) = self.tabs.active() {
-                        self.load_path(
-                            tab.target.current_path().to_owned(),
+                        self.load_document(
+                            tab.target.current_path().map(Path::to_owned),
                             tab.target.media_kind(),
+                            false,
                         );
                     } else {
                         self.clear_active_media();
@@ -9075,9 +9132,10 @@ where
                 }
                 if was_active {
                     if let Some(tab) = self.tabs.active() {
-                        self.load_path(
-                            tab.target.current_path().to_owned(),
+                        self.load_document(
+                            tab.target.current_path().map(Path::to_owned),
                             tab.target.media_kind(),
+                            false,
                         );
                     } else {
                         self.clear_active_media();
@@ -9102,11 +9160,11 @@ where
         }
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
-        if remember && !deleted {
-            self.remember_closed_tab(closed_tabs::ClosedTab::Media(
-                removed.target.current_path().to_owned(),
-                position,
-            ));
+        if remember
+            && !deleted
+            && let Some(path) = removed.target.current_path()
+        {
+            self.remember_closed_tab(closed_tabs::ClosedTab::Media(path.to_owned(), position));
         }
         self.tab_preview.clear();
         self.edits.remove(&id);
@@ -9146,11 +9204,11 @@ where
         }
         if let Some((path, kind)) = self.tabs.active().map(|tab| {
             (
-                tab.target.current_path().to_owned(),
+                tab.target.current_path().map(Path::to_owned),
                 tab.target.media_kind(),
             )
         }) {
-            self.load_path(path, kind);
+            self.load_document(path, kind, false);
         } else {
             self.clear_active_media();
         }
@@ -10385,7 +10443,13 @@ where
 
     fn title(&self) -> String {
         let mut name = self.path.as_deref().map(display_name).unwrap_or_else(|| {
-            if self.keyboard_settings_active() {
+            if self
+                .tabs
+                .active()
+                .is_some_and(|tab| tab.target.current_path().is_none())
+            {
+                "Untitled"
+            } else if self.keyboard_settings_active() {
                 "Keyboard Shortcuts"
             } else {
                 "Gallery"
@@ -10441,6 +10505,7 @@ where
             filmstrip_open: self.filmstrip_open,
             reading_mode: self.reading_mode,
             source_deleted: self.current_source_deleted(),
+            source_untitled: self.current_document_untitled(),
             has_unsaved_edits: self
                 .tabs
                 .active()
@@ -10457,7 +10522,8 @@ where
     }
 
     fn dialog_input_blocked(&self) -> bool {
-        self.file_operations.busy()
+        self.image_paste.pending.is_some()
+            || self.file_operations.busy()
             || self.keyboard_settings.edit.is_some()
             || self.resize_dialog.is_some()
             || self.rotation_dialog.is_some()
@@ -11916,7 +11982,10 @@ where
         {
             self.expire_shortcut_prefix();
             if self.key_stroke(event).is_some_and(|stroke| {
-                self.owns_tab_key(&stroke) || (!is_synthetic && self.owns_focused_shortcut(&stroke))
+                self.owns_tab_key(&stroke)
+                    || (!is_synthetic
+                        && (self.owns_paste_shortcut(&stroke)
+                            || self.owns_focused_shortcut(&stroke)))
             }) {
                 self.process_key(event);
                 return;
@@ -15501,6 +15570,7 @@ mod tests {
                     .expect("shown tab")
                     .target
                     .current_path()
+                    .expect("file-backed tab")
                     .into(),
             );
             app.media_kind = Some(kind);
@@ -21442,6 +21512,7 @@ mod tests {
                     .expect("first tab")
                     .target
                     .current_path()
+                    .expect("file-backed tab")
                     .to_owned(),
             );
             app.media_kind = Some(MediaKind::Image);
@@ -21493,13 +21564,23 @@ mod tests {
                 b"existing output"
             );
             assert_ne!(
-                std::fs::read(app.tabs.tabs()[0].target.current_path())
-                    .expect("adopted Save as destination"),
+                std::fs::read(
+                    app.tabs.tabs()[0]
+                        .target
+                        .current_path()
+                        .expect("file-backed tab")
+                )
+                .expect("adopted Save as destination"),
                 source_bytes
             );
             assert_ne!(
-                std::fs::read(app.tabs.tabs()[1].target.current_path())
-                    .expect("second source saved"),
+                std::fs::read(
+                    app.tabs.tabs()[1]
+                        .target
+                        .current_path()
+                        .expect("file-backed tab")
+                )
+                .expect("second source saved"),
                 source_bytes
             );
         }

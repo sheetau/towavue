@@ -283,7 +283,7 @@ fn folder_card_navigation_preserves_background_owner_and_reading_activation() {
             active
         );
         let saved = &app.retained_images[&id];
-        assert_eq!(saved.path, paths[2]);
+        assert_eq!(saved.path, Some(paths[2].clone()));
         assert!(saved.resume_loading && saved.image.is_none());
         assert_eq!(saved.reading_mode, reading);
         assert_eq!(saved.reading_settings, settings);
@@ -316,7 +316,7 @@ fn folder_card_navigation_preserves_background_owner_and_reading_activation() {
         }
         // Delayed A-to-B results and actions cannot replace the new owner.
         app.handle_preview_image_seek(id, position.instance, paths[0].clone(), paths[1].clone());
-        assert_eq!(app.retained_images[&id].path, paths[2]);
+        assert_eq!(app.retained_images[&id].path, Some(paths[2].clone()));
         app.activate_tab(id);
         wait_image(&mut app);
         assert_eq!(app.media_generation, new_instance);
@@ -738,7 +738,8 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                         .find(|tab| tab.id == id)
                         .expect("image tab")
                         .target
-                        .current_path(),
+                        .current_path()
+                        .expect("file-backed tab"),
                     paths[3]
                 );
                 let (output, actions) = frame(&mut app, vec![]);
@@ -853,7 +854,8 @@ fn image_card_export_and_background_dirty_guards_keep_source_ownership() {
                 .find(|tab| tab.id == id)
                 .expect("tab")
                 .target
-                .current_path(),
+                .current_path()
+                .expect("file-backed tab"),
             paths[0]
         );
         assert!(app.pending_guard.is_none());
@@ -988,7 +990,8 @@ fn unopened_image_card_prepares_order_and_navigates_without_loading_or_activatin
             .get_mut(id)
             .expect("background tab")
             .target
-            .current_path(),
+            .current_path()
+            .expect("file-backed tab"),
         paths[3]
     );
     let changed = app.preview_folder(id, &paths[3]).expect("new card");
@@ -1000,7 +1003,8 @@ fn unopened_image_card_prepares_order_and_navigates_without_loading_or_activatin
             .get_mut(id)
             .expect("background tab")
             .target
-            .current_path(),
+            .current_path()
+            .expect("file-backed tab"),
         paths[3]
     );
     assert_eq!(app.tabs.active_id(), Some(active));

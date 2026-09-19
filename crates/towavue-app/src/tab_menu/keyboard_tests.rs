@@ -289,7 +289,14 @@ fn tab_context_enter_runs_the_target_close_once_through_the_dirty_guard() {
         returned.focus,
         node(
             &returned,
-            &display_name(app.tabs.active().expect("survivor").target.current_path())
+            &display_name(
+                app.tabs
+                    .active()
+                    .expect("survivor")
+                    .target
+                    .current_path()
+                    .expect("file-backed tab")
+            )
         )
     );
 }
@@ -484,7 +491,10 @@ fn tab_context_close_restores_a_surviving_tab_or_welcome_and_compact_menus_stay_
             let active = app.tabs.active().expect("surviving tab");
             assert_eq!(
                 menu.focus,
-                node(&menu, &display_name(active.target.current_path()))
+                node(
+                    &menu,
+                    &display_name(active.target.current_path().expect("file-backed tab"))
+                )
             );
         }
     }
@@ -516,7 +526,7 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     let generation = app.media_generation;
     let tab = app.tabs.active().expect("tab");
     let active = tab.id;
-    let name = display_name(tab.target.current_path());
+    let name = display_name(tab.target.current_path().expect("file-backed tab"));
     for label in [name.clone(), format!("Close tab: {name}")] {
         for mode in 0..3 {
             let origin = node(&frame(app, vec![]), &label);
@@ -744,7 +754,12 @@ fn pointer_tab_command_and_window_reactivation_do_not_restore_tab_focus() {
         let returned = settle(&mut app);
         assert_ne!(returned.focus, origin);
         assert_eq!(
-            app.tabs.active().expect("active").target.current_path(),
+            app.tabs
+                .active()
+                .expect("active")
+                .target
+                .current_path()
+                .expect("file-backed tab"),
             root.join("third.png")
         );
         assert!(

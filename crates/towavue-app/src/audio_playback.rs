@@ -1169,7 +1169,8 @@ mod tests {
                         .find(|tab| tab.id == audio)
                         .expect("audio tab")
                         .target
-                        .current_path(),
+                        .current_path()
+                        .expect("file-backed tab"),
                     paths[1]
                 );
                 wait(&mut app, &events, |app| {

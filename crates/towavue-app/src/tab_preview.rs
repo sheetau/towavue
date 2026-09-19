@@ -92,7 +92,8 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                 )
             } else {
                 let saved = self.retained_images.get(&tab).filter(|saved| {
-                    saved.path == path && saved.graphics_epoch == self.graphics_epoch
+                    saved.path.as_deref() == Some(path)
+                        && saved.graphics_epoch == self.graphics_epoch
                 })?;
                 (
                     saved.image.as_ref(),
@@ -204,41 +205,42 @@ impl TabPreview {
         self.positions
             .retain(|id, _| tabs.tabs().iter().any(|tab| tab.id == *id));
         if let Some(tab) = tabs.active()
-            && Some(tab.target.current_path()) == path
+            && tab.target.current_path() == path
             && tab.target.media_kind() == MediaKind::Video
+            && let Some(path) = tab.target.current_path()
         {
             let position = source_sample_time(position, duration, timeline);
             self.positions.insert(
                 tab.id,
                 LastPosition {
-                    path: tab.target.current_path().to_owned(),
+                    path: path.to_owned(),
                     position,
                 },
             );
         }
     }
 
-    pub fn target(&self, tab: &Tab) -> Target {
-        let path = tab.target.current_path().to_owned();
+    pub fn target(&self, tab: &Tab) -> Option<Target> {
+        let path = tab.target.current_path()?.to_owned();
         let position = self
             .positions
             .get(&tab.id)
             .filter(|last| last.path == path)
             .map_or(Duration::ZERO, |last| last.position);
-        Target {
+        Some(Target {
             tab: tab.id,
             path,
             kind: tab.target.media_kind(),
             position,
-        }
+        })
     }
 
     pub fn target_with_playback(
         &self,
         tab: &Tab,
         saved: Option<&crate::playback_tab::RetainedPlaybackTab>,
-    ) -> Target {
-        let mut target = self.target(tab);
+    ) -> Option<Target> {
+        let mut target = self.target(tab)?;
         if let Some(saved) = saved
             && target.kind == MediaKind::Video
             && saved.kind == MediaKind::Video
@@ -253,7 +255,7 @@ impl TabPreview {
                     .and_then(towavue_runtime_windows::PlaybackSession::timeline),
             );
         }
-        target
+        Some(target)
     }
 
     pub fn clear(&mut self) {
@@ -630,7 +632,9 @@ mod tests {
         let mut tabs = TabSet::default();
         tabs.open_new("generated-preview.mp4".into(), MediaKind::Video);
         let mut preview = TabPreview::new().expect("worker");
-        let target = preview.target(tabs.active().expect("tab"));
+        let target = preview
+            .target(tabs.active().expect("tab"))
+            .expect("file-backed preview");
         let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
             Duration::from_secs(100),
             Duration::ZERO,
@@ -739,17 +743,29 @@ mod tests {
             None,
         );
         assert_eq!(
-            preview.target(&tabs.tabs()[0]).position,
+            preview
+                .target(&tabs.tabs()[0])
+                .expect("file-backed preview")
+                .position,
             Duration::from_millis(37500)
         );
-        assert_eq!(preview.target(&tabs.tabs()[1]).position, Duration::ZERO);
+        assert_eq!(
+            preview
+                .target(&tabs.tabs()[1])
+                .expect("file-backed preview")
+                .position,
+            Duration::ZERO
+        );
         tabs.activate(video);
         tabs.active_mut()
             .expect("video tab")
             .target
             .set_current_path("changed.mp4".into(), MediaKind::Video);
         assert_eq!(
-            preview.target(tabs.active().expect("active")).position,
+            preview
+                .target(tabs.active().expect("active"))
+                .expect("file-backed preview")
+                .position,
             Duration::ZERO
         );
         let active = tabs.clone();
@@ -761,7 +777,10 @@ mod tests {
             None,
         );
         assert_eq!(
-            preview.target(tabs.active().expect("active")).position,
+            preview
+                .target(tabs.active().expect("active"))
+                .expect("file-backed preview")
+                .position,
             Duration::ZERO
         );
         assert_eq!(
@@ -788,10 +807,17 @@ mod tests {
             Some(Duration::from_secs(100)),
             Some(&plan),
         );
-        let target = preview.target(tabs.active().expect("tab"));
+        let target = preview
+            .target(tabs.active().expect("tab"))
+            .expect("file-backed preview");
         assert_eq!(target.position, Duration::from_millis(72500));
         tabs.open_new("other.png".into(), MediaKind::Image);
-        assert_eq!(preview.target(&tabs.tabs()[0]), target);
+        assert_eq!(
+            preview
+                .target(&tabs.tabs()[0])
+                .expect("file-backed preview"),
+            target
+        );
     }
 
     #[test]
@@ -803,7 +829,9 @@ mod tests {
         let mut tabs = TabSet::default();
         tabs.open_new(root.join("missing.mp4"), MediaKind::Video);
         let mut preview = TabPreview::new().expect("worker");
-        let mut target = preview.target(tabs.active().expect("tab"));
+        let mut target = preview
+            .target(tabs.active().expect("tab"))
+            .expect("file-backed preview");
         let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
             Duration::from_secs(100),
             Duration::ZERO,
@@ -904,7 +932,9 @@ mod tests {
         let mut tabs = TabSet::default();
         tabs.open_new("video.mp4".into(), MediaKind::Video);
         let mut preview = TabPreview::new().expect("worker");
-        let target = preview.target(tabs.active().expect("tab"));
+        let target = preview
+            .target(tabs.active().expect("tab"))
+            .expect("file-backed preview");
         let layout = towavue_runtime_windows::VideoSheetLayout::for_position(
             Duration::from_secs(100),
             Duration::ZERO,
@@ -1077,7 +1107,10 @@ mod tests {
         app.ui_context = Some(crate::fonts::test_context());
         app.tabs
             .open_new(root.join("pending.png"), MediaKind::Image);
-        let target = app.tab_preview.target(app.tabs.active().expect("tab"));
+        let target = app
+            .tab_preview
+            .target(app.tabs.active().expect("tab"))
+            .expect("file-backed preview");
         let mut trial = Trial {
             app,
             target,
@@ -1111,7 +1144,9 @@ mod tests {
             let mut tabs = TabSet::default();
             tabs.open_new("fixture-media".into(), kind);
             let mut preview = TabPreview::new().expect("worker");
-            let target = preview.target(tabs.active().expect("tab"));
+            let target = preview
+                .target(tabs.active().expect("tab"))
+                .expect("file-backed preview");
             preview.target = Some(target.clone());
             let texture = context.load_texture(
                 "ready",
@@ -1177,8 +1212,12 @@ mod tests {
         tabs.open_new(root.join("first.png"), MediaKind::Image);
         tabs.open_new(root.join("second.png"), MediaKind::Image);
         let mut preview = TabPreview::new().expect("worker");
-        let first = preview.target(&tabs.tabs()[0]);
-        let second = preview.target(&tabs.tabs()[1]);
+        let first = preview
+            .target(&tabs.tabs()[0])
+            .expect("file-backed preview");
+        let second = preview
+            .target(&tabs.tabs()[1])
+            .expect("file-backed preview");
         let (sent, events) = std::sync::mpsc::channel();
         let notify = Arc::new(move |event| {
             let _ = sent.send(event);
@@ -1375,6 +1414,7 @@ mod tests {
         assert_eq!(
             app.tab_preview
                 .target_with_playback(&app.tabs.tabs()[0], Some(saved))
+                .expect("file-backed preview")
                 .position,
             Duration::from_millis(2500),
             "stale retained path cannot supply a position"
@@ -1511,12 +1551,12 @@ mod tests {
         assert!(app.tab_preview.target.is_some());
         let saved = app.retained_images.get_mut(&tab).expect("retained");
         saved.graphics_epoch = app.graphics_epoch;
-        saved.path = "stale-path.gif".into();
+        saved.path = Some("stale-path.gif".into());
         assert!(
             !painted(&frame(&mut app, pointer), edited_texture),
             "a retained image for another path is not a match"
         );
-        app.retained_images.get_mut(&tab).expect("retained").path = path;
+        app.retained_images.get_mut(&tab).expect("retained").path = Some(path);
         assert!(painted(&frame(&mut app, pointer), edited_texture));
         assert!(
             app.tab_preview.target.is_none(),
@@ -1644,12 +1684,15 @@ mod tests {
         app.tabs.open_new("foreground.png".into(), MediaKind::Image);
         let tabs = app.tabs.clone();
         let history = app.edits[&dirty_tab].operations().to_vec();
-        let target = app.tab_preview.target(
-            tabs.tabs()
-                .iter()
-                .find(|tab| tab.id == dirty_tab)
-                .expect("dirty tab"),
-        );
+        let target = app
+            .tab_preview
+            .target(
+                tabs.tabs()
+                    .iter()
+                    .find(|tab| tab.id == dirty_tab)
+                    .expect("dirty tab"),
+            )
+            .expect("file-backed preview");
         let texture = context.load_texture(
             "fixture-tab-preview",
             egui::ColorImage::filled([64, 32], egui::Color32::RED),

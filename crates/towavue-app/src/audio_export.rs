@@ -144,11 +144,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .as_ref()
             .and_then(|context| context.memory(egui::Memory::focused))
             .map(|focus| (tab.id, focus));
+        let Some(source) = tab.target.current_path().map(Path::to_owned) else {
+            return;
+        };
         self.audio_export_generation = self.audio_export_generation.wrapping_add(1);
         self.audio_export_dialog = Some(AudioExportDialog {
             token: self.audio_export_generation,
             tab: tab.id,
-            source: tab.target.current_path().to_owned(),
+            source,
             kind: tab.target.media_kind(),
             generation: self.media_generation,
             options: self
@@ -168,7 +171,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.path.as_ref() == Some(&dialog.source)
             && self.tabs.active().is_some_and(|tab| {
                 tab.id == dialog.tab
-                    && tab.target.current_path() == dialog.source
+                    && tab.target.current_path() == Some(dialog.source.as_ref())
                     && tab.target.media_kind() == dialog.kind
             })
     }

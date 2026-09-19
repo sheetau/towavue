@@ -108,7 +108,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .filter(|tab| {
                     tab.target.media_kind() == MediaKind::Image && self.displayed_tab != Some(id)
                 })
-                .map(|tab| (id, tab.target.current_path().to_owned()))
+                .and_then(|tab| tab.target.current_path().map(|path| (id, path.to_owned())))
         });
         let Some((id, path)) = target else {
             self.image_tab_preparation.clear();
@@ -126,7 +126,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 id,
                 RetainedImageTab {
                     prepared_only: true,
-                    path: path.clone(),
+                    path: Some(path.clone()),
                     instance: self.media_sequence,
                     view: ImageViewState::default(),
                     reading_mode: false,
@@ -162,7 +162,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.request_redraw();
         }
         let saved = &self.retained_images[&id];
-        if saved.path != path || saved.folder_snapshot.is_some() {
+        if saved.path.as_deref() != Some(path.as_ref()) || saved.folder_snapshot.is_some() {
             self.image_tab_preparation.clear();
             return;
         }
@@ -215,13 +215,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(saved) = self.retained_images.get_mut(id)
             && saved.instance == *instance
-            && saved.path == *path
+            && saved.path.as_deref() == Some(path.as_ref())
             && Some(snapshot.folder_path.as_path()) == path.parent()
             && self
                 .tabs
                 .tabs()
                 .iter()
-                .any(|tab| tab.id == *id && tab.target.current_path() == path)
+                .any(|tab| tab.id == *id && tab.target.current_path() == Some(path.as_ref()))
         {
             saved.folder_snapshot = Some(snapshot);
         }
@@ -235,7 +235,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         path: &Path,
     ) -> Option<(u64, &FolderSnapshot, Option<ReadingSettings>)> {
         let tab = self.tabs.tabs().iter().find(|tab| tab.id == id)?;
-        if tab.target.media_kind() != MediaKind::Image || tab.target.current_path() != path {
+        if tab.target.media_kind() != MediaKind::Image || tab.target.current_path() != Some(path) {
             return None;
         }
         let (instance, snapshot, reading, settings) =
@@ -250,7 +250,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 let saved = self
                     .retained_images
                     .get(&id)
-                    .filter(|saved| saved.path == path)?;
+                    .filter(|saved| saved.path.as_deref() == Some(path))?;
                 (
                     saved.instance,
                     saved.folder_snapshot.as_ref(),
@@ -385,7 +385,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .max(self.media_generation)
             .wrapping_add(1);
         saved.instance = self.media_sequence;
-        saved.path = path.clone();
+        saved.path = Some(path.clone());
         saved.reading_focus = saved
             .folder_snapshot
             .as_ref()

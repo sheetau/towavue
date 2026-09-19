@@ -46,7 +46,7 @@ pub(super) struct ImageStage {
 }
 
 impl ImagePresentation {
-    fn rebind(&self, context: &egui::Context, path: &Path) -> Result<Self, String> {
+    fn rebind(&self, context: &egui::Context, path: Option<&Path>) -> Result<Self, String> {
         let limit = context.input(|input| input.max_texture_side);
         if self
             .decoded
@@ -62,7 +62,10 @@ impl ImagePresentation {
         Ok(Self {
             decoded: Arc::clone(&self.decoded),
             texture: context.load_texture(
-                format!("image:{}", path.display()),
+                format!(
+                    "image:{}",
+                    path.map(display_name).unwrap_or_else(|| "Untitled".into())
+                ),
                 color_image(&self.decoded.frames[self.frame_index]),
                 sampling,
             ),
@@ -116,7 +119,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return Err("wait for this tab's export to finish".into());
         }
         let path = tab.target.current_path();
-        let instance = if self.displayed_tab == Some(id) && self.path.as_deref() == Some(path) {
+        let instance = if self.displayed_tab == Some(id) && self.path.as_deref() == path {
             Some(self.media_generation)
         } else if self.displayed_tab != Some(id)
             && !self.retained_images.contains_key(&id)
@@ -129,7 +132,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Some(
                 self.retained_images
                     .get(&id)
-                    .filter(|saved| saved.path == path)
+                    .filter(|saved| saved.path.as_deref() == path)
                     .ok_or("the tab's image state is unavailable")?
                     .instance,
             )
@@ -137,14 +140,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Some(
                 self.retained_playback
                     .get(&id)
-                    .filter(|saved| saved.path == path)
+                    .filter(|saved| Some(saved.path.as_path()) == path)
                     .ok_or("the tab's playback state is unavailable")?
                     .instance,
             )
         };
         Ok(DetachRequest {
             tab: id,
-            path: Some(path.to_owned()),
+            path: path.map(Path::to_owned),
             instance,
         })
     }
@@ -332,10 +335,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 return id;
             }
         };
-        let path = transfer.target.current_path().to_owned();
+        let path = transfer.target.current_path().map(Path::to_owned);
         let kind = transfer.target.media_kind();
-        let id = self.tabs.open_new(path.clone(), kind);
-        self.tabs.get_mut(id).expect("new tab").target = transfer.target;
+        let id = self.tabs.open_target(transfer.target);
         self.tabs.reorder(id, gap);
         // Reserve an identity without changing the still-displayed tab's instance;
         // load_path must retain that tab under its existing worker identity.
@@ -398,7 +400,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.retained_images.insert(id, *saved);
             }
         }
-        self.load_path_inner(path, kind, true, None);
+        self.load_document(path, kind, true);
         if let Some(context) = &self.ui_context {
             if let Some(focus) = transfer.focus {
                 tab_focus::adopt(context, id, focus);

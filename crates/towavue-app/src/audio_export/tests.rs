@@ -526,6 +526,7 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
                 .expect("dialog document")
                 .target
                 .current_path()
+                .expect("file-backed tab")
                 .to_owned(),
             kind,
             generation: app.media_generation,
@@ -587,9 +588,11 @@ fn audio_export_settings_drive_save_resave_derivative_cancel_stale_dialog_and_so
             drain_export(&mut app, &events);
             assert!(app.edits[&tab].is_dirty());
             assert_eq!(
-                app.tabs
-                    .get_mut(tab)
-                    .map(|tab| tab.target.current_path().to_owned()),
+                app.tabs.get_mut(tab).map(|tab| tab
+                    .target
+                    .current_path()
+                    .expect("file-backed tab")
+                    .to_owned()),
                 Some(target.clone())
             );
             assert_eq!(app.audio_export_settings.get(&tab), Some(&options));

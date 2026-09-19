@@ -118,7 +118,7 @@ impl WindowHost {
                     || app.state == PlaybackState::Loading
                     || (*key != owner && (app.active_export.is_some() || app.modal_input_blocked()))
                     || app.tabs.tabs().iter().any(|tab| {
-                        tab.target.current_path() == source
+                        tab.target.current_path() == Some(source.as_ref())
                             && !app.source_backings.contains_key(&tab.id)
                             && app
                                 .source_versions
@@ -223,7 +223,7 @@ impl WindowHost {
                     || app.state == PlaybackState::Loading
                     || (*key != owner && (app.active_export.is_some() || app.modal_input_blocked()))
                     || app.tabs.tabs().iter().any(|tab| {
-                        tab.target.current_path() == source
+                        tab.target.current_path() == Some(source.as_ref())
                             && !app.source_backings.contains_key(&tab.id)
                             && app.source_versions.get(&tab.id).is_some_and(|version| {
                                 expected.is_none() || version.as_ref() != expected

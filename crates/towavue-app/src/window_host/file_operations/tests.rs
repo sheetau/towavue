@@ -409,7 +409,8 @@ fn inactive_relocation_keeps_displayed_owner_and_refreshes_the_current_folder() 
             .find(|tab| tab.id == background)
             .expect("background")
             .target
-            .current_path(),
+            .current_path()
+            .expect("file-backed tab"),
         renamed
     );
     let deadline = Instant::now() + Duration::from_secs(8);

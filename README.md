@@ -8,7 +8,7 @@ A lightweight image viewer, video player, and audio player for Windows — with 
 - **Familiar folder browsing.** Navigate in Windows Explorer's folder order, with a thumbnail filmstrip and recent files.
 - **Flexible viewing.** Zoom, pan, fit or fill the window, and switch to fullscreen.
 - **Reading mode.** View multiple images as connected pages, with adjustable page count, layout, and direction.
-- **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard.
+- **Image editing.** Select, crop, rotate, flip, resize, and copy an image or selection to the clipboard. Paste a clipboard image into a new Untitled tab, edit it, and save it as a file.
 - **Video and audio editing.** Select time ranges, remove or keep sections, and adjust gain and playback speed. Listening volume and mute do not change exported audio.
 - **Undo, save, and export.** Edit without changing the source, then save it or use Save as to continue with another file. Undo remains available after saving while the tab stays open, and keeps the saved destination as the current file. Deleting an open file keeps its media editable until you leave or close the document; Save can recreate it at the original location.
 - **Video frame images.** Export the current edited frame to PNG, without window zoom or changing the video's save state.
@@ -53,6 +53,7 @@ Public installer distribution is not yet available. To run from source, see the 
 | Seek backward / forward | Left / Right |
 | Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
 | Save as / save current file | Ctrl+Shift+S / Ctrl+S |
+| Paste image into a new tab | Ctrl+V |
 
 Available actions depend on the current media and editing mode. Enter retains its usual confirmation or activation behavior in text fields, menus, dialogs, and focused buttons. Menus show the active shortcuts. Open the Keyboard Shortcuts tab to search, record, edit, remove or reset bindings. Saves apply to all windows in the current host. Keyboard bindings are stored in `%APPDATA%\towavue\shortcuts.conf`; manual file changes use **Reload keyboard shortcuts** from the menu or command palette. Grid layout customization remains in `grid.conf`.
 

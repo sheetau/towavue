@@ -154,7 +154,10 @@ pub fn show(
             let enabled = match command {
                 ReopenClosedTab => can_reopen,
                 ToggleMute => muted.is_some(),
-                CopyFilePath | RevealFile => tabs.tabs().iter().any(|tab| tab.id == target),
+                CopyFilePath | RevealFile => tabs
+                    .tabs()
+                    .iter()
+                    .any(|tab| tab.id == target && tab.target.current_path().is_some()),
                 _ => !close_targets(tabs, target, *command).is_empty(),
             };
             let title = if *command == ToggleMute {

@@ -44,6 +44,25 @@ impl ImagePasteJob {
         )
     }
 
+    /// Prepares owned straight RGBA8 pixels without reading or writing the clipboard.
+    pub fn from_rgba(
+        width: u32,
+        height: u32,
+        rgba: Vec<u8>,
+        notify: impl FnOnce(Result<PastedImage, String>) + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Self::start_with_reader(
+            move || {
+                Ok(arboard::ImageData {
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: std::borrow::Cow::Owned(rgba),
+                })
+            },
+            notify,
+        )
+    }
+
     fn start_with_reader(
         read: impl FnOnce() -> Result<arboard::ImageData<'static>, String> + Send + 'static,
         notify: impl FnOnce(Result<PastedImage, String>) + Send + 'static,

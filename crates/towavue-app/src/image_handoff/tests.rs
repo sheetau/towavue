@@ -930,7 +930,7 @@ fn handoff_does_not_survive_failure_departure_or_last_tab_close() {
             1 => {
                 let saved = app.take_image_tab_state();
                 assert!(saved.image.is_none() && saved.resume_loading);
-                assert_eq!(saved.path, root.join("next.png"));
+                assert_eq!(saved.path, Some(root.join("next.png")));
             }
             2 => app.close_tab_unchecked(tab),
             _ => {

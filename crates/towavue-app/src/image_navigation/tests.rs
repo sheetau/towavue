@@ -331,7 +331,12 @@ fn jumps_load_actual_images_keep_the_tab_and_preserve_reading_spreads() {
             );
             assert_eq!(app.tabs.active().expect("tab").id, tab);
             assert_eq!(
-                app.tabs.active().expect("tab").target.current_path(),
+                app.tabs
+                    .active()
+                    .expect("tab")
+                    .target
+                    .current_path()
+                    .expect("file-backed tab"),
                 &paths[index]
             );
             assert_eq!(app.reading_settings, settings);

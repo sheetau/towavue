@@ -232,7 +232,7 @@ mod tests {
         let opened = app.tabs.active().expect("opened tab");
         assert_ne!(opened.id, original);
         assert_eq!(
-            opened.target.current_path(),
+            opened.target.current_path().expect("file-backed tab"),
             canonical_shell_path(&target).expect("path")
         );
         assert!(app.edits.get(&original).expect("old edits").is_dirty());

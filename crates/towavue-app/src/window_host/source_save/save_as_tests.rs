@@ -1,6 +1,51 @@
 use super::*;
 use towavue_runtime_windows::SaveAsTarget;
 
+#[test]
+fn untitled_first_save_uses_host_publication_and_adopts_only_the_pasted_document() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::source_save::tests::save_as::untitled_first_save_uses_host_publication_and_adopts_only_the_pasted_document",
+    ) else {
+        return;
+    };
+    let old = root.join("existing.bmp");
+    crate::tab_transfer::tests::bitmap(&old);
+    let old_pixels = pixels(&old);
+    let (mut host, owner, existing) = setup(&old);
+    let app = host.windows.get_mut(&owner).expect("owner");
+    app.ui_context = Some(fonts::test_context());
+    app.open_pasted_image(crate::image_paste::tests::fixture())
+        .expect("paste");
+    let pasted = app.tabs.active().expect("pasted").id;
+    let original = app.document_input(pasted).expect("original");
+    assert!(app.path.is_none() && !app.source_versions.contains_key(&pasted));
+    app.dispatch(CommandId::FlipHorizontal);
+    assert!(app.start_test_save_as(old.clone(), None));
+    ready(&mut host, owner);
+    assert_eq!(pixels(&old), old_pixels);
+    finish(&mut host, owner);
+    let app = &host.windows[&owner];
+    assert!(app.export_error.is_none(), "{:?}", app.export_error);
+    assert_eq!(app.path, Some(old.clone()));
+    assert_eq!(app.tabs.active().expect("same document").id, pasted);
+    assert!(!app.edits[&pasted].is_dirty());
+    assert_eq!(
+        app.document_input(pasted)
+            .expect("original retained")
+            .path(),
+        original.path()
+    );
+    assert_eq!(
+        pixels(
+            app.document_input(existing)
+                .expect("destination peer")
+                .path()
+        ),
+        old_pixels
+    );
+    assert!(app.edits[&existing].is_dirty());
+}
+
 fn chosen(host: &mut WindowHost, owner: WindowKey, id: TabId, source: &Path, target: &Path) {
     let selected = SaveAsTarget::capture(target).expect("simulated native acceptance");
     assert!(host.windows.get_mut(&owner).expect("owner").start_save_as(
@@ -74,7 +119,12 @@ fn save_as_adopts_only_the_exporter_and_preserves_both_originals_through_undo_an
     assert_eq!(app.path.as_ref(), Some(&target));
     assert_eq!(app.tabs.active().expect("tab").id, id);
     assert_eq!(
-        app.tabs.active().expect("tab").target.current_path(),
+        app.tabs
+            .active()
+            .expect("tab")
+            .target
+            .current_path()
+            .expect("file-backed tab"),
         target
     );
     assert!(!app.edits[&id].is_dirty());
@@ -100,7 +150,12 @@ fn save_as_adopts_only_the_exporter_and_preserves_both_originals_through_undo_an
     assert!(app.edits[&id].is_dirty());
     assert!(app.edits[&id].operations().is_empty());
     assert_eq!(
-        app.tabs.active().expect("same tab").target.current_path(),
+        app.tabs
+            .active()
+            .expect("same tab")
+            .target
+            .current_path()
+            .expect("file-backed tab"),
         target
     );
     app.dispatch(CommandId::Save);
@@ -171,7 +226,8 @@ fn save_as_background_owner_and_later_edits_keep_foreground_and_dirty_state() {
             .find(|tab| tab.id == id)
             .expect("background exporter")
             .target
-            .current_path(),
+            .current_path()
+            .expect("file-backed tab"),
         target
     );
     assert!(
@@ -233,7 +289,12 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
         assert_eq!(pixels(&source), original);
         assert_eq!(std::fs::read(&target).ok(), before);
         assert_ne!(
-            app.tabs.active().expect("tab").target.current_path(),
+            app.tabs
+                .active()
+                .expect("tab")
+                .target
+                .current_path()
+                .expect("file-backed tab"),
             target
         );
     }

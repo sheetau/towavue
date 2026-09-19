@@ -19,7 +19,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let tab = self.tabs.active()?;
         let frame = self.session.as_ref()?.current_video_snapshot()?;
-        let input = self.media_input_for(Some(tab.id), tab.target.current_path());
+        let input = self.media_input_for(Some(tab.id), tab.target.current_path()?);
         if input.path() != frame.source_path() {
             return None;
         }
@@ -79,8 +79,11 @@ impl PendingFrameExport {
             || app.active_export.is_some()
             || !app.tabs.active().is_some_and(|tab| {
                 tab.id == self.tab
-                    && tab.target.current_path() == self.input.logical_path()
-                    && app.media_input_for(Some(tab.id), tab.target.current_path()) == self.input
+                    && tab.target.current_path() == Some(self.input.logical_path())
+                    && tab
+                        .target
+                        .current_path()
+                        .is_some_and(|path| app.media_input_for(Some(tab.id), path) == self.input)
             })
         {
             app.set_status(

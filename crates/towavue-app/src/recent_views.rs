@@ -157,7 +157,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if self.tabs.is_utility(tab.id) || self.deleted_sources.contains_key(&tab.id) {
                 continue;
             }
-            let path = tab.target.current_path();
+            let Some(path) = tab.target.current_path() else {
+                continue;
+            };
             let (shown, playing) = if Some(tab.id) == self.displayed_tab {
                 let ready = self.path.as_deref() == Some(path)
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
@@ -419,7 +421,10 @@ mod tests {
         );
         let instance = app.retained_images[&background].instance;
         app.navigate_image_tab(background, instance, paths[0].clone(), paths[1].clone());
-        assert_eq!(app.retained_images[&background].path, paths[1]);
+        assert_eq!(
+            app.retained_images[&background].path,
+            Some(paths[1].clone())
+        );
         assert_eq!(app.displayed_tab, Some(foreground));
         let now = Instant::now();
         app.observe_viewed_history(now);

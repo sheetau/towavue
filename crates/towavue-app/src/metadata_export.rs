@@ -222,7 +222,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         if self.media_kind != Some(tab.target.media_kind())
-            || self.path.as_deref() != Some(tab.target.current_path())
+            || self.path.as_deref() != tab.target.current_path()
         {
             return;
         }
@@ -241,8 +241,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .get(&tab.id)
             .cloned()
             .unwrap_or_default();
-        let source = tab.target.current_path().to_owned();
-        let input = self.media_input_for(Some(tab.id), &source);
+        let Some(input) = self.document_input(tab.id) else {
+            return;
+        };
+        let source = input.logical_path().to_owned();
         let kind = tab.target.media_kind();
         let token = self.metadata_generation;
         self.metadata_dialog = Some(MetadataDialog {
@@ -296,7 +298,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.path.as_ref() == Some(&dialog.source)
             && self.tabs.active().is_some_and(|tab| {
                 tab.id == dialog.tab
-                    && tab.target.current_path() == dialog.source
+                    && self
+                        .document_input(tab.id)
+                        .is_some_and(|input| input.logical_path() == dialog.source)
                     && tab.target.media_kind() == dialog.kind
             })
     }

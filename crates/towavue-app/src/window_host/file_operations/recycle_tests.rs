@@ -255,7 +255,8 @@ fn recycle_completion_retains_duplicate_documents_edits_and_navigation() {
                     .get_mut(*id)
                     .expect("same tab")
                     .target
-                    .current_path(),
+                    .current_path()
+                    .expect("file-backed tab"),
                 source
             );
             assert!(app.edits[id].is_dirty());
@@ -351,7 +352,8 @@ fn background_audio_recycling_preserves_modes_and_unrelated_dirty_foreground() {
             .get_mut(audio)
             .expect("retained audio tab")
             .target
-            .current_path(),
+            .current_path()
+            .expect("file-backed tab"),
         source
     );
     let queue = &app.audio_queues[&audio].order;

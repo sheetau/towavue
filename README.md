@@ -25,13 +25,19 @@ AVIF viewing and saving support transparency, embedded display cropping, quarter
 
 ## Getting started
 
-towavue targets Windows 11, x64. Open a file or folder from the welcome screen, drag media from Explorer, or pass a path to the application:
+towavue supports **Windows 11 x64**. Published builds are listed in [GitHub Releases](https://github.com/sheetau/towavue/releases). Download the version's `windows-x64-setup.exe` and run it to install for the current user. Setup includes the Microsoft Visual C++ prerequisite and asks you to review its terms if installation is needed. The initial EXE and Setup are unsigned, so Windows may show an unknown-publisher warning. Windows 10 and ARM64 are not supported.
+
+Open a file or folder from the welcome screen, drag media from Explorer, or pass a path to the application:
 
 ```text
 towavue.exe "path/to/media.mp4"
 ```
 
-Public installer distribution is not yet available. To run from source, see the [development guide](docs/DEVELOPMENT.md).
+Installed builds check for updates automatically. Use **Help > Check for updates** for a manual check, then choose **Install now** or **Install on next launch** after a verified download. Unsaved edits still receive Save / Discard / Cancel prompts. Close the app before running Setup manually. Update metadata is independently signed even though the initial EXE and Setup have no Windows code signature.
+
+Uninstall through Windows Settings > Apps > Installed apps. Your media and settings are preserved, and the shared Microsoft Visual C++ runtime is not removed. **Help > About** shows the installed version; **Help > Show licenses and sources** opens the installed notices and the matching source download link. Each release includes a separate `sources.zip`; extract it and open `START-HERE.html` for the application/native sources, patches and original notices.
+
+To build from source, see the [development guide](docs/DEVELOPMENT.md). Known limitations are recorded in each release's notes.
 
 ## Shortcuts
 

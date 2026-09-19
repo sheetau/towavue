@@ -58,3 +58,28 @@ An incomplete draft says not to publish it. Normal release notes replace that no
 `test-release-publishing.ps1` exercises ownership, published/prerelease/tag refusal, missing-only retries, unchanged no-ops and empty-upload recovery without GitHub mutations. Add `-ArtifactDirectory <completed-build>` for signature/checksum/source-blob verification and seven actual local tampering/incomplete-asset controls. The production private key is not used by this test.
 
 The implementation follows the documented [draft creation options](https://cli.github.com/manual/gh_release_create), [upload behavior](https://cli.github.com/manual/gh_release_upload) and [release asset state/size/digest fields](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28). REST requests select API version 2022-11-28. Final remote execution and draft visibility still need their own evidence; pure planner tests are not an uploaded release.
+
+## Preserve and recover the update signing identity
+
+The current-user DPAPI file is the working key, not a portable backup. Copying that file alone to a different Windows account or reinstall does not establish recovery. Keep the same RSA identity: existing installations trust the embedded public key and will reject updates signed by a replacement.
+
+In **Windows PowerShell**, run this yourself with a new backup path outside the repository, preferably on separately retained storage:
+
+```powershell
+.\scripts\manage-update-key.ps1 -Mode Backup -BackupPath 'E:\towavue-update-key.pfx'
+.\scripts\manage-update-key.ps1 -Mode Verify -BackupPath 'E:\towavue-update-key.pfx'
+```
+
+Each command prompts locally for the backup password without echoing it. Use a long unique password and retain it separately from the encrypted backup; do not put it in a command-line literal, chat, Git or release assets. The script requires at least twelve characters when creating a backup. It verifies decryption, the exact application public key and a private-key signature before publishing the final backup filename. Existing backups are never overwritten.
+
+On a replacement Windows account or machine, with the same trusted source checkout and public key:
+
+```powershell
+.\scripts\manage-update-key.ps1 -Mode Restore -BackupPath 'E:\towavue-update-key.pfx'
+```
+
+Restore writes a new current-user DPAPI working key at the normal LocalApplicationData path, verifies it and refuses any existing destination. To rehearse recovery while the original working key still exists, supply `-KeyFile 'path/outside/the/repository/recovery-test.dpapi'` with a new destination. Preserve existing keys instead of deleting them to bypass a refusal. Neither command changes the tracked public key or creates a new signing identity.
+
+The backup uses Windows PKI's [AES256_SHA256 PFX export](https://learn.microsoft.com/powershell/module/pki/export-pfxcertificate). Its self-signed certificate is only a container for the existing key; it is not an Authenticode certificate and is never registered in a certificate store. Import uses [EphemeralKeySet](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.x509certificates.x509keystorageflags?view=netframework-4.8.1), retaining the private key in memory. A randomly password-protected intermediate PFX is needed to preserve the ephemeral CNG private key through Windows PKI; it is removed after AES rewrapping. No unencrypted private-key file is written. Restore enables in-memory export only on that ephemeral key to produce the existing DPAPI format; no persisted Windows key policy changes.
+
+`scripts/test-release-key-backup.ps1` creates isolated fixture keys and verifies backup/restore through identical update signatures, bad-password/corrupt/wrong-identity refusal, no overwrite, temporary-file cleanup and unchanged user certificate-store contents. It never reads or exports the production private key. A tested tool is separate from the owner's actual retained backup: production backup creation requires the owner's local password entry and storage choice.

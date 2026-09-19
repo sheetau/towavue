@@ -184,14 +184,14 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             );
             assert!(app.video_scrub.is_none(), "a press is not a scrub");
             let (end, handle_target) = if precise {
-                let above = start - vec2(0.0, 180.0);
+                let above = start - vec2(0.0, 90.0);
                 assert!(
                     frame(app, vec![egui::Event::PointerMoved(above)], false)
                         .0
                         .is_empty()
                 );
                 assert!(!app.timeline_open, "upward compact dragging always seeks");
-                (end - vec2(0.0, 180.0), (start.x + end.x) * 0.5)
+                (end - vec2(0.0, 90.0), (start.x + end.x) * 0.5)
             } else {
                 (end, end.x)
             };

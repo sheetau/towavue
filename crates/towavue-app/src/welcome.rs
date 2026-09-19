@@ -302,8 +302,8 @@ fn search_field(
             )
         })
         .inner
-        .help_text("Clear Gallery search\nEscape (search focused)")
-        .disabled_help_text("Clear Gallery search\nEscape (search focused)");
+        .help_text("Clear Gallery search (Escape)")
+        .disabled_help_text("Clear Gallery search (Escape)");
     clear.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,

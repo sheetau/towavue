@@ -401,13 +401,12 @@ impl CommandPalette {
         let selection_moved = self.selected != selected;
         self.selected = selected;
         self.selected_path = selected.map(|index| paths[index].clone());
-        if self.folders {
-            self.clear_preview();
-        } else if let Some(preview) = &mut self.preview {
-            preview.show(ui, self.selected_path.as_deref());
-        } else {
-            preview::paint(ui, self.selected_path.as_deref(), None);
-        }
+        // Reserve the card before laying out rows, then paint it with this
+        // frame's hovered row without changing the keyboard/Enter selection.
+        let preview_slot = (!self.folders && selected.is_some())
+            .then(|| preview::reserve(ui))
+            .flatten();
+        let mut hovered_path = None;
         let kind = if self.folders {
             RecentKind::Folder
         } else {
@@ -497,7 +496,13 @@ impl CommandPalette {
                 let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
                 let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
                 let selected_row = selected == Some(index);
-                let close = selected_row || ui.rect_contains_pointer(row);
+                let hovered = ui.is_enabled()
+                    && ui.input(|input| input.pointer.hover_pos().is_some())
+                    && ui.rect_contains_pointer(row);
+                if hovered {
+                    hovered_path = Some((*path).clone());
+                }
+                let close = selected_row || hovered;
                 let row_actions = RowActions::new(row, close, false);
                 let body = row_actions.body;
                 let background = ui.painter().add(egui::Shape::Noop);
@@ -599,6 +604,21 @@ impl CommandPalette {
             }
         });
         self.list_height = output.inner_rect.height();
+        let preview_path = hovered_path
+            .as_deref()
+            .filter(|path| {
+                !self
+                    .hidden_paths
+                    .contains(&normalized(&path.to_string_lossy()))
+            })
+            .or(self.selected_path.as_deref());
+        if self.folders {
+            self.clear_preview();
+        } else if let Some(preview) = &mut self.preview {
+            preview.show(ui, preview_path, preview_slot);
+        } else {
+            preview::paint(ui, preview_path, None, preview_slot);
+        }
         chosen
     }
 }

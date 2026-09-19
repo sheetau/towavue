@@ -406,12 +406,17 @@ pub(super) fn show_status(
                 } else {
                     "Cancel export"
                 };
-                let cancel = ui.add_enabled(
-                    !export.cancelling && export.job.cancellable(),
-                    egui::Button::new(egui::RichText::new("\u{ea76}").font(fonts::icon_font()))
-                        .frame(false)
-                        .min_size(egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE)),
-                );
+                let cancel = ui
+                    .add_enabled_ui(!export.cancelling && export.job.cancellable(), |ui| {
+                        chrome::status_button(
+                            ui,
+                            egui::vec2(54.0, chrome::STATUS_BUTTON_SIZE),
+                            egui::Button::new(egui::RichText::new("Cancel").size(12.0))
+                                .fill(chrome::HOVER)
+                                .stroke(egui::Stroke::NONE),
+                        )
+                    })
+                    .inner;
                 cancel.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, cancel.enabled(), label)
                 });

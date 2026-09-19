@@ -683,8 +683,8 @@ mod tests {
                     .expect("leading transport control");
                 assert!((play.x0 - 5.0).abs() < 0.1);
                 assert!((play.width() - 20.0).abs() < 0.1);
-                assert!((play.y0 - 275.0).abs() < 0.1);
-                assert!((play.y1 - 295.0).abs() < 0.1);
+                assert!((play.y0 - 276.0).abs() < 0.1);
+                assert!((play.y1 - 296.0).abs() < 0.1);
                 assert!((play.width() - play.height()).abs() < 0.1);
                 assert!((bounds.width() - bounds.height()).abs() < 0.1);
                 let expected_x = if label == "Repeat off" {
@@ -768,8 +768,13 @@ mod tests {
                     let tolerance = 1.0 / f64::from(density);
                     assert!((bounds.width() - 20.0).abs() <= tolerance);
                     assert!((bounds.height() - 20.0).abs() <= tolerance);
-                    assert!((bounds.y0 - 275.0).abs() <= tolerance);
-                    assert!((300.0 - bounds.y1 - 5.0).abs() <= tolerance);
+                    assert!(
+                        (bounds.y0 - 275.0 - 1.0 / f64::from(density)).abs() <= tolerance * 0.51
+                    );
+                    assert!(
+                        (300.0 - bounds.y1 - 5.0 + 1.0 / f64::from(density)).abs()
+                            <= tolerance * 0.51
+                    );
                     assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width));
                     assert!(!node.is_disabled());
                     let (_, actions) = frame(

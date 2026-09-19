@@ -32,7 +32,12 @@ impl FilePreview {
         self.texture = None;
     }
 
-    pub fn show(&mut self, ui: &mut Ui, path: Option<&Path>) {
+    pub fn show(
+        &mut self,
+        ui: &mut Ui,
+        path: Option<&Path>,
+        slot: Option<(egui::Rect, egui::Response)>,
+    ) {
         if self.path.as_deref() != path {
             self.texture = None;
             self.path = path.map(Path::to_path_buf);
@@ -45,7 +50,7 @@ impl FilePreview {
                 self.texture = Some(Err("Unsupported media type".into()));
             }
         }
-        paint(ui, path, self.texture.as_ref());
+        paint(ui, path, self.texture.as_ref(), slot);
     }
 
     pub fn finish(&mut self, context: &Context) -> bool {
@@ -77,25 +82,30 @@ impl FilePreview {
     }
 }
 
-pub(super) fn paint(
-    ui: &mut Ui,
-    path: Option<&Path>,
-    texture: Option<&Result<TextureHandle, String>>,
-) {
-    let Some(path) = path else { return };
+pub(super) fn reserve(ui: &mut Ui) -> Option<(egui::Rect, egui::Response)> {
     // Keep several result rows available in small windows. Loading, errors and
     // aspect-ratio changes use the same reserved area, so the list never jumps.
     let remaining = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0)
         .min(ui.available_height())
         .max(0.0);
     let height = (remaining - 88.0).clamp(0.0, 160.0);
-    if height < 1.0 {
+    (height >= 1.0).then(|| {
+        ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), height),
+            egui::Sense::hover(),
+        )
+    })
+}
+
+pub(super) fn paint(
+    ui: &mut Ui,
+    path: Option<&Path>,
+    texture: Option<&Result<TextureHandle, String>>,
+    slot: Option<(egui::Rect, egui::Response)>,
+) {
+    let (Some(path), Some((rect, response))) = (path, slot) else {
         return;
-    }
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
+    };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Image);
         node.set_label(format!("Preview: {}", path.display()));
@@ -111,7 +121,7 @@ pub(super) fn paint(
         Some(Ok(texture)) => {
             let size = texture.size_vec2();
             let scale = (rect.width().min(240.0) / size.x)
-                .min(height / size.y)
+                .min(rect.height() / size.y)
                 .min(1.0);
             painter.image(
                 texture.id(),
@@ -231,6 +241,80 @@ mod tests {
                         .any(|(_, node)| node.label().is_some_and(|l| l.starts_with("Preview: ")))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn hovered_picker_preview_precedes_selection_and_leaving_restores_keyboard_target() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            let mut palette = CommandPalette::default();
+            palette.open_files(false);
+            let files: Vec<_> = ["first.png", "second.png", "third.png"]
+                .map(PathBuf::from)
+                .into();
+            let sources = OpenSources {
+                files: &files,
+                ..Default::default()
+            };
+            let frame = |palette: &mut CommandPalette, events| {
+                open_frame_at(
+                    &context,
+                    palette,
+                    sources,
+                    events,
+                    (egui::vec2(640.0, 480.0), 32.0, density),
+                )
+            };
+            frame(&mut palette, vec![]);
+            frame(&mut palette, vec![]);
+            let (output, _) = frame(&mut palette, vec![]);
+            let bounds = output
+                .platform_output
+                .accesskit_update
+                .expect("tree")
+                .nodes
+                .into_iter()
+                .find(|(_, node)| node.label() == Some("third.png"))
+                .expect("third row")
+                .1
+                .bounds()
+                .expect("bounds");
+            let pos = egui::pos2(
+                (bounds.x0 + bounds.x1) as f32 * 0.5,
+                (bounds.y0 + bounds.y1) as f32 * 0.5,
+            );
+            let has_preview = |output: &egui::FullOutput, path: &str| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(format!("Preview: {path}").as_str()))
+            };
+            let (hover, choices) = frame(&mut palette, vec![egui::Event::PointerMoved(pos)]);
+            assert!(choices.is_empty());
+            assert!(has_preview(&hover, "third.png"));
+            assert_eq!(palette.selected_path.as_ref(), Some(&files[0]));
+            let (keyboard, _) = frame(
+                &mut palette,
+                vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert!(has_preview(&keyboard, "third.png"));
+            assert_eq!(palette.selected_path.as_ref(), Some(&files[1]));
+            let (leave, _) = frame(&mut palette, vec![egui::Event::PointerGone]);
+            assert!(has_preview(&leave, "second.png"));
+            let (_, choices) = frame(
+                &mut palette,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            assert!(
+                matches!(choices.as_slice(), [crate::palette::Choice::Open(crate::menu::RecentAction::Open(path, _, _))] if path == &files[1])
+            );
         }
     }
 

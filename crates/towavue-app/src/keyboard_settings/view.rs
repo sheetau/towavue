@@ -431,10 +431,7 @@ fn icon(
     selected: bool,
     shortcut: Option<&str>,
 ) -> egui::Response {
-    let help = shortcut.map_or_else(
-        || label.to_owned(),
-        |key| format!("{label}\n{key} (search focused)"),
-    );
+    let help = shortcut.map_or_else(|| label.to_owned(), |key| format!("{label} ({key})"));
     // Codicon record-keys / sort-precedence / clear-all / edit in the bundled font.
     let response = chrome::icon_button_at(
         ui,

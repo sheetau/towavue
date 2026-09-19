@@ -290,6 +290,7 @@ enum UiAction {
     ResolveGuard(GuardDecision),
     CancelExport,
     RevealExport(Instant),
+    OpenExport(Instant),
     DismissExportError,
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
@@ -6175,7 +6176,12 @@ where
                                 if reading_hint {
                                     ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
                                 } else {
-                                    ui.label(if export_link.is_some() { format!("{tooltip}\nShow exported file in Explorer") } else { tooltip });
+                                    let hint = if export_link.is_some_and(|shown| self.export_notice_open_target(shown).is_some()) {
+                                        "\nClick: show file in Explorer\nMiddle-click: open file in a new tab"
+                                    } else if export_link.is_some() {
+                                        "\nClick: show file in Explorer"
+                                    } else { "" };
+                                    ui.label(format!("{tooltip}{hint}"));
                                 }
                             });
                             if let Some(shown) = export_link {
@@ -6183,6 +6189,10 @@ where
                                     egui::WidgetType::Button, response.enabled(), "Show exported file in Explorer"));
                                 if response.clicked() {
                                     actions.push(UiAction::RevealExport(shown));
+                                }
+                                if response.clicked_by(egui::PointerButton::Middle)
+                                    && self.export_notice_open_target(shown).is_some() {
+                                    actions.push(UiAction::OpenExport(shown));
                                 }
                                 response.on_hover_cursor(egui::CursorIcon::PointingHand);
                             }
@@ -6917,6 +6927,11 @@ where
             UiAction::RevealExport(shown) => {
                 if let Some(path) = self.export_notice_target(shown).map(Path::to_path_buf) {
                     self.reveal_path(path);
+                }
+            }
+            UiAction::OpenExport(shown) => {
+                if let Some(path) = self.export_notice_open_target(shown).map(Path::to_path_buf) {
+                    self.open_external(path, true);
                 }
             }
             UiAction::OpenGalleryBackground(path) => {
@@ -14809,6 +14824,25 @@ mod tests {
                     );
                     assert!(
                         (text.pos.y + text.galley.size().y * 0.5 - 16.0).abs() <= 1.0 / density
+                    );
+                    let close_glyph = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(glyph)
+                                if glyph.galley.text() == "\u{ea76}"
+                                    && close.contains(glyph.visual_bounding_rect().center()) =>
+                            {
+                                Some(glyph)
+                            }
+                            _ => None,
+                        })
+                        .expect("close glyph");
+                    let trailing = close.right() - close_glyph.visual_bounding_rect().right();
+                    let leading = text.pos.x - label.left();
+                    assert!(
+                        (leading - trailing).abs() <= 1.5 / density,
+                        "tab edge spacing: text={leading}, close={trailing}"
                     );
                     let borders: Vec<_> = output
                         .shapes

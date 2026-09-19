@@ -787,7 +787,8 @@ fn search_button_help_names_focused_shortcuts_and_empty_clear_is_disabled() {
             found |= output.shapes.iter().any(|shape| {
                 matches!(&shape.shape, egui::Shape::Text(text)
                 if text.galley.text().contains(label) && text.galley.text().contains(key)
-                    && text.galley.text().contains("search focused"))
+                    && text.galley.text().contains(&format!("({key})"))
+                    && !text.galley.text().contains("search focused"))
             });
         }
         assert!(found, "visible tooltip for {label}");

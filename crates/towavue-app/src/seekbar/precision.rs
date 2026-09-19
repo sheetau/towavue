@@ -1,8 +1,8 @@
 use crate::timeline_input;
 use egui::{Context, Id, Pos2, Rect, Response};
 
-// Slightly taller than the compact thumbnail card, independent of display density.
-const BAND_HEIGHT: f32 = 160.0;
+// The slowest band begins 240 logical points above the seek bar.
+const BAND_HEIGHT: f32 = 80.0;
 const SPEEDS: [f32; 4] = [1.0, 0.5, 0.25, 0.1];
 const LABELS: [&str; 4] = [
     "Seeking · Normal speed",

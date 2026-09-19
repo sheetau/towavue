@@ -63,7 +63,8 @@ pub const STATUS_HEIGHT: f32 = 30.0;
 pub const STATUS_BUTTON_SIZE: f32 = 20.0;
 pub const STATUS_BUTTON_GAP: f32 = (STATUS_HEIGHT - STATUS_BUTTON_SIZE) * 0.5;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
-pub const TAB_PADDING: f32 = 10.0;
+// Match the visible close glyph's inset in its 24-point slot.
+pub const TAB_PADDING: f32 = 7.0;
 
 pub fn tab_close(ui: &mut Ui, rect: Rect, dirty: bool) -> egui::Response {
     let response = ui.put(
@@ -271,6 +272,15 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     button_with_sense(ui, icon, label, egui::Sense::click(), 24.0)
 }
 
+/// Keep layout spacing fixed while moving only the status button by one pixel.
+pub fn status_button(ui: &mut Ui, size: egui::Vec2, button: egui::Button<'_>) -> egui::Response {
+    let (_, rect) = ui.allocate_space(size);
+    ui.put(
+        rect.translate(egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point())),
+        button.min_size(size),
+    )
+}
+
 pub fn transport_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     button_with_sense(
         ui,
@@ -291,10 +301,12 @@ fn button_with_sense(
     let response = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = egui::Vec2::ZERO;
-            ui.add_sized(
-                [size, size],
-                egui::Button::new(icon.text()).frame(false).sense(sense),
-            )
+            let button = egui::Button::new(icon.text()).frame(false).sense(sense);
+            if size == STATUS_BUTTON_SIZE {
+                status_button(ui, egui::Vec2::splat(size), button)
+            } else {
+                ui.add_sized([size, size], button)
+            }
         })
         .inner
         .help_text(label);
@@ -333,12 +345,12 @@ pub enum AudioIcon {
 }
 
 pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -> egui::Response {
-    let response = ui
-        .add_sized(
-            [STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE],
-            egui::Button::new("").frame(false).selected(selected),
-        )
-        .help_text(label);
+    let response = status_button(
+        ui,
+        egui::Vec2::splat(STATUS_BUTTON_SIZE),
+        egui::Button::new("").frame(false).selected(selected),
+    )
+    .help_text(label);
     crate::tab_focus::observe_pointer_control(
         &response,
         ("audio-mode", matches!(icon, AudioIcon::Shuffle)),
@@ -364,8 +376,9 @@ pub fn reading_button(
 ) -> egui::Response {
     let response = ui
         .add_enabled_ui(enabled, |ui| {
-            ui.add_sized(
-                [STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE],
+            status_button(
+                ui,
+                egui::Vec2::splat(STATUS_BUTTON_SIZE),
                 egui::Button::new("")
                     .frame(false)
                     .sense(egui::Sense::click_and_drag())

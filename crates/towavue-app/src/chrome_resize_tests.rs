@@ -93,3 +93,62 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
         }
     }
 }
+
+#[test]
+fn utility_status_text_keeps_the_same_leading_gap_as_media_buttons() {
+    let Some(_root) = tests::isolated_test_root(
+        "chrome_resize_tests::utility_status_text_keeps_the_same_leading_gap_as_media_buttons",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        for keyboard in [false, true] {
+            if keyboard {
+                app.tabs.open_keyboard_settings();
+            } else {
+                app.tabs.open_gallery();
+            }
+            let mut output = None;
+            for _ in 0..2 {
+                output = Some(context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(640.0, 400.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                    },
+                ));
+            }
+            let output = output.expect("frame");
+            let text = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text().starts_with(if keyboard {
+                            "Double-click a command"
+                        } else {
+                            "Open a file"
+                        }) =>
+                    {
+                        Some(text)
+                    }
+                    _ => None,
+                })
+                .expect("utility status label");
+            assert!(
+                (text.pos.x - chrome::STATUS_BUTTON_GAP).abs() <= 1.0 / density,
+                "utility text left gap: {:?}",
+                text.pos
+            );
+        }
+    }
+}

@@ -1357,13 +1357,13 @@ fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_pa
     scrub_frame(
         &mut app,
         1.0,
-        vec![egui::Event::PointerMoved(egui::pos2(4.0, 90.0))],
+        vec![egui::Event::PointerMoved(egui::pos2(4.0, 180.0))],
     );
     for (x, target) in [(204.0, 20), (304.0, 30)] {
         let actions = scrub_frame(
             &mut app,
             1.0,
-            vec![egui::Event::PointerMoved(egui::pos2(x, 90.0))],
+            vec![egui::Event::PointerMoved(egui::pos2(x, 180.0))],
         );
         assert!(
             matches!(actions.as_slice(), [UiAction::ScrubImage(path, ..)] if path == &paths[target])
@@ -1395,7 +1395,7 @@ fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_pa
         &mut app,
         1.0,
         vec![egui::Event::PointerButton {
-            pos: egui::pos2(304.0, 90.0),
+            pos: egui::pos2(304.0, 180.0),
             button: egui::PointerButton::Primary,
             pressed: false,
             modifiers: egui::Modifiers::NONE,

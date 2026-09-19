@@ -104,7 +104,7 @@ fn four_speeds_reverse_without_jumping_and_keep_fractional_motion() {
             let mut raw = origin;
             let mut expected = origin.x;
             for band in [0, 1, 2, 3, 2, 1, 0] {
-                raw.y = 650.0 - (band as f32 + 0.25) * 160.0;
+                raw.y = 650.0 - (band as f32 + 0.25) * 80.0;
                 let (drag, _) = trial.frame(vec![egui::Event::PointerMoved(raw)]);
                 assert!((drag.position.expect("held position").x - expected).abs() < 0.001);
                 for _ in 0..8 {
@@ -133,10 +133,10 @@ fn precision_release_is_independent_of_batched_events_discard_and_reading_direct
             trial.discard = true;
             let points = [
                 Pos2::new(100.0, 650.0),
-                Pos2::new(100.0, 470.0),
-                Pos2::new(180.0, 470.0),
-                Pos2::new(180.0, 150.0),
-                Pos2::new(260.0, 150.0),
+                Pos2::new(100.0, 560.0),
+                Pos2::new(180.0, 560.0),
+                Pos2::new(180.0, 400.0),
+                Pos2::new(260.0, 400.0),
                 Pos2::new(260.0, 650.0),
                 Pos2::new(300.0, 650.0),
             ];
@@ -237,6 +237,6 @@ fn diagonal_band_crossings_are_stable_when_motion_events_are_coalesced() {
             })
             .sum();
         assert!((total - split).abs() < 0.001);
-        assert!((total.abs() - 292.0).abs() < 0.001);
+        assert!((total.abs() - 176.0).abs() < 0.001);
     }
 }

@@ -658,6 +658,27 @@ fn export_progress_toolbar_geometry_uia_hover_and_lightweight_loading() {
                 assert!(!node.supports_action(egui::accesskit::Action::Focus));
                 assert!(!node.supports_action(egui::accesskit::Action::SetValue));
             }
+            let status = paint(&mut app, size, density, 7.5, vec![]);
+            let cancel = status
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Cancel export"))
+                .expect("Cancel button")
+                .1
+                .bounds()
+                .expect("bounds");
+            assert!((cancel.y1 - cancel.y0 - 20.0).abs() <= 1.0 / f64::from(density));
+            assert!(
+                ((cancel.y0 + cancel.y1) * 0.5 - 385.0 - 1.0 / f64::from(density)).abs()
+                    <= 0.51 / f64::from(density),
+                "{cancel:?}"
+            );
+            assert!(status.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "Cancel")));
             assert_eq!(app.edits, before);
             assert_eq!(app.tabs.active().expect("tab").id, tab);
             assert_eq!(

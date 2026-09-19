@@ -23,6 +23,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         Some(path)
     }
 
+    pub(super) fn export_notice_open_target(&self, shown: Instant) -> Option<&Path> {
+        let target = self.export_notice_target(shown)?;
+        // Source Save and rename/move notices already show this file. Compare the
+        // current document as well as a held image during an asynchronous switch.
+        (self.path.as_deref() != Some(target)
+            && self.displayed_image_path().map(PathBuf::as_path) != Some(target))
+        .then_some(target)
+    }
+
     /// Keep the full notice for its tooltip and reveal identity; omit only the
     /// exact destination from the compact status label.
     pub(super) fn compact_export_notice(&self, message: &str) -> Option<String> {
@@ -152,6 +161,23 @@ mod tests {
                 paint(&app, width, vec![button(true)]);
                 let (_, actions) = paint(&app, width, vec![button(false)]);
                 assert!(actions == vec![UiAction::RevealExport(shown)]);
+                let middle = |pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Middle,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                paint(&app, width, vec![middle(true)]);
+                let (_, actions) = paint(&app, width, vec![middle(false)]);
+                assert!(actions == vec![UiAction::OpenExport(shown)]);
+                let source = app.path.replace(target.clone());
+                paint(&app, width, vec![middle(true)]);
+                let (_, actions) = paint(&app, width, vec![middle(false)]);
+                assert!(
+                    actions.is_empty(),
+                    "current document never opens a duplicate"
+                );
+                app.path = source;
                 let (_, actions) = paint(
                     &app,
                     width,
@@ -170,6 +196,50 @@ mod tests {
                 // not open Explorer or change the operator's foreground window.
             }
         }
+    }
+
+    #[test]
+    fn middle_click_export_notice_opens_owned_output_in_a_new_tab() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "export_notice::tests::middle_click_export_notice_opens_owned_output_in_a_new_tab",
+        ) else {
+            return;
+        };
+        let target = root.join("result.bmp");
+        let mut bytes = vec![0_u8; 62];
+        bytes[..2].copy_from_slice(b"BM");
+        bytes[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bytes[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bytes[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bytes[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bytes[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bytes[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        std::fs::write(&target, &bytes).expect("owned bitmap");
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let source = root.join("source.png");
+        let original = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source);
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(original)
+            .or_default()
+            .push(EditOperation::FlipHorizontal, MediaKind::Image);
+        let count = app.tabs.len();
+        let shown = notice(&mut app, &target);
+        app.handle_ui_action(UiAction::OpenExport(shown));
+        assert_eq!(app.tabs.len(), count + 1);
+        let opened = app.tabs.active().expect("opened tab");
+        assert_ne!(opened.id, original);
+        assert_eq!(
+            opened.target.current_path(),
+            canonical_shell_path(&target).expect("path")
+        );
+        assert!(app.edits.get(&original).expect("old edits").is_dirty());
+        assert_eq!(std::fs::read(&target).expect("output preserved"), bytes);
+        let shown = notice(&mut app, &target);
+        app.handle_ui_action(UiAction::OpenExport(shown));
+        assert_eq!(app.tabs.len(), count + 1, "current path stays in this tab");
     }
 
     #[test]
@@ -209,7 +279,10 @@ mod tests {
             }
             assert!(app.export_notice_target(shown).is_none());
             assert!(link(&paint(&app, 640.0, vec![]).0).is_none());
+            let count = app.tabs.len();
             app.handle_ui_action(UiAction::RevealExport(shown));
+            app.handle_ui_action(UiAction::OpenExport(shown));
+            assert_eq!(app.tabs.len(), count);
             app.palette_open = false;
             app.grid_open = false;
             app.export_error = None;

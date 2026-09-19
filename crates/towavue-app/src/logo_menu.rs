@@ -22,6 +22,7 @@ struct State {
     last_frame: u64,
     suppress: bool,
     section: Option<Section>,
+    keyboard_origin: bool,
 }
 
 fn state_id() -> egui::Id {
@@ -79,6 +80,7 @@ pub(super) fn show_with_recent(
     );
     let context = ui.ctx();
     let popup = egui::Popup::default_response_id(&response);
+    let was_open = egui::Popup::is_id_open(context, popup);
     let mut state = context
         .data(|data| data.get_temp::<State>(state_id()))
         .unwrap_or_default();
@@ -118,7 +120,7 @@ pub(super) fn show_with_recent(
         ui.input_mut(|input| {
             input.consume_key(egui::Modifiers::NONE, egui::Key::Escape);
         });
-        response.request_focus();
+        response.surrender_focus();
     }
     let mut open = None;
     let mut pointer_event = false;
@@ -133,7 +135,7 @@ pub(super) fn show_with_recent(
                     if context.dragged_id() == Some(response.id) {
                         context.stop_dragging();
                     }
-                    response.request_focus();
+                    response.surrender_focus();
                 }
             }
             egui::Event::PointerButton {
@@ -159,9 +161,10 @@ pub(super) fn show_with_recent(
                         density: context.pixels_per_point(),
                         crossed: false,
                     });
+                    state.keyboard_origin = false;
                     state.claimed = Some(frame);
                     state.suppress = false;
-                    response.request_focus();
+                    response.surrender_focus();
                 } else if !pressed && let Some(mut drag) = state.drag.take() {
                     drag.crossed |= (*pos - drag.origin).length_sq() >= 64.0;
                     state.suppress |= drag.crossed;
@@ -207,7 +210,9 @@ pub(super) fn show_with_recent(
         state.section = None;
     }
     let section = state.section;
-    context.data_mut(|data| data.insert_temp(state_id(), state));
+    if response.clicked() && !pointer_event && !suppress {
+        state.keyboard_origin = true;
+    }
     let shift = context.animate_value_with_time(
         response.id.with("shaft-shift"),
         if selected.is_some() { 1.0 } else { 0.0 },
@@ -260,6 +265,26 @@ pub(super) fn show_with_recent(
         })
         .inner
     });
+    // Only explicit keyboard/accessibility entry returns focus to the opener.
+    // Pointer gestures already paint held/open feedback without taking key focus.
+    if was_open
+        && !egui::Popup::is_id_open(context, egui::Popup::default_response_id(&response))
+        && !egui::Popup::is_any_open(context)
+        && state.keyboard_origin
+        && (events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key {
+                    key: egui::Key::Escape,
+                    pressed: true,
+                    ..
+                }
+            )
+        }) || inner.as_ref().is_some_and(|inner| inner.inner.is_some()))
+    {
+        response.request_focus();
+    }
+    context.data_mut(|data| data.insert_temp(state_id(), state));
     egui::InnerResponse {
         response,
         inner: inner.map(|inner| inner.inner),

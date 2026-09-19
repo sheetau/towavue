@@ -27,7 +27,7 @@ pub(crate) fn popup(
     response: &egui::Response,
     close: &egui::Response,
     contents: impl FnOnce(&mut egui::Ui) -> Option<CommandId>,
-) -> Option<CommandId> {
+) -> Option<(CommandId, Option<egui::Id>)> {
     let context = ui.ctx();
     let popup_id = egui::Popup::default_response_id(response);
     let was_open = egui::Popup::is_id_open(context, popup_id);
@@ -69,6 +69,8 @@ pub(crate) fn popup(
         });
         context.data_mut(|data| data.insert_temp(anchor_id, origin.id));
     } else if response.secondary_clicked() {
+        response.surrender_focus();
+        close.surrender_focus();
         context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
     }
     let keyboard_origin = context.data(|data| data.get_temp::<egui::Id>(anchor_id));
@@ -88,13 +90,15 @@ pub(crate) fn popup(
     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
     let chosen = popup.show(contents).and_then(|inner| inner.inner);
     if (was_open || origin.is_some()) && !egui::Popup::is_id_open(context, popup_id) {
-        if (escape || chosen.is_some()) && !egui::Popup::is_any_open(context) {
-            context
-                .memory_mut(|memory| memory.request_focus(keyboard_origin.unwrap_or(response.id)));
+        if (escape || chosen.is_some())
+            && !egui::Popup::is_any_open(context)
+            && let Some(origin) = keyboard_origin
+        {
+            context.memory_mut(|memory| memory.request_focus(origin));
         }
         context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
     }
-    chosen
+    chosen.map(|command| (command, keyboard_origin))
 }
 
 pub fn close_targets(tabs: &TabSet, target: TabId, command: CommandId) -> Vec<TabId> {
@@ -471,12 +475,12 @@ mod tests {
         frame(vec![]);
         let (_, actions) = frame(vec![key(egui::Key::Enter)]);
         assert!(
-            actions == [crate::UiAction::TabCommand(target, CopyFilePath)],
+            actions == [crate::UiAction::TabCommand(target, CopyFilePath, None)],
             "keyboard targets the contextual tab: {:?}",
             actions
                 .iter()
                 .filter_map(|action| match action {
-                    crate::UiAction::TabCommand(id, command) => Some((*id, *command)),
+                    crate::UiAction::TabCommand(id, command, _) => Some((*id, *command)),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

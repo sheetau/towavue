@@ -258,7 +258,7 @@ enum UiAction {
     BeginTrackDrag(u64, egui::Pos2, egui::Vec2, bool),
     NativeCaption(CaptionAction),
     ActivateTab(TabId),
-    TabCommand(TabId, CommandId),
+    TabCommand(TabId, CommandId, Option<egui::Id>),
     PreviewTransport(TabId, u64, PathBuf, CommandId),
     PreviewSeek(TabId, u64, PathBuf, MediaTime),
     PreviewImageSeek(TabId, u64, PathBuf, PathBuf),
@@ -5116,7 +5116,6 @@ where
                     ui.spacing_mut().item_spacing.x = (2.0 * density).round() / density;
                     ui.add_space(ui.spacing().item_spacing.x);
                     ui.visuals_mut().widgets.inactive.weak_bg_fill = chrome::BACKGROUND;
-                    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     let mut recent = menu::MenuData {
                         folders: &self.recent_folders,
                         files: &self.recent_paths,
@@ -5147,16 +5146,7 @@ where
                         menu.response.request_focus();
                     }
                     if let Some(Some(command)) = menu.inner {
-                        menu.response.request_focus();
                         actions.push(UiAction::Command(command));
-                    } else if escape
-                        && menu.inner.is_some()
-                        && !egui::Popup::is_id_open(
-                            ui.ctx(),
-                            egui::Popup::default_response_id(&menu.response),
-                        )
-                    {
-                        menu.response.request_focus();
                     }
                     menu.response.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -5277,7 +5267,7 @@ where
                                             }
                                         }
                                         drag_layout.register(id, &response);
-                                        if let Some(command) =
+                                        if let Some((command, focus)) =
                                             tab_menu::popup(&tab_ui, &response, &close, |ui| {
                                                 tab_menu::show(
                                                     ui,
@@ -5289,7 +5279,7 @@ where
                                                 )
                                             })
                                         {
-                                            actions.push(UiAction::TabCommand(id, command));
+                                            actions.push(UiAction::TabCommand(id, command, focus));
                                         }
                                         continue;
                                     }
@@ -5473,7 +5463,7 @@ where
                                     if !self.modal_input_blocked()
                                         && !self.palette_open
                                         && !self.grid_open
-                                        && let Some(command) =
+                                        && let Some((command, focus)) =
                                             tab_menu::popup(&tab_ui, &response, &close, |ui| {
                                                 tab_menu::show(
                                                     ui,
@@ -5485,7 +5475,7 @@ where
                                                 )
                                             })
                                     {
-                                        actions.push(UiAction::TabCommand(tab.id, command));
+                                        actions.push(UiAction::TabCommand(tab.id, command, focus));
                                     }
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
@@ -6824,11 +6814,7 @@ where
             UiAction::PreviewSeek(id, instance, path, target) => {
                 self.handle_preview_seek(id, instance, &path, target)
             }
-            UiAction::TabCommand(id, command) => {
-                let focus = self
-                    .ui_context
-                    .as_ref()
-                    .and_then(|context| context.memory(|memory| memory.focused()));
+            UiAction::TabCommand(id, command, focus) => {
                 self.dispatch_tab_command(id, command);
                 if let Some(context) = &self.ui_context
                     && let Some(focus) = focus

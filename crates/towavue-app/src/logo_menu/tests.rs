@@ -756,6 +756,11 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
             .platform_output
             .accesskit_update
             .expect("tree");
+        assert_ne!(
+            tree.focus,
+            node(&tree, "towavue menu"),
+            "cancelled pointer gesture leaves no logo focus: {mode}"
+        );
         frame(
             &mut app,
             size,
@@ -1306,5 +1311,137 @@ fn choice_submenus_from_logo_click_and_drag_apply_once_without_inheriting_parent
                 assert_eq!(app.folder_navigation_loop, edit);
             }
         }
+    }
+}
+
+#[test]
+fn pointer_menu_dismissal_does_not_leave_logo_focused_or_highlighted() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::pointer_menu_dismissal_does_not_leave_logo_focused_or_highlighted",
+    ) else {
+        return;
+    };
+    for mode in 0..3 {
+        let (mut app, origin) = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        let size = egui::vec2(640.0, 480.0);
+        let initial = frame(&mut app, size, vec![egui::Event::PointerGone]);
+        let tree = initial
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let logo = node(tree, "towavue menu");
+        let artwork = |output: &egui::FullOutput| -> Vec<egui::Shape> {
+            output
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape,
+                egui::Shape::Path(path) if path.points.iter().all(|p| p.x < 30.0 && p.y < 32.0))
+                })
+                .map(|shape| shape.shape.clone())
+                .collect()
+        };
+        let idle = artwork(&initial);
+        assert!(!idle.is_empty());
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        frame(&mut app, size, vec![pointer(origin, false)]);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        assert!(egui::Popup::is_any_open(&context));
+        match mode {
+            0 => {
+                frame(&mut app, size, vec![key(egui::Key::Escape)]);
+            }
+            1 => {
+                frame(&mut app, size, vec![pointer(origin, true)]);
+                frame(&mut app, size, vec![pointer(origin, false)]);
+            }
+            _ => {
+                let outside = egui::pos2(620.0, 450.0);
+                frame(
+                    &mut app,
+                    size,
+                    vec![egui::Event::PointerMoved(outside), pointer(outside, true)],
+                );
+                frame(&mut app, size, vec![pointer(outside, false)]);
+            }
+        }
+        frame(&mut app, size, vec![egui::Event::PointerGone]);
+        let output = frame(&mut app, size, vec![]);
+        assert!(!egui::Popup::is_any_open(&context), "dismissal {mode}");
+        assert_ne!(
+            output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .focus,
+            logo,
+            "pointer dismissal {mode} must not leave keyboard focus on the logo"
+        );
+        assert_eq!(
+            artwork(&output),
+            idle,
+            "logo returns to its idle colors: {mode}"
+        );
+    }
+}
+
+#[test]
+fn keyboard_logo_entry_restores_focus_after_escape() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::keyboard_logo_entry_restores_focus_after_escape",
+    ) else {
+        return;
+    };
+    for accessible in [false, true] {
+        let (mut app, _) = setup(&root);
+        let size = egui::vec2(640.0, 480.0);
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("tree");
+        let logo = node(&tree, "towavue menu");
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: logo,
+                    data: None,
+                },
+            )],
+        );
+        frame(&mut app, size, vec![]);
+        frame(
+            &mut app,
+            size,
+            vec![if accessible {
+                access(logo, None)
+            } else {
+                key(egui::Key::Enter)
+            }],
+        );
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        assert!(egui::Popup::is_any_open(
+            app.ui_context.as_ref().expect("context")
+        ));
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("returned tree");
+        assert_eq!(tree.focus, logo);
     }
 }

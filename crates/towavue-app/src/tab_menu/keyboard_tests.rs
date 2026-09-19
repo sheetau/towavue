@@ -354,7 +354,15 @@ fn tab_context_right_click_keeps_pointer_anchor_and_keyboard_navigation_tracks_r
         &mut app,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
-    assert_eq!(settle(&mut app).focus, origin);
+    assert_ne!(
+        settle(&mut app).focus,
+        origin,
+        "pointer-opened menu does not focus its tab on Escape"
+    );
+    tree(
+        &mut app,
+        vec![action(origin, egui::accesskit::Action::Focus)],
+    );
     let target = app.tabs.tabs()[0].id;
     app.tabs.reorder(target, 3);
     settle(&mut app);
@@ -641,4 +649,108 @@ fn tab_context_mute_targets_unopened_media_and_disables_unrelated_tabs() {
     app.tabs.close(audio);
     app.dispatch_tab_command(audio, CommandId::ToggleMute);
     assert_eq!(app.tab_mute_state(audio), None, "stale target is harmless");
+}
+
+#[test]
+fn pointer_tab_command_and_window_reactivation_do_not_restore_tab_focus() {
+    let Some(root) = tests::isolated_test_root(
+        "tab_menu::keyboard_tests::pointer_tab_command_and_window_reactivation_do_not_restore_tab_focus",
+    ) else {
+        return;
+    };
+    for command in [CommandId::CopyFilePath, CommandId::RevealFile] {
+        let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        let target = app.tabs.tabs()[0].id;
+        let initial = settle(&mut app);
+        let origin = node(&initial, "first.png");
+        let center = |node: &egui::accesskit::Node| {
+            let bounds = node.bounds().expect("bounds");
+            egui::pos2(
+                (bounds.x0 + bounds.x1) as f32 * 0.5,
+                (bounds.y0 + bounds.y1) as f32 * 0.5,
+            )
+        };
+        let pos = center(
+            &initial
+                .nodes
+                .iter()
+                .find(|(id, _)| *id == origin)
+                .expect("tab")
+                .1,
+        );
+        let pointer = |pos, button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        tree(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(pos),
+                pointer(pos, egui::PointerButton::Secondary, true),
+            ],
+        );
+        tree(
+            &mut app,
+            vec![pointer(pos, egui::PointerButton::Secondary, false)],
+        );
+        let menu = settle(&mut app);
+        let title = command_definitions()
+            .iter()
+            .find(|entry| entry.id == command)
+            .expect("command")
+            .title;
+        let pos = center(
+            &menu
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label().is_some_and(|label| label.starts_with(title)))
+                .expect("menu action")
+                .1,
+        );
+        tree(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(pos),
+                pointer(pos, egui::PointerButton::Primary, true),
+            ],
+        );
+        // Collect the exact action without opening Explorer or writing the native clipboard.
+        let mut actions = Vec::new();
+        let _ = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 480.0),
+                )),
+                events: vec![pointer(pos, egui::PointerButton::Primary, false)],
+                ..Default::default()
+            },
+            |ui| app.draw_ui(ui, &mut actions),
+        );
+        assert!(actions == [UiAction::TabCommand(target, command, None)]);
+        if command == CommandId::CopyFilePath {
+            // This only queues egui output; no native clipboard consumer runs here.
+            app.handle_ui_action(actions.remove(0));
+        }
+        assert!(!egui::Popup::is_any_open(&context));
+        tree(
+            &mut app,
+            vec![egui::Event::WindowFocused(false), egui::Event::PointerGone],
+        );
+        tree(&mut app, vec![egui::Event::WindowFocused(true)]);
+        let returned = settle(&mut app);
+        assert_ne!(returned.focus, origin);
+        assert_eq!(
+            app.tabs.active().expect("active").target.current_path(),
+            root.join("third.png")
+        );
+        assert!(
+            context
+                .data(|data| data.get_temp::<(TabId, egui::Id)>("tab-menu-return-focus".into()))
+                .is_none()
+        );
+    }
 }

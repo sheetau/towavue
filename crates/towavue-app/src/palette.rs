@@ -869,6 +869,9 @@ mod tests {
             context.global_style_mut(|style| {
                 crate::chrome::style(style);
                 style.animation_time = 0.0;
+                // Exercise list virtualization/input independently of the
+                // owner-deferred pinned-egui tooltip hit-occlusion defect.
+                style.interaction.tooltip_delay = 60.0;
             });
             let mut palette = CommandPalette::default();
             palette.open_files(false);
@@ -959,18 +962,34 @@ mod tests {
                     "selected row is visible: {center:?} in {panel:?}"
                 );
             };
-            verify(
-                &open_frame_at(
-                    &context,
-                    &mut palette,
-                    sources(&recent, &result),
-                    vec![],
-                    layout,
-                )
-                .0,
-                &result.paths[0],
+            let initial = open_frame_at(
+                &context,
+                &mut palette,
+                sources(&recent, &result),
+                vec![],
+                layout,
+            )
+            .0;
+            verify(&initial, &result.paths[0]);
+            // The preview reserves space above the list. Target a mounted row,
+            // not a fixed Y coordinate that can land on that preview instead.
+            let row = initial
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find_map(|(_, node)| {
+                    (node.label() == Some(result.paths[0].to_string_lossy().as_ref()))
+                        .then(|| node.bounds())
+                        .flatten()
+                })
+                .expect("initial result bounds");
+            let pointer = egui::pos2(
+                ((row.x0 + row.x1) / 2.0) as f32,
+                ((row.y0 + row.y1) / 2.0) as f32,
             );
-            let pointer = egui::pos2(size.x * 0.5, 120.0);
             open_frame_at(
                 &context,
                 &mut palette,
@@ -1043,10 +1062,25 @@ mod tests {
                         (rect.x0 + rect.x1) as f32 * 0.5,
                         (rect.y0 + rect.y1) as f32 * 0.5,
                     );
-                    (point.y > 100.0 && point.y < size.y - 12.0)
+                    let name = Path::new(label).file_name()?.to_str()?;
+                    let (_, clip) = picker_text(&scrolled, name)?;
+                    // Virtualized overscan rows also have accessibility nodes;
+                    // their centers can be outside the actual scroll viewport.
+                    (clip.contains(point) && point.y < size.y - 12.0)
                         .then(|| (PathBuf::from(label), point))
                 })
                 .expect("visible scrolled row");
+            // Settle the hovered row's inline remove control before exercising
+            // its ordinary click. Batched move/press is a separate row test.
+            for _ in 0..2 {
+                open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources(&recent, &result),
+                    vec![egui::Event::PointerMoved(point)],
+                    layout,
+                );
+            }
             let button = |pressed| egui::Event::PointerButton {
                 pos: point,
                 button: egui::PointerButton::Primary,

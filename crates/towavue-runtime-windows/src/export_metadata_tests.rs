@@ -406,7 +406,7 @@ fn metadata_composes_with_timeline_normalization_worker_and_selected_stream_over
     ];
     let mut options = ExportOptions {
         audio: AudioExportOptions {
-            normalize_peak: true,
+            normalization: crate::AudioNormalization::Peak,
             channels: AudioChannels::Stereo,
         },
         ..Default::default()

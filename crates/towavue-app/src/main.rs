@@ -8409,7 +8409,7 @@ where
                         &options,
                         self.media_duration,
                     ),
-                    analyzing_audio: options.audio.normalize_peak,
+                    analyzing_audio: options.audio.normalization.is_enabled(),
                     job: job.into(),
                     tab: id,
                     request,
@@ -20708,7 +20708,7 @@ mod tests {
         let saved = history.clone();
         app.export_paths.insert(original, second.clone());
         let options = AudioExportOptions {
-            normalize_peak: true,
+            normalization: towavue_runtime_windows::AudioNormalization::Peak,
             ..Default::default()
         };
         app.audio_export_settings.insert(original, options);

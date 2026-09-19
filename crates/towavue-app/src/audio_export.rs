@@ -1,5 +1,5 @@
 use crate::*;
-use towavue_runtime_windows::AudioChannels;
+use towavue_runtime_windows::{AudioChannels, AudioNormalization, LoudnessTarget};
 
 pub(super) struct AudioExportDialog {
     token: u64,
@@ -13,19 +13,54 @@ pub(super) struct AudioExportDialog {
 }
 
 pub(super) fn summary(options: AudioExportOptions) -> String {
+    let normalization = match options.normalization {
+        AudioNormalization::Off => "Normalization off".into(),
+        AudioNormalization::Peak => "Peak -1 dBFS".into(),
+        AudioNormalization::Loudness(target) => format!(
+            "{:.1} LUFS / max {:.1} dBTP",
+            f64::from(target.integrated_tenths) / 10.0,
+            f64::from(target.true_peak_tenths) / 10.0
+        ),
+    };
     format!(
-        "Peak {} / {}",
-        if options.normalize_peak {
-            "-1 dBFS"
-        } else {
-            "off"
-        },
+        "{normalization} / {}",
         match options.channels {
             AudioChannels::Keep => "Keep channels",
             AudioChannels::Mono => "Mono",
             AudioChannels::Stereo => "Stereo",
         }
     )
+}
+
+fn target_control(
+    ui: &mut egui::Ui,
+    value: &mut i16,
+    range: std::ops::RangeInclusive<i16>,
+    label: &str,
+) -> egui::Response {
+    let mut number = f64::from(*value) / 10.0;
+    let response = ui
+        .horizontal(|ui| {
+            let label = ui.label(label);
+            ui.add(
+                egui::DragValue::new(&mut number)
+                    .range(f64::from(*range.start()) / 10.0..=f64::from(*range.end()) / 10.0)
+                    .speed(0.1)
+                    .fixed_decimals(1)
+                    .custom_parser(|text| {
+                        text.trim()
+                            .parse::<f64>()
+                            .ok()
+                            .filter(|value| value.is_finite())
+                    }),
+            )
+            .labelled_by(label.id)
+        })
+        .inner;
+    if number.is_finite() {
+        *value = ((number * 10.0).round() as i16).clamp(*range.start(), *range.end());
+    }
+    response
 }
 
 impl AudioExportDialog {
@@ -44,9 +79,21 @@ impl AudioExportDialog {
         };
         let modal = chrome::modal(context, "audio-export-options".into(), false).show(context, |ui| {
             chrome::modal_body(ui, 340.0, "Audio export options", &["Apply options", "Cancel"], |ui| {
-                let response = ui.checkbox(&mut self.options.normalize_peak, "Normalize peak (-1 dBFS)").on_hover_cursor(egui::CursorIcon::PointingHand);
-                if self.first_frame { response.request_focus(); self.first_frame = false; }
-                reveal_focus(&response);
+                ui.label("Normalization");
+                for (value, label) in [
+                    (AudioNormalization::Off, "Off"),
+                    (AudioNormalization::Peak, "Peak (-1 dBFS)"),
+                    (AudioNormalization::Loudness(match self.options.normalization { AudioNormalization::Loudness(target) => target, _ => LoudnessTarget::default() }), "Loudness"),
+                ] {
+                    let response = ui.radio_value(&mut self.options.normalization, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if self.first_frame { response.request_focus(); self.first_frame = false; }
+                    reveal_focus(&response);
+                }
+                if let AudioNormalization::Loudness(target) = &mut self.options.normalization {
+                    reveal_focus(&target_control(ui, &mut target.integrated_tenths, -700..=-50, "Integrated loudness (LUFS)"));
+                    reveal_focus(&target_control(ui, &mut target.true_peak_tenths, -90..=0, "Maximum true peak (dBTP)"));
+                    ui.label("Encoded audio is checked within 0.1 LU of the target and below the true-peak ceiling. Correction can require additional passes. Unmeasurable audio or an unmet target fails without replacing the destination.");
+                }
                 ui.label("Output channels");
                 for (value, label) in [(AudioChannels::Keep, "Keep source channels"), (AudioChannels::Mono, "Mono"), (AudioChannels::Stereo, "Stereo")] {
                     let response = ui.radio_value(&mut self.options.channels, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -54,7 +101,7 @@ impl AudioExportDialog {
                 }
                 crate::chrome::separator(ui);
                 ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
-                ui.label("Peak normalization analyzes edited audio first, then applies one common gain. It can override overall volume edits, but preserves relative dynamics and silence. Not LUFS or true-peak; lossy encoding may change peaks.");
+                ui.label("Peak applies one common gain to reach -1 dBFS sample peak; lossy encoding may change peaks. Loudness analyzes edited audio after channel conversion, preserves dynamics when gain alone fits, and otherwise limits peaks without imposing a fixed loudness range. Normalization can override overall volume edits.");
                 ui.label("Mono averages left/right; Stereo duplicates mono. Conversion requires a mono or stereo input; use Keep for multichannel audio. The source must contain audio.");
                 ui.label("Settings last while this file stays in this tab. Apply does not export a file.");
             });

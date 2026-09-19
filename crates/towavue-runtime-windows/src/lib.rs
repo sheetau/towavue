@@ -80,11 +80,11 @@ pub use dialog::{
     confirm_file_delete, cursor_position_in_window, pick_path, show_prompt,
 };
 pub use export::{
-    AudioChannels, AudioExportOptions, ExportDialogRequest, ExportError, ExportEvent, ExportJob,
-    ExportOptions, ExportOutcome, ExportOutput, ExportRequest, ImageMetadataFormat,
-    MetadataExportOptions, MetadataField, MetadataSourceValue, VideoExportQuality,
-    VideoFrameSnapshot, export_media, export_media_with_options, export_media_with_output,
-    export_video_frame, read_export_metadata,
+    AudioChannels, AudioExportOptions, AudioNormalization, ExportDialogRequest, ExportError,
+    ExportEvent, ExportJob, ExportOptions, ExportOutcome, ExportOutput, ExportRequest,
+    ImageMetadataFormat, LoudnessTarget, MetadataExportOptions, MetadataField, MetadataSourceValue,
+    VideoExportQuality, VideoFrameSnapshot, export_media, export_media_with_options,
+    export_media_with_output, export_video_frame, read_export_metadata,
 };
 pub use file_details::FileDetails;
 pub use file_operation::{

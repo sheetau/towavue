@@ -20,7 +20,11 @@ fn active(
 ) -> ActiveExport {
     let request = request(path, kind);
     let mut options = ExportOptions::default();
-    options.audio.normalize_peak = normalized;
+    options.audio.normalization = if normalized {
+        towavue_runtime_windows::AudioNormalization::Peak
+    } else {
+        towavue_runtime_windows::AudioNormalization::Off
+    };
     ActiveExport {
         progress: ExportProgress::new(&request, &options, duration),
         // Rejected source alias provides an owned, non-writing worker for UI-only state tests.
@@ -507,7 +511,11 @@ fn ordinary_rate_analysis_is_indeterminate_until_encoding() {
         request.kind = kind;
         for normalized in [false, true] {
             let mut options = ExportOptions::default();
-            options.audio.normalize_peak = normalized;
+            options.audio.normalization = if normalized {
+                towavue_runtime_windows::AudioNormalization::Peak
+            } else {
+                towavue_runtime_windows::AudioNormalization::Off
+            };
             for rate in [0.25, 4.0] {
                 request.operations = vec![EditOperation::SetRate(rate)];
                 let progress =
@@ -539,7 +547,11 @@ fn export_progress_uses_snapshot_trim_timeline_rate_and_two_pass_estimates() {
     ];
     for normalized in [false, true] {
         let mut options = ExportOptions::default();
-        options.audio.normalize_peak = normalized;
+        options.audio.normalization = if normalized {
+            towavue_runtime_windows::AudioNormalization::Peak
+        } else {
+            towavue_runtime_windows::AudioNormalization::Off
+        };
         options.output = ExportOutput::AudioOnly;
         let progress = ExportProgress::new(&request, &options, Some(Duration::from_secs(20)));
         assert_eq!(progress.duration, Some(Duration::from_secs(8)));
@@ -763,7 +775,7 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     app.audio_export_settings.insert(
         tab,
         AudioExportOptions {
-            normalize_peak: true,
+            normalization: towavue_runtime_windows::AudioNormalization::Peak,
             ..Default::default()
         },
     );
@@ -837,4 +849,27 @@ fn normalized_save(root: &Path, source: &Path, output: ExportOutput) {
     let shown = app.status_message.as_ref().expect("success notice").1;
     assert_eq!(app.export_notice_target(shown), Some(target.as_path()));
     assert_eq!(std::fs::read(source).expect("source unchanged"), original);
+}
+
+#[test]
+fn loudness_progress_stays_indeterminate_through_encoding_verification_and_retries() {
+    let request = ExportRequest {
+        source: "source.wav".into(),
+        target: "target.wav".into(),
+        kind: MediaKind::Audio,
+        operations: vec![],
+        hardware_encode: false,
+    };
+    let mut options = ExportOptions::default();
+    options.audio.normalization =
+        towavue_runtime_windows::AudioNormalization::Loudness(Default::default());
+    let progress = ExportProgress::new(&request, &options, Some(Duration::from_secs(10)));
+    for analyzing in [true, false, true, false, true] {
+        for second in [0, 1, 5, 10] {
+            assert_eq!(
+                progress.fraction(Duration::from_secs(second), analyzing),
+                None
+            );
+        }
+    }
 }

@@ -182,7 +182,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         &options,
                         self.media_duration,
                     ),
-                    analyzing_audio: options.audio.normalize_peak,
+                    analyzing_audio: options.audio.normalization.is_enabled(),
                     request,
                     options,
                     encoded: Duration::ZERO,

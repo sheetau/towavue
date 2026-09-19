@@ -1033,7 +1033,7 @@ mod tests {
                 app.audio_export_settings.insert(
                     audio,
                     AudioExportOptions {
-                        normalize_peak: true,
+                        normalization: towavue_runtime_windows::AudioNormalization::Peak,
                         ..Default::default()
                     },
                 );
@@ -1107,7 +1107,7 @@ mod tests {
                 app.audio_export_settings.insert(
                     audio,
                     AudioExportOptions {
-                        normalize_peak: true,
+                        normalization: towavue_runtime_windows::AudioNormalization::Peak,
                         ..Default::default()
                     },
                 );

@@ -111,7 +111,7 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         .with_file_name("unsaved-target.mp4");
     app.export_paths.insert(id, export.clone());
     let audio_options = AudioExportOptions {
-        normalize_peak: true,
+        normalization: towavue_runtime_windows::AudioNormalization::Peak,
         channels: towavue_runtime_windows::AudioChannels::Mono,
     };
     let mut metadata_options = MetadataExportOptions::default();

@@ -258,6 +258,7 @@ pub(super) struct ExportProgress {
     started: Instant,
     duration: Option<Duration>,
     normalized: bool,
+    verifies_loudness: bool,
     counts_audio_samples: bool,
     animation_start: Option<f64>,
     stopped_at: Option<f64>,
@@ -290,7 +291,11 @@ impl ExportProgress {
         Self {
             started: Instant::now(),
             duration,
-            normalized: options.audio.normalize_peak,
+            normalized: options.audio.normalization.is_enabled(),
+            verifies_loudness: matches!(
+                options.audio.normalization,
+                towavue_runtime_windows::AudioNormalization::Loudness(_)
+            ),
             counts_audio_samples: request.kind != MediaKind::Image
                 && towavue_core::EditState::from_operations(&request.operations).rate != 1.0
                 && !request
@@ -305,7 +310,9 @@ impl ExportProgress {
     fn fraction(&self, time: Duration, analyzing: bool) -> Option<f32> {
         // No output timestamp yet: source probing, preroll and encoder startup
         // have no measurable fraction, even when the output duration is known.
-        if time.is_zero() {
+        // Loudness may re-encode after measuring the compressed candidate; the
+        // number of passes is unknown until its constraints are met.
+        if self.verifies_loudness || time.is_zero() {
             return None;
         }
         // Counting precedes tempo; normalization, if enabled, then restarts on the
@@ -520,6 +527,12 @@ pub(super) fn draw(
             "Cancelling export"
         } else if export.encoded.is_zero() {
             preparation_label(export.analyzing_audio)
+        } else if progress.verifies_loudness {
+            if export.analyzing_audio {
+                "Analyzing and verifying audio"
+            } else {
+                "Encoding audio to meet loudness targets"
+            }
         } else if export.analyzing_audio {
             "Analyzing audio (estimated progress)"
         } else {

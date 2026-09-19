@@ -29,7 +29,9 @@ mod gif_animation;
 
 #[path = "export_audio_options.rs"]
 mod audio_options;
-pub use audio_options::{AudioChannels, AudioExportOptions};
+#[path = "export_loudness.rs"]
+mod loudness;
+pub use audio_options::{AudioChannels, AudioExportOptions, AudioNormalization, LoudnessTarget};
 
 #[path = "export_frame.rs"]
 pub(crate) mod frame;
@@ -454,7 +456,7 @@ fn export_audio_cancellable(
         ));
     }
     let source_stamp = (request.kind == MediaKind::Video
-        || options.normalize_peak
+        || options.normalization.is_enabled()
         || (request.kind != MediaKind::Image && state.rate != 1.0)
         || image_metadata
         || png_source
@@ -789,7 +791,7 @@ fn export_audio_cancellable(
             })?,
         );
     }
-    if options.normalize_peak {
+    if options.normalization == AudioNormalization::Peak {
         let gain = audio_options::analyze(
             &staged_request,
             &streams,
@@ -805,28 +807,25 @@ fn export_audio_cancellable(
             .audio_post_filters
             .push(format!("volume={gain:.17e}:precision=double"));
     }
-    if request.hardware_encode
-        && streams.video_encoding.is_none()
-        && hardware_encode_supported_target(request)
-    {
-        let hardware = run_ffmpeg(
+    let mut loudness = if let AudioNormalization::Loudness(target) = options.normalization {
+        let plan = loudness::Plan::analyze(
+            target,
+            &staged_request,
+            &streams,
+            &staging,
             &executable,
-            staging.arguments(&staged_request, true, &streams)?,
             cancelled,
-            progress,
+            analyzing,
         )?;
-        if hardware.status.success() {
-            if let Some(stamp) = &source_stamp {
-                stamp.verify(&request.source)?;
-            }
-            check_cancelled(cancelled)?;
-            metadata.verify(&staging.output)?;
-            staging.publish(&request.target, cancelled, trimmed_kind)?;
-            return Ok(ExportOutcome {
-                used_hardware_encoder: true,
-            });
-        }
-    }
+        source_stamp
+            .as_ref()
+            .expect("normalization source stamp")
+            .verify(&request.source)?;
+        Some(plan)
+    } else {
+        None
+    };
+    let base_audio_filters = streams.audio_post_filters.clone();
     let png_input = |writer: &mut dyn Write, stopped: &AtomicBool| {
         let result = crate::image::apng::write_frames(&request.source, writer, &|| {
             !cancelled.load(Ordering::Relaxed) && !stopped.load(Ordering::Relaxed)
@@ -838,21 +837,56 @@ fn export_audio_cancellable(
             ))
         })
     };
-    let output = run_ffmpeg_with_input(
-        &executable,
-        staging.arguments(&staged_request, false, &streams)?,
-        cancelled,
-        progress,
-        streams.png_image_sequence.then_some(&png_input),
-    )?;
-    if !output.status.success() {
-        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(ExportError::Failed(if message.is_empty() {
-            format!("process exited with {}", output.status)
-        } else {
-            message
-        }));
-    }
+    let mut attempt = 0;
+    let used_hardware_encoder = loop {
+        streams.audio_post_filters = base_audio_filters.clone();
+        if let Some(plan) = &loudness {
+            streams.audio_post_filters.extend(plan.filters()?);
+        }
+        check_cancelled(cancelled)?;
+        progress(Duration::ZERO);
+        let mut hardware_succeeded = false;
+        if request.hardware_encode
+            && streams.video_encoding.is_none()
+            && hardware_encode_supported_target(request)
+        {
+            hardware_succeeded = run_ffmpeg(
+                &executable,
+                staging.arguments(&staged_request, true, &streams)?,
+                cancelled,
+                progress,
+            )?
+            .status
+            .success();
+        }
+        if !hardware_succeeded {
+            let output = run_ffmpeg_with_input(
+                &executable,
+                staging.arguments(&staged_request, false, &streams)?,
+                cancelled,
+                progress,
+                streams.png_image_sequence.then_some(&png_input),
+            )?;
+            if !output.status.success() {
+                let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+                return Err(ExportError::Failed(if message.is_empty() {
+                    format!("process exited with {}", output.status)
+                } else {
+                    message
+                }));
+            }
+        }
+        if let Some(stamp) = &source_stamp {
+            stamp.verify(&request.source)?;
+        }
+        if let Some(plan) = &mut loudness
+            && !plan.verify_candidate(&staging, &executable, cancelled, analyzing, attempt)?
+        {
+            attempt += 1;
+            continue;
+        }
+        break hardware_succeeded;
+    };
     if let Some(gif_animation) = gif_animation {
         if let Some(delays) = gif_avif_delays {
             avif::apply_png_frames(
@@ -896,7 +930,7 @@ fn export_audio_cancellable(
     }
     staging.publish(&request.target, cancelled, trimmed_kind)?;
     Ok(ExportOutcome {
-        used_hardware_encoder: false,
+        used_hardware_encoder,
     })
 }
 

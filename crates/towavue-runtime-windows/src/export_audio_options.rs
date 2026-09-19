@@ -9,15 +9,69 @@ pub enum AudioChannels {
     Stereo,
 }
 
+/// Output normalization is independent of listening volume and edit history.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AudioNormalization {
+    #[default]
+    Off,
+    /// One common gain to -1 dBFS sample peak; encoded peaks are not constrained.
+    Peak,
+    Loudness(LoudnessTarget),
+}
+
+impl AudioNormalization {
+    pub fn is_enabled(self) -> bool {
+        self != Self::Off
+    }
+}
+
+/// Tenths avoid floating-point equality in tab/export snapshot comparisons.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoudnessTarget {
+    pub integrated_tenths: i16,
+    pub true_peak_tenths: i16,
+}
+
+impl Default for LoudnessTarget {
+    fn default() -> Self {
+        Self {
+            integrated_tenths: -140,
+            true_peak_tenths: -10,
+        }
+    }
+}
+
+impl LoudnessTarget {
+    pub fn validate(self) -> Result<(), ExportError> {
+        if !(-700..=-50).contains(&self.integrated_tenths)
+            || !(-90..=0).contains(&self.true_peak_tenths)
+        {
+            return Err(ExportError::Failed(
+                "Loudness target must be -70 to -5 LUFS and maximum true peak -9 to 0 dBTP".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn integrated(self) -> f64 {
+        f64::from(self.integrated_tenths) / 10.0
+    }
+    pub(super) fn true_peak(self) -> f64 {
+        f64::from(self.true_peak_tenths) / 10.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AudioExportOptions {
-    /// Apply one common gain to reach -1 dBFS sample peak after edits and channel conversion.
-    pub normalize_peak: bool,
+    pub normalization: AudioNormalization,
     pub channels: AudioChannels,
 }
 
 impl AudioExportOptions {
     pub(super) fn filters(self, channels: Option<u16>) -> Result<Vec<String>, ExportError> {
+        if let AudioNormalization::Loudness(target) = self.normalization {
+            target.validate()?;
+        }
         if self == Self::default() {
             return Ok(Vec::new());
         }
@@ -108,7 +162,7 @@ fn sample_count_from_statistics(log: &str) -> Result<u64, ExportError> {
     Ok(count.expect("validated count"))
 }
 
-fn analysis_log(
+pub(super) fn analysis_log(
     request: &ExportRequest,
     streams: &ExportStreams,
     staging: &StagedExport,

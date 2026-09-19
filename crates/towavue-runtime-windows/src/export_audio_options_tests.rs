@@ -33,7 +33,11 @@ fn options(normalize_peak: bool, channels: AudioChannels) -> ExportOptions {
     ExportOptions {
         output: ExportOutput::Media,
         audio: AudioExportOptions {
-            normalize_peak,
+            normalization: if normalize_peak {
+                crate::AudioNormalization::Peak
+            } else {
+                crate::AudioNormalization::Off
+            },
             channels,
         },
         ..Default::default()
@@ -317,7 +321,11 @@ fn normalization_progress_and_cancellation_keep_existing_target_and_detect_sourc
     fs::write(&request.target, existing).expect("owned target");
     for (rate, normalized) in [(1.0, true), (4.0, false), (4.0, true)] {
         request.operations = vec![EditOperation::SetRate(rate)];
-        options.audio.normalize_peak = normalized;
+        options.audio.normalization = if normalized {
+            crate::AudioNormalization::Peak
+        } else {
+            crate::AudioNormalization::Off
+        };
         for phase in 0..4 {
             let cancelled = AtomicBool::new(false);
             let seen_analysis = AtomicBool::new(false);

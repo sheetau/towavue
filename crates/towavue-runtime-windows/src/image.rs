@@ -14,6 +14,8 @@ use crate::decode::DecodeError;
 pub(crate) mod apng;
 pub(crate) mod avif;
 mod bmp_preview;
+#[cfg(test)]
+mod icc_cost;
 mod jpeg_preview;
 mod jpeg_static;
 pub(crate) mod jpeg_wic_preview;

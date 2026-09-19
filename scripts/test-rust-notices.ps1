@@ -24,6 +24,9 @@ foreach ($package in $inventory.packages) {
         throw "Missing or duplicate package section: $heading"
     }
 }
+foreach ($excerpt in $inventory.source_notice_excerpts) {
+    if (-not $text.Contains("--- Crate source notice: $($excerpt.path) ---`n$($excerpt.text)`n")) { throw 'Missing source notice excerpt.' }
+}
 foreach ($required in @('LICENSE.chromium', 'fonts/Hack-Regular.txt', 'fonts/OFL.txt', 'fonts/UFL.txt',
         'fonts/emoji-icon-font-mit-license.txt', 'src/unicode_tables/LICENSE-UNICODE', 'src/spin/LICENSE',
         'not a notice file recovered from the crate', 'not the authors of ffmpeg-sys-next')) {

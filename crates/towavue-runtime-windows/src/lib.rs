@@ -46,10 +46,13 @@ pub use playback_preferences::PlaybackVolumePreferences;
 mod presentation_verification;
 mod preview;
 mod preview_loader;
+mod project_link;
+pub mod update;
 #[cfg(feature = "presentation-verification")]
 pub use presentation_verification::{
     towavue_original_ready, towavue_original_submitted, towavue_presentation_stage,
 };
+pub use project_link::ProjectLink;
 mod recent;
 mod video_resume;
 pub use video_resume::{VideoResume, VideoResumeEvent, VideoResumeHistory, VideoResumeSource};

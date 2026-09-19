@@ -109,6 +109,12 @@ foreach ($item in $inventory.packages) {
         [void]$bundle.Append("`n--- Crate file: $entry ---`n$body`n")
         $noticeCount++
     }
+    foreach ($excerpt in @($inventory.source_notice_excerpts | Where-Object { $_.name -eq $item.name -and $_.version -eq $item.version })) {
+        $sourceText = Read-ArchiveText $archive ($stem + '/' + $excerpt.path)
+        if (-not $sourceText.StartsWith($excerpt.text + "`n", [StringComparison]::Ordinal)) { throw 'Source notice excerpt differs from the pinned crate.' }
+        [void]$bundle.Append("`n--- Crate source notice: $($excerpt.path) ---`n$($excerpt.text)`n")
+        $noticeCount++
+    }
     $provenance = $inventory.missing_root_notice_provenance | Where-Object { $_.name -eq $item.name -and $_.version -eq $item.version }
     if ($provenance) {
         foreach ($notice in @($inventory.retrieved_upstream_notices | Where-Object commit -eq $provenance.commit)) {

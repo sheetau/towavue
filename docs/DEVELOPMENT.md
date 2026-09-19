@@ -2,6 +2,8 @@
 
 Use this guide for setup and checks, [STATUS](STATUS.md) to resume work, and the relevant [ARCHITECTURE](ARCHITECTURE.md) section for design constraints. Product usage belongs in [README](../README.md).
 
+The test profile keeps line-table debug information: full native app-test type information exceeds the MSVC PDB size limit (LNK1140). Ordinary development and Release product profiles are unchanged. Use the standard test command below; avoid restarting a live compiler merely because it has not produced output.
+
 ## Build and run
 
 Windows x64, Visual Studio's Desktop development with C++ workload, Windows SDK, LLVM/libclang, Git, and PowerShell are required. Rust and components are pinned by [rust-toolchain.toml](../rust-toolchain.toml); dependencies by [Cargo.lock](../Cargo.lock).
@@ -223,7 +225,7 @@ The old README, architecture, roadmap, UX ledger, and known-gaps snapshots are r
 
 ## Packaging references — only when needed
 
-Publication is deferred; this index is not authorization to resume it.
+Use the current owner request and STATUS for packaging scope. Historical evaluation records do not authorize public publication; the current launch goal targets a reviewed first-release draft.
 
 - [DISTRIBUTION](DISTRIBUTION.md): packaging decisions and audit entry point.
 - [LOCAL_SETUP](LOCAL_SETUP.md): per-user install/update/rollback/uninstall contracts and lifecycle evidence.

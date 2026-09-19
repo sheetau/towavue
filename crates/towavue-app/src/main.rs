@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod about;
 mod audio_export;
 #[cfg(test)]
 mod audio_export_tests;
@@ -294,6 +295,7 @@ enum UiAction {
     RevealExport(Instant),
     OpenExport(Instant),
     DismissExportError,
+    About(about::Action),
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
@@ -1017,6 +1019,7 @@ struct Application<N> {
     image_paste: image_paste::State,
     loading_progress: export_progress::LoadingProgress,
     export_error: Option<String>,
+    about_open: bool,
     grid_layouts: grid::GridLayouts,
     grid_path: PathBuf,
     path: Option<PathBuf>,
@@ -1309,6 +1312,7 @@ where
             image_paste: image_paste::State::default(),
             loading_progress: export_progress::LoadingProgress::default(),
             export_error: None,
+            about_open: false,
             grid_layouts,
             grid_path,
             path: None,
@@ -4088,6 +4092,8 @@ where
             }
         } else if self.pending_guard.is_some() && self.native_prompt.is_none() {
             self.draw_unsaved_guard(&context, actions);
+        } else if self.about_open {
+            self.draw_about(&context, actions);
         } else if self.audio_export_dialog.is_some() {
             self.show_audio_export_options(&context, actions);
         } else if self.metadata_dialog.is_some() {
@@ -6818,6 +6824,9 @@ where
                     self.pending_guard.is_some() && self.export_error.is_none()
                 }
                 UiAction::DismissExportError => self.export_error.is_some(),
+                UiAction::About(_) => {
+                    self.about_open && self.pending_guard.is_none() && self.export_error.is_none()
+                }
                 UiAction::KeybindingChange(id, _) => {
                     self.tabs.active_id() == Some(id)
                         && self.keyboard_settings_active()
@@ -7083,6 +7092,7 @@ where
                 }
                 self.request_redraw();
             }
+            UiAction::About(action) => self.handle_about(action),
             UiAction::DismissExportError => {
                 self.export_error = None;
                 self.request_redraw();
@@ -7249,6 +7259,10 @@ where
                 }
             }
             CommandId::ShowLicenses => self.show_licenses(),
+            CommandId::About => {
+                self.about_open = true;
+                self.request_redraw();
+            }
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active_id() {
                     self.request_guarded(GuardedAction::CloseTab(id));
@@ -10523,6 +10537,7 @@ where
 
     fn dialog_input_blocked(&self) -> bool {
         self.image_paste.pending.is_some()
+            || self.about_open
             || self.file_operations.busy()
             || self.keyboard_settings.edit.is_some()
             || self.resize_dialog.is_some()

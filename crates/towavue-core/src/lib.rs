@@ -10,6 +10,7 @@ mod file_search;
 mod image;
 mod media;
 mod navigation;
+pub mod release;
 mod rotation_sequence;
 mod tabs;
 mod timeline;

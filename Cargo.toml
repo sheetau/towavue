@@ -12,7 +12,7 @@ egui-directx11 = { path = "vendor/egui-directx11" }
 png = { path = "vendor/png" }
 
 [workspace.package]
-version = "0.0.0"
+version = "1.0.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT OR Apache-2.0"
@@ -25,3 +25,8 @@ unsafe_op_in_unsafe_fn = "deny"
 dbg_macro = "deny"
 todo = "deny"
 unwrap_used = "deny"
+
+# The app's large native test binary exceeds MSVC's PDB limit with full type
+# debug data. Keep source locations without affecting ordinary product builds.
+[profile.test]
+debug = "line-tables-only"

@@ -4146,7 +4146,7 @@ where
         let modal = egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
             ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
             chrome::modal_heading(ui, "Unsaved edits");
-            ui.separator();
+            crate::chrome::separator(ui);
             ui.label("Save over the source file?");
             ui.add(
                 egui::Label::new(&name)

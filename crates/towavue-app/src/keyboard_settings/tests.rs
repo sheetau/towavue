@@ -695,3 +695,77 @@ fn list_navigation_reveals_virtual_rows_without_editing_and_preserves_search_inp
         assert!(settings.search_focused(&context));
     }
 }
+
+#[test]
+fn search_button_help_names_focused_shortcuts_and_empty_clear_is_disabled() {
+    let context = fonts::test_context();
+    context.global_style_mut(|style| {
+        chrome::style(style);
+        style.interaction.tooltip_delay = 0.0;
+    });
+    context.enable_accesskit();
+    let bindings = shortcuts::defaults();
+    let mut settings = KeyboardSettings::default();
+    let mut time = 0.0;
+    let mut frame = |settings: &mut KeyboardSettings, events| {
+        time += 1.0;
+        context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(640.0, 440.0),
+                )),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                settings.show(ui, &bindings, true);
+            },
+        )
+    };
+    frame(&mut settings, vec![]);
+    let output = frame(&mut settings, vec![]);
+    let nodes = &output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes;
+    for (label, key) in [
+        ("Record keys", "Alt+K"),
+        ("Sort by precedence", "Alt+P"),
+        ("Clear keybindings search input", "Escape"),
+    ] {
+        let node = &nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .expect(label)
+            .1;
+        assert_eq!(node.is_disabled(), key == "Escape");
+        let bounds = node.bounds().expect("button bounds");
+        let pointer = egui::pos2(
+            (bounds.x0 + bounds.x1) as f32 * 0.5,
+            (bounds.y0 + bounds.y1) as f32 * 0.5,
+        );
+        let mut found = false;
+        for _ in 0..4 {
+            let output = frame(&mut settings, vec![egui::Event::PointerMoved(pointer)]);
+            found |= output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(text)
+                if text.galley.text().contains(label) && text.galley.text().contains(key)
+                    && text.galley.text().contains("search focused"))
+            });
+        }
+        assert!(found, "visible tooltip for {label}");
+    }
+    settings.query = "Open".into();
+    let output = frame(&mut settings, vec![egui::Event::PointerGone]);
+    let nodes = &output.platform_output.accesskit_update.expect("tree").nodes;
+    let clear = &nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Clear keybindings search input"))
+        .expect("clear")
+        .1;
+    assert!(!clear.is_disabled());
+}

@@ -54,7 +54,7 @@ impl AudioExportDialog {
                     let response = ui.radio_value(&mut self.options.channels, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
                     reveal_focus(&response);
                 }
-                ui.separator();
+                crate::chrome::separator(ui);
                 ui.label("Applies to the next Save, Export as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
                 ui.label("Peak normalization analyzes edited audio first, then applies one common gain. It can override overall volume edits, but preserves relative dynamics and silence. Not LUFS or true-peak; lossy encoding may change peaks.");
                 ui.label("Mono averages left/right; Stereo duplicates mono. Conversion requires a mono or stereo input; use Keep for multichannel audio. The source must contain audio.");

@@ -60,7 +60,7 @@ impl CommandPalette {
                 }
                 for (index, definition) in matches.iter().enumerate() {
                     if index == recent_count && recent_count > 0 {
-                        ui.separator();
+                        crate::chrome::separator(ui);
                     }
                     let group = if index == 0 && recent_count > 0 {
                         "recently used"

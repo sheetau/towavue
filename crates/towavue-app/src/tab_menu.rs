@@ -140,7 +140,7 @@ pub fn show(
         &[CopyFilePath, RevealFile],
     ] {
         if !items.is_empty() {
-            ui.separator();
+            crate::chrome::separator(ui);
         }
         for command in group {
             let definition = command_definitions()

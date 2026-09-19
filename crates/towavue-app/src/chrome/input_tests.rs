@@ -83,3 +83,24 @@ fn application_ui_scale_ignores_zoom_input_and_keeps_native_dpi_and_media_gestur
         }
     }
 }
+
+#[test]
+fn menu_separators_keep_border_color_without_restoring_flat_button_strokes() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(style);
+        context.set_pixels_per_point(density);
+        let output = context.run_ui(Default::default(), |ui| {
+            flat_buttons(ui);
+            let before = ui.visuals().widgets.clone();
+            ui.label("First group");
+            separator(ui);
+            ui.label("Second group");
+            assert_eq!(ui.visuals().widgets, before);
+        });
+        assert!(output.shapes.iter().any(|shape| matches!(shape.shape,
+            egui::Shape::LineSegment { points, stroke }
+                if points[0].y == points[1].y && points[0].x < points[1].x
+                    && stroke.color == BORDER && stroke.width == 1.0)));
+    }
+}

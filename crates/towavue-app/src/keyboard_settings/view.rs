@@ -162,7 +162,7 @@ impl KeyboardSettings {
                             } else {
                                 ('\u{ea60}', "Add keybinding")
                             };
-                            icon(ui, edit_rect, glyph, label, false)
+                            icon(ui, edit_rect, glyph, label, false, None)
                         });
                         for (left, width, text) in [
                             (34.0, command_width - 34.0, row.command.title),
@@ -277,6 +277,7 @@ impl KeyboardSettings {
             '\u{ea65}',
             "Record keys",
             self.record_search,
+            Some("Alt+K"),
         )
         .clicked()
         {
@@ -290,20 +291,26 @@ impl KeyboardSettings {
             '\u{eb55}',
             "Sort by precedence",
             self.precedence,
+            Some("Alt+P"),
         )
         .clicked()
         {
             self.precedence = !self.precedence;
             search.request_focus();
         }
-        if icon(
-            ui,
-            buttons[0],
-            '\u{eabf}',
-            "Clear keybindings search input",
-            false,
-        )
-        .clicked()
+        if ui
+            .add_enabled_ui(!self.query.is_empty(), |ui| {
+                icon(
+                    ui,
+                    buttons[0],
+                    '\u{eabf}',
+                    "Clear keybindings search input",
+                    false,
+                    Some("Escape"),
+                )
+            })
+            .inner
+            .clicked()
         {
             self.query.clear();
             self.recorded.clear();
@@ -412,7 +419,12 @@ fn icon(
     glyph: char,
     label: &str,
     selected: bool,
+    shortcut: Option<&str>,
 ) -> egui::Response {
+    let help = shortcut.map_or_else(
+        || label.to_owned(),
+        |key| format!("{label}\n{key} (search focused)"),
+    );
     // Codicon record-keys / sort-precedence / clear-all / edit in the bundled font.
     let response = chrome::icon_button_at(
         ui,
@@ -424,7 +436,8 @@ fn icon(
         .stroke(egui::Stroke::NONE)
         .frame_when_inactive(false),
     )
-    .help_text(label);
+    .help_text(help.clone())
+    .disabled_help_text(help);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
     });

@@ -342,7 +342,7 @@ fn show_items(
         .show_styled(ui, |ui| {
             for (index, group) in groups.iter().enumerate() {
                 if index > 0 {
-                    ui.separator();
+                    crate::chrome::separator(ui);
                 }
                 for id in *group {
                     if let Some((response, command)) =
@@ -446,7 +446,7 @@ fn show_items(
                 }
             }
             if title == "View" {
-                ui.separator();
+                crate::chrome::separator(ui);
                 let (response, command) =
                     submenu(ui, "Image jump", context, shortcuts, requested, recent);
                 if response.gained_focus() {
@@ -551,7 +551,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
                     }
                 }
                 if !paths.is_empty() {
-                    ui.separator();
+                    crate::chrome::separator(ui);
                 }
             }
             // Resume positions can outlive the shorter recent-path lists.

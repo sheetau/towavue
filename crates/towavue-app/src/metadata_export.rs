@@ -154,7 +154,7 @@ impl MetadataDialog {
                     let response = ui.push_id(self.selected, |ui| resize::multiline_text_input(ui, "Metadata value (empty removes the tag)", &mut draft.text)).inner;
                     reveal_focus(&response);
                 }
-                ui.separator();
+                crate::chrome::separator(ui);
                 ui.label("Current source values");
                 match &self.current {
                     None => { ui.label("Reading metadata…"); }
@@ -168,7 +168,7 @@ impl MetadataDialog {
                         if !found { ui.label(if self.kind == MediaKind::Image { "No matching image text value." } else { "No value in the file or selected streams." }); }
                     }
                 }
-                ui.separator();
+                crate::chrome::separator(ui);
                 if image_format == Some(ImageMetadataFormat::Png) {
                     ui.label("PNG input and PNG output only. Applies to the next Save or Export as for this tab's current file. Applying options does not write the file. Save replaces the source; Export as writes a separate file.");
                     ui.label("Only these 10 PNG text fields are edited; EXIF, XMP and technical metadata are not edited. Keep preserves matching source text chunks in PNG output, including when all fields are Keep. Other formats do not guarantee preservation.");

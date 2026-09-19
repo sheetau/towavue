@@ -185,6 +185,16 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
     }
 }
 
+/// Separators share egui's noninteractive stroke with disabled buttons.
+/// Restore only the separator's stroke, leaving flat button geometry untouched.
+pub fn separator(ui: &mut Ui) -> egui::Response {
+    let previous = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.visuals_mut().widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
+    let response = ui.separator();
+    ui.visuals_mut().widgets.noninteractive.bg_stroke = previous;
+    response
+}
+
 pub fn bar() -> egui::Frame {
     egui::Frame::NONE
         .fill(BACKGROUND)

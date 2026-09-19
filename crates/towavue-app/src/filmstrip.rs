@@ -924,9 +924,6 @@ impl Filmstrip {
                     {
                         wanted.push((path.clone(), kind));
                     }
-                    if response.hovered() || response.has_focus() {
-                        ui.painter().rect_filled(rect, 3.0, crate::chrome::HOVER);
-                    }
                     let image_rect = Rect::from_min_size(
                         rect.min,
                         egui::vec2(cell_width, cell_width * 2.0 / 3.0),
@@ -988,7 +985,7 @@ impl Filmstrip {
                             );
                         },
                     );
-                    if response.has_focus() {
+                    if response.hovered() || response.has_focus() {
                         ui.painter().rect_stroke(
                             image_rect,
                             3.0,

@@ -1,15 +1,16 @@
-//! Whole-client readbacks for reviewing the concept's image/audio layouts.
+//! Whole-client readbacks for reviewing the concept's media layouts.
 //! Media and Shell state are generated; this does not exercise native input or captions.
 
 use crate::*;
+use std::os::windows::process::CommandExt;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 #[test]
 #[ignore = "requires hidden hardware D3D11; writes generated full-client UI readbacks"]
-fn image_and_audio_reference_layouts_reach_the_gpu() {
-    let Some(root) = tests::isolated_test_root(
-        "ui_reference_tests::image_and_audio_reference_layouts_reach_the_gpu",
-    ) else {
+fn media_reference_layouts_reach_the_gpu() {
+    let Some(root) =
+        tests::isolated_test_root("ui_reference_tests::media_reference_layouts_reach_the_gpu")
+    else {
         return;
     };
     // PCM silence has the same declared duration as the seeded paused UI clock.
@@ -25,6 +26,30 @@ fn image_and_audio_reference_layouts_reach_the_gpu() {
     wav.extend_from_slice(&samples.to_le_bytes());
     wav.resize(44 + samples as usize, 128);
     std::fs::write(root.join("Track 2.wav"), wav).expect("generated silent audio");
+    assert!(
+        std::process::Command::new(
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg fixture tools"))
+                .join("bin/ffmpeg.exe"),
+        )
+        .creation_flags(0x0800_0000)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x2060a0:s=320x180:r=1:d=161",
+            "-c:v",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            "-an"
+        ])
+        .arg(root.join("Clip 2.mp4"))
+        .status()
+        .expect("generate video")
+        .success()
+    );
     struct Trial {
         root: PathBuf,
         complete: bool,
@@ -40,22 +65,37 @@ fn image_and_audio_reference_layouts_reach_the_gpu() {
                 .unwrap_or_else(|| self.root.clone());
             std::fs::create_dir_all(&output).expect("reference output directory");
             for density in [1.0, 1.25, 2.0] {
-                for scene in ["image", "audio", "audio-timeline"] {
+                for scene in [
+                    "image",
+                    "audio",
+                    "audio-timeline",
+                    "video",
+                    "video-timeline",
+                ] {
                     let context = fonts::test_context();
                     context.global_style_mut(chrome::style);
                     let mut app = fixture(&self.root, &context, scene);
                     if scene != "image" {
                         app.session = Some(
                             PlaybackSession::open_paused(
-                                app.path.as_deref().expect("audio path"),
+                                app.path.as_deref().expect("media path"),
                                 renderer.graphics_device(),
                                 0.0,
                                 1.0,
                                 Default::default(),
                                 |_| {},
                             )
-                            .expect("generated paused native audio session"),
+                            .expect("generated paused native session"),
                         );
+                        if scene.starts_with("video") {
+                            let session = app.session.as_mut().expect("video session");
+                            let deadline = Instant::now() + Duration::from_secs(10);
+                            while session.pending_video_time().is_none() {
+                                assert!(Instant::now() < deadline, "decoded video deadline");
+                                std::thread::sleep(Duration::from_millis(1));
+                            }
+                            assert!(session.advance_pending());
+                        }
                     }
                     let width = (1228.0 * density) as u32;
                     let height = (708.0 * density) as u32;
@@ -90,6 +130,16 @@ fn image_and_audio_reference_layouts_reach_the_gpu() {
                             }
                         }
                         renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+                        if scene.starts_with("video") {
+                            let rect = app.video_rect.expect("video layout");
+                            assert!(
+                                app.session
+                                    .as_mut()
+                                    .expect("video session")
+                                    .draw_current(&mut renderer, rect * density, app.video_uv)
+                                    .expect("native video before UI")
+                            );
+                        }
                         renderer.render_ui(&context, ui).expect("UI submission");
                         pixels = renderer
                             .verification_surface_rgba()
@@ -119,6 +169,31 @@ fn image_and_audio_reference_layouts_reach_the_gpu() {
                             [32, 96, 160, 255],
                             "image cannot cover status"
                         );
+                    } else if scene.starts_with("video") {
+                        let center = at(614.0, 354.0);
+                        assert!(
+                            center[2] > center[0].saturating_add(60),
+                            "decoded blue video survives UI composition: {scene}, {density}: {center:?}"
+                        );
+                        assert_eq!(app.timeline_open, scene == "video-timeline");
+                        let rect = app.video_rect.expect("video layout");
+                        assert!(
+                            rect.top() >= 32.0 && rect.bottom() <= 679.0,
+                            "video fits between chrome: {scene}: {rect:?}"
+                        );
+                        assert!(
+                            at(614.0, 10.0)[2] < 100 && at(614.0, 698.0)[2] < 100,
+                            "video must not cover toolbar/status"
+                        );
+                        if scene == "video" {
+                            assert_eq!(
+                                at(50.0, 678.0),
+                                [255, 255, 255, 255],
+                                "video seek progress"
+                            );
+                        } else {
+                            assert!(rect.bottom() <= 590.0, "editing reserves timeline height");
+                        }
                     } else {
                         let list = app.playlist.scroll_rect.expect("audio list viewport");
                         assert!(list.top() >= 32.0 && list.bottom() < 708.0);
@@ -167,7 +242,7 @@ fn image_and_audio_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image, compact audio and editing audio at 100/125/200%; nine full-client GPU readbacks. Generated state; no native-caption or physical-input evidence."
+                "PASS reference layouts: image, compact/editing audio and compact/editing video at 100/125/200%; fifteen full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }
@@ -191,6 +266,8 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
     let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("reference app");
     let kind = if scene == "image" {
         MediaKind::Image
+    } else if scene.starts_with("video") {
+        MediaKind::Video
     } else {
         MediaKind::Audio
     };
@@ -201,6 +278,14 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
             "Portrait.png",
             "Texture.png",
             "Diagram.png",
+        ]
+    } else if kind == MediaKind::Video {
+        [
+            "Clip 1.mp4",
+            "Clip 2.mp4",
+            "Clip 3.mp4",
+            "Clip 4.mp4",
+            "Clip 5.mp4",
         ]
     } else {
         [
@@ -263,7 +348,7 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
             media_time(Duration::from_secs(50)),
             1.0,
         ));
-        app.timeline_open = scene == "audio-timeline";
+        app.timeline_open = scene.ends_with("-timeline");
         if app.timeline_open {
             let mut waveform = egui::ColorImage::filled([512, 64], Color32::TRANSPARENT);
             for x in 0..512 {

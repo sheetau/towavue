@@ -92,6 +92,8 @@ mod timeline_input;
 mod track_drag;
 mod trim;
 #[cfg(test)]
+mod ui_reference_tests;
+#[cfg(test)]
 mod video_context_tests;
 mod video_edit;
 mod video_resize;

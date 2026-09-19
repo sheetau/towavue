@@ -370,10 +370,8 @@ impl KeyboardSettings {
         let submit = std::mem::take(&mut edit.submit)
             || context
                 .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        egui::Modal::new(egui::Id::new("keyboard-edit")).show(context, |ui| {
-            ui.set_width(400.0_f32.min((context.content_rect().width() - 40.0).max(120.0)));
-            ui.spacing_mut().item_spacing.y = 10.0;
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+        chrome::modal(context, egui::Id::new("keyboard-edit"), false).show(context, |ui| {
+            chrome::modal_body(ui, 400.0, "Keyboard shortcut", &[], |ui| {
                 ui.label("Press desired key combination and then press ENTER.");
                 ui.add(
                     egui::TextEdit::singleline(&mut edit.text)

@@ -109,10 +109,8 @@ impl MetadataDialog {
                 !popup_open && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
             }
         });
-        let modal = egui::Modal::new(egui::Id::new(("metadata-export-options", self.token))).show(context, |ui| {
-            ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 420.0));
-            chrome::modal_heading(ui, "Metadata export options");
-            egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show_styled(ui, |ui| {
+        let modal = chrome::modal(context, egui::Id::new(("metadata-export-options", self.token)), false).show(context, |ui| {
+            chrome::modal_body(ui, 420.0, "Metadata export options", &["Apply metadata", "Cancel"], |ui| {
                 ui.label("Metadata field");
                 let response = egui::ComboBox::from_id_salt("metadata-field")
                     .selected_text(MetadataField::ALL[self.selected].label()).show_ui(ui, |ui| {
@@ -195,7 +193,7 @@ impl MetadataDialog {
                 if let Err(error) = self.options() { ui.label(error); }
             });
             let options = self.options();
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
                 if ui.add_enabled(options.is_ok() && !self.ime_composing, egui::Button::new("Apply metadata")).clicked() { action = Some(Some(options.expect("valid options"))); }
                 if ui.button("Cancel").clicked() { action = Some(None); }

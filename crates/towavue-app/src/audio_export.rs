@@ -42,10 +42,8 @@ impl AudioExportDialog {
                 }
             }
         };
-        let modal = egui::Modal::new("audio-export-options".into()).show(context, |ui| {
-            ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 340.0));
-            chrome::modal_heading(ui, "Audio export options");
-            egui::ScrollArea::vertical().max_height((context.content_rect().height() - 128.0).max(20.0)).min_scrolled_height(20.0).show_styled(ui, |ui| {
+        let modal = chrome::modal(context, "audio-export-options".into(), false).show(context, |ui| {
+            chrome::modal_body(ui, 340.0, "Audio export options", &["Apply options", "Cancel"], |ui| {
                 let response = ui.checkbox(&mut self.options.normalize_peak, "Normalize peak (-1 dBFS)").on_hover_cursor(egui::CursorIcon::PointingHand);
                 if self.first_frame { response.request_focus(); self.first_frame = false; }
                 reveal_focus(&response);
@@ -60,7 +58,7 @@ impl AudioExportDialog {
                 ui.label("Mono averages left/right; Stereo duplicates mono. Conversion requires a mono or stereo input; use Keep for multichannel audio. The source must contain audio.");
                 ui.label("Settings last while this file stays in this tab. Apply does not export a file.");
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
                 if ui.button("Apply options").clicked() { action = Some(Some(self.options)); }
                 if ui.button("Cancel").clicked() { action = Some(None); }

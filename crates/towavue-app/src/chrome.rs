@@ -6,6 +6,9 @@ use crate::hover_help::HoverHelp;
 #[cfg(test)]
 mod input_tests;
 
+mod modal;
+pub use modal::{modal, modal_body, set_modal_bounds};
+
 mod reading_icon;
 mod tab_fade;
 pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade};
@@ -201,18 +204,6 @@ pub fn bar() -> egui::Frame {
     egui::Frame::NONE
         .fill(BACKGROUND)
         .inner_margin(egui::Margin::symmetric(6, 3))
-}
-
-pub fn modal_heading(ui: &mut Ui, title: &str) {
-    if ui.ctx().content_rect().height() < 200.0 {
-        ui.spacing_mut().item_spacing.y = 2.0;
-    }
-    ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
-        node.set_role(egui::accesskit::Role::Dialog);
-        node.set_label(title);
-        node.set_modal();
-    });
-    ui.heading(title);
 }
 
 #[derive(Clone, Copy)]

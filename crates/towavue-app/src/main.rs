@@ -3942,6 +3942,7 @@ where
             None
         };
         self.draw_timeline(root, actions);
+        chrome::set_modal_bounds(&context, root.available_rect_before_wrap());
         let media_panel = egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(root, |ui| {
@@ -4019,21 +4020,17 @@ where
             self.draw_grid_menu(&context, actions);
         }
         if let Some(error) = &self.export_error {
-            let modal = egui::Modal::new("export-error".into()).show(&context, |ui| {
-                ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
-                chrome::modal_heading(ui, "Export failed");
-                ui.label("Your edits and existing files have been kept.");
-                egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 130.0).clamp(20.0, 220.0))
-                    .min_scrolled_height(20.0)
-                    .show_styled(ui, |ui| {
+            let modal =
+                chrome::modal(&context, "export-error".into(), false).show(&context, |ui| {
+                    chrome::modal_body(ui, 520.0, "Export failed", &["OK"], |ui| {
+                        ui.label("Your edits and existing files have been kept.");
                         ui.label(error);
                     });
-                chrome::flat_buttons(ui);
-                if ui.button("OK").clicked() {
-                    actions.push(UiAction::DismissExportError);
-                }
-            });
+                    chrome::flat_buttons(ui);
+                    if ui.button("OK").clicked() {
+                        actions.push(UiAction::DismissExportError);
+                    }
+                });
             if modal.is_top_modal
                 && !modal.any_popup_open
                 && context
@@ -4077,40 +4074,45 @@ where
             .path
             .as_deref()
             .map_or_else(|| "this media".to_owned(), display_name);
-        let modal = egui::Modal::new("unsaved-edit-guard".into()).show(context, |ui| {
-            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 520.0));
-            chrome::modal_heading(ui, "Unsaved edits");
-            crate::chrome::separator(ui);
-            ui.label("Save over the source file?");
-            ui.add(
-                egui::Label::new(&name)
-                    .truncate()
-                    .show_tooltip_when_elided(false),
-            )
-            .help_text(&name);
-            ui.label("Undo is kept in open tabs.");
-            ui.horizontal_wrapped(|ui| {
-                chrome::flat_buttons(ui);
-                if ui
-                    .add_enabled(
-                        self.active_export.is_none(),
-                        egui::Button::new("Save and continue"),
+        let modal =
+            chrome::modal(context, "unsaved-edit-guard".into(), false).show(context, |ui| {
+                let mut labels = vec!["Save and continue", "Discard edits", "Cancel"];
+                if self.active_export.is_some() {
+                    labels.push("Cancel current export");
+                }
+                chrome::modal_body(ui, 520.0, "Unsaved edits", &labels, |ui| {
+                    ui.label("Save over the source file?");
+                    ui.add(
+                        egui::Label::new(&name)
+                            .truncate()
+                            .show_tooltip_when_elided(false),
                     )
-                    .clicked()
-                {
-                    actions.push(UiAction::ResolveGuard(GuardDecision::Save));
-                }
-                if ui.button("Discard edits").clicked() {
-                    actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
-                }
-                if ui.button("Cancel").clicked() {
-                    actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
-                }
-                if self.active_export.is_some() && ui.button("Cancel current export").clicked() {
-                    actions.push(UiAction::CancelExport);
-                }
+                    .help_text(&name);
+                    ui.label("Undo is kept in open tabs.");
+                });
+                ui.horizontal_wrapped(|ui| {
+                    chrome::flat_buttons(ui);
+                    if ui
+                        .add_enabled(
+                            self.active_export.is_none(),
+                            egui::Button::new("Save and continue"),
+                        )
+                        .clicked()
+                    {
+                        actions.push(UiAction::ResolveGuard(GuardDecision::Save));
+                    }
+                    if ui.button("Discard edits").clicked() {
+                        actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
+                    }
+                    if ui.button("Cancel").clicked() {
+                        actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
+                    }
+                    if self.active_export.is_some() && ui.button("Cancel current export").clicked()
+                    {
+                        actions.push(UiAction::CancelExport);
+                    }
+                });
             });
-        });
         if modal.is_top_modal
             && !modal.any_popup_open
             && context

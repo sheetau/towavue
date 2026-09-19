@@ -39,84 +39,78 @@ impl VideoRotationDialog {
         let previous_angle = self.angle.clone();
         let mut action = None;
         let id = egui::Id::new("free-rotate-video");
-        let modal = egui::Modal::new(id)
-            .area(
-                egui::Modal::default_area(id)
-                    .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0)),
-            )
-            .backdrop_color(Color32::TRANSPARENT)
-            .show(context, |ui| {
-                ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 340.0));
-                egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 48.0).max(1.0))
-                    .show_styled(ui, |ui| {
-                        chrome::modal_heading(ui, "Free rotate video");
-                        ui.label("Preview on the video. Apply adds one undoable edit.");
-                        ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
-                        let response = resize::text_input(
-                            ui,
-                            "Video rotation angle in degrees",
-                            &mut self.angle,
-                        );
-                        if self.first_frame {
-                            response.request_focus();
-                            self.first_frame = false;
+        let modal = chrome::modal(context, id, true).show(context, |ui| {
+            let value = chrome::modal_body(
+                ui,
+                340.0,
+                "Free rotate video",
+                &["Apply rotation", "Cancel"],
+                |ui| {
+                    ui.label("Preview on the video. Apply adds one undoable edit.");
+                    ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
+                    let response =
+                        resize::text_input(ui, "Video rotation angle in degrees", &mut self.angle);
+                    if self.first_frame {
+                        response.request_focus();
+                        self.first_frame = false;
+                    }
+                    let mut degrees = self
+                        .angle
+                        .trim()
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                        .map(|value| (value.clamp(-180.0, 180.0) * 10.0).round() / 10.0)
+                        .unwrap_or(0.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut degrees, -180.0..=180.0)
+                                .step_by(0.1)
+                                .show_value(false)
+                                .text("Video rotation angle"),
+                        )
+                        .changed()
+                    {
+                        self.angle = format!("{degrees:.1}");
+                    }
+                    let value = self.value();
+                    match &value {
+                        Ok(value) if value.tenths() == 0 => {
+                            ui.label("0 degrees — no edit or pixel-aspect change");
                         }
-                        let mut degrees = self
-                            .angle
-                            .trim()
-                            .parse::<f64>()
-                            .ok()
-                            .filter(|value| value.is_finite())
-                            .map(|value| (value.clamp(-180.0, 180.0) * 10.0).round() / 10.0)
-                            .unwrap_or(0.0);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut degrees, -180.0..=180.0)
-                                    .step_by(0.1)
-                                    .show_value(false)
-                                    .text("Video rotation angle"),
-                            )
-                            .changed()
-                        {
-                            self.angle = format!("{degrees:.1}");
+                        Ok(value) => {
+                            let size = self
+                                .snapshot
+                                .geometry_with(EditOperation::RotateVideo(*value))
+                                .expect("validated rotation");
+                            ui.label(format!(
+                                "{:.1} degrees — {} x {} pixels",
+                                f64::from(value.tenths()) / 10.0,
+                                size.0,
+                                size.1
+                            ));
                         }
-                        let value = self.value();
-                        match &value {
-                            Ok(value) if value.tenths() == 0 => {
-                                ui.label("0 degrees — no edit or pixel-aspect change");
-                            }
-                            Ok(value) => {
-                                let size = self
-                                    .snapshot
-                                    .geometry_with(EditOperation::RotateVideo(*value))
-                                    .expect("validated rotation");
-                                ui.label(format!(
-                                    "{:.1} degrees — {} x {} pixels",
-                                    f64::from(value.tenths()) / 10.0,
-                                    size.0,
-                                    size.1
-                                ));
-                            }
-                            Err(error) => {
-                                ui.label(error);
-                            }
+                        Err(error) => {
+                            ui.label(error);
                         }
-                        ui.label("Black canvas; resampled on the GPU. Export encoding may differ.");
-                        ui.horizontal(|ui| {
-                            crate::chrome::flat_buttons(ui);
-                            if ui
-                                .add_enabled(value.is_ok(), egui::Button::new("Apply rotation"))
-                                .clicked()
-                            {
-                                action = Some(value.ok());
-                            }
-                            if ui.button("Cancel").clicked() {
-                                action = Some(None);
-                            }
-                        });
-                    });
+                    }
+                    ui.label("Black canvas; resampled on the GPU. Export encoding may differ.");
+                    value
+                },
+            );
+            ui.horizontal_wrapped(|ui| {
+                crate::chrome::flat_buttons(ui);
+                if ui
+                    .add_enabled(value.is_ok(), egui::Button::new("Apply rotation"))
+                    .clicked()
+                {
+                    action = Some(value.ok());
+                }
+                if ui.button("Cancel").clicked() {
+                    action = Some(None);
+                }
             });
+        });
         if modal.is_top_modal
             && !modal.any_popup_open
             && context

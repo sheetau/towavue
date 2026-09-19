@@ -28,15 +28,8 @@ impl VideoResizeDialog {
     fn show(&mut self, context: &egui::Context) -> Option<Option<VideoResize>> {
         let mut action = None;
         let id = egui::Id::new("resize-video");
-        let modal = egui::Modal::new(id)
-            .area(egui::Modal::default_area(id).anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0)))
-            .backdrop_color(Color32::TRANSPARENT)
-            .show(context, |ui| {
-                ui.set_width((context.content_rect().width() - 48.0).clamp(1.0, 360.0));
-                egui::ScrollArea::vertical()
-                    .max_height((context.content_rect().height() - 48.0).max(1.0))
-                    .show_styled(ui, |ui| {
-                        chrome::modal_heading(ui, "Resize / resample video");
+        let modal = chrome::modal(context, id, true).show(context, |ui| {
+            let value = chrome::modal_body(ui, 360.0, "Resize / resample video", &["Apply resize", "Cancel"], |ui| {
                         ui.label("Preview on the video. Apply adds one undoable edit.");
                         self.inputs.controls(ui);
                         let value = self.value();
@@ -50,14 +43,15 @@ impl VideoResizeDialog {
                             Err(error) => { ui.label(error); }
                         }
                         ui.label("Even dimensions; linked edge rounds to 2 pixels. Export encoding may differ.");
-                        ui.horizontal(|ui| {
+                value
+            });
+                        ui.horizontal_wrapped(|ui| {
                             crate::chrome::flat_buttons(ui);
                             if self.inputs.reveal_focus(ui.add_enabled(value.is_ok(), egui::Button::new("Apply resize"))).clicked() {
                                 action = Some(value.ok());
                             }
                             if self.inputs.reveal_focus(ui.button("Cancel")).clicked() { action = Some(None); }
                         });
-                    });
             });
         if modal.is_top_modal
             && !modal.any_popup_open

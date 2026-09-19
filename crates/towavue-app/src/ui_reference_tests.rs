@@ -69,6 +69,9 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image",
                     "image-reading",
                     "image-languages",
+                    "image-modal-resize",
+                    "image-modal-rotate",
+                    "image-modal-error",
                     "image-export",
                     "image-export-wait",
                     "audio",
@@ -82,6 +85,17 @@ fn media_reference_layouts_reach_the_gpu() {
                         fonts::install(&context);
                     }
                     let mut app = fixture(&self.root, &context, scene);
+                    match scene {
+                        "image-modal-resize" => app.dispatch(CommandId::ResizeImage),
+                        "image-modal-rotate" => app.dispatch(CommandId::FreeRotateImage),
+                        "image-modal-error" => {
+                            app.export_error = Some(
+                                "Generated error details. Existing files remain unchanged.\n"
+                                    .repeat(35),
+                            )
+                        }
+                        _ => {}
+                    }
                     if scene == "image-reading" {
                         // Seed only the model; no native cursor capture or physical input.
                         app.reading_drag = Some(reading_input::ReadingDrag::new(
@@ -218,7 +232,24 @@ fn media_reference_layouts_reach_the_gpu() {
                             * 4;
                         &pixels[offset..offset + 4]
                     };
-                    if scene.starts_with("image") {
+                    if scene.starts_with("image-modal") {
+                        for y in [35.0, 674.0] {
+                            assert!(
+                                at(614.0, y)[2] < 140,
+                                "modal backdrop covers the media edges outside its placement bounds"
+                            );
+                        }
+                        assert!(
+                            pixels
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .filter(|p| p[0] > 180 && p[1] > 180 && p[2] > 180)
+                                .count()
+                                > 200,
+                            "modal text reaches the GPU"
+                        );
+                    } else if scene.starts_with("image") {
                         assert_eq!(
                             at(614.0, 354.0),
                             [32, 96, 160, 255],
@@ -307,7 +338,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/languages/reading/export status, compact/editing audio and compact/editing video at 100/125/200%; twenty-seven full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/languages/reading/export status/modals, compact/editing audio and compact/editing video at 100/125/200%; thirty-six full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }

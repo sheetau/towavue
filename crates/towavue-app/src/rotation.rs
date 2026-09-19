@@ -46,12 +46,13 @@ impl RotationDialog {
 
     pub(super) fn show(&mut self, context: &egui::Context) -> Option<Option<ImageRotation>> {
         let mut action = None;
-        let modal = egui::Modal::new("free-rotate-image".into()).show(context, |ui| {
-            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 420.0));
-            egui::ScrollArea::vertical()
-                .max_height((context.content_rect().height() - 32.0).max(1.0))
-                .show_styled(ui, |ui| {
-                    chrome::modal_heading(ui, "Free rotate image");
+        let modal = chrome::modal(context, "free-rotate-image".into(), false).show(context, |ui| {
+            let value = chrome::modal_body(
+                ui,
+                420.0,
+                "Free rotate image",
+                &["Apply rotation", "Cancel"],
+                |ui| {
                     ui.label("Preview only. Apply adds one undoable edit.");
                     ui.label("Tip: hold Alt and drag horizontally on the image.");
                     ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
@@ -98,19 +99,21 @@ impl RotationDialog {
                             "16384 pixels per side and 128 Mi pixels.",
                         ));
                     }
-                    ui.horizontal(|ui| {
-                        crate::chrome::flat_buttons(ui);
-                        if ui
-                            .add_enabled(value.is_some(), egui::Button::new("Apply rotation"))
-                            .clicked()
-                        {
-                            action = Some(value);
-                        }
-                        if ui.button("Cancel").clicked() {
-                            action = Some(None);
-                        }
-                    });
-                });
+                    value
+                },
+            );
+            ui.horizontal_wrapped(|ui| {
+                crate::chrome::flat_buttons(ui);
+                if ui
+                    .add_enabled(value.is_some(), egui::Button::new("Apply rotation"))
+                    .clicked()
+                {
+                    action = Some(value);
+                }
+                if ui.button("Cancel").clicked() {
+                    action = Some(None);
+                }
+            });
         });
         if modal.is_top_modal
             && !modal.any_popup_open

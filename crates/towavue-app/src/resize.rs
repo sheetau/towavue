@@ -1,4 +1,4 @@
-use crate::scroll_style::ScrollAreaStyle;
+use crate::chrome;
 use towavue_core::{ImageResize, ResampleFilter};
 
 #[cfg(test)]
@@ -132,13 +132,13 @@ impl ResizeDialog {
 
     pub fn show(&mut self, context: &egui::Context) -> Option<Option<ImageResize>> {
         let mut action = None;
-        let modal = egui::Modal::new("resize-image".into()).show(context, |ui| {
-            ui.set_width((context.content_rect().width() - 32.0).clamp(1.0, 360.0));
-            egui::ScrollArea::vertical()
-                .max_height((context.content_rect().height() - 32.0).max(1.0))
-                .min_scrolled_height(1.0)
-                .show_styled(ui, |ui| {
-                    crate::chrome::modal_heading(ui, "Resize / resample image");
+        let modal = chrome::modal(context, "resize-image".into(), false).show(context, |ui| {
+            let value = chrome::modal_body(
+                ui,
+                360.0,
+                "Resize / resample image",
+                &["Apply resize", "Cancel"],
+                |ui| {
                     ui.label("Original file is kept. Apply adds one undoable edit.");
                     self.controls(ui);
                     let value = self.value();
@@ -151,21 +151,23 @@ impl ResizeDialog {
                             ));
                         }
                     }
-                    ui.horizontal(|ui| {
-                        crate::chrome::flat_buttons(ui);
-                        if self
-                            .reveal_focus(
-                                ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
-                            )
-                            .clicked()
-                        {
-                            action = Some(value);
-                        }
-                        if self.reveal_focus(ui.button("Cancel")).clicked() {
-                            action = Some(None);
-                        }
-                    });
-                });
+                    value
+                },
+            );
+            ui.horizontal_wrapped(|ui| {
+                crate::chrome::flat_buttons(ui);
+                if self
+                    .reveal_focus(
+                        ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
+                    )
+                    .clicked()
+                {
+                    action = Some(value);
+                }
+                if self.reveal_focus(ui.button("Cancel")).clicked() {
+                    action = Some(None);
+                }
+            });
         });
         if modal.is_top_modal
             && !modal.any_popup_open
@@ -733,16 +735,16 @@ pub(crate) mod tests {
             return;
         }
         let tree = frame(vec![]);
-        let (cancel, _) = tree
+        let (filter, _) = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Cancel"))
-            .expect("cancel control");
+            .find(|(_, node)| node.role() == egui::accesskit::Role::ComboBox)
+            .expect("scrollable filter control");
         frame(vec![egui::Event::AccessKitActionRequest(
             egui::accesskit::ActionRequest {
                 action: egui::accesskit::Action::Focus,
                 target_tree: egui::accesskit::TreeId::ROOT,
-                target_node: *cancel,
+                target_node: *filter,
                 data: None,
             },
         )]);

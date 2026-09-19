@@ -342,7 +342,10 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
     for density in [1.0, 1.25, 2.0] {
         for width in [320.0, 960.0] {
             let context = fonts::test_context();
-            context.global_style_mut(chrome::style);
+            context.global_style_mut(|style| {
+                chrome::style(style);
+                style.animation_time = 0.0;
+            });
             context.enable_accesskit();
             context.set_pixels_per_point(density);
             let mut settings = KeyboardSettings::default();
@@ -449,9 +452,22 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
                 .expect("first row text");
             assert!((clip.top() - border - 1.0).abs() <= 1.0 / density);
             assert!(
-                clip.bottom() <= 432.0,
-                "bottom inset remains outside the scroll clip"
+                (clip.bottom() - 440.0).abs() <= 1.0 / density,
+                "rows paint through the former fixed bottom inset"
             );
+            let track = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.rect.width() <= 5.0 && rect.rect.height() > 300.0 =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("inset scrollbar track");
+            assert!((track.bottom() - 432.0).abs() <= 1.0 / density);
             let blocked = frame(&mut settings, false, vec![]);
             assert!(!colors(&output).is_empty());
             assert_eq!(
@@ -665,10 +681,10 @@ fn list_navigation_reveals_virtual_rows_without_editing_and_preserves_search_inp
                 },
             )],
         );
-        // 360 minus both margins, search/header/separators leaves 287 points: eleven rows.
+        // The bottom eight points now scroll, leaving 295 points: twelve rows.
         for (key, index) in [
-            (egui::Key::PageDown, 11),
-            (egui::Key::ArrowDown, 12),
+            (egui::Key::PageDown, 12),
+            (egui::Key::ArrowDown, 13),
             (egui::Key::PageUp, 1),
             (egui::Key::ArrowUp, 0),
         ] {
@@ -681,9 +697,26 @@ fn list_navigation_reveals_virtual_rows_without_editing_and_preserves_search_inp
                 .1;
             assert_eq!(node.label(), Some(label(index).as_str()));
             let bounds = node.bounds().expect("visible bounds");
-            assert!(bounds.y0 >= 64.0 && bounds.y1 <= 353.0, "{bounds:?}");
+            assert!(bounds.y0 >= 64.0 && bounds.y1 <= 360.0, "{bounds:?}");
             assert!(settings.edit.is_none());
         }
+        for _ in 0..rows.len().div_ceil(12) {
+            frame(
+                &mut settings,
+                vec![key_event(egui::Key::PageDown, egui::Modifiers::NONE)],
+            );
+        }
+        let tree = frame(&mut settings, vec![]);
+        let last = &tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label(rows.len() - 1).as_str()))
+            .expect("last row is revealed")
+            .1;
+        assert!(
+            (360.0 - last.bounds().expect("last bounds").y1 - 8.0).abs()
+                <= 1.0 / f64::from(density)
+        );
         settings.request_search_focus();
         frame(&mut settings, vec![]);
         let previous = settings.row_focus;

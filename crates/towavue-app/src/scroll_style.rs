@@ -12,6 +12,15 @@ pub(crate) trait ScrollAreaStyle {
         count: usize,
         content: impl FnOnce(&mut Ui, Range<usize>) -> R,
     ) -> ScrollAreaOutput<R>;
+    /// Virtual rows with scrolling top/bottom space, independent of the bar track.
+    fn show_rows_padded_styled<R>(
+        self,
+        ui: &mut Ui,
+        height: f32,
+        count: usize,
+        padding: [f32; 2],
+        content: impl FnOnce(&mut Ui, Range<usize>) -> R,
+    ) -> ScrollAreaOutput<R>;
     fn show_viewport_styled<R>(
         self,
         ui: &mut Ui,
@@ -75,6 +84,38 @@ impl ScrollAreaStyle for ScrollArea {
         })
     }
 
+    fn show_rows_padded_styled<R>(
+        self,
+        ui: &mut Ui,
+        height: f32,
+        count: usize,
+        [top, bottom]: [f32; 2],
+        content: impl FnOnce(&mut Ui, Range<usize>) -> R,
+    ) -> ScrollAreaOutput<R> {
+        let spacing = ui.spacing().item_spacing.y;
+        let pitch = height + spacing;
+        self.content_margin(egui::Margin::ZERO)
+            .show_viewport_styled(ui, |ui, viewport| {
+                ui.set_height((pitch * count as f32 - spacing).max(0.0) + top + bottom);
+                // egui's ordinary show_rows assumes row zero starts at offset zero.
+                // Subtract the leading space when virtualizing, or partial first rows
+                // disappear one padding-height too early while scrolling.
+                let start = (((viewport.top() - top).max(0.0) / pitch).floor() as usize).min(count);
+                let end =
+                    (((viewport.bottom() - top).max(0.0) / pitch).ceil() as usize + 1).min(count);
+                let origin = ui.max_rect().top() + top;
+                let rect = Rect::from_x_y_ranges(
+                    ui.max_rect().x_range(),
+                    (origin + start as f32 * pitch)..=(origin + end as f32 * pitch),
+                );
+                ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    ui.skip_ahead_auto_ids(start);
+                    content(ui, start..end)
+                })
+                .inner
+            })
+    }
+
     fn show_viewport_styled<R>(
         self,
         ui: &mut Ui,
@@ -92,6 +133,101 @@ impl ScrollAreaStyle for ScrollArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn padded_rows_keep_partial_rows_and_scroll_padding_inside_the_viewport() {
+        for density in [1.0, 1.25, 2.0] {
+            for (height, top) in [(24.0, 0.0), (32.0, 8.0)] {
+                for count in [0, 2, 10_000] {
+                    let context = egui::Context::default();
+                    context.set_pixels_per_point(density);
+                    context.global_style_mut(crate::chrome::style);
+                    let viewport =
+                        Rect::from_min_max(egui::pos2(8.0, 32.0), egui::pos2(232.0, 276.0));
+                    let total = height * count as f32 + top + 8.0;
+                    let maximum = (total - viewport.height()).max(0.0);
+                    for offset in [0.0, 31.0_f32.min(maximum), 1234.0_f32.min(maximum), maximum] {
+                        let mut rows = Vec::new();
+                        let mut measured = None;
+                        for _ in 0..3 {
+                            rows.clear();
+                            let _ = context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(240.0, 300.0),
+                                    )),
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let mut child =
+                                        ui.new_child(egui::UiBuilder::new().max_rect(viewport));
+                                    child.set_clip_rect(viewport);
+                                    child.visuals_mut().clip_rect_margin = 0.0;
+                                    child.spacing_mut().item_spacing.y = 0.0;
+                                    let result = ScrollArea::vertical()
+                                        .auto_shrink([false, false])
+                                        .vertical_scroll_offset(offset)
+                                        .show_rows_padded_styled(
+                                            &mut child,
+                                            height,
+                                            count,
+                                            [top, 8.0],
+                                            |ui, range| {
+                                                for index in range {
+                                                    let response = ui.allocate_response(
+                                                        egui::vec2(180.0, height),
+                                                        egui::Sense::click(),
+                                                    );
+                                                    rows.push((
+                                                        index,
+                                                        response.rect,
+                                                        ui.clip_rect(),
+                                                    ));
+                                                }
+                                            },
+                                        );
+                                    measured = Some((result.content_size.y, result.state.offset.y));
+                                },
+                            );
+                        }
+                        let (content_height, actual_offset) =
+                            measured.expect("laid out scroll area");
+                        assert!(
+                            (content_height - total).abs() <= 1.0 / density,
+                            "content height: {content_height} vs {total}"
+                        );
+                        assert!((actual_offset - offset).abs() <= 1.0 / density);
+                        assert!(rows.len() <= 13, "large lists remain virtualized");
+                        if count == 0 {
+                            assert!(rows.is_empty());
+                            continue;
+                        }
+                        for index in 0..count {
+                            let y = viewport.top() + top + index as f32 * height - offset;
+                            if y < viewport.bottom() && y + height > viewport.top() {
+                                let (_, rect, clip) = rows
+                                    .iter()
+                                    .find(|(row, _, _)| *row == index)
+                                    .expect("every partially visible row must be laid out");
+                                assert!((rect.top() - y).abs() <= 1.0 / density);
+                                assert_eq!(clip.y_range(), viewport.y_range());
+                            }
+                        }
+                        if maximum > 0.0 && offset == maximum {
+                            let (_, last, _) = rows
+                                .iter()
+                                .find(|(index, _, _)| *index + 1 == count)
+                                .expect("last virtual row");
+                            assert!(
+                                (viewport.bottom() - last.bottom() - 8.0).abs() <= 1.0 / density
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn scrollbars_have_only_pill_handles_until_hovered_without_restyling_content() {

@@ -105,11 +105,12 @@ impl Playlist {
         let margin = egui::Margin {
             left: 8,
             right: 8,
-            top: 8,
+            top: 0,
             bottom: 0,
         };
         egui::Frame::new().inner_margin(margin).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            ui.visuals_mut().clip_rect_margin = 0.0;
             // The scrollbar is part of the list's wheel ownership too.
             self.scroll_rect = Some(ui.available_rect_before_wrap().intersect(ui.clip_rect()));
             let mut reveal = None;
@@ -165,7 +166,11 @@ impl Playlist {
                 .as_ref()
                 .map(|(path, index)| (path.as_path(), *index))
                 != focus;
+            let mut bar = ui.available_rect_before_wrap();
+            bar.min.y = (bar.top() + 8.0).min(bar.bottom());
+            bar.max.y = (bar.bottom() - 8.0).max(bar.top());
             let mut scroll = egui::ScrollArea::vertical()
+                .scroll_bar_rect(bar)
                 .id_salt("audio_playlist")
                 .vertical_scroll_offset(self.scroll_offset)
                 .scroll_source(egui::scroll_area::ScrollSource {
@@ -182,9 +187,10 @@ impl Playlist {
                 self.wheel.clear();
                 if let Some(index) = reveal.or_else(|| focus.map(|(_, index)| index)) {
                     let offset = self.scroll_offset;
-                    let top = index as f32 * 32.0;
+                    let row_top = 8.0 + index as f32 * 32.0;
+                    let top = if index == 0 { 0.0 } else { row_top };
                     let height = ui.available_height();
-                    let bottom = top + 32.0 + if index + 1 == items.len() { 8.0 } else { 0.0 };
+                    let bottom = row_top + 32.0 + if index + 1 == items.len() { 8.0 } else { 0.0 };
                     let offset = if top < offset {
                         top
                     } else if bottom > offset + height {
@@ -208,99 +214,95 @@ impl Playlist {
                     scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
-            let output = scroll.show_rows_styled(ui, 32.0, items.len(), |ui, rows| {
-                // The virtual child begins at rows.start. Extend its minimum to the
-                // list end plus padding, keeping the scroll viewport at the media edge.
-                if !items.is_empty() {
-                    ui.set_min_height((items.len() - rows.start) as f32 * 32.0 + 8.0);
-                }
-                for index in rows {
-                    let item = items[index];
-                    self.visible.push(item.path.clone());
-                    let selected = current == Some(item.path.as_path());
-                    let name = crate::display_name(&item.path);
-                    let text = RichText::new(format!("{}. {name}", index + 1)).size(14.0);
-                    let duration = self
-                        .durations
-                        .get(&item.path)
-                        .copied()
-                        .flatten()
-                        .map(|duration| crate::format_time(crate::media_time(duration)))
-                        .unwrap_or_else(|| "—".into());
-                    let duration = RichText::new(duration).size(14.0);
-                    let response = ui
-                        .scope_builder(
-                            egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
-                            |ui| {
-                                crate::chrome::flat_buttons(ui);
-                                if selected {
-                                    ui.visuals_mut().widgets.inactive.fg_stroke.color =
-                                        egui::Color32::WHITE;
-                                }
-                                let background = ui.painter().add(egui::Shape::Noop);
-                                let response = ui.add_sized(
-                                    egui::vec2(ui.available_width(), 32.0),
-                                    egui::Button::selectable(
-                                        false,
-                                        (text, egui::Atom::grow(), duration),
-                                    )
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE)
-                                    .truncate(),
-                                );
-                                if response.hovered() {
-                                    ui.painter().set(
-                                        background,
-                                        egui::Shape::rect_filled(
-                                            response.rect,
-                                            3,
-                                            crate::chrome::HOVER,
-                                        ),
+            let output =
+                scroll.show_rows_padded_styled(ui, 32.0, items.len(), [8.0, 8.0], |ui, rows| {
+                    for index in rows {
+                        let item = items[index];
+                        self.visible.push(item.path.clone());
+                        let selected = current == Some(item.path.as_path());
+                        let name = crate::display_name(&item.path);
+                        let text = RichText::new(format!("{}. {name}", index + 1)).size(14.0);
+                        let duration = self
+                            .durations
+                            .get(&item.path)
+                            .copied()
+                            .flatten()
+                            .map(|duration| crate::format_time(crate::media_time(duration)))
+                            .unwrap_or_else(|| "—".into());
+                        let duration = RichText::new(duration).size(14.0);
+                        let response = ui
+                            .scope_builder(
+                                egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
+                                |ui| {
+                                    crate::chrome::flat_buttons(ui);
+                                    if selected {
+                                        ui.visuals_mut().widgets.inactive.fg_stroke.color =
+                                            egui::Color32::WHITE;
+                                    }
+                                    let background = ui.painter().add(egui::Shape::Noop);
+                                    let response = ui.add_sized(
+                                        egui::vec2(ui.available_width(), 32.0),
+                                        egui::Button::selectable(
+                                            false,
+                                            (text, egui::Atom::grow(), duration),
+                                        )
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .stroke(egui::Stroke::NONE)
+                                        .truncate(),
                                     );
-                                }
-                                response
-                            },
-                        )
-                        .inner
-                        .help_ui(|ui| {
-                            ui.set_max_width(
-                                (ui.ctx().viewport_rect().width() - 32.0).clamp(1.0, 400.0),
-                            );
-                            ui.add(egui::Label::new(&name).wrap());
+                                    if response.hovered() {
+                                        ui.painter().set(
+                                            background,
+                                            egui::Shape::rect_filled(
+                                                response.rect,
+                                                3,
+                                                crate::chrome::HOVER,
+                                            ),
+                                        );
+                                    }
+                                    response
+                                },
+                            )
+                            .inner
+                            .help_ui(|ui| {
+                                ui.set_max_width(
+                                    (ui.ctx().viewport_rect().width() - 32.0).clamp(1.0, 400.0),
+                                );
+                                ui.add(egui::Label::new(&name).wrap());
+                            });
+                        if reveal == Some(index) {
+                            response.request_focus();
+                        }
+                        crate::tab_focus::observe_pointer_control(
+                            &response,
+                            ("playlist-row", &item.path),
+                        );
+                        if response.has_focus() {
+                            self.keyboard_focus = Some((item.path.clone(), response.id));
+                        }
+                        ui.ctx().accesskit_node_builder(response.id, |node| {
+                            node.clear_toggled();
+                            node.set_label(format!("{}. {name}", index + 1));
+                            node.set_description(format!(
+                                "{}{}{}",
+                                item.path.display(),
+                                if selected { " (current track)" } else { "" },
+                                self.durations
+                                    .get(&item.path)
+                                    .copied()
+                                    .flatten()
+                                    .map(|duration| format!(
+                                        " · Duration {}",
+                                        crate::format_time(crate::media_time(duration))
+                                    ))
+                                    .unwrap_or_default()
+                            ));
                         });
-                    if reveal == Some(index) {
-                        response.request_focus();
+                        if response.clicked() {
+                            chosen = Some(item.path.clone());
+                        }
                     }
-                    crate::tab_focus::observe_pointer_control(
-                        &response,
-                        ("playlist-row", &item.path),
-                    );
-                    if response.has_focus() {
-                        self.keyboard_focus = Some((item.path.clone(), response.id));
-                    }
-                    ui.ctx().accesskit_node_builder(response.id, |node| {
-                        node.clear_toggled();
-                        node.set_label(format!("{}. {name}", index + 1));
-                        node.set_description(format!(
-                            "{}{}{}",
-                            item.path.display(),
-                            if selected { " (current track)" } else { "" },
-                            self.durations
-                                .get(&item.path)
-                                .copied()
-                                .flatten()
-                                .map(|duration| format!(
-                                    " · Duration {}",
-                                    crate::format_time(crate::media_time(duration))
-                                ))
-                                .unwrap_or_default()
-                        ));
-                    });
-                    if response.clicked() {
-                        chosen = Some(item.path.clone());
-                    }
-                }
-            });
+                });
             // The vertical bar is a separate egui 0.35 widget from the playlist rows.
             if let Some(response) = ui.ctx().read_response(output.id.with(1_usize))
                 && response.enabled()
@@ -802,6 +804,24 @@ mod tests {
                             "padding keeps rows virtualized"
                         );
                     }
+                    assert_eq!(scroll.top(), media.top());
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(_) if (shape.clip_rect.top() - media.top()).abs() <= 1.0 / density)),
+                        "rows paint through the former fixed top inset");
+                    let track = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect)
+                                if rect.rect.width() <= 5.0 && rect.rect.height() > 200.0 =>
+                            {
+                                Some(rect.rect)
+                            }
+                            _ => None,
+                        })
+                        .expect("inset scrollbar track");
+                    assert!((track.top() - media.top() - 8.0).abs() <= 1.0 / density);
+                    assert!((track.bottom() - media.bottom() + 8.0).abs() <= 1.0 / density);
                     assert_eq!(scroll.left(), media.left() + 8.0);
                     assert_eq!(scroll.right(), media.right() - 8.0);
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(_) if (shape.clip_rect.bottom() - media.bottom()).abs() <= 1.0 / density)), "rows paint to the media bottom");

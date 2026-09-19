@@ -53,7 +53,14 @@ impl KeyboardSettings {
             });
         }
         let mut change = None;
-        let body = ui.available_rect_before_wrap().shrink(8.0);
+        let available = ui.available_rect_before_wrap();
+        let body = egui::Rect::from_min_max(
+            available.min + egui::vec2(8.0, 8.0),
+            egui::pos2(
+                (available.right() - 8.0).max(available.left() + 8.0),
+                available.bottom(),
+            ),
+        );
         ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
             if !enabled || self.edit.is_some() {
                 let opacity = ui.opacity();
@@ -119,7 +126,11 @@ impl KeyboardSettings {
             let reveal = focused_row.filter(|_| navigation.moved()).map(|index| {
                 navigation.destination(index, rows.len(), ui.available_height(), 24.0)
             });
-            let mut scroll = egui::ScrollArea::vertical().id_salt("keyboard-rows");
+            let mut bar = ui.available_rect_before_wrap();
+            bar.max.y = (bar.bottom() - 8.0).max(bar.top());
+            let mut scroll = egui::ScrollArea::vertical()
+                .id_salt("keyboard-rows")
+                .scroll_bar_rect(bar);
             if let Some(index) = reveal {
                 let offset = egui::scroll_area::State::load(
                     ui.ctx(),
@@ -127,14 +138,15 @@ impl KeyboardSettings {
                 )
                 .map_or(0.0, |state| state.offset.y);
                 let top = index as f32 * 24.0;
-                let minimum = (top + 24.0 - ui.available_height()).max(0.0).min(top);
+                let bottom = top + 24.0 + if index + 1 == rows.len() { 8.0 } else { 0.0 };
+                let minimum = (bottom - ui.available_height()).max(0.0).min(top);
                 scroll = scroll.vertical_scroll_offset(offset.clamp(minimum, top));
             } else if let Some(offset) =
                 crate::list_navigation::unfocused_scroll(ui, "keyboard-rows", 24.0)
             {
                 scroll = scroll.vertical_scroll_offset(offset);
             }
-            scroll.show_rows_styled(ui, 24.0, rows.len(), |ui, range| {
+            scroll.show_rows_padded_styled(ui, 24.0, rows.len(), [0.0, 8.0], |ui, range| {
                 for index in range {
                     let row = &rows[index];
                     ui.push_id((row.command.id, row.slot), |ui| {

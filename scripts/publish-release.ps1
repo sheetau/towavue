@@ -96,7 +96,7 @@ if ($artifacts.receipt.source_commit -cne $identity.commit -or $artifacts.receip
 $notes = Get-TowavueDraftNotes $artifacts $notesText
 $state = Read-ReleaseState $artifacts $notes
 if ($CheckOnly) {
-    [pscustomobject]@{source_commit=$identity.commit;tag=$artifacts.receipt.tag;create_draft=$state.plan.create;missing_assets=@($state.plan.missing.name);incomplete_placeholders=@($state.plan.incomplete.name);scope='Read-only GitHub preflight; no push, tag, upload or release change.'} | ConvertTo-Json -Depth 5
+    [pscustomobject]@{source_commit=$identity.commit;tag=$artifacts.receipt.tag;create_draft=$state.plan.create;missing_assets=@($state.plan.missing | ForEach-Object { $_.name });incomplete_placeholders=@($state.plan.incomplete | ForEach-Object { $_.name });scope='Read-only GitHub preflight; no push, tag, upload or release change.'} | ConvertTo-Json -Depth 5
     return
 }
 $current = Get-ReleaseSourceIdentity $repositoryRoot

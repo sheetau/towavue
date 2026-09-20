@@ -91,6 +91,12 @@ $nsisSource = [IO.File]::ReadAllText((Join-Path $repositoryRoot 'packaging/windo
 $silentPattern = '(?m)  \$\{If\} \$\{Silent\}\r?\n    SetErrorLevel 2\r?\n    Quit\r?\n  \$\{EndIf\}'
 Assert-True ([regex]::Matches($nsisSource,$silentPattern).Count -eq 1) 'Silent fixture substitution missed its boundary.'
 $nsisSource = [regex]::Replace($nsisSource,$silentPattern,'  ; Silent execution is permitted only in this generated fixture.')
+# GitHub's Windows Server runner is not a supported product OS. Substitute
+# only the generated lifecycle fixture's platform gate; production source and
+# its explicit OS-refusal controls remain unchanged.
+$platformPattern = '(?ms)^  \$\{IfNot\} \$\{IsNativeAMD64\}\r?\n.*?^  \$\{EndIf\}\r?\n  GetWinVer \$0 Build\r?\n.*?^  \$\{EndIf\}'
+Assert-True ([regex]::Matches($nsisSource,$platformPattern).Count -eq 1) 'Platform fixture substitution missed its boundary.'
+$nsisSource = [regex]::Replace($nsisSource,$platformPattern,'  ; This generated fixture assumes a supported product OS.')
 $prerequisitePattern = '(?ms)^Function CheckPrerequisite\r?\n.*?^FunctionEnd'
 Assert-True ([regex]::Matches($nsisSource,$prerequisitePattern).Count -eq 1) 'Prerequisite fixture substitution missed its boundary.'
 $nsisSource = [regex]::Replace($nsisSource,$prerequisitePattern,"Function CheckPrerequisite`n  StrCpy `$PrerequisiteResult 0`nFunctionEnd")

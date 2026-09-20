@@ -4,11 +4,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$release = 'autobuild-2026-09-03-13-17'
+# Upstream retains month-end builds for two years; daily builds expire after 14.
+# This development-only runtime remains excluded from product distribution.
+$release = 'autobuild-2026-08-31-13-27'
 $asset = 'ffmpeg-n9.0.1-11-ge47273f4d9-win64-lgpl-shared-9.0.zip'
-$expectedSha256 = 'ad26fca80435853043bd75a989be38261fa28b54bb623459b88786177b22fa86'
+$expectedSha256 = '83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$vendorDirectory = Join-Path $repositoryRoot 'vendor\ffmpeg'
+$vendorDirectory = Join-Path $repositoryRoot ('vendor/ffmpeg/' + $release)
 $archivePath = Join-Path $vendorDirectory $asset
 $distributionName = [IO.Path]::GetFileNameWithoutExtension($asset)
 $distributionRoot = Join-Path $vendorDirectory $distributionName

@@ -2,6 +2,14 @@
 
 Last consolidated: 2026-09-20. This is the only current-status and handoff document. Update rows in place; detailed history stays in Git. [Development](DEVELOPMENT.md) provides setup, checks, and historical lookup; [Architecture](ARCHITECTURE.md) provides accepted contracts.
 
+## CI input and fixture repair (2026-09-20)
+
+The owner reported both jobs failing on 59cc25d. Run 35515570749 shows the Rust job stopping before compilation because the September 3 BtbN daily asset returns 404, and the generated Setup lifecycle fixture exiting 2 on the Windows Server 2022 runner. The same failures were already present in run 35505982818 before the Apache transition. No application regression is established by those failures.
+
+The development-only FFmpeg pin now uses retained month-end tag autobuild-2026-08-31-13-27, still FFmpeg n9.0.1-11-ge47273f4d9, with upstream asset digest 83a824f0729a69d143c9865125bb86988a11dd388325f0033711045522068aa0. Release-tag-specific cache paths preserve the previous local archive and audited distribution inputs. The generated lifecycle fixture substitutes the supported-OS assumption just as it substitutes prerequisite consent and silent execution; actual packaging/windows/setup.nsi gates remain unchanged. Windows Server CI is not Windows 11 product qualification.
+
+Local NSIS lifecycle verification passes install/update, refusal, interrupted registration, rollback/retry, parent/child lease and uninstall controls; fixture registry/shortcut cleanup completed. Evidence: target/tmp/setup-update-lifecycle-26958ee9cd2940678b8006e161cdf9af. The new archive digest matches upstream GitHub asset metadata; local byte verification and the corrected hosted jobs remain pending until their running checks finish.
+
 ## Apache-2.0 transition planned for 1.0.3 (2026-09-20)
 
 The owner chose to keep the repository public and switch towavue's own code from MIT OR Apache-2.0 to Apache-2.0, with NOTICE, for the 1.0.3 distribution. Current Cargo metadata, README and About use Apache-2.0. NOTICE identifies the existing copyright owner (sheetau) and points to third-party materials. The original MIT text moved unchanged to third-party/towavue-legacy/; published releases, historical manifests and third-party grants are preserved.

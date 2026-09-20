@@ -1,7 +1,9 @@
 towavue application licenses and Rust notices
 
-LICENSE-MIT OR LICENSE-APACHE applies to towavue. Third-party components retain
-their original terms; including both alternatives does not require both.
+For towavue 1.0.3 and later, LICENSE-APACHE and NOTICE apply to the application.
+Earlier versions retain their MIT OR Apache-2.0 terms; their application kit
+contains both license texts. Third-party components retain their own terms
+and original notices, independently of the application's license selection.
 
 RUST-THIRD-PARTY-NOTICES.txt contains the exact Windows x64 normal/build
 dependency closure recorded in docs/rust-license-inputs.json and Cargo.lock,

@@ -12,10 +12,12 @@ param(
     [string]$RuntimeNoticeCache
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 . (Join-Path $PSScriptRoot 'release-materials.ps1')
 . (Join-Path $PSScriptRoot 'release-signing.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $identity = Get-ReleaseSourceIdentity $repositoryRoot
+Assert-TowavueReleaseLicense $repositoryRoot $identity.version
 if (-not $CargoTargetDirectory) { $CargoTargetDirectory = Join-Path $repositoryRoot 'target/release-windows-x64' }
 foreach ($name in @('FfmpegPrefix','NativeMaterialsDirectory','VcRedist','NsisArchive','OutputDirectory','CargoTargetDirectory')) {
     Set-Variable -Name $name -Value (Resolve-ReleasePath (Get-Variable -Name $name -ValueOnly))

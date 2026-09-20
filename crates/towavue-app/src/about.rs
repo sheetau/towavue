@@ -23,7 +23,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     actions.push(UiAction::About(Action::Link(ProjectLink::Repository)));
                 }
                 ui.add_space(8.0);
-                ui.label("MIT OR Apache-2.0. Provided without warranty.");
+                ui.label(concat!(
+                    env!("CARGO_PKG_LICENSE"),
+                    ". Provided without warranty."
+                ));
                 if ui.link("Licenses and sources").clicked() {
                     actions.push(UiAction::About(Action::Licenses));
                 }
@@ -137,6 +140,13 @@ mod tests {
                             .all(|text| text.galley.text() != "About towavue")
                     );
                     if pass == 2 {
+                        assert!(texts.iter().any(|text| {
+                            text.galley.text()
+                                == concat!(
+                                    env!("CARGO_PKG_LICENSE"),
+                                    ". Provided without warranty."
+                                )
+                        }));
                         let identity = texts
                             .iter()
                             .find(|text| text.galley.text().starts_with("towavue / Version "))

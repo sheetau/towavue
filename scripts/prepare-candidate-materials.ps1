@@ -9,6 +9,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/candidate-material-inputs.json' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -125,13 +126,18 @@ Assert-File $sourcePath $manifest.application_source
 $utf8 = [Text.UTF8Encoding]::new($false)
 function Html([string]$Text) { return [Net.WebUtility]::HtmlEncode($Text) }
 function Link([string]$Path) { return (($Path.Split('/') | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/') }
+$licenseLinks = @{}
+foreach ($name in (Get-TowavueLicenseProfile $manifest.release_version).materials) {
+    $licenseLinks[$name] = 'catalog/materials/app-materials-v2/' + $name
+    if (-not (Test-Path -LiteralPath (Join-Path $OutputDirectory $licenseLinks[$name]) -PathType Leaf)) { throw "Missing application license material: $name" }
+}
 $page = @('<!doctype html>','<html lang="en"><meta charset="utf-8"><title>towavue sources and notices</title>',
     '<style>body{font:16px system-ui;max-width:1100px;margin:3em auto;padding:0 1em;line-height:1.6}table{border-collapse:collapse;width:100%}td,th{padding:.4em;text-align:left;border-bottom:1px solid #aaa}code{overflow-wrap:anywhere}a{overflow-wrap:anywhere}</style>',
     '<h1>towavue sources and notices</h1>',
     '<p>Local evaluation candidate &#8212; not a published or approved release. This directory contains source and notice materials, not an installer or the application binaries.</p>',
     '<h2>Application</h2>',
     ('<p><a href="' + (Link $manifest.application_source.name) + '">Application source ZIP</a> &middot; commit <code>' + $manifest.application_source_commit + '</code>. This is the source snapshot recorded for the evaluated executable, not a claim of a bit-for-bit reproducible build. It includes Cargo.lock and the pinned toolchain; dependency downloads and the separately supplied native build inputs are needed to rebuild.</p>'),
-    '<p><a href="catalog/materials/app-materials-v2/LICENSE-MIT">MIT</a> OR <a href="catalog/materials/app-materials-v2/LICENSE-APACHE">Apache-2.0</a> applies to towavue. Third-party code, fonts and data retain their own notices and original alternatives.</p>',
+    ('<p>towavue license: ' + (Get-TowavueLicenseLinks $manifest.release_version $licenseLinks) + '. Third-party code, fonts and data retain their own notices and original alternatives.</p>'),
     '<h2>Component sources and notices</h2><ul>')
 foreach ($kit in $catalog.kits) {
     $page += '<li><a href="' + (Link ('catalog/materials/' + $kit.name + '/README.txt')) + '">' + (Html $kit.title) + '</a> &#8212; ' + (Html $kit.description) + '</li>'

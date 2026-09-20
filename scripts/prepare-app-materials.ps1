@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/app-material-inputs.json' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -29,10 +30,15 @@ $copies = @{}
 foreach ($record in $manifest.repository_materials) {
     if ($record.name -notmatch '^[A-Za-z0-9_][A-Za-z0-9_./-]*$' -or $record.name -match '(^|/)\.\.(/|$)') { throw 'Invalid application material path.' }
     if ($copies.ContainsKey($record.name)) { throw 'Duplicate application material.' }
-    $path = Join-Path $repositoryRoot $record.name
+    $path = Resolve-TowavueLicenseMaterial $repositoryRoot $record.name
     Assert-File $path $record
     $copies[$record.name] = @{path=$path;record=$record}
 }
+$profile = Get-TowavueLicenseProfile $manifest.release_version
+foreach ($name in $profile.materials) {
+    if (-not $copies.ContainsKey($name)) { throw "Missing application license material: $name" }
+}
+if ($profile.id -eq 'Apache-2.0' -and $copies.ContainsKey('LICENSE-MIT')) { throw 'Current application materials must not offer the historical MIT license.' }
 $copies['RUST-THIRD-PARTY-NOTICES.txt'] = @{path=$RustNotices;record=$manifest.notice_files[0]}
 $copies['TOWAVUE-RUST-RUNTIME-NOTICES.zip'] = @{path=$RuntimeNotices;record=$manifest.notice_files[1]}
 $licenses = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/rust-license-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json

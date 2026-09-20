@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $repositoryRoot 'docs/app-material-inputs.json'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -15,7 +16,7 @@ $testRoot = Join-Path $repositoryRoot ('target/tmp/app-material-test-' + [Guid]:
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $originalInputs = @{}
 foreach ($key in $arguments.Keys) { $originalInputs[$arguments[$key]] = (Get-FileHash -LiteralPath $arguments[$key]).Hash }
-foreach ($file in @($manifest.runtime_inventory) + @($manifest.repository_materials)) { $originalInputs[(Join-Path $repositoryRoot $file.name)] = $file.sha256 }
+foreach ($file in @($manifest.runtime_inventory) + @($manifest.repository_materials)) { $originalInputs[(Resolve-TowavueLicenseMaterial $repositoryRoot $file.name)] = $file.sha256 }
 function Assert-Rejected([string]$Message) {
     $rejected = $false
     try { & $generator @arguments | Out-Null }
@@ -54,14 +55,15 @@ foreach ($key in @('RustNotices','RuntimeNotices','Executable')) {
     $fixtureInputs += $target
 }
 foreach ($file in @($manifest.runtime_inventory) + @($manifest.repository_materials)) {
-    $target = Join-Path $fixture $file.name
+    $target = Resolve-TowavueLicenseMaterial $fixture $file.name
     New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot $file.name) -Destination $target
+    Copy-Item -LiteralPath (Resolve-TowavueLicenseMaterial $repositoryRoot $file.name) -Destination $target
     $fixtureInputs += $target
 }
 $fixtureManifest = Join-Path $fixture 'docs/app-material-inputs.json'
 Copy-Item -LiteralPath $manifestPath -Destination $fixtureManifest
 Copy-Item -LiteralPath $generator -Destination "$fixture/scripts/prepare-app-materials.ps1"
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'application-license.ps1') -Destination "$fixture/scripts/application-license.ps1"
 $generator = Join-Path $fixture 'scripts/prepare-app-materials.ps1'
 $arguments.OutputDirectory = Join-Path $testRoot 'rejected'
 foreach ($path in $fixtureInputs) {

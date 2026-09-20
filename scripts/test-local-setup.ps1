@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $BuildDirectory = (Resolve-Path -LiteralPath $BuildDirectory).Path
 $SourceCompanion = (Resolve-Path -LiteralPath $SourceCompanion).Path
@@ -132,6 +133,19 @@ try {
 }
 finally { $archive.Dispose() }
 $html = Get-Content -LiteralPath (Join-Path $licenses 'START-HERE.html') -Raw -Encoding UTF8
+$profile = Get-TowavueLicenseProfile $pins.release_version
+foreach ($name in $profile.materials) {
+    $original = 'catalog/materials/app-materials-v2/' + $name
+    Assert-True ($originalNames.ContainsKey($original)) "Required application license material was omitted: $name"
+    $mapping = @($inventory.companion_entries | Where-Object companion -ceq $original)[0]
+    Assert-True ($html.Contains('href="' + $mapping.installed + '"')) "Application license material has no guide link: $name"
+}
+if ($profile.id -eq 'Apache-2.0') {
+    Assert-True (-not $originalNames.ContainsKey('catalog/materials/app-materials-v2/LICENSE-MIT')) 'Current application kit includes the historical MIT option.'
+    Assert-True ($html.Contains('towavue is Apache-2.0.') -and -not $html.Contains('towavue is MIT OR Apache-2.0.')) 'Installed application license is stale.'
+    $sourceNames = @($inventory.build_sources | ForEach-Object name)
+    Assert-True ('NOTICE' -in $sourceNames -and 'scripts/application-license.ps1' -in $sourceNames) 'Installer source archive omits current notice or license helper.'
+}
 $links = [regex]::Matches($html,'href="([^"]+)"')
 foreach ($link in $links) {
     $relative = [uri]::UnescapeDataString($link.Groups[1].Value)

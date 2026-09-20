@@ -10,9 +10,11 @@ param(
     [string]$RuntimeNoticeCache
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 . (Join-Path $PSScriptRoot 'release-materials.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $identity = Get-ReleaseSourceIdentity $repositoryRoot
+Assert-TowavueReleaseLicense $repositoryRoot $identity.version
 foreach ($name in @('Executable','FfmpegPrefix','NativeMaterialsDirectory','OutputDirectory')) {
     Set-Variable -Name $name -Value (Resolve-ReleasePath (Get-Variable -Name $name -ValueOnly))
 }
@@ -65,10 +67,11 @@ $app.candidate = $executableRecord
 $app.dependency_count = $licenses.packages.Count
 $app.notice_files = @((Get-ReleaseRecord $rustNotices 'RUST-THIRD-PARTY-NOTICES.txt'),(Get-ReleaseRecord $runtimeNotices 'TOWAVUE-RUST-RUNTIME-NOTICES.zip'))
 $app.runtime_inventory = Get-ReleaseRecord (Join-Path $repositoryRoot $app.runtime_inventory.name) $app.runtime_inventory.name
-$app.repository_materials = @($app.repository_materials | ForEach-Object {
+$profile = Get-TowavueLicenseProfile $identity.version
+$app.repository_materials = @($app.repository_materials | Where-Object { $_.name -notin @('LICENSE-MIT','LICENSE-APACHE','NOTICE') } | ForEach-Object {
     $name = if ($_.name -eq 'third-party/APP-MATERIALS-README.txt') { 'third-party/RELEASE-MATERIALS-README.txt' } else { $_.name }
     Get-ReleaseRecord (Join-Path $repositoryRoot $name) $name
-})
+}) + @($profile.materials | ForEach-Object { Get-ReleaseRecord (Resolve-TowavueLicenseMaterial $repositoryRoot $_) $_ })
 $appInput = Join-Path $OutputDirectory 'app-inputs.json'
 Write-ReleaseJson $appInput $app
 & (Join-Path $PSScriptRoot 'prepare-app-materials.ps1') -RustNotices $rustNotices -RuntimeNotices $runtimeNotices -Executable $Executable -OutputDirectory (Join-Path $materials 'app-materials-v2') -InputManifest $appInput | Write-Host

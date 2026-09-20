@@ -50,6 +50,6 @@ Shortcuts depend on the active media and mode. Menus show available commands; cu
 
 ## License and source
 
-Created by **sheeta**. towavue is available under the [MIT License](LICENSE-MIT) or [Apache License 2.0](LICENSE-APACHE), at your option. Third-party components retain their own licenses; see [third-party notices](third-party/README.md).
+Created by **sheeta**. Current development toward 1.0.3 and later is licensed under [Apache License 2.0](LICENSE-APACHE); see [NOTICE](NOTICE). Previously released versions retain their original MIT OR Apache-2.0 terms. Third-party components retain their own licenses; see [third-party notices](third-party/README.md).
 
 Each release includes a matching `sources.zip` with application and native sources, patches, and original notices. **Help > Show licenses and sources** opens the installed notices and source link. For building and contributing, see the [development guide](docs/DEVELOPMENT.md).

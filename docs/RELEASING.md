@@ -2,6 +2,14 @@
 
 Production releases target Windows 11 x64. EXE and Setup currently have no Authenticode signature by owner decision; update metadata is independently signed with the retained RSA-4096 key. This guide covers subsequent releases as well as the initial assembly. Use [STATUS](STATUS.md) for published versions, retained inputs and qualification limits. The publisher creates a draft; the owner publishes it.
 
+## Application license from 1.0.3
+
+Current development selects Apache-2.0 for towavue's own code. Publish these changes with 1.0.3 or later: update the workspace version and its Cargo.lock notice binding during release preparation. The assembler refuses a version/license mismatch. Existing releases and pinned historical material manifests retain their original MIT OR Apache-2.0 terms.
+
+The generated application kit contains LICENSE-APACHE and NOTICE; the installed guide links to both. Installer sources include the same current notice and license, plus clearly identified historical license records needed by evaluation inputs. The original MIT text is retained byte-for-byte under third-party/towavue-legacy/, not offered for current changes. Third-party license alternatives, sources and attribution notices remain unchanged.
+
+After changing license packaging, run `scripts/test-application-license.ps1 -PreparedDirectory <retained-release-build>` for material-only fixtures, then `test-local-setup.ps1` on the exact new Setup during release qualification. The latter checks the installed NOTICE, guide links and installer-source coverage. Material fixtures do not qualify a new release executable.
+
 ## Build exact local assets
 
 Use a clean committed checkout, the pinned Rust toolchain, Windows SDK/LLVM and a populated locked Cargo cache. Select the redistributable native FFmpeg build from [NATIVE_FFMPEG_BUILD](NATIVE_FFMPEG_BUILD.md), with headers/import libraries and its original runtime. The BtbN development runtime is excluded. Preserve the twelve native source/notice kits from the accepted catalog; the old application kit is not reused.

@@ -10,6 +10,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $manifestPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/setup-inputs.json' }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -150,7 +151,7 @@ foreach ($name in $updateSources) {
 }
 
 $utf8 = [Text.UTF8Encoding]::new($false)
-$buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json','LICENSE-MIT','LICENSE-APACHE','packaging/windows/SOURCES-README.txt')
+$buildSources = @('packaging/windows/setup.nsi','packaging/windows/operation-lock.ps1','packaging/windows/prerequisite.ps1','packaging/windows/registration.ps1','packaging/windows/registration-state.ps1','packaging/windows/UnicodeShellLink.cs','scripts/build-local-setup.ps1','scripts/get-vc-redist-status.ps1','scripts/vc-redist-state.ps1','docs/setup-inputs.json','docs/nsis-inputs.json','docs/vc-redist-inputs.json','LICENSE-APACHE','NOTICE','third-party/towavue-legacy/LICENSE-MIT','third-party/towavue-legacy/README.md','scripts/application-license.ps1','packaging/windows/SOURCES-README.txt')
 $buildSources = @(($buildSources + $updateSources) | Sort-Object -Unique)
 $buildSourcePaths = @{}
 foreach ($name in $buildSources) { $buildSourcePaths[$name] = Join-Path $repositoryRoot $name }
@@ -180,10 +181,15 @@ $noticeFiles = @(Get-ChildItem -LiteralPath $licenses -File -Recurse -Force | Fo
 [Array]::Sort($noticeFiles,[StringComparer]::Ordinal)
 $page = [Collections.Generic.List[string]]::new()
 $page.Add('<!doctype html><html lang="en"><meta charset="utf-8"><title>towavue licenses and sources</title><style>body{font:16px system-ui;max-width:1000px;margin:3em auto;padding:0 1em;line-height:1.6}code,a{overflow-wrap:anywhere}</style><h1>towavue licenses and sources</h1>')
-$page.Add('<p>Local evaluation only, not an approved or published release. towavue is MIT OR Apache-2.0. Third-party components retain their original terms. Compatible FFmpeg DLL replacement is not blocked by a startup hash allowlist.</p>')
-$mit = @($companionEntries | Where-Object { $_.companion -eq 'catalog/materials/app-materials-v2/LICENSE-MIT' })[0].installed
-$apache = @($companionEntries | Where-Object { $_.companion -eq 'catalog/materials/app-materials-v2/LICENSE-APACHE' })[0].installed
-$page.Add('<p><a href="' + $mit + '">MIT</a> OR <a href="' + $apache + '">Apache-2.0</a> &middot; <a href="NSIS-COPYING.txt">NSIS notices</a> &middot; <a href="INSTALLED-FILES.json">Installed payload inventory</a></p>')
+$profile = Get-TowavueLicenseProfile $manifest.release_version
+$page.Add('<p>Local evaluation only, not an approved or published release. towavue is ' + $profile.id + '. Third-party components retain their original terms. Compatible FFmpeg DLL replacement is not blocked by a startup hash allowlist.</p>')
+$licenseLinks = @{}
+foreach ($name in $profile.materials) {
+    $matches = @($companionEntries | Where-Object { $_.companion -ceq ('catalog/materials/app-materials-v2/' + $name) })
+    if ($matches.Count -ne 1) { throw "Missing or duplicate application license material: $name" }
+    $licenseLinks[$name] = $matches[0].installed
+}
+$page.Add('<p>' + (Get-TowavueLicenseLinks $manifest.release_version $licenseLinks) + ' &middot; <a href="NSIS-COPYING.txt">NSIS notices</a> &middot; <a href="INSTALLED-FILES.json">Installed payload inventory</a></p>')
 $page.Add('<h2>Corresponding sources</h2><p>The complete application and native sources, patches, build instructions and original notices are in the separate companion <code>' + $manifest.companion.name + '</code> (' + $manifest.companion.bytes + ' bytes), SHA256 <code>' + $manifest.companion.sha256 + '</code>. Extract it into a separate folder and start with its START-HERE.html. This local evaluation has no public download URL. A public release must provide this matching companion alongside Setup.</p>')
 $page.Add('<p>The exact installer sources and build-input manifests are included in <a href="INSTALLER-SOURCES.zip">INSTALLER-SOURCES.zip</a> (' + $installerSource.bytes + ' bytes), SHA256 <code>' + $installerSource.sha256 + '</code>. Extract this ZIP separately and read packaging/windows/SOURCES-README.txt. SOURCES.json lists its original file identities. External app/runtime binaries, the companion, NSIS and the Microsoft package must be supplied separately; nothing is downloaded or installed by the build.</p>')
 $page.Add('<p>The companion-records folder below retains every non-source-archive original under short numbered names. Link labels and the installed inventory map each file to its original companion path. Upstream READMEs and inventories refer to the complete companion, including archives intentionally not installed here. Use the extracted companion for those references; do not interpret its FILES.json as this installed tree. The Rust runtime notice ZIP is retained. No license text has been shortened or replaced.</p>')

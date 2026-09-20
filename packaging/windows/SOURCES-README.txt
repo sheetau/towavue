@@ -1,7 +1,9 @@
 towavue Setup sources
 
 This archive contains the exact installer build sources and input manifests
-recorded in SOURCES.json, plus towavue's original MIT and Apache-2.0 licenses.
+recorded in SOURCES.json, plus LICENSE-APACHE and NOTICE for these sources.
+The historical MIT text under third-party/towavue-legacy/ is retained only
+for earlier application payloads; see that directory's README.md.
 It is not the application's Rust source archive or an approved public release.
 Preserve the directory layout when extracting into a fresh local directory.
 

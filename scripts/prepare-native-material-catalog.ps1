@@ -8,6 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'application-license.ps1')
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $inventoryPath = if ($InputManifest) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InputManifest) } else { Join-Path $repositoryRoot 'docs/native-material-catalog.json' }
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -138,7 +139,7 @@ $readme += @($inventory.open_items | ForEach-Object { '- ' + $_ })
 if ($inventory.release_version) {
     $readme = @('# towavue application and native source/notice catalog', '',
         ('Materials for towavue ' + $inventory.release_version + '. The companion BINDING.json identifies the exact application and runtime. Source archives, patches, original notices and component build instructions are retained below. Historical evaluation statements inside unchanged native kits describe their original collection, not this release status.'), '',
-        'The application uses MIT OR Apache-2.0. Other components retain their own terms. Open each component README and its input inventory before rebuilding. Package recipes describe provenance, not a complete linked-code SBOM.', '',
+        ('The application uses ' + (Get-TowavueLicenseProfile $inventory.release_version).id + '. Other components retain their own terms. Open each component README and its input inventory before rebuilding. Package recipes describe provenance, not a complete linked-code SBOM.'), '',
         'See [PACKAGES.md](PACKAGES.md) for the original package owners and notices. The excluded original ZVBI package is replaced by the scoped ZVBI kit.', '',
         '## Component guide', '', '| Component | Contents and scope |', '|---|---|')
     foreach ($kit in $inventory.kits) { $readme += '| [' + $kit.title + '](' + (Get-Link ('materials/' + $kit.name + '/README.txt')) + ') | ' + $kit.description + ' |' }

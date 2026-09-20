@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$NsisArchive)
+param([string]$NsisArchive, [switch]$ShowUpdateProgress)
 $ErrorActionPreference = 'Stop'
 $repository = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'setup-update-transaction.ps1')
@@ -10,6 +10,7 @@ $incoming = Join-Path $root 'incoming'
 $programs = Join-Path $root 'programs'
 $keyName = 'Software\towavue\InstallerTests\' + [Guid]::NewGuid().ToString('N')
 $shortcut = Join-Path $programs 'towavue.lnk'
+$cleanupRegistration = $true
 $utf8 = [Text.UTF8Encoding]::new($false)
 [IO.Directory]::CreateDirectory($programs) | Out-Null
 function Assert-True([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
@@ -161,6 +162,9 @@ try {
         # Only this fixture supplies a satisfied prerequisite; product silent and
         # identity/version gates are compiled unchanged, with a private HKCU key.
         $nsis=[regex]::Replace($nsis,$pattern,"Function CheckPrerequisite`n  StrCpy `$PrerequisiteResult 0`nFunctionEnd")
+        # Fail immediately if an automatic run accidentally reaches Finish;
+        # otherwise an unattended regression would leave a live wizard behind.
+        $nsis=$nsis.Replace('Function ShowProductionFinish',"Function ShowProductionFinish`n  `${If} `$AutomaticUpdate == 1`n    SetErrorLevel 97`n    Quit`n  `${EndIf}")
         Write-Text (Join-Path $build 'setup.nsi') $nsis
         & $compiler /NOCONFIG /WX /V2 /DTOWAVUE_SETUP_APPLICATION /DTOWAVUE_SETUP_RELEASE /DPRODUCT_VERSION=1.0.1 ("/DTRIAL_ROOT=" + $build.Replace('$','$$')) (Join-Path $build 'setup.nsi')
         Assert-True ($LASTEXITCODE -eq 0) 'Production NSIS compilation failed.'
@@ -203,9 +207,29 @@ try {
             if ($case -eq 'fresh') { Assert-True (-not (Test-Path -LiteralPath $destination)) 'Automatic update created a fresh install directory.' }
         }
         Write-Output 'PASS: actual production NSIS branch/version resource, no-flag/fresh-install/same-version refusal and authenticated-handoff-shaped A-to-B update through the real transaction. Prerequisite is a satisfied fixture; no real product registration was used.'
+        if ($ShowUpdateProgress) {
+            $latest = Get-ChildItem -LiteralPath $root -Directory -Filter '.towavue-update-*' | Sort-Object CreationTimeUtc -Descending | Select-Object -First 1
+            $digest = (Get-FileHash -LiteralPath (Join-Path $latest.FullName 'journal.json')).Hash.ToLowerInvariant()
+            Invoke-TowavueUpdateTransaction -Mode Rollback -TransactionDirectory $latest.FullName -JournalSha256 $digest -ExpectedRegistration @{InstallDirectory=$installed;RegistrySubKey=$keyName;ShortcutPath=$shortcut} | Out-Null
+            $process = Start-Process -FilePath $setup -ArgumentList ('/S /TOWAVUEUPDATE=1 /TOWAVUEPROGRESS=1 /D=' + $installed) -WindowStyle Hidden -PassThru
+            $null = $process.Handle
+            try {
+                if (-not $process.WaitForExit(60000)) {
+                    $cleanupRegistration = $false
+                    throw "Automatic progress flow remains active: PID $($process.Id). Preserve its test registration and journal."
+                }
+                Assert-True ($process.ExitCode -eq 0) "Automatic progress flow failed: $($process.ExitCode)."
+            } finally { $process.Dispose() }
+            $key = $base.OpenSubKey($keyName)
+            try { Assert-True ($key.GetValue('DisplayVersion') -ceq '1.0.1' -and -not $key.GetValueNames().Contains('TowavuePendingUpdate')) 'Progress flow did not complete the registered update.' } finally { $key.Dispose() }
+            Write-Output 'PASS: native progress-page update completed and closed without wizard input. This checks process completion, not physical appearance.'
+        }
     }
     Write-Output "PASS: production version-bound inventory/plan/schema-4 journal, real PE version replacement and exact rollback, six registration interruption boundaries, unknown typed versions, namespace separation, journal binding and PE mismatch refusal. Isolated evidence: $root"
 } finally {
-    $base.DeleteSubKeyTree($keyName,$false); $base.Dispose()
-    if (Test-Path -LiteralPath $shortcut) { [IO.File]::Delete($shortcut) }
+    if ($cleanupRegistration) {
+        $base.DeleteSubKeyTree($keyName,$false)
+        if (Test-Path -LiteralPath $shortcut) { [IO.File]::Delete($shortcut) }
+    }
+    $base.Dispose()
 }

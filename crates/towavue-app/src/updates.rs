@@ -7,6 +7,7 @@ pub(super) enum Action {
     Install,
     NextLaunch,
     Cancel,
+    Dismiss,
 }
 
 #[derive(Clone, Copy)]
@@ -67,8 +68,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             // Invalidate approval synchronously, before a queued helper-ready
             // event can be routed. The host cancels the other windows as a unit.
             self.update_close = None;
-        } else if matches!(action, Action::Install | Action::NextLaunch)
-            && self.update_notice.take().is_none()
+        } else if matches!(
+            action,
+            Action::Install | Action::NextLaunch | Action::Dismiss
+        ) && self.update_notice.is_none()
         {
             return;
         }
@@ -77,49 +80,27 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn draw_update(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
-        let held = self.update_is_held();
         let cancellable = self
             .update_close
             .as_ref()
             .is_some_and(|close| !close.committing);
         let modal = chrome::modal(context, "towavue-update".into(), false).show(context, |ui| {
-            let buttons: &[&str] = if held {
-                if cancellable { &["Cancel"] } else { &[] }
-            } else {
-                &["Install now", "Install on next launch"]
-            };
+            let buttons: &[&str] = if cancellable { &["Cancel"] } else { &[] };
             chrome::modal_body(ui, 400.0, "towavue update", buttons, |ui| {
-                if held {
-                    ui.label(if cancellable {
-                        "Preparing update. Complete any save prompts in the other windows."
-                    } else {
-                        "Restarting to install the update…"
-                    });
-                } else if let Some(notice) = self.update_notice {
-                    ui.label(format!("Version {} is downloaded and ready to install.", notice.version));
-                    if notice.failed {
-                        ui.label("The previous installation did not finish. Your documents are still available.");
-                    }
-                }
+                ui.label(if cancellable {
+                    "Preparing update. Complete any save prompts in the other windows."
+                } else {
+                    "Restarting to install the update…"
+                });
             });
             chrome::flat_buttons(ui);
             ui.horizontal(|ui| {
-                if held {
-                    if cancellable && ui.button("Cancel").clicked() {
-                        actions.push(UiAction::Update(Action::Cancel));
-                    }
-                } else {
-                    if ui.button("Install now").clicked() {
-                        actions.push(UiAction::Update(Action::Install));
-                    }
-                    if ui.button("Install on next launch").clicked() {
-                        actions.push(UiAction::Update(Action::NextLaunch));
-                    }
+                if cancellable && ui.button("Cancel").clicked() {
+                    actions.push(UiAction::Update(Action::Cancel));
                 }
             });
         });
-        if held
-            && cancellable
+        if cancellable
             && modal.is_top_modal
             && !modal.any_popup_open
             && context

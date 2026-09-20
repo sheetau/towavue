@@ -22,6 +22,7 @@ use windows::{
 #[derive(Clone, Debug)]
 pub enum UpdateEvent {
     Disabled,
+    Unavailable(String),
     StartupComplete,
     InstallationInProgress,
     Ready {
@@ -72,18 +73,17 @@ impl UpdateService {
             .name("towavue-updates".into())
             .spawn(move || {
                 let context = match Installation::discover(installed) {
-                    Ok(Some(context)) => context,
-                    Ok(None) => {
+                    Ok(Discovery::Ready(context)) => context,
+                    Ok(Discovery::Disabled) => {
                         notify(UpdateEvent::Disabled);
                         return;
                     }
+                    Ok(Discovery::Installing) => {
+                        notify(UpdateEvent::InstallationInProgress);
+                        return;
+                    }
                     Err(error) => {
-                        notify(UpdateEvent::Error {
-                            message: error.to_string(),
-                            startup: true,
-                            operation: None,
-                        });
-                        notify(UpdateEvent::Disabled);
+                        notify(UpdateEvent::Unavailable(error.to_string()));
                         return;
                     }
                 };
@@ -148,6 +148,12 @@ struct Installation {
     store: UpdateStore,
 }
 
+enum Discovery {
+    Disabled,
+    Installing,
+    Ready(Installation),
+}
+
 fn registry_string(name: PCWSTR) -> io::Result<Option<String>> {
     let mut buffer = vec![0u16; 32768];
     let mut bytes = (buffer.len() * 2) as u32;
@@ -183,34 +189,57 @@ fn registry_string(name: PCWSTR) -> io::Result<Option<String>> {
 }
 
 impl Installation {
-    fn discover(installed: ReleaseVersion) -> io::Result<Option<Self>> {
+    fn discover(installed: ReleaseVersion) -> io::Result<Discovery> {
         let Some(directory) = registry_string(w!("InstallLocation"))? else {
-            return Ok(None);
+            return Ok(Discovery::Disabled);
         };
         let directory = PathBuf::from(directory);
         let executable = std::env::current_exe()?;
         if directory.join("towavue.exe").canonicalize().ok() != Some(executable.canonicalize()?) {
-            return Ok(None);
+            return Ok(Discovery::Disabled);
         }
-        if registry_string(w!("DisplayVersion"))?.as_deref() != Some(installed.to_string().as_str())
-        {
+        // Only the registered executable reaches the cache. During installation,
+        // the pending marker and version fields are transient, not corruption.
+        // SAFETY: copy Shell's task-allocated string and free it on both outcomes.
+        let folder = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None) }
+            .map_err(io::Error::other)?;
+        let local = unsafe { folder.to_string() }.map_err(io::Error::other);
+        unsafe { CoTaskMemFree(Some(folder.0.cast())) };
+        let store = UpdateStore::new(PathBuf::from(local?).join("towavue").join("updates"));
+        let context = Self { directory, store };
+        if context.available(installed, registry_string)? {
+            Ok(Discovery::Ready(context))
+        } else {
+            Ok(Discovery::Installing)
+        }
+    }
+
+    fn available(
+        &self,
+        installed: ReleaseVersion,
+        registration: impl Fn(PCWSTR) -> io::Result<Option<String>>,
+    ) -> io::Result<bool> {
+        if self.store.installation_in_progress()? {
+            return Ok(false);
+        }
+        if registration(w!("DisplayVersion"))?.as_deref() != Some(installed.to_string().as_str()) {
             return Err(io::Error::other(
                 "Installed and registered versions differ. Run Setup to recover the installation.",
             ));
         }
-        if registry_string(w!("TowavuePendingUpdate"))?.is_some() {
+        if registration(w!("TowavuePendingUpdate"))?.is_some() {
             return Err(io::Error::other(
                 "An interrupted installation needs recovery. Run Setup before updating.",
             ));
         }
-        let identity = registry_string(w!("TowavueOwnershipId"))?
+        let identity = registration(w!("TowavueOwnershipId"))?
             .ok_or_else(|| io::Error::other("Installation ownership is missing"))?;
         let hash = identity
             .strip_prefix("towavue-release-")
             .filter(|hash| hash.len() == 64)
             .ok_or_else(|| io::Error::other("Not a production installation"))?;
         let mut inventory = Vec::new();
-        File::open(directory.join("licenses/INSTALLED-FILES.json"))?
+        File::open(self.directory.join("licenses/INSTALLED-FILES.json"))?
             .take(4 * 1024 * 1024 + 1)
             .read_to_end(&mut inventory)?;
         let digest = super::crypto::sha256(inventory.as_slice())?
@@ -222,14 +251,7 @@ impl Installation {
                 "The installed file inventory changed. Run Setup to inspect the installation.",
             ));
         }
-        // SAFETY: Shell returns a task-allocated, NUL-terminated string. Copy it
-        // into owned Rust storage and release the allocation on both outcomes.
-        let folder = unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None) }
-            .map_err(io::Error::other)?;
-        let local = unsafe { folder.to_string() }.map_err(io::Error::other);
-        unsafe { CoTaskMemFree(Some(folder.0.cast())) };
-        let store = UpdateStore::new(PathBuf::from(local?).join("towavue").join("updates"));
-        Ok(Some(Self { directory, store }))
+        Ok(true)
     }
 }
 
@@ -398,6 +420,64 @@ fn run(
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn active_helper_gates_startup_before_pending_or_partially_updated_registration() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let fixture = super::super::storage::tests::Fixture::new();
+        drop(fixture.stage(1));
+        let context = Installation {
+            directory: fixture.store.root().join("never-installed"),
+            store: fixture.store.clone(),
+        };
+        let helper = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .share_mode(0)
+            .open(fixture.store.root().join("handoff.lock"))
+            .expect("helper lease");
+        assert!(
+            !context
+                .available(ReleaseVersion(1, 0, 0), |_| {
+                    panic!("active Setup registration must not be inspected")
+                })
+                .expect("installation in progress")
+        );
+        drop(helper);
+        let reads = std::cell::Cell::new(0);
+        let error = context
+            .available(ReleaseVersion(1, 0, 0), |_| {
+                reads.set(reads.get() + 1);
+                Ok(Some(
+                    if reads.get() == 1 {
+                        "1.0.0"
+                    } else {
+                        "pending recovery"
+                    }
+                    .into(),
+                ))
+            })
+            .expect_err("abandoned pending update");
+        assert!(
+            error
+                .to_string()
+                .contains("interrupted installation needs recovery")
+        );
+        assert_eq!(reads.get(), 2);
+    }
+
+    #[test]
+    fn early_installation_gate_does_not_create_a_cache() {
+        let fixture = super::super::storage::tests::Fixture::new();
+        let missing = fixture.store.root().join("not-created");
+        assert!(
+            !UpdateStore::new(missing.clone())
+                .installation_in_progress()
+                .expect("absent cache")
+        );
+        assert!(!missing.exists());
+    }
 
     #[test]
     fn worker_shutdown_persists_an_accepted_next_launch_choice_without_checking_or_installing() {

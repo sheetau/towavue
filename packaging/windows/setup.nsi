@@ -81,7 +81,13 @@ BrandingText "Local lifecycle test - no application or shared runtime"
 ShowInstDetails show
 ShowUninstDetails show
 !define MUI_ABORTWARNING
+!ifdef TOWAVUE_SETUP_RELEASE
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipAutomaticUpdatePage
+!endif
 !insertmacro MUI_PAGE_WELCOME
+!ifdef TOWAVUE_SETUP_RELEASE
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipAutomaticUpdatePage
+!endif
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckDirectoryPage
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -89,6 +95,7 @@ ShowUninstDetails show
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchTowavue
 !define MUI_FINISHPAGE_RUN_TEXT "Launch towavue"
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipAutomaticUpdatePage
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW ShowProductionFinish
 !endif
 !insertmacro MUI_PAGE_FINISH
@@ -106,9 +113,16 @@ Var RegistrationResult
 Var UpdateMode
 Var UpdateResult
 Var UpdateDestination
+Var AutomaticUpdate
 !endif
 
 !ifdef TOWAVUE_SETUP_RELEASE
+Function SkipAutomaticUpdatePage
+  ${If} $AutomaticUpdate == 1
+    Abort
+  ${EndIf}
+FunctionEnd
+
 Function ShowProductionFinish
   ${If} $PrerequisiteResult == 3010
   ${OrIf} $UpdateMode == "Rollback"
@@ -121,6 +135,7 @@ Function LaunchTowavue
   ; The updater owns restart after silent Setup. Never launch on recovery or
   ; before a prerequisite-requested restart, even if called without the page.
   ${If} ${Silent}
+  ${OrIf} $AutomaticUpdate == 1
   ${OrIf} $PrerequisiteResult == 3010
   ${OrIf} $UpdateMode == "Rollback"
     Return
@@ -311,6 +326,9 @@ FunctionEnd
 
 Function .onInit
 !ifdef TOWAVUE_SETUP_APPLICATION
+  StrCpy $AutomaticUpdate 0
+!endif
+!ifdef TOWAVUE_SETUP_APPLICATION
   StrCpy $CompletionTitle "Installation completed"
 !ifdef TOWAVUE_SETUP_RELEASE
   StrCpy $CompletionText "towavue is installed.$\r$\n$\r$\nClick Finish to close Setup."
@@ -354,6 +372,15 @@ Function .onInit
     ${OrIf} $1 != "1"
       SetErrorLevel 2
       Quit
+    ${EndIf}
+    StrCpy $AutomaticUpdate 1
+    ClearErrors
+    ${GetOptions} $0 "/TOWAVUEPROGRESS=" $1
+    ${IfNot} ${Errors}
+    ${AndIf} $1 == "1"
+      ; Unattended safety rules still apply while the native progress page is
+      ; visible. Welcome/directory/Finish and prerequisite consent are excluded.
+      SetSilent normal
     ${EndIf}
   ${EndIf}
 !else
@@ -417,6 +444,7 @@ FunctionEnd
 
 Function UpdateInstallation
   ${IfNot} ${Silent}
+  ${AndIf} $AutomaticUpdate != 1
     ${If} $UpdateMode == "Rollback"
       MessageBox MB_OKCANCEL|MB_ICONINFORMATION "Restore the previous installation using its retained update record? Close towavue and all uninstallers first. After recovery, run Setup again to retry the update." IDOK update_confirmed
     ${Else}
@@ -517,6 +545,7 @@ Function CheckPrerequisite
   DetailPrint "$0"
   ${If} $PrerequisiteResult == 10
     ${If} ${Silent}
+    ${OrIf} $AutomaticUpdate == 1
       SetErrorLevel 3
       Abort "Run Setup interactively to review and install the required Visual C++ runtime."
     ${EndIf}
@@ -566,7 +595,7 @@ Section "Files"
   ; Repeat after the page so silent mode and late directory changes cannot bypass it.
   Call CheckDestination
 !ifdef TOWAVUE_SETUP_RELEASE
-  ${If} ${Silent}
+  ${If} $AutomaticUpdate == 1
   ${AndIf} $UpdateMode != "Apply"
     SetErrorLevel 2
     Abort "Automatic updates require an existing production installation with no pending recovery. Run Setup interactively."

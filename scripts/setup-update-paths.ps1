@@ -7,6 +7,19 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class TowavueUpdatePaths {
+    public static System.IO.FileStream OpenTarget(string path, System.IO.FileShare share) {
+        // A freshly reopened app briefly maps its EXE/DLLs before its startup
+        // gate can see the active helper and exit. Keep the same access/share
+        // requirements; only transient sharing violations receive a bounded wait.
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        for (;;) {
+            try { return System.IO.File.Open(path, System.IO.FileMode.Open, System.IO.FileAccess.ReadWrite, share); }
+            catch (System.IO.IOException error) {
+                if ((error.HResult & 0xffff) != 32 || elapsed.ElapsedMilliseconds >= 5000) throw;
+                System.Threading.Thread.Sleep(50);
+            }
+        }
+    }
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     private static extern uint GetLongPathNameW(string path, StringBuilder output, uint size);
     public static string Expand(string path) {

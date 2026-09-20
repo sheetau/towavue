@@ -118,7 +118,7 @@ foreach ($name in $names) {
 # failures (including a running executable). This snapshot is not a retained lock;
 # an eventual updater must repeat validation immediately before replacement.
 foreach ($name in $oldFiles.Keys) {
-    $stream = [IO.File]::Open((Join-Path $InstallDirectory $name),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+    $stream = [TowavueUpdatePaths]::OpenTarget((Join-Path $InstallDirectory $name),[IO.FileShare]::None)
     $stream.Dispose()
 }
 $plan = [ordered]@{

@@ -535,6 +535,29 @@ function Start-RegisteredChild($Pair,[string]$Executable=$powerShell) {
     $process | Add-Member -NotePropertyName TrialErrorPath -NotePropertyValue ($childPath + '.err')
     return $process
 }
+$pair = New-RegisteredPair 'pending-lock-diagnostic'
+$before = Get-Snapshot $pair
+$beforeRegistration = Get-TrialRegistrationSnapshot $pair
+# Model an app reopening after preparation has already published its journal.
+$lockAfterPrepare = '$failureLock = [IO.File]::Open((Join-Path $InstallDirectory ''keep.dll''),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite); $result = Invoke-TowavueUpdateTransaction'
+$diagnosticSource = $registeredSource.Replace('$result = Invoke-TowavueUpdateTransaction',$lockAfterPrepare).Replace('$lease.Dispose()','if ($failureLock) { $failureLock.Dispose() }; $lease.Dispose()')
+Write-Trial $privateRegistered $diagnosticSource
+. $privateRegistered
+try { Expect-Failure { Invoke-TowavueRegisteredUpdate -Mode Apply @pair } 'being used by another process' }
+finally { . $registeredLibrary }
+$base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+$key = $base.OpenSubKey($pair.Registration.RegistrySubKey)
+try { $pending = $key.GetValue('TowavuePendingUpdate') | ConvertFrom-Json } finally { $key.Dispose(); $base.Dispose() }
+$errorFile = Join-Path $pending.TransactionDirectory 'apply-error.txt'
+Assert-True (([IO.File]::ReadAllText($errorFile,[Text.Encoding]::UTF8)).Contains('being used by another process')) 'Apply did not retain its actual failure beside the journal.'
+$errorHash = (Get-FileHash -LiteralPath $errorFile).Hash
+Assert-True ((Get-Snapshot $pair) -ceq $before) 'Locked apply changed installed bytes.'
+Invoke-TowavueRegisteredUpdate -Mode Rollback -InstallDirectory $pair.InstallDirectory -Registration $pair.Registration | Out-Null
+Assert-True ((Get-Snapshot $pair) -ceq $before -and (Get-TrialRegistrationSnapshot $pair) -ceq $beforeRegistration) 'Locked apply recovery did not restore the original registration.'
+Assert-True ((Get-FileHash -LiteralPath $errorFile).Hash -ceq $errorHash) 'Recovery changed the retained failure evidence.'
+Remove-TrialRegistration $pair
+Write-Trial $privateRegistered $registeredSource
+
 $pair = New-RegisteredPair 'pending-success'
 $result = Invoke-TowavueRegisteredUpdate -Mode Apply @pair
 Assert-True ($result.state -eq 'files_and_registration_applied') 'Registered entry point did not apply.'

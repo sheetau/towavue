@@ -186,7 +186,7 @@ public static class TowavueReleaseHandoff {
                         parentExited = true;
                         State(root, stage, "installing");
                         // /D must be last and unquoted, including spaces (NSIS).
-                        var start = new ProcessStartInfo(Path.Combine(directory, "setup.exe"), "/S /TOWAVUEUPDATE=1 /D=" + installation) {
+                        var start = new ProcessStartInfo(Path.Combine(directory, "setup.exe"), "/S /TOWAVUEUPDATE=1 /TOWAVUEPROGRESS=1 /D=" + installation) {
                             UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = directory
                         };
                         using (var installer = Process.Start(start)) {

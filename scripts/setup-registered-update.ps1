@@ -23,6 +23,7 @@ function Invoke-TowavueRegisteredUpdate {
     $lease = New-TowavueOperationLease $Registration.RegistrySubKey
     $base = $null
     $key = $null
+    $token = $null
     try {
         Write-Verbose 'Checking the registered installation and pending update record.'
         $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
@@ -56,6 +57,23 @@ function Invoke-TowavueRegisteredUpdate {
         $key.Flush()
         Write-Verbose 'Files and registration agree. Pending recovery record cleared.'
         return $result
+    } catch {
+        $failure = $_
+        # Preserve the actual child failure beside its already bound journal.
+        # Silent Setup otherwise reports only exit 5 after deleting its temp log.
+        # CreateNew never overwrites previous evidence or follows an existing file.
+        if ($Mode -eq 'Apply' -and $token -and $token.TransactionDirectory -and $token.JournalSha256) {
+            try {
+                Assert-LocalPath $token.TransactionDirectory
+                $errorPath = Join-Path $token.TransactionDirectory ($Mode.ToLowerInvariant() + '-error.txt')
+                $message = $failure.Exception.Message
+                if ($message.Length -gt 2048) { $message = $message.Substring(0,2048) }
+                $bytes = [Text.UTF8Encoding]::new($false).GetBytes($message)
+                $stream = [IO.File]::Open($errorPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+                try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
+            } catch { }
+        }
+        throw $failure
     } finally {
         if ($key) { $key.Dispose() }
         if ($base) { $base.Dispose() }

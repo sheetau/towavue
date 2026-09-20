@@ -374,6 +374,37 @@ impl UpdateStore {
         Ok(StartupUpdate::Cached(selected))
     }
 
+    /// Read-only early startup gate. Check this before interpreting registration:
+    /// Setup may have published its recovery record or only part of the version
+    /// transition. Another app must exit promptly so it does not hold the payload.
+    pub(super) fn installation_in_progress(&self) -> io::Result<bool> {
+        let _directories = match Directories::lock(&self.root, false) {
+            Ok(directories) => directories,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(self.root.join("handoff.lock"))
+        {
+            Ok(file) => {
+                let metadata = file.metadata()?;
+                if !metadata.is_file()
+                    || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
+                {
+                    return Err(invalid("Invalid installer handoff lock"));
+                }
+                Ok(false)
+            }
+            Err(error) if error.raw_os_error() == Some(32) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
     fn cleanup(selected: CachedUpdate) {
         let CachedUpdate {
             directory,

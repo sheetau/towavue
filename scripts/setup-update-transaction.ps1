@@ -176,7 +176,7 @@ function Invoke-TowavueUpdateTransaction {
                 Assert-LocalPath $path
                 if (-not (Test-Path -LiteralPath $path)) { continue }
                 if ($Mode -eq 'Apply') { throw 'Update transaction was already used; prepare a new one.' }
-                $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Delete)
+                $stream = [TowavueUpdatePaths]::OpenTarget($path,[IO.FileShare]::Delete)
                 $held.Add($stream)
                 $expected = if ($phase -eq 'apply') { $entry.before } else { $entry.after }
                 $record = Get-UpdateStreamRecord $stream
@@ -193,7 +193,7 @@ function Invoke-TowavueUpdateTransaction {
                 if ([TowavueUpdatePaths]::Expand($path) -ine $path) { throw 'Update target uses a short-name alias.' }
                 # Deny new readers/writers, including executable image opens,
                 # while permitting our same-volume namespace replacement.
-                $stream = [IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::Delete)
+                $stream = [TowavueUpdatePaths]::OpenTarget($path,[IO.FileShare]::Delete)
                 $held.Add($stream)
                 $actual = Get-UpdateStreamRecord $stream
             }

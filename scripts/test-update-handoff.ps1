@@ -82,7 +82,7 @@ public static class FixtureSetup {
         string root = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
         string command = Environment.CommandLine;
         File.WriteAllText(Path.Combine(root,"setup.called"),command);
-        string prefix = "/S /TOWAVUEUPDATE=1 /D=";
+        string prefix = "/S /TOWAVUEUPDATE=1 /TOWAVUEPROGRESS=1 /D=";
         int at = command.IndexOf(prefix,StringComparison.Ordinal);
         if (at < 0) return 90;
         string destination = command.Substring(at + prefix.Length);

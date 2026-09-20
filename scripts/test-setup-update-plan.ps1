@@ -53,6 +53,31 @@ function Expect-Failure([hashtable]$Pair,[string]$Message) {
     Assert-True $rejected "Unsafe update plan accepted: $Message"
     Assert-True ((Get-Snapshot $Pair) -ceq $before) 'Rejected plan modified files.'
 }
+
+. (Join-Path $PSScriptRoot 'setup-update-paths.ps1')
+Add-Type @'
+using System.IO;
+using System.Threading;
+public static class TransientUpdateReader {
+    public static Thread Hold(string path) {
+        var file = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var thread = new Thread(() => { try { Thread.Sleep(300); } finally { file.Dispose(); } });
+        thread.Start();
+        return thread;
+    }
+}
+'@
+$transient = New-Pair 'transient-reopened-reader'
+$before = Get-Snapshot $transient
+foreach ($sharing in @([IO.FileShare]::None,[IO.FileShare]::Delete)) {
+    $reader = [TransientUpdateReader]::Hold((Join-Path $transient.InstallDirectory 'towavue.exe'))
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $target = [TowavueUpdatePaths]::OpenTarget((Join-Path $transient.InstallDirectory 'towavue.exe'),$sharing)
+    try { Assert-True ($timer.ElapsedMilliseconds -ge 200) 'Target protection bypassed the live reader.' }
+    finally { $target.Dispose(); $reader.Join() }
+}
+Assert-True ((Get-Snapshot $transient) -ceq $before) 'Transient sharing wait changed file bytes.'
+Write-Output 'PASS: transient reopened readers retire before exclusive planning and retained transaction handles are acquired.'
 $pair = New-Pair 'baseline'
 $before = Get-Snapshot $pair
 $plan = & $planner @pair | ConvertFrom-Json

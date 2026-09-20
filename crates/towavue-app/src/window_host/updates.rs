@@ -25,6 +25,7 @@ pub(super) struct Updates {
     shutdown_requested: bool,
     pub(super) startup: bool,
     enabled: bool,
+    unavailable: Option<String>,
     checking: bool,
     manual: bool,
     next_check: Option<Instant>,
@@ -33,6 +34,8 @@ pub(super) struct Updates {
     next_token: u64,
     cancelling: Option<u64>,
     deferring: bool,
+    #[cfg(test)]
+    headless_prompt: bool,
 }
 
 impl WindowHost {
@@ -64,6 +67,7 @@ impl WindowHost {
         self.updates.startup = fresh_primary;
         self.updates.shutdown_requested = false;
         self.updates.enabled = false;
+        self.updates.unavailable = None;
         self.updates.checking = false;
         self.updates.manual = false;
         self.updates.cancelling = None;
@@ -84,9 +88,9 @@ impl WindowHost {
     fn check_updates(&mut self, manual: bool) {
         if !self.updates.enabled {
             if manual {
-                self.update_status(
-                    "Automatic updates are available in an installed production copy.",
-                );
+                self.update_status(self.updates.unavailable.clone().unwrap_or_else(|| {
+                    "Automatic updates are available in an installed production copy.".into()
+                }));
             }
             return;
         }
@@ -114,6 +118,12 @@ impl WindowHost {
         }
         match action {
             Action::Check => self.check_updates(true),
+            Action::Dismiss => {
+                self.updates.notice = None;
+                for app in self.windows.values_mut() {
+                    app.update_notice = None;
+                }
+            }
             Action::Cancel => self.cancel_update("Update cancelled. Your windows remain open."),
             Action::Install | Action::NextLaunch => {
                 if self.updates.notice.is_none()
@@ -233,6 +243,16 @@ impl WindowHost {
                 self.updates.checking = false;
                 self.updates.manual = false;
                 self.updates.next_check = None;
+            }
+            UpdateEvent::Unavailable(message) => {
+                self.updates.startup = false;
+                self.updates.enabled = false;
+                self.updates.checking = false;
+                self.updates.manual = false;
+                self.updates.next_check = None;
+                let message = format!("Update unavailable: {message}");
+                self.updates.unavailable = Some(message.clone());
+                self.update_status(message);
             }
             UpdateEvent::StartupComplete => {
                 self.updates.startup = false;
@@ -408,6 +428,10 @@ impl WindowHost {
             return;
         }
         if let Some(notice) = self.updates.notice {
+            #[cfg(not(test))]
+            let headless_prompt = false;
+            #[cfg(test)]
+            let headless_prompt = self.updates.headless_prompt;
             let shown = self
                 .windows
                 .values()
@@ -415,12 +439,12 @@ impl WindowHost {
             if !shown
                 && self.file_operation.is_none()
                 && self.source_save.is_none()
-                && let Some(app) = self
-                    .windows
-                    .values_mut()
-                    .find(|app| app.update_can_prompt())
+                && let Some(app) = self.windows.values_mut().find(|app| {
+                    (app.window.is_some() || headless_prompt) && app.update_can_prompt()
+                })
             {
                 app.update_notice = Some(notice);
+                app.open_native_prompt(FallbackPrompt::UpdateNotice(notice));
                 app.request_redraw();
             }
         }

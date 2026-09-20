@@ -132,6 +132,7 @@ pub enum PromptButtons {
     RetryCancel,
     YesNoCancel,
     SaveDiscardCancel { discard_all: bool },
+    InstallUpdate,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,22 +245,39 @@ pub fn show_prompt(
         move || {
             let _owner = owner;
             let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
-            if let PromptButtons::SaveDiscardCancel { discard_all } = buttons {
+            if matches!(
+                buttons,
+                PromptButtons::SaveDiscardCancel { .. } | PromptButtons::InstallUpdate
+            ) {
                 // SAFETY: this new worker owns its STA through the modal and releases it
                 // on the same thread, including errors. Native accessibility uses COM.
                 unsafe { OleInitialize(None) }?;
                 let _apartment = DialogApartment;
-                let choices = unsaved_prompt_buttons(discard_all);
+                let (choices, title, instruction, default_button) = match buttons {
+                    PromptButtons::SaveDiscardCancel { discard_all } => (
+                        unsaved_prompt_buttons(discard_all).to_vec(),
+                        w!("Unsaved edits - towavue"),
+                        w!("Save edits before continuing?"),
+                        IDCANCEL.0,
+                    ),
+                    PromptButtons::InstallUpdate => (
+                        update_prompt_buttons().to_vec(),
+                        w!("towavue update"),
+                        w!("An update is ready to install"),
+                        IDNO.0,
+                    ),
+                    _ => unreachable!("task dialog buttons checked above"),
+                };
                 let config = TASKDIALOGCONFIG {
                     cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
                     hwndParent: HWND(native_owner as *mut _),
                     dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
-                    pszWindowTitle: w!("Unsaved edits - towavue"),
-                    pszMainInstruction: w!("Save edits before continuing?"),
+                    pszWindowTitle: title,
+                    pszMainInstruction: instruction,
                     pszContent: PCWSTR(message.as_ptr()),
                     cButtons: choices.len() as u32,
                     pButtons: choices.as_ptr(),
-                    nDefaultButton: IDCANCEL.0,
+                    nDefaultButton: default_button,
                     ..Default::default()
                 };
                 let mut result = IDCANCEL.0;
@@ -277,7 +295,9 @@ pub fn show_prompt(
                 PromptButtons::Ok => MB_OK,
                 PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
                 PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
-                PromptButtons::SaveDiscardCancel { .. } => unreachable!("handled above"),
+                PromptButtons::SaveDiscardCancel { .. } | PromptButtons::InstallUpdate => {
+                    unreachable!("handled above")
+                }
             } | MB_ICONWARNING;
             // The worker retains the HWND owner and UTF-16 buffer for the modal call.
             // MessageBox owns its native UI; no COM or graphics resources cross threads.
@@ -302,6 +322,19 @@ pub fn show_prompt(
         },
         notify,
     )
+}
+
+fn update_prompt_buttons() -> [TASKDIALOG_BUTTON; 2] {
+    [
+        TASKDIALOG_BUTTON {
+            nButtonID: IDYES.0,
+            pszButtonText: w!("Install now"),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: IDNO.0,
+            pszButtonText: w!("Install on next launch"),
+        },
+    ]
 }
 
 fn unsaved_prompt_buttons(discard_all: bool) -> [TASKDIALOG_BUTTON; 3] {
@@ -529,6 +562,20 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn update_prompt_keeps_the_two_requested_native_actions() {
+        let buttons = update_prompt_buttons();
+        assert_eq!(buttons.map(|button| button.nButtonID), [IDYES.0, IDNO.0]);
+        assert_eq!(
+            buttons.map(|button| {
+                let label = button.pszButtonText;
+                // SAFETY: the dialog buttons retain static NUL-terminated literals.
+                unsafe { label.to_string() }.expect("static label")
+            }),
+            ["Install now", "Install on next launch"]
+        );
     }
 
     #[test]

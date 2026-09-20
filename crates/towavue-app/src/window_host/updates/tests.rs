@@ -9,6 +9,7 @@ fn host() -> (WindowHost, WindowKey, WindowKey) {
         app.state = PlaybackState::Paused;
     }
     host.updates.enabled = true;
+    host.updates.headless_prompt = true;
     (host, first, second)
 }
 
@@ -42,11 +43,80 @@ fn ready(host: &mut WindowHost, phase: UpdatePhase, startup: bool) {
 }
 
 fn choose(host: &mut WindowHost, key: WindowKey, action: Action) {
-    host.windows
-        .get_mut(&key)
-        .expect("window")
-        .handle_update_action(action);
+    let app = host.windows.get_mut(&key).expect("window");
+    if matches!(app.native_prompt, Some(FallbackPrompt::UpdateNotice(_))) {
+        app.finish_native_prompt(Ok(match action {
+            Action::Install => PromptResponse::Yes,
+            Action::NextLaunch => PromptResponse::No,
+            Action::Dismiss => PromptResponse::Cancel,
+            _ => panic!("unexpected native update choice"),
+        }));
+    } else {
+        app.handle_update_action(action);
+    }
     crate::window_host::tests::drain_captured(host);
+}
+
+#[test]
+fn downloaded_notice_waits_for_a_native_owner_window() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::downloaded_notice_waits_for_a_native_owner_window",
+    ) else {
+        return;
+    };
+    let (mut host, _, _) = host();
+    host.updates.headless_prompt = false;
+    ready(&mut host, UpdatePhase::Ready, true);
+    assert!(host.updates.notice.is_some());
+    assert!(
+        host.windows
+            .values()
+            .all(|app| app.update_notice.is_none() && app.native_prompt.is_none())
+    );
+}
+
+#[test]
+fn native_update_dismissal_does_not_schedule_or_reopen_and_errors_keep_their_reason() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::native_update_dismissal_does_not_schedule_or_reopen_and_errors_keep_their_reason",
+    ) else {
+        return;
+    };
+    let (mut host, first, _) = host();
+    ready(&mut host, UpdatePhase::Ready, false);
+    let app = host.windows.get_mut(&first).expect("window");
+    assert!(matches!(
+        app.native_prompt,
+        Some(FallbackPrompt::UpdateNotice(_))
+    ));
+    app.finish_native_prompt(Ok(PromptResponse::Cancel));
+    host.advance_update();
+    assert!(
+        host.windows[&first].native_prompt.is_none(),
+        "queued choice must not reopen the prompt"
+    );
+    crate::window_host::tests::drain_captured(&mut host);
+    host.advance_update();
+    assert!(
+        host.updates.notice.is_none() && host.updates.attempt.is_none() && !host.updates.deferring
+    );
+    assert!(host.windows.values().all(|app| !app.exit_requested));
+    host.update_event(UpdateEvent::Unavailable(
+        "Run Setup to recover the installation.".into(),
+    ));
+    host.check_updates(true);
+    assert!(!host.updates.enabled && host.updates.next_check.is_none());
+    assert_eq!(
+        host.updates.unavailable.as_deref(),
+        Some("Update unavailable: Run Setup to recover the installation.")
+    );
+    assert_eq!(
+        host.windows[&first]
+            .status_message
+            .as_ref()
+            .map(|(text, _)| text.as_str()),
+        host.updates.unavailable.as_deref()
+    );
 }
 
 #[test]
@@ -200,6 +270,7 @@ fn update_next_launch_runs_only_before_primary_startup_and_failures_require_a_ch
     assert!(host.updates.notice.expect("explicit retry notice").failed);
     for app in host.windows.values_mut() {
         app.update_notice = None;
+        app.native_prompt = None;
     }
     host.updates.startup = true;
     ready(&mut host, UpdatePhase::NextLaunch, true);
@@ -276,26 +347,22 @@ fn update_approved_peer_is_invalidated_by_real_source_save_and_active_exports_de
 }
 
 #[test]
-fn update_ready_notice_and_prepare_cancel_render_at_supported_densities() {
+fn update_prepare_cancel_renders_at_supported_densities() {
     let Some(_root) = crate::tests::isolated_test_root(
-        "window_host::updates::tests::update_ready_notice_and_prepare_cancel_render_at_supported_densities",
+        "window_host::updates::tests::update_prepare_cancel_renders_at_supported_densities",
     ) else {
         return;
     };
     let mut app = Application::new(None, |_| {}).expect("app");
     for density in [1.0, 1.25, 2.0] {
-        for preparing in [false, true] {
+        for committing in [false, true] {
             let context = crate::fonts::test_context();
             context.global_style_mut(chrome::style);
             context.set_pixels_per_point(density);
-            app.update_notice = (!preparing).then_some(Notice {
-                version: "1.0.1".parse().expect("version"),
-                failed: true,
-            });
-            app.update_close = preparing.then_some(Close {
+            app.update_close = Some(Close {
                 token: 1,
                 approved: Some(app.edits.clone()),
-                committing: false,
+                committing,
             });
             assert!(app.modal_input_blocked());
             for pass in 0..3 {
@@ -326,7 +393,7 @@ fn update_ready_notice_and_prepare_cancel_render_at_supported_densities() {
                     actions
                         .iter()
                         .any(|a| matches!(a, UiAction::Update(Action::Cancel))),
-                    preparing && pass == 2
+                    !committing && pass == 2
                 );
             }
         }

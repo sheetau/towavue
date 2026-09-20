@@ -495,6 +495,7 @@ enum GuardDecision {
 
 enum FallbackPrompt {
     ConfigurationWarning(String),
+    UpdateNotice(updates::Notice),
     Recovery {
         position: MediaTime,
         state: PlaybackState,
@@ -4122,7 +4123,7 @@ where
             }
         } else if self.pending_guard.is_some() && self.native_prompt.is_none() {
             self.draw_unsaved_guard(&context, actions);
-        } else if self.update_notice.is_some() || self.update_is_held() {
+        } else if self.update_is_held() {
             self.draw_update(&context, actions);
         } else if self.about_open {
             self.draw_about(&context, actions);
@@ -9925,11 +9926,31 @@ where
         if self.pending_dialog.is_some() || self.native_prompt.is_some() {
             return;
         }
+        #[cfg(test)]
+        if matches!(prompt, FallbackPrompt::UpdateNotice(_))
+            && self
+                .window
+                .as_ref()
+                .is_none_or(|window| window.is_visible() == Some(false))
+        {
+            // Hidden host controls inject the response through the same callback
+            // boundary; they must not display an owner-facing native dialog.
+            self.native_prompt = Some(prompt);
+            return;
+        }
         let Some(window) = self.window.clone() else {
             return;
         };
         let (message, buttons) = match &prompt {
             FallbackPrompt::ConfigurationWarning(message) => (message.clone(), PromptButtons::Ok),
+            FallbackPrompt::UpdateNotice(notice) => (
+                format!(
+                    "Version {} is downloaded and ready to install.{}\n\nInstallation can take several minutes. towavue will close and reopen automatically.",
+                    notice.version,
+                    if notice.failed { "\n\nThe previous installation did not finish." } else { "" },
+                ),
+                PromptButtons::InstallUpdate,
+            ),
             FallbackPrompt::Recovery { error, .. } => (
                 format!("Graphics could not be restored.\n\n{error}\n\nRetry: restore graphics at the saved playback position.\nCancel: keep all edits. Press Alt+F4 afterward to export or close."),
                 PromptButtons::RetryCancel,
@@ -9961,6 +9982,10 @@ where
 
     fn native_prompt_failed(&mut self, prompt: FallbackPrompt, error: DialogError) {
         towavue_runtime_windows::diagnostic!("towavue: native prompt failed: {error}");
+        if matches!(prompt, FallbackPrompt::UpdateNotice(_)) {
+            self.handle_update_action(updates::Action::Dismiss);
+            self.set_status(format!("Could not show the update notification: {error}"));
+        }
         if matches!(prompt, FallbackPrompt::Guard) {
             self.resolve_guard(GuardDecision::Cancel);
             self.set_status(format!(
@@ -9983,6 +10008,11 @@ where
         };
         match prompt {
             FallbackPrompt::ConfigurationWarning(_) => {}
+            FallbackPrompt::UpdateNotice(_) => self.handle_update_action(match response {
+                PromptResponse::Yes => updates::Action::Install,
+                PromptResponse::No => updates::Action::NextLaunch,
+                _ => updates::Action::Dismiss,
+            }),
             FallbackPrompt::Recovery {
                 position, state, ..
             } if response == PromptResponse::Retry => {

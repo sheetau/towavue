@@ -12,6 +12,42 @@ function Assert-Refused([scriptblock]$Action, [string]$Expected) {
     throw "Expected refusal: $Expected"
 }
 function Clone-Value($Value) { return ($Value | ConvertTo-Json -Depth 20 | ConvertFrom-Json) }
+# Import only the lookup function; executing the publisher would contact GitHub.
+$publisherAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'publish-release.ps1'),[ref]$null,[ref]$null)
+$lookup = $publisherAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Read-ReleaseByTag' },$true)
+if (-not $lookup) { throw 'Draft lookup function is missing.' }
+. ([scriptblock]::Create($lookup.Extent.Text))
+$repository = 'fixture/repository'
+$script:lookupPages = @{}
+$script:lookupDetail = [pscustomobject]@{id=42;tag_name='v1.0.0';draft=$true}
+function Invoke-ReleaseGitHub($Arguments) {
+    $path = $Arguments[1]
+    if ($path -match '/releases\?per_page=100&page=([0-9]+)$') { return $script:lookupPages[[int]$Matches[1]] }
+    if ($path -ceq 'repos/fixture/repository/releases/42') { return $script:lookupDetail }
+    throw "Unexpected fixture request: $path"
+}
+$script:lookupPages[1] = @($script:lookupDetail)
+if ((Read-ReleaseByTag 'v1.0.0').id -ne 42) { throw 'Draft lookup failed.' }
+if ($null -ne (Read-ReleaseByTag 'missing')) { throw 'Absent release lookup failed.' }
+$script:lookupPages[1] = @(1..100 | ForEach-Object { [pscustomobject]@{id=($_+100);tag_name='older'} })
+$script:lookupPages[2] = @($script:lookupDetail)
+if ((Read-ReleaseByTag 'v1.0.0').id -ne 42) { throw 'Paginated draft lookup failed.' }
+$script:lookupPages[1][0] = $script:lookupDetail
+Assert-Refused { Read-ReleaseByTag 'v1.0.0' } 'Multiple releases'
+$script:lookupPages = @{1=@([pscustomobject]@{id='../other';tag_name='v1.0.0'})}
+Assert-Refused { Read-ReleaseByTag 'v1.0.0' } 'Invalid release ID'
+$script:lookupPages = @{1=@([pscustomobject]@{id=42;tag_name='v1.0.0'})}
+$script:lookupDetail = [pscustomobject]@{id=42;tag_name='changed'}
+Assert-Refused { Read-ReleaseByTag 'v1.0.0' } 'identity changed'
+$script:lookupDetail = [pscustomobject]@{id=43;tag_name='v1.0.0'}
+Assert-Refused { Read-ReleaseByTag 'v1.0.0' } 'identity changed'
+$script:lookupDetail = $null
+Assert-Refused { Read-ReleaseByTag 'v1.0.0' } 'identity changed'
+$fullPage = @(1..100 | ForEach-Object { [pscustomobject]@{id=$_;tag_name='older'} })
+$script:lookupPages = @{}
+foreach ($page in 1..100) { $script:lookupPages[$page] = $fullPage }
+Assert-Refused { Read-ReleaseByTag 'missing' } 'lookup limit'
+Write-Output 'PASS: authenticated draft lookup, pagination, absent tags, duplicate/invalid/racing identity and bounded-list refusal.'
 $receipt = [pscustomobject]@{source_commit=('a' * 40);tag='v1.0.0';assets=@(
     [pscustomobject]@{name='first.zip';bytes=100;sha256=('b' * 64)},
     [pscustomobject]@{name='second.exe';bytes=200;sha256=('c' * 64)}

@@ -68,9 +68,30 @@ function Read-ReleaseTagCommit([string]$Tag) {
     }
     throw 'Release tag nesting exceeds the verification limit.'
 }
+function Read-ReleaseByTag([string]$Tag) {
+    # The tag endpoint returns published releases only. Authenticated listing
+    # also includes drafts; resolve the unique matching release by its ID.
+    $matchingReleases = [Collections.Generic.List[object]]::new()
+    for ($page = 1; $page -le 100; $page++) {
+        $batch = @(Invoke-ReleaseGitHub @('api',"repos/$repository/releases?per_page=100&page=$page"))
+        foreach ($candidate in $batch) {
+            if ($candidate.tag_name -ceq $Tag) { $matchingReleases.Add($candidate) }
+        }
+        if ($matchingReleases.Count -gt 1) { throw 'Multiple releases reference the requested tag.' }
+        if ($batch.Count -lt 100) {
+            if (-not $matchingReleases.Count) { return $null }
+            $releaseId = [string]$matchingReleases[0].id
+            if ($releaseId -cnotmatch '^[1-9][0-9]*\z') { throw 'Invalid release ID.' }
+            $release = Invoke-ReleaseGitHub @('api',"repos/$repository/releases/$releaseId")
+            if ($null -eq $release -or $release.tag_name -cne $Tag -or [string]$release.id -cne $releaseId) { throw 'Release identity changed during lookup.' }
+            return $release
+        }
+    }
+    throw 'Release listing exceeds the lookup limit.'
+}
 function Read-ReleaseState($Artifacts, $Notes) {
     $tagCommit = Read-ReleaseTagCommit $Artifacts.receipt.tag
-    $release = Invoke-ReleaseGitHub @('api',"repos/$repository/releases/tags/$($Artifacts.receipt.tag)") -AllowNotFound
+    $release = Read-ReleaseByTag $Artifacts.receipt.tag
     $plan = Get-TowavueDraftPlan $Artifacts $release $tagCommit $Notes
     return [pscustomobject]@{release=$release;plan=$plan;tag_commit=$tagCommit}
 }
@@ -79,7 +100,7 @@ $remote = Invoke-ReleaseGitHub @('api',"repos/$repository")
 if ($remote.full_name -cne $repository -or -not $remote.permissions.push) { throw 'GitHub credentials cannot publish this repository.' }
 $initialTag = Read-ReleaseTagCommit ('v' + $identity.version)
 if ($initialTag -and $initialTag -cne $identity.commit) { throw 'Release tag belongs to a different source commit.' }
-$initialRelease = Invoke-ReleaseGitHub @('api',"repos/$repository/releases/tags/v$($identity.version)") -AllowNotFound
+$initialRelease = Read-ReleaseByTag ('v' + $identity.version)
 if ($null -ne $initialRelease -and ($initialRelease.draft -ne $true -or $initialRelease.prerelease -ne $false)) { throw 'Only an unpublished stable draft can be uploaded.' }
 if ($PSCmdlet.ParameterSetName -eq 'Build') {
     $buildArguments = @{}

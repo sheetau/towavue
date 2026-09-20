@@ -59,6 +59,34 @@ An incomplete draft says not to publish it. Normal release notes replace that no
 
 The implementation follows the documented [draft creation options](https://cli.github.com/manual/gh_release_create), [upload behavior](https://cli.github.com/manual/gh_release_upload) and [release asset state/size/digest fields](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28). REST requests select API version 2022-11-28. Final remote execution and draft visibility still need their own evidence; pure planner tests are not an uploaded release.
 
+## Local host-update verification before publication
+
+An unpublished local A/B pair can exercise the installed app without publishing a test release. Keep B in a detached verification checkout with a newer workspace version and the corresponding Cargo.lock notice digest; never upload or tag that fixture. Build both with the normal assembler and the existing signing identity. This tests local authenticated delivery into the app; it does not prove discovery or download from a published GitHub release.
+
+Build `update-cache-verify` in the selected-prefix development environment, retaining that environment when running the trial scripts:
+
+```powershell
+cargo build -p towavue-runtime-windows --example update-cache-verify --release --target x86_64-pc-windows-msvc --locked --offline
+```
+
+`scripts/test-local-update-trial.ps1 -ArtifactDirectory <B-build> -VerifierExe <built-example>` checks an isolated ready cache through the production runtime verifier, scope/duplicate refusal, actual Setup tampering and original preservation. It never changes the installed application's cache or reads a private key.
+
+After the owner finishes A's fresh-install/media/About checks, close every towavue process. Prepare the installed trial explicitly:
+
+```powershell
+.\scripts\prepare-local-update-trial.ps1 `
+  -ArtifactDirectory 'path/to/local-B-build' `
+  -VerifierExe 'path/to/update-cache-verify.exe' `
+  -CacheDirectory (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'towavue\updates') `
+  -InstalledTrial
+```
+
+The script authenticates the complete release, requires a matching older production installation and closed app, locks the cache/helper boundaries, and refuses any existing state or generation. It copies into a new generation, publishes Ready without overwriting state, then verifies the cache through the application's compiled public key. It does not launch or install B. A refusal or verification failure retains evidence; do not delete an occupied cache merely to bypass it.
+
+For manual verification, launch A and choose **Install on next launch**, remain in that same process, and create disposable unsaved edits in two windows (including an Untitled pasted image). Use **Help > Check for updates**, choose **Install now**, and cancel a save/Save as prompt. All windows and edits must remain. Check again and complete Save/Discard for the disposable edits; the app must close, install B and restart with B's About version. Setup verification can take several minutes on the qualified host. Record actual results separately from the automated guard tests.
+
+To exercise the separate next-launch path, uninstall the local B, reinstall A, prepare the trial again only after its old cache is empty, choose **Install on next launch**, close normally and reopen. Verify B's version after the restart. Finally uninstall the unpublished B and reinstall A; do not leave a fictitious newer version installed, because it can suppress a later real update with the same version number. Owner media/settings remain subject to the normal preservation checks. Keep the local fixture and any failure evidence out of the public release assets.
+
 ## Preserve and recover the update signing identity
 
 The current-user DPAPI file is the working key, not a portable backup. Copying that file alone to a different Windows account or reinstall does not establish recovery. Keep the same RSA identity: existing installations trust the embedded public key and will reject updates signed by a replacement.

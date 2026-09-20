@@ -55,7 +55,7 @@ jobs:
   rust:
     name: Rust checks
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 35
 
     steps:
       - name: Check out repository

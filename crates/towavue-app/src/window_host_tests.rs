@@ -609,6 +609,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
         received: BTreeSet<WindowKey>,
         closed: Option<WindowKey>,
         background_prepared: bool,
+        retiring: bool,
         deadline: Instant,
         completed: bool,
         skipped: bool,
@@ -893,25 +894,33 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
                 .join()
                 .expect("late and replacement worker");
             } else if self.closed.is_some() && self.received.len() == 3 {
-                assert_eq!(self.host.windows.len(), 2);
-                assert!(
-                    self.host
+                if !self.retiring {
+                    assert_eq!(self.host.windows.len(), 2);
+                    assert!(
+                        self.host
+                            .windows
+                            .values()
+                            .all(|app| status(app).is_none_or(|text| !text.ends_with("stale")))
+                    );
+                    let ids: Vec<_> = self
+                        .host
                         .windows
                         .values()
-                        .all(|app| status(app).is_none_or(|text| !text.ends_with("stale")))
-                );
-                let ids: Vec<_> = self
-                    .host
-                    .windows
-                    .values()
-                    .map(|app| app.window.as_ref().expect("window").id())
-                    .collect();
-                for id in ids {
-                    self.host
-                        .window_event(event_loop, id, WindowEvent::CloseRequested);
+                        .map(|app| app.window.as_ref().expect("window").id())
+                        .collect();
+                    for id in ids {
+                        self.host
+                            .window_event(event_loop, id, WindowEvent::CloseRequested);
+                    }
+                    self.retiring = true;
                 }
                 self.host.about_to_wait(event_loop);
-                assert!(self.host.windows.is_empty() && event_loop.exiting());
+                assert!(self.host.windows.is_empty());
+                // Final-window exit waits for the owned Shell/update workers;
+                // drive the event loop until that existing gate has completed.
+                if !event_loop.exiting() {
+                    return;
+                }
                 assert_eq!(event_loop.control_flow(), ControlFlow::Poll);
                 self.completed = true;
                 eprintln!(
@@ -937,6 +946,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
         received: BTreeSet::new(),
         closed: None,
         background_prepared: false,
+        retiring: false,
         deadline: Instant::now() + Duration::from_secs(15),
         completed: false,
         skipped: false,

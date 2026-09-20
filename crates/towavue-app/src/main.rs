@@ -177,13 +177,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "presentation-verification")]
     towavue_runtime_windows::towavue_presentation_stage(0);
-    let initial_path = parse_initial_path()?;
+    let (initial_path, new_window) = initial_launch_from(std::env::args_os().skip(1))?;
     let mut event_loop = EventLoop::<window_host::Event>::with_user_event();
     configure_mouse_input(&mut event_loop);
     let event_loop = event_loop.build()?;
     let proxy = event_loop.create_proxy();
-    let _launch_server = match towavue_runtime_windows::LaunchServer::start_or_forward(
+    let _launch_server = match towavue_runtime_windows::LaunchServer::start_or_forward_target(
         initial_path.as_deref(),
+        new_window,
         move |request| {
             let _ = proxy.send_event(window_host::Event::Launch(request));
         },
@@ -198,8 +199,25 @@ fn run() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn parse_initial_path() -> Result<Option<PathBuf>, Box<dyn Error>> {
-    initial_path_from(std::env::args_os().skip(1))
+fn initial_launch_from(
+    arguments: impl Iterator<Item = std::ffi::OsString>,
+) -> Result<(Option<PathBuf>, bool), Box<dyn Error>> {
+    let mut arguments = arguments.peekable();
+    let new_window = arguments
+        .peek()
+        .is_some_and(|value| value == "--new-window");
+    if new_window {
+        arguments.next();
+    }
+    if arguments.peek().is_some_and(|value| value == "--") {
+        arguments.next();
+    } else if arguments
+        .peek()
+        .is_some_and(|value| value.to_string_lossy().starts_with("--"))
+    {
+        return Err("unknown option; use -- before a file name beginning with --".into());
+    }
+    Ok((initial_path_from(arguments)?, new_window))
 }
 
 fn initial_path_from(
@@ -11558,7 +11576,7 @@ fn spawn_new_window(path: &Path) -> std::io::Result<()> {
 
 fn new_window_command(executable: &Path, path: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(executable);
-    command.arg(path);
+    command.arg("--new-window").arg("--").arg(path);
     command
 }
 

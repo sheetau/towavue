@@ -3,6 +3,57 @@ use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
 #[test]
+fn launch_forwarding_retains_explicit_tab_and_window_targets() {
+    let executable = std::env::current_exe()
+        .expect("exe")
+        .canonicalize()
+        .expect("canonical");
+    let identity = format!(
+        "towavue-target-test-{}-{:?}",
+        std::process::id(),
+        Instant::now()
+    );
+    let (sent, received) = mpsc::channel();
+    let owner = start_or_forward_target(
+        &identity,
+        &executable,
+        None,
+        false,
+        Box::new(move |request| {
+            sent.send(request).expect("receiver");
+        }),
+    )
+    .expect("owner");
+    assert!(matches!(owner, LaunchRole::Primary(_)));
+    for new_window in [false, true] {
+        let executable = executable.clone();
+        let identity = identity.clone();
+        let path = PathBuf::from(r"C:\media space\日本語.png");
+        let expected = path.clone();
+        let client = std::thread::spawn(move || {
+            matches!(
+                start_or_forward_target(
+                    &identity,
+                    &executable,
+                    Some(&path),
+                    new_window,
+                    Box::new(|_| panic!("unexpected primary")),
+                )
+                .expect("acknowledged"),
+                LaunchRole::Forwarded
+            )
+        });
+        let request = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("forwarded");
+        assert_eq!(request.path, Some(expected));
+        assert_eq!(request.new_window, new_window);
+        request.acknowledge(true);
+        assert!(client.join().expect("client"));
+    }
+}
+
+#[test]
 fn launch_payload_preserves_windows_paths_and_rejects_malformed_requests() {
     assert_eq!(decode(&encode(None).expect("Welcome")), Some(None));
     for path in [

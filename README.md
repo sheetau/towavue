@@ -33,6 +33,8 @@ Open a file or folder from the welcome screen, drag media from Explorer, or pass
 towavue.exe "path/to/media.mp4"
 ```
 
+Setup registers supported media in **Open with** and **Settings > Apps > Default apps > towavue**. Choose towavue there, or use **Open with > Choose another app > Always**, to make it the default for a file type. Normal file launches open a new tab in the last active towavue window. For a separate window, use **Open in new towavue window** under Explorer's **Show more options**, or run `towavue.exe --new-window -- "path/to/media.mp4"`. File thumbnails depend on Windows' installed thumbnail providers and Explorer settings; this installer adds no thumbnail extension.
+
 Installed builds check for updates automatically. Use **Help > Check for updates** for a manual check, then choose **Install now** or **Install on next launch** after a verified download. Unsaved edits still receive Save / Discard / Cancel prompts. Close the app before running Setup manually. Update metadata is independently signed even though the initial EXE and Setup have no Windows code signature.
 
 Uninstall through Windows Settings > Apps > Installed apps. Your media and settings are preserved, and the shared Microsoft Visual C++ runtime is not removed. **Help > About** shows the installed version; **Help > Show licenses and sources** opens the installed notices and the matching source download link. Each release includes a separate `sources.zip`; extract it and open `START-HERE.html` for the application/native sources, patches and original notices.

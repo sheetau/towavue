@@ -2,6 +2,85 @@ use super::*;
 use towavue_runtime_windows::{LaunchRole, LaunchServer};
 
 #[test]
+fn explorer_launch_options_select_tabs_or_explicit_windows() {
+    let path = canonical_shell_path(Path::new("Cargo.toml")).expect("manifest");
+    for (arguments, new_window) in [
+        (vec!["Cargo.toml"], false),
+        (vec!["--", "Cargo.toml"], false),
+        (vec!["--new-window", "--", "Cargo.toml"], true),
+    ] {
+        assert_eq!(
+            initial_launch_from(arguments.into_iter().map(Into::into)).expect("launch"),
+            (Some(path.clone()), new_window)
+        );
+    }
+    assert_eq!(
+        initial_launch_from(std::iter::empty()).expect("activate"),
+        (None, false)
+    );
+    assert!(initial_launch_from(["--unknown".into()].into_iter()).is_err());
+    assert!(
+        initial_launch_from(
+            [
+                "--new-window".into(),
+                "Cargo.toml".into(),
+                "Cargo.toml".into()
+            ]
+            .into_iter()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn explorer_tabs_preserve_existing_tabs_and_respect_active_window_guards() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::launch_tests::explorer_tabs_preserve_existing_tabs_and_respect_active_window_guards",
+    ) else {
+        return;
+    };
+    let source = root.join("Explorer 日本語.bmp");
+    tab_transfer::tests::bitmap(&source);
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("second");
+    for app in host.windows.values_mut() {
+        app.ui_context = Some(fonts::test_context());
+    }
+    host.last_active_window = Some(first);
+    assert_eq!(
+        host.open_launched_tab(Some(source.clone()), false)
+            .expect("tab"),
+        first
+    );
+    let retained = host.windows[&first].tabs.active().expect("first tab").id;
+    host.open_launched_tab(Some(source.clone()), false)
+        .expect("duplicate path in fresh tab");
+    assert_eq!(host.windows.len(), 2);
+    assert_eq!(host.windows[&first].tabs.tabs().len(), 2);
+    assert_ne!(
+        host.windows[&first].tabs.active().expect("new tab").id,
+        retained
+    );
+    assert!(host.windows[&second].tabs.tabs().is_empty());
+    host.windows.get_mut(&first).expect("first").about_open = true;
+    assert!(host.open_launched_tab(Some(source.clone()), false).is_err());
+    assert_eq!(host.windows[&first].tabs.tabs().len(), 2);
+    host.last_active_window = Some(second);
+    assert_eq!(
+        host.open_launched_tab(None, false).expect("activate"),
+        second
+    );
+    assert!(
+        host.open_launched_tab(Some(root.join("unsupported.txt")), false)
+            .is_err()
+    );
+    host.open_launched_tab(Some(source), false)
+        .expect("second window tab");
+    assert_eq!(host.windows[&second].tabs.tabs().len(), 1);
+}
+
+#[test]
 fn launch_arguments_resolve_in_the_sender_before_forwarding() {
     assert!(
         initial_path_from(std::iter::empty())

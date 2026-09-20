@@ -1,6 +1,6 @@
 # Release assembly
 
-The initial release targets Windows 11 x64, version 1.0.0. EXE and Setup have no Authenticode signature by owner decision. Update metadata is independently signed with the existing RSA-4096 key. Public publication is reserved to the owner. See [STATUS](STATUS.md) for the remaining qualification and draft-publishing work.
+The current release candidate is 1.0.1 for Windows 11 x64. The owner chose to retain the unpublished 1.0.0 draft and its tag. EXE and Setup have no Authenticode signature by owner decision. Update metadata is independently signed with the existing RSA-4096 key. Public publication is reserved to the owner. See [STATUS](STATUS.md) for the remaining qualification and draft-publishing work.
 
 ## Build exact local assets
 
@@ -16,7 +16,7 @@ Run from PowerShell, replacing the local input paths:
   -NativeMaterialsDirectory 'path/to/retained-native-materials' `
   -VcRedist 'path/to/vc_redist.x64.exe' `
   -NsisArchive 'path/to/nsis-3.12.zip' `
-  -OutputDirectory 'target/release-1.0.0-attempt1'
+  -OutputDirectory 'target/release-1.0.1-attempt1'
 ```
 
 The output must be new, with an existing parent. The command builds the Windows x64 Release application offline, snapshots it, regenerates current Rust notices and exact Git source, verifies/copies native materials and the selected 94-file runtime, creates the source companion, compiles production Setup and runs non-installing package checks. It signs the exact Setup's canonical metadata and writes checksums. `RELEASE.json` is written last; its absence means the attempt is incomplete. Failed attempts are retained for diagnosis; use a fresh output name for a retry.
@@ -46,9 +46,9 @@ After the final qualification gates in STATUS are satisfied, run `scripts/publis
 Use `-CheckOnly` to build and perform read-only GitHub preflight without a push, tag or draft change. For an already completed build, use:
 
 ```powershell
-.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.0-attempt1' -CheckOnly
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.1-attempt1' -CheckOnly
 # After qualification, upload the same verified build:
-.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.0-attempt1'
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.1-attempt1'
 ```
 
 The prepared build must match the current clean commit. Retrying that same command verifies the existing draft's source tag, ownership marker, stable channel, exact asset names, sizes and server SHA-256 digests. It uploads only missing assets. Identical uploaded files are kept; different files, unrelated/edited drafts and all published releases are refused. A known empty GitHub `starter` placeholder can be removed and retried only on the matching draft. There is no `--clobber`, forced tag update or published-asset replacement. If code or notes change, create and qualify a new build before attempting another draft; the command does not silently retarget an existing version.

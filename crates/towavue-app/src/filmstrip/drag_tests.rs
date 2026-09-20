@@ -2123,7 +2123,14 @@ fn filmstrip_window_request_preserves_the_original_tab_and_handles_failure_and_s
     let path = root.join("日本語 & 'quoted' source.png");
     let command = crate::new_window_command(&executable, &path);
     assert_eq!(command.get_program(), executable.as_os_str());
-    assert_eq!(command.get_args().collect::<Vec<_>>(), [path.as_os_str()]);
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        [
+            std::ffi::OsStr::new("--new-window"),
+            std::ffi::OsStr::new("--"),
+            path.as_os_str()
+        ]
+    );
 }
 
 #[test]

@@ -24,12 +24,14 @@ mod tests;
 
 const CLASS: PCWSTR = w!("towavue-launch-v1");
 const PROTOCOL: usize = 0x7476_0001;
+const TAB_PROTOCOL: usize = 0x7476_0002;
 const MAX_UNITS: usize = 32_768;
 const ACK_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// An owned path-only request. Acknowledge only after native window startup succeeds.
 pub struct LaunchRequest {
     pub path: Option<PathBuf>,
+    pub new_window: bool,
     reply: mpsc::SyncSender<bool>,
 }
 
@@ -67,11 +69,21 @@ impl LaunchServer {
         path: Option<&Path>,
         notify: impl Fn(LaunchRequest) + Send + 'static,
     ) -> io::Result<LaunchRole> {
+        Self::start_or_forward_target(path, true, notify)
+    }
+
+    /// Route normal Explorer launches to a tab; explicit window launches remain
+    /// in the same host and share its graphics device and guarded shutdown.
+    pub fn start_or_forward_target(
+        path: Option<&Path>,
+        new_window: bool,
+        notify: impl Fn(LaunchRequest) + Send + 'static,
+    ) -> io::Result<LaunchRole> {
         let executable = std::env::current_exe()?.canonicalize()?;
         // SAFETY: the current-process pseudo handle is borrowed, never closed.
         let user = unsafe { process_user(GetCurrentProcess())? };
         let identity = format!("towavue-v1-{user}-{}", executable.display());
-        start_or_forward(&identity, &executable, path, Box::new(notify))
+        start_or_forward_target(&identity, &executable, path, new_window, Box::new(notify))
     }
 }
 
@@ -157,10 +169,21 @@ unsafe fn process_user(process: HANDLE) -> io::Result<String> {
     }
 }
 
+#[cfg(test)]
 fn start_or_forward(
     identity: &str,
     executable: &Path,
     path: Option<&Path>,
+    notify: Box<dyn Fn(LaunchRequest) + Send>,
+) -> io::Result<LaunchRole> {
+    start_or_forward_target(identity, executable, path, true, notify)
+}
+
+fn start_or_forward_target(
+    identity: &str,
+    executable: &Path,
+    path: Option<&Path>,
+    new_window: bool,
     notify: Box<dyn Fn(LaunchRequest) + Send>,
 ) -> io::Result<LaunchRole> {
     let payload = encode(path)?;
@@ -187,7 +210,7 @@ fn start_or_forward(
         let window =
             unsafe { FindWindowExW(Some(HWND_MESSAGE), None, CLASS, PCWSTR(title.as_ptr())) };
         if let Ok(window) = window {
-            forward(window, executable, &payload)?;
+            forward(window, executable, &payload, new_window)?;
             return Ok(LaunchRole::Forwarded);
         }
         if Instant::now() >= deadline {
@@ -199,7 +222,7 @@ fn start_or_forward(
     }
 }
 
-fn forward(window: HWND, executable: &Path, payload: &[u16]) -> io::Result<()> {
+fn forward(window: HWND, executable: &Path, payload: &[u16], new_window: bool) -> io::Result<()> {
     // SAFETY: process query handles are owned locally; UTF-16 buffer and COPYDATA
     // payload remain immutable and live through synchronous, bounded SendMessage.
     unsafe {
@@ -225,7 +248,7 @@ fn forward(window: HWND, executable: &Path, payload: &[u16]) -> io::Result<()> {
         }
         let _ = AllowSetForegroundWindow(pid);
         let data = COPYDATASTRUCT {
-            dwData: PROTOCOL,
+            dwData: if new_window { PROTOCOL } else { TAB_PROTOCOL },
             cbData: (payload.len() * 2) as u32,
             lpData: payload.as_ptr() as *mut _,
         };
@@ -370,7 +393,7 @@ unsafe extern "system" fn window_proc(
                     return LRESULT(0);
                 }
                 let data = &*(lparam.0 as *const COPYDATASTRUCT);
-                if data.dwData != PROTOCOL
+                if !matches!(data.dwData, PROTOCOL | TAB_PROTOCOL)
                     || data.cbData < 2
                     || data.cbData as usize > MAX_UNITS * 2
                     || !data.cbData.is_multiple_of(2)
@@ -391,7 +414,11 @@ unsafe extern "system" fn window_proc(
                 };
                 let (reply, receive_reply) = mpsc::sync_channel(1);
                 let accepted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ((*state).notify)(LaunchRequest { path, reply });
+                    ((*state).notify)(LaunchRequest {
+                        path,
+                        new_window: data.dwData == PROTOCOL,
+                        reply,
+                    });
                     receive_reply.recv_timeout(ACK_TIMEOUT).unwrap_or(false)
                 }))
                 .unwrap_or(false);

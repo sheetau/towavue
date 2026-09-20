@@ -508,6 +508,17 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     let source = *host.windows.keys().next().expect("source");
     // The preceding image exercise has just reactivated this paused video.
     let app = finish_child(host, source);
+    // Media readiness does not imply completion of the preceding relocation's
+    // Shell query. Drain it before installing the fixed-generation fixture.
+    let folder_deadline = Instant::now() + Duration::from_secs(5);
+    while app.pending_folder.is_some() {
+        app.finish_folder_load();
+        assert!(
+            Instant::now() < folder_deadline,
+            "source folder did not settle"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
     let source_path = app.path.clone().expect("silent video");
     let image_path = source_path.with_file_name("filmstrip [new] 日本語.bmp");
     let bad_image = source_path.with_file_name("filmstrip-corrupt.bmp");
@@ -569,6 +580,23 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
         let app = host.windows.get_mut(&source).expect("source");
         app.filmstrip_open = true;
         let client_origin = egui::pos2(-40.0, 60.0);
+        assert!(
+            app.can_open_filmstrip_window(path, 42),
+            "filmstrip fixture unavailable: blocked={}, snapshot={:?}, status={:?}",
+            app.modal_input_blocked(),
+            app.folder_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.generation),
+            app.status_message
+        );
+        assert!(
+            !app.ui_context
+                .as_ref()
+                .expect("context")
+                .content_rect()
+                .contains(client_origin),
+            "filmstrip fixture must drop outside its source window"
+        );
         let origin = app
             .window
             .as_ref()
@@ -592,7 +620,13 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
             .windows
             .keys()
             .find(|key| !keys.contains(key))
-            .expect("hosted filmstrip child");
+            .unwrap_or_else(|| {
+                panic!(
+                    "hosted filmstrip child: status={:?}, tabs={}",
+                    host.windows[&source].status_message,
+                    host.windows[&source].tabs.tabs().len()
+                )
+            });
         assert_eq!(host.windows.len(), window_count + 1);
         let app = host.windows.get_mut(&child).expect("child");
         assert_drop_client_position(

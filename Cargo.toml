@@ -12,7 +12,7 @@ egui-directx11 = { path = "vendor/egui-directx11" }
 png = { path = "vendor/png" }
 
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT OR Apache-2.0"

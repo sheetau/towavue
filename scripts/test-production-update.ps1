@@ -56,6 +56,16 @@ $registration=@{RegistrySubKey=$keyName;ShortcutPath=$shortcut}
 $arguments=@{InstallDirectory=$installed;OwnershipId=$oldId;RegistrySubKey=$keyName;ShortcutPath=$shortcut;SizeKiB=10;ProductVersion='1.0.0'}
 $pair=@{InstallDirectory=$installed;IncomingPayloadDirectory=$incoming;IncomingOwnershipId=$newId;NewUninstaller=$uninstaller;Registration=$registration}
 $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
+function Assert-AssociationState([bool]$Present) {
+    foreach ($record in @(Get-TowavueAssociationRecords $installed $keyName)) {
+        $key=$base.OpenSubKey($record.path)
+        try {
+            $value=if ($key) { $key.GetValue($record.name,$null) } else { $null }
+            if ($Present) { Assert-True ($value -ceq $record.value) 'Production update did not publish its Shell association.' }
+            else { Assert-True ($null -eq $value) 'Rollback retained a new Shell association.' }
+        } finally { if ($key) { $key.Dispose() } }
+    }
+}
 try {
     Invoke-TowavueRegistration @arguments -Mode Install | Out-Null
     $key=$base.OpenSubKey($keyName,$true)
@@ -67,9 +77,11 @@ try {
     Assert-True ($journal.schema_version -eq 4 -and $journal.plan.schema_version -eq 2 -and $journal.registration.PreviousProductVersion -ceq '1.0.0' -and $journal.registration.ProductVersion -ceq '1.0.1') 'Production version binding is incomplete.'
     $invoke=@{TransactionDirectory=$token.TransactionDirectory;JournalSha256=$token.JournalSha256}
     Invoke-TowavueUpdateTransaction @invoke -Mode Apply | Out-Null
+    Assert-AssociationState $true
     $key=$base.OpenSubKey($keyName)
     try { Assert-True ($key.GetValue('DisplayVersion') -ceq '1.0.1' -and (Get-Item -LiteralPath (Join-Path $installed 'towavue.exe')).VersionInfo.ProductVersion -ceq '1.0.1') 'EXE and registration versions did not advance together.' } finally { $key.Dispose() }
     Invoke-TowavueUpdateTransaction @invoke -Mode Rollback | Out-Null
+    Assert-AssociationState $false
     Assert-True ((Snapshot) -ceq $before) 'Production rollback did not restore exact files and typed registration.'
 
     # Each independently written field can be interrupted in either direction.
@@ -87,6 +99,7 @@ try {
             Refused { if ($direction -eq 'Apply') { Invoke-TowavueRegistration @update -Mode Update } else { Invoke-TowavueRegistration @rollback -Mode Update } } 'Injected version interruption'
             . $statePath
             Invoke-TowavueRegistration @rollback -Mode Update | Out-Null
+            Assert-AssociationState $false
             Assert-True ((Snapshot) -ceq $before) 'A partial three-field transition did not recover exactly.'
         }
     }
@@ -222,6 +235,7 @@ try {
             } finally { $process.Dispose() }
             $key = $base.OpenSubKey($keyName)
             try { Assert-True ($key.GetValue('DisplayVersion') -ceq '1.0.1' -and -not $key.GetValueNames().Contains('TowavuePendingUpdate')) 'Progress flow did not complete the registered update.' } finally { $key.Dispose() }
+            Assert-AssociationState $true
             Write-Output 'PASS: native progress-page update completed and closed without wizard input. This checks process completion, not physical appearance.'
         }
     }

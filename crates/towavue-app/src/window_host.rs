@@ -71,6 +71,7 @@ pub(crate) struct WindowHost {
     windows: BTreeMap<WindowKey, WindowApplication>,
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
+    last_active_window: Option<WindowKey>,
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
@@ -102,6 +103,7 @@ impl WindowHost {
             file_operation: None,
             source_save: None,
             windows: BTreeMap::new(),
+            last_active_window: None,
             proxy,
             next_key: 1,
             pending_launches: Vec::new(),
@@ -243,11 +245,17 @@ impl WindowHost {
             }
         }
         for request in std::mem::take(&mut self.pending_launches) {
-            let result =
+            let result = if !request.new_window
+                && self.windows.values().any(|app| !app.exit_requested)
+                && !request.path.as_ref().is_some_and(|path| path.is_dir())
+            {
+                self.open_launched_tab(request.path.clone(), visible)
+            } else {
                 self.open_launched_window_with(request.path.clone(), visible, |app, device| {
                     app.start_on_device(event_loop, device, false)
                         .map_err(|error| error.to_string())
-                });
+                })
+            };
             if let Err(error) = &result {
                 towavue_runtime_windows::diagnostic!(
                     "towavue: could not open launched window: {error}"
@@ -255,6 +263,40 @@ impl WindowHost {
             }
             request.acknowledge(result.is_ok());
         }
+    }
+
+    fn open_launched_tab(
+        &mut self,
+        path: Option<PathBuf>,
+        visible: bool,
+    ) -> Result<WindowKey, String> {
+        let key = self
+            .last_active_window
+            .filter(|key| self.windows.get(key).is_some_and(|app| !app.exit_requested))
+            .or_else(|| {
+                self.windows
+                    .iter()
+                    .rev()
+                    .find(|(_, app)| !app.exit_requested)
+                    .map(|(key, _)| *key)
+            })
+            .ok_or("No open window can accept the file")?;
+        let app = self.windows.get_mut(&key).expect("selected window");
+        if app.modal_input_blocked() || app.pending_guard.is_some() {
+            return Err("Close the active dialog before opening an external file".into());
+        }
+        if let Some(path) = path {
+            if MediaKind::from_path(&path).is_none() {
+                return Err(format!("Unsupported media: {}", path.display()));
+            }
+            app.open_external(path, true);
+            app.request_redraw();
+        }
+        if visible && let Some(window) = &app.window {
+            window.set_minimized(false);
+            let _ = towavue_runtime_windows::activate_window(window.as_ref());
+        }
+        Ok(key)
     }
 
     fn open_launched_window_with(
@@ -841,6 +883,14 @@ impl ApplicationHandler<Event> for WindowHost {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        if matches!(event, WindowEvent::Focused(true)) {
+            self.last_active_window = self.windows.iter().find_map(|(key, app)| {
+                app.window
+                    .as_ref()
+                    .filter(|window| window.id() == window_id)
+                    .map(|_| *key)
+            });
+        }
         if let Some(app) = self.native_window(window_id) {
             app.window_event(event_loop, window_id, event);
         }

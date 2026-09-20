@@ -10,6 +10,9 @@ fn audio_viewing_seek_and_editing_modes_preserve_live_state_without_hover_cards(
     ) else {
         return;
     };
+    if !tests::shared_audio_endpoint_available("audio viewing and editing modes") {
+        return;
+    }
     let source = root.join("silence.wav");
     assert!(
         std::process::Command::new(

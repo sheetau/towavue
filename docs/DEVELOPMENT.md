@@ -63,7 +63,7 @@ For the isolated `audio_playback::tests::audio_buttons_fit_small_windows_and_acc
 
 For the final-window Shell exit gate, run the app filter `native_last_window_waits_for_shell_retirement_before_exiting` with `--ignored --nocapture --test-threads=1` and the app test debug override above. It creates one hidden native window, verifies that production AboutToWait closes its owner without exiting while a controlled Shell worker remains, then verifies event-loop exit after the native worker finishes. D3D11 is required; this is automated native lifetime evidence, not physical input or rendered-pixel approval. The ordinary `shell::shutdown::` runtime test additionally holds a TLS destructor to distinguish actual native thread exit from worker-body completion.
 
-[CI](../.github/workflows/ci.yml) retains full Windows checks; this documentation change does not alter CI policy. There is no requirement to repeat those checks locally for prose-only edits.
+[CI](../.github/workflows/ci.yml) runs full Windows checks with a 35-minute cold-build budget. Workspace tests emit diagnostics immediately and attempt all targets before reporting failures. The audio-view and held-seek native controls report SKIP only when synchronous WASAPI preflight returns E_NOTFOUND (no default render endpoint); held-seek still runs its video-only cases. Those skips are not live-audio coverage: run the controls on an audio-capable Windows 11 machine for that evidence. There is no requirement to repeat full checks locally for prose-only edits.
 
 ## Locate code and tests
 

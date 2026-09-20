@@ -56,9 +56,14 @@ fn held_video_seeks_wait_for_presented_results_without_backlog_or_discrete_input
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+    let audio_available =
+        crate::tests::shared_audio_endpoint_available("held-video seek cases with audio");
     let mut paths = Vec::new();
     for codec in ["copy", "mpeg4"] {
         for audio in [false, true] {
+            if audio && !audio_available {
+                continue;
+            }
             let path = root.join(format!("{codec}-{audio}.mp4"));
             let mut command = std::process::Command::new(&ffmpeg);
             command

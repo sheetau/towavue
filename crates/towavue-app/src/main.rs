@@ -15591,6 +15591,28 @@ mod tests {
         Some(canonical_shell_path(&PathBuf::from(root)).expect("canonical test root"))
     }
 
+    pub(super) fn shared_audio_endpoint_available(test_name: &str) -> bool {
+        use towavue_runtime_windows::{AudioFormat, AudioOutput, AudioOutputError};
+
+        // Probe synchronously before an app session queues asynchronous WASAPI startup.
+        // The safe runtime API retains HRESULT text: only E_NOTFOUND means this host
+        // has no default render endpoint. Other startup failures remain test failures.
+        match AudioOutput::start(AudioFormat {
+            sample_rate: 48000,
+            channels: 2,
+        }) {
+            Ok(output) => {
+                drop(output);
+                true
+            }
+            Err(AudioOutputError::Wasapi(error)) if error.contains("0x80070490") => {
+                eprintln!("SKIP {test_name}: no default audio render endpoint: {error}");
+                false
+            }
+            Err(error) => panic!("{test_name}: shared audio startup failed: {error}"),
+        }
+    }
+
     fn finish_isolated_test(test_name: &str, root: &Path, result: std::process::Output) {
         if result.status.success() {
             std::fs::remove_dir_all(root).expect("remove isolated test files");

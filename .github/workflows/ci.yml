@@ -80,7 +80,7 @@ jobs:
         run: cargo +1.98.0 clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo +1.98.0 test --workspace --all-targets
+        run: cargo +1.98.0 test --workspace --all-targets --no-fail-fast -- --nocapture
 
       - name: Verify per-texture interpolation with offscreen WARP
         run: cargo +1.98.0 test -p egui-directx11 --lib --locked --offline

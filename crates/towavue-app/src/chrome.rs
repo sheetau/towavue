@@ -7,7 +7,7 @@ use crate::hover_help::HoverHelp;
 mod input_tests;
 
 mod modal;
-pub use modal::{modal, modal_body, set_modal_bounds};
+pub use modal::{modal, modal_body, modal_body_with_header, set_modal_bounds};
 
 mod reading_icon;
 mod tab_fade;

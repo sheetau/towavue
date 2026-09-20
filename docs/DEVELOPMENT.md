@@ -30,6 +30,8 @@ The app build uses the installed Windows SDK's `rc.exe` to embed `assets/towavue
 
 Helper lookup is deliberate: colocated ffmpeg.exe/ffprobe.exe take precedence; only a development layout with neither colocated helper uses FFMPEG_DIR/bin. A partially installed pair fails rather than borrowing another version from PATH.
 
+The Release app is a GUI executable and does not open a console. Session warnings/errors are retained under `%LOCALAPPDATA%\towavue\logs` (up to 1 MiB per session, newest five closed/current sessions subject to active-file retention). Debug keeps stderr diagnostics. For logging changes, run the runtime `diagnostics::` filter: it covers bounded UTF-8 messages, saturation, session retention, shutdown drain and a separate native FFmpeg callback process. Check the Release PE subsystem separately; tests use the console subsystem.
+
 ## Verification by impact
 
 | Change | Expected checks |

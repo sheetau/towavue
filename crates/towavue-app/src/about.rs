@@ -11,17 +11,7 @@ pub(super) enum Action {
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn draw_about(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
         let modal = chrome::modal(context, "about-towavue".into(), false).show(context, |ui| {
-            chrome::modal_body(ui, 360.0, "About towavue", &["OK"], |ui| {
-                ui.horizontal(|ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::hover());
-                    chrome::paint_logo(ui.painter(), rect, None, 0.0, true);
-                    ui.vertical(|ui| {
-                        ui.heading("towavue");
-                        ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
-                    });
-                });
-                ui.add_space(8.0);
+            chrome::modal_body_with_header(ui, 360.0, "About towavue", &["OK"], identity, |ui| {
                 ui.label("Media viewer for Windows");
                 ui.horizontal(|ui| {
                     ui.label("Creator:");
@@ -69,6 +59,22 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 }
 
+fn identity(ui: &mut egui::Ui) -> egui::Response {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+        chrome::paint_logo(ui.painter(), rect, None, 0.0, true);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!("towavue / Version {}", env!("CARGO_PKG_VERSION")))
+                    .size(18.0)
+                    .color(chrome::FOREGROUND),
+            )
+            .wrap_mode(egui::TextWrapMode::Truncate),
+        );
+    })
+    .response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +120,33 @@ mod tests {
                         |_| app.draw_about(&context, &mut actions),
                     );
                     assert!(!output.shapes.is_empty());
+                    let texts: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| {
+                            if let egui::Shape::Text(text) = &shape.shape {
+                                Some(text)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    assert!(
+                        texts
+                            .iter()
+                            .all(|text| text.galley.text() != "About towavue")
+                    );
+                    if pass == 2 {
+                        let identity = texts
+                            .iter()
+                            .find(|text| text.galley.text().starts_with("towavue / Version "))
+                            .expect("single identity line");
+                        assert_eq!(identity.galley.rows.len(), 1);
+                        assert_eq!(
+                            identity.galley.job.sections[0].format.color,
+                            chrome::FOREGROUND
+                        );
+                    }
                     for action in actions {
                         app.handle_ui_action(action);
                     }

@@ -184,7 +184,7 @@ impl PreviewCache {
 
     pub fn new(root: PathBuf) -> Result<Self, PreviewError> {
         if let Err(error) = fs::create_dir_all(&root) {
-            eprintln!("towavue: could not create preview cache: {error}");
+            crate::diagnostic!("towavue: could not create preview cache: {error}");
         }
         Ok(Self {
             root,
@@ -428,7 +428,7 @@ impl PreviewCache {
                     ready_preview_png(image)?
                 }
                 Err(error) => {
-                    eprintln!("towavue: auxiliary preview decoder unavailable; using frame fallback: {error}");
+                    crate::diagnostic!("towavue: auxiliary preview decoder unavailable; using frame fallback: {error}");
                     (frame_preview(source, position, filter, self.cancellation.as_ref())?, None)
                 }
             };
@@ -667,10 +667,10 @@ impl PreviewCache {
                 })
             });
         if let Err(error) = &stored {
-            eprintln!("towavue: could not store preview cache: {error}");
+            crate::diagnostic!("towavue: could not store preview cache: {error}");
         }
         if let Err(error) = self.prune() {
-            eprintln!("towavue: could not prune preview cache: {error}");
+            crate::diagnostic!("towavue: could not prune preview cache: {error}");
         }
         self.check_cancelled()?;
         // Disk failures must not force every waiting caller to decode the same media.

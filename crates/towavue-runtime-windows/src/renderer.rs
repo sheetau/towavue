@@ -660,6 +660,7 @@ impl FrameRenderer {
         }
         if frame.transfer != VideoTransfer::Sdr && !self.hdr_tone_mapping_active {
             self.hdr_tone_mapping_active = true;
+            #[cfg(any(debug_assertions, feature = "presentation-verification"))]
             eprintln!(
                 "towavue: HDR source tone-mapped to the SDR swap chain by D3D11 Video Processor"
             );

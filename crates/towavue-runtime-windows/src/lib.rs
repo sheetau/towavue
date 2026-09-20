@@ -12,7 +12,9 @@ pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_
 mod cancellation;
 mod caption;
 mod decode;
+mod diagnostics;
 mod dialog;
+pub use diagnostics::{Diagnostics, record_diagnostic, start_diagnostics};
 mod export;
 mod file_details;
 mod file_operation;

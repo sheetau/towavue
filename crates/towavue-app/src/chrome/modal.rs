@@ -58,6 +58,25 @@ pub fn modal_body<R>(
     actions: &[&str],
     content: impl FnOnce(&mut Ui) -> R,
 ) -> R {
+    modal_body_with_header(
+        ui,
+        width,
+        title,
+        actions,
+        |ui| ui.label(egui::RichText::new(title).color(super::FOREGROUND)),
+        content,
+    )
+}
+
+/// Retain the accessible title while allowing a compact identity header.
+pub fn modal_body_with_header<R>(
+    ui: &mut Ui,
+    width: f32,
+    title: &str,
+    actions: &[&str],
+    header: impl FnOnce(&mut Ui) -> egui::Response,
+    content: impl FnOnce(&mut Ui) -> R,
+) -> R {
     let bounds = bounds(ui.ctx());
     ui.set_width(width.min((bounds.width() - FRAME_SPACE).max(1.0)));
     // Area remembers its previous content size; reset the maximum so a body can
@@ -71,7 +90,7 @@ pub fn modal_body<R>(
         node.set_label(title);
         node.set_modal();
     });
-    let heading = ui.label(egui::RichText::new(title).color(super::FOREGROUND));
+    let heading = header(ui);
     let font = egui::TextStyle::Button.resolve(ui.style());
     let row_height =
         ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;

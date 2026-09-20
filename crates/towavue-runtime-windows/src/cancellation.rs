@@ -30,7 +30,7 @@ impl Cancellation {
         if let Some(child) = child.as_mut()
             && let Err(error) = child.kill()
         {
-            eprintln!("towavue: could not cancel preview child: {error}");
+            crate::diagnostic!("towavue: could not cancel preview child: {error}");
         }
     }
 

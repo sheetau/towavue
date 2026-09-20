@@ -7,7 +7,7 @@ pub fn install(context: &egui::Context) -> bool {
         let japanese = towavue_runtime_windows::japanese_ui_font();
         let available = japanese.is_some();
         if !available {
-            eprintln!("towavue: no installed Japanese UI font was found; using available system and bundled fallback fonts");
+            towavue_runtime_windows::diagnostic!("towavue: no installed Japanese UI font was found; using available system and bundled fallback fonts");
         }
         let mut fonts = definitions(japanese, towavue_runtime_windows::ui_symbol_font());
         for fallback in towavue_runtime_windows::ui_font_fallbacks() {

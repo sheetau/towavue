@@ -85,6 +85,12 @@ ShowUninstDetails show
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE CheckDirectoryPage
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!ifdef TOWAVUE_SETUP_RELEASE
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchTowavue
+!define MUI_FINISHPAGE_RUN_TEXT "Launch towavue"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW ShowProductionFinish
+!endif
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -100,6 +106,32 @@ Var RegistrationResult
 Var UpdateMode
 Var UpdateResult
 Var UpdateDestination
+!endif
+
+!ifdef TOWAVUE_SETUP_RELEASE
+Function ShowProductionFinish
+  ${If} $PrerequisiteResult == 3010
+  ${OrIf} $UpdateMode == "Rollback"
+    SendMessage $mui.FinishPage.Run ${BM_SETCHECK} ${BST_UNCHECKED} 0
+    ShowWindow $mui.FinishPage.Run ${SW_HIDE}
+  ${EndIf}
+FunctionEnd
+
+Function LaunchTowavue
+  ; The updater owns restart after silent Setup. Never launch on recovery or
+  ; before a prerequisite-requested restart, even if called without the page.
+  ${If} ${Silent}
+  ${OrIf} $PrerequisiteResult == 3010
+  ${OrIf} $UpdateMode == "Rollback"
+    Return
+  ${EndIf}
+  SetOutPath "$INSTDIR"
+  ClearErrors
+  Exec '"$INSTDIR\towavue.exe"'
+  ${If} ${Errors}
+    MessageBox MB_OK|MB_ICONEXCLAMATION "towavue could not be started. Open it from the Start menu."
+  ${EndIf}
+FunctionEnd
 !endif
 
 ; Both paths use the same checks. Inspect all existing ancestors, not only the leaf.
@@ -280,7 +312,11 @@ FunctionEnd
 Function .onInit
 !ifdef TOWAVUE_SETUP_APPLICATION
   StrCpy $CompletionTitle "Installation completed"
+!ifdef TOWAVUE_SETUP_RELEASE
+  StrCpy $CompletionText "towavue is installed.$\r$\n$\r$\nClick Finish to close Setup."
+!else
   StrCpy $CompletionText "${APPLICATION_LABEL} is installed.$\r$\n$\r$\nNo application was launched. Click Finish to close Setup."
+!endif
 !endif
   ${GetParameters} $0
   ClearErrors
@@ -424,7 +460,11 @@ Function UpdateInstallation
     StrCpy $CompletionText "The previous installation has been restored. The new version has not been installed.$\r$\n$\r$\nClick Finish, then run Setup again to retry the update.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched."
   ${Else}
     StrCpy $CompletionTitle "Update completed"
+!ifdef TOWAVUE_SETUP_RELEASE
+    StrCpy $CompletionText "towavue has been updated.$\r$\n$\r$\nRecovery files are retained beside the installation folder. Click Finish to close Setup."
+!else
     StrCpy $CompletionText "${APPLICATION_LABEL} has been updated.$\r$\n$\r$\nRecovery files are retained beside the installation folder. No application was launched. Click Finish to close Setup."
+!endif
   ${EndIf}
   SetErrorLevel 0
   ${If} $PrerequisiteResult == 3010

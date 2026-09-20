@@ -28,7 +28,7 @@ pub(super) fn open_preferences(
         .join("towavue")
         .join("playback-volume.conf");
     match towavue_runtime_windows::PlaybackVolumePreferences::open(path, move |error| {
-        eprintln!("towavue: could not save playback volume: {error}");
+        towavue_runtime_windows::diagnostic!("towavue: could not save playback volume: {error}");
         if let Some(proxy) = &proxy {
             let _ = proxy.send_event(window_host::Event::PlaybackVolumePreferenceFailed(error));
         }
@@ -41,7 +41,9 @@ pub(super) fn open_preferences(
             )
         }
         Err(error) => {
-            eprintln!("towavue: could not load playback volume: {error}");
+            towavue_runtime_windows::diagnostic!(
+                "towavue: could not load playback volume: {error}"
+            );
             (PlaybackVolume::default(), None)
         }
     }

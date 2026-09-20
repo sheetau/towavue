@@ -79,7 +79,9 @@ impl AudioTab {
                 Some(provider)
             }
             Err(error) => {
-                eprintln!("towavue: audio order unavailable after tab transfer: {error}");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: audio order unavailable after tab transfer: {error}"
+                );
                 None
             }
         };

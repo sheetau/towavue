@@ -156,7 +156,7 @@ fn watch_loop(
     let io_event = match unsafe { CreateEventW(None, true, false, None) } {
         Ok(event) => event,
         Err(error) => {
-            eprintln!("towavue: folder monitor event creation failed: {error}");
+            crate::diagnostic!("towavue: folder monitor event creation failed: {error}");
             return;
         }
     };
@@ -187,7 +187,7 @@ fn watch_loop(
                 None,
             )
         } {
-            eprintln!("towavue: folder monitoring stopped: {error}");
+            crate::diagnostic!("towavue: folder monitoring stopped: {error}");
             break;
         }
         if let Some(ready) = ready.take() {
@@ -204,7 +204,7 @@ fn watch_loop(
             break;
         }
         if wait.0 != WAIT_OBJECT_0.0 + 1 {
-            eprintln!("towavue: folder monitor wait failed: {}", wait.0);
+            crate::diagnostic!("towavue: folder monitor wait failed: {}", wait.0);
             let _ = unsafe { CancelIoEx(directory, Some(&overlapped)) };
             let mut transferred = 0;
             let _ = unsafe { GetOverlappedResult(directory, &overlapped, &mut transferred, true) };

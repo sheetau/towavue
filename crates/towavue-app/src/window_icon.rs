@@ -18,7 +18,9 @@ pub fn apply(window: &Window, scale: f64) {
             window.set_window_icon(Some(small));
             window.set_taskbar_icon(Some(large));
         }
-        Err(error) => eprintln!("Could not load application icon: {error}"),
+        Err(error) => {
+            towavue_runtime_windows::diagnostic!("Could not load application icon: {error}")
+        }
     }
 }
 

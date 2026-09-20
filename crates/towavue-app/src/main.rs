@@ -1,6 +1,10 @@
 //! Application entry point for towavue.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(
+    all(windows, not(debug_assertions), not(test)),
+    windows_subsystem = "windows"
+)]
 
 mod about;
 mod audio_export;
@@ -162,6 +166,15 @@ const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
 const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let _diagnostics = towavue_runtime_windows::start_diagnostics().ok();
+    let result = run();
+    if let Err(error) = &result {
+        towavue_runtime_windows::diagnostic!("Startup or event loop failed: {error}");
+    }
+    result
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "presentation-verification")]
     towavue_runtime_windows::towavue_presentation_stage(0);
     let initial_path = parse_initial_path()?;
@@ -771,7 +784,7 @@ impl ImagePresentation {
 #[derive(Clone, Copy)]
 enum SelectionDrag {
     New(UnitPoint),
-    OutsideImage,
+    OutsideImage(egui::Pos2),
     Left,
     Right,
     Top,
@@ -1186,7 +1199,7 @@ where
                 "Using built-in defaults for the settings below. Existing configuration files have not been changed.\n\n{}\n\nCorrect these files, then choose File > Reload keyboard shortcuts from the towavue menu.",
                 warnings.join("\n\n")
             );
-            eprintln!("towavue: {warning}");
+            towavue_runtime_windows::diagnostic!("towavue: {warning}");
             warning
         });
         let notify = Arc::new(notify);
@@ -1475,7 +1488,7 @@ where
         }) {
             Ok(taskbar) => Some(taskbar),
             Err(error) => {
-                eprintln!("Taskbar integration unavailable: {error}");
+                towavue_runtime_windows::diagnostic!("Taskbar integration unavailable: {error}");
                 None
             }
         };
@@ -3374,7 +3387,9 @@ where
                 self.thumbnail_loading = None;
                 if let Err(error) = &result {
                     self.failed_thumbnails.insert(bucket);
-                    eprintln!("towavue: thumbnail unavailable at bucket {bucket}: {error}");
+                    towavue_runtime_windows::diagnostic!(
+                        "towavue: thumbnail unavailable at bucket {bucket}: {error}"
+                    );
                     self.request_redraw();
                 }
                 if let Ok(preview) = result
@@ -3414,7 +3429,9 @@ where
         let previous = (saved.state, saved.audio_drained);
         match event {
             PlaybackEvent::DeviceRemoved(_, reason) => {
-                eprintln!("towavue: recovering background D3D11 device: {reason}");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: recovering background D3D11 device: {reason}"
+                );
                 self.recover_graphics_device(self.current_position());
                 return;
             }
@@ -3441,8 +3458,9 @@ where
                 self.load_next_frame();
             }
             PlaybackEvent::AudioReady(_) => self.poll_audio(),
-            PlaybackEvent::DecodePathSelected(_, path) => {
-                eprintln!("towavue: decode path selected: {path:?}");
+            PlaybackEvent::DecodePathSelected(_, _path) => {
+                #[cfg(any(debug_assertions, feature = "presentation-verification"))]
+                eprintln!("towavue: decode path selected: {_path:?}");
             }
             PlaybackEvent::DecodeFinished(_) => {
                 self.decode_finished = self
@@ -3452,7 +3470,9 @@ where
                 self.check_eof();
             }
             PlaybackEvent::DeviceRemoved(_, reason) => {
-                eprintln!("towavue: recovering removed D3D11 device: {reason}");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: recovering removed D3D11 device: {reason}"
+                );
                 self.recover_graphics_device(self.current_position());
             }
             PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
@@ -4496,11 +4516,7 @@ where
             return;
         }
         let (shift, pointer) = ui.input(|input| (input.modifiers.shift, input.pointer.hover_pos()));
-        let mut volume_response = response.clone();
-        if !self.visual_selection_enabled() {
-            volume_response.interact_rect = viewport.intersect(full);
-        }
-        volume_targets.push(volume_response);
+        volume_targets.push(response.clone());
         let before_selection = self.image_view;
         self.update_selection(&response, full, size, shift, pointer);
         if self.image_view != before_selection {
@@ -4883,7 +4899,7 @@ where
                         egui::CursorIcon::ResizeNwSe
                     }
                     SelectionDrag::Corner { .. } => egui::CursorIcon::ResizeNeSw,
-                    SelectionDrag::New(_) | SelectionDrag::OutsideImage => {
+                    SelectionDrag::New(_) | SelectionDrag::OutsideImage(_) => {
                         egui::CursorIcon::Crosshair
                     }
                 });
@@ -4902,11 +4918,7 @@ where
                         .contains(origin)
                         .then(|| SelectionDrag::New(unit_point(origin, image_rect)))
                 })
-                .or_else(|| {
-                    self.image_view
-                        .selection
-                        .map(|_| SelectionDrag::OutsideImage)
-                })
+                .or(Some(SelectionDrag::OutsideImage(origin)))
         {
             self.forget_pointer_selection_focus(&response.ctx);
             self.view_drag = Some(ViewDrag::Selection {
@@ -4926,6 +4938,7 @@ where
         // egui's response can describe a later gesture in the same frame. Keep
         // click eligibility with this selection, including earlier held frames.
         let dragging = if let Some(ViewDrag::Selection {
+            mode,
             origin,
             started_at,
             moved,
@@ -4947,6 +4960,12 @@ where
                     }
                     match event {
                         egui::Event::PointerMoved(pos) => {
+                            enter_selection_image(
+                                mode,
+                                *pos,
+                                image_rect.intersect(response.rect),
+                                image_rect,
+                            );
                             *moved |= origin.distance(*pos) > options.max_click_dist;
                         }
                         egui::Event::PointerButton {
@@ -4955,6 +4974,12 @@ where
                             pressed: false,
                             ..
                         } => {
+                            enter_selection_image(
+                                mode,
+                                *pos,
+                                image_rect.intersect(response.rect),
+                                image_rect,
+                            );
                             *moved |= origin.distance(*pos) > options.max_click_dist;
                             break;
                         }
@@ -4986,7 +5011,7 @@ where
             && !matches!(
                 self.view_drag,
                 Some(ViewDrag::Selection {
-                    mode: SelectionDrag::OutsideImage,
+                    mode: SelectionDrag::OutsideImage(_),
                     ..
                 })
             )
@@ -5000,7 +5025,7 @@ where
             self.view_drag = None;
             if !dragging && let Some(selection) = self.image_view.selection {
                 let selected = selection_rect(image_rect, selection);
-                if matches!(mode, SelectionDrag::New(_) | SelectionDrag::OutsideImage)
+                if matches!(mode, SelectionDrag::New(_) | SelectionDrag::OutsideImage(_))
                     && !selected.contains(origin)
                     && !selected.contains(pointer)
                 {
@@ -5082,7 +5107,9 @@ where
             SelectionDrag::Right => selection.max.x = point.x.max(selection.min.x),
             SelectionDrag::Top => selection.min.y = point.y.min(selection.max.y),
             SelectionDrag::Bottom => selection.max.y = point.y.max(selection.min.y),
-            SelectionDrag::New(_) | SelectionDrag::OutsideImage | SelectionDrag::Corner { .. } => {
+            SelectionDrag::New(_)
+            | SelectionDrag::OutsideImage(_)
+            | SelectionDrag::Corner { .. } => {
                 return;
             }
         }
@@ -5122,7 +5149,7 @@ where
                     selection.max.x = (center + width * 0.5).min(1.0);
                 }
                 SelectionDrag::New(_)
-                | SelectionDrag::OutsideImage
+                | SelectionDrag::OutsideImage(_)
                 | SelectionDrag::Corner { .. } => {}
             }
         }
@@ -9933,7 +9960,7 @@ where
     }
 
     fn native_prompt_failed(&mut self, prompt: FallbackPrompt, error: DialogError) {
-        eprintln!("towavue: native prompt failed: {error}");
+        towavue_runtime_windows::diagnostic!("towavue: native prompt failed: {error}");
         if matches!(prompt, FallbackPrompt::Guard) {
             self.resolve_guard(GuardDecision::Cancel);
             self.set_status(format!(
@@ -10202,7 +10229,9 @@ where
                 self.check_eof();
             }
             AudioOutputEvent::EndpointChanged => {
-                eprintln!("towavue: recovering changed or invalidated audio endpoint");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: recovering changed or invalidated audio endpoint"
+                );
                 self.seek_to(self.current_position());
                 self.pending_seek_started = None;
             }
@@ -10279,7 +10308,7 @@ where
             if !self.metrics_recorded {
                 if let Some(session) = &self.session {
                     let metrics = session.metrics();
-                    eprintln!(
+                    towavue_runtime_windows::diagnostic!(
                         "towavue: adapter={:08x}:{:08x} hardware_frames={} cpu_transfers={} presented={} dropped={}",
                         metrics.adapter_luid.high_part,
                         metrics.adapter_luid.low_part,
@@ -10307,7 +10336,9 @@ where
             .map_or(error, RenderError::DeviceRemoved);
         match error {
             RenderError::DeviceRemoved(reason) => {
-                eprintln!("towavue: recovering removed D3D11 device: {reason}");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: recovering removed D3D11 device: {reason}"
+                );
                 self.recover_graphics_device(self.current_position());
             }
             other => {
@@ -10328,7 +10359,7 @@ where
             clock.set_paused(true);
         }
         self.pending_seek_started = None;
-        eprintln!("towavue: {error}");
+        towavue_runtime_windows::diagnostic!("towavue: {error}");
         self.playback_error = Some(error.clone());
         self.set_status(error);
         self.state = PlaybackState::Faulted;
@@ -10468,6 +10499,7 @@ where
         {
             let latency = started.elapsed();
             self.seek_latencies.push(latency);
+            #[cfg(any(debug_assertions, feature = "presentation-verification"))]
             eprintln!(
                 "towavue: seek_latency_ms={:.3}",
                 latency.as_secs_f64() * 1000.0
@@ -10477,12 +10509,14 @@ where
 
     fn report_timing_metrics(&self) {
         if !self.seek_latencies.is_empty() {
+            #[cfg(any(debug_assertions, feature = "presentation-verification"))]
             eprintln!(
                 "towavue: seek_p95_ms={:.3}",
                 percentile_95(&self.seek_latencies).as_secs_f64() * 1000.0
             );
         }
         if !self.drift_samples.is_empty() {
+            #[cfg(any(debug_assertions, feature = "presentation-verification"))]
             eprintln!(
                 "towavue: av_drift_p95_ms={:.3} av_drift_max_ms={:.3}",
                 percentile_95(&self.drift_samples).as_secs_f64() * 1000.0,
@@ -10656,7 +10690,9 @@ where
         {
             // The next regular frame retains the existing device-recovery path.
             // A failed cosmetic transition must not prevent leaving fullscreen.
-            eprintln!("towavue: fullscreen background presentation failed: {error}");
+            towavue_runtime_windows::diagnostic!(
+                "towavue: fullscreen background presentation failed: {error}"
+            );
         }
         self.fullscreen = enabled;
         self.surface_resize_pending = true;
@@ -11477,6 +11513,7 @@ fn video_frame_due(
     paused_preview || deadline.is_none_or(|deadline| presentation_time <= deadline)
 }
 
+#[cfg(any(test, debug_assertions, feature = "presentation-verification"))]
 fn percentile_95(samples: &[Duration]) -> Duration {
     let mut ordered = samples.to_vec();
     ordered.sort_unstable();
@@ -11538,6 +11575,40 @@ fn unit_point(point: egui::Pos2, image_rect: egui::Rect) -> UnitPoint {
         x: ((point.x - image_rect.left()) / image_rect.width()).clamp(0.0, 1.0),
         y: ((point.y - image_rect.top()) / image_rect.height()).clamp(0.0, 1.0),
     }
+}
+
+// A press in the viewport margin owns a pending gesture. Anchor at its first
+// crossing of the visible media, including a crossing delivered in one frame.
+fn enter_selection_image(
+    mode: &mut SelectionDrag,
+    position: egui::Pos2,
+    visible: egui::Rect,
+    image: egui::Rect,
+) {
+    let SelectionDrag::OutsideImage(previous) = *mode else {
+        return;
+    };
+    let delta = position - previous;
+    let mut enter = 0.0f32;
+    let mut leave = 1.0f32;
+    for axis in 0..2 {
+        if delta[axis].abs() < f32::EPSILON {
+            if previous[axis] < visible.min[axis] || previous[axis] > visible.max[axis] {
+                *mode = SelectionDrag::OutsideImage(position);
+                return;
+            }
+        } else {
+            let a = (visible.min[axis] - previous[axis]) / delta[axis];
+            let b = (visible.max[axis] - previous[axis]) / delta[axis];
+            enter = enter.max(a.min(b));
+            leave = leave.min(a.max(b));
+        }
+    }
+    *mode = if visible.is_positive() && enter <= leave {
+        SelectionDrag::New(unit_point(previous + delta * enter, image))
+    } else {
+        SelectionDrag::OutsideImage(position)
+    };
 }
 
 fn bilinear_uv(corners: [UnitPoint; 4], x: f32, y: f32) -> UnitPoint {
@@ -11782,7 +11853,7 @@ where
         if self.window.is_none()
             && let Err(error) = self.start(event_loop)
         {
-            eprintln!("towavue: {error}");
+            towavue_runtime_windows::diagnostic!("towavue: {error}");
             event_loop.exit();
         }
     }
@@ -25041,6 +25112,7 @@ mod tests {
                         .video_geometry()
                         .is_some()
                 );
+                assert_video_margin_volume(&mut app);
                 app.toggle_pause();
                 assert_eq!(app.state, PlaybackState::Playing);
                 assert_eq!(app.current_position(), MediaTime::ZERO);
@@ -25121,6 +25193,63 @@ mod tests {
             .expect("test event loop")
             .run_app(&mut Trial(path, short_path))
             .expect("seek trial");
+    }
+
+    fn assert_video_margin_volume(
+        app: &mut Application<impl Fn(AppEvent) + Send + Sync + 'static>,
+    ) {
+        for timeline in [false, true] {
+            let context = fonts::test_context();
+            app.timeline_open = timeline;
+            app.set_playback_volume(1.0);
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 600.0));
+            let mut point = egui::pos2(300.0, 10.0);
+            for pass in 0..4 {
+                let mut actions = Vec::new();
+                let mut events = vec![egui::Event::PointerMoved(point)];
+                if pass == 3 {
+                    events.push(egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, -1.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    });
+                }
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let mut targets = Vec::new();
+                        app.draw_video_edit_overlay(ui, &mut targets, &mut actions);
+                        let video = app.video_rect.expect("held video surface");
+                        point = [egui::pos2(300.0, 10.0), egui::pos2(10.0, 300.0)]
+                            .into_iter()
+                            .find(|point| !video.contains(*point))
+                            .expect("letterbox margin");
+                        if pass == 3 {
+                            assert!(
+                                targets
+                                    .iter()
+                                    .any(|target| target.interact_rect.contains(point))
+                            );
+                            app.volume_wheel(&context, &targets, &mut actions);
+                        }
+                    },
+                );
+                if pass == 3 {
+                    assert!(
+                        actions.iter().any(
+                            |action| matches!(action, UiAction::Volume(_, volume) if *volume < 1.0)
+                        ),
+                        "margin wheel in timeline={timeline}"
+                    );
+                }
+            }
+        }
+        app.timeline_open = false;
     }
 
     #[test]
@@ -25892,7 +26021,24 @@ mod tests {
                         Some(rectangle(100, 100, 200, 200)),
                         Some(rectangle(140, 100, 160, 200)),
                     ),
-                    (egui::pos2(20.0, 20.0), egui::pos2(300.0, 300.0), None, None),
+                    (
+                        egui::pos2(20.0, 20.0),
+                        egui::pos2(300.0, 300.0),
+                        None,
+                        Some(rectangle(0, 0, 250, 250)),
+                    ),
+                    (
+                        egui::pos2(20.0, 20.0),
+                        egui::pos2(480.0, 480.0),
+                        None,
+                        Some(rectangle(0, 0, 400, 400)),
+                    ),
+                    (
+                        egui::pos2(20.0, 20.0),
+                        egui::pos2(20.0, 400.0),
+                        Some(rectangle(100, 100, 200, 200)),
+                        Some(rectangle(100, 100, 200, 200)),
+                    ),
                     (
                         egui::pos2(48.0, 250.0),
                         egui::pos2(100.0, 250.0),
@@ -25996,6 +26142,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn outside_selection_uses_the_first_visible_crossing_of_the_actual_path() {
+        let image = egui::Rect::from_min_max(egui::pos2(50.0, 50.0), egui::pos2(450.0, 450.0));
+        let mut mode = SelectionDrag::OutsideImage(egui::pos2(20.0, 20.0));
+        enter_selection_image(&mut mode, egui::pos2(20.0, 100.0), image, image);
+        assert!(matches!(mode, SelectionDrag::OutsideImage(_)));
+        enter_selection_image(&mut mode, egui::pos2(300.0, 380.0), image, image);
+        let SelectionDrag::New(start) = mode else {
+            panic!("crossing starts selection")
+        };
+        assert!(start.x.abs() < 0.0001 && (start.y - 0.2).abs() < 0.0001);
+        enter_selection_image(&mut mode, egui::pos2(480.0, 480.0), image, image);
+        assert!(matches!(mode, SelectionDrag::New(point) if point == start));
+        // A zoomed image can extend beyond the viewport: hidden pixels cannot
+        // become the start of an outside-origin selection.
+        let visible = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(400.0, 400.0));
+        let mut mode = SelectionDrag::OutsideImage(egui::pos2(20.0, 20.0));
+        enter_selection_image(&mut mode, egui::pos2(300.0, 300.0), visible, image);
+        assert!(
+            matches!(mode, SelectionDrag::New(point) if point == UnitPoint { x: 0.125, y: 0.125 })
+        );
     }
 
     #[test]

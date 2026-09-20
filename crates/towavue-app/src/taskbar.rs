@@ -50,7 +50,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(taskbar) = &mut self.native_taskbar
             && let Err(error) = taskbar.set_transport(transport)
         {
-            eprintln!("Could not update taskbar transport: {error}");
+            towavue_runtime_windows::diagnostic!("Could not update taskbar transport: {error}");
         }
     }
 
@@ -88,7 +88,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .as_mut()
                 .expect("taskbar")
                 .set_icons(icons),
-            Err(error) => eprintln!("Taskbar icons unavailable: {error}"),
+            Err(error) => {
+                towavue_runtime_windows::diagnostic!("Taskbar icons unavailable: {error}")
+            }
         }
         self.taskbar_ui.icon_size = Some(size);
     }

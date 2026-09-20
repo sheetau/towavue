@@ -140,7 +140,7 @@ impl VideoSheets {
                 self.textures.push_back((target, texture));
             }
             Err(error) => {
-                eprintln!("towavue: video sheet unavailable: {error}");
+                towavue_runtime_windows::diagnostic!("towavue: video sheet unavailable: {error}");
                 while self.failed.len() >= 32 {
                     self.failed.pop_front();
                 }

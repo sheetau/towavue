@@ -43,7 +43,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(taskbar) = &mut self.native_taskbar
             && let Err(error) = taskbar.set_progress(progress)
         {
-            eprintln!("Could not update taskbar progress: {error}");
+            towavue_runtime_windows::diagnostic!("Could not update taskbar progress: {error}");
         }
     }
 

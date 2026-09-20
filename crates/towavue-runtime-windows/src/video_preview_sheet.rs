@@ -148,7 +148,7 @@ impl PreviewCache {
             );
             self.check_cancelled()?;
             if let Err(error) = result {
-                eprintln!(
+                crate::diagnostic!(
                     "towavue: shared preview decoder unavailable; using frame fallback: {error}"
                 );
                 for (slot, position) in targets.into_iter().enumerate() {

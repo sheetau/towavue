@@ -312,8 +312,8 @@ fn run_session_trial(audio: bool, test: &str) {
                                     "letterbox click fixture"
                                 );
                                 assert!(
-                                    !targets.iter().any(|rect| rect.contains(point)),
-                                    "volume wheel stays on the video pixels"
+                                    targets.iter().any(|rect| rect.contains(point)),
+                                    "volume wheel includes the letterbox margin"
                                 );
                             }
                         }

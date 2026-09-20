@@ -378,7 +378,23 @@ fn loudness_video_audio_only_and_source_save_share_verified_output() {
         .expect("native source publication");
     assert!((measurement(&audio, LoudnessTarget::default()).integrated + 14.0).abs() <= 0.100001);
     assert_ne!(fs::read(&audio).expect("source bytes"), original);
+    let staging = saved
+        .original_path()
+        .parent()
+        .expect("owned save staging")
+        .to_owned();
+    assert!(staging.starts_with(&root));
     drop(saved);
+    // Retained-source cleanup runs on its own worker. Removing the fixture tree
+    // immediately races that worker's Windows directory/file handles.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while staging.try_exists().expect("staging state") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "retained source cleanup completes"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     fs::remove_dir_all(root).expect("owned fixture cleanup");
 }
 

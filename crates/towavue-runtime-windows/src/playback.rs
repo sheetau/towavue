@@ -821,7 +821,9 @@ impl PlaybackSession {
             && let Some(PresentationFrame::Hardware(frame)) = &mut self.current_video
             && let Err(error) = frame.retain_surface(&self.graphics_device)
         {
-            eprintln!("towavue: retaining original video surface after copy failure: {error}");
+            crate::diagnostic!(
+                "towavue: retaining original video surface after copy failure: {error}"
+            );
         }
         self.completion.restart_video();
         self.video_visible = false;

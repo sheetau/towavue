@@ -75,7 +75,9 @@ impl WindowHost {
             .as_mut()
             .expect("idle renderer");
         if let Err(error) = renderer.trim_idle_resources() {
-            eprintln!("towavue: idle graphics cache trim was unavailable: {error}");
+            towavue_runtime_windows::diagnostic!(
+                "towavue: idle graphics cache trim was unavailable: {error}"
+            );
         }
         ControlFlow::Wait
     }

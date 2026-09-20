@@ -184,7 +184,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             match FolderOrderProvider::with_notify(move || notify(AppEvent::FolderReady)) {
                 Ok(provider) => preparation.provider = Some(provider),
                 Err(error) => {
-                    eprintln!("towavue: image tab folder preparation unavailable: {error}");
+                    towavue_runtime_windows::diagnostic!(
+                        "towavue: image tab folder preparation unavailable: {error}"
+                    );
                     preparation.failed = true;
                     return;
                 }

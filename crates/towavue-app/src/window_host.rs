@@ -199,7 +199,9 @@ impl WindowHost {
                     }
                 }
                 Err(error) => {
-                    eprintln!("towavue: could not create window: {error}");
+                    towavue_runtime_windows::diagnostic!(
+                        "towavue: could not create window: {error}"
+                    );
                     app.exit_requested = true;
                 }
             }
@@ -247,7 +249,9 @@ impl WindowHost {
                         .map_err(|error| error.to_string())
                 });
             if let Err(error) = &result {
-                eprintln!("towavue: could not open launched window: {error}");
+                towavue_runtime_windows::diagnostic!(
+                    "towavue: could not open launched window: {error}"
+                );
             }
             request.acknowledge(result.is_ok());
         }

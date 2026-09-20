@@ -26,38 +26,7 @@ fn hidden_views_read_saved_shell_sort_without_overwriting_it() {
                     native_column(NAME, SORT_DESCENDING),
                 ],
             ] {
-                let expected = {
-                    let browser = FixtureWriter::new();
-                    browser
-                        .browser
-                        .SetPropertyBag(w!("Shell"))
-                        .expect("Explorer state");
-                    browser
-                        .browser
-                        .SetOptions(EBO_NOBORDER | EBO_NOTRAVELLOG)
-                        .expect("enable persistence for owned fixture only");
-                    let enumeration = HiddenEnumeration::new(&browser.browser).expect("events");
-                    browser
-                        .browser
-                        .BrowseToIDList(pidl.as_ptr(), SBSP_ABSOLUTE)
-                        .expect("browse");
-                    let deadline = Instant::now() + Duration::from_secs(30);
-                    enumeration
-                        .wait(&|| Instant::now() < deadline)
-                        .expect("ready");
-                    let view = browser
-                        .browser
-                        .GetCurrentView::<IFolderView2>()
-                        .expect("view");
-                    view.SetCurrentFolderFlags(FWF_NOBROWSERVIEWSTATE.0 as u32, 0)
-                        .expect("enable view persistence for fixture writer");
-                    let snapshot = set_sort_and_capture(&view, &folder, &pidl, &columns);
-                    view.cast::<IShellView>()
-                        .expect("Shell view")
-                        .SaveViewState()
-                        .expect("save");
-                    snapshot
-                };
+                let expected = save_fixture_sort(&folder, &pidl, &columns, 4);
                 for generation in 1..=2 {
                     let deadline = Instant::now() + Duration::from_secs(30);
                     let actual =
@@ -119,6 +88,56 @@ fn hidden_views_read_saved_shell_sort_without_overwriting_it() {
     .join()
     .expect("fixture worker");
     fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+// SAFETY: use only for an owned generated folder on its initialized STA. This
+// deliberately persists that fixture's view settings, never a user folder's.
+pub(in crate::shell) unsafe fn save_name_order_fixture(
+    folder: &Path,
+    pidl: &OwnedPidl,
+    count: usize,
+) -> FolderSnapshot {
+    unsafe { save_fixture_sort(folder, pidl, &[native_column(NAME, SORT_ASCENDING)], count) }
+}
+
+unsafe fn save_fixture_sort(
+    folder: &Path,
+    pidl: &OwnedPidl,
+    columns: &[SORTCOLUMN],
+    count: usize,
+) -> FolderSnapshot {
+    unsafe {
+        let browser = FixtureWriter::new();
+        browser
+            .browser
+            .SetPropertyBag(w!("Shell"))
+            .expect("Explorer state");
+        browser
+            .browser
+            .SetOptions(EBO_NOBORDER | EBO_NOTRAVELLOG)
+            .expect("enable persistence for owned fixture only");
+        let enumeration = HiddenEnumeration::new(&browser.browser).expect("events");
+        browser
+            .browser
+            .BrowseToIDList(pidl.as_ptr(), SBSP_ABSOLUTE)
+            .expect("browse");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        enumeration
+            .wait(&|| Instant::now() < deadline)
+            .expect("ready");
+        let view = browser
+            .browser
+            .GetCurrentView::<IFolderView2>()
+            .expect("view");
+        view.SetCurrentFolderFlags(FWF_NOBROWSERVIEWSTATE.0 as u32, 0)
+            .expect("enable view persistence for fixture writer");
+        let snapshot = set_sort_and_capture_count(&view, folder, pidl, columns, count);
+        view.cast::<IShellView>()
+            .expect("Shell view")
+            .SaveViewState()
+            .expect("save");
+        snapshot
+    }
 }
 
 // Deliberately independent of the read-only production browser's teardown.

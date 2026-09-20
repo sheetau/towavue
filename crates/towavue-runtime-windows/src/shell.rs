@@ -1152,7 +1152,7 @@ unsafe fn pump_messages() {
 #[cfg(test)]
 mod tests {
     mod lifetime_tests;
-    mod saved_order_tests;
+    pub(super) mod saved_order_tests;
     #[test]
     fn missing_reveal_target_reports_failure_without_opening_explorer() {
         let path = std::env::temp_dir()
@@ -1792,6 +1792,16 @@ mod tests {
         folder_pidl: &OwnedPidl,
         columns: &[SORTCOLUMN],
     ) -> FolderSnapshot {
+        unsafe { set_sort_and_capture_count(view, folder, folder_pidl, columns, 4) }
+    }
+
+    unsafe fn set_sort_and_capture_count(
+        view: &IFolderView2,
+        folder: &Path,
+        folder_pidl: &OwnedPidl,
+        columns: &[SORTCOLUMN],
+        expected_count: usize,
+    ) -> FolderSnapshot {
         unsafe {
             view.SetSortColumns(columns)
                 .expect("set Shell sort columns");
@@ -1820,7 +1830,7 @@ mod tests {
                     FolderSnapshotSource::PersistedShellView,
                     1,
                     &|| true,
-                ) && snapshot.items.len() == 4
+                ) && snapshot.items.len() == expected_count
                     && snapshot.sort_columns == expected
                 {
                     return snapshot;

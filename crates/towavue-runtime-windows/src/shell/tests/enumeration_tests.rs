@@ -351,7 +351,13 @@ fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
                 result.ok().expect("canonical Shell identity comparison");
                 result.0 as u16 == 0
             };
-            let mut baseline: Option<FolderSnapshot> = None;
+            // A new folder inherits the runner's template and can change its
+            // default order on first use. Establish an explicit persisted order
+            // on this owned fixture before comparing fresh observer snapshots.
+            let expected_order =
+                unsafe { tests::saved_order_tests::save_name_order_fixture(&folder, &pidl, count) };
+            assert_eq!(expected_order.items.len(), count);
+            let mut baseline = Some(expected_order);
             for generation in 1..=3 {
                 eprintln!("HIDDEN_COMPLETE count={count} generation={generation}");
                 let started = Instant::now();

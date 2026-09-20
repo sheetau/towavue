@@ -235,7 +235,7 @@ The old README, architecture, roadmap, UX ledger, and known-gaps snapshots are r
 
 ## Packaging references — only when needed
 
-Use the current owner request and STATUS for packaging scope. Historical evaluation records do not authorize public publication; the current launch goal targets a reviewed first-release draft.
+Start with RELEASING for production builds and STATUS for current release evidence. The remaining records describe installer contracts, pinned inputs and historical audits; they do not independently qualify a new release.
 
 - [DISTRIBUTION](DISTRIBUTION.md): packaging decisions and audit entry point.
 - [RELEASING](RELEASING.md): clean-source production asset assembly, generated material bindings, signing and exact-package checks.

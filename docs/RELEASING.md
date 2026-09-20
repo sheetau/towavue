@@ -1,6 +1,6 @@
 # Release assembly
 
-The current release candidate is 1.0.1 for Windows 11 x64. The owner chose to retain the unpublished 1.0.0 draft and its tag. EXE and Setup have no Authenticode signature by owner decision. Update metadata is independently signed with the existing RSA-4096 key. Public publication is reserved to the owner. See [STATUS](STATUS.md) for the remaining qualification and draft-publishing work.
+Production releases target Windows 11 x64. EXE and Setup currently have no Authenticode signature by owner decision; update metadata is independently signed with the retained RSA-4096 key. This guide covers subsequent releases as well as the initial assembly. Use [STATUS](STATUS.md) for published versions, retained inputs and qualification limits. The publisher creates a draft; the owner publishes it.
 
 ## Build exact local assets
 

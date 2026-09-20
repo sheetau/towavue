@@ -1,18 +1,8 @@
-# インストーラー配布の準備
+# Distribution audit history
 
-2026-09-07のowner指定により、インストール先を選べるSetup.exeを目標とする。これは配布前の技術・資料監査であり、公開可能なpackageや法的適合性の認定ではない。現行のRust構成とFFmpeg動的リンクを維持する。H1の品質確認も継続する。
+For current production packaging, start with [RELEASING](RELEASING.md). [STATUS](STATUS.md) records published releases and qualification limits; [LOCAL_SETUP](LOCAL_SETUP.md) maintains install/update/uninstall contracts.
 
-2026-09-09更新: [評価候補と資料の対応付け](CANDIDATE_MATERIALS.md)では、現行の候補exeと94 runtime filesを実hashで照合し、本体の対応source ZIP・13 kitの原本・ローカルHTML案内をまとめる。下記のBtbN監査記録は除外済みbinaryの履歴であり、現行候補一覧ではない。新しい資料集も公開版やインストーラーではなく、実表示・アプリ内の入口・最終同時提供と品質／導入gateは残る。
-
-同日、[Help／paletteの資料入口](DEVELOPMENT.md)を後続UI buildへ追加し、Explorerでの選択表示と欠落案内を検証した。旧03125262用の固定資料は保持しており、新195af870 buildの対応sourceとして流用しない。最終app／sourceの再対応付け、installerでの`licenses/START-HERE.html`配置、HTML実表示・同時提供と品質／導入gateは継続する。
-
-その後、[候補資料v3](CANDIDATE_MATERIALS.md)で195af870を実source 06588b6とapp kit v2／catalog v11へ再対応付けした。元のnative資料は再収集せず保持し、実資料のHelp選択表示と、全2879 filesを保持した約510 MBのsource companion ZIPを検証した。旧候補は履歴として残る。次は実アプリSetupとlocal notices／companion取得案内の組み込みであり、このZIPを公開版や本体installerとは扱わない。
-
-続く[NSIS安全性fixture](INSTALLER_FIXTURE.md)は、試験文書だけを配置するSetup.exeで、場所選択・既存file保護・明示一覧だけの削除を確認する。本体／FFmpeg／VCの同梱、実アプリ更新や配布採用ではない。試験生成物はGit対象外とし、実配布の最終資料・導入／品質gateは維持する。
-
-2026-09-08更新: **下記の固定開発binaryは配布候補から除外する。** Chromaprint経由でGPLのFFTWが静的リンクされていた。recipe、実libraryの未解決symbol、当時のpkg-config、avformat DLL内の識別文字列が一致する。LGPL表示だけでは既定の配布条件を満たさない。[再build計画と単体検証](FFMPEG_REBUILD.md)、[固定した根拠](ffmpeg-distribution-rejection.json)を参照。開発用fileは保持し、本体のlicense変更やcodecの暗黙の削除はしない。
-
-最新の配置工程は[本体入りlocal Setup評価](LOCAL_SETUP.md)を参照する。95個の実行file、local noticesと別source companion案内、元のVC package UIへ繋ぐwrapperと、現在userの登録／shortcutを組み立てた。既存folderや登録を上書きせず、共有VCは削除しない。実アプリの導入・更新・登録起動・削除は隔離した対象Windowsで未検証であり、同時提供、最終品質・owner受入と公開判断も残る。以下の旧binary監査を現行Setupへ適用しない。
+The September 2026 records below document historical inputs and licensing investigations. The BtbN development binaries were excluded from distribution after Chromaprint's static FFTW dependency was confirmed; preserve [the recorded rejection](ffmpeg-distribution-rejection.json) and [rebuild rationale](FFMPEG_REBUILD.md). The selected native build and materials are described in [NATIVE_FFMPEG_BUILD](NATIVE_FFMPEG_BUILD.md) and [NATIVE_MATERIAL_CATALOG](NATIVE_MATERIAL_CATALOG.md). Historical candidate hashes and open gates below are evidence for those inputs, not the current release state.
 
 ## 固定binaryの確認（2026-09-07 22:18 JST）
 

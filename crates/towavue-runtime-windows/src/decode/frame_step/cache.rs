@@ -215,6 +215,9 @@ mod tests {
 
         // Preserve file ID, size and mtime: native change time must still invalidate.
         let previous_identity = source_stamp(&path).expect("identity before rewrite");
+        // As in the frame-export identity control, separate writes beyond the
+        // host clock granularity before restoring the original modification time.
+        std::thread::sleep(std::time::Duration::from_millis(20));
         {
             use std::io::Write;
             let mut writer = std::fs::File::options()

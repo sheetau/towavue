@@ -331,6 +331,26 @@ fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
             assert!(apartment.0);
             let folder = canonical_shell_path(&folder).expect("canonical folder");
             let pidl = parse_path(&folder).expect("PIDL");
+            // Shell PIDLs are opaque: equivalent items may have different bytes.
+            // Compare their canonical meaning while retaining exact path/kind order.
+            // https://learn.microsoft.com/windows/win32/api/shlobj_core/nf-shlobj_core-ilisequal
+            let desktop =
+                unsafe { windows::Win32::UI::Shell::SHGetDesktopFolder().expect("desktop folder") };
+            let same_identity = |left: &ShellIdentity, right: &ShellIdentity| {
+                // SAFETY: both byte arrays are complete absolute PIDLs copied by
+                // capture_view. They remain alive, and this desktop belongs to this STA.
+                let result = unsafe {
+                    desktop.CompareIDs(
+                        windows::Win32::Foundation::LPARAM(
+                            windows::Win32::UI::Shell::SHCIDS_CANONICALONLY as isize,
+                        ),
+                        left.as_bytes().as_ptr().cast(),
+                        right.as_bytes().as_ptr().cast(),
+                    )
+                };
+                result.ok().expect("canonical Shell identity comparison");
+                result.0 as u16 == 0
+            };
             let mut baseline: Option<FolderSnapshot> = None;
             for generation in 1..=3 {
                 eprintln!("HIDDEN_COMPLETE count={count} generation={generation}");
@@ -359,19 +379,24 @@ fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
                 assert_eq!(actual, expected);
                 if let Some(baseline) = &baseline {
                     assert_eq!(snapshot.sort_columns, baseline.sort_columns);
-                    assert!(
-                        snapshot
-                            .items
-                            .iter()
-                            .map(|item| (&item.path, &item.identity, item.kind))
-                            .eq(baseline.items.iter().map(|item| (
-                                &item.path,
-                                &item.identity,
-                                item.kind
-                            ))),
-                        "fresh hidden views preserve complete order/identity/kind"
-                    );
+                    for (index, (item, previous)) in
+                        snapshot.items.iter().zip(&baseline.items).enumerate()
+                    {
+                        assert_eq!(
+                            (&item.path, item.kind),
+                            (&previous.path, previous.kind),
+                            "fresh hidden view order/kind at index {index}"
+                        );
+                        assert!(
+                            same_identity(&item.identity, &previous.identity),
+                            "fresh hidden view canonical identity at index {index}"
+                        );
+                    }
                 }
+                assert!(
+                    !same_identity(&snapshot.items[0].identity, &snapshot.items[1].identity),
+                    "distinct fixture items must not compare equal"
+                );
                 baseline = Some(snapshot);
             }
             // Cancellation must work even if the view is already ready, and a

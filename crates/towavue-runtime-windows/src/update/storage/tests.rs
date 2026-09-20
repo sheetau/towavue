@@ -10,7 +10,11 @@ pub(in crate::update) struct Fixture {
 impl Fixture {
     pub(in crate::update) fn new() -> Self {
         let signer = TestSigner::new();
-        let root = std::env::temp_dir().join(format!(
+        // Hosted Windows may expose TEMP through an 8.3 alias. The production
+        // helper requires normalized long paths, as supplied by installation discovery.
+        let temporary = crate::shell::canonical_shell_path(&std::env::temp_dir())
+            .expect("canonical fixture parent");
+        let root = temporary.join(format!(
             "towavue-update-{}",
             stage_name().expect("owned fixture")
         ));
@@ -53,7 +57,9 @@ impl Drop for Fixture {
         // Only this test's freshly generated path. Normal product code never
         // recursively removes cache content or an installation directory.
         let root = &self.store.root;
-        assert_eq!(root.parent(), Some(std::env::temp_dir().as_path()));
+        let temporary = crate::shell::canonical_shell_path(&std::env::temp_dir())
+            .expect("canonical fixture parent");
+        assert_eq!(root.parent(), Some(temporary.as_path()));
         assert!(
             root.file_name()
                 .expect("owned fixture")

@@ -37,16 +37,14 @@ Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF, including suppor
 
 | Action | Shortcut |
 |---|---|
-| Open file / folder | Ctrl+O / Ctrl+Shift+O |
-| Command palette | Ctrl+Shift+P |
-| Switch tabs | Ctrl+Tab / Ctrl+Shift+Tab |
-| Fullscreen | F11 |
-| Filmstrip / reading mode | F / B |
-| Previous / next image; seek video or audio | Left / Right |
-| Image zoom | Ctrl+wheel |
-| Play / pause | Space |
-| Undo / redo | Ctrl+Z / Ctrl+Shift+Z |
-| Save / save as | Ctrl+S / Ctrl+Shift+S |
+| Toggle filmstrip / reading mode / timeline | F / B / T |
+| Previous / next file in the folder, across media types | Alt+Left / Alt+Right |
+| Previous / next file of the same media type | Ctrl+Left / Ctrl+Right |
+| Crop the image selection / keep only the selected video or audio range | Ctrl+Y |
+| Set the time selection's start / end at the playhead | I / O |
+| Raise / lower playback volume | Wheel up / down over the video or audio view (outside the audio playlist) |
+| Previous / next video frame | `,` / `.` |
+| Decrease / increase playback speed | `Ctrl+,` / `Ctrl+.`; reset with `/` |
 
 Shortcuts depend on the active media and mode. Menus show available commands; customize bindings in **Keyboard Shortcuts** (Ctrl+K Ctrl+S).
 

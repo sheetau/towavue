@@ -1,0 +1,12 @@
+./concept
+.history/
+node_modules/
+.next/
+out/
+concepts/
+images/
+output/
+.playwright-cli/
+.env*
+!.env.example
+*.log

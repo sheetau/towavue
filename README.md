@@ -36,6 +36,7 @@ This follows the monapad LP's Next.js Pages Router, static export, separate webs
 | `src/site/config.mjs` | Repository, canonical site URL, base path, and asset paths |
 | `src/site/download.mjs` | Latest-release lookup and Windows x64 installer selection |
 | `src/site/media.js` | Demo filenames, fictional audio tracks, and clock formatting |
+| `src/site/audio-playback.mjs` | Silent audio clock, queue progression, repeat, and shuffle |
 | `styles/globals.css` | Shared tokens, page layout, app demo, and responsive rules |
 | `public/media/` | Optimized copies of supplied media and the favicon |
 | `.github/workflows/deploy.yml` | Build `gh-pages` and deploy `out/` through GitHub Actions |
@@ -50,7 +51,9 @@ The monapad names `--color-theme-*`, `--font-*`, `--max-width-container`, `.cont
 
 The body copy is grounded in the app's README, STATUS, ARCHITECTURE, and playlist implementation. The two closing artwork slots without supplied images are deliberately blank on desktop, and collapse on mobile. Add an `image` and `alt` to the corresponding closing item in each locale to fill a slot.
 
-The preview supports image, video, and audio tabs; seven-image navigation; actual video seeking; and fictional audio-track selection with a silent clock. Window, close, and transport icons are decorative. The MP4 has no audio stream and is paused: only the requested tabs, seek bar, and playlist interact. The supplied outline logo is used for the header and demo; favicon artwork is used for browser and demo tabs.
+The preview supports image, video, and audio tabs, seven-image navigation, video playback and seeking, and fictional audio tracks with a silent playback clock. The video can be played/paused from either its status button or the media area, and has no audio stream. Audio supports repeat off/all/one and a shuffled queue, without loading an audio source. Switching tabs pauses playback and preserves positions. Window/close controls and the reading icon remain decorative. The supplied outline logo is used for the header and demo; only the browser tab uses the favicon.
+
+The header stays at the top on an opaque black background, with the same inset vertical rules as the content. Screenshot images have no added borders. Demo tabs are rounded, their close/caption SVGs match monapad, and the idle seek bar is a one-pixel track without a visible thumb. Status metadata uses the supplied originals for images, the web video for video, and fictional audio metadata. Transport/reading artwork comes from Lucide; see [attribution and license](notices/lucide.md).
 
 Both download buttons fetch the latest public release at click time and select `towavue-*-windows-x64-setup.exe`. They initiate a browser download without replacing the LP. API errors, timeouts, and missing installers display a retryable inline message and a Releases fallback. The ordinary link remains useful without JavaScript.
 
@@ -62,7 +65,7 @@ English is the default. The footer switches between explicit English and Japanes
 2. Add `pages/<locale>/index.jsx` following `pages/ja/index.jsx`.
 3. Rebuild and verify the new route and layout.
 
-Google Fonts loads IBM Plex Serif and IBM Plex Mono. Japanese glyphs use the system fallback. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
+Google Fonts loads IBM Plex Serif and IBM Plex Mono for English, and Noto Serif JP and M PLUS 1 Code for Japanese. The monapad-style language popup opens above the footer button, marks the current language, and supports arrows, Home/End, Escape, outside-click dismissal, and focus restoration. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
 
 ## Media
 
@@ -96,9 +99,9 @@ For a different hosting subpath set `NEXT_PUBLIC_BASE_PATH` before both build an
 
 ## Verification
 
-- `npm run check`: installer selection, wrong-host rejection, missing assets, draft/prerelease rejection, and API failures.
+- `npm run check`: installer selection and failures; paused/ended audio, track transitions, repeat one/all, and shuffle progression.
 - `npm run build`: static production output for English and Japanese.
-- Browser review: all seven images, keyboard and pointer tab controls, video seeking and retained position, silent audio selection, all five feature previews, locale switching, download success/failure, and 320–1920 px overflow checks.
+- Browser review: all seven images, keyboard and pointer tab controls, video playback/area-click/seek, silent audio playback/repeat/shuffle, feature previews, language-menu focus and dismissal, download success/failure, responsive overflow, Japanese font loading, inset rails, fixed header, and image borders.
 - Download browser checks use the live GitHub release response and intercept the installer payload with a small fixture; they do not run or install the EXE.
 - `npm audit`: dependency audit. PostCSS is explicitly overridden to the patched version while retaining the reference site's Next.js 15 structure.
 

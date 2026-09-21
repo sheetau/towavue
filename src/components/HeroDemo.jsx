@@ -3,6 +3,7 @@ import { asset } from "../site/config.mjs";
 import { photos, tracks, sampleVideo, formatSize, formatTime } from "../site/media";
 import { advanceAudio, createAudioState, toggleShuffle } from "../site/audio-playback.mjs";
 import { Icon, Logo, TabClose, WindowControls } from "./Icons";
+import { SeekBar } from "./SeekBar";
 
 const mediaTypes = ["image", "video", "audio"];
 
@@ -125,9 +126,7 @@ export function HeroDemo({ content }) {
             </ol>
           </div>
         </div>
-        <div className="demo-seekbar">
-          <input type="range" aria-label={content[`${tab}Seek`]} aria-valuetext={tab === "image" ? `${photo + 1} / ${photos.length}` : `${formatTime(value)} / ${formatTime(max)}`} min="0" max={max || 1} step={tab === "image" ? 1 : 0.01} value={value} disabled={tab === "video" && (!duration || videoError)} onChange={seek} style={{ "--seek-progress": `${max ? value / max * 100 : 0}%` }} />
-        </div>
+        <SeekBar key={tab} label={content[`${tab}Seek`]} valueText={tab === "image" ? `${photo + 1} / ${photos.length}` : `${formatTime(value)} / ${formatTime(max)}`} value={value} max={max} step={tab === "image" ? 1 : 0.01} disabled={tab === "video" && (!duration || videoError)} onChange={seek} />
         <div className="demo-statusbar">
           <div className="demo-transport">
             {tab === "image" ? <span className="demo-reading" role="img" aria-label={content.reading}><Icon name="book" /></span> : <button className="demo-icon-button" type="button" aria-label={playing ? content.pause : content.play} title={playing ? content.pause : content.play} onClick={togglePlayback} disabled={tab === "video" && (!duration || videoError)}><Icon name={playing ? "pause" : "play"} /></button>}
@@ -141,7 +140,6 @@ export function HeroDemo({ content }) {
           <span className="demo-metadata">{metadata.map((value, index) => <span key={index}>{value}</span>)}</span>
         </div>
       </div>
-      <figcaption>{tab === "audio" ? content.audioHint : content.hint}</figcaption>
     </figure>
   );
 }

@@ -34,9 +34,9 @@ screenshots = {
 }
 for source, destination in screenshots.items():
     with Image.open(SOURCE / source) as original:
-        image = original.convert("RGB")
+        image = original.convert("RGBA")
         image.thumbnail((1440, 1000))
-        image.save(DEST / destination, quality=92, method=6)
+        image.save(DEST / destination, lossless=True, method=6)
 
 (DEST / "favicon.ico").write_bytes((SOURCE / "favicon.ico").read_bytes())
 
@@ -54,8 +54,8 @@ subprocess.run([
 
 with Image.open(SOURCE / "monapad_ss.png") as original:
     social = Image.new("RGB", (1200, 630), "black")
-    screenshot = ImageOps.contain(original.convert("RGB"), (1160, 590))
-    social.paste(screenshot, ((1200 - screenshot.width) // 2, (630 - screenshot.height) // 2))
+    screenshot = ImageOps.contain(original.convert("RGBA"), (1160, 590))
+    social.paste(screenshot, ((1200 - screenshot.width) // 2, (630 - screenshot.height) // 2), screenshot)
     social.save(DEST / "og-image.png", optimize=True)
 
 print("Prepared supplied photos, app screenshots, favicon, and silent video.")

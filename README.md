@@ -53,7 +53,7 @@ The body copy is grounded in the app's README, STATUS, ARCHITECTURE, and playlis
 
 The preview supports image, video, and audio tabs, seven-image navigation, video playback and seeking, and fictional audio tracks with a silent playback clock. The video can be played/paused from either its status button or the media area, and has no audio stream. Audio supports repeat off/all/one and a shuffled queue, without loading an audio source. Switching tabs pauses playback and preserves positions. Window/close controls and the reading icon remain decorative. The supplied outline logo is used for the header and demo; only the browser tab uses the favicon.
 
-The header stays at the top on an opaque black background, with the same inset vertical rules as the content. Screenshot images have no added borders. Demo tabs are rounded, their close/caption SVGs match monapad, and the idle seek bar is a one-pixel track without a visible thumb. Status metadata uses the supplied originals for images, the web video for video, and fictional audio metadata. Transport/reading artwork comes from Lucide; see [attribution and license](notices/lucide.md).
+The header stays at the top on a translucent black background. Inset vertical rules sit behind the content and remain faintly visible through the header. Screenshot images preserve the source PNG alpha channel in lossless WebP, with no added borders or corner decoration. Demo tabs are rounded and their close/caption SVG paths come from monapad. Compact close and transport icons respond with white hover color only. The idle seek bar is a one-pixel track; hover animates its thickness and thumb scale and overlays a translucent preview up to the pointer, without seeking until an actual click or drag. Status metadata uses the supplied originals for images, the web video for video, and fictional audio metadata. Transport/reading artwork comes from Lucide; see [attribution and license](notices/lucide.md).
 
 Both download buttons fetch the latest public release at click time and select `towavue-*-windows-x64-setup.exe`. They initiate a browser download without replacing the LP. API errors, timeouts, and missing installers display a retryable inline message and a Releases fallback. The ordinary link remains useful without JavaScript.
 
@@ -65,7 +65,7 @@ English is the default. The footer switches between explicit English and Japanes
 2. Add `pages/<locale>/index.jsx` following `pages/ja/index.jsx`.
 3. Rebuild and verify the new route and layout.
 
-Google Fonts loads IBM Plex Serif and IBM Plex Mono for English, and Noto Serif JP and M PLUS 1 Code for Japanese. The monapad-style language popup opens above the footer button, marks the current language, and supports arrows, Home/End, Escape, outside-click dismissal, and focus restoration. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
+Google Fonts loads IBM Plex Serif and IBM Plex Mono for English, and Noto Serif JP and M PLUS 1 Code for Japanese. The language trigger is unboxed and aligned to the right container edge; its rectangular popup follows the download button's colors with no outer padding or inter-item gaps. The monapad-style popup marks the current language and supports arrows, Home/End, Escape, outside-click dismissal, and focus restoration. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
 
 ## Media
 

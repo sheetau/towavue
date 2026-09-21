@@ -3,7 +3,8 @@ export const languages = { en: "English", ja: "日本語" };
 export const locales = {
   en: {
     title: "towavue | One home for all your media",
-    description: "Images, video, and audio in one fast, beautifully minimal Windows app. Browse, play, and edit with towavue. Free and open source.",
+    description:
+      "Images, video, and audio in one fast, beautifully minimal Windows app. Browse, play, and edit with towavue. Free and open source.",
     ogLocale: "en_US",
     skip: "Skip to content",
     home: "towavue home",
@@ -19,21 +20,69 @@ export const locales = {
     hero: ["The last media viewer", "you’ll ever need"],
     heroDescription: "Images, video, and audio in one fast, beautifully minimal workspace.",
     featureTitle: "One workspace for every kind of media",
-    featureDescription: "Browse, play, and edit. Follow your curiosity, without switching between apps.",
+    featureDescription: "Browse, play, and edit without ever switching between apps.",
     featureLabel: "Explore features",
     features: [
-      { id: "workspace", title: "All your media, together", description: "Move between images, video, and audio in one beautifully simple workspace.", image: "workspace.webp", alt: "A black-and-white flower photograph in the towavue image viewer" },
-      { id: "speed", title: "Built for speed", description: "Built in Rust with native GPU rendering, for responsive browsing and smooth, hardware-decoded video.", image: "video.webp", alt: "Video playback with a thumbnail preview above the seek bar" },
-      { id: "editing", title: "A viewer, with room to edit", description: "Crop, rotate, resize, or trim. Make non-destructive edits and keep undo, even after saving.", image: "video-edit.webp", alt: "Video editing timeline with an audio waveform and a selected range" },
-      { id: "tabs", title: "Tabs that move with you", description: "Keep files within reach. Move tabs between windows with your edits and playback position intact.", image: "tab.webp", alt: "Multiple towavue windows with media tabs and a tab preview" },
-      { id: "browse", title: "Find your next frame", description: "Browse in Explorer order, jump through thumbnail filmstrips, or pick up a recent file from the gallery.", image: "filmstrip.webp", alt: "A thumbnail filmstrip over the image viewer, showing nearby files" },
+      {
+        id: "workspace",
+        title: "All your media, together",
+        description: "Transition between images, video, and audio inside a single cohesive window.",
+        image: "workspace.webp",
+        alt: "A black-and-white flower photograph in the towavue image viewer",
+      },
+      {
+        id: "speed",
+        title: "Built for speed",
+        description:
+          "Built in Rust with native GPU rendering for responsive browsing and smooth, hardware-decoded video.",
+        image: "video.webp",
+        alt: "Video playback with a thumbnail preview above the seek bar",
+      },
+      {
+        id: "editing",
+        title: "A viewer with room to edit",
+        description: "Crop, rotate, resize, or trim. Make non-destructive edits and keep undo, even after saving.",
+        image: "video-edit.webp",
+        alt: "Video editing timeline with an audio waveform and a selected range",
+      },
+      {
+        id: "tabs",
+        title: "Tabs that move with you",
+        description: "Keep files within reach. Move tabs between windows with your edits and playback position intact.",
+        image: "tab.webp",
+        alt: "Multiple towavue windows with media tabs and a tab preview",
+      },
+      {
+        id: "browse",
+        title: "Find your next frame",
+        description:
+          "Browse in Explorer order, jump through thumbnail filmstrips, or pick up a recent file from the gallery.",
+        image: "filmstrip.webp",
+        alt: "A thumbnail filmstrip over the image viewer, showing nearby files",
+      },
     ],
     closingTitle: "Make yourself at home",
     closingDescription: "Familiar where it matters. Flexible where it counts.",
     closing: [
-      { title: "Your keys, your way", description: "Set your own shortcuts for the way you browse and edit. Keep the commands you use most at your fingertips.", image: "shortcut.webp", alt: "The Keyboard Shortcuts view with commands and editable keybindings" },
-      { title: "Open by design", description: "Free to use, with the source out in the open. Explore the code, report an issue, or help shape what comes next.", link: "Explore the source", href: "https://github.com/sheetau/towavue" },
-      { title: "Less UI, more you", description: "A quiet interface that leaves room for your media. From a quick glance to a fullscreen reading session, settle in and stay a while." },
+      {
+        title: "Your keys, your way",
+        description:
+          "Set your own shortcuts for the way you browse and edit. Keep the commands you use most at your fingertips.",
+        image: "shortcut.webp",
+        alt: "The Keyboard Shortcuts view with commands and editable keybindings",
+      },
+      {
+        title: "Open by design",
+        description:
+          "Free to use, with the source out in the open. Explore the code, report an issue, or help shape what comes next.",
+        link: "Explore the source",
+        href: "https://github.com/sheetau/towavue",
+      },
+      {
+        title: "Less UI, more you",
+        description:
+          "A quiet interface that leaves room for your media. From a quick glance to a fullscreen reading session, settle in and stay a while.",
+      },
     ],
     demo: {
       label: "Interactive towavue preview",
@@ -55,12 +104,21 @@ export const locales = {
       silent: "Silent preview",
       loading: "Loading preview…",
       error: "The preview could not load. Please reload the page to try again.",
-      imageAlt: ["White flowers against deep green leaves", "A white flower on a dark background", "White blossoms among glossy green leaves", "Small white flowers in the shadows", "Black and white photograph of flowering branches", "A single white flower in soft focus", "White flowers in a sunlit garden"],
+      imageAlt: [
+        "White flowers against deep green leaves",
+        "A white flower on a dark background",
+        "White blossoms among glossy green leaves",
+        "Small white flowers in the shadows",
+        "Black and white photograph of flowering branches",
+        "A single white flower in soft focus",
+        "White flowers in a sunlit garden",
+      ],
     },
   },
   ja: {
-    title: "towavue | すべてのメディアを、ひとつの場所に",
-    description: "画像も、動画も、音声も。閲覧から編集まで、軽快でミニマルなWindowsアプリひとつで。towavueは無料のオープンソースアプリです。",
+    title: "towavue | すべてのメディアに、たったひとつの居場所を",
+    description:
+      "画像・動画・音声を閲覧から編集までこなす、高速で美しいWindows用メディアビューワー。towavueは無料のオープンソースアプリです。",
     ogLocale: "ja_JP",
     skip: "本文へ移動",
     home: "towavue ホーム",
@@ -69,28 +127,78 @@ export const locales = {
     platform: "Windows 11 · x64 · 無料",
     downloading: "ダウンロードを準備中…",
     downloadStarted: "ダウンロードを開始します。",
-    downloadError: "インストーラーを取得できませんでした。もう一度試すか、リリースページをご確認ください。",
+    downloadError: "インストーラーを取得できませんでした。再試行するかReleasesをご確認ください。",
     releases: "リリース",
     license: "ライセンス",
     language: "言語",
-    hero: ["メディアビューアーは、", "これひとつで"],
-    heroDescription: "画像も、動画も、音声も。軽快でミニマルな、ひとつのワークスペースに。",
-    featureTitle: "すべてのメディアを、ひとつの場所に",
-    featureDescription: "見つける、再生する、編集する。アプリを行き来せず、気になるものを次々と。",
+    hero: ["ビューワー選びに、", "終止符を"],
+    heroDescription: "画像・動画・音声を1つに。高速で美しく無駄のないワークスペース。",
+    featureTitle: "すべてのメディアに、たったひとつの居場所を",
+    featureDescription: "アプリを切り替えることなく、閲覧・再生・編集をシームレスに。",
     featureLabel: "機能を見る",
     features: [
-      { id: "workspace", title: "画像も、動画も、音声も", description: "写真、映画、お気に入りの曲。メディアの種類を問わず、いつもの操作で楽しめます。", image: "workspace.webp", alt: "towavueの画像ビューアーに表示されたモノクロの花の写真" },
-      { id: "speed", title: "待たせないための設計", description: "RustとGPUによるネイティブ描画で、軽快な閲覧を。動画のハードウェアデコードにも対応しています。", image: "video.webp", alt: "シークバー上にサムネイルプレビューを表示した動画再生画面" },
-      { id: "editing", title: "見る、そのまま編集する", description: "切り抜き、回転、リサイズ、トリミング。非破壊編集で、保存したあとも操作を元に戻せます。", image: "video-edit.webp", alt: "音声波形と選択範囲を表示した動画編集タイムライン" },
-      { id: "tabs", title: "タブで、自由に行き来する", description: "複数のファイルをすぐ手の届くところに。編集内容や再生位置を保ったまま、別のウィンドウへ移動できます。", image: "tab.webp", alt: "複数のtowavueウィンドウとメディアタブのプレビュー" },
-      { id: "browse", title: "次の一枚が、すぐ見つかる", description: "エクスプローラーと同じ順序で閲覧。フィルムストリップで探したり、ギャラリーから最近のファイルを開いたり。", image: "filmstrip.webp", alt: "画像の上に並んだフォルダー内のサムネイル" },
+      {
+        id: "workspace",
+        title: "必要なのは、これだけです",
+        description: "画像、動画、音声を単一のウィンドウ内でなめらかに行き来できます。",
+        image: "workspace.webp",
+        alt: "towavueの画像ビューアーに表示されたモノクロの花の写真",
+      },
+      {
+        id: "speed",
+        title: "圧倒的なスピード設計",
+        description:
+          "RustとネイティブGPUレンダリングによる爆速の応答性。高画質動画もハードウェアデコードで極めてスムーズに再生します。",
+        image: "video.webp",
+        alt: "シークバー上にサムネイルプレビューを表示した動画再生画面",
+      },
+      {
+        id: "editing",
+        title: "そのまま編集まで",
+        description:
+          "切り抜き、回転、リサイズ、カット編集まで。非破壊編集に対応し、保存後でも自由に取り消しが可能です。",
+        image: "video-edit.webp",
+        alt: "音声波形と選択範囲を表示した動画編集タイムライン",
+      },
+      {
+        id: "tabs",
+        title: "タブでいつも手元に",
+        description:
+          "複数のファイルをすぐ手の届くところに。編集内容や再生位置を保ったまま、自由にタブとウィンドウを行き来できます。",
+        image: "tab.webp",
+        alt: "複数のtowavueウィンドウとメディアタブのプレビュー",
+      },
+      {
+        id: "browse",
+        title: "次の一枚が、すぐ見つかる",
+        description:
+          "エクスプローラー順の閲覧、サムネイルのフィルムストリップ表示、ギャラリーからのアクセスなど、直感的なファイル探索が可能です。",
+        image: "filmstrip.webp",
+        alt: "画像の上に並んだフォルダー内のサムネイル",
+      },
     ],
     closingTitle: "いつもの場所に、したくなる",
     closingDescription: "慣れた操作も、自分らしい使い方も。",
     closing: [
-      { title: "自分に合ったキー操作", description: "閲覧や編集のショートカットを、好みに合わせて設定。よく使う操作を、指先ひとつで呼び出せます。", image: "shortcut.webp", alt: "コマンドとキーバインドが並ぶショートカット設定画面" },
-      { title: "オープンソース", description: "無料で使えて、ソースコードも公開。コードを読んだり、不具合を報告したり、次の改善に参加したり。", link: "ソースコードを見る", href: "https://github.com/sheetau/towavue" },
-      { title: "メディアが主役の画面", description: "写真や映像を邪魔しない、静かなインターフェース。ちょっとした確認から、全画面での読書まで、ゆっくりどうぞ。" },
+      {
+        title: "ショートカットを、意のままに",
+        description:
+          "閲覧から編集まで、すべての操作を好みのキーに割り当て。よく使うコマンドを指先ひとつで呼び出せます。",
+        image: "shortcut.webp",
+        alt: "コマンドとキーバインドが並ぶショートカット設定画面",
+      },
+      {
+        title: "オープンソース",
+        description:
+          "完全無料でソースコードも公開。コードの確認、バグ報告、新機能の提案など、誰でも自由に開発に参加できます。",
+        link: "ソースコードを見る",
+        href: "https://github.com/sheetau/towavue",
+      },
+      {
+        title: "主役は、あなたのコンテンツ",
+        description:
+          "写真や映像を邪魔しない、静かなインターフェース。ちょっとした確認から、全画面での読書や鑑賞まで、コンテンツだけに没頭できます。",
+      },
     ],
     demo: {
       label: "操作できるtowavueのプレビュー",
@@ -112,7 +220,15 @@ export const locales = {
       silent: "無音プレビュー",
       loading: "プレビューを読み込み中…",
       error: "プレビューを読み込めませんでした。ページを再読み込みしてお試しください。",
-      imageAlt: ["深い緑の葉を背景に咲く白い花", "暗い背景に浮かぶ白い花", "艶のある緑の葉に囲まれた白い花", "木陰に咲く小さな白い花", "花の咲く枝を写したモノクロ写真", "柔らかなぼけを背景にした一輪の白い花", "庭の日差しを浴びる白い花"],
+      imageAlt: [
+        "深い緑の葉を背景に咲く白い花",
+        "暗い背景に浮かぶ白い花",
+        "艶のある緑の葉に囲まれた白い花",
+        "木陰に咲く小さな白い花",
+        "花の咲く枝を写したモノクロ写真",
+        "柔らかなぼけを背景にした一輪の白い花",
+        "庭の日差しを浴びる白い花",
+      ],
     },
   },
 };

@@ -788,7 +788,7 @@ h2 {
   height: 60%;
   aspect-ratio: 833 / 374;
   transform: translateY(-50%);
-  mask-image: linear-gradient(to bottom, black 20%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 30%, transparent 90%);
 }
 /* The projected frame bounds fill the padded stage from top to bottom. */
 .speed-frame-stack {
@@ -817,11 +817,19 @@ h2 {
   background-color: #000;
   background-repeat: no-repeat;
   filter: brightness(var(--frame-brightness));
-  box-shadow: 0 10px 20px #0008;
+  box-shadow: 0 10px 50px #0008;
+  border: 1px solid var(--color-theme-border-02);
+  opacity: var(--frame-opacity);
 }
 @keyframes frame-load {
-  from { opacity: 0; translate: 0 -16px; }
-  to { opacity: 1; translate: 0 0; }
+  from {
+    opacity: 0;
+    translate: 0 -16px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 @keyframes preview-in {
   from {
@@ -867,6 +875,7 @@ h2 {
 }
 .source-artwork {
   position: relative;
+  top: -20px;
   width: 100%;
   height: 100%;
   max-width: 340px;
@@ -889,7 +898,7 @@ h2 {
   width: 74%;
   height: 78%;
   object-fit: fill;
-  filter: drop-shadow(-14px -12px 8px #0b0b0b) drop-shadow(-4px -4px 2px #0b0b0b);
+  filter: drop-shadow(-14px -12px 8px #0b0b0b);
 }
 .closing-copy {
   padding: 26px 24px 30px;
@@ -1022,7 +1031,7 @@ html[lang="ja"] h1 {
   transform: scaleX(0.7);
   transform-origin: left center;
   font-size: clamp(32px, 3.25vw, 46px);
-  line-height: 1.45;
+  line-height: 1.1;
 }
 html[lang="ja"] .hero-text > p {
   max-width: 460px;

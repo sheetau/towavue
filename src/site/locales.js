@@ -137,7 +137,7 @@ export const locales = {
     releases: "リリース",
     license: "Apache 2.0",
     language: "言語",
-    hero: ["あなたに必要な、", "最後のメディアビューアー"],
+    hero: ["現代にそぐう、", "唯一のメディアビューワー"],
     heroDescription: "画像・動画・音声を1つに。高速で美しく無駄のないワークスペース。",
     featureTitle: "すべてのメディアに、たったひとつの居場所を",
     featureDescription: "アプリを切り替えることなく、閲覧・再生・編集をシームレスに。",

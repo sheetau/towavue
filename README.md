@@ -24,6 +24,8 @@ npm run preview
 
 The preview server supports byte-range video requests. Build output is in `out/`. Development uses `.next-dev/` while production builds use `.next/`, so they can compile without overwriting each other.
 
+To review a production build from a phone on the same LAN, run `npm run build` then `npm run preview:lan`. This serves only `out/` on port 3001, prints the computer's LAN URL, and supports video byte-range requests. Open the printed URL on the phone (append `ja/` for Japanese). Rebuild after edits; the preview uses revalidation to avoid stale files. Set `PORT` to override the default port. Regular `npm run preview` remains loopback-only on port 3000.
+
 ## Organization
 
 This follows the monapad LP's Next.js Pages Router, static export, separate website branch, and directory organization:
@@ -58,7 +60,7 @@ The header stays at the top on a translucent black background. Inset vertical ru
 
 Both download buttons fetch the latest public release at click time and select `towavue-*-windows-x64-setup.exe`. They initiate a browser download without replacing the LP. API errors, timeouts, and missing installers display a retryable inline message and a Releases fallback. The ordinary link remains useful without JavaScript.
 
-Scroll deltas advance only the paused video while the demo is visible; manual seeking establishes a new starting position. Scroll seeking pauses during dragging or playback and respects reduced-motion preferences. Image hover previews use small thumbnails, and video previews use a single sprite sampled every half second without seeking the player.
+Desktop and other non-iOS browsers scrub the native video directly. Only iOS/iPadOS paused video scrubbing displays independently decoded 960px-wide stills sampled at 12 fps, so it also works when a mobile browser does not repaint paused video seeks. It keeps the previous image until the next one decodes, and retains that overlay until playback presents a video frame. Native paused timeupdate events do not override the requested position. Scroll deltas advance only the paused video while the demo is visible; manual seeking establishes a new starting position. Scroll seeking pauses during dragging or playback and respects reduced-motion preferences. Image hover previews use small thumbnails, and video previews use a single sprite sampled every half second without seeking the player.
 
 Feature artwork uses each locale item's `images` array in front-to-back order. The speed preview uses ten 800px-wide frames in a separate high-quality sprite extracted from the original video, newest and brightest on top, with older frames beneath it. Its brief staggered entrance respects reduced-motion preferences. Shared `--feature-padding` controls top, bottom, and left spacing; stacked images distribute their vertical offsets across that space and clip at the right edge. The tab image has a gradient mask on an exactly matching wrapper.
 

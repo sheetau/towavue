@@ -67,6 +67,8 @@
     "previewWidth": 160,
     "previewHeight": 106,
     "frameWidth": 800,
-    "frameHeight": 532
+    "frameHeight": 532,
+    "stillFrameRate": 12,
+    "stillFrameCount": 58
   }
 }

@@ -104,13 +104,28 @@ subprocess.run([
     "-vf", f"fps=1/{interval},scale={frame_width}:{frame_height},tile={count}x1", "-frames:v", "1",
     "-quality", "86", str(DEST / "samples" / "video-frames.webp"),
 ], check=True)
+# Paused scrubbing must not depend on an iOS video decoder repainting a seek.
+still_rate = 12
+still_count = math.ceil(duration * still_rate)
+still_dir = DEST / "samples" / "video-stills"
+still_dir.mkdir(exist_ok=True)
+subprocess.run([
+    "ffmpeg", "-y", "-loglevel", "error", "-i", str(video_path),
+    "-vf", f"fps={still_rate}:start_time=0,scale=960:-1,setsar=1", "-frames:v", str(still_count),
+    "-c:v", "libwebp", "-f", "image2", "-start_number", "0", "-quality", "82", str(still_dir / "frame-%03d.webp"),
+], check=True)
+for old in still_dir.glob("frame-*.webp"):
+    if re.fullmatch(r"frame-\d+\.webp", old.name) and int(old.stem.split("-")[1]) >= still_count:
+        old.unlink()
+assert all((still_dir / f"frame-{index:03d}.webp").exists() for index in range(still_count))
 manifest = {
     "photos": photo_metadata,
     "sampleVideo": {"name": video_source, "bytes": video_path.stat().st_size,
                     "width": stream["width"], "height": stream["height"], "fps": fps_numerator / fps_denominator, "duration": duration,
                     "previewInterval": interval, "previewCount": count,
                     "previewWidth": thumb_width, "previewHeight": thumb_height,
-                    "frameWidth": frame_width, "frameHeight": frame_height},
+                    "frameWidth": frame_width, "frameHeight": frame_height,
+                    "stillFrameRate": still_rate, "stillFrameCount": still_count},
 }
 (ROOT / "src" / "site" / "media-manifest.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n",

@@ -5,6 +5,7 @@ import { advanceAudio, createAudioState, toggleShuffle } from "../site/audio-pla
 import { Icon, Logo, TabClose, WindowControls } from "./Icons";
 import { SeekBar } from "./SeekBar";
 import { useScrollSeek } from "./useScrollSeek";
+import { PausedVideoFrame } from "./PausedVideoFrame";
 
 const mediaTypes = ["video", "image", "audio"];
 
@@ -15,11 +16,15 @@ export function HeroDemo({ content }) {
   const [videoTime, setVideoTime] = useState(0);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
+  const [useStillFrames, setUseStillFrames] = useState(null);
+  const [showStill, setShowStill] = useState(true);
   const [videoError, setVideoError] = useState(false);
   const [imageError, setImageError] = useState(false);
   const demo = useRef(null);
   const scrubbing = useRef(false);
   const video = useRef(null);
+  const videoPosition = useRef(0);
+  const presentedFrame = useRef(null);
   const tabRefs = useRef([]);
   const image = photos[photo];
   const track = tracks[audio.track];
@@ -37,9 +42,8 @@ export function HeroDemo({ content }) {
     if (scrubbing.current) return;
     const clamp = (position, limit) => Math.max(0, Math.min(limit, position));
     if (tab === "video" && video.current && duration && !videoError && video.current.paused) {
-      const next = clamp(video.current.currentTime + delta * duration, duration);
-      video.current.currentTime = next;
-      setVideoTime(next);
+      const position = useStillFrames ? videoPosition.current : video.current.currentTime;
+      seekVideo(clamp(position + delta * duration, duration));
     }
   });
 
@@ -66,7 +70,13 @@ export function HeroDemo({ content }) {
 
   // A cached default video can load before React attaches its event handlers.
   useEffect(() => {
+    // iPadOS can identify as a Mac; touch support distinguishes that mode.
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    setUseStillFrames(ios);
+    if (ios) setDuration(sampleVideo.duration);
     const player = video.current;
+    if (!ios && player?.readyState >= 1) player.currentTime = videoPosition.current;
     if (player?.error) setVideoError(true);
     if (player?.readyState >= 1 && Number.isFinite(player.duration)) setDuration(player.duration);
   }, []);
@@ -121,6 +131,39 @@ export function HeroDemo({ content }) {
     setAudio((state) => ({ ...state, playing: false }));
   }
 
+  function seekVideo(position) {
+    videoPosition.current = position;
+    setVideoTime(position);
+    if (video.current && (!useStillFrames || !video.current.paused)) video.current.currentTime = position;
+    else if (useStillFrames) setShowStill(true);
+  }
+
+  function syncVideoTime(player) {
+    // Only iOS uses an independent position while its native decoder is paused.
+    if (useStillFrames && player.paused) return;
+    videoPosition.current = player.currentTime;
+    setVideoTime(player.currentTime);
+  }
+
+  function pauseVideo(player) {
+    if (presentedFrame.current !== null) player.cancelVideoFrameCallback?.(presentedFrame.current);
+    presentedFrame.current = null;
+    setVideoPlaying(false);
+    videoPosition.current = player.currentTime;
+    setVideoTime(player.currentTime);
+  }
+
+  function revealPlayback(player) {
+    if (!useStillFrames) return;
+    const reveal = () => {
+      presentedFrame.current = null;
+      if (!player.paused) setShowStill(false);
+    };
+    if (presentedFrame.current !== null) player.cancelVideoFrameCallback?.(presentedFrame.current);
+    if (player.requestVideoFrameCallback) presentedFrame.current = player.requestVideoFrameCallback(reveal);
+    else reveal();
+  }
+
   async function togglePlayback() {
     if (tab === "audio") {
       setAudio((state) => ({ ...state, time: state.time >= tracks[state.track].duration ? 0 : state.time, playing: !state.playing }));
@@ -128,8 +171,13 @@ export function HeroDemo({ content }) {
       const player = video.current;
       if (!player.paused) player.pause();
       else {
-        if (player.ended) player.currentTime = 0;
-        try { await player.play(); } catch { setVideoPlaying(false); }
+        if (useStillFrames) {
+          const position = videoPosition.current >= duration ? 0 : videoPosition.current;
+          videoPosition.current = position;
+          setVideoTime(position);
+          if (player.readyState >= 1) player.currentTime = position;
+        } else if (player.ended) player.currentTime = 0;
+        try { await player.play(); } catch { setVideoPlaying(false); setShowStill(true); }
       }
     }
   }
@@ -146,8 +194,7 @@ export function HeroDemo({ content }) {
     const position = Number(event.target.value);
     if (tab === "image") { setPhoto(position); setImageError(false); }
     else if (tab === "video") {
-      if (video.current && duration) video.current.currentTime = position;
-      setVideoTime(position);
+      seekVideo(position);
     } else setAudio((state) => ({ ...state, time: position }));
   }
 
@@ -173,9 +220,12 @@ export function HeroDemo({ content }) {
           <div className="demo-panel" id="demo-panel-video" role="tabpanel" aria-labelledby="demo-tab-video" hidden={tab !== "video"} tabIndex={0}>
             <video ref={video} src={asset("samples/flowers.mp4")} poster={asset("samples/video-poster.webp")} muted playsInline preload="auto" disablePictureInPicture onLoadedMetadata={(event) => {
               const player = event.currentTarget;
-              setDuration(Number.isFinite(player.duration) ? player.duration : 0);
-              player.currentTime = Math.min(videoTime, player.duration || 0);
-            }} onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)} onPlay={() => setVideoPlaying(true)} onPause={() => setVideoPlaying(false)} onEnded={() => setVideoPlaying(false)} onError={() => { setVideoError(true); setVideoPlaying(false); }} />
+              setDuration(Number.isFinite(player.duration) ? player.duration : useStillFrames ? sampleVideo.duration : 0);
+              if (useStillFrames === false) player.currentTime = Math.min(videoPosition.current, player.duration || 0);
+              // An iOS play gesture may arrive before metadata.
+              else if (!player.paused && videoPosition.current > 0) player.currentTime = Math.min(videoPosition.current, player.duration);
+            }} onTimeUpdate={(event) => syncVideoTime(event.currentTarget)} onPlay={() => setVideoPlaying(true)} onPlaying={(event) => revealPlayback(event.currentTarget)} onPause={(event) => pauseVideo(event.currentTarget)} onEnded={(event) => pauseVideo(event.currentTarget)} onError={() => { setVideoError(true); setVideoPlaying(false); setShowStill(true); }} />
+            {useStillFrames && <PausedVideoFrame time={videoTime} active={!videoPlaying || showStill} visible={showStill} />}
             <button className="demo-video-toggle" type="button" aria-label={videoPlaying ? content.pauseVideo : content.playVideo} onClick={togglePlayback} disabled={!duration || videoError} />
             {videoError && <p className="demo-error" role="status">{content.error}</p>}
           </div>

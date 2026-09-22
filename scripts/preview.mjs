@@ -2,10 +2,13 @@ import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import { networkInterfaces } from "node:os";
 import { basePath } from "../src/site/config.mjs";
 
 const root = path.resolve("out");
-const port = Number(process.env.PORT ?? 3000);
+const lan = process.argv.includes("--lan");
+const port = Number(process.env.PORT ?? (lan ? 3001 : 3000));
+const host = lan ? "0.0.0.0" : "127.0.0.1";
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webp": "image/webp", ".png": "image/png", ".ico": "image/x-icon", ".mp4": "video/mp4", ".xml": "application/xml", ".txt": "text/plain; charset=utf-8" };
 
 createServer(async (request, response) => {
@@ -18,7 +21,7 @@ createServer(async (request, response) => {
     if (filename !== root && !filename.startsWith(`${root}${path.sep}`)) throw new Error("Not found");
     let info = await stat(filename);
     if (info.isDirectory()) { filename = path.join(filename, "index.html"); info = await stat(filename); }
-    const headers = { "Content-Type": types[path.extname(filename)] ?? "application/octet-stream", "Accept-Ranges": "bytes" };
+    const headers = { "Content-Type": types[path.extname(filename)] ?? "application/octet-stream", "Accept-Ranges": "bytes", "Cache-Control": "no-cache" };
     const range = request.headers.range?.match(/^bytes=(\d+)-(\d*)$/);
     let start = 0;
     let end = info.size - 1;
@@ -33,4 +36,13 @@ createServer(async (request, response) => {
     if (request.method === "HEAD") response.end();
     else createReadStream(filename, { start, end }).pipe(response);
   } catch { response.writeHead(404).end("Not found"); }
-}).listen(port, "127.0.0.1", () => console.log(`Preview: http://localhost:${port}${basePath}/`));
+}).listen(port, host, () => {
+  console.log(`Preview: http://localhost:${port}${basePath}/`);
+  if (lan) for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal && !address.address.startsWith("169.254.")) {
+        console.log(`LAN: http://${address.address}:${port}${basePath}/`);
+      }
+    }
+  }
+});

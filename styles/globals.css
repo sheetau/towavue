@@ -1039,6 +1039,7 @@ html[lang="ja"] h1 {
 }
 html[lang="ja"] .hero-text > p {
   max-width: 460px;
+  word-break: auto-phrase;
 }
 html[lang="ja"] p {
   line-height: 1.9;

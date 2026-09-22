@@ -1,0 +1,80 @@
+{
+  "photos": [
+    {
+      "name": "quino-al-BlMj6RYy3c0-unsplash.jpg",
+      "bytes": 421835,
+      "width": 3888,
+      "height": 2592
+    },
+    {
+      "name": "leman-gujTEMomy5A-unsplash.jpg",
+      "bytes": 673155,
+      "width": 3456,
+      "height": 5184
+    },
+    {
+      "name": "ajoy-das--SdQ1Q3oUdg-unsplash.jpg",
+      "bytes": 1109879,
+      "width": 6016,
+      "height": 4016
+    },
+    {
+      "name": "aarn-giri-3tYZjGSBwbk-unsplash.jpg",
+      "bytes": 525713,
+      "width": 2333,
+      "height": 3490
+    },
+    {
+      "name": "andrew-small-EfhCUc_fjrU-unsplash.jpg",
+      "bytes": 2151176,
+      "width": 5261,
+      "height": 3507
+    },
+    {
+      "name": "rikonavt-oEWdQsbRVZk-unsplash.jpg",
+      "bytes": 2976455,
+      "width": 2250,
+      "height": 4000
+    },
+    {
+      "name": "magnus-thompson-BBlerGhETwU-unsplash.jpg",
+      "bytes": 2131599,
+      "width": 5184,
+      "height": 3456
+    },
+    {
+      "name": "michael-navarro-OQLM1Yr9u6k-unsplash.jpg",
+      "bytes": 263516,
+      "width": 4272,
+      "height": 2848
+    },
+    {
+      "name": "miom-_0326-k9cL4b3wXZA-unsplash.jpg",
+      "bytes": 1186618,
+      "width": 3072,
+      "height": 4096
+    },
+    {
+      "name": "siddharth-sarma-Mnztfkyile4-unsplash.jpg",
+      "bytes": 383716,
+      "width": 4241,
+      "height": 2828
+    },
+    {
+      "name": "vinh-thang-PeNUDEdA3Xg-unsplash.jpg",
+      "bytes": 286556,
+      "width": 3000,
+      "height": 1987
+    }
+  ],
+  "sampleVideo": {
+    "name": "13560406_3840_2160_30fps.mp4",
+    "bytes": 1407007,
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "duration": 25.992633,
+    "previewInterval": 2,
+    "previewCount": 13
+  }
+}

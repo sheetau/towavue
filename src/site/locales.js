@@ -27,29 +27,29 @@ export const locales = {
         id: "workspace",
         title: "All your media, together",
         description: "Transition between images, video, and audio inside a single cohesive window.",
-        image: "workspace.webp",
-        alt: "A black-and-white flower photograph in the towavue image viewer",
+        images: ["workspace.webp", "video.webp", "audio.webp"],
+        alt: "The image, video, and audio viewers in towavue",
       },
       {
         id: "speed",
         title: "Built for speed",
         description:
           "Built in Rust with native GPU rendering for responsive browsing and smooth, hardware-decoded video.",
-        image: "video.webp",
+        images: [],
         alt: "Video playback with a thumbnail preview above the seek bar",
       },
       {
         id: "editing",
         title: "A viewer with room to edit",
         description: "Crop, rotate, resize, or trim. Make non-destructive edits and keep undo, even after saving.",
-        image: "video-edit.webp",
+        images: ["video-edit.webp"],
         alt: "Video editing timeline with an audio waveform and a selected range",
       },
       {
         id: "tabs",
         title: "Tabs that move with you",
         description: "Keep files within reach. Move tabs between windows with your edits and playback position intact.",
-        image: "tab.webp",
+        images: ["tab.webp"],
         alt: "Multiple towavue windows with media tabs and a tab preview",
       },
       {
@@ -57,8 +57,8 @@ export const locales = {
         title: "Find your next frame",
         description:
           "Browse in Explorer order, jump through thumbnail filmstrips, or pick up a recent file from the gallery.",
-        image: "filmstrip.webp",
-        alt: "A thumbnail filmstrip over the image viewer, showing nearby files",
+        images: ["filmstrip.webp", "gallery.webp"],
+        alt: "The thumbnail filmstrip and recent-file gallery in towavue",
       },
     ],
     closingTitle: "Make yourself at home",
@@ -80,6 +80,8 @@ export const locales = {
       },
       {
         title: "Less UI, more you",
+        image: "image2.webp",
+        alt: "A white magnolia in the minimal towavue image viewer",
         description:
           "A quiet interface that leaves room for your media. From a quick glance to a fullscreen reading session, settle in and stay a while.",
       },
@@ -105,8 +107,12 @@ export const locales = {
       loading: "Loading preview…",
       error: "The preview could not load. Please reload the page to try again.",
       imageAlt: [
-        "White flowers against deep green leaves",
+        "A white magnolia on a black background",
         "A white flower on a dark background",
+        "White flowers against deep green leaves",
+        "A close-up of a white daisy",
+        "A pale pink gerbera against a blue background",
+        "A bouquet of pink roses",
         "White blossoms among glossy green leaves",
         "Small white flowers in the shadows",
         "Black and white photograph of flowering branches",
@@ -131,7 +137,7 @@ export const locales = {
     releases: "リリース",
     license: "ライセンス",
     language: "言語",
-    hero: ["ビューワー選びに、", "終止符を"],
+    hero: ["あなたに必要な、", "最後のメディアビューアー"],
     heroDescription: "画像・動画・音声を1つに。高速で美しく無駄のないワークスペース。",
     featureTitle: "すべてのメディアに、たったひとつの居場所を",
     featureDescription: "アプリを切り替えることなく、閲覧・再生・編集をシームレスに。",
@@ -141,15 +147,15 @@ export const locales = {
         id: "workspace",
         title: "必要なのは、これだけです",
         description: "画像、動画、音声を単一のウィンドウ内でなめらかに行き来できます。",
-        image: "workspace.webp",
-        alt: "towavueの画像ビューアーに表示されたモノクロの花の写真",
+        images: ["workspace.webp", "video.webp", "audio.webp"],
+        alt: "towavueの画像・動画・音声ビューアー",
       },
       {
         id: "speed",
         title: "圧倒的なスピード設計",
         description:
           "RustとネイティブGPUレンダリングによる爆速の応答性。高画質動画もハードウェアデコードで極めてスムーズに再生します。",
-        image: "video.webp",
+        images: [],
         alt: "シークバー上にサムネイルプレビューを表示した動画再生画面",
       },
       {
@@ -157,7 +163,7 @@ export const locales = {
         title: "そのまま編集まで",
         description:
           "切り抜き、回転、リサイズ、カット編集まで。非破壊編集に対応し、保存後でも自由に取り消しが可能です。",
-        image: "video-edit.webp",
+        images: ["video-edit.webp"],
         alt: "音声波形と選択範囲を表示した動画編集タイムライン",
       },
       {
@@ -165,7 +171,7 @@ export const locales = {
         title: "タブでいつも手元に",
         description:
           "複数のファイルをすぐ手の届くところに。編集内容や再生位置を保ったまま、自由にタブとウィンドウを行き来できます。",
-        image: "tab.webp",
+        images: ["tab.webp"],
         alt: "複数のtowavueウィンドウとメディアタブのプレビュー",
       },
       {
@@ -173,8 +179,8 @@ export const locales = {
         title: "次の一枚が、すぐ見つかる",
         description:
           "エクスプローラー順の閲覧、サムネイルのフィルムストリップ表示、ギャラリーからのアクセスなど、直感的なファイル探索が可能です。",
-        image: "filmstrip.webp",
-        alt: "画像の上に並んだフォルダー内のサムネイル",
+        images: ["filmstrip.webp", "gallery.webp"],
+        alt: "画像のフィルムストリップと最近のファイルを表示したギャラリー",
       },
     ],
     closingTitle: "いつもの場所に、したくなる",
@@ -196,6 +202,8 @@ export const locales = {
       },
       {
         title: "主役は、あなたのコンテンツ",
+        image: "image2.webp",
+        alt: "シンプルなtowavueの画像ビューアーに表示された白いモクレン",
         description:
           "写真や映像を邪魔しない、静かなインターフェース。ちょっとした確認から、全画面での読書や鑑賞まで、コンテンツだけに没頭できます。",
       },
@@ -221,8 +229,12 @@ export const locales = {
       loading: "プレビューを読み込み中…",
       error: "プレビューを読み込めませんでした。ページを再読み込みしてお試しください。",
       imageAlt: [
-        "深い緑の葉を背景に咲く白い花",
+        "黒い背景に浮かぶ白いモクレン",
         "暗い背景に浮かぶ白い花",
+        "深い緑の葉を背景に咲く白い花",
+        "白いデイジーのクローズアップ",
+        "青い背景に浮かぶ淡いピンクのガーベラ",
+        "ピンクのバラの花束",
         "艶のある緑の葉に囲まれた白い花",
         "木陰に咲く小さな白い花",
         "花の咲く枝を写したモノクロ写真",

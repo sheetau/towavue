@@ -3,6 +3,7 @@ import { asset } from "../site/config.mjs";
 
 export function FeatureShowcase({ content }) {
   const [active, setActive] = useState(0);
+  const feature = content.features[active];
   return (
     <div className="feature-showcase">
       <ol className="feature-list" aria-label={content.featureLabel}>
@@ -16,11 +17,12 @@ export function FeatureShowcase({ content }) {
         ))}
       </ol>
       <div className="feature-media" id="feature-preview" aria-live="polite" aria-atomic="true">
-        <div className="feature-media-inner" key={content.features[active].id}>
-          <img src={asset(content.features[active].image)} alt={content.features[active].alt} width="1200" height="760" loading="lazy" />
-          <span className="sr-only">{content.features[active].title}</span>
+        <div className={`feature-media-inner feature-media-${feature.id}${feature.images.length > 1 ? " is-stacked" : ""}`} key={feature.id}>
+          {feature.images.length > 0 && <div className="feature-artwork" role="img" aria-label={feature.alt}>
+            {feature.images.map((source, index) => <img key={source} src={asset(source)} alt="" loading="lazy" style={{ "--layer": index, "--layer-position": `${feature.images.length > 1 ? index / (feature.images.length - 1) * 100 : 0}%`, zIndex: feature.images.length - index }} />)}
+          </div>}
+          <span className="sr-only">{feature.title}</span>
         </div>
-        <div className="feature-media-caption" aria-hidden="true"><span>{String(active + 1).padStart(2, "0")} / 05</span><span>{content.features[active].title}</span></div>
       </div>
     </div>
   );

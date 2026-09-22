@@ -283,10 +283,14 @@ h1 {
   color: var(--color-theme-fg-04);
 }
 .hero-mockup {
-  width: max(100%, var(--max-width-container));
+  width: 100%;
+  height: var(--demo-height, auto);
   margin-top: var(--space-5);
 }
 .demo-window {
+  width: var(--max-width-container);
+  transform: scale(var(--demo-scale, 1));
+  transform-origin: top left;
   background: #000;
   border: 1px solid #363636;
   border-radius: 8px;

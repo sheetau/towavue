@@ -43,6 +43,27 @@ export function HeroDemo({ content }) {
     }
   });
 
+  // Scale the whole desktop layout, including typography and hit targets.
+  useEffect(() => {
+    const figure = demo.current;
+    const frame = figure.querySelector(".demo-window");
+    function resize() {
+      const visibleWidth = Math.max(0, document.documentElement.clientWidth - figure.getBoundingClientRect().left);
+      const scale = Math.min(1, visibleWidth * 1.5 / frame.offsetWidth);
+      const height = parseFloat(getComputedStyle(frame).height);
+      figure.style.setProperty("--demo-scale", String(scale));
+      figure.style.setProperty("--demo-height", `${height * scale}px`);
+    }
+    const observer = new ResizeObserver(resize);
+    observer.observe(frame);
+    window.addEventListener("resize", resize);
+    resize();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
   // A cached default video can load before React attaches its event handlers.
   useEffect(() => {
     const player = video.current;

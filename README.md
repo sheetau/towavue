@@ -22,7 +22,7 @@ npm run build
 npm run preview
 ```
 
-The preview server supports byte-range video requests. Build output is in `out/`.
+The preview server supports byte-range video requests. Build output is in `out/`. Development uses `.next-dev/` while production builds use `.next/`, so they can compile without overwriting each other.
 
 ## Organization
 
@@ -62,7 +62,7 @@ Scroll deltas advance only the paused video while the demo is visible; manual se
 
 Feature artwork uses each locale item's `images` array in front-to-back order. The speed preview uses ten 800px-wide frames in a separate high-quality sprite extracted from the original video, newest and brightest on top, with older frames beneath it. Its brief staggered entrance respects reduced-motion preferences. Shared `--feature-padding` controls top, bottom, and left spacing; stacked images distribute their vertical offsets across that space and clip at the right edge. The tab image has a gradient mask on an exactly matching wrapper.
 
-On narrow screens the demo retains its 1144px desktop width and extends beyond the right viewport edge without creating horizontal page scrolling. Japanese h1 text uses the existing Noto Serif JP font compressed horizontally to 70%, anchored to the left.
+On narrow screens the demo uniformly scales its 1144px desktop layout, including fonts, buttons, and spacing, so at least the left two-thirds remain visible. The rest extends beyond the right viewport edge without horizontal page scrolling. Its reserved height follows the scaled height. Japanese h1 text uses the existing Noto Serif JP font compressed horizontally to 70%, anchored to the left.
 
 ## Localization
 

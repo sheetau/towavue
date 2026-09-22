@@ -50,17 +50,19 @@ The monapad names `--color-theme-*`, `--font-*`, `--max-width-container`, `.cont
 
 `concepts/lp_concept.fig` was unpacked and its embedded Kiwi schema and Zstandard node data decoded. The frame hierarchy, text styles, fills, and strokes were inspected, alongside the PNG. The source defines a black canvas, white headings, gray body text, IBM Plex Serif headings (italic hero), and IBM Plex Mono body copy. The layout retains the narrow header, left-aligned hero, app demo, five selectable feature rows with a shared preview, three closing cards, and footer. Spacing is normalized through shared tokens.
 
-The body copy is grounded in the app's README, STATUS, ARCHITECTURE, and playlist implementation. The remaining closing artwork slot without a supplied image is deliberately blank on desktop, and collapses on mobile. Add an `image` and `alt` to the corresponding closing item in each locale to fill a slot.
+The body copy is grounded in the app's README, STATUS, ARCHITECTURE, and playlist implementation. Closing artwork includes shortcuts, the viewer layered over its source code, and a minimal image-viewer screenshot. The source-code layer uses screen blending; both source layers skew by -10 degrees, with a dark upper-left shadow behind the viewer.
 
-The preview supports image, video, and audio tabs, eleven-image navigation, video playback and seeking, and fictional audio tracks with a silent playback clock. The video can be played/paused from either its status button or the media area, and has no audio stream. Audio supports repeat off/all/one and a shuffled queue, without loading an audio source. Switching tabs pauses playback and preserves positions. Window/close controls and the reading icon remain decorative. The supplied outline logo is used for the header and demo; only the browser tab uses the favicon.
+The preview supports video, image, and audio tabs in that order, nine-image navigation, video playback and seeking, and fictional audio tracks with a silent playback clock. The video can be played/paused from either its status button or the media area, and has no audio stream. Audio supports repeat off/all/one and a shuffled queue, without loading an audio source. Switching tabs pauses playback and preserves positions. Window/close controls and the reading icon remain decorative. The supplied outline logo is used for the header and demo; only the browser tab uses the favicon.
 
 The header stays at the top on a translucent black background. Inset vertical rules sit behind the content and remain faintly visible through the header. Screenshot images preserve the source PNG alpha channel in lossless WebP, with no added borders or corner decoration. Demo tabs are rounded and their close/caption SVG paths come from monapad. Compact close and transport icons respond with white hover color only. The idle seek bar is a one-pixel track; hover animates its thickness and thumb scale and overlays a translucent preview up to the pointer, without seeking until an actual click or drag. Status metadata uses the supplied originals for images, the web video for video, and fictional audio metadata. Transport/reading artwork comes from Lucide; see [attribution and license](notices/lucide.md).
 
 Both download buttons fetch the latest public release at click time and select `towavue-*-windows-x64-setup.exe`. They initiate a browser download without replacing the LP. API errors, timeouts, and missing installers display a retryable inline message and a Releases fallback. The ordinary link remains useful without JavaScript.
 
-Scroll deltas advance the active media while the demo is visible; manual seeking establishes a new starting position. Scroll seeking pauses during dragging or playback and respects reduced-motion preferences. Image hover previews use small thumbnails, and video previews use a single sprite sampled every two seconds without seeking the player.
+Scroll deltas advance only the paused video while the demo is visible; manual seeking establishes a new starting position. Scroll seeking pauses during dragging or playback and respects reduced-motion preferences. Image hover previews use small thumbnails, and video previews use a single sprite sampled every half second without seeking the player.
 
-Feature artwork uses each locale item's `images` array in front-to-back order. An empty array leaves the speed preview blank. Shared `--feature-padding` controls top, bottom, and left spacing; stacked images distribute their vertical offsets across that space and clip at the right edge. The tab image has a gradient mask on an exactly matching wrapper.
+Feature artwork uses each locale item's `images` array in front-to-back order. The speed preview uses ten 800px-wide frames in a separate high-quality sprite extracted from the original video, newest and brightest on top, with older frames beneath it. Its brief staggered entrance respects reduced-motion preferences. Shared `--feature-padding` controls top, bottom, and left spacing; stacked images distribute their vertical offsets across that space and clip at the right edge. The tab image has a gradient mask on an exactly matching wrapper.
+
+On narrow screens the demo retains its 1144px desktop width and extends beyond the right viewport edge without creating horizontal page scrolling. Japanese h1 text uses the existing Noto Serif JP font compressed horizontally to 70%, anchored to the left.
 
 ## Localization
 
@@ -80,7 +82,7 @@ Web-sized derivatives are committed, so a regular site build needs no media tool
 python scripts/prepare-media.py
 ```
 
-The image samples are the owner's eleven supplied Unsplash files, with Quino Al first and Leman second. Original photographer identifiers remain in the preparation script and generated manifest. The video derives from supplied `13560406_3840_2160_30fps.mp4`. The preparation script also generates photo thumbnails, the video frame sprite, and `src/site/media-manifest.json`; commit these together when replacing media. Source files are preserved. There is no generated replacement artwork. The MP4 is resized to 1280×720, stripped of audio, encoded with frequent keyframes for seeking, and uses fast-start metadata.
+The image samples are the owner's nine supplied Unsplash files: Quino Al first, Logan Clark second, Vinh Thang second to last, and miom last. Original photographer identifiers remain in the preparation script and generated manifest. The video derives from supplied `Blooming white orchid.mp4`. The preparation script also generates photo thumbnails, the video frame sprite, and `src/site/media-manifest.json`; commit these together when replacing media. Source files are preserved. There is no generated replacement artwork. The MP4 is resized to 1280 pixels wide with its original aspect ratio, stripped of audio, encoded with frequent keyframes for seeking, and uses fast-start metadata.
 
 ## Publishing
 
@@ -106,7 +108,7 @@ For a different hosting subpath set `NEXT_PUBLIC_BASE_PATH` before both build an
 
 - `npm run check`: installer selection and failures; paused/ended audio, track transitions, repeat one/all, and shuffle progression.
 - `npm run build`: static production output for English and Japanese.
-- Browser review: all eleven images, scroll seeking, image/video hover thumbnails, keyboard and pointer tab controls, video playback/area-click/seek, silent audio playback/repeat/shuffle, feature previews, language-menu focus and dismissal, download success/failure, responsive overflow, Japanese font loading, inset rails, fixed header, and image borders.
+- Browser review: all nine images, scroll seeking, image/video hover thumbnails, keyboard and pointer tab controls, video playback/area-click/seek, silent audio playback/repeat/shuffle, feature previews, language-menu focus and dismissal, download success/failure, responsive overflow, Japanese font loading, inset rails, fixed header, and image borders.
 - Download browser checks use the live GitHub release response and intercept the installer payload with a small fixture; they do not run or install the EXE.
 - `npm audit`: dependency audit. PostCSS is explicitly overridden to the patched version while retaining the reference site's Next.js 15 structure.
 

@@ -132,6 +132,7 @@ select {
   vector-effect: non-scaling-stroke;
 }
 .site-shell {
+  overflow-x: clip;
   position: relative;
   isolation: isolate;
 }
@@ -173,7 +174,7 @@ select {
   position: sticky;
   top: 0;
   z-index: 20;
-  background: rgb(0 0 0 / 65%);
+  background: rgb(0 0 0 / 50%);
   border-bottom: 1px solid var(--color-theme-border-02);
   backdrop-filter: blur(5px);
 }
@@ -282,6 +283,7 @@ h1 {
   color: var(--color-theme-fg-04);
 }
 .hero-mockup {
+  width: max(100%, var(--max-width-container));
   margin-top: var(--space-5);
 }
 .demo-window {
@@ -334,6 +336,7 @@ h1 {
   font-size: 12px;
   white-space: nowrap;
   min-width: 0;
+  max-width: 200px;
 }
 .demo-tab[aria-selected="true"] {
   color: #eee;
@@ -418,23 +421,6 @@ h1 {
 }
 .demo-video-toggle:focus-visible {
   outline-offset: -5px;
-}
-.demo-silent {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  color: #bbb;
-  background: #000b;
-  font-size: 10px;
-  pointer-events: none;
-}
-.demo-silent .icon {
-  height: 13px;
-  width: 13px;
 }
 .demo-error {
   position: absolute;
@@ -565,7 +551,6 @@ h1 {
 }
 .demo-seek-video-frame {
   display: block;
-  aspect-ratio: 16 / 9;
   background-repeat: no-repeat;
 }
 .demo-seek-thumbnail-label {
@@ -712,7 +697,7 @@ h2 {
 }
 .feature-list li {
   position: relative;
-  min-height: 124px;
+  min-height: 0px;
   padding: 22px 28px 22px 52px;
   border-bottom: 1px solid var(--color-theme-border-02);
   transition: background var(--duration);
@@ -792,6 +777,7 @@ h2 {
   width: auto;
   max-width: none;
   transform: translateY(calc(-1 * var(--layer-position)));
+  filter: drop-shadow(0 4px 20px #000) drop-shadow(0 4px 10px #000);
 }
 .is-stacked .feature-artwork img {
   height: 70%;
@@ -799,10 +785,43 @@ h2 {
 .feature-media-tabs .feature-artwork {
   top: 50%;
   bottom: auto;
-  height: 75%;
+  height: 60%;
   aspect-ratio: 833 / 374;
   transform: translateY(-50%);
-  mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+  mask-image: linear-gradient(to bottom, black 20%, transparent 100%);
+}
+/* The projected frame bounds fill the padded stage from top to bottom. */
+.speed-frame-stack {
+  position: absolute;
+  inset: 0;
+}
+.speed-frame-layer {
+  position: absolute;
+  left: 0;
+  top: var(--frame-position);
+  height: 65%;
+  aspect-ratio: var(--frame-aspect);
+  transform: translateY(calc(-1 * var(--frame-position)));
+  animation: frame-load 450ms var(--ease-out-soft) both;
+  animation-delay: calc(var(--frame-order) * 45ms);
+}
+.speed-frame {
+  position: absolute;
+  display: block;
+  left: 0;
+  top: var(--frame-top);
+  height: var(--frame-height);
+  width: auto;
+  transform: skewY(var(--frame-skew-y)) skewX(var(--frame-skew-x)) scaleY(var(--frame-scale-y));
+  transform-origin: top left;
+  background-color: #000;
+  background-repeat: no-repeat;
+  filter: brightness(var(--frame-brightness));
+  box-shadow: 0 10px 20px #0008;
+}
+@keyframes frame-load {
+  from { opacity: 0; translate: 0 -16px; }
+  to { opacity: 1; translate: 0 0; }
 }
 @keyframes preview-in {
   from {
@@ -842,6 +861,36 @@ h2 {
   height: auto;
   object-fit: contain;
 }
+.closing-media-source {
+  overflow: hidden;
+  isolation: isolate;
+}
+.source-artwork {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: 340px;
+}
+.source-artwork img {
+  position: absolute;
+  transform: skewY(-10deg);
+}
+.source-artwork .source-code {
+  left: 0;
+  top: 12%;
+  width: 86%;
+  height: 83%;
+  object-fit: fill;
+  mix-blend-mode: screen;
+}
+.source-artwork .source-window {
+  right: 0;
+  top: 19%;
+  width: 74%;
+  height: 78%;
+  object-fit: fill;
+  filter: drop-shadow(-14px -12px 8px #0b0b0b) drop-shadow(-4px -4px 2px #0b0b0b);
+}
 .closing-copy {
   padding: 26px 24px 30px;
 }
@@ -875,7 +924,7 @@ h2 {
   min-height: 90px;
   display: flex;
   align-items: center;
-  gap: 40px;
+  gap: 30px;
   font-size: 11px;
   color: var(--color-theme-fg-03);
 }
@@ -969,6 +1018,9 @@ html[lang="ja"] {
   --font-mono: "IBM Plex Mono", "M PLUS 1 Code", monospace;
 }
 html[lang="ja"] h1 {
+  width: calc(100% / 0.7);
+  transform: scaleX(0.7);
+  transform-origin: left center;
   font-size: clamp(32px, 3.25vw, 46px);
   line-height: 1.45;
 }
@@ -987,9 +1039,6 @@ html[lang="ja"] p {
 @media (max-width: 900px) {
   :root {
     --section-space: 72px;
-  }
-  .demo-tab {
-    max-width: 190px;
   }
   .feature-list li {
     padding: 20px 20px 20px 45px;
@@ -1054,58 +1103,6 @@ html[lang="ja"] p {
   .hero-mockup {
     margin-top: 36px;
   }
-  .demo-toolbar {
-    height: 36px;
-    gap: 4px;
-  }
-  .demo-tabs {
-    flex: 1;
-  }
-  .demo-tab {
-    flex: 1;
-    justify-content: center;
-    font-size: 10px;
-    padding: 0 6px;
-  }
-  .demo-tab-name,
-  .demo-tab .editor-tab-close,
-  .editor-window-controls {
-    display: none;
-  }
-  .demo-tab-short {
-    display: inline;
-  }
-  .demo-viewport {
-    aspect-ratio: 4 / 3;
-  }
-  .demo-statusbar {
-    gap: 4px 8px;
-    font-size: 8px;
-    flex-wrap: wrap;
-    padding-block: 7px;
-  }
-  .demo-path {
-    flex: 1;
-  }
-  .demo-metadata {
-    flex-basis: 100%;
-    gap: 10px;
-    font-size: 8px;
-  }
-  .audio-playlist button {
-    min-height: 36px;
-    padding: 8px;
-    font-size: 10px;
-    gap: 5px;
-  }
-  .track-number {
-    width: 16px;
-  }
-  .demo-silent {
-    top: 10px;
-    right: 10px;
-    font-size: 9px;
-  }
   .section-heading {
     margin-bottom: 28px;
   }
@@ -1160,6 +1157,9 @@ html[lang="ja"] p {
   }
   .closing-media img {
     max-width: 340px;
+  }
+  .closing-media-source {
+    height: 330px;
   }
   .closing-media.is-empty {
     display: none;

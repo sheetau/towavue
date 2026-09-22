@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 import math
+import re
 import subprocess
 from PIL import Image, ImageOps
 
@@ -12,17 +13,16 @@ DEST = ROOT / "public" / "media"
 
 photos = [
     "quino-al-BlMj6RYy3c0-unsplash.jpg",
+    "logan-clark-LdIuq6djo3U-unsplash.jpg",
     "leman-gujTEMomy5A-unsplash.jpg",
     "ajoy-das--SdQ1Q3oUdg-unsplash.jpg",
-    "aarn-giri-3tYZjGSBwbk-unsplash.jpg",
-    "andrew-small-EfhCUc_fjrU-unsplash.jpg",
-    "rikonavt-oEWdQsbRVZk-unsplash.jpg",
+    "siddharth-sarma-Mnztfkyile4-unsplash.jpg",
     "magnus-thompson-BBlerGhETwU-unsplash.jpg",
     "michael-navarro-OQLM1Yr9u6k-unsplash.jpg",
-    "miom-_0326-k9cL4b3wXZA-unsplash.jpg",
-    "siddharth-sarma-Mnztfkyile4-unsplash.jpg",
     "vinh-thang-PeNUDEdA3Xg-unsplash.jpg",
+    "miom-_0326-k9cL4b3wXZA-unsplash.jpg",
 ]
+video_source = "Blooming white orchid.mp4"
 
 photo_metadata = []
 for index, name in enumerate(photos, 1):
@@ -34,12 +34,20 @@ for index, name in enumerate(photos, 1):
         image.thumbnail((320, 200))
         image.save(DEST / "samples" / f"photo-{index}-thumb.webp", quality=65, method=6)
 
+# Remove only numbered derivatives from this generator when the sample list shrinks.
+for derivative in (DEST / "samples").glob("photo-*.webp"):
+    match = re.fullmatch(r"photo-(\d+)(?:-thumb)?\.webp", derivative.name)
+    if match and int(match.group(1)) > len(photos):
+        derivative.unlink()
+
 screenshots = {
     "image.png": "workspace.webp",
     "video.png": "video.webp",
     "audio.png": "audio.webp",
     "gallery.png": "gallery.webp",
     "image2.png": "image2.webp",
+    "image3.png": "image3.webp",
+    "code.png": "code.webp",
     "video-edit.png": "video-edit.webp",
     "tab.png": "tab.webp",
     "filmstrip.png": "filmstrip.webp",
@@ -55,8 +63,8 @@ for source, destination in screenshots.items():
 
 subprocess.run([
     "ffmpeg", "-y", "-loglevel", "error", "-i",
-    str(SOURCE / "sample media" / "13560406_3840_2160_30fps.mp4"),
-    "-an", "-vf", "scale=1280:-2", "-c:v", "libx264", "-preset", "medium",
+    str(SOURCE / "sample media" / video_source),
+    "-an", "-vf", "scale=1280:-2,setsar=1", "-c:v", "libx264", "-preset", "medium",
     "-crf", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
     "-g", "15", str(DEST / "samples" / "flowers.mp4"),
 ], check=True)
@@ -74,21 +82,35 @@ with Image.open(SOURCE / "image.png") as original:
 # One small sprite provides instant hover previews without seeking the playing video.
 video_path = DEST / "samples" / "flowers.mp4"
 probe = json.loads(subprocess.check_output([
-    "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(video_path),
+    "ffprobe", "-v", "error", "-show_entries", "format=duration:stream=width,height,r_frame_rate", "-of", "json", str(video_path),
 ], text=True))
 duration = float(probe["format"]["duration"])
-interval = 2
+stream = probe["streams"][0]
+fps_numerator, fps_denominator = map(int, stream["r_frame_rate"].split("/"))
+interval = 0.5
+thumb_width = 160
+thumb_height = round(thumb_width * stream["height"] / stream["width"])
 count = math.ceil(duration / interval)
 subprocess.run([
     "ffmpeg", "-y", "-loglevel", "error", "-i", str(video_path),
-    "-vf", f"fps=1/{interval},scale=160:90,tile={count}x1", "-frames:v", "1",
+    "-vf", f"fps=1/{interval},scale={thumb_width}:{thumb_height},tile={count}x1", "-frames:v", "1",
     "-quality", "55", str(DEST / "samples" / "video-thumbnails.webp"),
+], check=True)
+# Feature artwork gets a separate high-resolution sprite from the original video.
+frame_width = 800
+frame_height = round(frame_width * stream["height"] / stream["width"])
+subprocess.run([
+    "ffmpeg", "-y", "-loglevel", "error", "-i", str(SOURCE / "sample media" / video_source),
+    "-vf", f"fps=1/{interval},scale={frame_width}:{frame_height},tile={count}x1", "-frames:v", "1",
+    "-quality", "86", str(DEST / "samples" / "video-frames.webp"),
 ], check=True)
 manifest = {
     "photos": photo_metadata,
-    "sampleVideo": {"name": "13560406_3840_2160_30fps.mp4", "bytes": video_path.stat().st_size,
-                    "width": 1280, "height": 720, "fps": 30, "duration": duration,
-                    "previewInterval": interval, "previewCount": count},
+    "sampleVideo": {"name": video_source, "bytes": video_path.stat().st_size,
+                    "width": stream["width"], "height": stream["height"], "fps": fps_numerator / fps_denominator, "duration": duration,
+                    "previewInterval": interval, "previewCount": count,
+                    "previewWidth": thumb_width, "previewHeight": thumb_height,
+                    "frameWidth": frame_width, "frameHeight": frame_height},
 }
 (ROOT / "src" / "site" / "media-manifest.json").write_text(
     json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n",

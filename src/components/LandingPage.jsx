@@ -6,6 +6,7 @@ import { DownloadLink } from "./DownloadLink";
 import { HeroDemo } from "./HeroDemo";
 import { FeatureShowcase } from "./FeatureShowcase";
 import { LanguageSwitcher } from "./LanguageSwitcher";
+import { SourceArtwork } from "./SourceArtwork";
 
 export function LandingPage({ locale = "en" }) {
   const content = locales[locale] ?? locales.en;
@@ -37,7 +38,7 @@ export function LandingPage({ locale = "en" }) {
         <section className="feature-block prefooter section" aria-labelledby="closing-title"><div className="container">
           <div className="section-heading"><h2 id="closing-title">{content.closingTitle}</h2><p>{content.closingDescription}</p></div>
           <div className="closing-grid">{content.closing.map((item) => <article className="closing-card" key={item.title}>
-            <div className={`closing-media${item.image ? "" : " is-empty"}`} aria-hidden={!item.image ? "true" : undefined}>{item.image && <img src={asset(item.image)} alt={item.alt} width="740" height="470" loading="lazy" />}</div>
+            <div className={`closing-media${item.artwork ? ` closing-media-${item.artwork}` : ""}${item.image || item.artwork ? "" : " is-empty"}`} aria-hidden={!item.image && !item.artwork ? "true" : undefined}>{item.artwork === "source" ? <SourceArtwork label={item.alt} /> : item.image && <img src={asset(item.image)} alt={item.alt} width="740" height="470" loading="lazy" />}</div>
             <div className="closing-copy"><h4>{item.title}</h4><p>{item.description}</p>{item.link && <a className="text-link" href={item.href} target="_blank" rel="noreferrer">{item.link}<Icon name="arrow" /></a>}</div>
           </article>)}</div>
         </div></section>

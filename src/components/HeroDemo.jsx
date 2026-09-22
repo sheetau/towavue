@@ -6,16 +6,14 @@ import { Icon, Logo, TabClose, WindowControls } from "./Icons";
 import { SeekBar } from "./SeekBar";
 import { useScrollSeek } from "./useScrollSeek";
 
-const mediaTypes = ["image", "video", "audio"];
+const mediaTypes = ["video", "image", "audio"];
 
 export function HeroDemo({ content }) {
-  const [tab, setTab] = useState("image");
-  const [imagePosition, setImagePosition] = useState(0);
-  const photo = Math.round(imagePosition);
+  const [tab, setTab] = useState("video");
+  const [photo, setPhoto] = useState(0);
   const [audio, setAudio] = useState(() => createAudioState(tracks.length));
   const [videoTime, setVideoTime] = useState(0);
   const [videoPlaying, setVideoPlaying] = useState(false);
-  const [videoLoaded, setVideoLoaded] = useState(false);
   const [duration, setDuration] = useState(0);
   const [videoError, setVideoError] = useState(false);
   const [imageError, setImageError] = useState(false);
@@ -26,7 +24,7 @@ export function HeroDemo({ content }) {
   const image = photos[photo];
   const track = tracks[audio.track];
   const names = { image: image.name, video: sampleVideo.name, audio: track.name };
-  const value = tab === "image" ? imagePosition : tab === "video" ? videoTime : audio.time;
+  const value = tab === "image" ? photo : tab === "video" ? videoTime : audio.time;
   const max = tab === "image" ? photos.length - 1 : tab === "video" ? duration : track.duration;
   const playing = tab === "video" ? videoPlaying : audio.playing;
   const metadata = tab === "image"
@@ -38,17 +36,19 @@ export function HeroDemo({ content }) {
   useScrollSeek(demo, (delta) => {
     if (scrubbing.current) return;
     const clamp = (position, limit) => Math.max(0, Math.min(limit, position));
-    if (tab === "image") {
-      setImagePosition((position) => clamp(position + delta * (photos.length - 1), photos.length - 1));
-      setImageError(false);
-    } else if (tab === "video" && video.current && duration && !videoError && video.current.paused) {
+    if (tab === "video" && video.current && duration && !videoError && video.current.paused) {
       const next = clamp(video.current.currentTime + delta * duration, duration);
       video.current.currentTime = next;
       setVideoTime(next);
-    } else if (tab === "audio") {
-      setAudio((state) => state.playing ? state : { ...state, time: clamp(state.time + delta * tracks[state.track].duration, tracks[state.track].duration) });
     }
   });
+
+  // A cached default video can load before React attaches its event handlers.
+  useEffect(() => {
+    const player = video.current;
+    if (player?.error) setVideoError(true);
+    if (player?.readyState >= 1 && Number.isFinite(player.duration)) setDuration(player.duration);
+  }, []);
 
   useEffect(() => {
     for (const index of [photo - 1, photo + 1]) {
@@ -66,7 +66,7 @@ export function HeroDemo({ content }) {
     if (tab === "video") {
       const time = fraction * duration;
       const frame = Math.min(sampleVideo.previewCount - 1, Math.floor(time / sampleVideo.previewInterval));
-      return { sprite: asset("samples/video-thumbnails.webp"), count: sampleVideo.previewCount, frame, label: formatTime(time) };
+      return { frame, label: formatTime(time) };
     }
     return null;
   }
@@ -98,7 +98,6 @@ export function HeroDemo({ content }) {
     setTab(type);
     video.current?.pause();
     setAudio((state) => ({ ...state, playing: false }));
-    if (type === "video") setVideoLoaded(true);
   }
 
   async function togglePlayback() {
@@ -124,7 +123,7 @@ export function HeroDemo({ content }) {
 
   function seek(event) {
     const position = Number(event.target.value);
-    if (tab === "image") { setImagePosition(position); setImageError(false); }
+    if (tab === "image") { setPhoto(position); setImageError(false); }
     else if (tab === "video") {
       if (video.current && duration) video.current.currentTime = position;
       setVideoTime(position);
@@ -151,13 +150,12 @@ export function HeroDemo({ content }) {
             {imageError && <p className="demo-error" role="status">{content.error}</p>}
           </div>
           <div className="demo-panel" id="demo-panel-video" role="tabpanel" aria-labelledby="demo-tab-video" hidden={tab !== "video"} tabIndex={0}>
-            {videoLoaded && <video ref={video} src={asset("samples/flowers.mp4")} poster={asset("samples/video-poster.webp")} muted playsInline preload="auto" disablePictureInPicture onLoadedMetadata={(event) => {
+            <video ref={video} src={asset("samples/flowers.mp4")} poster={asset("samples/video-poster.webp")} muted playsInline preload="auto" disablePictureInPicture onLoadedMetadata={(event) => {
               const player = event.currentTarget;
               setDuration(Number.isFinite(player.duration) ? player.duration : 0);
               player.currentTime = Math.min(videoTime, player.duration || 0);
-            }} onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)} onPlay={() => setVideoPlaying(true)} onPause={() => setVideoPlaying(false)} onEnded={() => setVideoPlaying(false)} onError={() => { setVideoError(true); setVideoPlaying(false); }} />}
+            }} onTimeUpdate={(event) => setVideoTime(event.currentTarget.currentTime)} onPlay={() => setVideoPlaying(true)} onPause={() => setVideoPlaying(false)} onEnded={() => setVideoPlaying(false)} onError={() => { setVideoError(true); setVideoPlaying(false); }} />
             <button className="demo-video-toggle" type="button" aria-label={videoPlaying ? content.pauseVideo : content.playVideo} onClick={togglePlayback} disabled={!duration || videoError} />
-            <span className="demo-silent"><Icon name="muted" />{content.silent}</span>
             {videoError && <p className="demo-error" role="status">{content.error}</p>}
           </div>
           <div className="demo-panel demo-audio" id="demo-panel-audio" role="tabpanel" aria-labelledby="demo-tab-audio" hidden={tab !== "audio"} tabIndex={0}>

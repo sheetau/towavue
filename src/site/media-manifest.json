@@ -7,6 +7,12 @@
       "height": 2592
     },
     {
+      "name": "logan-clark-LdIuq6djo3U-unsplash.jpg",
+      "bytes": 1469119,
+      "width": 3648,
+      "height": 5472
+    },
+    {
       "name": "leman-gujTEMomy5A-unsplash.jpg",
       "bytes": 673155,
       "width": 3456,
@@ -19,22 +25,10 @@
       "height": 4016
     },
     {
-      "name": "aarn-giri-3tYZjGSBwbk-unsplash.jpg",
-      "bytes": 525713,
-      "width": 2333,
-      "height": 3490
-    },
-    {
-      "name": "andrew-small-EfhCUc_fjrU-unsplash.jpg",
-      "bytes": 2151176,
-      "width": 5261,
-      "height": 3507
-    },
-    {
-      "name": "rikonavt-oEWdQsbRVZk-unsplash.jpg",
-      "bytes": 2976455,
-      "width": 2250,
-      "height": 4000
+      "name": "siddharth-sarma-Mnztfkyile4-unsplash.jpg",
+      "bytes": 383716,
+      "width": 4241,
+      "height": 2828
     },
     {
       "name": "magnus-thompson-BBlerGhETwU-unsplash.jpg",
@@ -49,32 +43,30 @@
       "height": 2848
     },
     {
-      "name": "miom-_0326-k9cL4b3wXZA-unsplash.jpg",
-      "bytes": 1186618,
-      "width": 3072,
-      "height": 4096
-    },
-    {
-      "name": "siddharth-sarma-Mnztfkyile4-unsplash.jpg",
-      "bytes": 383716,
-      "width": 4241,
-      "height": 2828
-    },
-    {
       "name": "vinh-thang-PeNUDEdA3Xg-unsplash.jpg",
       "bytes": 286556,
       "width": 3000,
       "height": 1987
+    },
+    {
+      "name": "miom-_0326-k9cL4b3wXZA-unsplash.jpg",
+      "bytes": 1186618,
+      "width": 3072,
+      "height": 4096
     }
   ],
   "sampleVideo": {
-    "name": "13560406_3840_2160_30fps.mp4",
-    "bytes": 1407007,
+    "name": "Blooming white orchid.mp4",
+    "bytes": 795126,
     "width": 1280,
-    "height": 720,
-    "fps": 30,
-    "duration": 25.992633,
-    "previewInterval": 2,
-    "previewCount": 13
+    "height": 852,
+    "fps": 60.0,
+    "duration": 4.816667,
+    "previewInterval": 0.5,
+    "previewCount": 10,
+    "previewWidth": 160,
+    "previewHeight": 106,
+    "frameWidth": 800,
+    "frameHeight": 532
   }
 }

@@ -6,6 +6,7 @@ export const locales = {
     description:
       "Images, video, and audio in one fast, beautifully minimal Windows app. Browse, play, and edit with towavue. Free and open source.",
     ogLocale: "en_US",
+    shareImageAlt: "A white magnolia in the towavue image viewer",
     skip: "Skip to content",
     home: "towavue home",
     download: "Download",
@@ -122,10 +123,12 @@ export const locales = {
     },
   },
   ja: {
-    title: "towavue | すべてのメディアに、たったひとつの居場所を",
+    title: "towavue（トワビュー） | すべてのメディアに、たったひとつの居場所を",
+    alternateName: "トワビュー",
     description:
-      "画像・動画・音声を閲覧から編集までこなす、高速で美しいWindows用メディアビューワー。towavueは無料のオープンソースアプリです。",
+      "towavue（トワビュー）は、画像・動画・音声を閲覧から編集までこなす、高速で美しいWindows用メディアビューワー。無料のオープンソースアプリです。",
     ogLocale: "ja_JP",
+    shareImageAlt: "towavue（トワビュー）の画像ビューアーに表示された白いモクレン",
     skip: "本文へ移動",
     home: "towavue ホーム",
     download: "ダウンロード",
@@ -138,7 +141,7 @@ export const locales = {
     license: "Apache 2.0",
     language: "言語",
     hero: ["現代にそぐう、", "唯一のメディアビューワー"],
-    heroDescription: "画像・動画・音声を1つに。towavueは高速で美しく無駄のないワークスペースを提供します。",
+    heroDescription: "画像・動画・音声を1つに。towavue（トワビュー）は高速で美しく無駄のないワークスペースを提供します。",
     featureTitle: "すべてのメディアに、たったひとつの居場所を",
     featureDescription: "アプリを切り替えることなく、閲覧・再生・編集をシームレスに。",
     featureLabel: "機能を見る",

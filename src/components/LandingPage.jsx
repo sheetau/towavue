@@ -15,6 +15,8 @@ export function LandingPage({ locale = "en" }) {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: "towavue",
+    alternateName: content.alternateName,
+    inLanguage: locale,
     applicationCategory: "MultimediaApplication",
     operatingSystem: "Windows 11",
     url: canonical,
@@ -39,11 +41,14 @@ export function LandingPage({ locale = "en" }) {
         <meta property="og:description" content={content.description} />
         <meta property="og:url" content={canonical} />
         <meta property="og:locale" content={content.ogLocale} />
-        <meta property="og:image" content={`${siteUrl}/media/og-image.png`} />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
-        <meta property="og:image:alt" content={content.features[0].alt} />
+        <meta property="og:image" content={`${siteUrl}/media/image2.png`} />
+        <meta property="og:image:type" content="image/png" />
+        <meta property="og:image:width" content="997" />
+        <meta property="og:image:height" content="622" />
+        <meta property="og:image:alt" content={content.shareImageAlt} />
         <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:image" content={`${siteUrl}/media/image2.png`} />
+        <meta name="twitter:image:alt" content={content.shareImageAlt} />
         <meta name="google-site-verification" content="CbYcYiYRBtqbBzRcFrgow4wD0aZR5AceysXb3puyV5M" />
         <script
           type="application/ld+json"

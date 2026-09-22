@@ -60,6 +60,7 @@ for source, destination in screenshots.items():
         image.save(DEST / destination, lossless=True, method=6)
 
 (DEST / "favicon.ico").write_bytes((SOURCE / "favicon.ico").read_bytes())
+(DEST / "image2.png").write_bytes((SOURCE / "image2.png").read_bytes())
 
 subprocess.run([
     "ffmpeg", "-y", "-loglevel", "error", "-i",

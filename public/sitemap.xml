@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://sheetau.github.io/towavue/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sheetau.github.io/towavue/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sheetau.github.io/towavue/ja/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sheetau.github.io/towavue/" />
+  </url>
+  <url>
+    <loc>https://sheetau.github.io/towavue/ja/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://sheetau.github.io/towavue/" />
+    <xhtml:link rel="alternate" hreflang="ja" href="https://sheetau.github.io/towavue/ja/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://sheetau.github.io/towavue/" />
+  </url>
+</urlset>

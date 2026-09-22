@@ -74,6 +74,10 @@ English is the default. The footer switches between explicit English and Japanes
 2. Add `pages/<locale>/index.jsx` following `pages/ja/index.jsx`.
 3. Rebuild and verify the new route and layout.
 
+Both pages have self-referencing canonical URLs and reciprocal `hreflang` links. The footer uses real links for language navigation, and `public/sitemap.xml` lists both production URLs and their language alternatives. Update that sitemap when adding a language or changing the production hostname/base path. Submit `https://sheetau.github.io/towavue/sitemap.xml` in Search Console; after a content update, request indexing for the changed page with URL Inspection. Indexing does not guarantee a particular query ranking or immediate search-result updates.
+
+The Japanese title, description, visible introduction, and application structured data include the reading `トワビュー`. Open Graph and Twitter cards use an unchanged copy of the supplied `images/image2.png` at `public/media/image2.png` (997 × 622); the media preparation script preserves this copy on regeneration.
+
 Google Fonts loads IBM Plex Serif and IBM Plex Mono for English, and Noto Serif JP and M PLUS 1 Code for Japanese. The language trigger is unboxed and aligned to the right container edge; its rectangular popup follows the download button's colors with no outer padding or inter-item gaps. The monapad-style popup marks the current language and supports arrows, Home/End, Escape, outside-click dismissal, and focus restoration. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
 
 ## Media

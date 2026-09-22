@@ -29,6 +29,7 @@ export function LandingPage({ locale = "en" }) {
       <Head>
         <title>{content.title}</title>
         <meta name="description" content={content.description} />
+        {content.keywords && <meta name="keywords" content={content.keywords} />}
         <link rel="canonical" href={canonical} />
         {Object.keys(languages).map((code) => (
           <link key={code} rel="alternate" hrefLang={code} href={`${siteUrl}/${code === "en" ? "" : `${code}/`}`} />

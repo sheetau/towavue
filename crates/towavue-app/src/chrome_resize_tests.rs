@@ -152,3 +152,70 @@ fn utility_status_text_has_double_the_media_button_leading_gap() {
         }
     }
 }
+
+#[test]
+fn tabs_fit_until_their_actual_painted_width_reaches_the_minimum() {
+    let Some(root) = tests::isolated_test_root(
+        "chrome_resize_tests::tabs_fit_until_their_actual_painted_width_reaches_the_minimum",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for count in [2, 4, 6] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            for index in 0..count {
+                app.tabs
+                    .open_new(root.join(format!("tab-{index}.png")), MediaKind::Image);
+            }
+            let context = fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
+            for width in [480.0, 900.0, 1400.0] {
+                for tick in 0..4 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 400.0),
+                            )),
+                            time: Some(f64::from(width) + f64::from(tick)),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_top_bar(ui, &mut Vec::new());
+                        },
+                    );
+                    if tick < 3 {
+                        continue;
+                    }
+                    let tabs: Vec<_> = output
+                        .shapes
+                        .iter()
+                        .filter_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect)
+                                if rect.corner_radius == egui::CornerRadius::same(3)
+                                    && rect.rect.width() >= 70.0
+                                    && rect.rect.top() < 32.0
+                                    && [chrome::BORDER, chrome::BACKGROUND]
+                                        .contains(&rect.fill) =>
+                            {
+                                Some((rect.rect, shape.clip_rect))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(!tabs.is_empty());
+                    for (rect, clip) in tabs {
+                        if rect.width() > 72.0 + 1.0 / density {
+                            assert!(
+                                rect.left() >= clip.left() - 1.0 / density
+                                    && rect.right() <= clip.right() + 1.0 / density,
+                                "non-minimum tab must fit: {rect:?}, {clip:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

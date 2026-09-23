@@ -6,6 +6,7 @@ use towavue_core::TabId;
 #[derive(Default)]
 pub struct Hud {
     notice: Option<(TabId, u64, Instant)>,
+    dragging: bool,
 }
 
 impl Hud {
@@ -20,25 +21,59 @@ impl Hud {
         media: Option<Rect>,
         volume: f32,
         now: Instant,
-    ) {
-        let Some((tab, generation, until)) = self.notice else {
-            return;
-        };
-        if now >= until || owner != Some((tab, generation)) {
+    ) -> Option<f32> {
+        let (tab, generation, until) = self.notice?;
+        if now >= until && !self.dragging || owner != Some((tab, generation)) {
             self.notice = None;
-            return;
+            self.dragging = false;
+            return None;
         }
-        ui.ctx().request_repaint_after(until - now);
+        ui.ctx()
+            .request_repaint_after(until.saturating_duration_since(now));
         let viewport = ui.max_rect();
         if !viewport.is_positive() {
-            return;
+            return None;
         }
-        let (track, fill) = geometry(viewport, media, volume);
+        let (track, _) = geometry(viewport, media, volume);
+        let response = ui.interact(
+            track.expand(5.0).intersect(viewport),
+            ui.id().with(("volume-hud", tab, generation)),
+            egui::Sense::CLICK | egui::Sense::DRAG,
+        );
+        let owned = (response.is_pointer_button_down_on()
+            && ui.input(|input| input.pointer.primary_down()))
+            || response.dragged_by(egui::PointerButton::Primary);
+        if owned || self.dragging {
+            self.changed(tab, generation, now);
+        }
+        self.dragging = owned;
+        let changed = (owned || response.clicked_by(egui::PointerButton::Primary))
+            .then(|| response.interact_pointer_pos())
+            .flatten()
+            .map(|position| {
+                let fraction = if track.width() > track.height() {
+                    (position.x - track.left()) / track.width()
+                } else {
+                    (track.bottom() - position.y) / track.height()
+                };
+                fraction.clamp(0.0, 1.0) * towavue_core::MAX_VOLUME
+            });
+        let (_, fill) = geometry(viewport, media, changed.unwrap_or(volume));
         let painter = ui.painter_at(viewport);
+        painter.add(
+            egui::epaint::Shadow {
+                offset: [0, 0],
+                blur: 6,
+                spread: 1,
+                color: Color32::from_black_alpha(180),
+            }
+            .as_shape(track, 2),
+        );
         painter.rect_filled(track, 1.5, Color32::from_gray(76));
         if fill.is_positive() {
             painter.rect_filled(fill, 1.5, Color32::WHITE);
         }
+        changed
     }
 }
 
@@ -75,6 +110,73 @@ mod tests {
     use super::*;
 
     #[test]
+    fn visible_hud_clicks_and_drags_follow_both_axes_and_keep_the_deadline_alive() {
+        for horizontal in [false, true] {
+            let context = crate::fonts::test_context();
+            let mut tabs = towavue_core::TabSet::default();
+            let tab = tabs.open_new("video.mp4".into(), towavue_core::MediaKind::Video);
+            let start = Instant::now();
+            let mut hud = Hud::default();
+            hud.changed(tab, 1, start);
+            let viewport = Rect::from_min_size(egui::Pos2::ZERO, vec2(500.0, 400.0));
+            let media = horizontal.then(|| viewport.with_min_y(80.0));
+            let mut track = Rect::NOTHING;
+            let mut frame = |hud: &mut Hud, elapsed, events| {
+                let mut changed = None;
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(viewport),
+                        time: Some(elapsed as f64 / 1000.0),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        track = geometry(ui.max_rect(), media, 0.5).0;
+                        changed = hud.show(
+                            ui,
+                            Some((tab, 1)),
+                            media,
+                            0.5,
+                            start + Duration::from_millis(elapsed),
+                        );
+                    },
+                );
+                (changed, track)
+            };
+            let (_, track) = frame(&mut hud, 0, vec![]);
+            let event = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let center = track.center();
+            let (level, _) = frame(
+                &mut hud,
+                10,
+                vec![egui::Event::PointerMoved(center), event(center, true)],
+            );
+            assert!((level.expect("press updates volume") - 1.0).abs() < 0.01);
+            let maximum = if horizontal {
+                track.right_center()
+            } else {
+                track.center_top()
+            };
+            let (level, _) = frame(&mut hud, 2000, vec![egui::Event::PointerMoved(maximum)]);
+            assert_eq!(level, Some(towavue_core::MAX_VOLUME));
+            assert!(
+                hud.notice.is_some(),
+                "an owned drag outlives the display timer"
+            );
+            frame(&mut hud, 2100, vec![event(maximum, false)]);
+            assert!(!hud.dragging);
+            assert!(context.memory(|memory| memory.focused()).is_none());
+            frame(&mut hud, 3400, vec![]);
+            assert!(hud.notice.is_none());
+        }
+    }
+
+    #[test]
     fn hud_fits_letterboxes_and_expires_without_input_or_focus() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
@@ -100,7 +202,7 @@ mod tests {
                             None,
                             1.0,
                             start + Duration::from_millis(elapsed),
-                        )
+                        );
                     },
                 )
             };
@@ -110,7 +212,7 @@ mod tests {
             assert!(!frame(1200, 1).shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::WHITE)));
             hud.changed(tab, 1, start);
             let _ = context.run_ui(Default::default(), |ui| {
-                hud.show(ui, Some((tab, 2)), None, 1.0, start)
+                hud.show(ui, Some((tab, 2)), None, 1.0, start);
             });
             assert!(
                 hud.notice.is_none(),

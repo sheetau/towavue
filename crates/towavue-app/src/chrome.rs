@@ -404,8 +404,9 @@ pub fn reading_button(
     response
 }
 
-pub fn tab_width(available: f32, count: usize) -> f32 {
-    (available / count.max(1) as f32).clamp(72.0, 160.0)
+pub fn tab_width(available: f32, count: usize, gap: f32) -> f32 {
+    let gaps = count.saturating_sub(1) as f32 * gap;
+    ((available - gaps) / count.max(1) as f32).clamp(72.0, 160.0)
 }
 
 pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize, f32)> {
@@ -1058,8 +1059,18 @@ mod tests {
 
     #[test]
     fn tabs_share_width_with_a_bounded_minimum() {
-        assert_eq!(tab_width(600.0, 4), 150.0);
-        assert_eq!(tab_width(600.0, 1), 160.0);
-        assert_eq!(tab_width(300.0, 10), 72.0);
+        assert_eq!(tab_width(600.0, 4, 2.0), 148.5);
+        assert_eq!(tab_width(600.0, 1, 2.0), 160.0);
+        assert_eq!(tab_width(300.0, 10, 2.0), 72.0);
+        for available in [240.0, 600.0, 1200.0] {
+            for count in 1..20 {
+                let width = tab_width(available, count, 2.0);
+                let extent = width * count as f32 + 2.0 * count.saturating_sub(1) as f32;
+                assert!(
+                    extent <= available + 0.001 || width == 72.0,
+                    "tabs may only overflow after reaching the minimum width"
+                );
+            }
+        }
     }
 }

@@ -66,9 +66,12 @@ pub fn tab_strip_fades(ui: &Ui, rect: Rect, content_width: f32, offset: f32) {
     }
     let pixel = (1.0 / ui.ctx().pixels_per_point()).min(width);
     let painter = ui.painter().with_clip_rect(rect);
+    // Layout and scroll offsets are rounded independently at fractional DPI.
+    // Subpixel residue at an end is not another clipped tab.
+    let tolerance = 0.5 / ui.ctx().pixels_per_point();
     for (needed, left) in [
-        (offset > 0.0, true),
-        (content_width - rect.width() - offset > 0.0, false),
+        (offset > tolerance, true),
+        (content_width - rect.width() - offset > tolerance, false),
     ] {
         if !needed {
             continue;
@@ -223,7 +226,8 @@ mod tests {
             for (content, offset, edges) in [
                 (100.0, 0.0, 0),
                 (400.0, 0.0, 1),
-                (400.0, 0.25, 2),
+                (400.0, 0.25, 1),
+                (400.0, 199.75, 1),
                 (400.0, 100.0, 2),
                 (400.0, 200.0, 1),
             ] {

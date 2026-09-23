@@ -247,6 +247,12 @@ mod tests {
         );
         app.media_kind = Some(towavue_core::MediaKind::Audio);
         assert!(app.list_owns_key(&key));
+        let before = app.playback_volume();
+        app.process_shortcut("Ctrl+Down".parse().expect("volume key"));
+        assert!(
+            app.playback_volume() < before,
+            "audio volume remains reachable while plain arrows belong to the list"
+        );
         app.media_kind = Some(towavue_core::MediaKind::Video);
         assert!(!app.list_owns_key(&key));
     }

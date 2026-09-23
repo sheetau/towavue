@@ -7,7 +7,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v9";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v10";
+const ZOOM_BINDING_HEADER: &str = "# towavue shortcuts v9";
 const EDITOR_BINDING_HEADER: &str = "# towavue shortcuts v8";
 
 const MULTI_BINDING_HEADER: &str = "# towavue shortcuts v2";
@@ -175,6 +176,8 @@ pub fn defaults() -> ShortcutBindings {
         );
     }
     for (command, key) in [
+        (CommandId::VolumeUp, "Ctrl+Up"),
+        (CommandId::VolumeDown, "Ctrl+Down"),
         (CommandId::ZoomIn, "="),
         (CommandId::ToggleFullscreen, "Enter"),
         (CommandId::SeekBackward, "J"),
@@ -198,9 +201,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let text = text.trim_start_matches('\u{feff}');
-    let zoom_bindings = text
+    let volume_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let zoom_bindings =
+        volume_bindings || text.lines().any(|line| line.trim() == ZOOM_BINDING_HEADER);
+    let mut implicit_volume =
+        std::collections::BTreeSet::from([CommandId::VolumeUp, CommandId::VolumeDown]);
     let mut implicit_zoom = true;
     let editor_bindings = zoom_bindings
         || text
@@ -248,6 +255,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
         declared.insert(command);
         if sequence.trim().is_empty() {
+            implicit_volume.remove(&command);
             if command == CommandId::ZoomIn {
                 implicit_zoom = false;
             }
@@ -279,11 +287,19 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 && sequences.len() == 1
                 && standard.get(command) == sequences.first();
         }
-        let inherit = (legacy
-            && matches!(
-                command,
-                CommandId::SeekBackward | CommandId::SeekForward | CommandId::TogglePause
-            )
+        if implicit_volume.contains(&command)
+            && (volume_bindings
+                || sequences.len() != 1
+                || standard.get(command) != sequences.first())
+        {
+            implicit_volume.remove(&command);
+        }
+        let inherit = (implicit_volume.contains(&command)
+            || legacy
+                && matches!(
+                    command,
+                    CommandId::SeekBackward | CommandId::SeekForward | CommandId::TogglePause
+                )
             || !image_bindings
                 && matches!(
                     command,
@@ -407,6 +423,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
+                || implicit_volume.contains(&definition.id)
         })
     {
         let contexts: Vec<_> = [
@@ -435,6 +452,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .filter(|candidate| {
                 // Only the newly inherited Equals alternative may be pruned here.
                 // Preserve the old primary Plus binding and explicit custom choices.
+                if implicit_volume.contains(&definition.id)
+                    && !candidate.to_string().starts_with("Ctrl+")
+                {
+                    return true;
+                }
                 if definition.id == CommandId::ZoomIn && candidate.to_string() != "=" {
                     return true;
                 }
@@ -485,6 +507,55 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn volume_alternatives_migrate_without_overriding_custom_keys() {
+        for (command, primary, alternative) in [
+            (CommandId::VolumeUp, "Up", "Ctrl+Up"),
+            (CommandId::VolumeDown, "Down", "Ctrl+Down"),
+        ] {
+            let old = format!("{ZOOM_BINDING_HEADER}\n{} = {primary}\n", command.as_str());
+            let migrated = parse(&old, defaults()).expect("legacy settings");
+            for kind in [MediaKind::Audio, MediaKind::Video] {
+                let context = CommandContext {
+                    media_kind: Some(kind),
+                    ..Default::default()
+                };
+                assert_eq!(
+                    migrated.resolve(&[alternative.parse().expect("test key")], context),
+                    ShortcutMatch::Command(command)
+                );
+            }
+            assert_eq!(
+                parse(&serialize(&migrated), defaults()).expect("test binding"),
+                migrated
+            );
+            for value in ["", "Alt+U", primary] {
+                let text = format!("{CURRENT_BINDING_HEADER}\n{} = {value}\n", command.as_str());
+                let explicit = parse(&text, defaults()).expect("test binding");
+                assert!(
+                    !explicit
+                        .all(command)
+                        .contains(&alternative.parse().expect("test key"))
+                );
+            }
+            for custom in [alternative.to_owned(), format!("{alternative} X")] {
+                let text = format!("{old}open_file = {custom}\n");
+                let preserved = parse(&text, defaults()).expect("test binding");
+                assert_eq!(
+                    preserved.all(command),
+                    &[primary.parse().expect("test key")]
+                );
+                assert_eq!(
+                    preserved
+                        .get(CommandId::OpenFile)
+                        .expect("test binding")
+                        .to_string(),
+                    custom
+                );
+            }
+        }
+    }
 
     #[test]
     fn paste_default_preserves_custom_keys_prefixes_and_explicit_removal() {

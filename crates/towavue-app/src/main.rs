@@ -4092,8 +4092,13 @@ where
                         .active()
                         .map(|tab| (tab.id, self.media_generation));
                     let volume = self.playback_volume();
-                    self.volume_hud
-                        .show(ui, owner, self.video_rect, volume, Instant::now());
+                    if let Some(level) =
+                        self.volume_hud
+                            .show(ui, owner, self.video_rect, volume, Instant::now())
+                        && let Some((tab, _)) = owner
+                    {
+                        actions.push(UiAction::Volume(tab, level));
+                    }
                 }
             });
         if let Some(rect) = status_rect {
@@ -5282,7 +5287,11 @@ where
                         .help_text("towavue menu · drag → File / ↘ Edit / ↓ View");
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
-                    let width = chrome::tab_width(strip_width, self.tabs.len());
+                    let width = chrome::tab_width(
+                        strip_width,
+                        self.tabs.len(),
+                        ui.spacing().item_spacing.x,
+                    );
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
                     ui.spacing_mut().scroll.dormant_handle_opacity = 0.0;
@@ -15333,8 +15342,9 @@ mod tests {
                 .iter()
                 .fold(egui::Rect::NOTHING, |rect, (tab, _)| rect.union(*tab));
             let clip = tabs.first().expect("tab backgrounds").1;
-            let expected_edges = usize::from(content.left() < clip.left())
-                + usize::from(content.right() > clip.right());
+            let tolerance = 0.5 / context.pixels_per_point();
+            let expected_edges = usize::from(content.left() < clip.left() - tolerance)
+                + usize::from(content.right() > clip.right() + tolerance);
             let edges: Vec<_> = output
                 .shapes
                 .iter()

@@ -82,6 +82,7 @@ pub struct Filmstrip {
     loader: PreviewLoader,
     generation: u64,
     visible: Vec<PathBuf>,
+    foreground: usize,
     previews: HashMap<PathBuf, Preview>,
     preview_order: Vec<PathBuf>,
     gallery_viewport: Vec<PathBuf>,
@@ -118,6 +119,7 @@ impl Filmstrip {
             loader: PreviewLoader::new(cache, notify)?,
             generation: 0,
             visible: Vec::new(),
+            foreground: 0,
             previews: HashMap::new(),
             preview_order: Vec::new(),
             gallery_viewport: Vec::new(),
@@ -389,7 +391,7 @@ impl Filmstrip {
                 (item.path.clone(), item.kind)
             })
             .collect();
-        self.set_visible(wanted);
+        self.set_visible_prioritized(wanted, 0);
         if self.preparation.as_ref().is_none_or(|preparation| {
             preparation.current != snapshot.items[selected].path
                 || preparation.snapshot != snapshot.generation
@@ -426,7 +428,9 @@ impl Filmstrip {
                 continue;
             }
             self.warming = Some(item.path.clone());
-            self.generation = self.loader.request(vec![(item.path.clone(), item.kind)]);
+            self.generation = self
+                .loader
+                .request_prioritized(vec![(item.path.clone(), item.kind)], 0);
             break;
         }
     }
@@ -1175,6 +1179,7 @@ impl Filmstrip {
         self.focused_card = focused_card;
         self.recent_focus = recent_focus;
         self.gallery_viewport = wanted.iter().map(|(path, _)| path.clone()).collect();
+        let foreground = wanted.len();
         // Keep recently prepared offscreen pixels before spending spare slots on
         // newest-first prefetch. Filling every spare slot with new requests used
         // to evict all older ready cards as soon as they left the viewport.
@@ -1202,7 +1207,7 @@ impl Filmstrip {
                 wanted.push((path.clone(), kind));
             }
         }
-        self.set_visible(wanted);
+        self.set_visible_prioritized(wanted, foreground);
         RecentGrid {
             columns,
             row_height,
@@ -1215,9 +1220,18 @@ impl Filmstrip {
         }
     }
 
-    fn set_visible(&mut self, mut wanted: Vec<(PathBuf, MediaKind)>) {
+    fn set_visible(&mut self, wanted: Vec<(PathBuf, MediaKind)>) {
+        let foreground = wanted.len();
+        self.set_visible_prioritized(wanted, foreground);
+    }
+
+    fn set_visible_prioritized(
+        &mut self,
+        mut wanted: Vec<(PathBuf, MediaKind)>,
+        foreground: usize,
+    ) {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
-        if visible != self.visible {
+        if visible != self.visible || foreground != self.foreground {
             self.warming = None;
             // Reserve slots for current requests, then reuse recently wanted ready
             // textures. A brief seek hover or narrow strip must not undo idle work.
@@ -1234,11 +1248,17 @@ impl Filmstrip {
                 .retain(|path, _| self.preview_order.contains(path));
             self.refreshing
                 .retain(|path| self.preview_order.contains(path));
+            let mut index = 0;
+            let mut missing_foreground = 0;
             wanted.retain(|(path, _)| {
-                !self.previews.contains_key(path) || self.refreshing.contains(path)
+                let missing = !self.previews.contains_key(path) || self.refreshing.contains(path);
+                missing_foreground += usize::from(missing && index < foreground);
+                index += 1;
+                missing
             });
-            self.generation = self.loader.request(wanted);
+            self.generation = self.loader.request_prioritized(wanted, missing_foreground);
             self.visible = visible;
+            self.foreground = foreground;
         }
     }
 }

@@ -25,6 +25,7 @@ enum PreviewStage {
 struct PendingPreview {
     path: PathBuf,
     kind: MediaKind,
+    prefetch: bool,
     stage: PreviewStage,
     disk_key: Option<String>,
 }
@@ -105,10 +106,19 @@ impl PreviewLoader {
     }
 
     pub fn request(&self, paths: Vec<(PathBuf, MediaKind)>) -> u64 {
+        self.request_prioritized(paths, usize::MAX)
+    }
+
+    /// Complete viewport work, including cache misses, before offscreen prefetch.
+    /// Within each class memory/disk hits still precede generation.
+    pub fn request_prioritized(&self, paths: Vec<(PathBuf, MediaKind)>, foreground: usize) -> u64 {
         let mut wanted = Vec::new();
-        for item in paths {
-            if !wanted.contains(&item) {
-                wanted.push(item);
+        for (index, (path, kind)) in paths.into_iter().enumerate() {
+            if !wanted
+                .iter()
+                .any(|(old, old_kind, _)| *old == path && *old_kind == kind)
+            {
+                wanted.push((path, kind, index >= foreground));
                 if wanted.len() == VISIBLE_PREVIEW_LIMIT {
                     break;
                 }
@@ -116,12 +126,22 @@ impl PreviewLoader {
         }
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("preview mailbox");
-        if let Some(active) = &mailbox.active
-            && !wanted
+        if let Some(active) = &mailbox.active {
+            let retained = wanted
                 .iter()
-                .any(|(path, kind)| *path == active.path && *kind == active.kind)
-        {
-            active.cancellation.cancel();
+                .find(|(path, kind, _)| *path == active.path && *kind == active.kind);
+            let foreground_pending = wanted.iter().any(|(path, kind, prefetch)| {
+                !prefetch
+                    && !mailbox
+                        .completed
+                        .iter()
+                        .any(|(ready_kind, preview)| ready_kind == kind && preview.path == *path)
+            });
+            if retained.is_none()
+                || (retained.is_some_and(|(_, _, prefetch)| *prefetch) && foreground_pending)
+            {
+                active.cancellation.cancel();
+            }
         }
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
@@ -129,19 +149,20 @@ impl PreviewLoader {
             preview.generation = generation;
             wanted
                 .iter()
-                .any(|(path, wanted_kind)| *path == preview.path && wanted_kind == kind)
+                .any(|(path, wanted_kind, _)| *path == preview.path && wanted_kind == kind)
         });
         mailbox.pending = wanted
             .into_iter()
-            .filter(|(path, kind)| {
+            .filter(|(path, kind, _)| {
                 !mailbox
                     .completed
                     .iter()
                     .any(|(ready_kind, preview)| ready_kind == kind && preview.path == *path)
             })
-            .map(|(path, kind)| PendingPreview {
+            .map(|(path, kind, prefetch)| PendingPreview {
                 path,
                 kind,
+                prefetch,
                 // Another preview consumer may have populated the shared cache since our miss.
                 stage: PreviewStage::Memory,
                 disk_key: None,
@@ -197,12 +218,13 @@ fn run_worker(
             if mailbox.closed {
                 return;
             }
-            // Memory hits precede disk images, then generation; retain request order per stage.
+            // Visible misses must not wait for speculative metadata/probing.
+            // Preserve cache-hit-first ordering within each demand class.
             let index = mailbox
                 .pending
                 .iter()
                 .enumerate()
-                .min_by_key(|(_, work)| work.stage)
+                .min_by_key(|(_, work)| (work.prefetch, work.stage))
                 .expect("pending work")
                 .0;
             let mut work = mailbox.pending[index].clone();
@@ -279,6 +301,163 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn viewport_misses_finish_before_prefetch_probes_and_keep_cache_hits_first() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = PreviewLoader {
+            shared: Arc::clone(&shared),
+        };
+        let trace = Arc::new(Mutex::new(Vec::new()));
+        let observed = Arc::clone(&trace);
+        let (sent, ready) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            run_worker(
+                shared,
+                || {
+                    let _ = sent.send(());
+                },
+                |path, _, _, _, _| {
+                    observed
+                        .lock()
+                        .expect("trace")
+                        .push(format!("cache:{}", path.display()));
+                    (path == std::path::Path::new("hit.png")).then(|| MediaPreview {
+                        image: crate::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![1, 2, 3, 255].into(),
+                        },
+                        duration: None,
+                    })
+                },
+                |path, _, _| {
+                    observed
+                        .lock()
+                        .expect("trace")
+                        .push(format!("generate:{}", path.display()));
+                    Err("owned miss".into())
+                },
+            )
+        });
+        let generation = loader.request_prioritized(
+            ["visible.png", "hit.png", "older.png"]
+                .map(|path| (path.into(), MediaKind::Image))
+                .into(),
+            2,
+        );
+        for _ in 0..3 {
+            ready
+                .recv_timeout(Duration::from_secs(5))
+                .expect("completion");
+        }
+        let results = loader.take_completed();
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.path.as_path())
+                .collect::<Vec<_>>(),
+            ["hit.png", "visible.png", "older.png"].map(std::path::Path::new)
+        );
+        assert!(results.iter().all(|result| result.generation == generation));
+        drop(loader);
+        worker.join().expect("worker");
+        let trace = trace.lock().expect("trace");
+        assert!(
+            trace
+                .iter()
+                .position(|event| event == "generate:visible.png")
+                .expect("visible generation")
+                < trace
+                    .iter()
+                    .position(|event| event == "cache:older.png")
+                    .expect("prefetch probe")
+        );
+    }
+
+    #[test]
+    fn new_viewport_preempts_unneeded_active_work_and_reuses_promoted_or_completed_requests() {
+        for (initial_foreground, promote, completed) in [
+            (0, false, false),
+            (1, false, false),
+            (0, true, false),
+            (1, true, false),
+            (0, false, true),
+        ] {
+            let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+            let loader = PreviewLoader {
+                shared: Arc::clone(&shared),
+            };
+            let (entered, started) = mpsc::channel();
+            let (release, gate) = mpsc::channel();
+            let (sent, ready) = mpsc::channel();
+            let first = std::sync::atomic::AtomicBool::new(true);
+            let worker = thread::spawn(move || {
+                run_worker(
+                    shared,
+                    || {
+                        let _ = sent.send(());
+                    },
+                    |_, _, _, _, _| None,
+                    |path, _, cancellation| {
+                        if path == std::path::Path::new("background.png")
+                            && first.swap(false, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            entered.send(cancellation.clone()).expect("entered");
+                            gate.recv_timeout(Duration::from_secs(5)).expect("release");
+                        }
+                        Err(format!("owned generation: {}", path.display()))
+                    },
+                )
+            });
+            if completed {
+                loader.request_prioritized(
+                    ["visible.png", "background.png"]
+                        .map(|path| (path.into(), MediaKind::Image))
+                        .into(),
+                    1,
+                );
+            } else {
+                loader.request_prioritized(
+                    vec![("background.png".into(), MediaKind::Image)],
+                    initial_foreground,
+                );
+            }
+            let active = started
+                .recv_timeout(Duration::from_secs(5))
+                .expect("active prefetch");
+            let order = if promote {
+                ["background.png", "visible.png"]
+            } else {
+                ["visible.png", "background.png"]
+            };
+            let generation = loader
+                .request_prioritized(order.map(|path| (path.into(), MediaKind::Image)).into(), 1);
+            assert_eq!(active.is_cancelled(), !promote && !completed);
+            release.send(()).expect("resume worker");
+            for _ in 0..2 {
+                ready
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("completion");
+            }
+            let results = loader.take_completed();
+            assert_eq!(
+                results.len(),
+                2,
+                "cancelled prefetch cannot publish an extra stale result"
+            );
+            assert_eq!(
+                results
+                    .iter()
+                    .map(|result| result.path.as_path())
+                    .collect::<Vec<_>>(),
+                order.map(std::path::Path::new)
+            );
+            assert!(results.iter().all(|result| result.generation == generation));
+            drop(loader);
+            worker.join().expect("worker");
+        }
+    }
 
     #[test]
     fn a_single_remaining_request_skips_the_disk_priority_sweep() {

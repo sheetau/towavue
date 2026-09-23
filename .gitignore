@@ -9,6 +9,7 @@
 /.cache/
 /.idea/
 /.vscode/
+/.history/
 *.pdb
 *.ilk
 *.user

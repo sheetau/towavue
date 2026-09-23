@@ -1811,9 +1811,28 @@ fn normalize_packet_time(packet: &mut ffmpeg::Packet, time_base: Rational, origi
 }
 
 pub(crate) fn probe_audio_format(path: &Path) -> Result<Option<AudioFormat>, DecodeError> {
+    Ok(probe_playback_formats(path)?.0)
+}
+
+/// Reuse the initial playback probe for descriptive video metadata; no second
+/// file open or render-thread probing is required to display source FPS.
+pub(crate) fn probe_playback_formats(
+    path: &Path,
+) -> Result<(Option<AudioFormat>, Option<f64>), DecodeError> {
     ffmpeg::init()?;
     let input = format::input(path)?;
-    Ok(create_audio_pipeline(&input)?.map(|pipeline| pipeline.output_format))
+    let fps = input.streams().best(Type::Video).and_then(|stream| {
+        positive_frame_rate(stream.avg_frame_rate()).or_else(|| positive_frame_rate(stream.rate()))
+    });
+    Ok((
+        create_audio_pipeline(&input)?.map(|pipeline| pipeline.output_format),
+        fps,
+    ))
+}
+
+fn positive_frame_rate(rate: Rational) -> Option<f64> {
+    (rate.numerator() > 0 && rate.denominator() > 0)
+        .then(|| f64::from(rate.numerator()) / f64::from(rate.denominator()))
 }
 
 fn create_video_pipeline(
@@ -2114,6 +2133,72 @@ mod tests {
         DecodeOutput, ParallelSoftwareDecodeOutput, VideoTransfer, classify_transfer,
         decode_file_from, select_d3d11_pixel_format, timestamp_to_media_time,
     };
+
+    #[test]
+    fn playback_probe_reports_source_frame_rate_without_decoding_or_retiming_it() {
+        for rate in [
+            Rational(0, 1),
+            Rational(1, 0),
+            Rational(-1, 1),
+            Rational(1, -1),
+        ] {
+            assert_eq!(super::positive_frame_rate(rate), None);
+        }
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let executable = std::env::var_os("FFMPEG_DIR")
+            .map(std::path::PathBuf::from)
+            .map(|path| path.join("bin/ffmpeg.exe"))
+            .unwrap_or_else(|| "ffmpeg.exe".into());
+        for (index, rate, expected) in [(0, "25", 25.0), (1, "30000/1001", 30000.0 / 1001.0)] {
+            let path =
+                std::env::temp_dir().join(format!("towavue-source-fps-{unique}-{index}.nut"));
+            let output = std::process::Command::new(&executable)
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    &format!("color=size=32x24:rate={rate}:duration=0.2"),
+                    "-c:v",
+                    "ffv1",
+                ])
+                .arg(&path)
+                .output()
+                .expect("owned video fixture");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let (audio, fps) = super::probe_playback_formats(&path).expect("probe");
+            assert!(audio.is_none());
+            assert!((fps.expect("video FPS") - expected).abs() < 0.000001);
+            let mut session = crate::PlaybackSession::open_paused(
+                &path,
+                crate::GraphicsDevice::warp_for_test().expect("WARP"),
+                0.0,
+                1.0,
+                towavue_core::PlaybackRange::default(),
+                |_| {},
+            )
+            .expect("video session");
+            assert_eq!(session.source_video_frame_rate(), fps);
+            session
+                .set_rate_at(MediaTime::ZERO, 2.0, true)
+                .expect("speed");
+            assert_eq!(
+                session.source_video_frame_rate(),
+                fps,
+                "source FPS is not display throughput"
+            );
+            drop(session);
+            std::fs::remove_file(path).expect("remove owned video fixture");
+        }
+    }
 
     #[test]
     fn timestamp_conversion_uses_stream_time_base() {

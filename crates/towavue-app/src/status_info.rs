@@ -91,6 +91,21 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             };
             details.push(Group::Playback, &value, format!("Speed {value}"));
         }
+        if self.media_kind == Some(MediaKind::Video)
+            && let Some(fps) = self
+                .session
+                .as_ref()
+                .and_then(PlaybackSession::source_video_frame_rate)
+        {
+            let value = frame_rate_text(fps);
+            details.push(
+                Group::File,
+                &value,
+                format!(
+                    "Source frame rate: {value} (stream-reported; independent of playback speed)"
+                ),
+            );
+        }
         if self
             .tabs
             .active()
@@ -110,11 +125,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let value = extension.to_uppercase();
             details.push(Group::File, &value, &value);
         } else if self.current_document_untitled() {
-            details.push(
-                Group::Document,
-                "Untitled",
-                "Pasted image without a saved file",
-            );
+            details.push(Group::Document, "PNG", "Pasted image without a saved file");
         } else if let Some(image) = image {
             let value = image.decoded.format.to_uppercase();
             details.push(Group::File, &value, &value);
@@ -228,4 +239,30 @@ pub(super) fn fitting_text(ui: &egui::Ui, details: &[String], width: f32) -> Str
         text = candidate;
     }
     text
+}
+
+fn frame_rate_text(fps: f64) -> String {
+    // Very sparse streams must not round down to an impossible zero FPS.
+    let number = if fps < 0.001 {
+        fps.to_string()
+    } else {
+        format!("{fps:.3}")
+    };
+    format!("{} fps", number.trim_end_matches('0').trim_end_matches('.'))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn source_frame_rate_keeps_useful_fractional_precision() {
+        for (fps, expected) in [
+            (60.0, "60 fps"),
+            (30000.0 / 1001.0, "29.97 fps"),
+            (24000.0 / 1001.0, "23.976 fps"),
+            (0.5, "0.5 fps"),
+            (0.0001, "0.0001 fps"),
+        ] {
+            assert_eq!(super::frame_rate_text(fps), expected);
+        }
+    }
 }

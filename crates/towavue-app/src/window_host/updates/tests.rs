@@ -460,7 +460,8 @@ fn update_untitled_save_as_cancel_keeps_private_pixels_and_late_save_cannot_exit
     app.ui_context = Some(crate::fonts::test_context());
     app.open_pasted_image(crate::image_paste::tests::fixture())
         .expect("owned paste");
-    let id = app.tabs.active_id().expect("Untitled");
+    let id = app.tabs.active_id().expect("pasted image");
+    app.dispatch(CommandId::RotateClockwise);
     let original = app.document_input(id).expect("retained pixels");
     ready(&mut host, UpdatePhase::Ready, false);
     choose(&mut host, first, Action::Install);

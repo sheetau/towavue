@@ -585,6 +585,12 @@ fn source_save_native_video_reopens_all_hosted_readers_on_their_retained_origina
                 app.generation = session.generation();
                 app.clock = Some(PlaybackClock::paused(position, 1.0));
                 app.session = Some(session);
+                assert!(app.status_details().iter().any(|field| field == "4 fps"));
+                assert!(
+                    app.status_info()
+                        .tooltip()
+                        .contains("Source frame rate: 4 fps")
+                );
             }
             let app = host.windows.get_mut(&owner).expect("owner");
             app.edits.entry(id).or_default().push(
@@ -622,6 +628,7 @@ fn source_save_native_video_reopens_all_hosted_readers_on_their_retained_origina
                     backup
                 );
                 assert_eq!(app.state, PlaybackState::Paused);
+                assert!(app.status_details().iter().any(|field| field == "4 fps"));
                 assert_eq!(
                     app.current_position(),
                     if key == owner {

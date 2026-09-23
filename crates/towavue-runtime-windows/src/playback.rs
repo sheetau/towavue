@@ -138,6 +138,7 @@ pub struct PlaybackSession {
     graphics_device: GraphicsDevice,
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
+    source_video_frame_rate: Option<f64>,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
     pending_video: Option<QueuedVideoFrame>,
     current_video: Option<PresentationFrame>,
@@ -251,7 +252,7 @@ impl PlaybackSession {
         // Capture before probing/starting decoders, never at Save time. Viewing
         // unsupported file identities (e.g. symlinks) remains available.
         let source = crate::FileOperationSource::capture(path).ok();
-        let audio_format = decode::probe_audio_format(path)?;
+        let (audio_format, source_video_frame_rate) = decode::probe_playback_formats(path)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
             hardware_frame_count: AtomicU64::new(0),
@@ -266,6 +267,7 @@ impl PlaybackSession {
             graphics_device,
             notify: Arc::new(notify),
             audio_format,
+            source_video_frame_rate,
             video_rx: None,
             pending_video: None,
             current_video: None,
@@ -888,6 +890,12 @@ impl PlaybackSession {
             time: self.current_source_video_time()?,
             source: Arc::clone(self.current_video_source.as_ref()?),
         })
+    }
+
+    /// Source stream metadata, independent of listening/playback speed or GPU
+    /// presentation throughput. Uses the stream's reported average when available.
+    pub fn source_video_frame_rate(&self) -> Option<f64> {
+        self.source_video_frame_rate
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {

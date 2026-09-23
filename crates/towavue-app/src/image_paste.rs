@@ -1,6 +1,8 @@
 use crate::*;
 use towavue_runtime_windows::{ImagePasteJob, PastedImage};
 
+pub(super) const DEFAULT_NAME: &str = "image.png";
+
 #[derive(Default)]
 pub(super) struct State {
     pub serial: u64,
@@ -54,14 +56,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         // Validate the destination texture before changing the selected tab.
         let image = ImagePresentation::from_named_frame(
             context,
-            "Untitled",
+            DEFAULT_NAME,
             Arc::clone(pasted.image()),
             0,
             self.image_sampling(),
         )?;
         let id = self.tabs.open_untitled_image();
         self.source_backings.insert(id, pasted.original().clone());
-        self.edits.entry(id).or_default().invalidate_saved_source();
+        self.edits.entry(id).or_default();
         self.load_document(None, MediaKind::Image, false);
         self.image = Some(image);
         self.image_error = None;

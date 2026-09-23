@@ -1407,7 +1407,7 @@ fn image_transfer_resumes_only_missing_pages_and_keeps_loading_preview() {
         if hidden_source {
             assert_eq!(destination.reading_focus_path(), Some(&paths[1]));
             let preview = destination
-                .retained_tab_preview(destination_id, &paths[0])
+                .retained_tab_preview(destination_id, Some(&paths[0]))
                 .expect("reading preview");
             let tab_preview::RetainedPreview::Reading { pages, .. } = preview else {
                 panic!("reading")

@@ -1197,7 +1197,7 @@ fn reading_leading_focus_survives_regrouping_background_restore_and_shell_change
                 app.displayed_tab = Some(foreground);
                 app.path = Some(root.join("other.bmp"));
                 let preview = app
-                    .retained_tab_preview(id, &source)
+                    .retained_tab_preview(id, Some(&source))
                     .expect("retained preview");
                 let tab_preview::RetainedPreview::Reading { pages, .. } = preview else {
                     panic!("reading card")

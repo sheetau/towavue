@@ -4184,7 +4184,7 @@ where
         let name = self
             .path
             .as_deref()
-            .map_or_else(|| "this media".to_owned(), display_name);
+            .map_or_else(|| image_paste::DEFAULT_NAME.to_owned(), display_name);
         let modal =
             chrome::modal(context, "unsaved-edit-guard".into(), false).show(context, |ui| {
                 let mut labels = vec!["Save and continue", "Discard edits", "Cancel"];
@@ -4192,7 +4192,11 @@ where
                     labels.push("Cancel current export");
                 }
                 chrome::modal_body(ui, 520.0, "Unsaved edits", &labels, |ui| {
-                    ui.label("Save over the source file?");
+                    ui.label(if self.current_document_untitled() {
+                        "Save this image to a file?"
+                    } else {
+                        "Save over the source file?"
+                    });
                     ui.add(
                         egui::Label::new(&name)
                             .truncate()
@@ -5476,7 +5480,7 @@ where
                                         .target
                                         .current_path()
                                         .map(display_name)
-                                        .unwrap_or_else(|| "Untitled".into());
+                                        .unwrap_or_else(|| image_paste::DEFAULT_NAME.into());
                                     let audio = self.tab_audio_indicator(tab);
                                     let audio_rect = audio.map(|_| {
                                         let mut bounds = label_rect;
@@ -5604,19 +5608,23 @@ where
                                                 tab.target
                                                     .current_path()
                                                     .map(display_name)
-                                                    .unwrap_or_else(|| "Untitled".into())
+                                                    .unwrap_or_else(
+                                                        || image_paste::DEFAULT_NAME.into()
+                                                    )
                                             ),
                                         )
                                     });
                                     tab_ui.ctx().accesskit_node_builder(close.id, |node| {
                                         node.set_description(format!(
-                                            "{}{}",
-                                            tab.target
-                                                .current_path()
-                                                .map(|path| path.display().to_string())
-                                                .unwrap_or_else(|| "Untitled".into()),
-                                            if dirty { " — Unsaved changes" } else { "" }
-                                        ));
+                                                "{}{}",
+                                                tab.target
+                                                    .current_path()
+                                                    .map(|path| path.display().to_string())
+                                                    .unwrap_or_else(
+                                                        || image_paste::DEFAULT_NAME.into()
+                                                    ),
+                                                if dirty { " — Unsaved changes" } else { "" }
+                                            ));
                                     });
                                     if !self.modal_input_blocked()
                                         && !self.palette_open
@@ -5638,15 +5646,30 @@ where
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if preview_allowed
-                                        && (active || tab.target.current_path().is_none())
-                                    {
+                                    if preview_allowed && active {
                                         response.clone().help_text(
                                             tab.target
                                                 .current_path()
                                                 .map(|path| path.display().to_string())
-                                                .unwrap_or_else(|| "Untitled".into()),
+                                                .unwrap_or_else(|| {
+                                                    image_paste::DEFAULT_NAME.into()
+                                                }),
                                         );
+                                    }
+                                    if preview_allowed
+                                        && !active
+                                        && tab.target.current_path().is_none()
+                                        && !egui::Popup::is_any_open(tab_ui.ctx())
+                                    {
+                                        let mut response = response.clone();
+                                        response.rect.min.x = rect.min.x;
+                                        response.interact_rect = response.rect.intersect(clip);
+                                        let retained = media_preview::tab_hovered(&response)
+                                            .then(|| self.retained_tab_preview(tab.id, None))
+                                            .flatten();
+                                        // Pathless pixels already belong to this tab. Never send a
+                                        // fabricated filename or private backing path to a cache worker.
+                                        self.tab_preview.show_pasted(&response, retained.as_ref());
                                     }
                                     if preview_allowed
                                         && !active
@@ -5679,12 +5702,13 @@ where
                                         let folder = hovered
                                             .then(|| self.preview_folder(tab.id, &target.path))
                                             .flatten();
-                                        let mut retained_image =
-                                            if hovered && target.kind == MediaKind::Image {
-                                                self.retained_tab_preview(tab.id, &target.path)
-                                            } else {
-                                                None
-                                            };
+                                        let mut retained_image = if hovered
+                                            && target.kind == MediaKind::Image
+                                        {
+                                            self.retained_tab_preview(tab.id, Some(&target.path))
+                                        } else {
+                                            None
+                                        };
                                         if retained_image.is_none()
                                             && let Some(folder) = &folder
                                             && let Some(paths) = folder.reading_paths()
@@ -6307,6 +6331,9 @@ where
                                         chrome::MUTED,
                                         format!("{}{}{suffix}", self.deleted_path_prefix(), path.display()),
                                     )
+                                } else if self.current_document_untitled() {
+                                    (image_paste::DEFAULT_NAME.into(), chrome::MUTED,
+                                     "Pasted image without a saved file".into())
                                 } else {
                                     (
                                         if self.keyboard_settings_active() {
@@ -7933,7 +7960,7 @@ where
                 .path
                 .as_deref()
                 .map(display_name)
-                .unwrap_or_else(|| "Untitled".into()),
+                .unwrap_or_else(|| image_paste::DEFAULT_NAME.into()),
             decoded,
             frame_index,
             options,
@@ -8563,7 +8590,7 @@ where
         };
         let dialog = FileDialogKind::SaveExport {
             suggested_name: if self.current_document_untitled() {
-                "Untitled.png".into()
+                image_paste::DEFAULT_NAME.into()
             } else if output == ExportOutput::AudioOnly {
                 export_audio_name(&source)
             } else {
@@ -10006,8 +10033,14 @@ where
                 PromptButtons::RetryCancel,
             ),
             FallbackPrompt::Guard => {
-                let name = self.path.as_deref().map(display_name).unwrap_or_default();
-                (format!("{name}\n\nSave replaces the source file. Cancel keeps your edits and stops this action."),
+                let name = self.path.as_deref().map(display_name)
+                    .unwrap_or_else(|| image_paste::DEFAULT_NAME.into());
+                let save = if self.current_document_untitled() {
+                    "Save lets you choose a file location."
+                } else {
+                    "Save replaces the source file."
+                };
+                (format!("{name}\n\n{save} Cancel keeps your edits and stops this action."),
                     PromptButtons::SaveDiscardCancel {
                         discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit | GuardedAction::UpdateExit(_))),
                     })
@@ -10624,7 +10657,7 @@ where
                 .active()
                 .is_some_and(|tab| tab.target.current_path().is_none())
             {
-                "Untitled"
+                image_paste::DEFAULT_NAME
             } else if self.keyboard_settings_active() {
                 "Keyboard Shortcuts"
             } else {

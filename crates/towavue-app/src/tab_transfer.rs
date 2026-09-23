@@ -64,7 +64,8 @@ impl ImagePresentation {
             texture: context.load_texture(
                 format!(
                     "image:{}",
-                    path.map(display_name).unwrap_or_else(|| "Untitled".into())
+                    path.map(display_name)
+                        .unwrap_or_else(|| image_paste::DEFAULT_NAME.into())
                 ),
                 color_image(&self.decoded.frames[self.frame_index]),
                 sampling,

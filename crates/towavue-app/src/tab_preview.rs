@@ -78,9 +78,13 @@ impl RetainedPreview {
 }
 
 impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
-    pub(super) fn retained_tab_preview(&self, tab: TabId, path: &Path) -> Option<RetainedPreview> {
+    pub(super) fn retained_tab_preview(
+        &self,
+        tab: TabId,
+        path: Option<&Path>,
+    ) -> Option<RetainedPreview> {
         let (image, others, reading, settings, snapshot, loading, focus) =
-            if self.displayed_tab == Some(tab) && self.path.as_deref() == Some(path) {
+            if self.displayed_tab == Some(tab) && self.path.as_deref() == path {
                 (
                     self.image.as_ref(),
                     &self.reading_pages,
@@ -92,8 +96,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                 )
             } else {
                 let saved = self.retained_images.get(&tab).filter(|saved| {
-                    saved.path.as_deref() == Some(path)
-                        && saved.graphics_epoch == self.graphics_epoch
+                    saved.path.as_deref() == path && saved.graphics_epoch == self.graphics_epoch
                 })?;
                 (
                     saved.image.as_ref(),
@@ -108,6 +111,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
         if !reading {
             return image.map(|image| RetainedPreview::Image(image.texture.clone()));
         }
+        let path = path?;
         let pending_size = image.map_or(egui::Vec2::splat(1.0), |image| image.texture.size_vec2());
         let mut pages: Vec<_> = others
             .iter()
@@ -461,6 +465,26 @@ impl TabPreview {
         transport: Option<&crate::preview_transport::Transport>,
         folder: Option<&crate::image_tab_preview::FolderPosition>,
     ) -> Option<crate::preview_transport::Action> {
+        self.show_card(response, Some(target), retained, transport, folder)
+    }
+
+    pub fn show_pasted(&self, response: &egui::Response, retained: Option<&RetainedPreview>) {
+        self.show_card(response, None, retained, None, None);
+    }
+
+    fn show_card(
+        &self,
+        response: &egui::Response,
+        target: Option<&Target>,
+        retained: Option<&RetainedPreview>,
+        transport: Option<&crate::preview_transport::Transport>,
+        folder: Option<&crate::image_tab_preview::FolderPosition>,
+    ) -> Option<crate::preview_transport::Action> {
+        let kind = target.map_or(MediaKind::Image, |target| target.kind);
+        let label = target.map_or_else(
+            || crate::image_paste::DEFAULT_NAME.into(),
+            |target| crate::display_name(&target.path),
+        );
         crate::media_preview::Preview::tab(response)
             .show(|ui| {
                 ui.set_max_width(240.0);
@@ -469,11 +493,11 @@ impl TabPreview {
                 {
                     let action = folder.and_then(|folder| folder.show(ui, thumbnail));
                     crate::media_preview::caption(ui, |ui| {
-                        ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                        ui.add(egui::Label::new(&label).wrap());
                     });
                     return action;
                 }
-                let cached = (self.target.as_ref() == Some(target))
+                let cached = (target.is_some() && self.target.as_ref() == target)
                     .then_some(self.texture.as_ref())
                     .flatten();
                 let texture = retained
@@ -494,7 +518,7 @@ impl TabPreview {
                     // Video sheets contain padded 240x160 cells. Keep that same
                     // viewport for the earlier unpadded thumbnail, otherwise a
                     // retained shorter height shrinks the whole sheet cell.
-                    let height = if target.kind == MediaKind::Video {
+                    let height = if kind == MediaKind::Video {
                         160.0
                     } else if transport.is_some() || folder.is_some() {
                         size.y.max(40.0)
@@ -528,7 +552,7 @@ impl TabPreview {
                                 240.0,
                                 card_viewport_height(
                                     response,
-                                    if target.kind == MediaKind::Audio {
+                                    if kind == MediaKind::Audio {
                                         40.0
                                     } else {
                                         160.0
@@ -552,13 +576,15 @@ impl TabPreview {
                     if texture.is_some_and(|texture| texture.is_err()) {
                         ui.label("No preview");
                     }
-                    if target.kind == MediaKind::Video {
+                    if kind == MediaKind::Video {
                         ui.label(format!(
                             "Preview near {}",
-                            crate::format_time(crate::media_time(target.position))
+                            crate::format_time(crate::media_time(
+                                target.expect("video target").position
+                            ))
                         ));
                     }
-                    ui.add(egui::Label::new(target.path.display().to_string()).wrap());
+                    ui.add(egui::Label::new(&label).wrap());
                 });
                 action
             })

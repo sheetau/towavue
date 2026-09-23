@@ -80,6 +80,14 @@ pub struct RecentFiles {
 
 impl RecentFiles {
     pub fn new(path: PathBuf, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
+        Self::with_presence_probe(path, notify, |path| path.try_exists())
+    }
+
+    fn with_presence_probe(
+        path: PathBuf,
+        notify: impl Fn() + Send + 'static,
+        mut exists: impl FnMut(&Path) -> std::io::Result<bool> + Send + 'static,
+    ) -> std::io::Result<Self> {
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
         let worker = thread::Builder::new()
@@ -145,35 +153,46 @@ impl RecentFiles {
                             }
                         }
                     }
-                    if refresh_gallery {
-                        if let Some(missing) = missing_paths(&paths, || {
-                            let mailbox = mutex.lock().expect("recent mailbox");
-                            mailbox.closed
-                                || mailbox.clear
-                                || !mailbox.pending.is_empty()
-                                || !mailbox.commands.is_empty()
-                        }) {
-                            missing_files = missing;
-                            refresh_gallery = false;
-                        }
-                    } else {
-                        let retained: HashSet<_> = paths.iter().map(|entry| &entry.path).collect();
-                        missing_files.retain(|path| retained.contains(path));
-                    }
-                    {
+                    let retained: HashSet<_> = paths.iter().map(|entry| &entry.path).collect();
+                    missing_files.retain(|path| retained.contains(path));
+                    let publish = |missing_files: &[PathBuf]| {
                         let mut mailbox = mutex.lock().expect("recent mailbox");
-                        if !mailbox.clear && mailbox.pending.is_empty() {
+                        if !mailbox.closed && !mailbox.clear && mailbox.pending.is_empty() {
                             mailbox.completed = Some(RecentUpdate {
                                 commands: (commands_available && mailbox.commands.is_empty())
                                     .then(|| command_history.clone()),
                                 entries: paths.clone(),
                                 hidden_folders: hidden_folders.clone(),
-                                missing_files: missing_files.clone(),
-                                error,
+                                missing_files: missing_files.to_vec(),
+                                error: error.clone(),
                             });
+                            drop(mailbox);
+                            notify();
                         }
+                    };
+                    // Deliver newest-first history before any source filesystem call.
+                    // The last confirmed presence mask remains usable during a refresh;
+                    // only a changed completed mask needs a second snapshot/notification.
+                    publish(&missing_files);
+                    if refresh_gallery
+                        && let Some(missing) = missing_paths(
+                            &paths,
+                            || {
+                                let mailbox = mutex.lock().expect("recent mailbox");
+                                mailbox.closed
+                                    || mailbox.clear
+                                    || !mailbox.pending.is_empty()
+                                    || !mailbox.commands.is_empty()
+                            },
+                            &mut exists,
+                        )
+                    {
+                        if missing != missing_files {
+                            missing_files = missing;
+                            publish(&missing_files);
+                        }
+                        refresh_gallery = false;
                     }
-                    notify();
                     let mut mailbox = ready
                         .wait_while(mutex.lock().expect("recent mailbox"), |mailbox| {
                             !mailbox.closed
@@ -357,6 +376,7 @@ fn remember(paths: &mut Vec<RecentEntry>, pending: &[RecentEntry]) {
 fn missing_paths(
     paths: &[RecentEntry],
     mut interrupted: impl FnMut() -> bool,
+    exists: &mut impl FnMut(&Path) -> std::io::Result<bool>,
 ) -> Option<Vec<PathBuf>> {
     let mut missing = Vec::new();
     for entry in paths.iter().filter(|entry| entry.kind == RecentKind::File) {
@@ -365,7 +385,7 @@ fn missing_paths(
         if interrupted() {
             return None;
         }
-        if matches!(entry.path.try_exists(), Ok(false)) {
+        if matches!(exists(&entry.path), Ok(false)) {
             missing.push(entry.path.clone());
         }
     }
@@ -659,6 +679,90 @@ mod tests {
     }
 
     #[test]
+    fn history_arrives_before_a_blocked_presence_probe_and_clear_rejects_its_snapshot() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+        for clear in [false, true] {
+            let path = fixture(if clear {
+                "early-clear"
+            } else {
+                "early-history"
+            });
+            let entries: Vec<_> = (0..FILE_LIMIT)
+                .map(|index| RecentEntry {
+                    path: path.parent().expect("root").join(format!("{index:05}.png")),
+                    kind: RecentKind::File,
+                    opened_at: Some(index as u64),
+                })
+                .collect();
+            let expected = update(&path, &entries).expect("seed archive");
+            let original = fs::read(&path).expect("history");
+            let (notified, updates) = mpsc::channel();
+            let (entered, probes) = mpsc::channel();
+            let (release, gate) = mpsc::channel();
+            let mut first = true;
+            let started = Instant::now();
+            let recent = RecentFiles::with_presence_probe(
+                path.clone(),
+                move || {
+                    let _ = notified.send(());
+                },
+                move |source| {
+                    if first {
+                        first = false;
+                        entered.send(source.to_owned()).expect("probe entered");
+                        gate.recv_timeout(Duration::from_secs(5))
+                            .expect("release probe");
+                    }
+                    Ok(false)
+                },
+            )
+            .expect("worker");
+            assert_eq!(
+                probes.recv_timeout(Duration::from_secs(5)).expect("probe"),
+                expected[0].path
+            );
+            updates
+                .recv_timeout(Duration::from_secs(5))
+                .expect("early notification");
+            let early = recent
+                .take_completed()
+                .expect("history before probe completes");
+            assert_eq!(early.entries, expected);
+            assert!(early.missing_files.is_empty() && early.error.is_none());
+            eprintln!(
+                "EARLY_HISTORY entries={} delivery_ms={:.3} blocked_probe=true clear={clear}",
+                early.entries.len(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            if clear {
+                recent.clear();
+                assert!(recent.take_completed().is_none());
+            }
+            release.send(()).expect("release");
+            updates
+                .recv_timeout(Duration::from_secs(5))
+                .expect("final notification");
+            let final_update = recent.take_completed().expect("final snapshot");
+            if clear {
+                assert!(final_update.entries.is_empty() && final_update.missing_files.is_empty());
+            } else {
+                assert_eq!(final_update.entries, expected);
+                assert_eq!(
+                    final_update.missing_files,
+                    expected
+                        .iter()
+                        .map(|entry| entry.path.clone())
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(fs::read(&path).expect("unchanged history"), original);
+            }
+            drop(recent);
+            clean(&path);
+        }
+    }
+
+    #[test]
     fn gallery_refresh_hides_only_absent_files_without_rewriting_history() {
         let path = fixture("gallery-presence");
         let root = path.parent().expect("parent");
@@ -691,21 +795,27 @@ mod tests {
             let _ = sender.send(());
         })
         .expect("worker");
-        let delivered = || {
-            receiver
-                .recv_timeout(std::time::Duration::from_secs(5))
-                .expect("worker notification");
-            let update = recent.take_completed().expect("delivered snapshot");
-            assert!(update.error.is_none());
-            update
+        let delivered = |expected: &[PathBuf]| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                receiver
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("worker notification");
+                if let Some(update) = recent.take_completed() {
+                    assert!(update.error.is_none());
+                    if update.missing_files == expected {
+                        return update;
+                    }
+                }
+            }
         };
-        let initial = delivered();
+        let initial = delivered(std::slice::from_ref(&missing));
         assert_eq!(initial.missing_files, std::slice::from_ref(&missing));
         assert_eq!(initial.entries.len(), 4);
         fs::remove_file(&present).expect("remove owned source");
         fs::write(&missing, b"restored source").expect("restore owned source");
         recent.refresh_gallery();
-        let refreshed = delivered();
+        let refreshed = delivered(std::slice::from_ref(&present));
         assert_eq!(refreshed.missing_files, std::slice::from_ref(&present));
         assert_eq!(refreshed.entries, initial.entries);
         assert_eq!(fs::read(&path).expect("history unchanged"), original);
@@ -713,12 +823,15 @@ mod tests {
         // Successful opens clear their stale marks without restatting all history.
         fs::write(&present, b"original source").expect("restore source");
         recent.record(present.clone());
-        assert!(delivered().missing_files.is_empty());
+        assert!(delivered(&[]).missing_files.is_empty());
         fs::remove_file(&present).expect("remove owned source");
         recent.refresh_gallery();
-        assert_eq!(delivered().missing_files, [present]);
+        assert_eq!(
+            delivered(std::slice::from_ref(&present)).missing_files,
+            [present]
+        );
         recent.clear();
-        let cleared = delivered();
+        let cleared = delivered(&[]);
         assert!(cleared.entries.is_empty() && cleared.missing_files.is_empty());
         drop(recent);
         assert_eq!(
@@ -988,7 +1101,7 @@ mod tests {
         let months_ms = started.elapsed().as_secs_f64() * 1000.0;
         let started = std::time::Instant::now();
         assert_eq!(
-            missing_paths(&stored, || false)
+            missing_paths(&stored, || false, &mut |path| path.try_exists())
                 .expect("presence scan")
                 .len(),
             FILE_LIMIT
@@ -996,10 +1109,14 @@ mod tests {
         let presence_ms = started.elapsed().as_secs_f64() * 1000.0;
         let mut queries = 0;
         assert!(
-            missing_paths(&stored, || {
-                queries += 1;
-                queries == 17
-            })
+            missing_paths(
+                &stored,
+                || {
+                    queries += 1;
+                    queries == 17
+                },
+                &mut |path| path.try_exists()
+            )
             .is_none()
         );
         assert_eq!(

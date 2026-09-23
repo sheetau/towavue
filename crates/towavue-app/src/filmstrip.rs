@@ -1130,6 +1130,22 @@ impl Filmstrip {
         self.recent_drag.finish(ui.ctx(), None, actions);
         self.focused_card = focused_card;
         self.recent_focus = recent_focus;
+        // Keep recently prepared offscreen pixels before spending spare slots on
+        // newest-first prefetch. Filling every spare slot with new requests used
+        // to evict all older ready cards as soon as they left the viewport.
+        for path in &self.preview_order {
+            if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+                break;
+            }
+            if self.previews.get(path).is_some_and(Result::is_ok)
+                && !self.refreshing.contains(path)
+                && !paths.is_empty()
+                && !wanted.iter().any(|(existing, _)| existing == path)
+                && let Some(kind) = MediaKind::from_path(path)
+            {
+                wanted.push((path.clone(), kind));
+            }
+        }
         // Keep the same bounded preparation set while a menu or picker covers the grid.
         for path in paths {
             if wanted.len() == VISIBLE_PREVIEW_LIMIT {
@@ -2123,6 +2139,109 @@ mod tests {
             std::fs::write(path, &bitmap).expect("owned bitmap");
         }
         paths
+    }
+
+    #[test]
+    fn gallery_scrolling_retains_recent_pixels_before_prefetch_and_survives_suspension() {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "towavue-gallery-retention-{}-{unique}",
+            std::process::id()
+        ));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        let paths = bitmap_paths(&root, 100);
+        let (sent, ready) = std::sync::mpsc::channel();
+        let mut strip = Filmstrip::new(cache, move || {
+            let _ = sent.send(());
+        })
+        .expect("worker");
+        let context = crate::fonts::test_context();
+        let frame = |strip: &mut Filmstrip, offset| {
+            let mut bottom = 0.0;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 260.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .vertical_scroll_offset(offset)
+                        .show_styled(ui, |ui| strip.show_recent(ui, &paths, 1, true, &mut vec![]));
+                    bottom = (scroll.content_size.y - scroll.inner_rect.height()).max(0.0);
+                },
+            );
+            (output, bottom)
+        };
+        let finish = |strip: &mut Filmstrip| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while strip
+                .visible
+                .iter()
+                .any(|path| !strip.previews.contains_key(path))
+            {
+                ready
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("previews");
+                strip.finish(&context);
+            }
+            assert!(strip.previews.values().all(Result::is_ok));
+            assert!(strip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+        };
+        for _ in 0..3 {
+            frame(&mut strip, 0.0);
+        }
+        finish(&mut strip);
+        assert_eq!(strip.previews.len(), VISIBLE_PREVIEW_LIMIT);
+        let original = strip.previews[&paths[0]].as_ref().expect("first").0.id();
+        let bottom = frame(&mut strip, 0.0).1;
+        for _ in 0..3 {
+            frame(&mut strip, bottom);
+        }
+        finish(&mut strip);
+        assert!(
+            strip.previews.contains_key(paths.last().expect("last")),
+            "visible tail loads before prefetch"
+        );
+        assert_eq!(
+            strip.previews[&paths[0]]
+                .as_ref()
+                .expect("retained first")
+                .0
+                .id(),
+            original
+        );
+        let generation = strip.generation;
+        for _ in 0..20 {
+            frame(&mut strip, bottom);
+        }
+        assert_eq!(
+            strip.generation, generation,
+            "idle frames do not restart requests"
+        );
+        strip.pause_preparation();
+        let output = frame(&mut strip, 0.0).0;
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == original)),
+            "return reuses original GPU pixels immediately"
+        );
+        assert_eq!(
+            strip.previews[&paths[0]]
+                .as_ref()
+                .expect("first after pause")
+                .0
+                .id(),
+            original
+        );
+        assert!(strip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+        drop(strip);
+        std::fs::remove_dir_all(root).expect("remove owned fixtures");
     }
 
     #[test]

@@ -113,6 +113,27 @@ fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_pad
                 before.y0 as f32 - 20.0,
             );
             frame(&preview, pointer);
+            let previous_texture = preview
+                .texture
+                .as_ref()
+                .expect("texture")
+                .as_ref()
+                .expect("ready")
+                .id();
+            preview.texture = None;
+            for point in [pointer, source.center(), pointer] {
+                let pending = frame(&preview, point);
+                assert_eq!(
+                    seek_bounds(&pending),
+                    before,
+                    "pending sheets retain natural geometry"
+                );
+                assert!(
+                    !pending.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == previous_texture)),
+                    "a placeholder must not show stale pixels"
+                );
+            }
             preview.finish_sheet(
                 &context,
                 target.clone(),
@@ -124,9 +145,9 @@ fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_pad
                     )
                     .expect("layout"),
                     image: PreviewImage {
-                        width: 960,
-                        height: 640,
-                        rgba: vec![255; 960 * 640 * 4].into(),
+                        width: width * 4,
+                        height: height * 4,
+                        rgba: vec![255; (width * height * 16 * 4) as usize].into(),
                     },
                 }),
             );
@@ -154,11 +175,28 @@ fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_pad
                 })
                 .reduce(egui::Rect::union)
                 .expect("sheet pixels");
-            assert!(
-                (image.width() - 160.0).abs() <= 1.0 / density,
-                "sheet cannot acquire extra horizontal padding: {image:?}"
-            );
-            assert!((image.height() - 160.0 * 2.0 / 3.0).abs() <= 1.0 / density);
+            let scale = (160.0 / width as f32).min(108.0 / height as f32);
+            assert!((image.width() - width as f32 * scale).abs() <= 1.0 / density);
+            assert!((image.height() - height as f32 * scale).abs() <= 1.0 / density);
+            if width == 240 {
+                let viewport = after
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Toggle preview playback"))
+                    .expect("preview surface")
+                    .1
+                    .bounds()
+                    .expect("viewport bounds");
+                assert!(
+                    (image.top() - viewport.y0 as f32).abs() <= 1.0 / density
+                        && (image.bottom() - viewport.y1 as f32).abs() <= 1.0 / density,
+                    "landscape pixels fill their viewport without added bands"
+                );
+            }
         }
     }
 }

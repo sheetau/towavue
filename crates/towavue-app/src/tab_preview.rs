@@ -309,10 +309,10 @@ impl TabPreview {
             && previous.path == next.path
             && previous.kind == MediaKind::Video
             && next.kind == MediaKind::Video
-            && matches!(self.texture, Some(Ok(_)))
+            && let Some(Ok(texture)) = &self.texture
             && let Some([left, top, right, bottom]) = self
                 .sheet_layout
-                .and_then(|layout| layout.uv(next.position))
+                .and_then(|layout| layout.uv(next.position, texture.size()))
         {
             self.sheet_uv = Some(egui::Rect::from_min_max(
                 egui::pos2(left, top),
@@ -435,7 +435,10 @@ impl TabPreview {
         let pixels = result.and_then(|sheet| {
             let [left, top, right, bottom] = sheet
                 .layout
-                .uv(target.position)
+                .uv(
+                    target.position,
+                    [sheet.image.width as usize, sheet.image.height as usize],
+                )
                 .ok_or_else(|| "Video sheet does not contain the requested position".to_owned())?;
             uv = Some(egui::Rect::from_min_max(
                 egui::pos2(left, top),
@@ -519,53 +522,61 @@ impl TabPreview {
                 };
                 let mut thumbnail = None;
                 if let Some(Ok(texture)) = texture {
-                    let size =
-                        sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
-                    let scale = (SIZE.x / size.x).min(SIZE.y / size.y).min(1.0);
-                    let size = size * scale;
-                    // Video sheets contain padded 240x160 cells. Keep that same
-                    // viewport for the earlier unpadded thumbnail, otherwise a
-                    // retained shorter height shrinks the whole sheet cell.
-                    let height = if kind == MediaKind::Video {
-                        SIZE.y
-                    } else if transport.is_some() || folder.is_some() {
-                        size.y.max(40.0)
+                    let size = if sheet_uv.is_some() {
+                        let [width, height] =
+                            towavue_runtime_windows::VideoSheetLayout::cell_size(texture.size())
+                                .expect("validated video sheet");
+                        egui::vec2(width as f32, height as f32)
                     } else {
-                        size.y
+                        texture.size_vec2()
                     };
-                    let height = if transport.is_some() || folder.is_some() {
-                        card_viewport_height(response, height)
+                    let uv = sheet_uv.unwrap_or(egui::Rect::from_min_max(
+                        egui::Pos2::ZERO,
+                        egui::pos2(1.0, 1.0),
+                    ));
+                    if kind == MediaKind::Video {
+                        let bounds =
+                            crate::media_preview::video(ui, texture.id(), size, uv, SIZE.y);
+                        video_viewport_height(response, Some(bounds.height()));
+                        thumbnail = Some(bounds);
                     } else {
-                        height
-                    };
-                    let size = size * (height / size.y).min(1.0);
-                    let (bounds, _) =
-                        ui.allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
-                    thumbnail = Some(bounds);
-                    crate::media_preview::image(
-                        ui,
-                        texture.id(),
-                        egui::Rect::from_center_size(bounds.center(), size),
-                        sheet_uv.unwrap_or(egui::Rect::from_min_max(
-                            egui::Pos2::ZERO,
-                            egui::pos2(1.0, 1.0),
-                        )),
-                        bounds,
-                    );
+                        let scale = (SIZE.x / size.x).min(SIZE.y / size.y).min(1.0);
+                        let size = size * scale;
+                        let height = if transport.is_some() || folder.is_some() {
+                            card_viewport_height(response, size.y.max(40.0))
+                        } else {
+                            size.y
+                        };
+                        let size = size * (height / size.y).min(1.0);
+                        let (bounds, _) = ui
+                            .allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
+                        thumbnail = Some(bounds);
+                        crate::media_preview::image(
+                            ui,
+                            texture.id(),
+                            egui::Rect::from_center_size(bounds.center(), size),
+                            uv,
+                            bounds,
+                        );
+                    }
                 }
                 if thumbnail.is_none() && (transport.is_some() || folder.is_some()) {
                     thumbnail = Some(
                         ui.allocate_exact_size(
                             egui::vec2(
                                 SIZE.x,
-                                card_viewport_height(
-                                    response,
-                                    if kind == MediaKind::Audio {
-                                        40.0
-                                    } else {
-                                        SIZE.y
-                                    },
-                                ),
+                                if kind == MediaKind::Video {
+                                    video_viewport_height(response, None)
+                                } else {
+                                    card_viewport_height(
+                                        response,
+                                        if kind == MediaKind::Audio {
+                                            40.0
+                                        } else {
+                                            SIZE.y
+                                        },
+                                    )
+                                },
                             ),
                             egui::Sense::hover(),
                         )
@@ -604,6 +615,23 @@ impl TabPreview {
 struct CardViewportHeight {
     frame: u64,
     height: f32,
+}
+
+fn video_viewport_height(response: &egui::Response, natural: Option<f32>) -> f32 {
+    let context = &response.ctx;
+    let id = response.id.with("video-viewport-height");
+    let frame = context.cumulative_frame_nr();
+    // Keep controls stationary while the next sheet is pending. A decoded image
+    // always supplies its natural height; only empty placeholders reuse geometry.
+    context.data_mut(|data| {
+        let height = natural.unwrap_or_else(|| {
+            data.get_temp::<CardViewportHeight>(id)
+                .filter(|previous| previous.frame.saturating_add(1) >= frame)
+                .map_or(SIZE.y, |previous| previous.height)
+        });
+        data.insert_temp(id, CardViewportHeight { frame, height });
+        height
+    })
 }
 
 fn card_viewport_height(response: &egui::Response, natural: f32) -> f32 {
@@ -908,7 +936,7 @@ mod tests {
                     .id(),
                 texture_id
             );
-            let [left, top, right, bottom] = layout.uv(target.position).expect("cell");
+            let [left, top, right, bottom] = layout.uv(target.position, [960, 640]).expect("cell");
             assert_eq!(
                 preview.sheet_uv,
                 Some(egui::Rect::from_min_max(

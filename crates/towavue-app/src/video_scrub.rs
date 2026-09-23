@@ -16,14 +16,13 @@ pub(super) struct Scrub {
     was_playing: bool,
     phase: Phase,
     geometry: Geometry,
-    sample: Option<(TextureHandle, Rect, bool)>,
+    sample: Option<(TextureHandle, Rect)>,
 }
 
 struct Geometry {
     vertices: Vec<(Pos2, Pos2)>,
     size: Vec2,
     aspect: f32,
-    source_aspect: f32,
 }
 
 impl Geometry {
@@ -37,7 +36,6 @@ impl Geometry {
         let oriented = ImageTransform::with_orientation(size, orientation, &[]);
         let mut size = vec2(oriented.size.0, oriented.size.1);
         let mut aspect = oriented.pixel_aspect(aspect);
-        let source_aspect = size.x * aspect / size.y;
         let mut vertices = vec![
             (Pos2::ZERO, Pos2::ZERO),
             (pos2(size.x, 0.0), pos2(1.0, 0.0)),
@@ -120,16 +118,10 @@ impl Geometry {
             vertices,
             size,
             aspect,
-            source_aspect,
         }
     }
 
-    fn mesh(&self, texture: &TextureHandle, mut uv: Rect, padded: bool, rect: Rect) -> egui::Mesh {
-        if padded {
-            let fit = (240.0 / self.source_aspect).min(160.0);
-            let fraction = vec2(fit * self.source_aspect / 240.0, fit / 160.0);
-            uv = Rect::from_center_size(uv.center(), uv.size() * fraction);
-        }
+    fn mesh(&self, texture: &TextureHandle, uv: Rect, rect: Rect) -> egui::Mesh {
         let mut mesh = egui::Mesh::with_texture(texture.id());
         for (position, source) in &self.vertices {
             mesh.vertices.push(egui::epaint::Vertex {
@@ -276,7 +268,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.video_scrub = Some(scrub);
     }
 
-    pub(super) fn update_scrub_sample(&mut self, sample: Option<(TextureHandle, Rect, bool)>) {
+    pub(super) fn update_scrub_sample(&mut self, sample: Option<(TextureHandle, Rect)>) {
         if let Some(scrub) = &mut self.video_scrub
             && scrub.phase == Phase::Dragging
             && sample.is_some()
@@ -301,7 +293,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(scrub) = &self.video_scrub else {
             return;
         };
-        let Some((texture, uv, padded)) = &scrub.sample else {
+        let Some((texture, uv)) = &scrub.sample else {
             return;
         };
         let Some((painter, viewport)) = &self.video_scrub_surface else {
@@ -317,7 +309,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         );
         let painter = painter.with_clip_rect(*viewport);
         painter.rect_filled(*viewport, 0.0, Color32::BLACK);
-        painter.add(geometry.mesh(texture, *uv, *padded, rect));
+        painter.add(geometry.mesh(texture, *uv, rect));
         self.video_rect = None;
     }
 }

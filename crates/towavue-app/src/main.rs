@@ -6624,7 +6624,6 @@ where
         let scrub_sample = target
             .as_ref()
             .and_then(|target| self.video_sheets.sample(target, source))
-            .map(|(texture, uv)| (texture, uv, true))
             .or_else(|| {
                 self.hover_thumbnail
                     .as_ref()
@@ -6633,7 +6632,6 @@ where
                         (
                             texture.clone(),
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            false,
                         )
                     })
             });
@@ -6656,20 +6654,23 @@ where
                         .then(|| egui::Image::new((texture.id(), texture.size_vec2())))
                 })
             });
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(160.0, height), egui::Sense::hover());
-            if let Some(image) = image {
-                let image = image.max_size(rect.size());
-                if let Some(size) = image.load_and_calc_size(ui, rect.size())
+            let painted = image.is_some_and(|image| {
+                let image = image.max_size(egui::vec2(media_preview::SIZE.x, height));
+                if let Some(size) =
+                    image.load_and_calc_size(ui, egui::vec2(media_preview::SIZE.x, height))
                     && let egui::ImageSource::Texture(texture) = image.source(ui.ctx())
                 {
-                    media_preview::image(
-                        ui,
-                        texture.id,
-                        egui::Rect::from_center_size(rect.center(), size),
-                        image.image_options().uv,
-                        rect,
-                    );
+                    media_preview::video(ui, texture.id, size, image.image_options().uv, height);
+                    true
+                } else {
+                    false
                 }
+            });
+            if !painted {
+                ui.allocate_exact_size(
+                    egui::vec2(media_preview::SIZE.x, height),
+                    egui::Sense::hover(),
+                );
             }
             let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
                 format!("{} · No preview", format_time(media_time(position)))

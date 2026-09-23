@@ -22,7 +22,6 @@ fn scrub_geometry_preserves_ordered_crop_rotation_flip_and_resample() {
     );
     assert_eq!(geometry.size, vec2(40.0, 60.0));
     assert_eq!(geometry.aspect, 0.5);
-    assert_eq!(geometry.source_aspect, 2.5);
     for (position, uv) in &geometry.vertices {
         assert!((position.x - (uv.y * 80.0 - 10.0)).abs() < 0.0001);
         assert!((position.y - (uv.x * 100.0 - 20.0)).abs() < 0.0001);
@@ -87,7 +86,7 @@ fn scrub_mesh_uses_cell_uvs_and_preserves_rotated_empty_corners() {
         VideoOrientation::default(),
         &[EditOperation::RotateVideo(rotation)],
     );
-    let mesh = geometry.mesh(&texture, uv, true, rect);
+    let mesh = geometry.mesh(&texture, uv, rect);
     assert_eq!(mesh.indices.len(), 6);
     assert!(
         mesh.vertices
@@ -101,10 +100,9 @@ fn scrub_mesh_uses_cell_uvs_and_preserves_rotated_empty_corners() {
     );
     assert_eq!(mesh.texture_id, texture.id());
     let simple = Geometry::new((160, 90), 1.0, VideoOrientation::default(), &[]);
-    let padded = simple.mesh(&texture, uv, true, rect);
-    let fallback = simple.mesh(&texture, uv, false, rect);
-    assert!(padded.vertices[0].uv.y > fallback.vertices[0].uv.y);
-    assert_eq!(padded.vertices[0].uv.x, fallback.vertices[0].uv.x);
+    let mesh = simple.mesh(&texture, uv, rect);
+    assert_eq!(mesh.vertices[0].uv, uv.min);
+    assert_eq!(mesh.vertices[2].uv, uv.max);
 }
 
 pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
@@ -226,7 +224,6 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             app.update_scrub_sample(Some((
                 texture,
                 Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
-                true,
             )));
             let (_, output) = frame(app, vec![], false);
             assert!(

@@ -73,6 +73,36 @@ pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::NONE.inner_margin(6).show(ui, content).inner
 }
 
+pub fn video(
+    ui: &mut Ui,
+    texture: egui::TextureId,
+    source_size: egui::Vec2,
+    uv: egui::Rect,
+    max_height: f32,
+) -> egui::Rect {
+    let max_size = egui::vec2(SIZE.x, max_height.clamp(1.0, SIZE.y));
+    let scale = (max_size.x / source_size.x)
+        .min(max_size.y / source_size.y)
+        .min(1.0);
+    let size = source_size * scale;
+    let height = if size.x >= max_size.x - 0.001 {
+        size.y
+    } else {
+        max_size.y
+    };
+    let bounds = ui
+        .allocate_exact_size(egui::vec2(max_size.x, height), egui::Sense::hover())
+        .0;
+    image(
+        ui,
+        texture,
+        egui::Rect::from_center_size(bounds.center(), size),
+        uv,
+        bounds,
+    );
+    bounds
+}
+
 pub fn image(
     ui: &Ui,
     texture: egui::TextureId,
@@ -305,6 +335,96 @@ mod tests {
                             vertex.pos.distance(center) <= radius,
                             "image must stay inside the card corner"
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn video_cards_fit_landscape_height_and_keep_portrait_height_for_tabs_and_seeking() {
+        for density in [1.0, 1.25, 2.0] {
+            for seek in [false, true] {
+                for source_size in [
+                    egui::vec2(240.0, 135.0),
+                    egui::vec2(240.0, 60.0),
+                    egui::vec2(60.0, 160.0),
+                ] {
+                    for max_height in [108.0, 44.0] {
+                        let context = crate::fonts::test_context();
+                        context.set_pixels_per_point(density);
+                        context.global_style_mut(crate::chrome::style);
+                        let texture = context.load_texture(
+                            "video",
+                            egui::ColorImage::filled([960, 640], egui::Color32::BLACK),
+                            egui::TextureOptions::LINEAR,
+                        );
+                        let source = egui::Rect::from_min_size(
+                            egui::pos2(220.0, 200.0),
+                            egui::vec2(100.0, 24.0),
+                        );
+                        let uv =
+                            egui::Rect::from_min_max(egui::pos2(0.25, 0.25), egui::pos2(0.5, 0.5));
+                        let mut bounds = egui::Rect::NOTHING;
+                        let mut output = egui::FullOutput::default();
+                        for frame in 0..3 {
+                            output = context.run_ui(
+                                egui::RawInput {
+                                    time: Some(f64::from(frame)),
+                                    screen_rect: Some(egui::Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(600.0, 500.0),
+                                    )),
+                                    events: vec![egui::Event::PointerMoved(source.center())],
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let response = ui.interact(
+                                        source,
+                                        "video-source".into(),
+                                        egui::Sense::hover(),
+                                    );
+                                    let preview = if seek {
+                                        Preview::seek(&response, 0.5)
+                                    } else {
+                                        Preview::tab(&response)
+                                    };
+                                    preview
+                                        .show(|ui| {
+                                            bounds = video(
+                                                ui,
+                                                texture.id(),
+                                                source_size,
+                                                uv,
+                                                max_height,
+                                            );
+                                            caption(ui, |ui| ui.label("Video"));
+                                        })
+                                        .expect("visible card");
+                                },
+                            );
+                        }
+                        let pixels = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                                    Some(mesh.calc_bounds())
+                                }
+                                _ => None,
+                            })
+                            .expect("video pixels");
+                        let scale = (160.0 / source_size.x).min(max_height / source_size.y);
+                        let expected = source_size * scale;
+                        assert!((pixels.size() - expected).length() <= 1.0 / density);
+                        assert!((bounds.width() - 160.0).abs() <= 1.0 / density);
+                        if expected.x >= 160.0 - 0.001 {
+                            assert!((bounds.height() - expected.y).abs() <= 1.0 / density);
+                            assert!((pixels.min - bounds.min).length() <= 1.0 / density);
+                            assert!((pixels.max - bounds.max).length() <= 1.0 / density);
+                        } else {
+                            assert!((bounds.height() - max_height).abs() <= 1.0 / density);
+                        }
                     }
                 }
             }

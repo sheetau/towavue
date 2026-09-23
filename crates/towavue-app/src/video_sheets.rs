@@ -119,6 +119,11 @@ impl VideoSheets {
             if sheet.layout != target.layout
                 || sheet.image.width as usize > limit
                 || sheet.image.height as usize > limit
+                || VideoSheetLayout::cell_size([
+                    sheet.image.width as usize,
+                    sheet.image.height as usize,
+                ])
+                .is_none()
             {
                 return Err("Video sheet exceeds texture limits or has a stale layout".into());
             }
@@ -152,9 +157,10 @@ impl VideoSheets {
 
     pub fn image(&self, target: &Request, position: Duration) -> Option<egui::Image<'static>> {
         let (texture, uv) = self.sample(target, position)?;
+        let [width, height] = VideoSheetLayout::cell_size(texture.size())?;
         Some(
             // Mesh painting preserves cell UVs; rounded-rect antialiasing expands them.
-            egui::Image::new((texture.id(), egui::vec2(240.0, 160.0)))
+            egui::Image::new((texture.id(), egui::vec2(width as f32, height as f32)))
                 .rotate(0.0, egui::vec2(0.5, 0.5))
                 .uv(uv),
         )
@@ -169,7 +175,7 @@ impl VideoSheets {
             .textures
             .iter()
             .find(|(request, _)| request == target)?;
-        let [left, top, right, bottom] = target.layout.uv(position)?;
+        let [left, top, right, bottom] = target.layout.uv(position, texture.size())?;
         Some((
             texture.clone(),
             egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom)),
@@ -244,7 +250,8 @@ mod tests {
                 })
                 .collect();
             assert!(!meshes.is_empty());
-            let [left, top, right, bottom] = target.layout.uv(position).expect("cell UV");
+            let [left, top, right, bottom] =
+                target.layout.uv(position, [960, 640]).expect("cell UV");
             assert!(
                 meshes
                     .iter()

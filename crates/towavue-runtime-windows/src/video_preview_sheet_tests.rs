@@ -1,6 +1,8 @@
 use super::*;
 use std::time::UNIX_EPOCH;
 
+const FILMSTRIP_FILTER: &str = "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba";
+
 const THUMB_FILTER: &str =
     "scale=240:240:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba";
 
@@ -29,6 +31,55 @@ fn generate(arguments: &[&str], output: &Path) {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+#[test]
+fn generated_landscape_portrait_and_wide_sheets_have_no_added_bands() {
+    let root = root("natural-cells");
+    let cache = PreviewCache::new(root.join("cache")).expect("cache");
+    for (source_size, expected) in [
+        ("320x180", (240, 135)),
+        ("120x320", (60, 160)),
+        ("320x100", (240, 75)),
+    ] {
+        let source = root.join(format!("{source_size}.mp4"));
+        generate(
+            &[
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=black:size={source_size}:rate=10:duration=1"),
+                "-c:v",
+                "mpeg4",
+                "-g",
+                "1",
+                "-an",
+            ],
+            &source,
+        );
+        let duration = cache.duration(&source).expect("duration");
+        let layout = VideoSheetLayout::for_position(duration, Duration::ZERO).expect("layout");
+        let sheet = cache.video_sheet(&source, layout).expect("sheet");
+        assert_eq!(
+            (sheet.image.width, sheet.image.height),
+            (expected.0 * 4, expected.1 * 4)
+        );
+        let reference = reference(&source, layout.position(0).expect("sample"));
+        for slot in 0..16 {
+            for y in 0..reference.height {
+                let offset = (((slot / 4 * reference.height + y) * sheet.image.width
+                    + slot % 4 * reference.width)
+                    * 4) as usize;
+                let row = (y * reference.width * 4) as usize;
+                assert!(
+                    sheet.image.rgba[offset..offset + reference.width as usize * 4]
+                        == reference.rgba[row..row + reference.width as usize * 4],
+                    "retain complete decoded black frames, including conversion rounding, without heuristic cropping"
+                );
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("remove owned fixtures");
 }
 
 #[test]
@@ -246,7 +297,7 @@ fn compare(source: &Path, targets: &[Duration]) {
     let expected = filtered_reference(
         source,
         card.duration.expect("duration").mul_f64(0.1),
-        FILTER,
+        FILMSTRIP_FILTER,
     );
     assert_eq!(
         (card.image.width, card.image.height),
@@ -438,7 +489,7 @@ fn shared_sheet_decoder_matches_orientation_color_streams_offsets_and_eof() {
         FILTER,
         &|| false,
         |_, image| {
-            let center = ((CELL_HEIGHT / 2 * CELL_WIDTH + CELL_WIDTH / 2) * 4) as usize;
+            let center = ((image.height / 2 * image.width + image.width / 2) * 4) as usize;
             assert!(
                 image.rgba[center + 2] > 200 && image.rgba[center] < 10,
                 "the default blue stream is selected"
@@ -516,7 +567,7 @@ fn shared_sheet_decoder_matches_orientation_color_streams_offsets_and_eof() {
         FILTER,
         &|| false,
         |_, image| {
-            let center = ((CELL_HEIGHT / 2 * CELL_WIDTH + CELL_WIDTH / 2) * 4) as usize;
+            let center = ((image.height / 2 * image.width + image.width / 2) * 4) as usize;
             assert!(
                 image.rgba[center] > 250 && (125..=129).contains(&image.rgba[center + 3]),
                 "preview retains source alpha"
@@ -563,12 +614,12 @@ fn shared_sheet_unsupported_matrix_keeps_the_existing_frame_fallback() {
         .video_sheet(&source, layout)
         .expect("legacy fallback sheet");
     let reference = reference(&source, layout.position(0).expect("cell"));
-    for y in 0..CELL_HEIGHT {
-        let row = (y * WIDTH * 4) as usize;
-        let reference_row = (y * CELL_WIDTH * 4) as usize;
+    for y in 0..reference.height {
+        let row = (y * sheet.image.width * 4) as usize;
+        let reference_row = (y * reference.width * 4) as usize;
         assert_eq!(
-            &sheet.image.rgba[row..row + (CELL_WIDTH * 4) as usize],
-            &reference.rgba[reference_row..reference_row + (CELL_WIDTH * 4) as usize]
+            &sheet.image.rgba[row..row + (reference.width * 4) as usize],
+            &reference.rgba[reference_row..reference_row + (reference.width * 4) as usize]
         );
     }
     let thumbnail = cache
@@ -583,7 +634,7 @@ fn shared_sheet_unsupported_matrix_keeps_the_existing_frame_fallback() {
         .expect("card fallback");
     assert_eq!(
         card.image,
-        filtered_reference(&source, duration.mul_f64(0.1), FILTER)
+        filtered_reference(&source, duration.mul_f64(0.1), FILMSTRIP_FILTER)
     );
     fs::remove_dir_all(root).expect("remove owned fallback fixture");
 }

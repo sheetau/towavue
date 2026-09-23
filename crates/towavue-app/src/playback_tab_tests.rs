@@ -162,7 +162,7 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
                 })
                 .find_map(|shape| match shape {
                     egui::Shape::Rect(rect)
-                        if (240.0..245.0).contains(&rect.rect.width())
+                        if (160.0..165.0).contains(&rect.rect.width())
                             && rect.rect.height() > 50.0
                             && rect.fill == chrome::FLOATING_BACKGROUND =>
                     {
@@ -192,20 +192,7 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
             continue;
         }
         let bounds = card(&output).expect("inactive card remains open");
-        let caption_top = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text)
-                    if text.galley.text().starts_with("Preview near ")
-                        || text.galley.text() == path.display().to_string() =>
-                {
-                    Some(text.pos.y)
-                }
-                _ => None,
-            })
-            .expect("caption below the fitted thumbnail");
-        let point = egui::pos2(bounds.center().x, (bounds.top() + caption_top - 6.0) * 0.5);
+        let point = node_center(&output, "Toggle preview playback");
         frame(app, point, None);
         let (output, _) = frame(app, point, None);
         let mut button = node_center(&output, "Play");

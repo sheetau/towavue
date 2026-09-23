@@ -104,6 +104,24 @@ fn loading_indicator(output: &egui::FullOutput) -> Option<&egui::accesskit::Node
 }
 
 #[test]
+fn loading_segment_enters_and_leaves_without_a_full_segment_jump() {
+    let (start, end) = indeterminate_span(0.001);
+    assert_eq!(start, 0.0);
+    assert!(end > 0.0 && end < 0.001);
+    let (start, end) = indeterminate_span(0.8);
+    assert!(start > 0.0 && end < 1.0);
+    assert!((end - start - 0.25).abs() < 0.0001);
+    let (start, end) = indeterminate_span(1.599);
+    assert_eq!(end, 1.0);
+    assert!(end - start < 0.001);
+    assert_eq!(indeterminate_span(1.6), (0.0, 0.0));
+    for tick in 0..3200 {
+        let (start, end) = indeterminate_span(f64::from(tick) / 1000.0);
+        assert!(0.0 <= start && start <= end && end <= 1.0);
+    }
+}
+
+#[test]
 fn folder_order_notice_waits_for_its_request_and_preserves_explicit_feedback() {
     let Some(root) = crate::tests::isolated_test_root(
         "export_progress::tests::folder_order_notice_waits_for_its_request_and_preserves_explicit_feedback",

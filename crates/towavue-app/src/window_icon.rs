@@ -33,9 +33,11 @@ mod tests {
         for scale in [1.0, 1.25, 1.5, 2.0, 3.0, 4.0] {
             load(scale).expect("embedded small and taskbar icons");
         }
-        for size in [16, 32, 48, 64, 128, 256] {
-            Icon::from_resource(1, Some(PhysicalSize::new(size, size)))
-                .expect("each supplied icon size");
+        for resource in [1, 2, 3, 4] {
+            for size in [16, 32, 48, 64, 128, 256] {
+                Icon::from_resource(resource, Some(PhysicalSize::new(size, size)))
+                    .expect("each supplied application/media icon size");
+            }
         }
     }
 }

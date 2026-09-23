@@ -1,5 +1,8 @@
 LANGUAGE 0, 0
 1 ICON "assets/towavue.ico"
+2 ICON "assets/image.ico"
+3 ICON "assets/video.ico"
+4 ICON "assets/audio.ico"
 
 1 VERSIONINFO
 FILEVERSION @VERSION_COMPONENTS@

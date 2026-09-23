@@ -13,7 +13,10 @@ use crate::{
 };
 use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt};
+use std::os::windows::{
+    ffi::OsStrExt,
+    fs::{MetadataExt, OpenOptionsExt},
+};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -21,7 +24,10 @@ use std::sync::{
 };
 use std::time::Duration;
 use thiserror::Error;
-use windows::Win32::Storage::FileSystem::{FILE_SHARE_READ, REPLACE_FILE_FLAGS, ReplaceFileW};
+use windows::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_HIDDEN, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, REPLACE_FILE_FLAGS,
+    ReplaceFileW, SetFileAttributesW,
+};
 use windows::core::PCWSTR;
 
 #[derive(Debug, Error)]
@@ -145,12 +151,32 @@ impl Files {
             match fs::create_dir(&directory) {
                 Ok(()) => {
                     let extension = target.extension().unwrap_or_default();
-                    return Ok(Arc::new(Self {
+                    let files = Arc::new(Self {
                         prepared: directory.join("prepared").with_extension(extension),
                         original: directory.join("original").with_extension(extension),
                         directory,
                         preserve: AtomicBool::new(false),
-                    }));
+                    });
+                    let path: Vec<u16> = files
+                        .directory
+                        .as_os_str()
+                        .encode_wide()
+                        .chain(Some(0))
+                        .collect();
+                    let attributes = FILE_FLAGS_AND_ATTRIBUTES(
+                        fs::metadata(&files.directory)?.file_attributes(),
+                    );
+                    // SAFETY: the terminated path is owned through this call; this
+                    // newly created staging directory has not escaped to readers.
+                    // Preserve other attributes and let Files clean up on failure.
+                    unsafe {
+                        SetFileAttributesW(
+                            PCWSTR(path.as_ptr()),
+                            attributes | FILE_ATTRIBUTE_HIDDEN,
+                        )
+                    }
+                    .map_err(io::Error::from)?;
+                    return Ok(files);
                 }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error),

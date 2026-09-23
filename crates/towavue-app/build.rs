@@ -1,7 +1,9 @@
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rerun-if-changed=assets/windows.rc");
-        println!("cargo:rerun-if-changed=assets/towavue.ico");
+        for icon in ["towavue", "image", "video", "audio"] {
+            println!("cargo:rerun-if-changed=assets/{icon}.ico");
+        }
         println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
         let sdk = find_msvc_tools::find_windows_sdk(std::env::consts::ARCH)
             .expect("Windows SDK is required to compile the application icon");

@@ -5279,7 +5279,7 @@ where
                         actions.push(UiAction::Command(CommandId::OpenGallery));
                     }
                     menu.response
-                        .help_text("towavue menu · drag ↗ File / ↘ Edit / ↙ View");
+                        .help_text("towavue menu · drag → File / ↘ Edit / ↓ View");
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
                     let width = chrome::tab_width(strip_width, self.tabs.len());
@@ -6065,7 +6065,11 @@ where
         volume_targets: &mut Vec<egui::Response>,
     ) -> egui::Rect {
         let mut frame = chrome::bar();
-        frame.inner_margin.left = chrome::STATUS_BUTTON_GAP as i8;
+        frame.inner_margin.left = if self.media_kind.is_none() {
+            (chrome::STATUS_BUTTON_GAP * 2.0) as i8
+        } else {
+            chrome::STATUS_BUTTON_GAP as i8
+        };
         let density = root.ctx().pixels_per_point();
         // Anchor to the physical edge, not the sum of independently rounded child widths.
         let info_right = ((root.max_rect().right() * density).round()

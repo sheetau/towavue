@@ -15,11 +15,20 @@ function Refuse-Install {
 }
 try {
     Assert-True (@($records | Where-Object { -not $_.path.StartsWith($registry+'\ShellRegistration\',[StringComparison]::Ordinal) }).Count -eq 0) 'Fixture escaped its private namespace.'
-    Assert-True (@($records | Where-Object { $_.path -match 'UserChoice|DefaultIcon|shellex' }).Count -eq 0) 'Default, icon or thumbnail ownership was requested.'
+    Assert-True (@($records | Where-Object { $_.path -match 'UserChoice|shellex' }).Count -eq 0) 'Default or thumbnail ownership was requested.'
     $media = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../crates/towavue-core/src/media.rs') -Raw -Encoding UTF8
     $extensions = @([regex]::Matches($media.Substring(0,$media.IndexOf('#[cfg(test)]')),'"([a-z0-9]+)"') | ForEach-Object { '.'+$_.Groups[1].Value } | Sort-Object -Unique)
     $registered = @($records | Where-Object { $_.path.EndsWith('\Capabilities\FileAssociations') } | ForEach-Object name | Sort-Object)
     Assert-True (($extensions -join ',') -ceq ($registered -join ',')) 'Registered types differ from supported media.'
+    $icons = @($records | Where-Object { $_.path.EndsWith('\DefaultIcon') })
+    Assert-True ($icons.Count -eq $extensions.Count) 'Not every media type has an icon.'
+    foreach ($entry in $icons) {
+        Assert-True ($entry.path -match '\\Classes\\towavue\.[a-z0-9]+\\DefaultIcon$') 'Icon escaped an owned ProgID.'
+    }
+    foreach ($pair in @(@('png',2),@('mp4',3),@('mp3',4))) {
+        $entry = @($icons | Where-Object { $_.path.EndsWith('\towavue.'+$pair[0]+'\DefaultIcon') })[0]
+        Assert-True ($entry.value -ceq ('"'+$install+'\towavue.exe",-'+$pair[1])) 'Media icon resource or quoting differs.'
+    }
     Invoke-TowavueAssociations Inspect $install $registry
     Assert-True ($null -eq (Read-Value $records[0])) 'Inspection wrote registry state.'
     Invoke-TowavueAssociations Install $install $registry
@@ -39,6 +48,22 @@ try {
     $key = $base.OpenSubKey($open.path,$true)
     try { $key.DeleteValue('') } finally { $key.Dispose() }
     Invoke-TowavueAssociations Install $install $registry
+    Invoke-TowavueAssociations Install $install $registry '1.0.1'
+    Invoke-TowavueAssociations Install $install $registry '1.0.1'
+    foreach ($entry in $icons) { Assert-True ($null -eq (Read-Value $entry)) 'Rollback kept icons absent from the older executable.' }
+    foreach ($entry in @(Get-TowavueAssociationRecords $install $registry '1.0.1')) {
+        Assert-True ((Read-Value $entry) -ceq $entry.value) 'Rollback changed legacy associations.'
+    }
+    Invoke-TowavueAssociations Install $install $registry '1.0.3'
+    foreach ($entry in $icons) { Assert-True ((Read-Value $entry) -ceq $entry.value) 'Upgrade did not restore media icons.' }
+    $key = $base.OpenSubKey($icons[0].path,$true)
+    try { $key.SetValue('','Owner icon replacement') } finally { $key.Dispose() }
+    Invoke-TowavueAssociations Install $install $registry '1.0.1'
+    Assert-True ((Read-Value $icons[0]) -ceq 'Owner icon replacement') 'Legacy rollback removed a foreign icon.'
+    Refuse-Install
+    $key = $base.OpenSubKey($icons[0].path,$true)
+    try { $key.DeleteValue('') } finally { $key.Dispose() }
+    Invoke-TowavueAssociations Install $install $registry '1.0.3'
     # Simulate interruption after the path binding and one command were written.
     foreach ($record in $records | Select-Object -Skip 2) {
         $key = $base.OpenSubKey($record.path,$true)

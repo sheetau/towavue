@@ -104,6 +104,18 @@ fn staged_save_preserves_original_until_publication_and_retains_read_only_undo_s
     .expect("owned ADS");
     let prepared = prepare(&path);
     let directory = prepared.files.directory.clone();
+    assert_ne!(
+        fs::metadata(&directory)
+            .expect("staging attributes")
+            .file_attributes()
+            & FILE_ATTRIBUTE_HIDDEN.0,
+        0
+    );
+    assert_eq!(
+        directory.parent(),
+        path.parent(),
+        "staging stays on the source volume"
+    );
     let edited = fs::read(&prepared.files.prepared).expect("candidate");
     assert_ne!(edited, original);
     assert_eq!(fs::read(&path).expect("unchanged source"), original);

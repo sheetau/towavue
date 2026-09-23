@@ -176,7 +176,7 @@ pub(super) fn show(
                         y - 4.0..=y + 4.0,
                     ),
                     "gain",
-                    "Relative gain · drag to multiply the selection or whole track; release returns to 100%",
+                    "Relative gain · drag to multiply the selection or whole track; drag to the bottom to mute",
                 ))
             }
             Gesture::Select

@@ -1,4 +1,4 @@
-function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$RegistrySubKey) {
+function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.3') {
     # Test registrations are confined beneath their existing private namespace.
     $prefix = if ($RegistrySubKey -cmatch '^Software\\towavue\\InstallerTests\\[0-9a-f]{32}$') { $RegistrySubKey + '\ShellRegistration\' } elseif ($RegistrySubKey -ceq 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue') { '' } else { throw 'Shell registration is outside the owned namespace.' }
     $exe = Join-Path $InstallDirectory 'towavue.exe'
@@ -23,11 +23,16 @@ function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$Regist
         Video=@('3gp','avi','m2ts','m4v','mkv','mov','mp4','mpeg','mpg','mts','ogv','ts','webm','wmv')
         Audio=@('aac','aiff','alac','flac','m4a','mp3','oga','ogg','opus','wav','wma')
     }
+    # Negative identifiers name stable PE icon resources, not group positions.
+    $fileIcons = @{Image=2;Video=3;Audio=4}
     foreach ($kind in $groups.Keys) {
         foreach ($extension in $groups[$kind]) {
             $progid = 'towavue.' + $extension
             $class = 'Software\Classes\' + $progid
             Add-AssociationValue $class '' ($extension.ToUpperInvariant()+' '+$kind.ToLowerInvariant())
+            if ([version]$ProductVersion -ge [version]'1.0.3') {
+                Add-AssociationValue ($class+'\DefaultIcon') '' ('"'+$exe+'",-'+$fileIcons[$kind])
+            }
             Add-AssociationValue ($class+'\Application') 'ApplicationName' 'towavue'
             Add-AssociationValue ($class+'\Application') 'ApplicationIcon' $icon
             Add-AssociationValue ($class+'\shell') '' 'open'
@@ -43,12 +48,12 @@ function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$Regist
             }
         }
     }
-    # No extension defaults, UserChoice, DefaultIcon, thumbnail handlers or codecs.
+    # Only owned ProgIDs receive icons; no extension defaults, UserChoice, thumbnail handlers or codecs.
     return $records.ToArray()
 }
 
-function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[string]$RegistrySubKey) {
-    $records = @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey)
+function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.3') {
+    $records = @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey $(if ($Mode -eq 'Remove') { '1.0.3' } else { $ProductVersion }))
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
     try {
         $binding = $base.OpenSubKey($records[0].path)
@@ -68,6 +73,16 @@ function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[str
                 } finally { if ($key) { $key.Dispose() } }
             }
             if ($Mode -eq 'Inspect') { return }
+            if ([version]$ProductVersion -lt [version]'1.0.3' -and $owned) {
+                # A rollback to an older executable must retire only our media
+                # icon values, since those PE resources do not exist before 1.0.3.
+                foreach ($record in @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey | Where-Object { $_.path.EndsWith('\DefaultIcon') })) {
+                    $key = $base.OpenSubKey($record.path,$true)
+                    try {
+                        if ($key -and $key.GetValueNames() -contains '' -and $key.GetValueKind('') -eq 'String' -and $key.GetValue('') -ceq $record.value) { $key.DeleteValue('',$false) }
+                    } finally { if ($key) { $key.Dispose() } }
+                }
+            }
             foreach ($record in $records) {
                 $key = $base.CreateSubKey($record.path)
                 try { $key.SetValue($record.name,$record.value,[Microsoft.Win32.RegistryValueKind]::String); $key.Flush() } finally { $key.Dispose() }
@@ -163,9 +178,9 @@ function Invoke-TowavueRegistration {
             if (@($PreviousOwnershipId,$OwnershipId) -cnotcontains $currentId -or @($PreviousSizeKiB,$SizeKiB) -notcontains $currentSize) { throw 'Update registration has an unknown identity or size; preserve it.' }
             if ($release -and ($key.GetValueKind('DisplayVersion') -ne 'String' -or @($PreviousProductVersion,$ProductVersion) -cnotcontains $key.GetValue('DisplayVersion'))) { throw 'Update registration has an unknown product version or type; preserve it.' }
             $associationMode = if ($release -and [version]$ProductVersion -ge [version]'1.0.1') { 'Install' } else { 'Remove' }
-            if ($release -and $associationMode -eq 'Install') { Invoke-TowavueAssociations 'Inspect' $InstallDirectory $RegistrySubKey }
+            if ($release -and $associationMode -eq 'Install') { Invoke-TowavueAssociations 'Inspect' $InstallDirectory $RegistrySubKey $ProductVersion }
             if ($Mode -eq 'VerifyUpdate') { return 'Registration transition verified; no changes made.' }
-            if ($release) { Invoke-TowavueAssociations $associationMode $InstallDirectory $RegistrySubKey }
+            if ($release) { Invoke-TowavueAssociations $associationMode $InstallDirectory $RegistrySubKey $ProductVersion }
             # Separate writes are not atomic. The caller retains both typed states;
             # retry or reversed arguments can complete a known partial transition.
             if ($currentSize -ne $SizeKiB) { $key.SetValue('EstimatedSize',$SizeKiB,[Microsoft.Win32.RegistryValueKind]::DWord) }
@@ -177,7 +192,7 @@ function Invoke-TowavueRegistration {
         if ($Mode -in @('Inspect','Install')) {
             if ($key -or (Test-Path -LiteralPath $ShortcutPath)) { throw 'An existing registration or shortcut occupies this application identity. It was not changed.' }
             if (-not (Test-Path -LiteralPath (Split-Path -Parent $ShortcutPath) -PathType Container)) { throw 'The per-user shortcut directory is unavailable.' }
-            if ($release -and [version]$ProductVersion -ge [version]'1.0.1') { Invoke-TowavueAssociations 'Inspect' $InstallDirectory $RegistrySubKey }
+            if ($release -and [version]$ProductVersion -ge [version]'1.0.1') { Invoke-TowavueAssociations 'Inspect' $InstallDirectory $RegistrySubKey $ProductVersion }
             if ($Mode -eq 'Inspect') { return 'Registration destination is available; no changes made.' }
             $executable = Join-Path $InstallDirectory 'towavue.exe'
             $uninstaller = Join-Path $InstallDirectory 'Uninstall.exe'
@@ -199,7 +214,7 @@ function Invoke-TowavueRegistration {
             if (-not ('TowavueInstallerShellLink' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'UnicodeShellLink.cs') }
             [TowavueInstallerShellLink]::Create($ShortcutPath,$executable,$InstallDirectory)
             $key.SetValue('TowavueShortcutSha256',(Get-FileHash -LiteralPath $ShortcutPath -ErrorAction Stop).Hash.ToLowerInvariant(),[Microsoft.Win32.RegistryValueKind]::String)
-            if ($release -and [version]$ProductVersion -ge [version]'1.0.1') { Invoke-TowavueAssociations 'Install' $InstallDirectory $RegistrySubKey }
+            if ($release -and [version]$ProductVersion -ge [version]'1.0.1') { Invoke-TowavueAssociations 'Install' $InstallDirectory $RegistrySubKey $ProductVersion }
             return 'Registered for the current user and created the Start menu shortcut.'
         }
         if (-not $key) { return 'No registration remains. Any shortcut without its ownership record is preserved.' }

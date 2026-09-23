@@ -411,12 +411,25 @@ pub(super) fn show_status(
                         chrome::status_button(
                             ui,
                             egui::vec2(54.0, chrome::STATUS_BUTTON_SIZE),
-                            egui::Button::new(egui::RichText::new("Cancel").size(12.0))
-                                .fill(chrome::HOVER)
+                            egui::Button::new("")
+                                .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
                         )
                     })
                     .inner;
+                let background = if cancel.hovered() || cancel.is_pointer_button_down_on() {
+                    chrome::HOVER
+                } else {
+                    egui::Color32::from_gray(24)
+                };
+                ui.painter().rect_filled(cancel.rect, 2.0, background);
+                ui.painter().text(
+                    cancel.rect.center() - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
+                    egui::Align2::CENTER_CENTER,
+                    "Cancel",
+                    egui::FontId::proportional(12.0),
+                    ui.style().interact(&cancel).text_color(),
+                );
                 cancel.widget_info(|| {
                     egui::WidgetInfo::labeled(egui::WidgetType::Button, cancel.enabled(), label)
                 });
@@ -548,8 +561,10 @@ pub(super) fn draw(
 }
 
 fn indeterminate_span(elapsed: f64) -> (f32, f32) {
-    let offset = ((elapsed / 1.6).fract() * 0.75) as f32;
-    (offset, offset + 0.25)
+    // Move the entire segment through the edges, clipping its entering/leaving
+    // portions instead of resetting a full-width segment inside the toolbar.
+    let end = ((elapsed.max(0.0) / 1.6).fract() * 1.25) as f32;
+    ((end - 0.25).max(0.0), end.min(1.0))
 }
 
 fn paint_span(ui: &egui::Ui, track: egui::Rect, start: f32, end: f32) {

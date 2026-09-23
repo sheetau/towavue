@@ -95,9 +95,9 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
 }
 
 #[test]
-fn utility_status_text_keeps_the_same_leading_gap_as_media_buttons() {
+fn utility_status_text_has_double_the_media_button_leading_gap() {
     let Some(_root) = tests::isolated_test_root(
-        "chrome_resize_tests::utility_status_text_keeps_the_same_leading_gap_as_media_buttons",
+        "chrome_resize_tests::utility_status_text_has_double_the_media_button_leading_gap",
     ) else {
         return;
     };
@@ -145,7 +145,7 @@ fn utility_status_text_keeps_the_same_leading_gap_as_media_buttons() {
                 })
                 .expect("utility status label");
             assert!(
-                (text.pos.x - chrome::STATUS_BUTTON_GAP).abs() <= 1.0 / density,
+                (text.pos.x - 2.0 * chrome::STATUS_BUTTON_GAP).abs() <= 1.0 / density,
                 "utility text left gap: {:?}",
                 text.pos
             );

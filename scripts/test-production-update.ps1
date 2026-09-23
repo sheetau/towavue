@@ -57,7 +57,7 @@ $arguments=@{InstallDirectory=$installed;OwnershipId=$oldId;RegistrySubKey=$keyN
 $pair=@{InstallDirectory=$installed;IncomingPayloadDirectory=$incoming;IncomingOwnershipId=$newId;NewUninstaller=$uninstaller;Registration=$registration}
 $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
 function Assert-AssociationState([bool]$Present) {
-    foreach ($record in @(Get-TowavueAssociationRecords $installed $keyName)) {
+    foreach ($record in @(Get-TowavueAssociationRecords $installed $keyName '1.0.1')) {
         $key=$base.OpenSubKey($record.path)
         try {
             $value=if ($key) { $key.GetValue($record.name,$null) } else { $null }

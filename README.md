@@ -8,7 +8,7 @@
   <a href="https://github.com/sheetau/towavue/blob/main/docs/DEVELOPMENT.md">Development</a>
 </p>
 
----
+<h1></h1>
 
 **All your media. One fast, beautifully minimal Windows app.**
 

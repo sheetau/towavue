@@ -410,6 +410,15 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
             assert!(rows[0].x0 >= 8.0);
             let point = egui::pos2(rows[0].x0 as f32 + 70.0, rows[0].y0 as f32 + 12.0);
             let hovered = frame(&mut settings, true, vec![egui::Event::PointerMoved(point)]);
+            assert!(
+                hovered.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.rect.contains(point)
+                        && rect.rect.width() > width * 0.8
+                        && rect.fill == egui::Color32::from_gray(0x18)
+                        && rect.corner_radius == egui::CornerRadius::same(3)
+                )),
+                "rounded dark content-row hover"
+            );
             assert_ne!(hovered.platform_output.cursor_icon, egui::CursorIcon::Text);
             let colors = |output: &egui::FullOutput| {
                 output

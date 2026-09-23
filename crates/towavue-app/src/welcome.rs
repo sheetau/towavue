@@ -126,12 +126,16 @@ pub fn show(
                 ),
             ] {
                 let response = ui
-                    .add_sized(
-                        [20.0, 20.0],
-                        egui::Button::new(icon.text())
-                            .stroke(egui::Stroke::NONE)
-                            .frame_when_inactive(false),
-                    )
+                    .scope(|ui| {
+                        chrome::surface_hover(ui);
+                        ui.add_sized(
+                            [20.0, 20.0],
+                            egui::Button::new(icon.text())
+                                .stroke(egui::Stroke::NONE)
+                                .frame_when_inactive(false),
+                        )
+                    })
+                    .inner
                     .help_text(format!(
                         "{label}  {}",
                         shortcuts.label(command, Default::default())
@@ -252,7 +256,7 @@ fn search_field(
         ui.spacing_mut().text_edit_width = f32::INFINITY;
         crate::resize::unframed_text_input(ui, "Search Gallery", query)
     });
-    let filter_button = chrome::icon_button_at(
+    let filter_button = chrome::surface_icon_button_at(
         ui,
         filter_rect,
         egui::Button::new(chrome::Icon::Filter.text().color(if filter.is_some() {
@@ -293,7 +297,7 @@ fn search_field(
     }
     let clear = ui
         .add_enabled_ui(!query.is_empty(), |ui| {
-            chrome::icon_button_at(
+            chrome::surface_icon_button_at(
                 ui,
                 clear_rect,
                 egui::Button::new(RichText::new("\u{eabf}").font(crate::fonts::icon_font()))

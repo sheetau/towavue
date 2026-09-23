@@ -630,7 +630,7 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
             output.shapes.iter().any(|shape| {
                 matches!(&shape.shape,
                 egui::Shape::Rect(rect) if rect.rect.width() > 10.0
-                    && rect.rect.height() <= 2.01 && rect.fill.a() > 0
+                    && rect.rect.height() <= 3.01 && rect.fill.a() > 0
                     && rect.rect.top() >= bounds.y0 as f32 - 0.01
                     && rect.rect.bottom() <= bounds.y1 as f32 + 0.01)
             })
@@ -703,7 +703,7 @@ fn tab_scrollbar_owns_drag_and_wheel_without_widening_on_hover() {
         let hovered_height = bar_height(&hovered);
         assert!(painted_bar(&hovered));
         assert!(
-            hovered_height <= 2.01,
+            hovered_height <= 3.01,
             "tab scrollbar stays thin: {hovered_height}"
         );
         frame(

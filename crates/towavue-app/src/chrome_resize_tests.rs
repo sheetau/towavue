@@ -219,3 +219,86 @@ fn tabs_fit_until_their_actual_painted_width_reaches_the_minimum() {
         }
     }
 }
+
+#[test]
+fn tab_scrollbar_fills_lower_gutter_and_keeps_title_controls_aligned() {
+    let Some(root) = tests::isolated_test_root(
+        "chrome_resize_tests::tab_scrollbar_fills_lower_gutter_and_keeps_title_controls_aligned",
+    ) else {
+        return;
+    };
+    for (density, inset) in [(1.0, 0.0), (1.25, 8.0), (2.0, 6.5)] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        for index in 0..20 {
+            app.tabs
+                .open_new(root.join(format!("gutter-{index}.png")), MediaKind::Image);
+        }
+        let context = fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        context.global_style_mut(chrome::style);
+        context.global_style_mut(|style| style.animation_time = 0.0);
+        for tick in 0..4 {
+            let output = context.run_ui(
+                egui::RawInput {
+                    time: Some(f64::from(tick)),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    safe_area_insets: Some(egui::SafeAreaInsets(egui::epaint::MarginF32 {
+                        top: inset,
+                        ..Default::default()
+                    })),
+                    events: vec![egui::Event::PointerMoved(egui::pos2(120.0, inset + 30.0))],
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_top_bar(ui, &mut Vec::new());
+                    assert!((ui.available_rect_before_wrap().top() - inset - 32.0).abs() < 0.01);
+                },
+            );
+            if tick < 3 {
+                continue;
+            }
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let bar = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                .expect("horizontal scrollbar")
+                .1
+                .bounds()
+                .expect("bar hit region");
+            assert!(((bar.y1 - bar.y0) as f32 - 3.0).abs() < 0.01, "{bar:?}");
+            let border = inset + 32.0 - 1.0 / density;
+            assert!(
+                (bar.y1 as f32 - border).abs() <= 0.5 / density,
+                "{bar:?}, border={border}"
+            );
+            for label in ["towavue menu", "gutter-19.png"] {
+                let bounds = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("title control")
+                    .1
+                    .bounds()
+                    .expect("control bounds");
+                assert!(
+                    ((bounds.y0 + bounds.y1) as f32 * 0.5 - inset - 16.0).abs() <= 1.0 / density,
+                    "unchanged center: {label}: {bounds:?}"
+                );
+                assert!(
+                    bounds.y1 <= bar.y0 + 0.5 / f64::from(density),
+                    "separate tab and bar hit regions"
+                );
+            }
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(rect) if rect.rect.width() > 5.0 && (rect.rect.height() - 3.0).abs() <= 0.5 / density
+                    && (rect.rect.bottom() - border).abs() <= 0.5 / density
+                    && rect.fill != chrome::BACKGROUND
+            )), "painted scrollbar meets the border");
+        }
+    }
+}

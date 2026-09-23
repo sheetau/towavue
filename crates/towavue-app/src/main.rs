@@ -5293,16 +5293,32 @@ where
                         ui.spacing().item_spacing.x,
                     );
                     ui.style_mut().always_scroll_the_only_direction = true;
-                    ui.spacing_mut().scroll.bar_width = ui.spacing().scroll.floating_width;
+                    ui.spacing_mut().scroll.bar_width = 3.0;
+                    ui.spacing_mut().scroll.floating_width = 3.0;
+                    ui.spacing_mut().scroll.bar_inner_margin = 0.0;
+                    ui.spacing_mut().scroll.bar_outer_margin = 0.0;
                     ui.spacing_mut().scroll.dormant_handle_opacity = 0.0;
                     let scroll_fade = ui.spacing().scroll.fade;
                     ui.spacing_mut().scroll.fade.strength = 0.0;
+                    // The scroll host includes the lower tab gutter, while the
+                    // row allocator keeps the menu, tabs and caption centered.
+                    let strip_rect = egui::Rect::from_min_size(
+                        ui.available_rect_before_wrap().min,
+                        egui::vec2(strip_width, layout.tab_height + 3.0),
+                    );
+                    let mut strip_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("tab-strip-host")
+                            .max_rect(strip_rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
                     let strip_scroll = egui::ScrollArea::horizontal()
                         .id_salt("tab-strip")
                         .max_width(strip_width)
-                        .max_height(layout.tab_height)
+                        .max_height(strip_rect.height())
                         .auto_shrink([true, false])
-                        .show_styled(ui, |ui| {
+                        .show_styled(&mut strip_ui, |ui| {
+                            ui.set_max_height(layout.tab_height);
                             ui.spacing_mut().scroll.fade = scroll_fade;
                             ui.horizontal_centered(|ui| {
                                 let tab_rects: Vec<_> = self
@@ -5784,6 +5800,10 @@ where
                                 );
                             });
                         });
+                    ui.advance_cursor_after_rect(egui::Rect::from_min_size(
+                        strip_rect.min,
+                        egui::vec2(strip_scroll.inner_rect.width(), layout.tab_height),
+                    ));
                     ui.spacing_mut().scroll.fade = scroll_fade;
                     // egui 0.35 uses the ScrollArea ID plus its usize axis for the bar.
                     if let Some(response) = ui.ctx().read_response(strip_scroll.id.with(0_usize))

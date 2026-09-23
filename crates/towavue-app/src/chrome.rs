@@ -58,6 +58,7 @@ pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_gray(24);
 pub const HOVER: Color32 = Color32::from_gray(44);
+pub const SURFACE_HOVER: Color32 = Color32::from_gray(24);
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
 pub const STATUS_BUTTON_SIZE: f32 = 20.0;
@@ -166,8 +167,20 @@ pub fn style(style: &mut egui::Style) {
 }
 
 pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, button: egui::Button<'_>) -> egui::Response {
+    styled_icon_button_at(ui, rect, button, false)
+}
+
+fn styled_icon_button_at(
+    ui: &mut Ui,
+    rect: Rect,
+    button: egui::Button<'_>,
+    surface: bool,
+) -> egui::Response {
     ui.scope(|ui| {
         flat_buttons(ui);
+        if surface {
+            surface_hover(ui);
+        }
         ui.spacing_mut().button_padding = egui::Vec2::ZERO;
         ui.spacing_mut().interact_size = rect.size();
         ui.put(rect, button)
@@ -189,6 +202,19 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
         visuals.bg_stroke = egui::Stroke::NONE;
         visuals.expansion = 0.0;
     }
+}
+
+/// Frameless controls painted directly over the black content surface.
+pub fn surface_hover(ui: &mut Ui) {
+    let widgets = &mut ui.visuals_mut().widgets;
+    for visual in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+        visual.bg_fill = SURFACE_HOVER;
+        visual.weak_bg_fill = SURFACE_HOVER;
+    }
+}
+
+pub fn surface_icon_button_at(ui: &mut Ui, rect: Rect, button: egui::Button<'_>) -> egui::Response {
+    styled_icon_button_at(ui, rect, button, true)
 }
 
 /// Separators share egui's noninteractive stroke with disabled buttons.

@@ -162,7 +162,7 @@ impl KeyboardSettings {
                         // while the pointer crosses onto it, so it cannot disappear.
                         let hovered = response.contains_pointer() || response.has_focus();
                         if hovered {
-                            ui.painter().rect_filled(rect, 0.0, chrome::HOVER);
+                            ui.painter().rect_filled(rect, 3.0, chrome::SURFACE_HOVER);
                         }
                         let edit_rect = egui::Rect::from_min_size(
                             rect.min + egui::vec2(4.0, 2.0),
@@ -433,18 +433,22 @@ fn icon(
 ) -> egui::Response {
     let help = shortcut.map_or_else(|| label.to_owned(), |key| format!("{label} ({key})"));
     // Codicon record-keys / sort-precedence / clear-all / edit in the bundled font.
-    let response = chrome::icon_button_at(
-        ui,
-        rect,
-        egui::Button::selectable(
-            selected,
-            RichText::new(glyph.to_string()).font(fonts::icon_font()),
-        )
-        .stroke(egui::Stroke::NONE)
-        .frame_when_inactive(false),
+    let mut button = egui::Button::selectable(
+        selected,
+        RichText::new(glyph.to_string()).font(fonts::icon_font()),
     )
-    .help_text(help.clone())
-    .disabled_help_text(help);
+    .stroke(egui::Stroke::NONE)
+    .frame_when_inactive(false);
+    if selected {
+        button = button.fill(if ui.rect_contains_pointer(rect) {
+            chrome::HOVER
+        } else {
+            chrome::SURFACE_HOVER
+        });
+    }
+    let response = chrome::surface_icon_button_at(ui, rect, button)
+        .help_text(help.clone())
+        .disabled_help_text(help);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
     });

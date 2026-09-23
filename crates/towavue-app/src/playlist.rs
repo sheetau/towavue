@@ -256,7 +256,7 @@ impl Playlist {
                                             egui::Shape::rect_filled(
                                                 response.rect,
                                                 3,
-                                                crate::chrome::HOVER,
+                                                crate::chrome::SURFACE_HOVER,
                                             ),
                                         );
                                     }
@@ -518,7 +518,7 @@ mod tests {
             let row =
                 Rect::from_min_size(Pos2::new(8.0, duration.pos.y - 5.0), Vec2::new(300.0, 32.0));
             let backgrounds = |output: &egui::FullOutput| {
-                output.shapes.iter().filter(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::HOVER && rect.rect.intersects(row))).count()
+                output.shapes.iter().filter(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::SURFACE_HOVER && rect.rect.intersects(row))).count()
             };
             assert_eq!(backgrounds(&output), 0, "current row is text-only");
             frame(&mut playlist, &snapshot, Some(row.center()));
@@ -905,10 +905,10 @@ mod tests {
                         frame(&mut playlist, events);
                         let output = frame(&mut playlist, vec![]);
                         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                            Shape::Rect(rect) if rect.rect == row && rect.fill == crate::chrome::HOVER)),
+                            Shape::Rect(rect) if rect.rect == row && rect.fill == crate::chrome::SURFACE_HOVER)),
                             "hover bounds: density={density}, width={width}, index={index}, held={held}, row={row:?}, fills={:?}",
                             output.shapes.iter().filter_map(|shape| match &shape.shape {
-                                Shape::Rect(rect) if rect.fill == crate::chrome::HOVER => Some(rect.rect), _ => None
+                                Shape::Rect(rect) if rect.fill == crate::chrome::SURFACE_HOVER => Some(rect.rect), _ => None
                             }).collect::<Vec<_>>());
                         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
                             Shape::Rect(rect) if rect.rect.intersects(row.shrink(2.0)) && rect.stroke.width > 0.0)),
@@ -1057,7 +1057,7 @@ mod tests {
             );
             assert!(
                 !focused.shapes.iter().any(|shape| matches!(
-                    &shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::HOVER
+                    &shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::SURFACE_HOVER
                 )),
                 "keyboard focus keeps white text without a hover background"
             );

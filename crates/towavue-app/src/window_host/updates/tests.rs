@@ -347,53 +347,101 @@ fn update_approved_peer_is_invalidated_by_real_source_save_and_active_exports_de
 }
 
 #[test]
-fn update_prepare_cancel_renders_at_supported_densities() {
+fn update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities() {
     let Some(_root) = crate::tests::isolated_test_root(
-        "window_host::updates::tests::update_prepare_cancel_renders_at_supported_densities",
+        "window_host::updates::tests::update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities",
     ) else {
         return;
     };
     let mut app = Application::new(None, |_| {}).expect("app");
     for density in [1.0, 1.25, 2.0] {
-        for committing in [false, true] {
+        for (fullscreen, committing, native) in [
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (true, true, false),
+            (true, false, true),
+        ] {
             let context = crate::fonts::test_context();
             context.global_style_mut(chrome::style);
             context.set_pixels_per_point(density);
+            context.enable_accesskit();
+            app.fullscreen = fullscreen;
+            app.native_prompt = native.then_some(FallbackPrompt::ExportBusy);
             app.update_close = Some(Close {
                 token: 1,
                 approved: Some(app.edits.clone()),
                 committing,
             });
             assert!(app.modal_input_blocked());
-            for pass in 0..3 {
+            let mut cancel_position = None;
+            for pass in 0..5 {
                 let mut actions = Vec::new();
+                let events = if pass == 2 {
+                    vec![egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }]
+                } else if pass >= 3 {
+                    cancel_position.map_or_else(Vec::new, |pos| {
+                        vec![
+                            egui::Event::PointerMoved(pos),
+                            egui::Event::PointerButton {
+                                pos,
+                                button: egui::PointerButton::Primary,
+                                pressed: pass == 3,
+                                modifiers: egui::Modifiers::NONE,
+                            },
+                        ]
+                    })
+                } else {
+                    Vec::new()
+                };
                 let output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
                             egui::vec2(600.0, 360.0),
                         )),
-                        events: if pass == 2 {
-                            vec![egui::Event::Key {
-                                key: egui::Key::Escape,
-                                physical_key: None,
-                                pressed: true,
-                                repeat: false,
-                                modifiers: egui::Modifiers::NONE,
-                            }]
-                        } else {
-                            vec![]
-                        },
+                        events,
                         ..Default::default()
                     },
-                    |_| app.draw_update(&context, &mut actions),
+                    |ui| app.draw_ui(ui, &mut actions),
                 );
                 assert!(!output.shapes.is_empty());
+                assert!(context.memory(|memory| memory.top_modal_layer().is_none()));
+                if pass == 1 {
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .expect("accessibility");
+                    let cancel = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some("Cancel update"));
+                    if committing {
+                        assert!(cancel.is_none());
+                    } else {
+                        let (_, node) = cancel.expect("status cancel");
+                        assert_eq!(node.is_disabled(), native);
+                        let bounds = node.bounds().expect("bounds");
+                        assert!(bounds.y0 >= f64::from(360.0 - chrome::STATUS_HEIGHT));
+                        assert!(bounds.y1 <= 360.0);
+                        cancel_position = Some(egui::pos2(
+                            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                        ));
+                    }
+                }
                 assert_eq!(
                     actions
                         .iter()
                         .any(|a| matches!(a, UiAction::Update(Action::Cancel))),
-                    !committing && pass == 2
+                    !committing && !native && matches!(pass, 2 | 4),
+                    "density {density}, fullscreen {fullscreen}, committing {committing}, native {native}, pass {pass}"
                 );
             }
         }

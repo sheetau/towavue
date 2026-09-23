@@ -107,6 +107,7 @@ impl WindowHost {
         let source = pending.expected.path().to_owned();
         let blocked = !app.source_save_is_current()
             || app.native_prompt.is_some()
+            || app.about_open
             || app.pending_dialog.is_some()
             || app
                 .active_export
@@ -219,6 +220,7 @@ impl WindowHost {
         let blocked = !app.save_as_is_current()
             || export.cancelling
             || app.native_prompt.is_some()
+            || app.about_open
             || app.pending_dialog.is_some()
             || self.windows.iter().any(|(key, app)| {
                 app.exit_requested

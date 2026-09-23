@@ -26,6 +26,9 @@ use windows::core::{PCWSTR, w};
 
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
 
+mod about;
+pub use about::{AboutEvent, AboutResponse, show_about};
+
 #[derive(Debug, Error)]
 pub enum DialogError {
     #[error("the file dialog's owner window is unavailable")]

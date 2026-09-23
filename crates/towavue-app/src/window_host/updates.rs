@@ -196,6 +196,7 @@ impl WindowHost {
                     && app.active_export.is_none()
                     && app.pending_dialog.is_none()
                     && app.native_prompt.is_none()
+                    && !app.about_open
                     && app.pending_guard.is_none()
                     && app.pending_window_open.is_none()
                     && app.pending_window_launches.is_empty()
@@ -409,6 +410,7 @@ impl WindowHost {
                                     && app.pending_guard.is_none()
                                     && app.pending_dialog.is_none()
                                     && app.native_prompt.is_none()
+                                    && !app.about_open
                                     && app.active_export.is_none()
                         })
                 });

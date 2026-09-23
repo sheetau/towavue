@@ -328,7 +328,6 @@ enum UiAction {
     RevealExport(Instant),
     OpenExport(Instant),
     DismissExportError,
-    About(about::Action),
     Update(updates::Action),
     FinishResize(Option<towavue_core::ImageResize>),
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
@@ -399,6 +398,7 @@ enum AppEvent {
     DialogFinished(Result<Option<PathBuf>, DialogError>),
     SaveAsDialogFinished(Result<Option<towavue_runtime_windows::SaveAsTarget>, DialogError>),
     PromptFinished(Result<PromptResponse, DialogError>),
+    About(towavue_runtime_windows::AboutEvent),
     LicenseGuideRevealed(std::io::Result<PathBuf>),
     FileRevealed(std::io::Result<PathBuf>),
     RecentFilesReady,
@@ -3201,6 +3201,7 @@ where
             AppEvent::DialogFinished(result) => self.finish_dialog(result),
             AppEvent::SaveAsDialogFinished(result) => self.finish_save_as_dialog(result),
             AppEvent::PromptFinished(result) => self.finish_native_prompt(result),
+            AppEvent::About(event) => self.handle_about(event),
             AppEvent::LicenseGuideRevealed(result) => {
                 self.license_guide_pending = false;
                 self.set_status(match result {
@@ -3941,6 +3942,7 @@ where
             }
         }
         let modal_blocked = self.modal_input_blocked();
+        self.update_cancel_key(&context, actions);
         list_navigation::block_for_frame(
             &context,
             modal_blocked
@@ -4125,47 +4127,46 @@ where
         if !modal_blocked {
             self.draw_grid_menu(&context, actions);
         }
-        if let Some(error) = &self.export_error {
-            let modal =
-                chrome::modal(&context, "export-error".into(), false).show(&context, |ui| {
-                    chrome::modal_body(ui, 520.0, "Export failed", &["OK"], |ui| {
-                        ui.label("Your edits and existing files have been kept.");
-                        ui.label(error);
+        if !self.about_open && self.native_prompt.is_none() {
+            if let Some(error) = &self.export_error {
+                let modal =
+                    chrome::modal(&context, "export-error".into(), false).show(&context, |ui| {
+                        chrome::modal_body(ui, 520.0, "Export failed", &["OK"], |ui| {
+                            ui.label("Your edits and existing files have been kept.");
+                            ui.label(error);
+                        });
+                        chrome::flat_buttons(ui);
+                        if ui.button("OK").clicked() {
+                            actions.push(UiAction::DismissExportError);
+                        }
                     });
-                    chrome::flat_buttons(ui);
-                    if ui.button("OK").clicked() {
-                        actions.push(UiAction::DismissExportError);
-                    }
-                });
-            if modal.is_top_modal
-                && !modal.any_popup_open
-                && context
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                if modal.is_top_modal
+                    && !modal.any_popup_open
+                    && context.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    })
+                {
+                    actions.push(UiAction::DismissExportError);
+                }
+            } else if self.pending_guard.is_some() {
+                self.draw_unsaved_guard(&context, actions);
+            } else if self.audio_export_dialog.is_some() {
+                self.show_audio_export_options(&context, actions);
+            } else if self.metadata_dialog.is_some() {
+                self.show_metadata_options(&context, actions);
+            } else if self.video_resize_dialog.is_some() {
+                self.show_video_resize(&context, actions);
+            } else if self.video_rotation_dialog.is_some() {
+                self.show_video_rotation(&context, actions);
+            } else if let Some(dialog) = &mut self.rotation_dialog {
+                if let Some(action) = dialog.show(&context) {
+                    actions.push(UiAction::FinishRotation(dialog.token, action));
+                }
+            } else if let Some(dialog) = &mut self.resize_dialog
+                && let Some(action) = dialog.show(&context)
             {
-                actions.push(UiAction::DismissExportError);
+                actions.push(UiAction::FinishResize(action));
             }
-        } else if self.pending_guard.is_some() && self.native_prompt.is_none() {
-            self.draw_unsaved_guard(&context, actions);
-        } else if self.update_is_held() {
-            self.draw_update(&context, actions);
-        } else if self.about_open {
-            self.draw_about(&context, actions);
-        } else if self.audio_export_dialog.is_some() {
-            self.show_audio_export_options(&context, actions);
-        } else if self.metadata_dialog.is_some() {
-            self.show_metadata_options(&context, actions);
-        } else if self.video_resize_dialog.is_some() {
-            self.show_video_resize(&context, actions);
-        } else if self.video_rotation_dialog.is_some() {
-            self.show_video_rotation(&context, actions);
-        } else if let Some(dialog) = &mut self.rotation_dialog {
-            if let Some(action) = dialog.show(&context) {
-                actions.push(UiAction::FinishRotation(dialog.token, action));
-            }
-        } else if let Some(dialog) = &mut self.resize_dialog
-            && let Some(action) = dialog.show(&context)
-        {
-            actions.push(UiAction::FinishResize(action));
         }
         tab_focus::finish(
             &context,
@@ -6017,11 +6018,12 @@ where
         });
         // Only hover opens the bar. An existing pointer gesture retains it through
         // release, but a new press in the content must not inherit that ownership.
-        self.fullscreen_controls_visible =
-            (self.fullscreen && self.active_export.is_some() && self.export_error.is_none())
-                || (eligible
-                    && focused
-                    && ((!held && at_edge) || (was_visible && held && !outside_press)));
+        self.fullscreen_controls_visible = (self.fullscreen
+            && (self.update_is_held()
+                || self.active_export.is_some() && self.export_error.is_none()))
+            || (eligible
+                && focused
+                && ((!held && at_edge) || (was_visible && held && !outside_press)));
         if self.fullscreen
             && !self.fullscreen_controls_visible
             && controls_have_focus()
@@ -6117,6 +6119,10 @@ where
                     ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
                     ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
                     ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+                    if self.update_is_held() {
+                        self.draw_update_status(ui, actions);
+                        return;
+                    }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
                         let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::transport_button(
@@ -6906,7 +6912,7 @@ where
         if !matches!(action, UiAction::BeginReadingDrag(..)) {
             self.finish_reading_drag(true);
         }
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
             return;
         }
         if self.modal_input_blocked()
@@ -6919,9 +6925,6 @@ where
                     (self.update_notice.is_some() || self.update_is_held())
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
-                }
-                UiAction::About(_) => {
-                    self.about_open && self.pending_guard.is_none() && self.export_error.is_none()
                 }
                 UiAction::KeybindingChange(id, _) => {
                     self.tabs.active_id() == Some(id)
@@ -7188,7 +7191,6 @@ where
                 }
                 self.request_redraw();
             }
-            UiAction::About(action) => self.handle_about(action),
             UiAction::Update(action) => self.handle_update_action(action),
             UiAction::DismissExportError => {
                 self.export_error = None;
@@ -7357,10 +7359,7 @@ where
             }
             CommandId::CheckForUpdates => (self.notify)(AppEvent::Update(updates::Action::Check)),
             CommandId::ShowLicenses => self.show_licenses(),
-            CommandId::About => {
-                self.about_open = true;
-                self.request_redraw();
-            }
+            CommandId::About => self.open_about(),
             CommandId::CloseTab => {
                 if let Some(id) = self.tabs.active_id() {
                     self.request_guarded(GuardedAction::CloseTab(id));
@@ -8363,7 +8362,7 @@ where
     }
 
     fn begin_dialog(&mut self, kind: FileDialogKind, intent: DialogIntent) -> bool {
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
             return false;
         }
         let Some(window) = self.window.clone() else {
@@ -8740,7 +8739,7 @@ where
                         if !export.cancelling
                             && let Some(action) = export.continuation
                         {
-                            if self.native_prompt.is_some() {
+                            if self.native_prompt.is_some() || self.about_open {
                                 self.pending_guard = Some(action);
                             } else {
                                 self.request_guarded(action);
@@ -8996,8 +8995,8 @@ where
             self.cancel_shortcut_prefix();
             self.cancel_view_drag();
         }
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
-            self.set_status("Close the file dialog before leaving.".into());
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
+            self.set_status("Close the dialog before leaving.".into());
             return;
         }
         if !background_image
@@ -9958,7 +9957,7 @@ where
     }
 
     fn show_native_fallback(&mut self) {
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
             return;
         }
         let prompt = if let Some(recovery) = self.queued_recovery.take() {
@@ -9974,7 +9973,7 @@ where
     }
 
     fn open_native_prompt(&mut self, prompt: FallbackPrompt) {
-        if self.pending_dialog.is_some() || self.native_prompt.is_some() {
+        if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
             return;
         }
         #[cfg(test)]

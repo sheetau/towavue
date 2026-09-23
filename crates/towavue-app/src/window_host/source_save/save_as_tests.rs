@@ -245,7 +245,7 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
     ) else {
         return;
     };
-    for mode in 0..4 {
+    for mode in 0..5 {
         let source = root.join(format!("source-{mode}.bmp"));
         let target = root.join(format!("target-{mode}.bmp"));
         crate::tab_transfer::tests::bitmap(&source);
@@ -270,7 +270,7 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
                 .get_mut(&owner)
                 .expect("owner")
                 .handle_ui_action(UiAction::CancelExport),
-            _ => {
+            3 => {
                 host.windows
                     .get_mut(&owner)
                     .expect("owner")
@@ -279,6 +279,11 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
                     .expect("tab")
                     .target
                     .set_current_path(root.join("changed.bmp"), MediaKind::Image);
+            }
+            _ => {
+                let app = host.windows.get_mut(&owner).expect("owner");
+                app.dispatch(CommandId::About);
+                assert!(app.about_open);
             }
         }
         let before = std::fs::read(&target).ok();

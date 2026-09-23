@@ -86,8 +86,9 @@ pub use decode::{
     adjacent_video_frame, edited_video_frame_png, source_video_frame_png,
 };
 pub use dialog::{
-    DeleteConfirmation, DialogError, FileDialogKind, PromptButtons, PromptResponse,
-    confirm_file_delete, cursor_position_in_window, pick_path, pick_save_as, show_prompt,
+    AboutEvent, AboutResponse, DeleteConfirmation, DialogError, FileDialogKind, PromptButtons,
+    PromptResponse, confirm_file_delete, cursor_position_in_window, pick_path, pick_save_as,
+    show_about, show_prompt,
 };
 pub use export::{
     AudioChannels, AudioExportOptions, AudioNormalization, ExportDialogRequest, ExportError,

@@ -3,6 +3,31 @@ use crate::preview_transport::{Action, Transport};
 use towavue_core::{CommandId, MediaTime, PlaybackState};
 
 #[test]
+fn audio_card_preparation_does_not_submit_an_artwork_or_waveform_job() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_preview::navigation_tests::audio_card_preparation_does_not_submit_an_artwork_or_waveform_job",
+    ) else {
+        return;
+    };
+    let cache = PreviewCache::new(root.join("previews")).expect("cache");
+    let mut tabs = TabSet::default();
+    tabs.open_new(root.join("not-decoded.wav"), MediaKind::Audio);
+    let mut preview = TabPreview::new().expect("worker");
+    let target = preview.target(tabs.active().expect("tab")).expect("target");
+    let (sent, events) = std::sync::mpsc::channel();
+    let notify = Arc::new(move |event| {
+        let _ = sent.send(event);
+    });
+    for _ in 0..3 {
+        preview.request(Some(target.clone()), &cache, notify.clone());
+        assert!(preview.is_idle());
+        assert_eq!(preview.target, Some(target.clone()));
+        assert!(preview.texture.is_none());
+        assert!(events.try_recv().is_err());
+    }
+}
+
+#[test]
 fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_padding() {
     for density in [1.0, 1.25, 2.0] {
         for (width, height) in [(240, 135), (90, 160), (240, 100)] {
@@ -130,16 +155,16 @@ fn video_thumbnail_and_sheet_keep_the_same_viewport_without_extra_horizontal_pad
                 .reduce(egui::Rect::union)
                 .expect("sheet pixels");
             assert!(
-                (image.width() - 240.0).abs() <= 1.0 / density,
+                (image.width() - 160.0).abs() <= 1.0 / density,
                 "sheet cannot acquire extra horizontal padding: {image:?}"
             );
-            assert!((image.height() - 160.0).abs() <= 1.0 / density);
+            assert!((image.height() - 160.0 * 2.0 / 3.0).abs() <= 1.0 / density);
         }
     }
 }
 
 #[test]
-fn audio_card_navigation_keeps_pointer_ownership_when_artwork_shrinks_or_loads() {
+fn audio_card_is_compact_and_keeps_controls_stationary_without_artwork() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.enable_accesskit();
@@ -221,7 +246,7 @@ fn audio_card_navigation_keeps_pointer_ownership_when_artwork_shrinks_or_loads()
         let card = context
             .memory(|memory| memory.area_rect(layer))
             .expect("card");
-        let thumbnail_center = egui::pos2(card.center().x, card.top() + 81.0);
+        let thumbnail_center = egui::pos2(card.center().x, card.top() + 21.0);
         let output = frame(
             &mut preview,
             0,
@@ -301,10 +326,13 @@ fn audio_card_navigation_keeps_pointer_ownership_when_artwork_shrinks_or_loads()
         let reopened = context
             .memory(|memory| memory.area_rect(layer))
             .expect("reopened card");
-        assert!(
-            reopened.height() < card.height() - 100.0,
-            "reopening restores the current artwork's natural height"
+        assert_eq!(
+            reopened.height(),
+            card.height(),
+            "artwork does not affect height"
         );
+        assert!(card.height() < 90.0, "compact controls and filename only");
+        assert!((card.width() - 162.0).abs() <= 1.0 / density);
         let small_center = egui::pos2(reopened.center().x, reopened.top() + 21.0);
         frame(
             &mut preview,
@@ -314,14 +342,14 @@ fn audio_card_navigation_keeps_pointer_ownership_when_artwork_shrinks_or_loads()
         for _ in 0..3 {
             let output = frame(&mut preview, 4, vec![]).0;
             assert!(
-                output.shapes.iter().any(|shape| matches!(&shape.shape,
-                egui::Shape::Mesh(mesh) if mesh.texture_id == large.id())),
-                "new artwork is displayed"
+                !output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Mesh(mesh) if [large.id(), small.id()].contains(&mesh.texture_id))),
+                "audio never displays artwork or waveform pixels"
             );
             assert_eq!(
                 context.memory(|memory| memory.area_rect(layer)),
                 Some(reopened),
-                "artwork growth also preserves the operated card"
+                "audio preparation preserves the operated card"
             );
         }
     }

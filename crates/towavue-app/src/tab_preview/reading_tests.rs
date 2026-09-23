@@ -136,7 +136,7 @@ fn reading_tab_hover_joins_retained_pages_without_decoding_uploading_or_activati
                         .copied()
                         .reduce(egui::Rect::union)
                         .expect("spread");
-                    assert!(spread.width() <= 240.001 && spread.height() <= 160.001);
+                    assert!(spread.width() <= 160.001 && spread.height() <= 108.001);
                     let ordered = if reversed {
                         [rects[2], rects[1], rects[0]]
                     } else {

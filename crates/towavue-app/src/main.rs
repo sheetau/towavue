@@ -5665,6 +5665,7 @@ where
                                         let mut response = response.clone();
                                         response.rect.min.x = rect.min.x;
                                         response.interact_rect = response.rect.intersect(clip);
+                                        response.rect = rect;
                                         let retained = media_preview::tab_hovered(&response)
                                             .then(|| self.retained_tab_preview(tab.id, None))
                                             .flatten();
@@ -5682,6 +5683,7 @@ where
                                         let mut response = response.clone();
                                         response.rect.min.x = rect.min.x;
                                         response.interact_rect = response.rect.intersect(clip);
+                                        response.rect = rect;
                                         let hovered = media_preview::tab_hovered(&response);
                                         if hovered && tab.target.media_kind() == MediaKind::Image {
                                             image_preparation_target = Some(tab.id);

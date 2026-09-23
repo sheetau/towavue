@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::media_preview::SIZE;
 use egui::{TextureHandle, TextureOptions};
 use towavue_core::{MediaKind, Tab, TabId, TabSet};
 use towavue_runtime_windows::{LatestTask, PreviewCache, PreviewImage};
@@ -39,7 +40,7 @@ impl RetainedPreview {
         };
         let sizes: Vec<_> = pages.iter().map(|page| page.1).collect();
         let rects = crate::reading_page_rects(
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(240.0, 160.0)),
+            egui::Rect::from_min_size(egui::Pos2::ZERO, SIZE),
             &sizes,
             settings.axis,
             settings.reversed,
@@ -52,7 +53,7 @@ impl RetainedPreview {
         let natural = spread.height().max(40.0);
         let height = control.map_or(natural, |response| card_viewport_height(response, natural));
         let scale = (height / spread.height()).min(1.0);
-        let (bounds, _) = ui.allocate_exact_size(egui::vec2(240.0, height), egui::Sense::hover());
+        let (bounds, _) = ui.allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
         let rect = egui::Rect::from_center_size(bounds.center(), spread.size() * scale);
         for ((texture, _), page) in pages.iter().zip(rects) {
             if let Some(texture) = texture {
@@ -324,10 +325,13 @@ impl TabPreview {
         let Some(target) = target else {
             return;
         };
+        self.target = Some(target.clone());
+        if target.kind == MediaKind::Audio {
+            return;
+        }
         let Some(input) = input else {
             return;
         };
-        self.target = Some(target.clone());
         let generation = self.generation;
         let cache = cache.clone();
         self.worker.submit(move |cancellation| {
@@ -487,7 +491,7 @@ impl TabPreview {
         );
         crate::media_preview::Preview::tab(response)
             .show(|ui| {
-                ui.set_max_width(240.0);
+                ui.set_max_width(SIZE.x);
                 if let Some(thumbnail) =
                     retained.and_then(|preview| preview.show_reading(ui, folder.map(|_| response)))
                 {
@@ -500,10 +504,14 @@ impl TabPreview {
                 let cached = (target.is_some() && self.target.as_ref() == target)
                     .then_some(self.texture.as_ref())
                     .flatten();
-                let texture = retained
-                    .and_then(RetainedPreview::image)
-                    .map(Ok)
-                    .or_else(|| cached.map(Result::as_ref));
+                let texture = if kind == MediaKind::Audio {
+                    None
+                } else {
+                    retained
+                        .and_then(RetainedPreview::image)
+                        .map(Ok)
+                        .or_else(|| cached.map(Result::as_ref))
+                };
                 let sheet_uv = if retained.is_some() {
                     None
                 } else {
@@ -513,13 +521,13 @@ impl TabPreview {
                 if let Some(Ok(texture)) = texture {
                     let size =
                         sheet_uv.map_or_else(|| texture.size_vec2(), |_| egui::vec2(240.0, 160.0));
-                    let scale = (240.0 / size.x).min(160.0 / size.y).min(1.0);
+                    let scale = (SIZE.x / size.x).min(SIZE.y / size.y).min(1.0);
                     let size = size * scale;
                     // Video sheets contain padded 240x160 cells. Keep that same
                     // viewport for the earlier unpadded thumbnail, otherwise a
                     // retained shorter height shrinks the whole sheet cell.
                     let height = if kind == MediaKind::Video {
-                        160.0
+                        SIZE.y
                     } else if transport.is_some() || folder.is_some() {
                         size.y.max(40.0)
                     } else {
@@ -532,7 +540,7 @@ impl TabPreview {
                     };
                     let size = size * (height / size.y).min(1.0);
                     let (bounds, _) =
-                        ui.allocate_exact_size(egui::vec2(240.0, height), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
                     thumbnail = Some(bounds);
                     crate::media_preview::image(
                         ui,
@@ -549,13 +557,13 @@ impl TabPreview {
                     thumbnail = Some(
                         ui.allocate_exact_size(
                             egui::vec2(
-                                240.0,
+                                SIZE.x,
                                 card_viewport_height(
                                     response,
                                     if kind == MediaKind::Audio {
                                         40.0
                                     } else {
-                                        160.0
+                                        SIZE.y
                                     },
                                 ),
                             ),
@@ -1219,12 +1227,15 @@ mod tests {
                             .any(|text| matches!(*text, "…" | "Loading preview…"))
                     );
                     assert!(text.contains(&"fixture-media"));
-                    assert_eq!(text.contains(&"No preview"), state == 1);
+                    assert_eq!(
+                        text.contains(&"No preview"),
+                        state == 1 && kind != MediaKind::Audio
+                    );
                     assert_eq!(
                         text.iter().any(|text| text.starts_with("Preview near ")),
                         kind == MediaKind::Video
                     );
-                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
+                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2 && kind != MediaKind::Audio);
                 }
             }
         }

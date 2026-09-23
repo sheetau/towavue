@@ -1,6 +1,60 @@
 use super::*;
 
 #[test]
+fn audio_buttons_are_visible_from_the_source_tab_without_a_dark_backdrop() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.enable_accesskit();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        let thumbnail = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(160.0, 40.0));
+        let output = context.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::PointerMoved(egui::pos2(90.0, 15.0))],
+                ..Default::default()
+            },
+            |ui| {
+                assert!(
+                    (Transport {
+                        instance: 1,
+                        kind: MediaKind::Audio,
+                        state: PlaybackState::Paused,
+                        position: MediaTime::ZERO,
+                        duration: Some(media_time(Duration::from_secs(60))),
+                        enabled: true,
+                        previous: true,
+                        next: true,
+                    })
+                    .show(ui, thumbnail)
+                    .is_none()
+                );
+            },
+        );
+        let nodes = &output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes;
+        for label in ["Previous track", "Play", "Next track"] {
+            let bounds = nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .expect("button visible before entering card")
+                .1
+                .bounds()
+                .expect("bounds");
+            assert!(bounds.y0 >= 40.0 && bounds.y1 <= 80.0);
+        }
+        assert!(
+            !output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(160))),
+            "audio controls have no thumbnail backdrop"
+        );
+    }
+}
+
+#[test]
 fn card_seek_rejects_replacement_disabled_duration_and_interrupted_drags() {
     for scenario in 0..5 {
         let context = fonts::test_context();
@@ -179,7 +233,10 @@ fn tab_card_bridge_transport_clicks_and_progress_keep_layout_and_ownership() {
                                 .show(|ui| {
                                     let thumbnail = ui
                                         .allocate_exact_size(
-                                            egui::vec2(240.0, 80.0),
+                                            egui::vec2(
+                                                media_preview::SIZE.x,
+                                                if kind == MediaKind::Audio { 40.0 } else { 80.0 },
+                                            ),
                                             egui::Sense::hover(),
                                         )
                                         .0;

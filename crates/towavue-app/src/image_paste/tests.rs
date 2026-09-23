@@ -335,6 +335,31 @@ fn pasted_tabs_preview_retained_pixels_and_never_expose_private_paths() {
             egui::Shape::Mesh(mesh) if mesh.texture_id == texture)),
             "retained hover pixels at {density}"
         );
+        let tab = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect)
+                    if rect.corner_radius == egui::CornerRadius::same(3)
+                        && rect.rect.contains(egui::pos2(90.0, 16.0)) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+            .expect("painted tab bounds including its close button");
+        let pixels = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.calc_bounds()),
+                _ => None,
+            })
+            .expect("preview pixels");
+        assert!(
+            (pixels.center().x - tab.center().x).abs() <= 1.0 / density,
+            "preview centers on the full tab, not its shortened label: {pixels:?}, {tab:?}"
+        );
         let labels: Vec<_> = output
             .shapes
             .iter()

@@ -86,16 +86,18 @@ impl Transport {
         if self.state == PlaybackState::Playing {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
-        if !ui.rect_contains_pointer(thumbnail) {
+        let audio = self.kind == MediaKind::Audio;
+        if !audio && !ui.rect_contains_pointer(thumbnail) {
             return seek;
         }
-        let audio = self.kind == MediaKind::Audio;
         let rect = egui::Rect::from_center_size(
             thumbnail.center(),
             egui::vec2(if audio { 72.0 } else { 24.0 }, 24.0),
         );
-        ui.painter()
-            .rect_filled(rect, 4.0, Color32::from_black_alpha(160));
+        if !audio {
+            ui.painter()
+                .rect_filled(rect, 4.0, Color32::from_black_alpha(160));
+        }
         let mut action = None;
         let mut buttons = ui.new_child(
             egui::UiBuilder::new()

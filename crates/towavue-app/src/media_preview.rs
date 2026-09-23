@@ -19,6 +19,8 @@ fn tab_hover_id() -> egui::Id {
     egui::Id::new("open-tab-preview")
 }
 
+pub const SIZE: egui::Vec2 = egui::vec2(160.0, 108.0);
+
 pub fn tab_hovered(response: &Response) -> bool {
     let context = &response.ctx;
     if !response.enabled()
@@ -196,13 +198,13 @@ impl Preview {
                     response.rect.top() - 4.0,
                 ),
                 Align2::CENTER_BOTTOM,
-                160.0,
+                SIZE.x,
             )
         } else {
             (
                 response.rect.center_bottom() + egui::vec2(0.0, 4.0),
                 Align2::CENTER_TOP,
-                240.0,
+                SIZE.x,
             )
         };
         let id = response.id.with("media-preview");
@@ -349,11 +351,7 @@ mod tests {
                             };
                             card = preview
                                 .show(|ui| {
-                                    let size = if seek {
-                                        egui::vec2(160.0, 108.0)
-                                    } else {
-                                        egui::vec2(240.0, 160.0)
-                                    };
+                                    let size = SIZE;
                                     pixels = ui.allocate_exact_size(size, egui::Sense::hover()).0;
                                     image(ui, texture.id(), pixels, uv, pixels);
                                     caption(ui, |ui| {

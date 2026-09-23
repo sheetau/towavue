@@ -301,8 +301,8 @@ fn filmstrip_tab_navigation_uses_current_order_after_folder_updates() {
                             .get(&focused)
                             .and_then(|preview| preview.as_ref().ok())
                             .map(|(texture, _)| texture.id()),
-                        Some(texture_id),
-                        "keep ready pixels during same-folder refresh"
+                        (change != "remove_focus").then_some(texture_id),
+                        "keep existing pixels and retire confirmed removals on refresh"
                     );
                     let count = snapshot.items.len();
                     let start = snapshot

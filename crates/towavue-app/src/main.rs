@@ -2570,7 +2570,8 @@ where
             self.filmstrip
                 .refresh_previews(&snapshot, self.filmstrip_open);
         } else {
-            self.filmstrip.clear();
+            self.filmstrip.suspend_view();
+            self.filmstrip.refresh_previews(&snapshot, false);
         }
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 3);
@@ -2733,7 +2734,7 @@ where
             return;
         }
         if !self.filmstrip_open {
-            self.filmstrip.clear_previews();
+            self.filmstrip.pause_preparation();
         }
         self.image_request_offset = offset;
         self.image_loading = !paths.is_empty();
@@ -10901,13 +10902,8 @@ where
                 self.filmstrip
                     .prepare_neighbors(self.folder_snapshot.as_ref(), self.path.as_deref());
             }
-        } else if matches!(
-            &self.pending_folder,
-            Some((_, FolderIntent::Refresh(path))) if self.path.as_ref() == Some(path)
-        ) {
-            self.filmstrip.pause_preparation();
         } else {
-            self.filmstrip.clear();
+            self.filmstrip.pause_preparation();
         }
     }
 

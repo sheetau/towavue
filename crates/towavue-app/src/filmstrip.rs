@@ -84,6 +84,7 @@ pub struct Filmstrip {
     visible: Vec<PathBuf>,
     previews: HashMap<PathBuf, Preview>,
     preview_order: Vec<PathBuf>,
+    gallery_viewport: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
     preparation: Option<Preparation>,
     warming: Option<PathBuf>,
@@ -119,6 +120,7 @@ impl Filmstrip {
             visible: Vec::new(),
             previews: HashMap::new(),
             preview_order: Vec::new(),
+            gallery_viewport: Vec::new(),
             refreshing: Vec::new(),
             preparation: None,
             warming: None,
@@ -139,14 +141,24 @@ impl Filmstrip {
         })
     }
 
+    #[cfg(test)]
     pub fn clear(&mut self) {
+        self.suspend_view();
+        self.clear_previews();
+    }
+
+    /// Retire view/input ownership and pending work without discarding bounded
+    /// ready pixels. Revalidate them asynchronously when another view uses them.
+    pub fn suspend_view(&mut self) {
         self.held_deleted = None;
         self.held_snapshot = None;
         self.preserve_refresh_view = false;
         self.focus_requested = false;
         self.focus = None;
         self.scroll_offset = 0.0;
-        self.clear_previews();
+        self.preparation = None;
+        self.pause_preparation();
+        self.refreshing = self.previews.keys().cloned().collect();
     }
 
     /// Native mutations keep the viewport, even if the operated card changes
@@ -256,6 +268,7 @@ impl Filmstrip {
         }
         self.previews.clear();
         self.preview_order.clear();
+        self.gallery_viewport.clear();
         self.refreshing.clear();
     }
 
@@ -277,6 +290,24 @@ impl Filmstrip {
     pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot, open: bool) {
         self.preparation = None;
         self.warming = None;
+        // Absence from a completed listing retires that folder's removed cards.
+        // Other folders' cached pixels still belong to the shared working set.
+        let mut removed: std::collections::HashSet<_> = self
+            .previews
+            .keys()
+            .filter(|path| {
+                path.parent() == Some(snapshot.folder_path.as_path())
+                    && self.held_deleted.as_ref() != Some(*path)
+            })
+            .cloned()
+            .collect();
+        for item in &snapshot.items {
+            if removed.is_empty() {
+                break;
+            }
+            removed.remove(&item.path);
+        }
+        self.previews.retain(|path, _| !removed.contains(path));
         if !open {
             self.pause_preparation();
             // Keep ready pixels until use permits revalidation, including textures
@@ -309,12 +340,12 @@ impl Filmstrip {
             focus: self.focus.take(),
             offset: self.scroll_offset,
         };
-        self.clear();
+        self.suspend_view();
         view
     }
 
     pub fn restore_view(&mut self, view: View) {
-        self.clear();
+        self.suspend_view();
         self.focus = view.focus;
         self.scroll_offset = view.offset;
     }
@@ -332,7 +363,7 @@ impl Filmstrip {
                 .position(|item| Some(item.path.as_path()) == current)
                 .map(|selected| (snapshot, selected))
         }) else {
-            self.clear();
+            self.suspend_view();
             return;
         };
         self.cancel_drag();
@@ -340,7 +371,19 @@ impl Filmstrip {
         self.focus = None;
         self.scroll_offset = 0.0;
         let count = snapshot.items.len();
-        let wanted = (0..count.min(VISIBLE_PREVIEW_LIMIT))
+        // Closed-strip prefetch must not evict the last visible Gallery just
+        // because its neighboring folder can fill every available texture slot.
+        // The current media still gets the first request and at least one slot.
+        let reserved = self
+            .gallery_viewport
+            .iter()
+            .filter(|path| {
+                **path != snapshot.items[selected].path
+                    && self.previews.get(*path).is_some_and(Result::is_ok)
+            })
+            .count();
+        let wanted_limit = VISIBLE_PREVIEW_LIMIT.saturating_sub(reserved).max(1);
+        let wanted = (0..count.min(wanted_limit))
             .map(|rank| {
                 let item = &snapshot.items[neighbor_index(selected, count, rank)];
                 (item.path.clone(), item.kind)
@@ -357,7 +400,7 @@ impl Filmstrip {
             self.preparation = Some(Preparation {
                 current: snapshot.items[selected].path.clone(),
                 snapshot: snapshot.generation,
-                next: count.min(VISIBLE_PREVIEW_LIMIT),
+                next: 0,
             });
         }
         if self.warming.is_some()
@@ -373,10 +416,11 @@ impl Filmstrip {
             let item = &snapshot.items[neighbor_index(selected, count, preparation.next)];
             // Plain BMP previews are memory-only. Scanning beyond the retained
             // working set would just evict useful pixels without warming disk.
-            if item
-                .path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("bmp"))
+            if self.visible.contains(&item.path)
+                || item
+                    .path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("bmp"))
             {
                 preparation.next += 1;
                 continue;
@@ -1130,6 +1174,7 @@ impl Filmstrip {
         self.recent_drag.finish(ui.ctx(), None, actions);
         self.focused_card = focused_card;
         self.recent_focus = recent_focus;
+        self.gallery_viewport = wanted.iter().map(|(path, _)| path.clone()).collect();
         // Keep recently prepared offscreen pixels before spending spare slots on
         // newest-first prefetch. Filling every spare slot with new requests used
         // to evict all older ready cards as soon as they left the viewport.
@@ -1180,8 +1225,9 @@ impl Filmstrip {
                 !visible.is_empty()
                     && !visible.contains(path)
                     && self.previews.get(path).is_some_and(Result::is_ok)
-                    && !self.refreshing.contains(path)
             });
+            self.preview_order
+                .sort_by_key(|path| !self.gallery_viewport.contains(path));
             self.preview_order.splice(0..0, visible.iter().cloned());
             self.preview_order.truncate(VISIBLE_PREVIEW_LIMIT);
             self.previews
@@ -1504,7 +1550,8 @@ mod tests {
         // The actual foreground entry must cancel preparation before any redraw,
         // not merely rely on a future frame noticing image_loading.
         app.request_image_paths(vec![paths[48].clone()], 0);
-        assert!(app.filmstrip.warming.is_none() && app.filmstrip.preparation.is_none());
+        assert!(app.filmstrip.warming.is_none() && app.filmstrip.visible.is_empty());
+        assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
         let foreground_started = std::time::Instant::now();
         let original = loop {
             if let Some(result) = app.image_loader.take_completed() {
@@ -2142,6 +2189,190 @@ mod tests {
     }
 
     #[test]
+    fn gallery_pixels_survive_media_tabs_prefetch_and_revalidate_on_return() {
+        use crate::audio_export::tests::frame;
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::gallery_pixels_survive_media_tabs_prefetch_and_revalidate_on_return",
+        ) else {
+            return;
+        };
+        let (sent, events) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new(None, move |event| {
+            let _ = sent.send(event);
+        })
+        .expect("app");
+        app.recent_files = None;
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(crate::chrome::style);
+        app.ui_context = Some(context.clone());
+        let gallery_root = root.join("gallery");
+        let media_root = root.join("media");
+        std::fs::create_dir_all(&gallery_root).expect("gallery directory");
+        std::fs::create_dir_all(&media_root).expect("media directory");
+        let paths = bitmap_paths(&gallery_root, 100);
+        let media = bitmap_paths(&media_root, 100);
+        app.recent_paths = paths.clone();
+        let gallery = app.tabs.gallery().expect("Gallery tab");
+        let size = egui::vec2(660.0, 400.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let wait = |app: &mut crate::Application<_>| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while app.filmstrip.visible.iter().any(|path| {
+                !app.filmstrip.previews.contains_key(path)
+                    || app.filmstrip.refreshing.contains(path)
+            }) {
+                let event = events
+                    .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                    .expect("preview completion");
+                if matches!(event, crate::AppEvent::FilmstripReady) {
+                    app.handle_app_event(event);
+                }
+            }
+            assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+        };
+        wait(&mut app);
+        let retained: Vec<_> = app
+            .filmstrip
+            .gallery_viewport
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    app.filmstrip.previews[path]
+                        .as_ref()
+                        .expect("Gallery pixels")
+                        .0
+                        .id(),
+                )
+            })
+            .collect();
+        assert!(!retained.is_empty());
+        let image = crate::tab_transfer::tests::install(
+            &mut app,
+            media[0].clone(),
+            crate::tab_transfer::tests::decoded(false),
+        );
+        app.pending_folder = None;
+        let snapshot = FolderSnapshot {
+            folder_identity: ShellIdentity::new(vec![]),
+            folder_path: media_root,
+            items: media
+                .iter()
+                .enumerate()
+                .map(|(index, path)| FolderMediaItem {
+                    identity: ShellIdentity::new(vec![index as u8]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::NaturalNameFallback,
+            generation: 1,
+            captured_at: SystemTime::now(),
+        };
+        app.apply_folder_snapshot(snapshot);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !app.image_loader.is_idle() {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        app.prepare_filmstrip(&context);
+        assert_eq!(
+            app.filmstrip.visible.first(),
+            Some(&media[0]),
+            "current media leads requests"
+        );
+        wait(&mut app);
+        for (path, id) in &retained {
+            assert_eq!(
+                app.filmstrip.previews[path]
+                    .as_ref()
+                    .expect("protected Gallery")
+                    .0
+                    .id(),
+                *id
+            );
+        }
+        app.state = towavue_core::PlaybackState::Playing;
+        app.prepare_filmstrip(&context);
+        assert!(app.filmstrip.visible.is_empty() && app.filmstrip.warming.is_none());
+        app.state = towavue_core::PlaybackState::Paused;
+        app.activate_tab(gallery);
+        let output = frame(&mut app, size, vec![]);
+        for (path, id) in &retained {
+            assert_eq!(
+                app.filmstrip.previews[path]
+                    .as_ref()
+                    .expect("immediate return")
+                    .0
+                    .id(),
+                *id
+            );
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Mesh(mesh) if mesh.texture_id == *id)));
+        }
+        wait(&mut app);
+        let source = retained[0].0.clone();
+        let previous = app.filmstrip.previews[&source]
+            .as_ref()
+            .expect("validated")
+            .0
+            .id();
+        app.activate_tab(image);
+        let mut bytes = std::fs::read(&source).expect("owned bitmap");
+        bytes[56] = 255;
+        bytes[59] = 255;
+        let modified = std::fs::metadata(&source)
+            .expect("metadata")
+            .modified()
+            .expect("mtime");
+        std::fs::write(&source, bytes).expect("external change");
+        std::fs::File::options()
+            .write(true)
+            .open(&source)
+            .expect("file")
+            .set_times(std::fs::FileTimes::new().set_modified(modified + Duration::from_secs(2)))
+            .expect("new stamp");
+        app.activate_tab(gallery);
+        let output = frame(&mut app, size, vec![]);
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == previous)),
+            "old pixels stay visible during revalidation"
+        );
+        wait(&mut app);
+        let replacement = app.filmstrip.previews[&source]
+            .as_ref()
+            .expect("new source")
+            .0
+            .id();
+        let output = frame(&mut app, size, vec![]);
+        let pixels = &output
+            .textures_delta
+            .set
+            .iter()
+            .find(|(id, _)| *id == replacement)
+            .expect("new pixels uploaded")
+            .1
+            .image;
+        let egui::ImageData::Color(pixels) = pixels;
+        assert!(
+            pixels
+                .pixels
+                .iter()
+                .all(|pixel| *pixel == Color32::from_rgb(255, 34, 12))
+        );
+        app.filmstrip.clear_previews();
+        assert!(
+            app.filmstrip.previews.is_empty() && app.filmstrip.gallery_viewport.is_empty(),
+            "graphics recovery and source publication can still invalidate all previews"
+        );
+    }
+
+    #[test]
     fn gallery_scrolling_retains_recent_pixels_before_prefetch_and_survives_suspension() {
         let unique = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -2713,7 +2944,12 @@ mod tests {
             egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)));
         assert!(!app.filmstrip.refreshing.is_empty());
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !app.filmstrip.refreshing.is_empty() {
+        while app
+            .filmstrip
+            .visible
+            .iter()
+            .any(|path| app.filmstrip.refreshing.contains(path))
+        {
             ready
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
                 .expect("deferred source validation resumes on opening");
@@ -2778,7 +3014,11 @@ mod tests {
                 .map(|(path, _)| (path.clone(), MediaKind::Image))
                 .collect(),
         );
-        assert!(!app.filmstrip.previews.contains_key(&offscreen));
+        assert!(app.filmstrip.previews.contains_key(&offscreen));
+        assert!(
+            app.filmstrip.refreshing.contains(&offscreen),
+            "offscreen revalidation is deferred until use"
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while retained.iter().any(|(path, id)| {
             app.filmstrip.previews[path]
@@ -2789,9 +3029,11 @@ mod tests {
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
                 .expect("refreshed previews finish");
             app.filmstrip.finish(&context);
-            assert_eq!(
-                app.filmstrip.previews.len(),
-                retained.len(),
+            assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+            assert!(
+                retained
+                    .iter()
+                    .all(|(path, _)| app.filmstrip.previews.contains_key(path)),
                 "no empty slots while refreshing"
             );
         }
@@ -2799,7 +3041,12 @@ mod tests {
             app.filmstrip.previews[&removed].is_err(),
             "missing source replaces stale preview"
         );
-        assert!(app.filmstrip.refreshing.is_empty());
+        assert!(
+            retained
+                .iter()
+                .all(|(path, _)| !app.filmstrip.refreshing.contains(path))
+        );
+        assert!(app.filmstrip.refreshing.contains(&offscreen));
         let replacement = app.filmstrip.previews[&current]
             .as_ref()
             .expect("changed source")
@@ -2829,12 +3076,12 @@ mod tests {
         app.filmstrip.pause_preparation();
         app.apply_folder_snapshot(reordered);
         assert!(
-            app.filmstrip.previews.is_empty(),
-            "changed order resets a closed strip"
+            app.filmstrip.visible.is_empty() && !app.filmstrip.refreshing.is_empty(),
+            "changed order resets requests and requires revalidation"
         );
         assert!(
-            context.tex_manager().read().meta(replacement).is_none(),
-            "clear releases paused textures"
+            context.tex_manager().read().meta(replacement).is_some(),
+            "reordering retains paused textures until validation"
         );
         app.filmstrip_open = false;
         for blocked in 0..7 {
@@ -2856,8 +3103,8 @@ mod tests {
             app.prepare_filmstrip(&context);
             assert!(app.filmstrip.visible.is_empty(), "blocked case {blocked}");
             assert!(
-                app.filmstrip.previews.is_empty(),
-                "release speculative textures"
+                app.filmstrip.previews.contains_key(&current),
+                "foreground work pauses speculation without freeing ready pixels"
             );
             app.image_sequence.steps.clear();
         }
@@ -3974,7 +4221,7 @@ fn snapshot_comparison_reuse_preserves_sequence_and_preview_refresh_decisions() 
                         .map(|item| &item.path)
                         .eq(next.items_of_kind(MediaKind::Image).map(|item| &item.path))
             });
-            let retain_previews = previous.as_ref().is_some_and(|previous| {
+            let retain_view = previous.as_ref().is_some_and(|previous| {
                 previous.folder_path == next.folder_path && (previous.items == next.items || open)
             });
             let current = base.items[0].path.clone();
@@ -4002,14 +4249,12 @@ fn snapshot_comparison_reuse_preserves_sequence_and_preview_refresh_decisions() 
                 "change {change}, open {open}"
             );
             assert_eq!(app.image_sequence.steps.is_empty(), cancel_sequence);
-            assert_eq!(
-                app.filmstrip.previews.contains_key(&current),
-                retain_previews
-            );
-            assert_eq!(app.filmstrip.focus.is_some(), retain_previews);
+            assert!(app.filmstrip.previews.contains_key(&current));
+            assert!(app.filmstrip.refreshing.contains(&current));
+            assert_eq!(app.filmstrip.focus.is_some(), retain_view);
             assert_eq!(
                 app.filmstrip.scroll_offset,
-                if retain_previews { 123.0 } else { 0.0 }
+                if retain_view { 123.0 } else { 0.0 }
             );
             let installed = app.folder_snapshot.as_ref().expect("fresh snapshot");
             assert_eq!(installed.generation, 2);

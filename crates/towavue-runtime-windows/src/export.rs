@@ -1197,6 +1197,7 @@ struct ExportStreams {
     png_image_sequence: bool,
     video: Option<(usize, ffmpeg::Rational)>,
     video_encoding: Option<video_encoding::HighDepth>,
+    parallel_h264: bool,
     video_quality: VideoExportQuality,
     audio: Option<(usize, ffmpeg::Rational)>,
     audio_channels: Option<u16>,
@@ -1209,10 +1210,26 @@ struct ExportStreams {
 
 impl ExportStreams {
     fn codec_arguments(&self, request: &ExportRequest, hardware: bool) -> Vec<String> {
-        self.video_encoding.as_ref().map_or_else(
+        let mut arguments = self.video_encoding.as_ref().map_or_else(
             || codec_arguments(request, hardware, self.video_quality),
             |encoding| encoding.arguments(&request.target, self.video_quality),
-        )
+        );
+        if request.kind == MediaKind::Video {
+            // Bound random-access preroll by output time, including rate/trim
+            // edits and variable frame rates. OpenH264 otherwise defaults to an
+            // unbounded GOP; every later seek can require decoding from zero.
+            arguments.extend(["-force_key_frames".into(), "expr:gte(t,n_forced*2)".into()]);
+        }
+        if self.parallel_h264
+            && arguments
+                .windows(2)
+                .any(|pair| pair == ["-c:v", "libopenh264"])
+        {
+            // The single-slice default serializes OpenH264. Bound its slice
+            // workers to four, and avoid extra slicing on small edited canvases.
+            arguments.extend(["-threads:v", "4", "-slices", "4"].map(String::from));
+        }
+        arguments
     }
 
     fn visual_filters(&self, operations: &[EditOperation]) -> Vec<String> {
@@ -1232,7 +1249,24 @@ impl ExportStreams {
             let video = (request.kind == MediaKind::Video)
                 .then(|| input.streams().best(ffmpeg::media::Type::Video))
                 .flatten()
-                .map(|stream| (stream.index(), stream.time_base()));
+                .map(|stream| {
+                    let decoder =
+                        ffmpeg::codec::context::Context::from_parameters(stream.parameters())?
+                            .decoder()
+                            .video()?;
+                    let size = video_encoding::edited_size(
+                        (decoder.width(), decoder.height()),
+                        &request.operations,
+                    );
+                    // Only minimum extent matters here; native quarter-turn
+                    // orientation cannot change this eligibility.
+                    Ok::<_, ffmpeg::Error>((
+                        stream.index(),
+                        stream.time_base(),
+                        size.0 >= 256 && size.1 >= 256,
+                    ))
+                })
+                .transpose()?;
             let audio = input
                 .streams()
                 .best(ffmpeg::media::Type::Audio)
@@ -1267,7 +1301,8 @@ impl ExportStreams {
                 png_animation: false,
                 gif_animation: false,
                 png_image_sequence: false,
-                video,
+                video: video.map(|(index, time_base, _)| (index, time_base)),
+                parallel_h264: video.is_some_and(|(_, _, parallel)| parallel),
                 video_encoding: None,
                 video_quality: VideoExportQuality::High,
                 audio: audio.map(|(index, time_base, _)| (index, time_base)),

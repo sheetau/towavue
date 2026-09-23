@@ -297,3 +297,91 @@ fn sequential(mut args: Vec<String>) -> Vec<String> {
     }
     args
 }
+
+#[test]
+#[ignore = "Read-only authorized source; retains a new midpoint trim in an explicitly reserved output directory"]
+fn reference_midpoint_trim_reports_public_export_cost() {
+    if cfg!(debug_assertions) {
+        panic!("use Release for timing");
+    }
+    let source = PathBuf::from(
+        std::env::var_os("TOWAVUE_EXPORT_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let root = PathBuf::from(
+        std::env::var_os("TOWAVUE_EXPORT_REFERENCE_OUTPUT").expect("new output directory"),
+    );
+    // Never overwrite an existing directory or reference media.
+    fs::create_dir(&root).expect("reserve new output directory");
+    let stamp = || {
+        let metadata = fs::metadata(&source).expect("source metadata");
+        (metadata.len(), metadata.modified().expect("source mtime"))
+    };
+    let before = stamp();
+    let mut request = ExportRequest {
+        source: source.clone(),
+        target: root.join("midpoint.mp4"),
+        kind: MediaKind::Video,
+        operations: Vec::new(),
+        hardware_encode: false,
+    };
+    let duration = ExportStreams::probe(&request)
+        .expect("streams")
+        .duration
+        .expect("finite duration")
+        .as_nanoseconds();
+    let seconds: i64 = std::env::var("TOWAVUE_EXPORT_REFERENCE_SECONDS")
+        .unwrap_or_else(|_| "180".into())
+        .parse()
+        .expect("positive trim seconds");
+    assert!(seconds > 0 && seconds <= 180);
+    let length = seconds * 1_000_000_000;
+    assert!(duration > length);
+    let start = (duration - length) / 2;
+    request.operations = vec![
+        EditOperation::SetTrimStart(MediaTime::from_nanoseconds(start)),
+        EditOperation::SetTrimEnd(MediaTime::from_nanoseconds(start + length)),
+    ];
+    let (notify, events) = std::sync::mpsc::channel();
+    let began = Instant::now();
+    let job = ExportJob::start(request.clone(), move |event| {
+        let _ = notify.send(event);
+    })
+    .expect("public export worker");
+    let mut first_progress = None;
+    loop {
+        match events
+            .recv_timeout(Duration::from_secs(600))
+            .expect("bounded export")
+        {
+            ExportEvent::Progress(position) if !position.is_zero() => {
+                if first_progress.is_none() {
+                    first_progress = Some(began.elapsed());
+                    println!(
+                        "REFERENCE_EXPORT_FIRST seconds={:.3} position={position:?}",
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+            }
+            ExportEvent::Finished(result) => {
+                assert!(!result.expect("export success").used_hardware_encoder);
+                break;
+            }
+            _ => {}
+        }
+        assert!(began.elapsed() < Duration::from_secs(900), "bounded export");
+    }
+    let elapsed = began.elapsed();
+    drop(job);
+    assert_eq!(stamp(), before);
+    let output = ffmpeg::format::input(&request.target).expect("published output");
+    assert!((output.duration() - length / 1000).abs() < 100_000);
+    let report = format!(
+        "REFERENCE_EXPORT start_ns={start} length_ns={length} first_progress_s={:.3} total_s={:.3} bytes={} output={}\n",
+        first_progress.expect("encoding progress").as_secs_f64(),
+        elapsed.as_secs_f64(),
+        fs::metadata(&request.target).expect("output size").len(),
+        request.target.display(),
+    );
+    print!("{report}");
+    fs::write(root.join("timing.txt"), report).expect("retain timing");
+}

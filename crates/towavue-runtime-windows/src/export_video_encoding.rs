@@ -1,6 +1,21 @@
 use super::*;
 use ffmpeg::format::Pixel;
 
+pub(super) fn edited_size(mut size: (u32, u32), operations: &[EditOperation]) -> (u32, u32) {
+    for operation in operations {
+        match *operation {
+            EditOperation::Crop(crop) => size = (crop.width, crop.height),
+            EditOperation::ResizeVideo(resize) => size = resize.size(),
+            EditOperation::RotateVideo(rotation) => size = rotation.size(),
+            EditOperation::RotateClockwise | EditOperation::RotateCounterclockwise => {
+                size = (size.1, size.0);
+            }
+            _ => {}
+        }
+    }
+    size
+}
+
 /// Compression presets preserve the requested geometry, timing and sample depth.
 /// Encoder-specific controls are deliberately not a common numeric quality scale.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -174,17 +189,7 @@ impl HighDepth {
         if orientation.swaps_axes() {
             size = (size.1, size.0);
         }
-        for operation in &request.operations {
-            match *operation {
-                EditOperation::Crop(crop) => size = (crop.width, crop.height),
-                EditOperation::ResizeVideo(resize) => size = resize.size(),
-                EditOperation::RotateVideo(rotation) => size = rotation.size(),
-                EditOperation::RotateClockwise | EditOperation::RotateCounterclockwise => {
-                    size = (size.1, size.0);
-                }
-                _ => {}
-            }
-        }
+        size = edited_size(size, &request.operations);
         // SVT requires even dimensions of at least 64. AOM covers small/odd
         // canvases and other supported chroma/depth layouts without padding or
         // silently reducing sample depth. Both encoders are already bundled.

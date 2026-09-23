@@ -941,3 +941,84 @@ fn preroll_conversion_reports_first_frame_cost() {
         "SEEK_CONVERSION_CHECKS cases=48 exact_selected_frames=true unchanged_decode_count=true source_bytes_stamps=true"
     );
 }
+
+#[test]
+#[ignore = "Read-only owner reference seek timings; Release, explicit source, muted audio, no presentation"]
+fn reference_session_reports_fractional_seek_readiness() {
+    if cfg!(debug_assertions) {
+        panic!("use Release for timing");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let stamp = || {
+        let m = std::fs::metadata(&path).expect("source");
+        (m.len(), m.modified().expect("mtime"))
+    };
+    let before = stamp();
+    let input = format::input(&path).expect("read-only duration probe");
+    let duration = input.duration();
+    assert!(duration > 0, "finite reference duration");
+    drop(input);
+    let device = GraphicsDevice::hardware_for_test().expect("windowless hardware device");
+    let (notify, events) = mpsc::channel();
+    let open = Instant::now();
+    let mut session = crate::PlaybackSession::open_paused(
+        &path,
+        device,
+        0.0,
+        1.0,
+        towavue_core::PlaybackRange::default(),
+        move |event| {
+            let _ = notify.send(event);
+        },
+    )
+    .expect("muted paused session");
+    println!(
+        "REFERENCE_OPEN ms={:.3}",
+        open.elapsed().as_secs_f64() * 1000.0
+    );
+    for (index, numerator) in [0, 2, 3, 1, 2].into_iter().enumerate() {
+        let target = MediaTime::from_nanoseconds(duration * 1000 * numerator / 4);
+        let started = Instant::now();
+        session.seek(target).expect("seek");
+        let command_ms = started.elapsed().as_secs_f64() * 1000.0;
+        loop {
+            if let Some(time) = session.pending_video_time() {
+                assert!(
+                    time >= target && time <= target.saturating_add(Duration::from_secs(1)),
+                    "fresh target PTS"
+                );
+                assert!(session.advance_pending());
+                println!(
+                    "REFERENCE_SEEK index={index} target_s={:.3} command_ms={command_ms:.3} ready_ms={:.3} stages={:?} hardware={} transfers={}",
+                    target.as_nanoseconds() as f64 / 1e9,
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    session.seek_stage_ms(),
+                    session.metrics().hardware_frame_count,
+                    session.metrics().cpu_transfer_count
+                );
+                break;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(90),
+                "bounded reference seek wait"
+            );
+            if let Ok(event) = events.recv_timeout(Duration::from_millis(1))
+                && event.generation() == session.generation()
+            {
+                assert!(
+                    !matches!(
+                        event,
+                        crate::PlaybackEvent::Failed(..)
+                            | crate::PlaybackEvent::VideoFailed(..)
+                            | crate::PlaybackEvent::DeviceRemoved(..)
+                    ),
+                    "{event:?}"
+                );
+            }
+        }
+    }
+    drop(session);
+    assert_eq!(stamp(), before);
+}

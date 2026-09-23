@@ -1189,3 +1189,140 @@ fn high_depth_trim_preserves_declared_chroma_location() {
 
 #[path = "export_video_preset_tests.rs"]
 mod presets;
+
+#[test]
+fn edited_video_exports_have_periodic_random_access_without_changing_timing() {
+    let root = depth_directory();
+    for (index, (rate, pixel, extension, size)) in [
+        (25, "yuv420p", "mp4", "96x64"),
+        (60, "yuv420p", "mkv", "96x64"),
+        (1, "yuv420p", "mp4", "96x64"),
+        (8, "yuv420p10le", "mp4", "96x64"),
+        (25, "yuv420p", "webm", "96x64"),
+        (25, "yuv420p", "avi", "96x64"),
+        (25, "yuv420p", "wmv", "96x64"),
+        (8, "yuv444p10le", "mkv", "96x64"),
+        (25, "yuv420p", "mp4", "320x256"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = root.join(format!("gop-source-{index}.mkv"));
+        let target = root.join(format!("gop-output-{index}.{extension}"));
+        run(
+            "ffmpeg.exe",
+            &[
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("testsrc2=size={size}:rate={rate}:duration=7,format={pixel}"),
+                "-c:v",
+                "ffv1",
+                source.to_str().expect("source"),
+            ],
+        );
+        let request = ExportRequest {
+            source,
+            target: target.clone(),
+            kind: MediaKind::Video,
+            operations: vec![EditOperation::FlipHorizontal],
+            hardware_encode: false,
+        };
+        let streams = ExportStreams::probe(&request).expect("encoding geometry");
+        assert_eq!(streams.parallel_h264, size == "320x256");
+        if size == "320x256" {
+            let mut cropped = request.clone();
+            cropped
+                .operations
+                .push(EditOperation::Crop(towavue_core::PixelCrop {
+                    x: 0,
+                    y: 0,
+                    width: 32,
+                    height: 32,
+                }));
+            let small = ExportStreams::probe(&cropped).expect("cropped geometry");
+            assert!(!small.parallel_h264, "use the edited canvas extent");
+            assert!(
+                streams
+                    .codec_arguments(&request, false)
+                    .windows(2)
+                    .any(|pair| pair == ["-slices", "4"])
+            );
+            assert!(
+                !streams
+                    .codec_arguments(&request, true)
+                    .iter()
+                    .any(|argument| argument == "-slices")
+            );
+        }
+        export_media(&request).expect("edited export");
+        let probe = run(
+            "ffprobe.exe",
+            &[
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "packet=pts_time,flags",
+                "-of",
+                "csv=p=0",
+                target.to_str().expect("target"),
+            ],
+        );
+        let text = String::from_utf8(probe.stdout).expect("packet table");
+        let packets: Vec<(f64, bool)> = text
+            .lines()
+            .map(|line| {
+                let (time, flags) = line.split_once(',').expect("PTS and flags");
+                (time.parse().expect("seconds"), flags.contains('K'))
+            })
+            .collect();
+        assert_eq!(
+            packets.len(),
+            rate * 7,
+            "periodic keyframes must not add/drop frames"
+        );
+        let keys: Vec<f64> = packets
+            .iter()
+            .filter(|(_, key)| *key)
+            .map(|(time, _)| *time)
+            .collect();
+        assert!(keys.len() >= 4, "random-access points missing: {keys:?}");
+        assert!(keys[0].abs() < 0.001);
+        assert!(
+            keys.windows(2)
+                .all(|pair| pair[1] - pair[0] <= 2.0 + 1.0 / rate as f64)
+        );
+        let last = packets
+            .iter()
+            .map(|(time, _)| *time)
+            .max_by(f64::total_cmp)
+            .expect("last frame");
+        assert!((last - (7.0 - 1.0 / rate as f64)).abs() < 0.002);
+        let fields = run(
+            "ffprobe.exe",
+            &[
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=pix_fmt",
+                "-of",
+                "default=nw=1:nk=1",
+                target.to_str().expect("target"),
+            ],
+        );
+        assert_eq!(
+            String::from_utf8(fields.stdout)
+                .expect("pixel format")
+                .trim(),
+            pixel
+        );
+        println!("EXPORT_GOP rate={rate} pixel={pixel} container={extension} keys={keys:?}");
+    }
+    fs::remove_dir_all(root).expect("remove owned export fixture");
+}

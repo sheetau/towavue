@@ -5036,7 +5036,6 @@ where
             }
         }
         if dragging
-            && released
             && !matches!(
                 self.view_drag,
                 Some(ViewDrag::Selection {
@@ -5071,16 +5070,18 @@ where
         preserve_ratio: bool,
         image_size: (u32, u32),
     ) {
-        let Some(mut selection) = self.image_view.selection else {
-            return;
-        };
-        let ratio_selection = match self.view_drag {
+        // Recompute from the press snapshot: rounded live edges must not feed
+        // back into the next frame's anchor/center, even after a collapsed drag.
+        let Some(mut selection) = (match self.view_drag {
             Some(ViewDrag::Selection {
                 before: Some(before),
                 ..
-            }) => before,
-            _ => selection,
+            }) => Some(before),
+            _ => self.image_view.selection,
+        }) else {
+            return;
         };
+        let ratio_selection = selection;
         let pixel_ratio = ratio_selection.width() * image_size.0 as f32
             / (ratio_selection.height() * image_size.1 as f32).max(1.0);
         if let SelectionDrag::Corner { left, top } = edge {

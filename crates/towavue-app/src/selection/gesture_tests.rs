@@ -1,6 +1,179 @@
 use crate::*;
 
 #[test]
+fn held_selection_snaps_without_drift_and_release_keeps_the_live_bounds() {
+    let Some(_) = tests::isolated_test_root(
+        "selection::gesture_tests::held_selection_snaps_without_drift_and_release_keeps_the_live_bounds",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.timeline_open = true;
+    let size = (1002, 606);
+    let image = egui::Rect::from_min_size(egui::pos2(30.3, 40.7), egui::vec2(427.5, 257.25));
+    let original = PixelCrop {
+        x: 204,
+        y: 122,
+        width: 402,
+        height: 242,
+    }
+    .unit_rect(size);
+    let selected = selection_rect(image, original);
+    let gestures = [
+        (
+            image.lerp_inside(egui::vec2(0.133, 0.197)),
+            image.lerp_inside(egui::vec2(0.731, 0.799)),
+            None,
+        ),
+        (
+            image.lerp_inside(egui::vec2(0.731, 0.799)),
+            image.lerp_inside(egui::vec2(0.133, 0.197)),
+            None,
+        ),
+        (
+            selected.left_center(),
+            selected.left_center() + egui::vec2(-37.7, 0.0),
+            Some(selected.right_center()),
+        ),
+        (
+            selected.right_center(),
+            selected.right_center() + egui::vec2(37.7, 0.0),
+            Some(selected.left_center()),
+        ),
+        (
+            selected.center_top(),
+            selected.center_top() + egui::vec2(0.0, -31.3),
+            Some(selected.center_bottom()),
+        ),
+        (
+            selected.center_bottom(),
+            selected.center_bottom() + egui::vec2(0.0, 31.3),
+            Some(selected.center_top()),
+        ),
+        (
+            selected.left_top(),
+            selected.left_top() - egui::vec2(37.7, 31.3),
+            Some(selected.right_bottom()),
+        ),
+        (
+            selected.right_top(),
+            selected.right_top() + egui::vec2(37.7, -31.3),
+            Some(selected.left_bottom()),
+        ),
+        (
+            selected.left_bottom(),
+            selected.left_bottom() + egui::vec2(-37.7, 31.3),
+            Some(selected.right_top()),
+        ),
+        (
+            selected.right_bottom(),
+            selected.right_bottom() + egui::vec2(37.7, 31.3),
+            Some(selected.left_top()),
+        ),
+    ];
+    for density in [1.0, 1.25, 2.0] {
+        for kind in [MediaKind::Image, MediaKind::Video] {
+            app.media_kind = Some(kind);
+            let step = if kind == MediaKind::Video { 2.0 } else { 1.0 };
+            for shift in [false, true] {
+                for (start, target, collapse) in gestures {
+                    let context = fonts::test_context();
+                    let before = collapse.map(|_| original);
+                    app.image_view.selection = before;
+                    app.view_drag = None;
+                    let modifiers = if shift {
+                        egui::Modifiers::SHIFT
+                    } else {
+                        egui::Modifiers::NONE
+                    };
+                    let mut time = 0.0;
+                    let mut frame = |app: &mut Application<_>, events| {
+                        time += 0.05;
+                        let mut input = egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(600.0, 400.0),
+                            )),
+                            time: Some(time),
+                            events,
+                            modifiers,
+                            ..Default::default()
+                        };
+                        input
+                            .viewports
+                            .get_mut(&egui::ViewportId::ROOT)
+                            .expect("viewport")
+                            .native_pixels_per_point = Some(density);
+                        context.run_ui(input, |ui| {
+                            let response = ui.interact(
+                                image,
+                                "live-selection".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let pointer = ui.input(|input| input.pointer.hover_pos());
+                            app.update_selection(&response, image, size, shift, pointer);
+                        })
+                    };
+                    let button = |pos, pressed| egui::Event::PointerButton {
+                        pos,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers,
+                    };
+                    for _ in 0..3 {
+                        frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+                    }
+                    frame(&mut app, vec![button(start, true)]);
+                    frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+                    let live = app.image_view.selection.expect("held selection");
+                    let crop = PixelCrop::from_selection(live, size, kind).expect("pixel crop");
+                    assert_eq!(
+                        live,
+                        crop.unit_rect(size),
+                        "{kind:?}, {density}, shift={shift}"
+                    );
+                    assert!(matches!(app.view_drag, Some(ViewDrag::Selection { .. })));
+                    for _ in 0..5 {
+                        frame(&mut app, vec![]);
+                        assert_eq!(
+                            app.image_view.selection,
+                            Some(live),
+                            "stationary pointer must not drift"
+                        );
+                    }
+                    if let Some(collapse) = collapse {
+                        let collapse = collapse + (collapse - start) * 0.1;
+                        frame(&mut app, vec![egui::Event::PointerMoved(collapse)]);
+                        assert!(app.image_view.selection.is_none(), "collapsed crop");
+                        frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+                        assert_eq!(
+                            app.image_view.selection,
+                            Some(live),
+                            "collapsed selection must reopen from its original anchor"
+                        );
+                    }
+                    if shift {
+                        let ratio = if before.is_some() { 402.0 / 242.0 } else { 1.0 };
+                        assert!(
+                            (crop.width as f32 - ratio * crop.height as f32).abs()
+                                <= step * (1.0 + ratio)
+                        );
+                    }
+                    frame(&mut app, vec![button(target, false)]);
+                    assert_eq!(
+                        app.image_view.selection,
+                        Some(live),
+                        "release must not jump"
+                    );
+                    assert!(app.view_drag.is_none());
+                    assert!(app.edits.is_empty());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn pointer_selection_does_not_restore_the_previous_numeric_focus() {
     let Some(root) = tests::isolated_test_root(
         "selection::gesture_tests::pointer_selection_does_not_restore_the_previous_numeric_focus",

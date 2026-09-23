@@ -449,13 +449,11 @@ fn recent_delivery_projects_parent_folders_without_persisting_them_and_clear_per
         1,
         "derived parents are not extra folder records"
     );
-    assert!(app.recent_months.contains_key(&file));
-    assert!(!app.recent_months.contains_key(&folder));
+    assert!(app.recent_dates.contains_key(&file));
+    assert!(!app.recent_dates.contains_key(&folder));
     app.handle_recent_action(RecentAction::Clear);
     assert!(
-        app.recent_paths.is_empty()
-            && app.recent_folders.is_empty()
-            && app.recent_months.is_empty()
+        app.recent_paths.is_empty() && app.recent_folders.is_empty() && app.recent_dates.is_empty()
     );
     drop(app.recent_files.take());
     app.recent_files = Some(RecentFiles::new(history, || {}).expect("reopened worker"));

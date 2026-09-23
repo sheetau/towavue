@@ -32,9 +32,9 @@ fn local_time(ticks: u64, zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>) -> Optio
     ))
 }
 
-pub(crate) fn local_month(ticks: u64) -> Option<(u16, u16)> {
+pub(crate) fn local_date(ticks: u64) -> Option<(u16, u16, u16)> {
     let local = local_system_time(ticks, None)?;
-    Some((local.wYear, local.wMonth))
+    Some((local.wYear, local.wMonth, local.wDay))
 }
 
 fn local_system_time(

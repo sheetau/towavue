@@ -38,11 +38,16 @@ pub struct RecentEntry {
 impl RecentEntry {
     /// Convert at history delivery, not on each UI frame. No filesystem access.
     pub fn opened_month(&self) -> Option<(u16, u16)> {
+        self.opened_date().map(|(year, month, _)| (year, month))
+    }
+
+    /// Local calendar date of the recorded visit; legacy dates remain unknown.
+    pub fn opened_date(&self) -> Option<(u16, u16, u16)> {
         let ticks = self
             .opened_at?
             .checked_mul(10_000)?
             .checked_add(116_444_736_000_000_000)?;
-        crate::file_details::local_month(ticks)
+        crate::file_details::local_date(ticks)
     }
 }
 
@@ -1055,17 +1060,20 @@ mod tests {
     }
 
     #[test]
-    fn known_and_unknown_open_times_have_safe_local_months() {
+    fn known_and_unknown_open_times_have_safe_local_dates() {
         let mut entry = RecentEntry {
             kind: RecentKind::File,
             path: "unused.png".into(),
             opened_at: None,
         };
         assert_eq!(entry.opened_month(), None);
+        assert_eq!(entry.opened_date(), None);
         entry.opened_at = Some(15 * 86_400_000);
         assert_eq!(entry.opened_month(), Some((1970, 1)));
+        assert!(matches!(entry.opened_date(), Some((1970, 1, 15 | 16))));
         entry.opened_at = Some(u64::MAX);
         assert_eq!(entry.opened_month(), None);
+        assert_eq!(entry.opened_date(), None);
     }
 
     #[test]

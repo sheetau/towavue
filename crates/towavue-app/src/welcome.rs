@@ -102,7 +102,7 @@ pub fn show(
         ui.disable();
         ui.set_opacity(opacity);
     }
-    let width = (ui.available_width() - 40.0).clamp(0.0, 660.0);
+    let width = (ui.available_width() - 40.0).max(0.0);
     let gap = (ui.available_width() - width).max(0.0);
     let left = (gap / 2.0).min((gap - 40.0).max(0.0));
     let top = (ui.available_height() * 0.04).clamp(6.0, 20.0);

@@ -1,6 +1,165 @@
 use crate::*;
 
 #[test]
+fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_day() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_day",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for size in [
+            egui::vec2(660.0, 400.0),
+            egui::vec2(1100.0, 400.0),
+            egui::vec2(1920.0, 1080.0),
+        ] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(chrome::style);
+            context.global_style_mut(|style| {
+                style.animation_time = 0.0;
+                style.interaction.tooltip_delay = 60.0;
+            });
+            app.ui_context = Some(context);
+            for index in 0..120 {
+                let path = root.join(format!("tile-{index:03}.png"));
+                app.recent_dates
+                    .insert(path.clone(), (2026, 9, 24 - (index / 10) as u16));
+                app.recent_paths.push(path);
+            }
+            let cards = |output: &egui::FullOutput| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| {
+                        node.label()
+                            .filter(|name| name.starts_with("tile-"))
+                            .zip(node.bounds())
+                    })
+                    .map(|(name, bounds)| (name.to_owned(), bounds))
+                    .collect::<Vec<_>>()
+            };
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let bounds = cards(&output);
+            let first = bounds
+                .iter()
+                .find(|(name, _)| name == "tile-000.png")
+                .expect("first card")
+                .1;
+            let top = first.y0;
+            let mut row: Vec<_> = bounds
+                .iter()
+                .filter(|(_, rect)| (rect.y0 - top).abs() < 0.01)
+                .collect();
+            row.sort_by(|a, b| a.1.x0.total_cmp(&b.1.x0));
+            let tolerance = 1.0 / f64::from(density);
+            assert!(
+                row.last().expect("row").1.x1 - first.x0 > f64::from(size.x) * 0.85,
+                "grid fills the available width at {density}x / {size:?}: {row:?}"
+            );
+            for pair in row.windows(2) {
+                assert!(
+                    (pair[1].1.x0 - pair[0].1.x1 - 2.0).abs() <= tolerance,
+                    "two-point horizontal gap"
+                );
+            }
+            for (_, rect) in &bounds {
+                assert!(
+                    ((rect.y1 - rect.y0) - (rect.x1 - rect.x0) * 2.0 / 3.0).abs() <= tolerance,
+                    "no filename row"
+                );
+            }
+            let next = bounds
+                .iter()
+                .filter(|(_, rect)| rect.y0 > first.y1)
+                .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0))
+                .expect("second row")
+                .1;
+            assert!(
+                (next.y0 - first.y1 - 2.0).abs() <= tolerance,
+                "two-point vertical gap"
+            );
+            assert!(
+                bounds
+                    .iter()
+                    .filter(|(_, rect)| rect.y1 > top
+                        && rect.y0 < f64::from(size.y - chrome::STATUS_HEIGHT))
+                    .count()
+                    <= towavue_runtime_windows::VISIBLE_PREVIEW_LIMIT
+            );
+            assert!(
+                !output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text().starts_with("tile-"))),
+                "filenames remain accessible without painted captions"
+            );
+            assert_eq!(
+                app.gallery_listing.status_date().as_deref(),
+                Some("2026-09-24")
+            );
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "2026-09-24")));
+            frame(
+                &mut app,
+                size,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(size.x * 0.5, size.y * 0.5)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -480.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    },
+                ],
+            );
+            for _ in 0..12 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let current = cards(&output)
+                .into_iter()
+                .filter(|(_, rect)| rect.y1 > top + 0.1)
+                .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0).then(a.1.x0.total_cmp(&b.1.x0)))
+                .expect("visible card");
+            let index: usize = current
+                .0
+                .strip_prefix("tile-")
+                .expect("prefix")
+                .trim_end_matches(".png")
+                .parse()
+                .expect("index");
+            assert!(index > 0, "wheel scroll changes the top visible visit");
+            assert_eq!(
+                app.gallery_listing.status_date(),
+                Some(format!("2026-09-{:02}", 24 - index / 10))
+            );
+            app.gallery_search = "tile-119".into();
+            app.recent_dates.remove(&app.recent_paths[119]);
+            app.gallery_listing.invalidate();
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            assert_eq!(
+                app.gallery_listing.status_date().as_deref(),
+                Some("Date unknown")
+            );
+            app.gallery_search = "no matching tile".into();
+            frame(&mut app, size, vec![]);
+            assert!(app.gallery_listing.status_date().is_none());
+        }
+    }
+}
+
+#[test]
 fn large_gallery_keeps_widgets_bounded_and_searches_the_oldest_history() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(
@@ -15,11 +174,12 @@ fn large_gallery_keeps_widgets_bounded_and_searches_the_oldest_history() {
     app.ui_context = Some(context);
     for index in 0..10_000 {
         let path = root.join(format!("archive-{index:05}.png"));
-        app.recent_months.insert(
+        app.recent_dates.insert(
             path.clone(),
             (
                 2026 - (index / 1200) as u16,
                 12 - ((index / 100) % 12) as u16,
+                1,
             ),
         );
         app.recent_paths.push(path);
@@ -75,7 +235,7 @@ fn large_gallery_keeps_widgets_bounded_and_searches_the_oldest_history() {
         "oldest filtered month remains navigable"
     );
     app.handle_recent_action(menu::RecentAction::Clear);
-    assert!(app.recent_paths.is_empty() && app.recent_months.is_empty());
+    assert!(app.recent_paths.is_empty() && app.recent_dates.is_empty());
 }
 
 #[test]
@@ -208,8 +368,8 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         let image = root.join("image.png");
         let video = root.join("video.mp4");
         app.recent_paths = vec![image.clone(), video.clone()];
-        app.recent_months.insert(image.clone(), (2026, 9));
-        app.recent_months.insert(video.clone(), (2026, 7));
+        app.recent_dates.insert(image.clone(), (2026, 9, 1));
+        app.recent_dates.insert(video.clone(), (2026, 7, 1));
         let size = egui::vec2(480.0, 400.0);
         let click = |output: &egui::FullOutput, label| {
             egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
@@ -489,7 +649,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
             };
             let path = root.join(format!("{name}-{index:02}.png"));
             if let Some(date) = date {
-                app.recent_months.insert(path.clone(), date);
+                app.recent_dates.insert(path.clone(), (date.0, date.1, 1));
             }
             app.recent_paths.push(path);
         }

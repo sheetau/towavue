@@ -153,17 +153,24 @@ fn gallery_thumbnail_drag_excludes_only_its_source_and_cancels_stale_gestures() 
             assert_eq!(app.tabs, original);
             assert!(app.path.is_none());
         }
-        // Labels remain clickable, but only the thumbnail starts a transfer.
-        let label = first.center_bottom() - egui::vec2(0.0, 6.0);
-        frame(
-            &mut app,
-            density,
-            vec![egui::Event::PointerMoved(label), pointer(label, true)],
-        );
-        frame(&mut app, density, vec![egui::Event::PointerMoved(outside)]);
-        assert!(app.filmstrip.active_recent_drag(&context).is_none());
-        frame(&mut app, density, vec![pointer(outside, false)]);
-        assert!(app.pending_window_open.is_none());
+        // The former caption area is now part of the thumbnail; gaps stay inert.
+        for (start, transfers) in [
+            (first.center_bottom() - egui::vec2(0.0, 6.0), true),
+            (first.right_center() + egui::vec2(1.0, 0.0), false),
+        ] {
+            frame(
+                &mut app,
+                density,
+                vec![egui::Event::PointerMoved(start), pointer(start, true)],
+            );
+            frame(&mut app, density, vec![egui::Event::PointerMoved(outside)]);
+            assert_eq!(
+                app.filmstrip.active_recent_drag(&context).is_some(),
+                transfers
+            );
+            frame(&mut app, density, vec![pointer(outside, false)]);
+            assert_eq!(app.pending_window_open.take().is_some(), transfers);
+        }
         for cancel in 0..5 {
             for _ in 0..2 {
                 frame(&mut app, density, vec![]);

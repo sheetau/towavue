@@ -17,9 +17,19 @@ pub(super) struct Listing {
     months: Vec<(Option<(u16, u16)>, usize)>,
     query: String,
     filter: Option<MediaKind>,
+    visible_date: Option<Option<(u16, u16, u16)>>,
 }
 
 impl Listing {
+    pub fn status_date(&self) -> Option<String> {
+        self.visible_date.map(|date| {
+            date.map_or_else(
+                || "Date unknown".into(),
+                |(year, month, day)| format!("{year:04}-{month:02}-{day:02}"),
+            )
+        })
+    }
+
     pub(super) fn contains(
         &self,
         path: &std::path::Path,
@@ -37,6 +47,7 @@ impl Listing {
 
     pub fn invalidate(&mut self) {
         self.source_valid = false;
+        self.visible_date = None;
     }
 }
 
@@ -67,6 +78,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             query: old_query,
             filter: old_filter,
             filter_valid,
+            visible_date,
             ..
         } = listing;
         if let Some(command) = ui
@@ -93,7 +105,10 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             months.clear();
                             let mut seen = HashSet::new();
                             for (index, path) in filtered.iter().enumerate() {
-                                let date = self.recent_months.get(path).copied();
+                                let date = self
+                                    .recent_dates
+                                    .get(path)
+                                    .map(|&(year, month, _)| (year, month));
                                 if seen.insert(date) {
                                     months.push((date, index));
                                 }
@@ -113,6 +128,14 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             ui.is_enabled(),
                             actions,
                         );
+                        let date = grid
+                            .first_visible
+                            .map(|index| self.recent_dates.get(&filtered[index]).copied());
+                        if *visible_date != date {
+                            *visible_date = date;
+                            // Status is laid out before media input in this frame.
+                            ui.ctx().request_repaint();
+                        }
                         months
                             .iter()
                             .map(|&(date, index)| gallery_rail::Month {

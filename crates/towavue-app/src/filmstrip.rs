@@ -68,6 +68,7 @@ impl View {
 pub struct RecentGrid {
     columns: usize,
     row_height: f32,
+    pub first_visible: Option<usize>,
 }
 
 impl RecentGrid {
@@ -941,10 +942,21 @@ impl Filmstrip {
         let mut wanted = Vec::new();
         let origin = ui.cursor().top();
         let width = ui.available_width();
-        let columns = (((width + 8.0) / 164.0).floor() as usize).max(1);
-        let cell_width = ((width - (columns - 1) as f32 * 8.0) / columns as f32).max(1.0);
-        let cell_height = cell_width * 2.0 / 3.0 + 24.0;
-        let row_height = cell_height + 8.0 + ui.spacing().item_spacing.y;
+        const GAP: f32 = 2.0;
+        let mut columns = (((width + GAP) / (156.0 + GAP)).floor() as usize).max(1);
+        // Large windows use larger cards instead of exceeding the existing
+        // thumbnail working set and leaving visible cells without requests.
+        while columns > 1 {
+            let cell = (width - (columns - 1) as f32 * GAP) / columns as f32;
+            let rows = (ui.clip_rect().height() / (cell * 2.0 / 3.0 + GAP)).ceil() as usize + 1;
+            if columns.saturating_mul(rows) <= VISIBLE_PREVIEW_LIMIT {
+                break;
+            }
+            columns -= 1;
+        }
+        let cell_width = ((width - (columns - 1) as f32 * GAP) / columns as f32).max(1.0);
+        let cell_height = cell_width * 2.0 / 3.0;
+        let row_height = cell_height + GAP;
         let row_count = paths.len().div_ceil(columns);
         let mut focus = self
             .recent_focus
@@ -997,7 +1009,7 @@ impl Filmstrip {
                     let rect = Rect::from_min_size(
                         grid.min
                             + egui::vec2(
-                                column as f32 * (cell_width + 8.0),
+                                column as f32 * (cell_width + GAP),
                                 row as f32 * row_height,
                             ),
                         egui::vec2(cell_width, cell_height),
@@ -1037,10 +1049,7 @@ impl Filmstrip {
                     {
                         wanted.push((path.clone(), kind));
                     }
-                    let image_rect = Rect::from_min_size(
-                        rect.min,
-                        egui::vec2(cell_width, cell_width * 2.0 / 3.0),
-                    );
+                    let image_rect = rect;
                     self.recent_drag.observe_recent(&response, path, image_rect);
                     ui.painter()
                         .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
@@ -1078,26 +1087,6 @@ impl Filmstrip {
                         }
                         None => {}
                     }
-                    let name_rect = Rect::from_min_max(
-                        egui::pos2(rect.left(), image_rect.bottom() + 4.0),
-                        rect.max,
-                    );
-                    ui.scope_builder(
-                        egui::UiBuilder::new()
-                            .max_rect(name_rect)
-                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-                        |ui| {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(display_name(path))
-                                        .color(crate::chrome::FOREGROUND)
-                                        .size(12.0),
-                                )
-                                .halign(egui::Align::Min)
-                                .truncate(),
-                            );
-                        },
-                    );
                     if response.hovered() || response.has_focus() {
                         ui.painter().rect_stroke(
                             image_rect,
@@ -1156,6 +1145,12 @@ impl Filmstrip {
         RecentGrid {
             columns,
             row_height,
+            first_visible: (!paths.is_empty() && ui.clip_rect().is_positive()).then(|| {
+                let row = ((ui.clip_rect().top() - origin + GAP) / row_height)
+                    .floor()
+                    .max(0.0) as usize;
+                (row * columns).min(paths.len() - 1)
+            }),
         }
     }
 
@@ -1750,17 +1745,10 @@ mod tests {
                 _ => None,
             })
             .expect("image mesh");
-        let label_left = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "00-image.png" => Some(text.pos.x),
-                _ => None,
-            })
-            .expect("filename label");
         assert!(
-            (image_left - label_left).abs() < 1.0,
-            "filename aligns with the card edge"
+            !output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "00-image.png")),
+            "Gallery has no filename caption"
         );
         let tree = output
             .platform_output
@@ -1778,6 +1766,7 @@ mod tests {
             Some(paths[0].to_string_lossy().as_ref())
         );
         let bounds = node.bounds().expect("card bounds");
+        assert!((f64::from(image_left) - bounds.x0).abs() < 1.0);
         let position = egui::pos2((bounds.x0 + 20.0) as f32, (bounds.y0 + 20.0) as f32);
         for (step, enabled) in [true, false, true].into_iter().enumerate() {
             if step == 2 {
@@ -3409,9 +3398,10 @@ mod tests {
                             "mode {mode}, state {state}"
                         );
                         assert_eq!(text.contains(&"No preview"), state == 1, "mode {mode}");
-                        assert!(
+                        assert_eq!(
                             text.iter().any(|text| text.contains("fixture.png")),
-                            "caption remains: mode {mode}"
+                            mode != 2,
+                            "only Filmstrip and seek retain captions: mode {mode}"
                         );
                         assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
                         assert_eq!(output.pixels_per_point, density);

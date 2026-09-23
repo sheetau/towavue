@@ -1016,7 +1016,7 @@ struct Application<N> {
     gallery_listing: gallery::Listing,
     recent_folders: Vec<PathBuf>,
     pending_window_launches: Vec<PathBuf>,
-    recent_months: BTreeMap<PathBuf, (u16, u16)>,
+    recent_dates: BTreeMap<PathBuf, (u16, u16, u16)>,
     gallery_search: String,
     gallery_filter: Option<MediaKind>,
     image_copy: Option<towavue_runtime_windows::ImageCopyJob>,
@@ -1312,7 +1312,7 @@ where
             gallery_listing: gallery::Listing::default(),
             recent_folders: Vec::new(),
             pending_window_launches: Vec::new(),
-            recent_months: BTreeMap::new(),
+            recent_dates: BTreeMap::new(),
             gallery_search: String::new(),
             gallery_filter: None,
             image_copy: None,
@@ -1743,7 +1743,7 @@ where
                     towavue_runtime_windows::RecentKind::File => {
                         self.viewed_media.forget(Some(&path));
                         self.recent_paths.retain(|old| *old != path);
-                        self.recent_months.remove(&path);
+                        self.recent_dates.remove(&path);
                         self.gallery_missing_files.retain(|old| *old != path);
                         self.gallery_listing.invalidate();
                     }
@@ -1763,7 +1763,7 @@ where
                 self.gallery_missing_files.clear();
                 self.gallery_listing.invalidate();
                 self.recent_folders.clear();
-                self.recent_months.clear();
+                self.recent_dates.clear();
             }
             menu::RecentAction::Open(path, kind, target) => {
                 if target == menu::OpenTarget::Tab
@@ -3233,14 +3233,12 @@ where
                     }
                     self.gallery_missing_files = update.missing_files;
                     self.gallery_listing.invalidate();
-                    self.recent_months = update
+                    self.recent_dates = update
                         .entries
                         .iter()
                         .filter(|entry| entry.kind == towavue_runtime_windows::RecentKind::File)
                         .filter_map(|entry| {
-                            entry
-                                .opened_month()
-                                .map(|month| (entry.path.clone(), month))
+                            entry.opened_date().map(|date| (entry.path.clone(), date))
                         })
                         .collect();
                     self.recent_paths.clear();
@@ -6334,6 +6332,9 @@ where
                                         chrome::MUTED,
                                         format!("{}{}{suffix}", self.deleted_path_prefix(), path.display()),
                                     )
+                                } else if self.media_kind.is_none() && !self.keyboard_settings_active()
+                                    && let Some(date) = self.gallery_listing.status_date() {
+                                    (date.clone(), chrome::MUTED, format!("Last opened: {date}"))
                                 } else if self.current_document_untitled() {
                                     (image_paste::DEFAULT_NAME.into(), chrome::MUTED,
                                      "Pasted image without a saved file".into())

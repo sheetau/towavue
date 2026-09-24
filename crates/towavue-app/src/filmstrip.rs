@@ -40,6 +40,20 @@ struct Preparation {
     current: PathBuf,
     snapshot: u64,
     next: usize,
+    stopped: bool,
+}
+
+struct RecentPreparation {
+    revision: u64,
+    next: usize,
+    stopped: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreparationPolicy {
+    Paused,
+    Visible,
+    All,
 }
 
 mod drag;
@@ -88,6 +102,8 @@ pub struct Filmstrip {
     gallery_viewport: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
     preparation: Option<Preparation>,
+    recent_preparation: Option<RecentPreparation>,
+    warming_recent: bool,
     warming: Option<PathBuf>,
     focus: Option<PathBuf>,
     held_deleted: Option<PathBuf>,
@@ -125,6 +141,8 @@ impl Filmstrip {
             gallery_viewport: Vec::new(),
             refreshing: Vec::new(),
             preparation: None,
+            recent_preparation: None,
+            warming_recent: false,
             warming: None,
             focus: None,
             held_deleted: None,
@@ -257,6 +275,7 @@ impl Filmstrip {
 
     pub fn clear_previews(&mut self) {
         self.preparation = None;
+        self.recent_preparation = None;
         self.warming = None;
         self.drag.clear();
         self.recent_drag.clear();
@@ -291,6 +310,7 @@ impl Filmstrip {
 
     pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot, open: bool) {
         self.preparation = None;
+        self.recent_preparation = None;
         self.warming = None;
         // Absence from a completed listing retires that folder's removed cards.
         // Other folders' cached pixels still belong to the shared working set.
@@ -358,6 +378,9 @@ impl Filmstrip {
     }
 
     pub fn prepare_neighbors(&mut self, snapshot: Option<&FolderSnapshot>, current: Option<&Path>) {
+        if self.warming_recent {
+            self.pause_warming();
+        }
         let Some((snapshot, selected)) = snapshot.and_then(|snapshot| {
             snapshot
                 .items
@@ -403,6 +426,7 @@ impl Filmstrip {
                 current: snapshot.items[selected].path.clone(),
                 snapshot: snapshot.generation,
                 next: 0,
+                stopped: false,
             });
         }
         if self.warming.is_some()
@@ -414,7 +438,7 @@ impl Filmstrip {
             return;
         }
         let preparation = self.preparation.as_mut().expect("preparation origin");
-        while preparation.next < count {
+        while !preparation.stopped && preparation.next < count {
             let item = &snapshot.items[neighbor_index(selected, count, preparation.next)];
             // Plain BMP previews are memory-only. Scanning beyond the retained
             // working set would just evict useful pixels without warming disk.
@@ -428,28 +452,96 @@ impl Filmstrip {
                 continue;
             }
             self.warming = Some(item.path.clone());
-            self.generation = self
-                .loader
-                .request_prioritized(vec![(item.path.clone(), item.kind)], 0);
+            self.warming_recent = false;
+            self.generation = self.loader.request_warming(item.path.clone(), item.kind);
+            break;
+        }
+    }
+
+    pub fn pause_warming(&mut self) {
+        if self.warming.take().is_some() {
+            self.generation = self.loader.request(Vec::new());
+        }
+    }
+
+    pub fn recent_requests_paused(&self) -> bool {
+        self.visible.is_empty() && !self.gallery_viewport.is_empty()
+    }
+
+    pub fn prepare_recent(&mut self, paths: &[PathBuf], warmable: &[usize], revision: u64) {
+        if !self.warming_recent {
+            self.pause_warming();
+        }
+        if self
+            .recent_preparation
+            .as_ref()
+            .is_none_or(|state| state.revision != revision)
+        {
+            self.pause_warming();
+            self.recent_preparation = Some(RecentPreparation {
+                revision,
+                next: 0,
+                stopped: false,
+            });
+        }
+        if self.warming.is_some()
+            || self.visible.is_empty()
+            || self
+                .visible
+                .iter()
+                .any(|path| !self.previews.contains_key(path) || self.refreshing.contains(path))
+        {
+            return;
+        }
+        let state = self
+            .recent_preparation
+            .as_mut()
+            .expect("recent preparation");
+        while !state.stopped && state.next < warmable.len() {
+            let path = &paths[warmable[state.next]];
+            let Some(kind) = MediaKind::from_path(path) else {
+                state.next += 1;
+                continue;
+            };
+            if self.visible.contains(path) {
+                state.next += 1;
+                continue;
+            }
+            self.warming = Some(path.clone());
+            self.warming_recent = true;
+            self.generation = self.loader.request_warming(path.clone(), kind);
             break;
         }
     }
 
     pub fn finish(&mut self, context: &Context) -> bool {
+        if let Some(warmed) = self.loader.take_warmed()
+            && warmed.generation == self.generation
+            && self.warming.as_ref() == Some(&warmed.path)
+        {
+            self.warming = None;
+            let progress = if self.warming_recent {
+                self.recent_preparation
+                    .as_mut()
+                    .map(|state| (&mut state.next, &mut state.stopped))
+            } else {
+                self.preparation
+                    .as_mut()
+                    .map(|state| (&mut state.next, &mut state.stopped))
+            };
+            if let Some((next, stopped)) = progress {
+                if matches!(warmed.result, Ok(false)) {
+                    *stopped = true;
+                } else {
+                    *next += 1; // Bad individual sources must not stall the remaining history.
+                }
+            }
+        }
         let mut changed = false;
         for preview in self.loader.take_completed() {
             if preview.generation != self.generation
                 || self.held_deleted.as_ref() == Some(&preview.path)
             {
-                continue;
-            }
-            if self.warming.as_ref() == Some(&preview.path) {
-                self.warming = None;
-                if let Some(preparation) = &mut self.preparation {
-                    preparation.next += 1;
-                }
-                // Cache-only completion: never evict/upload retained visible
-                // textures or request a frame just to advance background work.
                 continue;
             }
             if !self.visible.contains(&preview.path) {
@@ -973,6 +1065,7 @@ impl Filmstrip {
         self.drag.finish(context, band, actions);
     }
 
+    #[cfg(test)]
     pub fn show_recent(
         &mut self,
         ui: &mut egui::Ui,
@@ -980,6 +1073,25 @@ impl Filmstrip {
         revision: u64,
         enabled: bool,
         actions: &mut Vec<UiAction>,
+    ) -> RecentGrid {
+        self.show_recent_with_policy(
+            ui,
+            paths,
+            revision,
+            enabled,
+            actions,
+            PreparationPolicy::All,
+        )
+    }
+
+    pub fn show_recent_with_policy(
+        &mut self,
+        ui: &mut egui::Ui,
+        paths: &[PathBuf],
+        revision: u64,
+        enabled: bool,
+        actions: &mut Vec<UiAction>,
+        policy: PreparationPolicy,
     ) -> RecentGrid {
         self.recent_drag.begin_recent(
             ui.ctx(),
@@ -1184,7 +1296,7 @@ impl Filmstrip {
         // newest-first prefetch. Filling every spare slot with new requests used
         // to evict all older ready cards as soon as they left the viewport.
         for path in &self.preview_order {
-            if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+            if policy != PreparationPolicy::All || wanted.len() == VISIBLE_PREVIEW_LIMIT {
                 break;
             }
             if self.previews.get(path).is_some_and(Result::is_ok)
@@ -1196,9 +1308,9 @@ impl Filmstrip {
                 wanted.push((path.clone(), kind));
             }
         }
-        // Keep the same bounded preparation set while a menu or picker covers the grid.
+        // Only spend spare request slots when media work permits speculation.
         for path in paths {
-            if wanted.len() == VISIBLE_PREVIEW_LIMIT {
+            if policy != PreparationPolicy::All || wanted.len() == VISIBLE_PREVIEW_LIMIT {
                 break;
             }
             if let Some(kind) = MediaKind::from_path(path)
@@ -1207,7 +1319,15 @@ impl Filmstrip {
                 wanted.push((path.clone(), kind));
             }
         }
-        self.set_visible_prioritized(wanted, foreground);
+        if policy == PreparationPolicy::Paused {
+            self.pause_warming();
+            if !self.visible.is_empty() {
+                self.generation = self.loader.request(Vec::new());
+                self.visible.clear();
+            }
+        } else {
+            self.set_visible_prioritized(wanted, foreground);
+        }
         RecentGrid {
             columns,
             row_height,
@@ -1344,6 +1464,369 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn gallery_progressively_warms_history_pauses_preserves_pixels_and_stops_at_capacity() {
+        use crate::audio_export::tests::frame;
+        use std::os::windows::process::CommandExt;
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::gallery_progressively_warms_history_pauses_preserves_pixels_and_stops_at_capacity",
+        ) else {
+            return;
+        };
+        let source = root.join("source.png");
+        let output = std::process::Command::new(
+            PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
+                .join("bin/ffmpeg.exe"),
+        )
+        .creation_flags(0x08000000)
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=32x24:rate=1",
+            "-frames:v",
+            "1",
+            "-threads",
+            "1",
+        ])
+        .arg(&source)
+        .output()
+        .expect("owned PNG");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let bytes = std::fs::read(&source).expect("source bytes");
+        let paths: Vec<_> = (0..96)
+            .map(|index| {
+                let path = root.join(format!("history-{:03}.png", 999 - index));
+                std::fs::write(
+                    &path,
+                    if index == 70 {
+                        b"invalid PNG".as_slice()
+                    } else {
+                        bytes.as_slice()
+                    },
+                )
+                .expect("history source");
+                path
+            })
+            .collect();
+        let cache_path = root.join("cache");
+        let cache = PreviewCache::new(cache_path.clone()).expect("owned cache");
+        let (sent, events) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new_with_preview_cache(
+            None,
+            move |event| {
+                let _ = sent.send(event);
+            },
+            cache,
+        )
+        .expect("app");
+        app.recent_files = None;
+        app.recent_paths = paths.clone();
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(crate::chrome::style);
+        app.ui_context = Some(context.clone());
+        let size = egui::vec2(660.0, 400.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let advance = |app: &mut crate::Application<_>| {
+            let event = events
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("preview completion");
+            if matches!(event, crate::AppEvent::FilmstripReady) {
+                app.handle_app_event(event);
+            }
+        };
+        while app
+            .filmstrip
+            .visible
+            .iter()
+            .any(|path| !app.filmstrip.previews.contains_key(path))
+        {
+            advance(&mut app);
+        }
+        assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
+        assert_eq!(
+            app.filmstrip.warming.as_ref(),
+            Some(&paths[64]),
+            "newest unprepared history first"
+        );
+        let retained: Vec<_> = app
+            .filmstrip
+            .previews
+            .iter()
+            .map(|(path, preview)| (path.clone(), preview.as_ref().expect("ready").0.id()))
+            .collect();
+        let next = app
+            .filmstrip
+            .recent_preparation
+            .as_ref()
+            .expect("cursor")
+            .next;
+        app.image_loading = true;
+        frame(&mut app, size, vec![]);
+        assert!(app.filmstrip.warming.is_none() && app.filmstrip.visible.is_empty());
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, crate::AppEvent::FilmstripReady) {
+                app.handle_app_event(event);
+            }
+        }
+        assert_eq!(
+            app.filmstrip
+                .recent_preparation
+                .as_ref()
+                .expect("paused cursor")
+                .next,
+            next
+        );
+        app.image_loading = false;
+        frame(&mut app, size, vec![]);
+        assert_eq!(
+            app.filmstrip.warming.as_ref(),
+            Some(&paths[64]),
+            "resume unfinished item"
+        );
+        let _ = context.tex_manager().write().take_delta();
+        while app
+            .filmstrip
+            .recent_preparation
+            .as_ref()
+            .expect("cursor")
+            .next
+            < paths.len()
+        {
+            let before = app
+                .filmstrip
+                .recent_preparation
+                .as_ref()
+                .expect("cursor")
+                .next;
+            if let Some(path) = &app.filmstrip.warming {
+                assert_eq!(path, &paths[before]);
+            }
+            advance(&mut app);
+            assert!(
+                !app.filmstrip
+                    .recent_preparation
+                    .as_ref()
+                    .expect("cursor")
+                    .stopped
+            );
+        }
+        let delta = context.tex_manager().write().take_delta();
+        assert!(
+            delta.set.is_empty() && delta.free.is_empty(),
+            "cache-only completion never uploads or frees UI pixels"
+        );
+        for (path, id) in retained {
+            assert_eq!(
+                app.filmstrip.previews[&path]
+                    .as_ref()
+                    .expect("retained")
+                    .0
+                    .id(),
+                id
+            );
+        }
+        let fresh = PreviewCache::new(cache_path.clone()).expect("fresh memory");
+        let expected = fresh
+            .cached_image(&paths[0])
+            .expect("cache read")
+            .expect("newest disk pixels")
+            .image;
+        for (index, path) in paths.iter().enumerate() {
+            let cached = fresh.cached_image(path).expect("cache read");
+            if index == 70 {
+                assert!(cached.is_none(), "bad individual source is skipped");
+            } else {
+                assert!(
+                    cached.expect("all older history persists").image == expected,
+                    "all pixels survive disk-only warming"
+                );
+            }
+            assert_eq!(
+                std::fs::read(path).expect("original"),
+                if index == 70 {
+                    b"invalid PNG".as_slice()
+                } else {
+                    bytes.as_slice()
+                }
+            );
+        }
+        let oldest = root.join("history-000.png");
+        std::fs::write(&oldest, &bytes).expect("new history source");
+        app.recent_paths.push(oldest.clone());
+        app.gallery_listing.invalidate();
+        let filler = cache_path.join("owned-capacity-fixture");
+        std::fs::File::create(&filler)
+            .expect("owned budget fixture")
+            .set_len(64 * 1024 * 1024)
+            .expect("fill budget");
+        frame(&mut app, size, vec![]);
+        while !app
+            .filmstrip
+            .recent_preparation
+            .as_ref()
+            .expect("budget cursor")
+            .stopped
+        {
+            advance(&mut app);
+        }
+        assert_eq!(
+            std::fs::metadata(&filler).expect("no eviction").len(),
+            64 * 1024 * 1024
+        );
+        assert!(fresh.cached_image(&paths[0]).expect("cache read").is_some());
+        assert!(fresh.cached_image(&oldest).expect("cache read").is_none());
+        let generation = app.filmstrip.generation;
+        for _ in 0..3 {
+            app.prepare_gallery(&context);
+        }
+        assert_eq!(
+            app.filmstrip.generation, generation,
+            "budget stop does not poll or retry every frame"
+        );
+        std::fs::remove_file(filler).expect("release owned capacity fixture");
+        app.gallery_search = "history-000".into();
+        frame(&mut app, size, vec![]);
+        while !app
+            .filmstrip
+            .previews
+            .get(&oldest)
+            .is_some_and(Result::is_ok)
+        {
+            advance(&mut app);
+        }
+        assert!(
+            fresh.cached_image(&oldest).expect("cache read").is_some(),
+            "filtered visible demand still works after a stopped pass"
+        );
+        app.recent_paths.clear();
+        app.gallery_listing.invalidate();
+        frame(&mut app, size, vec![]);
+        assert!(app.filmstrip.visible.is_empty() && app.filmstrip.warming.is_none());
+        let tail = root.join("after-bitmaps.png");
+        std::fs::write(&tail, &bytes).expect("eligible tail");
+        app.gallery_search.clear();
+        app.recent_paths = (0..10_000)
+            .map(|index| root.join(format!("memory-only-{index}.BMP")))
+            .collect();
+        app.recent_paths.push(tail.clone());
+        app.gallery_listing.invalidate();
+        frame(&mut app, size, vec![]);
+        while app
+            .filmstrip
+            .recent_preparation
+            .as_ref()
+            .expect("eligible cursor")
+            .next
+            != 1
+            || app.filmstrip.warming.is_some()
+        {
+            advance(&mut app);
+        }
+        assert!(
+            fresh.cached_image(&tail).expect("cache read").is_some(),
+            "one eligible disk request beyond a long BMP-only prefix"
+        );
+        assert!(
+            !app.filmstrip.previews.contains_key(&tail),
+            "offscreen result stays disk-only"
+        );
+        drop(app);
+    }
+
+    #[test]
+    fn gallery_policy_keeps_visible_cards_available_during_retained_playback() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::gallery_policy_keeps_visible_cards_available_during_retained_playback",
+        ) else {
+            return;
+        };
+        let mut app = crate::Application::new(None, |_| {}).expect("app");
+        app.recent_files = None;
+        let context = crate::fonts::test_context();
+        let gallery = app.tabs.gallery().expect("Gallery");
+        let path = root.join("owned-audio.wav");
+        let audio = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Audio);
+        app.state = towavue_core::PlaybackState::Playing;
+        let saved = app.take_playback_tab_state();
+        app.retained_playback.insert(audio, saved);
+        app.tabs.activate(gallery);
+        app.path = None;
+        app.media_kind = None;
+        assert!(app.gallery_active());
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::Visible);
+        app.recent_paths = (0..100)
+            .map(|index| root.join(format!("card-{index}.png")))
+            .collect();
+        let draw = |app: &mut crate::Application<_>| {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_gallery(ui, true, &mut vec![]),
+            );
+        };
+        draw(&mut app);
+        assert!(app.filmstrip.foreground > 0 && app.filmstrip.foreground < VISIBLE_PREVIEW_LIMIT);
+        assert_eq!(
+            app.filmstrip.visible.len(),
+            app.filmstrip.foreground,
+            "playing background owner allows only visible requests"
+        );
+        app.prepare_gallery(&context);
+        assert!(app.filmstrip.warming.is_none());
+
+        app.retained_playback
+            .get_mut(&audio)
+            .expect("retained")
+            .state = towavue_core::PlaybackState::Paused;
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::All);
+        draw(&mut app);
+        assert_eq!(
+            app.filmstrip.visible.len(),
+            VISIBLE_PREVIEW_LIMIT,
+            "pause permits bounded prefetch"
+        );
+
+        app.retained_playback
+            .get_mut(&audio)
+            .expect("retained")
+            .state = towavue_core::PlaybackState::Loading;
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::Visible);
+        app.retained_playback
+            .get_mut(&audio)
+            .expect("metadata-only")
+            .prepared_only = true;
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::All);
+        app.image_loading = true;
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::Paused);
+        draw(&mut app);
+        assert!(
+            app.filmstrip.visible.is_empty(),
+            "original-image demand retires preview requests"
+        );
+
+        app.image_loading = false;
+        app.palette_open = true;
+        assert!(app.gallery_preparation_policy(&context) == PreparationPolicy::Paused);
+    }
 
     #[test]
     fn neighbor_ranks_match_distance_order_without_duplicates() {
@@ -2007,8 +2490,19 @@ mod tests {
                         *bounds.get_or_insert(mesh.calc_bounds()),
                         mesh.calc_bounds()
                     );
-                    assert_eq!(app.filmstrip.generation, generation, "no request restart");
-                    assert_eq!(app.filmstrip.visible, std::slice::from_ref(&path));
+                    assert_eq!(
+                        app.filmstrip.generation,
+                        generation.wrapping_add(u64::from(overlay != 0)),
+                        "pause once without repeatedly resubmitting work"
+                    );
+                    if overlay == 0 {
+                        assert_eq!(app.filmstrip.visible, std::slice::from_ref(&path));
+                    } else {
+                        assert!(
+                            app.filmstrip.visible.is_empty(),
+                            "overlays pause requests without freeing pixels"
+                        );
+                    }
                     let tree = output.platform_output.accesskit_update.expect("tree");
                     let card = tree
                         .nodes

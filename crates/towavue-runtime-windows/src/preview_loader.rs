@@ -14,6 +14,18 @@ pub struct LoadedPreview {
     pub result: Result<MediaPreview, String>,
 }
 
+pub struct WarmedPreview {
+    pub generation: u64,
+    pub path: PathBuf,
+    /// False stops this speculative pass; errors skip only the failed source.
+    pub result: Result<bool, String>,
+}
+
+enum Completion {
+    Pixels(Result<MediaPreview, String>),
+    Warmed(Result<bool, String>),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum PreviewStage {
     Memory,
@@ -26,11 +38,13 @@ struct PendingPreview {
     path: PathBuf,
     kind: MediaKind,
     prefetch: bool,
+    cache_only: bool,
     stage: PreviewStage,
     disk_key: Option<String>,
 }
 
 struct ActivePreview {
+    cache_only: bool,
     path: PathBuf,
     kind: MediaKind,
     cancellation: Cancellation,
@@ -42,6 +56,7 @@ struct Mailbox {
     pending: Vec<PendingPreview>,
     active: Option<ActivePreview>,
     completed: Vec<(MediaKind, LoadedPreview)>,
+    warmed: Option<(MediaKind, WarmedPreview)>,
     closed: bool,
 }
 
@@ -100,6 +115,12 @@ impl PreviewLoader {
                             .filmstrip(path, kind)
                             .map_err(|error| error.to_string())
                     },
+                    |path, kind, cancellation| {
+                        cache
+                            .cancellable(cancellation.clone())
+                            .warm_filmstrip(path, kind)
+                            .map_err(|error| error.to_string())
+                    },
                 );
             })?;
         Ok(Self { shared })
@@ -137,7 +158,8 @@ impl PreviewLoader {
                         .iter()
                         .any(|(ready_kind, preview)| ready_kind == kind && preview.path == *path)
             });
-            if retained.is_none()
+            if active.cache_only
+                || retained.is_none()
                 || (retained.is_some_and(|(_, _, prefetch)| *prefetch) && foreground_pending)
             {
                 active.cancellation.cancel();
@@ -145,6 +167,7 @@ impl PreviewLoader {
         }
         mailbox.generation = mailbox.generation.wrapping_add(1);
         let generation = mailbox.generation;
+        mailbox.warmed = None;
         mailbox.completed.retain_mut(|(kind, preview)| {
             preview.generation = generation;
             wanted
@@ -163,6 +186,7 @@ impl PreviewLoader {
                 path,
                 kind,
                 prefetch,
+                cache_only: false,
                 // Another preview consumer may have populated the shared cache since our miss.
                 stage: PreviewStage::Memory,
                 disk_key: None,
@@ -170,6 +194,52 @@ impl PreviewLoader {
             .collect();
         ready.notify_one();
         generation
+    }
+
+    /// Replace idle work with one cache-only request on the same worker. A later
+    /// display request always preempts it, even when it wants the same path.
+    pub fn request_warming(&self, path: PathBuf, kind: MediaKind) -> u64 {
+        let (mutex, ready) = &*self.shared;
+        let mut mailbox = mutex.lock().expect("preview mailbox");
+        if let Some(active) = &mailbox.active
+            && (!active.cache_only || active.path != path || active.kind != kind)
+        {
+            active.cancellation.cancel();
+        }
+        mailbox.generation = mailbox.generation.wrapping_add(1);
+        let generation = mailbox.generation;
+        mailbox.completed.clear();
+        if let Some((previous_kind, previous)) = &mut mailbox.warmed {
+            if *previous_kind == kind && previous.path == path {
+                previous.generation = generation;
+            } else {
+                mailbox.warmed = None;
+            }
+        }
+        mailbox.pending = if mailbox.warmed.is_some() {
+            Vec::new()
+        } else {
+            vec![PendingPreview {
+                path,
+                kind,
+                prefetch: true,
+                cache_only: true,
+                stage: PreviewStage::Generate,
+                disk_key: None,
+            }]
+        };
+        ready.notify_one();
+        generation
+    }
+
+    pub fn take_warmed(&self) -> Option<WarmedPreview> {
+        self.shared
+            .0
+            .lock()
+            .expect("preview mailbox")
+            .warmed
+            .take()
+            .map(|(_, result)| result)
     }
 
     pub fn take_completed(&self) -> Vec<LoadedPreview> {
@@ -190,6 +260,7 @@ impl Drop for PreviewLoader {
         }
         mailbox.pending.clear();
         mailbox.completed.clear();
+        mailbox.warmed = None;
         ready.notify_one();
         // Cancel the owned child without joining work that may still be inside native probing.
     }
@@ -206,6 +277,7 @@ fn run_worker(
         &mut Option<String>,
     ) -> Option<MediaPreview>,
     generate: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<MediaPreview, String>,
+    warm: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<bool, String>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
@@ -235,13 +307,20 @@ fn run_worker(
             }
             let cancellation = Cancellation::default();
             mailbox.active = Some(ActivePreview {
+                cache_only: work.cache_only,
                 path: work.path.clone(),
                 kind: work.kind,
                 cancellation: cancellation.clone(),
             });
             (work, cancellation)
         };
-        let result = if work.stage != PreviewStage::Generate {
+        let result = if work.cache_only {
+            Some(Completion::Warmed(warm(
+                &work.path,
+                work.kind,
+                &cancellation,
+            )))
+        } else if work.stage != PreviewStage::Generate {
             cached(
                 &work.path,
                 work.kind,
@@ -249,9 +328,13 @@ fn run_worker(
                 work.stage,
                 &mut work.disk_key,
             )
-            .map(Ok)
+            .map(|preview| Completion::Pixels(Ok(preview)))
         } else {
-            Some(generate(&work.path, work.kind, &cancellation))
+            Some(Completion::Pixels(generate(
+                &work.path,
+                work.kind,
+                &cancellation,
+            )))
         };
         let publish = {
             let mut mailbox = mutex.lock().expect("preview mailbox");
@@ -263,14 +346,26 @@ fn run_worker(
                     .pending
                     .retain(|pending| pending.path != work.path || pending.kind != work.kind);
                 let generation = mailbox.generation;
-                mailbox.completed.push((
-                    work.kind,
-                    LoadedPreview {
-                        generation,
-                        path: work.path,
-                        result,
-                    },
-                ));
+                match result {
+                    Completion::Pixels(result) => mailbox.completed.push((
+                        work.kind,
+                        LoadedPreview {
+                            generation,
+                            path: work.path,
+                            result,
+                        },
+                    )),
+                    Completion::Warmed(result) => {
+                        mailbox.warmed = Some((
+                            work.kind,
+                            WarmedPreview {
+                                generation,
+                                path: work.path,
+                                result,
+                            },
+                        ))
+                    }
+                }
                 true
             } else {
                 if let Some(pending) = mailbox
@@ -301,6 +396,24 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    // Existing display-only controls still exercise the production worker.
+    fn run_worker(
+        shared: Arc<(Mutex<Mailbox>, Condvar)>,
+        notify: impl Fn(),
+        cached: impl Fn(
+            &std::path::Path,
+            MediaKind,
+            &Cancellation,
+            PreviewStage,
+            &mut Option<String>,
+        ) -> Option<MediaPreview>,
+        generate: impl Fn(&std::path::Path, MediaKind, &Cancellation) -> Result<MediaPreview, String>,
+    ) {
+        super::run_worker(shared, notify, cached, generate, |_, _, _| {
+            panic!("unexpected warming")
+        });
+    }
 
     #[test]
     fn viewport_misses_finish_before_prefetch_probes_and_keep_cache_hits_first() {
@@ -1023,5 +1136,111 @@ mod tests {
             }
             assert!(started_rx.try_recv().is_err());
         }
+    }
+    #[test]
+    fn cache_only_completions_are_typed_preemptible_and_never_reused_as_pixels() {
+        let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
+        let loader = PreviewLoader {
+            shared: Arc::clone(&shared),
+        };
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (ready_tx, ready_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            super::run_worker(
+                shared,
+                || {
+                    let _ = ready_tx.send(());
+                },
+                |_, _, _, _, _| None,
+                |_, _, _| {
+                    Ok(MediaPreview {
+                        image: crate::PreviewImage {
+                            width: 1,
+                            height: 1,
+                            rgba: vec![1, 2, 3, 255].into(),
+                        },
+                        duration: None,
+                    })
+                },
+                |path, _, cancellation| match path.to_str().expect("owned name") {
+                    "blocked.png" => {
+                        started_tx.send(cancellation.clone()).expect("started");
+                        release_rx
+                            .recv_timeout(Duration::from_secs(5))
+                            .expect("release");
+                        Ok(true)
+                    }
+                    "full.png" => Ok(false),
+                    "broken.png" => Err("bad source".into()),
+                    _ => Ok(true),
+                },
+            )
+        });
+        loader.request_warming("blocked.png".into(), MediaKind::Image);
+        let cancelled = started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("active warming");
+        let generation = loader.request(vec![("blocked.png".into(), MediaKind::Image)]);
+        assert!(
+            cancelled.is_cancelled(),
+            "display demand preempts even the same path"
+        );
+        release_tx.send(()).expect("release old work");
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("display result");
+        assert!(
+            loader.take_warmed().is_none(),
+            "stale warming cannot publish"
+        );
+        let result = loader.take_completed().pop().expect("pixels");
+        assert_eq!(result.generation, generation);
+        assert_eq!(
+            result.result.expect("ready").image.rgba.as_slice(),
+            [1, 2, 3, 255]
+        );
+
+        for (path, expected) in [
+            ("ready.png", Ok(true)),
+            ("full.png", Ok(false)),
+            ("broken.png", Err("bad source".to_owned())),
+        ] {
+            loader.request_warming(path.into(), MediaKind::Image);
+            ready_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("warming result");
+            assert!(
+                loader.take_completed().is_empty(),
+                "warming never returns UI pixels"
+            );
+            let generation = loader.request_warming(path.into(), MediaKind::Image);
+            let result = loader.take_warmed().expect("reuse unconsumed result");
+            assert_eq!(result.generation, generation);
+            assert_eq!(result.result, expected);
+            assert!(loader.is_idle());
+        }
+        loader.request_warming("ready.png".into(), MediaKind::Image);
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("completed warming");
+        let generation = loader.request(vec![("ready.png".into(), MediaKind::Image)]);
+        assert!(
+            loader.take_warmed().is_none(),
+            "display replacement discards cache-only status"
+        );
+        ready_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("fresh display result");
+        assert_eq!(loader.take_completed()[0].generation, generation);
+        loader.request_warming("blocked.png".into(), MediaKind::Image);
+        let cancelled = started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("active warming");
+        drop(loader);
+        assert!(cancelled.is_cancelled(), "closing stops speculative work");
+        release_tx.send(()).expect("release closing work");
+        worker.join().expect("worker exits");
+        assert!(ready_rx.try_recv().is_err(), "closed work never notifies");
     }
 }

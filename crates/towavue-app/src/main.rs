@@ -3182,7 +3182,15 @@ where
             AppEvent::FilmstripReady => {
                 if let Some(context) = self.ui_context.clone() {
                     let changed = self.filmstrip.finish(&context);
-                    if !self.filmstrip_open
+                    if self.gallery_active() {
+                        let resume_visible = self.filmstrip.recent_requests_paused()
+                            && self.gallery_preparation_policy(&context)
+                                != filmstrip::PreparationPolicy::Paused;
+                        self.prepare_gallery(&context);
+                        if changed || resume_visible {
+                            self.request_redraw();
+                        }
+                    } else if !self.filmstrip_open
                         && !self.image_seek_preview_active
                         && self.path.is_some()
                     {
@@ -4113,6 +4121,9 @@ where
         self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
         self.draw_video_scrub();
         self.volume_wheel(&context, &volume_targets, actions);
+        if self.gallery_active() {
+            self.prepare_gallery(&context);
+        }
         if self.filmstrip_open {
             if !modal_blocked {
                 self.draw_filmstrip(&context, media_panel.response.rect, actions);

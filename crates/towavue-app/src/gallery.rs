@@ -14,6 +14,7 @@ pub(super) struct Listing {
     filter_valid: bool,
     available: Vec<PathBuf>,
     filtered: Vec<PathBuf>,
+    warmable: Vec<usize>,
     months: Vec<(Option<(u16, u16)>, usize)>,
     query: String,
     filter: Option<MediaKind>,
@@ -52,12 +53,66 @@ impl Listing {
 }
 
 impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
+    pub(super) fn gallery_active(&self) -> bool {
+        self.media_kind.is_none()
+            && self.tabs.gallery().is_some()
+            && self.tabs.active_id() == self.tabs.gallery()
+    }
+
+    pub(super) fn gallery_preparation_policy(
+        &self,
+        context: &egui::Context,
+    ) -> crate::filmstrip::PreparationPolicy {
+        use crate::filmstrip::PreparationPolicy;
+        if self.image_loading
+            || self.image_edit_pending
+            || !self.image_sequence.steps.is_empty()
+            || !self.image_loader.is_idle()
+            || self.active_export.is_some()
+            || self.pending_folder.is_some()
+            || self.modal_input_blocked()
+            || self.palette_open
+            || self.grid_open
+            || egui::Popup::is_any_open(context)
+            || context
+                .input(|input| input.pointer.any_down() || !input.raw.hovered_files.is_empty())
+        {
+            PreparationPolicy::Paused
+        } else if self.retained_playback.values().any(|saved| {
+            !saved.prepared_only
+                && matches!(
+                    saved.state,
+                    towavue_core::PlaybackState::Loading | towavue_core::PlaybackState::Playing
+                )
+        }) {
+            PreparationPolicy::Visible
+        } else {
+            PreparationPolicy::All
+        }
+    }
+
+    pub(super) fn prepare_gallery(&mut self, context: &egui::Context) {
+        let listing = &self.gallery_listing;
+        if self.gallery_preparation_policy(context) == crate::filmstrip::PreparationPolicy::All
+            && listing.source_valid
+            && listing.filter_valid
+            && listing.query == self.gallery_search
+            && listing.filter == self.gallery_filter
+        {
+            self.filmstrip
+                .prepare_recent(&listing.filtered, &listing.warmable, listing.revision);
+        } else {
+            self.filmstrip.pause_warming();
+        }
+    }
+
     pub(super) fn draw_gallery(
         &mut self,
         ui: &mut egui::Ui,
         enabled: bool,
         actions: &mut Vec<UiAction>,
     ) {
+        let policy = self.gallery_preparation_policy(ui.ctx());
         let listing = &mut self.gallery_listing;
         if !listing.source_valid {
             let missing: HashSet<_> = self.gallery_missing_files.iter().collect();
@@ -74,6 +129,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             available,
             revision,
             filtered,
+            warmable,
             months,
             query: old_query,
             filter: old_filter,
@@ -102,6 +158,18 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                                 })
                                 .cloned()
                                 .collect();
+                            // Build once per projection, not while advancing a UI-side cursor.
+                            // A long BMP-only history must not create a full-history scan on each frame.
+                            warmable.clear();
+                            warmable.extend(filtered.iter().enumerate().filter_map(
+                                |(index, path)| {
+                                    (MediaKind::from_path(path).is_some()
+                                        && !path.extension().is_some_and(|extension| {
+                                            extension.eq_ignore_ascii_case("bmp")
+                                        }))
+                                    .then_some(index)
+                                },
+                            ));
                             months.clear();
                             let mut seen = HashSet::new();
                             for (index, path) in filtered.iter().enumerate() {
@@ -121,12 +189,13 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                         if filtered.is_empty() && !available.is_empty() {
                             ui.label("No matching files.");
                         }
-                        let grid = self.filmstrip.show_recent(
+                        let grid = self.filmstrip.show_recent_with_policy(
                             ui,
                             filtered,
                             *revision,
                             ui.is_enabled(),
                             actions,
+                            policy,
                         );
                         let date = grid
                             .first_visible

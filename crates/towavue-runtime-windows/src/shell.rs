@@ -206,8 +206,8 @@ impl FolderOrderProvider {
         self.enqueue(folder, None)
     }
 
-    /// Re-enumerate current files with the live view's sort/group settings.
-    /// A live Explorer view can retain stale item properties after publication.
+    /// Notify Shell after a disk change, then enumerate current files.
+    /// Every request uses fresh rows with the live view's sort/group settings.
     pub fn request_refreshed(&self, folder: PathBuf) -> u64 {
         self.enqueue_mode(Some(folder), None, true)
     }
@@ -443,30 +443,22 @@ fn shell_snapshot(
             matching_live_view(folder_pidl.as_ptr(), *last_live_window, current)
         {
             *last_live_window = Some(window);
-            if refresh {
-                if let Some(order) = refresh::ViewOrder::read(&view)
-                    && let Some(snapshot) = hidden_snapshot_with_order(
-                        &folder,
-                        &folder_pidl,
-                        generation,
-                        current,
-                        Some(&order),
-                    )
-                {
-                    return Some(snapshot);
-                }
-                // A vanished/unavailable live view falls back to saved Shell
-                // settings, never to the stale rows that prompted this refresh.
-            } else if let Some(snapshot) = capture_view(
-                &view,
-                &folder,
-                &folder_pidl,
-                FolderSnapshotSource::LiveExplorerView,
-                generation,
-                current,
-            ) {
+            // Live views can append newly created items or retain old properties,
+            // even after an earlier publication refresh. Borrow their settings,
+            // never their row cache, for every request including ordinary opens.
+            if let Some(order) = refresh::ViewOrder::read(&view)
+                && let Some(snapshot) = hidden_snapshot_with_order(
+                    &folder,
+                    &folder_pidl,
+                    generation,
+                    current,
+                    Some(&order),
+                )
+            {
                 return Some(snapshot);
             }
+            // A vanished/unavailable live view falls back to saved Shell settings.
+            // Never recover by copying the stale rows that prompted this request.
         }
 
         hidden_snapshot(&folder, &folder_pidl, generation, current)

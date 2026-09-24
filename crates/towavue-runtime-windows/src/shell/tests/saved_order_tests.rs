@@ -503,3 +503,142 @@ fn reference_exports_and_source_save_refresh_creation_order() {
     );
     eprintln!("PASS reference source bytes/mtime unchanged; owned sibling removed");
 }
+
+// Real Explorer views may retain appended rows after notifications. Ordinary
+// production requests must use fresh native ordering without changing those views.
+#[test]
+#[ignore = "opens two real Explorer windows on one owned temporary folder"]
+fn multiple_explorer_windows_cannot_supply_stale_file_order() {
+    let root = test_directory("multiple-live-order");
+    fs::create_dir(&root).expect("owned fixture");
+    for (index, name) in ["a.png", "b.jpg", "c.mp3", "d.mp4"].iter().enumerate() {
+        create_timed_file(&root.join(name), 100, index as u64 + 1, index as u64 + 1);
+    }
+    let fixture = root.clone();
+    thread::spawn(move || {
+        let apartment = ShellApartment::new();
+        assert!(apartment.0);
+        let folder = canonical_shell_path(&fixture).expect("fixture path");
+        let pidl = parse_path(&folder).expect("PIDL");
+        struct Windows { folder: PathBuf }
+        impl Drop for Windows {
+            fn drop(&mut self) {
+                // Only views still addressing this uniquely created fixture may
+                // receive Close; a window navigated elsewhere is left alone.
+                unsafe {
+                    let pidl = parse_path(&self.folder).expect("owned PIDL");
+                    for (_, hwnd) in fixture_views(&pidl) {
+                        let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while Instant::now() < deadline && !fixture_views(&pidl).is_empty() {
+                        pump_messages();
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                }
+            }
+        }
+        let _windows = Windows { folder: folder.clone() };
+        // SAFETY: all objects stay on this STA, and only this newly generated
+        // folder's views are configured. Observations use production capture.
+        unsafe {
+            assert!(fixture_views(&pidl).is_empty(), "unique fixture has no existing windows");
+            let mut launchers = Vec::new();
+            for count in 1..=2 {
+                launchers.push(Command::new("explorer.exe").arg(format!("/n,{}", folder.display())).spawn().expect("owned Explorer window"));
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while fixture_views(&pidl).len() < count {
+                    pump_messages();
+                    assert!(Instant::now() < deadline, "two distinct fixture windows must open");
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+            let views = fixture_views(&pidl);
+            assert_eq!(views.len(), 2);
+            for (view, _) in &views {
+                set_sort_and_capture(view, &folder, &pidl, &[native_column(DATE_CREATED, SORT_DESCENDING)]);
+            }
+            let names = |snapshot: &FolderSnapshot| snapshot.items.iter().map(|item| item.path.file_name().expect("name").to_string_lossy().into_owned()).collect::<Vec<_>>();
+            let mut reproduced = 0;
+            for phase in 0..6 {
+                let name = format!("new-{phase}.png");
+                create_timed_file(&folder.join(&name), 101, phase + 10, phase + 10);
+                let deadline = Instant::now() + Duration::from_secs(8);
+                let current = || Instant::now() < deadline;
+                let expected_count = 5 + phase as usize;
+                // Wait for membership only; explicitly do not refresh/re-sort the live views.
+                while current() {
+                    pump_messages();
+                    if views.iter().all(|(view, _)| capture_view(view, &folder, &pidl, FolderSnapshotSource::LiveExplorerView, phase, &current).is_some_and(|s| s.items.len() == expected_count)) { break; }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                for (index, (view, hwnd)) in views.iter().enumerate() {
+                    let live = capture_view(view, &folder, &pidl, FolderSnapshotSource::LiveExplorerView, phase, &current).expect("live observation");
+                    assert_eq!(live.items.len(), expected_count, "both views observed publication");
+                    let stale = live.items.first().is_none_or(|item| item.path.file_name() != Some(OsStr::new(&name)));
+                    reproduced += usize::from(stale);
+                    let mut preferred = Some(*hwnd);
+                    let started = Instant::now();
+                    let ordinary = shell_snapshot(&folder, phase, &mut preferred, &current, false).expect("ordinary production snapshot");
+                    let ordinary_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    assert_eq!(ordinary.items[0].path.file_name(), Some(OsStr::new(&name)), "ordinary opens cannot inherit stale live rows");
+                    let fresh = shell_snapshot(&folder, phase, &mut preferred, &current, true).expect("fresh production snapshot");
+                    assert_eq!(fresh.items[0].path.file_name(), Some(OsStr::new(&name)), "fresh view uses creation order");
+                    assert_eq!(names(&ordinary), names(&fresh));
+                    assert_eq!(ordinary.sort_columns, fresh.sort_columns);
+                    eprintln!("MULTI_EXPLORER phase={phase} view={index} ordinary_ms={ordinary_ms:.3} hwnd={hwnd:?} selected={preferred:?} foreground={:?} stale={stale} live={:?} ordinary={:?} fresh={:?}", windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow(), names(&live), names(&ordinary), names(&fresh));
+                }
+            }
+            eprintln!("MULTI_EXPLORER reproduced_stale_observations={reproduced}");
+            drop(views);
+            for launcher in &mut launchers { let _ = launcher.try_wait(); }
+        }
+    }).join().expect("owned multi-window trial");
+    let resolved = fs::canonicalize(&root).expect("fixture remains owned");
+    let temporary = fs::canonicalize(std::env::temp_dir()).expect("temporary root");
+    assert!(resolved.starts_with(temporary));
+    assert!(
+        resolved
+            .file_name()
+            .expect("fixture name")
+            .to_string_lossy()
+            .starts_with("towavue-shell-multiple-live-order-")
+    );
+    fs::remove_dir_all(resolved).expect("owned fixture cleanup");
+}
+
+// SAFETY: called only from a live STA; the PIDL is borrowed for this enumeration.
+unsafe fn fixture_views(folder: &OwnedPidl) -> Vec<(IFolderView2, HWND)> {
+    unsafe {
+        let windows: IShellWindows =
+            CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).expect("Shell windows");
+        let mut found = Vec::new();
+        for index in 0..windows.Count().expect("window count") {
+            let Ok(dispatch) = windows.Item(&VARIANT::from(index)) else {
+                continue;
+            };
+            let Ok(web) = dispatch.cast::<IWebBrowserApp>() else {
+                continue;
+            };
+            let Ok(hwnd) = web.HWND() else {
+                continue;
+            };
+            let Ok(services) = dispatch.cast::<IServiceProvider>() else {
+                continue;
+            };
+            let Ok(browser) = services.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) else {
+                continue;
+            };
+            let Ok(shell_view) = browser.QueryActiveShellView() else {
+                continue;
+            };
+            let Ok(view) = shell_view.cast::<IFolderView2>() else {
+                continue;
+            };
+            if view_matches(&view, folder.as_ptr()) {
+                found.push((view, HWND(hwnd.0 as *mut _)));
+            }
+        }
+        found
+    }
+}

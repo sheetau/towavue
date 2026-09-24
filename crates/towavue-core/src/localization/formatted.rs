@@ -13,6 +13,7 @@ macro_rules! templates {
 }
 
 templates! {
+    language_save_failed(error: &str) => ("Could not save the language: {error}", "表示言語を保存できませんでした: {error}"),
     rotation_drag(angle: f32, help: &str) => ("Rotation: {angle:.1} degrees · {help}", "回転: {angle:.1}度 · {help}"),
     rotation_drag_invalid(error: &str) => ("{error} · Preview unchanged; release cancels", "{error} · プレビューは変更しません。離すとキャンセル"),
     rotation_cancelled(error: &str) => ("Rotation cancelled: {error}", "回転をキャンセルしました: {error}"),

@@ -18,6 +18,13 @@ macro_rules! messages {
 }
 
 messages! {
+    DisplayLanguage => ("Language", "表示言語"),
+    LanguageEnglish => ("English", "English"),
+    LanguageJapanese => ("日本語", "日本語"),
+    LanguageRestart => ("Language saved. Close all towavue windows and start towavue again to apply it. You can continue working until then.", "表示言語を保存しました。towavueのすべてのウィンドウを閉じ、起動し直すと適用されます。それまでは作業を続けられます。"),
+    LanguageUnchanged => ("Language saved. The current display language will also be used on the next launch.", "表示言語を保存しました。次回の起動も、現在の表示言語を使用します。"),
+    LanguageSaving => ("Saving language…", "表示言語を保存中…"),
+    LanguageUnavailable => ("Language settings are unavailable. The existing preference has been preserved.", "表示言語の設定を利用できません。既存の設定は保持されています。"),
     MetadataTitle => ("Title", "タイトル"),
     MetadataArtist => ("Artist", "アーティスト"),
     MetadataAlbum => ("Album", "アルバム"),

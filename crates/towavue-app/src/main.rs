@@ -294,6 +294,7 @@ impl PlaybackClock {
 
 #[derive(Clone, PartialEq)]
 enum UiAction {
+    Language(localization::Language),
     KeybindingChange(TabId, keyboard_settings::Change),
     ConfigureKeybinding(CommandId),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
@@ -345,6 +346,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    Language(localization::Language),
     FileOperationSource(
         u64,
         Result<towavue_runtime_windows::FileOperationSource, String>,
@@ -519,6 +521,7 @@ enum GuardDecision {
 }
 
 enum FallbackPrompt {
+    LanguageNotice(String),
     ConfigurationWarning(String),
     UpdateNotice(updates::Notice),
     Recovery {
@@ -1015,6 +1018,7 @@ struct Application<N> {
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
+    language_settings: localization::Settings,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
@@ -1312,6 +1316,7 @@ where
             retained_playback: BTreeMap::new(),
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
+            language_settings: localization::Settings::default(),
             last_playback_volume: Arc::default(),
             playback_volume_preferences: None,
             video_export_quality: Arc::default(),
@@ -1552,6 +1557,7 @@ where
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(12);
         let context = egui::Context::default();
+        localization::set_language(&context, self.language_settings.display);
         chrome::configure_input(&context);
         context.set_visuals(egui::Visuals::dark());
         fonts::install(&context);
@@ -3144,6 +3150,7 @@ where
             return;
         }
         match event {
+            AppEvent::Language(_) => {} // Handled by the host.
             AppEvent::VideoExportQualityChanged => self.request_redraw(),
             AppEvent::Update(_) => {} // Routed by the shared host.
             AppEvent::ShortcutsChanged(bindings) => {
@@ -5288,6 +5295,8 @@ where
                         folders: &self.recent_folders,
                         files: &self.recent_paths,
                         action: None,
+                        language: self.language_settings,
+                        language_action: None,
                         choices: menu::Choices {
                             video_quality: self.video_export_quality(),
                             volume_step: self.volume_step_percent,
@@ -5308,6 +5317,9 @@ where
                         !self.modal_input_blocked(),
                         &mut recent,
                     );
+                    if let Some(language) = recent.language_action {
+                        actions.push(UiAction::Language(language));
+                    }
                     if let Some(action) = recent.action {
                         actions.push(UiAction::Recent(action));
                     }
@@ -7173,6 +7185,7 @@ where
             UiAction::ScrubImage(path, generation, owner) => {
                 self.scrub_image(path, generation, owner);
             }
+            UiAction::Language(language) => (self.notify)(AppEvent::Language(language)),
             UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::ThumbnailMenu(intent) => self.handle_thumbnail_menu(intent),
             UiAction::TimelineMenu(intent) => self.handle_timeline_menu(intent),
@@ -10076,11 +10089,13 @@ where
             return;
         }
         #[cfg(test)]
-        if matches!(prompt, FallbackPrompt::UpdateNotice(_))
-            && self
-                .window
-                .as_ref()
-                .is_none_or(|window| window.is_visible() == Some(false))
+        if matches!(
+            prompt,
+            FallbackPrompt::UpdateNotice(_) | FallbackPrompt::LanguageNotice(_)
+        ) && self
+            .window
+            .as_ref()
+            .is_none_or(|window| window.is_visible() == Some(false))
         {
             // Hidden host controls inject the response through the same callback
             // boundary; they must not display an owner-facing native dialog.
@@ -10091,6 +10106,7 @@ where
             return;
         };
         let (message, buttons) = match &prompt {
+            FallbackPrompt::LanguageNotice(message) => (message.clone(), PromptButtons::Information),
             FallbackPrompt::ConfigurationWarning(message) => (message.clone(), PromptButtons::Ok),
             FallbackPrompt::UpdateNotice(notice) => (
                 format!(
@@ -10162,7 +10178,7 @@ where
             }
         };
         match prompt {
-            FallbackPrompt::ConfigurationWarning(_) => {}
+            FallbackPrompt::ConfigurationWarning(_) | FallbackPrompt::LanguageNotice(_) => {}
             FallbackPrompt::UpdateNotice(_) => self.handle_update_action(match response {
                 PromptResponse::Yes => updates::Action::Install,
                 PromptResponse::No => updates::Action::NextLaunch,

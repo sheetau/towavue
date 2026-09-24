@@ -131,6 +131,7 @@ pub fn pick_save_as(
 
 #[derive(Clone, Copy)]
 pub enum PromptButtons {
+    Information,
     Ok,
     RetryCancel,
     YesNoCancel,
@@ -295,13 +296,18 @@ pub fn show_prompt(
                 });
             }
             let flags = match buttons {
+                PromptButtons::Information => MB_OK,
                 PromptButtons::Ok => MB_OK,
                 PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
                 PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
                 PromptButtons::SaveDiscardCancel { .. } | PromptButtons::InstallUpdate => {
                     unreachable!("handled above")
                 }
-            } | MB_ICONWARNING;
+            } | if matches!(buttons, PromptButtons::Information) {
+                windows::Win32::UI::WindowsAndMessaging::MB_ICONINFORMATION
+            } else {
+                MB_ICONWARNING
+            };
             // The worker retains the HWND owner and UTF-16 buffer for the modal call.
             // MessageBox owns its native UI; no COM or graphics resources cross threads.
             let result = unsafe {

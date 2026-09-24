@@ -39,9 +39,11 @@ mod launch;
 mod media_input;
 mod media_tools;
 pub use media_input::MediaInput;
+mod language_preferences;
 mod orientation;
 mod pinned_cursor;
 mod playback;
+pub use language_preferences::LanguagePreferences;
 mod playback_preferences;
 pub use playback_preferences::PlaybackVolumePreferences;
 #[cfg(feature = "presentation-verification")]

@@ -1,6 +1,13 @@
 //! Per-window display language; command IDs and persisted shortcuts stay stable.
 pub(crate) use towavue_core::localization::{Language, Text};
 
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Settings {
+    pub display: Language,
+    pub next: Language,
+    pub saving: bool,
+}
+
 #[cfg(test)]
 pub(crate) mod test_ui;
 
@@ -16,11 +23,12 @@ pub(crate) fn text(context: &egui::Context, key: Text) -> &'static str {
 
 impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
     pub(crate) fn language(&self) -> Language {
-        self.ui_context.as_ref().map_or(Language::English, language)
+        self.ui_context
+            .as_ref()
+            .map_or(self.language_settings.display, language)
     }
 }
 
-#[cfg(test)]
 pub(crate) fn set_language(context: &egui::Context, language: Language) {
     context.data_mut(|data| data.insert_temp(egui::Id::new("display-language"), language));
 }

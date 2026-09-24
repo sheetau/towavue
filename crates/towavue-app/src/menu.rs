@@ -5,6 +5,8 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 use CommandId::*;
 
 mod choices;
+#[cfg(test)]
+mod language_tests;
 pub(crate) use choices::Choices;
 
 pub(crate) fn shortcut_text(ui: &egui::Ui, label: String, enabled: bool) -> egui::RichText {
@@ -43,6 +45,8 @@ pub(crate) struct MenuData<'a> {
     pub files: &'a [std::path::PathBuf],
     pub action: Option<RecentAction>,
     pub choices: Choices,
+    pub language: crate::localization::Settings,
+    pub language_action: Option<crate::localization::Language>,
 }
 
 /// Project folder history at delivery, without filesystem work or new persisted
@@ -484,10 +488,64 @@ fn show_items(
                     items.push(response.id);
                 }
                 chosen = chosen.or(command);
+                crate::chrome::separator(ui);
+                let response = language_menu(ui, requested, recent);
+                if response.enabled() {
+                    items.push(response.id);
+                }
+                if response.gained_focus() {
+                    response.scroll_to_me(None);
+                }
             }
         });
     keyboard.finish(ui, items);
     (chosen, back)
+}
+
+fn language_menu(
+    ui: &mut egui::Ui,
+    requested: Option<egui::Id>,
+    data: &mut MenuData<'_>,
+) -> egui::Response {
+    use crate::localization::Language;
+    let menu = ui
+        .add_enabled_ui(!data.language.saving, |ui| {
+            let category = ui.next_auto_id();
+            if requested == Some(category) {
+                let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
+                egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
+                egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                    state.open_item = Some(id)
+                });
+            }
+            // Autonyms stay recognizable even when the current language is unfamiliar.
+            ui.menu_button(text(ui.ctx(), Text::DisplayLanguage), |ui| {
+                let keyboard = MenuKeyboard::begin(ui);
+                let back = keyboard.left;
+                let mut items = Vec::new();
+                ui.set_min_width(100.0);
+                for (language, label) in [
+                    (Language::English, Text::LanguageEnglish),
+                    (Language::Japanese, Text::LanguageJapanese),
+                ] {
+                    let mut selected = data.language.next == language;
+                    let response = ui.checkbox(&mut selected, text(ui.ctx(), label));
+                    items.push(response.id);
+                    if response.clicked() {
+                        data.language_action = Some(language);
+                        ui.close();
+                    }
+                }
+                keyboard.finish(ui, items);
+                back
+            })
+        })
+        .inner;
+    if menu.inner == Some(true) {
+        egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
+        menu.response.request_focus();
+    }
+    menu.response
 }
 
 fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f32) -> bool {
@@ -1272,6 +1330,9 @@ mod tests {
         navigate(egui::Key::ArrowLeft, false, "Edit");
         navigate(egui::Key::ArrowDown, false, "View");
         navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
+        navigate(egui::Key::Tab, true, "Language");
+        navigate(egui::Key::ArrowRight, false, "English");
+        navigate(egui::Key::ArrowLeft, false, "Language");
         navigate(egui::Key::Tab, true, "Image jump");
         navigate(egui::Key::Tab, true, "Show command palette");
         assert_eq!(
@@ -1645,13 +1706,16 @@ mod tests {
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
             if category == "Image jump" {
-                frame(vec![egui::Event::Key {
-                    key: egui::Key::Tab,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::SHIFT,
-                }]);
+                // Skip the final Language submenu, then enter Image jump.
+                for _ in 0..2 {
+                    frame(vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::SHIFT,
+                    }]);
+                }
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
             for _ in

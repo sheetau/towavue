@@ -35,6 +35,7 @@ mod idle_graphics;
 mod seek_verification;
 #[cfg(feature = "presentation-verification")]
 pub(crate) use seek_verification::run as verify_reference_seek;
+mod language;
 mod source_save;
 mod updates;
 
@@ -53,6 +54,7 @@ pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
     Update(u64, towavue_runtime_windows::update::UpdateEvent),
     PlaybackVolumePreferenceFailed(String),
+    LanguageSaved(Result<localization::Language, String>),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
 }
@@ -70,6 +72,7 @@ type CapturedEvents = Arc<std::sync::Mutex<Option<VecDeque<Event>>>>;
 
 pub(crate) struct WindowHost {
     updates: updates::Updates,
+    language: language::State,
     file_operation: Option<file_operations::Transaction>,
     source_save: Option<source_save::Publication>,
     delete_confirmation_suppressed: bool,
@@ -102,7 +105,9 @@ impl WindowHost {
             .is_some_and(crate::file_operations::preferences::suppressed);
         let (volume, playback_volume_preferences) =
             playback_volume::open_preferences(proxy.clone());
+        let language = language::State::open(proxy.clone());
         let mut host = Self {
+            language,
             updates: updates::Updates::default(),
             delete_confirmation_suppressed,
             delete_preference_path,
@@ -144,7 +149,8 @@ impl WindowHost {
             #[cfg(test)]
             if matches!(
                 event,
-                AppEvent::VideoExportQualityChanged
+                AppEvent::Language(_)
+                    | AppEvent::VideoExportQualityChanged
                     | AppEvent::Update(_)
                     | AppEvent::VideoResume(_)
                     | AppEvent::FolderReady
@@ -166,6 +172,7 @@ impl WindowHost {
         });
         let mut app =
             Application::new_with_preview_cache(initial_path, notify, self.preview_cache.clone())?;
+        app.language_settings = self.language.settings;
         app.last_playback_volume = Arc::clone(&self.last_playback_volume);
         app.playback_volume_preferences = self.playback_volume_preferences.clone();
         app.video_export_quality = Arc::clone(&self.video_export_quality);
@@ -466,6 +473,10 @@ impl WindowHost {
                 }
             }
             Event::Window(origin, AppEvent::Update(action)) => self.update_choice(origin, action),
+            Event::Window(origin, AppEvent::Language(language)) => {
+                self.select_language(origin, language)
+            }
+            Event::LanguageSaved(result) => self.finish_language_save(result),
             Event::PlaybackVolumePreferenceFailed(error) => {
                 if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
                     app.set_status(format!("Could not save playback volume: {error}"));
@@ -814,6 +825,7 @@ impl WindowHost {
     }
 
     fn prepare_wait(&mut self) -> ControlFlow {
+        self.show_language_notice();
         self.clear_stale_update_guards();
         self.advance_update();
         self.advance_source_save();

@@ -343,6 +343,26 @@ fn paired_prefetch_contract(format: image::ImageFormat) {
         } else {
             vec![target]
         };
+        let source_changed = if mode == "change_source" {
+            let (send, receive) = mpsc::channel();
+            let path = paths[1].clone();
+            let mut first = true;
+            // The foreground has captured the old stamp when this hook runs.
+            // Its short-lived identity handle must close before our fixture write:
+            // racing request() against fs::write can fail with a sharing violation.
+            // Both decoders remain gated until the mutation is acknowledged.
+            cache.lock().expect("cache").before_lookup = Some(Box::new(move || {
+                if std::mem::take(&mut first) {
+                    let mut bytes = std::fs::read(&path).expect("owned source");
+                    bytes.push(0);
+                    std::fs::write(&path, bytes).expect("change owned source stamp");
+                    send.send(()).expect("source mutation observer");
+                }
+            }));
+            Some(receive)
+        } else {
+            None
+        };
         loader.request(targets.clone());
         assert!(loader.verification_set_parallel_prefetch(false).is_err());
         if mode == "replace_tail" {
@@ -355,10 +375,10 @@ fn paired_prefetch_contract(format: image::ImageFormat) {
                 panic!("replacement must retain the primary decoder")
             });
         }
-        if mode == "change_source" {
-            let mut bytes = std::fs::read(&paths[1]).expect("owned source");
-            bytes.push(0);
-            std::fs::write(&paths[1], bytes).expect("change owned source stamp");
+        if let Some(source_changed) = source_changed {
+            source_changed
+                .recv_timeout(Duration::from_secs(5))
+                .expect("source changed after foreground stamp capture");
         }
         ahead_release_tx.send(()).expect("resume ahead");
         let ahead_current = currency_rx

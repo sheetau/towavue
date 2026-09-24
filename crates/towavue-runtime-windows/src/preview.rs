@@ -16,6 +16,8 @@ use crate::Cancellation;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
+const PUBLICATION_LOCK: &str = ".publication.lock";
+const WARMING_RESERVE_BYTES: u64 = 256 * 1024;
 const MEMORY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const STATIC_THUMBNAIL_BYTE_LIMIT: usize = 128 * 1024 * 1024;
 const IMAGE_PREVIEW_FILE_LIMIT: usize = 1024 * 1024;
@@ -162,6 +164,8 @@ pub enum PreviewError {
     InvalidDuration,
     #[error("LOCALAPPDATA is unavailable")]
     NoLocalAppData,
+    #[error("preview warming deferred")]
+    WarmingDeferred,
 }
 
 #[derive(Clone)]
@@ -170,6 +174,7 @@ pub struct PreviewCache {
     cancellation: Option<Cancellation>,
     memory: Arc<Mutex<PreviewMemory>>,
     in_flight: InFlight,
+    spare_only: bool,
 }
 
 impl PreviewCache {
@@ -191,6 +196,7 @@ impl PreviewCache {
             cancellation: None,
             memory: Arc::default(),
             in_flight: Arc::default(),
+            spare_only: false,
         })
     }
 
@@ -200,7 +206,83 @@ impl PreviewCache {
             cancellation: Some(cancellation),
             memory: Arc::clone(&self.memory),
             in_flight: Arc::clone(&self.in_flight),
+            spare_only: self.spare_only,
         }
+    }
+
+    /// Warm one persistent thumbnail without evicting existing disk or memory entries.
+    /// False stops the speculative pass when storage is full, busy or unavailable.
+    /// Ordinary foreground loading remains independent of this admission decision.
+    pub fn warm_filmstrip(&self, source: &Path, kind: MediaKind) -> Result<bool, PreviewError> {
+        self.check_cancelled()?;
+        if source
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("bmp"))
+        {
+            return Ok(true); // BMP thumbnails are intentionally memory-only.
+        }
+        {
+            let Some(_publication) = self.publication_lock() else {
+                return Ok(false);
+            };
+            let available = self.spare_capacity(WARMING_RESERVE_BYTES);
+            self.check_cancelled()?;
+            if !available {
+                return Ok(false);
+            }
+        }
+        let warming = Self {
+            root: self.root.clone(),
+            cancellation: self.cancellation.clone(),
+            memory: Arc::default(),
+            in_flight: Arc::clone(&self.in_flight),
+            spare_only: true,
+        };
+        match warming.filmstrip(source, kind) {
+            Ok(_) => Ok(true),
+            Err(PreviewError::WarmingDeferred) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    // Persistent lock identity coordinates cache instances/processes. Never hold
+    // it while decoding; optional foreground persistence must not wait for it.
+    fn publication_lock(&self) -> Option<fs::File> {
+        fs::create_dir_all(&self.root).ok()?;
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.root.join(PUBLICATION_LOCK))
+            .ok()?;
+        lock.try_lock().ok()?;
+        Some(lock)
+    }
+
+    fn spare_capacity(&self, additional: u64) -> bool {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return false;
+        };
+        let mut total = additional;
+        for entry in entries {
+            if self.check_cancelled().is_err() {
+                return false;
+            }
+            let Ok(entry) = entry else {
+                return false;
+            };
+            let Ok(metadata) = entry.metadata() else {
+                return false;
+            };
+            if metadata.is_file() {
+                total = total.saturating_add(metadata.len());
+            }
+            if total > CACHE_LIMIT_BYTES {
+                return false;
+            }
+        }
+        total <= CACHE_LIMIT_BYTES
     }
 
     fn check_cancelled(&self) -> Result<(), PreviewError> {
@@ -659,18 +741,30 @@ impl PreviewCache {
             NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
         ));
         // Disk persistence is optional once valid pixels are available.
-        let stored = fs::create_dir_all(&self.root)
-            .and_then(|()| fs::write(&temporary, &bytes))
-            .and_then(|()| {
-                fs::rename(&temporary, &path).inspect_err(|_| {
+        let stored = self.publication_lock().map(|_publication| {
+            if self.spare_only && !self.spare_capacity(bytes.len() as u64) {
+                return Err(std::io::Error::other(
+                    "preview warming has no spare capacity",
+                ));
+            }
+            let stored = fs::write(&temporary, &bytes)
+                .and_then(|()| fs::rename(&temporary, &path))
+                .inspect_err(|_| {
                     let _ = fs::remove_file(&temporary);
-                })
-            });
-        if let Err(error) = &stored {
-            crate::diagnostic!("towavue: could not store preview cache: {error}");
+                });
+            if !self.spare_only
+                && let Err(error) = self.prune()
+            {
+                crate::diagnostic!("towavue: could not prune preview cache: {error}");
+            }
+            stored
+        });
+        if self.spare_only && !matches!(stored, Some(Ok(()))) {
+            self.check_cancelled()?;
+            return Err(PreviewError::WarmingDeferred);
         }
-        if let Err(error) = self.prune() {
-            crate::diagnostic!("towavue: could not prune preview cache: {error}");
+        if let Some(Err(error)) = &stored {
+            crate::diagnostic!("towavue: could not store preview cache: {error}");
         }
         self.check_cancelled()?;
         // Disk failures must not force every waiting caller to decode the same media.
@@ -878,6 +972,7 @@ impl PreviewCache {
     fn prune(&self) -> Result<(), PreviewError> {
         let mut entries = fs::read_dir(&self.root)?
             .filter_map(Result::ok)
+            .filter(|entry| entry.file_name() != PUBLICATION_LOCK)
             .filter_map(|entry| {
                 let metadata = entry.metadata().ok()?;
                 metadata.is_file().then(|| {
@@ -1439,6 +1534,7 @@ mod tests {
             shared.load_or_generate("other-variant".into(), || Err(PreviewError::NoFrame)),
             Err(PreviewError::NoFrame)
         ));
+        fs::remove_file(root.join(PUBLICATION_LOCK)).expect("remove owned lock artifact");
         fs::remove_dir(root).expect("remove empty owned cache");
     }
 
@@ -1863,6 +1959,7 @@ mod tests {
         cancellation.cancel();
         let cache = PreviewCache {
             in_flight: Arc::default(),
+            spare_only: false,
             root: PathBuf::from("must-not-create-cache"),
             cancellation: Some(cancellation),
             memory: Arc::default(),

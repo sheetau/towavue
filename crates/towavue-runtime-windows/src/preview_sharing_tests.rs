@@ -585,7 +585,11 @@ fn native_media_publication_reports_png_round_trip_cost() -> Result<(), &'static
         let expected = generate(&seed);
         let file = fs::read_dir(&seed.root)
             .expect("seed files")
-            .next()
+            .find(|entry| {
+                entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.path().extension().is_some_and(|ext| ext == "png"))
+            })
             .expect("one PNG")
             .expect("entry")
             .path();
@@ -605,7 +609,11 @@ fn native_media_publication_reports_png_round_trip_cost() -> Result<(), &'static
                 );
                 let file = fs::read_dir(&store.root)
                     .expect("cache files")
-                    .next()
+                    .find(|entry| {
+                        entry.as_ref().is_ok_and(|entry| {
+                            entry.path().extension().is_some_and(|ext| ext == "png")
+                        })
+                    })
                     .expect("PNG")
                     .expect("entry")
                     .path();
@@ -2271,7 +2279,12 @@ fn unvisited_static_filmstrips_share_the_bounded_first_preview() {
             first.image
         );
         assert_eq!(
-            fs::read_dir(&cache.root).expect("cache files").count(),
+            fs::read_dir(&cache.root)
+                .expect("cache files")
+                .filter(|entry| entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.file_name() != PUBLICATION_LOCK))
+                .count(),
             if extension == "jpg" { 2 } else { 1 },
             "persist JPEG; keep cheap BMP sampling memory-only"
         );
@@ -2689,10 +2702,12 @@ fn identical_preview_work_is_coalesced_but_other_keys_and_cancellation_are_indep
     );
     assert!(cache.in_flight.0.lock().expect("pending").is_empty());
     assert!(fs::read_dir(&cache.root).expect("cache files").all(|file| {
-        file.expect("entry")
-            .path()
-            .extension()
-            .is_some_and(|extension| extension == "png")
+        let file = file.expect("entry");
+        file.file_name() == PUBLICATION_LOCK
+            || file
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "png")
     }));
     fs::remove_dir_all(&cache.root).expect("remove owned cache");
 }
@@ -2799,4 +2814,253 @@ fn durations_share_successes_bound_entries_and_leave_failures_retryable() {
     fs::write(&source, b"replacement").expect("fixture change");
     assert_ne!(cache_key(&source, "duration-v1").expect("changed key"), old);
     fs::remove_dir_all(&cache.root).expect("remove owned cache");
+}
+
+#[test]
+fn warming_persists_pixels_without_changing_foreground_memory() {
+    let store = cache("warming-pixels");
+    let source = store.root.join("source.png");
+    let original = image::RgbImage::from_fn(240, 160, |x, y| {
+        image::Rgb([x as u8, y as u8, (x + y) as u8])
+    });
+    original.save(&source).expect("owned source");
+    let source_bytes = fs::read(&source).expect("source bytes");
+    let expected = image::DynamicImage::ImageRgb8(original)
+        .into_rgba8()
+        .into_raw();
+    // Fill the foreground LRU, so accidental insertion would evict a ready entry.
+    for index in 0..64 {
+        store.memory.lock().expect("memory").insert_encoded(
+            format!("foreground-{index}"),
+            decode_png(&png()).expect("pixels"),
+            &png(),
+        );
+    }
+    let before: Vec<_> = store
+        .memory
+        .lock()
+        .expect("memory")
+        .entries
+        .iter()
+        .map(|entry| (entry.key.clone(), entry.image.rgba.as_ptr() as usize))
+        .collect();
+    assert!(
+        store
+            .warm_filmstrip(&source, MediaKind::Image)
+            .expect("warm")
+    );
+    let after: Vec<_> = store
+        .memory
+        .lock()
+        .expect("memory")
+        .entries
+        .iter()
+        .map(|entry| (entry.key.clone(), entry.image.rgba.as_ptr() as usize))
+        .collect();
+    assert_eq!(
+        before, after,
+        "foreground entries and their order are untouched"
+    );
+    let fresh = PreviewCache::new(store.root.clone()).expect("independent cache");
+    let warmed = fresh
+        .cached_image(&source)
+        .expect("disk read")
+        .expect("persistent thumbnail");
+    assert_eq!((warmed.image.width, warmed.image.height), (240, 160));
+    assert!(
+        warmed.image.rgba.as_slice() == expected,
+        "all persisted pixels"
+    );
+    assert!(
+        store
+            .warm_filmstrip(&source, MediaKind::Image)
+            .expect("repeat hit")
+    );
+    assert_eq!(fs::read(&source).expect("original"), source_bytes);
+    fs::remove_dir_all(store.root).expect("owned cleanup");
+}
+
+#[test]
+fn warming_full_or_unavailable_storage_stops_before_source_access() {
+    let store = cache("warming-full");
+    let retained = store.root.join("retained.png");
+    let file = fs::File::create(&retained).expect("owned entry");
+    file.set_len(CACHE_LIMIT_BYTES).expect("full cache");
+    file.set_times(
+        fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
+    )
+    .expect("old entry");
+    drop(file);
+    let before = fs::metadata(&retained).expect("before");
+    // If the source is accessed, this returns an error instead of the stop signal.
+    assert!(
+        !store
+            .warm_filmstrip(
+                Path::new("nonexistent-warming-source.png"),
+                MediaKind::Image
+            )
+            .expect("admission before source")
+    );
+    let after = fs::metadata(&retained).expect("retained entry");
+    assert_eq!(after.len(), before.len());
+    assert_eq!(
+        after.modified().expect("mtime"),
+        before.modified().expect("mtime")
+    );
+    assert_eq!(fs::read_dir(&store.root).expect("files").count(), 2);
+    let occupied = store.root.join("occupied");
+    fs::write(&occupied, b"keep").expect("owned file");
+    let unavailable = PreviewCache::new(occupied.clone()).expect("optional cache");
+    assert!(
+        !unavailable
+            .warm_filmstrip(
+                Path::new("nonexistent-warming-source.png"),
+                MediaKind::Image
+            )
+            .expect("unavailable admission")
+    );
+    assert_eq!(fs::read(occupied).expect("unchanged"), b"keep");
+    fs::remove_dir_all(store.root).expect("owned cleanup");
+}
+
+#[test]
+fn warming_rechecks_exact_capacity_after_generation_without_eviction() {
+    for fits in [false, true] {
+        let mut store = cache("warming-racing-capacity");
+        store.spare_only = true;
+        let bytes = png();
+        assert!(store.spare_capacity(WARMING_RESERVE_BYTES));
+        let retained = store.root.join("retained.png");
+        let result = store.load_or_generate_ready("candidate".into(), || {
+            // Model another publisher filling the cache while decoding is in progress.
+            let file = fs::File::create(&retained).expect("concurrent entry");
+            file.set_len(CACHE_LIMIT_BYTES - bytes.len() as u64 + u64::from(!fits))
+                .expect("remaining space");
+            Ok((bytes.clone(), None))
+        });
+        if fits {
+            assert_eq!(
+                result.expect("exact fit"),
+                decode_png(&bytes).expect("pixels")
+            );
+            assert_eq!(
+                fs::read(store.root.join("candidate.png")).expect("published"),
+                bytes
+            );
+        } else {
+            assert!(matches!(result, Err(PreviewError::WarmingDeferred)));
+            assert!(!store.root.join("candidate.png").exists());
+            assert!(store.memory.lock().expect("memory").entries.is_empty());
+        }
+        assert_eq!(
+            fs::metadata(&retained).expect("retained").len(),
+            CACHE_LIMIT_BYTES - bytes.len() as u64 + u64::from(!fits)
+        );
+        assert!(fs::read_dir(&store.root).expect("files").all(|entry| {
+            !entry
+                .expect("entry")
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "tmp")
+        }));
+        fs::remove_dir_all(store.root).expect("owned cleanup");
+    }
+}
+
+#[test]
+fn warming_publication_lock_does_not_block_foreground_pixels() {
+    let owner = cache("warming-busy");
+    let independent = PreviewCache::new(owner.root.clone()).expect("independent instance");
+    let held = owner.publication_lock().expect("held lock");
+    assert!(
+        independent.publication_lock().is_none(),
+        "independent handles coordinate"
+    );
+    assert!(
+        !independent
+            .warm_filmstrip(
+                Path::new("nonexistent-warming-source.png"),
+                MediaKind::Image
+            )
+            .expect("busy admission")
+    );
+    let pixels = independent
+        .load_or_generate("foreground".into(), || Ok(png()))
+        .expect("foreground returns while lock is held");
+    assert_eq!(pixels, decode_png(&png()).expect("pixels"));
+    assert!(!owner.root.join("foreground.png").exists());
+    assert_eq!(
+        independent
+            .load_or_generate("foreground".into(), || panic!("memory reuse"))
+            .expect("retained pixels"),
+        pixels
+    );
+    drop(held);
+    let reopened = PreviewCache::new(owner.root.clone()).expect("empty memory");
+    assert_eq!(
+        reopened
+            .load_or_generate("foreground".into(), || Ok(png()))
+            .expect("later persistence"),
+        pixels
+    );
+    assert_eq!(
+        fs::read(owner.root.join("foreground.png")).expect("disk entry"),
+        png()
+    );
+    fs::remove_dir_all(owner.root).expect("owned cleanup");
+}
+
+#[test]
+fn warming_cancellation_and_memory_only_bmp_do_not_touch_storage() {
+    let mut store = cache("warming-cancelled");
+    let root = store.root.clone();
+    store.root = root.join("must-not-create");
+    assert!(
+        store
+            .warm_filmstrip(Path::new("nonexistent.BMP"), MediaKind::Image)
+            .expect("memory-only skip")
+    );
+    assert!(!store.root.exists());
+    let cancellation = Cancellation::default();
+    cancellation.cancel();
+    let cancelled = store.cancellable(cancellation);
+    for path in ["nonexistent.png", "nonexistent.BMP"] {
+        assert!(matches!(
+            cancelled.warm_filmstrip(Path::new(path), MediaKind::Image),
+            Err(PreviewError::Cancelled)
+        ));
+    }
+    assert!(!store.root.exists());
+    fs::remove_dir_all(root).expect("owned cleanup");
+}
+
+#[test]
+fn disk_pruning_preserves_publication_lock_identity() {
+    let store = cache("warming-lock-prune");
+    let lock = store.publication_lock().expect("publication lock");
+    lock.set_times(
+        fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
+    )
+    .expect("oldest artifact");
+    drop(lock);
+    let filler = store.root.join("old.png");
+    let file = fs::File::create(&filler).expect("owned file");
+    file.set_len(CACHE_LIMIT_BYTES).expect("fill cache");
+    file.set_times(
+        fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(100)),
+    )
+    .expect("explicitly older cache entry");
+    drop(file);
+    fs::write(store.root.join("new.png"), png()).expect("over limit");
+    store.prune().expect("prune");
+    assert!(
+        store.root.join(PUBLICATION_LOCK).is_file(),
+        "never unlink the coordination identity"
+    );
+    assert!(!filler.exists());
+    let held = store.publication_lock().expect("still usable");
+    let independent = PreviewCache::new(store.root.clone()).expect("independent instance");
+    assert!(independent.publication_lock().is_none());
+    drop(held);
+    fs::remove_dir_all(store.root).expect("owned cleanup");
 }

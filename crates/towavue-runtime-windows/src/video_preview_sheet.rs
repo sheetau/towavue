@@ -464,7 +464,15 @@ mod tests {
                 Err(PreviewError::Cancelled)
             ));
         }
-        assert_eq!(fs::read_dir(&root).expect("sheet files").count(), 2);
+        assert_eq!(
+            fs::read_dir(&root)
+                .expect("sheet files")
+                .filter(|entry| entry
+                    .as_ref()
+                    .is_ok_and(|entry| entry.file_name() != super::super::PUBLICATION_LOCK))
+                .count(),
+            2
+        );
         fs::remove_dir_all(root).expect("remove owned cache");
     }
 }

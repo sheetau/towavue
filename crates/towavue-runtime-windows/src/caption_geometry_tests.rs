@@ -92,6 +92,17 @@ fn geometry(window: &Window, name: &str, state: &str) -> Geometry {
                     "CAPTION_EDGE {name} dpi={} edge={edge} border={border} hits={samples:?}",
                     GetDpiForWindow(handle)
                 );
+                if name == "towavue-frame" && edge == "top" {
+                    let resize_offsets: Vec<_> = samples
+                        .iter()
+                        .filter_map(|&(offset, hit)| (hit == HTTOP as isize).then_some(offset))
+                        .collect();
+                    assert_eq!(
+                        resize_offsets,
+                        [0],
+                        "one physical pixel inside the visible top"
+                    );
+                }
             }
         }
         assert_eq!(info.rgstate[5] & 0x18000, 0, "visible close button");

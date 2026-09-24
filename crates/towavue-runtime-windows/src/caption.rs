@@ -826,7 +826,8 @@ impl CaptionSurface {
 fn top_resize_hit(point: POINT, rect: RECT, border: i32) -> Option<u32> {
     // Only the top frame was extended into the client. The native procedure
     // already owns the other three edges; do not steal their inner UI pixels.
-    if point.y >= rect.top + border {
+    // This is a physical-pixel boundary, independent of display scaling.
+    if point.y != rect.top {
         return None;
     }
     let left = point.x < rect.left + border;
@@ -892,7 +893,7 @@ mod tests {
                 right: 960 * scale,
                 bottom: 576 * scale,
             };
-            for (x, y, hit) in [(1, 1, HTTOPLEFT), (959, 1, HTTOPRIGHT), (300, 1, HTTOP)] {
+            for (x, y, hit) in [(1, 0, HTTOPLEFT), (959, 0, HTTOPRIGHT), (300, 0, HTTOP)] {
                 assert_eq!(
                     top_resize_hit(
                         POINT {
@@ -906,6 +907,10 @@ mod tests {
                 );
             }
             for (x, y) in [
+                (300, -1),
+                (1, 1),
+                (959, 1),
+                (300, 1),
                 (20, 16),
                 (100, 16),
                 (300, 16),
@@ -928,6 +933,18 @@ mod tests {
                     None
                 );
             }
+            assert_eq!(
+                top_resize_hit(
+                    POINT {
+                        x: 300 * scale,
+                        y: 1
+                    },
+                    rect,
+                    8 * scale
+                ),
+                None,
+                "the second physical row remains interactive at every density"
+            );
         }
     }
 
@@ -1184,6 +1201,9 @@ mod tests {
                     let mut origin = POINT::default();
                     assert!(ClientToScreen(handle, &mut origin).as_bool());
                     for (x, y, expected) in [
+                        (300, 0, HTTOP),
+                        (300, 1, HTCLIENT),
+                        (300, 7, HTCLIENT),
                         (300, 16, HTCAPTION),
                         (100, 16, HTCLIENT),
                         (-1, 100, HTLEFT),
@@ -1407,10 +1427,14 @@ mod tests {
                                 for y in top as i32..=top as i32 + (3.0 * scale) as i32 {
                                     assert_eq!(
                                         hit((300.0 * scale) as i32, y),
-                                        if maximized { HTCAPTION } else { HTTOP } as isize,
+                                        if !maximized && y == 0 {
+                                            HTTOP
+                                        } else {
+                                            HTCAPTION
+                                        } as isize,
                                         "top-edge hit: maximized={maximized}, scale={scale}, y={y}"
                                     );
-                                    if maximized {
+                                    if maximized || y > 0 {
                                         assert_eq!(
                                             hit((100.0 * scale) as i32, y),
                                             HTCLIENT as isize,

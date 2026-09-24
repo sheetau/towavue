@@ -8,6 +8,7 @@ mod crop;
 mod edit;
 mod file_search;
 mod image;
+pub mod localization;
 mod media;
 mod navigation;
 pub mod release;

@@ -38,6 +38,8 @@ pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
 #[cfg(test)]
 mod audio_seek_tests;
 #[cfg(test)]
+mod seek_contention_tests;
+#[cfg(test)]
 mod video_seek_cost_tests;
 
 const OUTPUT_AUDIO_CHANNELS: usize = 2;

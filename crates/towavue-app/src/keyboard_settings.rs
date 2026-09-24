@@ -1,3 +1,4 @@
+use crate::localization::{Language, Text, language};
 use crate::*;
 use towavue_core::{CommandDefinition, KeySequence};
 
@@ -140,14 +141,19 @@ impl KeyboardSettings {
         self.request_search_focus();
     }
 
+    #[cfg(test)]
     fn rows(&self, bindings: &ShortcutBindings) -> Vec<Row> {
+        self.rows_in(bindings, Language::English)
+    }
+
+    fn rows_in(&self, bindings: &ShortcutBindings, language: Language) -> Vec<Row> {
         let query = self.query.trim().to_lowercase();
         let exact = query
             .strip_prefix('"')
             .and_then(|query| query.strip_suffix('"'));
         let mut rows = Vec::new();
         for (precedence, command) in command_definitions().iter().enumerate() {
-            let when = when_label(command);
+            let when = when_label_in(command, language);
             for index in 0..bindings.all(command.id).len().max(1) {
                 let bound = bindings.all(command.id).get(index);
                 let keys = bound.map(ToString::to_string).unwrap_or_default();
@@ -158,7 +164,7 @@ impl KeyboardSettings {
                 } else {
                     let haystack = format!(
                         "{} {} {} {}",
-                        command.title,
+                        command.title_in(language),
                         command.id.as_str(),
                         keys,
                         when
@@ -187,22 +193,24 @@ impl KeyboardSettings {
                 )
             });
         } else {
-            rows.sort_by_key(|row| (row.command.title.to_lowercase(), row.slot));
+            rows.sort_by_key(|row| (row.command.title_in(language).to_lowercase(), row.slot));
         }
         rows
     }
 }
 
-fn when_label(command: &CommandDefinition) -> String {
+fn when_label_in(command: &CommandDefinition, language: Language) -> String {
     if command.media_kinds.is_empty() {
-        return "Always".into();
+        return Text::WhenAlways.in_language(language).into();
     }
+    let reading = Text::WhenReading.in_language(language);
+    let timeline = Text::WhenTimeline.in_language(language);
     let mut terms = Vec::new();
     for kind in command.media_kinds {
         let name = match kind {
-            MediaKind::Image => "image",
-            MediaKind::Video => "video",
-            MediaKind::Audio => "audio",
+            MediaKind::Image => Text::WhenImage.in_language(language),
+            MediaKind::Video => Text::WhenVideo.in_language(language),
+            MediaKind::Audio => Text::WhenAudio.in_language(language),
         };
         let enabled = |reading_mode, timeline_open| {
             command.is_enabled(CommandContext {
@@ -217,14 +225,14 @@ fn when_label(command: &CommandDefinition) -> String {
         let base = if *kind == MediaKind::Image {
             match (enabled(false, false), enabled(true, false)) {
                 (true, true) => name.to_owned(),
-                (true, false) => format!("{name} && !reading"),
-                (false, true) => format!("{name} && reading"),
+                (true, false) => format!("{name} && !{reading}"),
+                (false, true) => format!("{name} && {reading}"),
                 _ => continue,
             }
         } else if enabled(false, false) {
             name.to_owned()
         } else if enabled(false, true) {
-            format!("{name} && timeline")
+            format!("{name} && {timeline}")
         } else {
             continue;
         };
@@ -232,7 +240,7 @@ fn when_label(command: &CommandDefinition) -> String {
     }
     let mut label = terms.join(" || ");
     if command.id == CommandId::DeleteFile {
-        return format!("({label}) && !timeline");
+        return format!("({label}) && !{timeline}");
     }
     if matches!(
         command.id,
@@ -240,13 +248,13 @@ fn when_label(command: &CommandDefinition) -> String {
             | CommandId::KeepTimeSelection
             | CommandId::PlayTimeSelection
     ) {
-        label.push_str("; time selection");
+        label.push_str(Text::WhenTimeSelection.in_language(language));
     }
     if command.id == CommandId::ExportFrame {
-        label.push_str("; frame available");
+        label.push_str(Text::WhenFrameAvailable.in_language(language));
     }
     if command.id == CommandId::ToggleReadingMode {
-        label.push_str("; no unsaved edits");
+        label.push_str(Text::WhenNoUnsavedEdits.in_language(language));
     }
     label
 }
@@ -314,7 +322,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.cancel_shortcut_prefix();
                 self.keyboard_settings.edit = None;
                 self.keyboard_settings.cancel_capture();
-                self.keyboard_settings.message = Some("Keyboard shortcuts saved".into());
+                self.keyboard_settings.message = Some(
+                    Text::ShortcutsSaved
+                        .in_language(self.ui_context.as_ref().map_or(Language::English, language))
+                        .into(),
+                );
                 (self.notify)(AppEvent::ShortcutsChanged(bindings));
             }
             Err(error) => self.keyboard_settings.message = Some(error),

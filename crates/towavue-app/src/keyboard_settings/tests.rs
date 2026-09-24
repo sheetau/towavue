@@ -3,6 +3,96 @@ use super::*;
 mod gpu;
 
 #[test]
+fn japanese_search_sort_and_recording_keep_persisted_command_and_key_names() {
+    let bindings = shortcuts::defaults();
+    let mut settings = KeyboardSettings {
+        query: "フォルダーを開く".into(),
+        ..Default::default()
+    };
+    let rows = settings.rows_in(&bindings, Language::Japanese);
+    assert!(!rows.is_empty());
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.command.id)
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([CommandId::OpenFolder, CommandId::OpenRecentFolder]),
+    );
+    assert!(settings.rows_in(&bindings, Language::English).is_empty());
+    settings.query.clear();
+    let rows = settings.rows_in(&bindings, Language::Japanese);
+    assert!(rows.windows(2).all(|pair| {
+        pair[0].command.title_in(Language::Japanese).to_lowercase()
+            <= pair[1].command.title_in(Language::Japanese).to_lowercase()
+    }));
+    settings.query = "@command:open_folder".into();
+    // Use the stable schema spelling, rather than deriving it from a translation.
+    assert_eq!(CommandId::OpenFolder.as_str(), "open_folder");
+    assert!(!settings.rows_in(&bindings, Language::Japanese).is_empty());
+    assert!(
+        settings
+            .rows_in(&bindings, Language::Japanese)
+            .iter()
+            .all(|row| row.command.id == CommandId::OpenFolder)
+    );
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        if !fonts::install(&context) {
+            eprintln!(
+                "SKIP Japanese glyph qualification: no installed Japanese UI font; recording remains checked"
+            );
+        }
+        context.enable_accesskit();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        crate::localization::set_language(&context, Language::Japanese);
+        settings.begin_edit(CommandId::OpenFolder, None, &bindings);
+        settings.capture("Ctrl+K".parse().expect("key"));
+        settings.capture("Ctrl+O".parse().expect("key"));
+        let mut change = None;
+        for _ in 0..3 {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(780.0, 540.0),
+                    )),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    change = settings.show(ui, &bindings, true);
+                },
+            );
+        }
+        assert!(change.is_none());
+        assert_eq!(
+            settings.edit.as_ref().expect("recording").text,
+            "Ctrl+K Ctrl+O"
+        );
+        settings.capture("Enter".parse().expect("key"));
+        let _ = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(780.0, 540.0),
+                )),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| {
+                change = settings.show(ui, &bindings, true);
+            },
+        );
+        let change = change.expect("recorded binding");
+        assert_eq!(change.command, CommandId::OpenFolder);
+        assert_eq!(
+            change.replacement.last().expect("new binding").to_string(),
+            "Ctrl+K Ctrl+O"
+        );
+    }
+}
+
+#[test]
 fn records_search_chords_and_cancels_without_dispatching() {
     let mut state = KeyboardSettings {
         record_search: true,

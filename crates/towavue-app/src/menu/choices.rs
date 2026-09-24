@@ -20,49 +20,49 @@ impl Default for Choices {
     }
 }
 
-type Options = (&'static str, &'static [(CommandId, &'static str)]);
+type Options = (Text, &'static [(CommandId, Text)]);
 
 pub(super) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
         ExportQualityHigh => (
-            "Export quality",
+            Text::ExportQuality,
             &[
-                (ExportQualityHigh, "High quality"),
-                (ExportQualityBalanced, "Balanced"),
-                (ExportQualitySmaller, "Smaller file"),
+                (ExportQualityHigh, Text::QualityHigh),
+                (ExportQualityBalanced, Text::QualityBalanced),
+                (ExportQualitySmaller, Text::QualitySmaller),
             ],
         ),
         CycleVolumeStep => (
-            "Listening volume step",
+            Text::ListeningVolumeStep,
             &[
-                (VolumeStepTwo, "2%"),
-                (VolumeStepFive, "5%"),
-                (VolumeStepTen, "10%"),
+                (VolumeStepTwo, Text::VolumeStepTwo),
+                (VolumeStepFive, Text::VolumeStepFive),
+                (VolumeStepTen, Text::VolumeStepTen),
             ],
         ),
         CycleAudioRepeat => (
-            "Audio repeat",
+            Text::AudioRepeat,
             &[
-                (AudioRepeatOff, "Off"),
-                (AudioRepeatAll, "All"),
-                (AudioRepeatOne, "One"),
+                (AudioRepeatOff, Text::RepeatOff),
+                (AudioRepeatAll, Text::RepeatAll),
+                (AudioRepeatOne, Text::RepeatOne),
             ],
         ),
         FolderNavigationStop => (
-            "Folder navigation",
+            Text::FolderNavigation,
             &[
-                (FolderNavigationStop, "Stop at ends"),
-                (FolderNavigationLoop, "Loop at ends"),
+                (FolderNavigationStop, Text::FolderStop),
+                (FolderNavigationLoop, Text::FolderLoop),
             ],
         ),
         _ => return None,
     })
 }
 
-fn row_width(ui: &egui::Ui, rows: &[(CommandId, &str)]) -> f32 {
+fn row_width(ui: &egui::Ui, rows: &[(CommandId, Text)]) -> f32 {
     rows.iter()
         .map(|(_, label)| {
-            egui::WidgetText::from(*label)
+            egui::WidgetText::from(text(ui.ctx(), *label))
                 .into_galley(
                     ui,
                     Some(egui::TextWrapMode::Extend),
@@ -168,7 +168,7 @@ pub(super) fn submenu(
                     state.open_item = Some(id)
                 });
             }
-            ui.menu_button(title, |ui| {
+            ui.menu_button(text(ui.ctx(), title), |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 let frame = egui::Frame::popup(ui.style()).total_margin().sum().x;
@@ -181,7 +181,7 @@ pub(super) fn submenu(
                 let mut items = Vec::new();
                 for (id, label) in rows {
                     let mut checked = *id == selected;
-                    let response = ui.checkbox(&mut checked, *label);
+                    let response = ui.checkbox(&mut checked, text(ui.ctx(), *label));
                     items.push(response.id);
                     if response.clicked() {
                         chosen = Some(*id);

@@ -27,6 +27,7 @@ impl Language {
 }
 
 mod catalog;
+pub mod formatted;
 pub use catalog::Text;
 
 /// Keep persisted command IDs independent of translated display titles.

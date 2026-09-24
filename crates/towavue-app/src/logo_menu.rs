@@ -292,6 +292,8 @@ pub(super) fn show_with_recent(
 }
 
 fn show_direction_label(ui: &egui::Ui, response: &egui::Response, section: Section) {
+    let language = crate::localization::language(ui.ctx());
+    let title = section.key().in_language(language);
     // Paint-only feedback appears during the captured drag without tooltip delay
     // or a hit-test surface that could intercept its movement/release.
     let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -300,7 +302,7 @@ fn show_direction_label(ui: &egui::Ui, response: &egui::Response, section: Secti
     ));
     let frame = egui::Frame::popup(ui.style());
     let galley = painter.layout_no_wrap(
-        section.title().into(),
+        title.into(),
         egui::FontId::proportional(12.0),
         chrome::FOREGROUND,
     );
@@ -322,7 +324,9 @@ fn show_direction_label(ui: &egui::Ui, response: &egui::Response, section: Secti
         painter.galley(content.min, galley, chrome::FOREGROUND);
     }
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(format!("Release to open the {} menu", section.title()));
+        node.set_description(towavue_core::localization::formatted::release_menu(
+            language, title,
+        ));
     });
 }
 

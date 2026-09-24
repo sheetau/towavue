@@ -7,6 +7,7 @@ impl KeyboardSettings {
         bindings: &ShortcutBindings,
         enabled: bool,
     ) -> Option<Change> {
+        let display_language = language(ui.ctx());
         if ui.input(|input| {
             !input.focused || input.events.contains(&egui::Event::WindowFocused(false))
         }) {
@@ -71,25 +72,33 @@ impl KeyboardSettings {
             ui.visuals_mut().clip_rect_margin = 0.0;
             self.search(ui);
             if self.record_search {
-                ui.label("Recording keys — press up to four strokes. Escape clears the search.");
+                ui.label(Text::RecordingKeysHelp.in_language(display_language));
             }
             if let Some(message) = &self.message {
                 ui.colored_label(chrome::MUTED, message);
             }
             ui.add_space(8.0);
-            let rows = self.rows(bindings);
+            let rows = self.rows_in(bindings, display_language);
             let row_width = ui.available_width();
             let command_width = row_width * 0.42;
             let keys_width = row_width * 0.25;
             let (header, _) =
                 ui.allocate_exact_size(egui::vec2(row_width, 24.0), egui::Sense::hover());
             for (left, width, text) in [
-                (34.0, command_width - 34.0, "Command"),
-                (command_width, keys_width, "Keybindings"),
+                (
+                    34.0,
+                    command_width - 34.0,
+                    Text::KeyboardCommand.in_language(display_language),
+                ),
+                (
+                    command_width,
+                    keys_width,
+                    Text::KeyboardBindings.in_language(display_language),
+                ),
                 (
                     command_width + keys_width,
                     (row_width - command_width - keys_width).max(0.0),
-                    "When",
+                    Text::KeyboardWhen.in_language(display_language),
                 ),
             ] {
                 cell_label(
@@ -108,7 +117,7 @@ impl KeyboardSettings {
             );
             ui.add_space(1.0);
             if rows.is_empty() {
-                ui.label("No matching keyboard shortcuts");
+                ui.label(Text::NoMatchingShortcuts.in_language(display_language));
             }
             let focused_row = self.row_focus.and_then(|(command, slot, id)| {
                 ui.memory(|memory| memory.has_focus(id))
@@ -170,14 +179,24 @@ impl KeyboardSettings {
                         );
                         let edit = hovered.then(|| {
                             let (glyph, label) = if row.slot.is_some() {
-                                ('\u{ea73}', "Edit keybinding")
+                                (
+                                    '\u{ea73}',
+                                    Text::EditKeybinding.in_language(display_language),
+                                )
                             } else {
-                                ('\u{ea60}', "Add keybinding")
+                                (
+                                    '\u{ea60}',
+                                    Text::AddKeybinding.in_language(display_language),
+                                )
                             };
                             icon(ui, edit_rect, glyph, label, false, None)
                         });
                         for (left, width, text) in [
-                            (34.0, command_width - 34.0, row.command.title),
+                            (
+                                34.0,
+                                command_width - 34.0,
+                                row.command.title_in(display_language),
+                            ),
                             (command_width, keys_width, &row.keys),
                             (
                                 command_width + keys_width,
@@ -196,7 +215,7 @@ impl KeyboardSettings {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 response.enabled(),
-                                format!("{}: {}", row.command.title, row.keys),
+                                format!("{}: {}", row.command.title_in(display_language), row.keys),
                             )
                         });
                         if edit.is_some_and(|response| response.clicked())
@@ -214,18 +233,26 @@ impl KeyboardSettings {
                         }
                         response.context_menu(|ui| {
                             chrome::flat_buttons(ui);
-                            if ui.button("Edit keybinding").clicked() {
+                            if ui
+                                .button(Text::EditKeybinding.in_language(display_language))
+                                .clicked()
+                            {
                                 self.begin_edit(row.command.id, row.slot, bindings);
                                 ui.close();
                             }
-                            if ui.button("Add keybinding").clicked() {
+                            if ui
+                                .button(Text::AddKeybinding.in_language(display_language))
+                                .clicked()
+                            {
                                 self.begin_edit(row.command.id, None, bindings);
                                 ui.close();
                             }
                             if ui
                                 .add_enabled(
                                     row.slot.is_some(),
-                                    egui::Button::new("Remove keybinding"),
+                                    egui::Button::new(
+                                        Text::RemoveKeybinding.in_language(display_language),
+                                    ),
                                 )
                                 .clicked()
                             {
@@ -240,7 +267,10 @@ impl KeyboardSettings {
                                 });
                                 ui.close();
                             }
-                            if ui.button("Reset command to defaults").clicked() {
+                            if ui
+                                .button(Text::ResetKeybindings.in_language(display_language))
+                                .clicked()
+                            {
                                 change = Some(Change {
                                     command: row.command.id,
                                     expected: bindings.all(row.command.id).to_vec(),
@@ -257,6 +287,7 @@ impl KeyboardSettings {
     }
 
     fn search(&mut self, ui: &mut egui::Ui) {
+        let display_language = language(ui.ctx());
         let (outer, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
         let background = ui.painter().add(egui::Shape::Noop);
@@ -274,7 +305,7 @@ impl KeyboardSettings {
             ui.spacing_mut().text_edit_width = f32::INFINITY;
             crate::resize::unframed_text_input(
                 ui,
-                "Search commands or keybindings",
+                Text::SearchKeybindings.in_language(display_language),
                 &mut self.query,
             )
         });
@@ -287,7 +318,7 @@ impl KeyboardSettings {
             ui,
             buttons[2],
             '\u{ea65}',
-            "Record keys",
+            Text::RecordKeys.in_language(display_language),
             self.record_search,
             Some("Alt+K"),
         )
@@ -301,7 +332,7 @@ impl KeyboardSettings {
             ui,
             buttons[1],
             '\u{eb55}',
-            "Sort by precedence",
+            Text::SortByPrecedence.in_language(display_language),
             self.precedence,
             Some("Alt+P"),
         )
@@ -316,7 +347,7 @@ impl KeyboardSettings {
                     ui,
                     buttons[0],
                     '\u{eabf}',
-                    "Clear keybindings search input",
+                    Text::ClearKeybindingSearch.in_language(display_language),
                     false,
                     Some("Escape"),
                 )
@@ -365,55 +396,65 @@ impl KeyboardSettings {
         context: &egui::Context,
         bindings: &ShortcutBindings,
     ) -> Option<Change> {
+        let display_language = language(context);
         let edit = self.edit.as_mut()?;
         let mut change = None;
         let submit = std::mem::take(&mut edit.submit)
             || context
                 .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         chrome::modal(context, egui::Id::new("keyboard-edit"), false).show(context, |ui| {
-            chrome::modal_body(ui, 400.0, "Keyboard shortcut", &[], |ui| {
-                ui.label("Press desired key combination and then press ENTER.");
-                ui.add(
-                    egui::TextEdit::singleline(&mut edit.text)
-                        .interactive(false)
-                        .horizontal_align(egui::Align::Center)
-                        .desired_width(f32::INFINITY),
-                );
-                let parsed = edit.text.trim().parse::<KeySequence>();
-                if let Ok(sequence) = &parsed {
-                    keycaps(ui, sequence);
-                    let matches: Vec<_> = command_definitions()
-                        .iter()
-                        .filter(|other| {
-                            other.id != edit.command
-                                && bindings.all(other.id).iter().any(|bound| {
-                                    bound.strokes().starts_with(sequence.strokes())
-                                        || sequence.strokes().starts_with(bound.strokes())
-                                })
-                        })
-                        .map(|other| other.title)
-                        .collect();
-                    if !matches.is_empty() {
-                        ui.label(format!("Also used by: {}", matches.join(", ")));
-                    }
-                    if submit {
-                        let mut replacement = edit.expected.clone();
-                        if let Some(slot) = edit.slot {
-                            replacement[slot] = sequence.clone();
-                        } else {
-                            replacement.push(sequence.clone());
+            chrome::modal_body(
+                ui,
+                400.0,
+                Text::KeyboardShortcut.in_language(display_language),
+                &[],
+                |ui| {
+                    ui.label(Text::PressKeyCombination.in_language(display_language));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut edit.text)
+                            .interactive(false)
+                            .horizontal_align(egui::Align::Center)
+                            .desired_width(f32::INFINITY),
+                    );
+                    let parsed = edit.text.trim().parse::<KeySequence>();
+                    if let Ok(sequence) = &parsed {
+                        keycaps(ui, sequence);
+                        let matches: Vec<_> = command_definitions()
+                            .iter()
+                            .filter(|other| {
+                                other.id != edit.command
+                                    && bindings.all(other.id).iter().any(|bound| {
+                                        bound.strokes().starts_with(sequence.strokes())
+                                            || sequence.strokes().starts_with(bound.strokes())
+                                    })
+                            })
+                            .map(|other| other.title_in(display_language))
+                            .collect();
+                        if !matches.is_empty() {
+                            ui.label(towavue_core::localization::formatted::also_used_by(
+                                display_language,
+                                &matches.join(", "),
+                            ));
                         }
-                        change = Some(Change {
-                            command: edit.command,
-                            expected: edit.expected.clone(),
-                            replacement,
-                        });
+                        if submit {
+                            let mut replacement = edit.expected.clone();
+                            if let Some(slot) = edit.slot {
+                                replacement[slot] = sequence.clone();
+                            } else {
+                                replacement.push(sequence.clone());
+                            }
+                            change = Some(Change {
+                                command: edit.command,
+                                expected: edit.expected.clone(),
+                                replacement,
+                            });
+                        }
                     }
-                }
-                if let Some(message) = &self.message {
-                    ui.colored_label(chrome::MUTED, message);
-                }
-            });
+                    if let Some(message) = &self.message {
+                        ui.colored_label(chrome::MUTED, message);
+                    }
+                },
+            );
         });
         if context.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.edit = None;
@@ -465,10 +506,14 @@ fn cell_label(ui: &mut egui::Ui, rect: egui::Rect, text: &str) -> egui::Response
 }
 
 fn keycaps(ui: &mut egui::Ui, sequence: &KeySequence) {
+    let display_language = language(ui.ctx());
     let mut tokens = Vec::new();
     for (index, stroke) in sequence.strokes().iter().enumerate() {
         if index > 0 {
-            tokens.push(("chord to".to_owned(), false));
+            tokens.push((
+                Text::ChordTo.in_language(display_language).to_owned(),
+                false,
+            ));
         }
         for (index, key) in stroke.to_string().split('+').enumerate() {
             if index > 0 {

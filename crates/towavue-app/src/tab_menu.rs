@@ -172,12 +172,12 @@ pub fn show(
             };
             let title = if *command == ToggleMute {
                 if muted == Some(true) {
-                    "Unmute tab"
+                    crate::localization::text(ui.ctx(), towavue_core::localization::Text::UnmuteTab)
                 } else {
-                    "Mute tab"
+                    crate::localization::text(ui.ctx(), towavue_core::localization::Text::MuteTab)
                 }
             } else {
-                definition.title
+                definition.title_in(crate::localization::language(ui.ctx()))
             };
             let response = ui.add_enabled(
                 enabled,

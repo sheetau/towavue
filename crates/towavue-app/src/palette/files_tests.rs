@@ -1,6 +1,49 @@
 use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
+#[test]
+fn japanese_command_search_displays_translated_result_and_executes_original_id() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        if !crate::fonts::install(&context) {
+            eprintln!(
+                "SKIP Japanese glyph qualification: no installed Japanese UI font; command search remains checked"
+            );
+        }
+        context.enable_accesskit();
+        context.global_style_mut(crate::chrome::style);
+        crate::localization::set_language(&context, towavue_core::localization::Language::Japanese);
+        let mut palette = CommandPalette {
+            query: ">ファイルを開く".into(),
+            ..Default::default()
+        };
+        let frame = |palette: &mut CommandPalette, events| {
+            open_frame_at(
+                &context,
+                palette,
+                OpenSources::default(),
+                events,
+                (egui::vec2(600.0, 400.0), 0.0, density),
+            )
+        };
+        for _ in 0..4 {
+            assert!(frame(&mut palette, vec![]).1.is_empty());
+        }
+        let output = frame(&mut palette, vec![]).0;
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text().contains("ファイルを開く") && !text.galley.elided)));
+        assert!(button_rect(&output, "ファイルを開く").width() > 0.0);
+        assert_eq!(
+            frame(
+                &mut palette,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+            )
+            .1,
+            [Choice::Command(CommandId::OpenFile)]
+        );
+    }
+}
+
 fn button_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {
     let tree = output
         .platform_output

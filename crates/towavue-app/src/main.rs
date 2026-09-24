@@ -47,6 +47,7 @@ mod image_visibility_tests;
 mod image_wheel_tests;
 mod keyboard_settings;
 mod list_navigation;
+mod localization;
 mod logo_menu;
 mod lucide;
 mod media_preview;
@@ -5951,7 +5952,9 @@ where
                                 let title = command_definitions()
                                     .iter()
                                     .find(|definition| definition.id == command)
-                                    .map_or(command.as_str(), |definition| definition.title);
+                                    .map_or(command.as_str(), |definition| {
+                                        definition.title_in(localization::language(ui.ctx()))
+                                    });
                                 chrome::flat_buttons(ui);
                                 let enabled = command_definitions()
                                     .iter()

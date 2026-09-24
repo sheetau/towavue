@@ -1,3 +1,4 @@
+use crate::localization::{Text, language, text};
 use crate::scroll_style::ScrollAreaStyle;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
@@ -68,9 +69,9 @@ pub(crate) fn recent_folders(
     folders
 }
 
-const MENUS: &[(&str, &[&[CommandId]])] = &[
+const MENUS: &[(Text, &[&[CommandId]])] = &[
     (
-        "File",
+        Text::MenuFile,
         &[
             &[OpenFile, OpenFolder, OpenGallery],
             &[GoToFile, OpenRecentFolder],
@@ -98,7 +99,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         ],
     ),
     (
-        "Edit",
+        Text::MenuEdit,
         &[
             &[Undo, Redo],
             &[CopyImage, PasteImage],
@@ -129,7 +130,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         ],
     ),
     (
-        "View",
+        Text::MenuView,
         &[
             &[ToggleFullscreen],
             &[ToggleImageInterpolation, ToggleImageMinification],
@@ -175,7 +176,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         ],
     ),
     (
-        "Image jump",
+        Text::MenuImageJump,
         &[
             &[
                 JumpImagesBackward1,
@@ -204,7 +205,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         ],
     ),
     (
-        "Video seek",
+        Text::MenuVideoSeek,
         &[&[
             SeekVideo0,
             SeekVideo10,
@@ -218,7 +219,10 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
             SeekVideo90,
         ]],
     ),
-    ("Help", &[&[ShowLicenses], &[CheckForUpdates], &[About]]),
+    (
+        Text::MenuHelp,
+        &[&[ShowLicenses], &[CheckForUpdates], &[About]],
+    ),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -229,11 +233,17 @@ pub(crate) enum Section {
 }
 
 impl Section {
+    #[cfg(test)]
     pub(crate) fn title(self) -> &'static str {
+        self.key()
+            .in_language(towavue_core::localization::Language::English)
+    }
+
+    pub(crate) fn key(self) -> Text {
         match self {
-            Self::File => "File",
-            Self::Edit => "Edit",
-            Self::View => "View",
+            Self::File => Text::MenuFile,
+            Self::Edit => Text::MenuEdit,
+            Self::View => Text::MenuView,
         }
     }
 }
@@ -266,7 +276,7 @@ pub(crate) fn show_section_with_recent(
 ) -> Option<CommandId> {
     let mut chosen = None;
     if let Some(section) = initial {
-        return show_items(ui, section.title(), context, shortcuts, recent, None).0;
+        return show_items(ui, section.key(), context, shortcuts, recent, None).0;
     }
     let keyboard = MenuKeyboard::begin(ui);
     let requested_category = keyboard
@@ -276,10 +286,10 @@ pub(crate) fn show_section_with_recent(
     let mut categories = Vec::new();
     for (title, _) in MENUS
         .iter()
-        .filter(|(title, _)| !matches!(*title, "Image jump" | "Video seek"))
+        .filter(|(title, _)| !matches!(*title, Text::MenuImageJump | Text::MenuVideoSeek))
     {
         let (response, command) =
-            submenu(ui, title, context, shortcuts, requested_category, recent);
+            submenu(ui, *title, context, shortcuts, requested_category, recent);
         categories.push(response.id);
         chosen = chosen.or(command);
     }
@@ -289,7 +299,7 @@ pub(crate) fn show_section_with_recent(
 
 fn submenu(
     ui: &mut egui::Ui,
-    title: &str,
+    title: Text,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     requested: Option<egui::Id>,
@@ -303,7 +313,7 @@ fn submenu(
     }
     let root = egui::containers::menu::find_menu_root(ui);
     let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
-    let menu = ui.menu_button(title, |ui| {
+    let menu = ui.menu_button(text(ui.ctx(), title), |ui| {
         show_items(ui, title, context, shortcuts, recent, Some(parent))
     });
     let (chosen, back) = menu.inner.unwrap_or_default();
@@ -316,7 +326,7 @@ fn submenu(
 
 fn show_items(
     ui: &mut egui::Ui,
-    title: &str,
+    title: Text,
     context: CommandContext,
     shortcuts: &ShortcutBindings,
     recent: &mut MenuData<'_>,
@@ -374,11 +384,9 @@ fn show_items(
                     let enabled = definition.is_enabled(context);
                     let response = ui.add_enabled(
                         enabled,
-                        egui::Button::new(definition.title).shortcut_text(shortcut_text(
-                            ui,
-                            shortcuts.label(*id, context),
-                            enabled,
-                        )),
+                        egui::Button::new(definition.title_in(language(ui.ctx()))).shortcut_text(
+                            shortcut_text(ui, shortcuts.label(*id, context), enabled),
+                        ),
                     );
                     if response.enabled() {
                         items.push(response.id);
@@ -395,12 +403,19 @@ fn show_items(
                         ui.close();
                     }
                 }
-                if title == "View" && group.contains(&SeekForward) {
+                if title == Text::MenuView && group.contains(&SeekForward) {
                     let enabled = context.media_kind == Some(towavue_core::MediaKind::Video)
                         && !context.playback_blocked;
                     let (response, command) = ui
                         .add_enabled_ui(enabled, |ui| {
-                            submenu(ui, "Video seek", context, shortcuts, requested, recent)
+                            submenu(
+                                ui,
+                                Text::MenuVideoSeek,
+                                context,
+                                shortcuts,
+                                requested,
+                                recent,
+                            )
                         })
                         .inner;
                     if response.enabled() {
@@ -411,7 +426,7 @@ fn show_items(
                     }
                     chosen = chosen.or(command);
                 }
-                if title == "File" && index == 0 {
+                if title == Text::MenuFile && index == 0 {
                     let category = ui.next_auto_id();
                     if requested == Some(category) {
                         let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
@@ -435,8 +450,9 @@ fn show_items(
                         right.max(left)
                     };
                     let available_width = side_width - 2.0 - 1.0 / ui.ctx().pixels_per_point();
-                    let menu = ui
-                        .menu_button("Open Recent", |ui| show_recent(ui, recent, available_width));
+                    let menu = ui.menu_button(text(ui.ctx(), Text::OpenRecent), |ui| {
+                        show_recent(ui, recent, available_width)
+                    });
                     if menu.response.enabled() {
                         items.push(menu.response.id);
                     }
@@ -451,10 +467,16 @@ fn show_items(
                     }
                 }
             }
-            if title == "View" {
+            if title == Text::MenuView {
                 crate::chrome::separator(ui);
-                let (response, command) =
-                    submenu(ui, "Image jump", context, shortcuts, requested, recent);
+                let (response, command) = submenu(
+                    ui,
+                    Text::MenuImageJump,
+                    context,
+                    shortcuts,
+                    requested,
+                    recent,
+                );
                 if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
@@ -484,7 +506,9 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
         .take(10)
         .chain(recent.files.iter().take(10))
         .map(|path| path.display().to_string())
-        .chain(std::iter::once("Clear Recently Opened".into()))
+        .chain(std::iter::once(
+            text(ui.ctx(), Text::ClearRecentlyOpened).into(),
+        ))
         .map(|text| {
             egui::WidgetText::from(text)
                 .into_galley(
@@ -561,7 +585,8 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
                 }
             }
             // Resume positions can outlive the shorter recent-path lists.
-            let response = ui.add(egui::Button::new("Clear Recently Opened").truncate());
+            let response =
+                ui.add(egui::Button::new(text(ui.ctx(), Text::ClearRecentlyOpened)).truncate());
             if response.enabled() {
                 items.push(response.id);
             }
@@ -843,7 +868,7 @@ mod tests {
                                             );
                                             show_items(
                                                 ui,
-                                                "File",
+                                                Text::MenuFile,
                                                 CommandContext::default(),
                                                 &crate::shortcuts::defaults(),
                                                 &mut MenuData {
@@ -1670,7 +1695,10 @@ mod tests {
     fn every_menu_command_has_exactly_one_leaf_location() {
         let mut placed = BTreeSet::new();
         assert_eq!(
-            MENUS.iter().map(|(title, _)| *title).collect::<Vec<_>>(),
+            MENUS
+                .iter()
+                .map(|(title, _)| title.in_language(towavue_core::localization::Language::English))
+                .collect::<Vec<_>>(),
             ["File", "Edit", "View", "Image jump", "Video seek", "Help"]
         );
         for (_, groups) in MENUS {

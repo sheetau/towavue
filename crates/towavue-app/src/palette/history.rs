@@ -1,4 +1,6 @@
 use super::*;
+use crate::localization::{Text, language, text};
+use towavue_core::localization::formatted;
 
 impl CommandPalette {
     pub(super) fn show_commands(
@@ -10,11 +12,17 @@ impl CommandPalette {
         navigation: (Navigation, bool),
         query_changed: bool,
     ) -> Option<Choice> {
+        let language = language(ui.ctx());
         let (navigation, enter) = navigation;
-        let query = self.query[1..].trim().to_ascii_lowercase();
+        let query = self.query[1..].trim().to_lowercase();
         let mut matches: Vec<_> = command_definitions()
             .iter()
-            .filter(|definition| definition.title.to_ascii_lowercase().contains(&query))
+            .filter(|definition| {
+                definition
+                    .title_in(language)
+                    .to_lowercase()
+                    .contains(&query)
+            })
             .collect();
         matches.sort_by_key(|definition| {
             history
@@ -56,16 +64,16 @@ impl CommandPalette {
             .show_styled(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 if matches.is_empty() {
-                    ui.weak("No matching commands");
+                    ui.weak(text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, definition) in matches.iter().enumerate() {
                     if index == recent_count && recent_count > 0 {
                         crate::chrome::separator(ui);
                     }
                     let group = if index == 0 && recent_count > 0 {
-                        "recently used"
+                        text(ui.ctx(), Text::RecentlyUsed)
                     } else if index == recent_count {
-                        "other commands"
+                        text(ui.ctx(), Text::OtherCommands)
                     } else {
                         ""
                     };
@@ -77,7 +85,8 @@ impl CommandPalette {
                         RowActions::new(row, index < recent_count && controls, controls);
                     let body = row_actions.body;
                     let background = ui.painter().add(egui::Shape::Noop);
-                    let mut atoms = egui::Atoms::new((definition.title, egui::Atom::grow()));
+                    let mut atoms =
+                        egui::Atoms::new((definition.title_in(language), egui::Atom::grow()));
                     if !shortcut.is_empty() {
                         atoms.push_right(label_gap(ui));
                         atoms.push_right(
@@ -108,15 +117,19 @@ impl CommandPalette {
                                 (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
                             );
                             ui.add(
-                                egui::Label::new(format!("{}  {}", definition.title, shortcut))
-                                    .wrap(),
+                                egui::Label::new(format!(
+                                    "{}  {}",
+                                    definition.title_in(language),
+                                    shortcut
+                                ))
+                                .wrap(),
                             );
                         });
                     ui.painter()
                         .set(background, row_background(ui, row, &response, selected));
                     context.accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
-                        node.set_label(definition.title);
+                        node.set_label(definition.title_in(language));
                         if !shortcut.is_empty() {
                             node.set_description(shortcut.clone());
                         }
@@ -133,9 +146,12 @@ impl CommandPalette {
                                 row_icon(ui, rect, '\u{eb51}')
                             })
                             .inner
-                            .help_text("Configure keybinding");
+                            .help_text(text(ui.ctx(), Text::ConfigureKeybinding));
                         context.accesskit_node_builder(configure.id, |node| {
-                            node.set_label(format!("Configure keybinding: {}", definition.title));
+                            node.set_label(formatted::configure_keybinding(
+                                language,
+                                definition.title_in(language),
+                            ));
                         });
                         if configure.clicked() && !query_changed {
                             chosen = Some(Choice::Configure(definition.id));
@@ -147,11 +163,11 @@ impl CommandPalette {
                                 row_icon(ui, close_rect, '\u{ea76}')
                             })
                             .inner
-                            .help_text("Remove from Recently Used");
+                            .help_text(text(ui.ctx(), Text::RemoveRecentlyUsed));
                         context.accesskit_node_builder(remove.id, |node| {
-                            node.set_label(format!(
-                                "Remove {} from Recently Used",
-                                definition.title
+                            node.set_label(formatted::remove_recent_command(
+                                language,
+                                definition.title_in(language),
                             ));
                         });
                         if remove.clicked() && !query_changed {

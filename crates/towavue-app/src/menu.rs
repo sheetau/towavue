@@ -132,7 +132,7 @@ const MENUS: &[(&str, &[&[CommandId]])] = &[
         "View",
         &[
             &[ToggleFullscreen],
-            &[ToggleImageInterpolation],
+            &[ToggleImageInterpolation, ToggleImageMinification],
             &[TogglePause, SeekBackward, SeekForward],
             &[PreviousVideoFrame, NextVideoFrame],
             &[StepAudioBackward, StepAudioForward],

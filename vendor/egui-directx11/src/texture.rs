@@ -8,6 +8,8 @@
 //
 // Nekomaru, March 2024
 
+mod mipmap;
+
 use std::{collections::HashMap, mem};
 
 use egui::{Color32, ImageData, TextureId, TexturesDelta};
@@ -25,6 +27,8 @@ struct ManagedTexture {
     srv: ID3D11ShaderResourceView,
     size: [usize; 2],
     options: egui::TextureOptions,
+    mipmapped: bool,
+    mips_dirty: bool,
 }
 
 #[cfg(feature = "render-verification")]
@@ -36,6 +40,7 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
+    mod minification;
     mod upload;
 
     use super::*;
@@ -154,6 +159,7 @@ mod tests {
                 ));
                 let mut texture = TexturePool::create_managed_texture(
                     &device,
+                    &context,
                     ImageData::Color(original.clone()),
                     egui::TextureOptions::LINEAR,
                 )?;
@@ -356,6 +362,7 @@ mod tests {
         assert!(
             TexturePool::create_managed_texture(
                 &device,
+                &context,
                 ImageData::Color(Arc::new(malformed)),
                 egui::TextureOptions::LINEAR
             )
@@ -380,6 +387,7 @@ mod tests {
             assert!(
                 TexturePool::create_managed_texture(
                     &device,
+                    &context,
                     ImageData::Color(Arc::new(invalid)),
                     egui::TextureOptions::LINEAR
                 )
@@ -418,6 +426,7 @@ pub struct TexturePool {
     device: ID3D11Device,
     pool: HashMap<TextureId, Texture>,
     next_user_texture_id: u64,
+    mip_generator: Option<mipmap::MipGenerator>,
 }
 
 impl TexturePool {
@@ -439,6 +448,32 @@ impl TexturePool {
             .collect()
     }
 
+    #[cfg(feature = "render-verification")]
+    pub fn verification_managed_texel_bytes(&self) -> u64 {
+        self.pool
+            .values()
+            .filter_map(|texture| match texture {
+                Texture::Managed(texture) => {
+                    let mut desc = D3D11_TEXTURE2D_DESC::default();
+                    // Borrowed live resource; descriptor query does not synchronize GPU work.
+                    unsafe {
+                        texture.tex.GetDesc(&mut desc);
+                    }
+                    Some(
+                        (0..desc.MipLevels)
+                            .map(|level| {
+                                u64::from((desc.Width >> level).max(1))
+                                    * u64::from((desc.Height >> level).max(1))
+                                    * 4
+                            })
+                            .sum::<u64>(),
+                    )
+                }
+                Texture::User { .. } => None,
+            })
+            .sum()
+    }
+
     pub fn options(&self, id: TextureId) -> egui::TextureOptions {
         match self.pool.get(&id) {
             Some(Texture::Managed(texture)) => texture.options,
@@ -450,6 +485,7 @@ impl TexturePool {
             device: device.clone(),
             pool: HashMap::new(),
             next_user_texture_id: 0,
+            mip_generator: None,
         }
     }
 
@@ -491,7 +527,7 @@ impl TexturePool {
             if delta.is_whole() {
                 self.pool.insert(
                     tid,
-                    Self::create_managed_texture(&self.device, delta.image, delta.options)?,
+                    Self::create_managed_texture(&self.device, ctx, delta.image, delta.options)?,
                 );
                 // the old texture is returned and dropped here, freeing
                 // all its gpu resource.
@@ -522,6 +558,62 @@ impl TexturePool {
                 self.pool.remove(&tid);
             }
         }
+    }
+
+    pub(super) fn prepare_for_draw(
+        &mut self,
+        ctx: &ID3D11DeviceContext,
+        id: TextureId,
+    ) -> Result<()> {
+        let Some(Texture::Managed(texture)) = self.pool.get_mut(&id) else {
+            return Ok(());
+        };
+        let mipmapped = texture.options.mipmap_mode.is_some() && texture.size != [1, 1];
+        if !mipmapped && !texture.mipmapped {
+            return Ok(());
+        }
+        // All resources and immediate-context operations belong to the renderer's
+        // device thread. Sampler-only promotion/demotion copies the original on the GPU;
+        // no source pixels, mapped pointer or CPU shadow are retained.
+        unsafe {
+            if ctx.GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE {
+                return Err(E_INVALIDARG.into());
+            }
+            if texture.mipmapped != mipmapped {
+                let mut desc = D3D11_TEXTURE2D_DESC::default();
+                texture.tex.GetDesc(&mut desc);
+                desc.MipLevels = if mipmapped { 0 } else { 1 };
+                desc.BindFlags = (D3D11_BIND_SHADER_RESOURCE.0
+                    | if mipmapped {
+                        D3D11_BIND_RENDER_TARGET.0
+                    } else {
+                        0
+                    }) as u32;
+                let mut replacement = None;
+                self.device
+                    .CreateTexture2D(&desc, None, Some(&mut replacement))?;
+                let replacement = replacement.expect("successful mip texture creation");
+                let mut srv = None;
+                self.device
+                    .CreateShaderResourceView(&replacement, None, Some(&mut srv))?;
+                ctx.CopySubresourceRegion(&replacement, 0, 0, 0, 0, &texture.tex, 0, None);
+                texture.tex = replacement;
+                texture.srv = srv.expect("successful mip view creation");
+                texture.mipmapped = mipmapped;
+                texture.mips_dirty = mipmapped;
+            }
+            if texture.mips_dirty {
+                if self.mip_generator.is_none() {
+                    self.mip_generator = Some(mipmap::MipGenerator::new(&self.device)?);
+                }
+                self.mip_generator
+                    .as_ref()
+                    .unwrap()
+                    .generate(&self.device, ctx, &texture.tex)?;
+                texture.mips_dirty = false;
+            }
+        }
+        Ok(())
     }
 
     fn update_partial(
@@ -574,11 +666,13 @@ impl TexturePool {
                 0,
             );
         }
+        old.mips_dirty = old.mipmapped;
         Ok(())
     }
 
     fn create_managed_texture(
         device: &ID3D11Device,
+        ctx: &ID3D11DeviceContext,
         data: ImageData,
         options: egui::TextureOptions,
     ) -> Result<Texture> {
@@ -595,10 +689,11 @@ impl TexturePool {
             return Err(E_INVALIDARG.into());
         }
 
+        let mipmapped = options.mipmap_mode.is_some() && [width, height] != [1, 1];
         let desc = D3D11_TEXTURE2D_DESC {
             Width: width as _,
             Height: height as _,
-            MipLevels: 1,
+            MipLevels: if mipmapped { 0 } else { 1 },
             ArraySize: 1,
             Format: DXGI_FORMAT_R8G8B8A8_UNORM,
             SampleDesc: DXGI_SAMPLE_DESC {
@@ -606,7 +701,12 @@ impl TexturePool {
                 Quality: 0,
             },
             Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as _,
+            BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
+                | if mipmapped {
+                    D3D11_BIND_RENDER_TARGET.0
+                } else {
+                    0
+                }) as _,
             ..Default::default()
         };
 
@@ -634,7 +734,26 @@ impl TexturePool {
         // pointer to its storage after CreateTexture2D returns.
         #[cfg(feature = "render-verification")]
         let started = std::time::Instant::now();
-        unsafe { device.CreateTexture2D(&desc, Some(&subresource_data), Some(&mut tex)) }?;
+        unsafe {
+            if mipmapped {
+                if ctx.GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE {
+                    return Err(E_INVALIDARG.into());
+                }
+                // Only level zero has CPU data. Allocate the chain, upload that
+                // level once, and generate the remaining levels when first drawn.
+                device.CreateTexture2D(&desc, None, Some(&mut tex))?;
+                ctx.UpdateSubresource(
+                    tex.as_ref().expect("successful texture creation"),
+                    0,
+                    None,
+                    subresource_data.pSysMem,
+                    subresource_data.SysMemPitch,
+                    0,
+                );
+            } else {
+                device.CreateTexture2D(&desc, Some(&subresource_data), Some(&mut tex))?;
+            }
+        }
         let tex = tex.unwrap();
 
         let mut srv = None;
@@ -657,6 +776,8 @@ impl TexturePool {
             srv,
             size: [width, height],
             options,
+            mipmapped,
+            mips_dirty: mipmapped,
         }))
     }
 }

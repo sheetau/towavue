@@ -470,9 +470,9 @@ mod tests {
                     );
                     assert!(help.lines().all(|line| line.starts_with("\u{2022} ")));
                     assert!(help.contains(if nearest {
-                        "Nearest-neighbor image scaling"
+                        "Nearest-neighbor magnification"
                     } else {
-                        "Smooth image scaling"
+                        "Smooth magnification"
                     }));
                     assert!(
                         help.contains("Fit within the window") && help.contains("Unsaved changes")

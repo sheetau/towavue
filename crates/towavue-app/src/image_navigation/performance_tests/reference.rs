@@ -32,6 +32,7 @@ struct PhaseTrace {
 }
 
 #[derive(Debug, Default, PartialEq)]
+// Base-level source/upload bytes only; allocated-chain inventory is logged separately.
 struct TextureFootprint {
     count: usize,
     bytes: usize,
@@ -534,7 +535,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                                 .map(|(_, size)| size),
                         );
                         eprintln!(
-                            "REFERENCE_TRACE_TEXTURES before_count={} before_bytes={} retiring_existing_count={} retiring_existing_bytes={} whole_upload_count={} whole_upload_bytes={} after_count={} after_bytes={}; RGBA8 dimension estimates, not physical VRAM; retirement matches pre-submit resources only; full replacements counted as uploads; snapshots outside GPU timing",
+                            "REFERENCE_TRACE_TEXTURES before_count={} before_bytes={} retiring_existing_count={} retiring_existing_bytes={} whole_upload_count={} whole_upload_bytes={} after_count={} after_bytes={} allocated_mip_texel_bytes={}; base-level RGBA8 dimension estimates, not physical VRAM; retirement matches pre-submit resources only; full replacements counted as uploads; snapshots outside GPU timing",
                             before.count,
                             before.bytes,
                             retiring.count,
@@ -543,6 +544,7 @@ fn reference_folder_reports_unpaced_completion_under_fixed_rate_commands() {
                             uploading.bytes,
                             after.count,
                             after.bytes,
+                            renderer.verification_managed_texel_bytes(),
                         );
                         eprintln!(
                             "REFERENCE_TRACE_PRESENT at_ms={:.3} completion_events_since_previous_original_ms={:.3} layout_ms={:.3} gpu_submit_present_ms={:.3}; event preparation excludes results drained inside layout; GPU is CPU wall time including upload/render/Present, not pure upload",

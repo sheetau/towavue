@@ -115,16 +115,13 @@ pub(super) struct Memory {
 
 pub(super) fn report_resources(renderer: &FrameRenderer, phase: &str) {
     let managed = renderer.verification_managed_textures();
-    let rgba_bytes = managed
-        .iter()
-        .map(|(_, [width, height])| width * height * 4)
-        .sum::<usize>();
+    let rgba_bytes = renderer.verification_managed_texel_bytes();
     let memory = renderer.verification_memory().expect("process memory");
     let mib = |bytes: u64| bytes as f64 / 1048576.0;
     eprintln!(
-        "NAV100_RESOURCES phase={phase} managed_count={} managed_rgba_mib={:.2} working_mib={:.1} private_mib={:.1} gpu_local_nonlocal_mib={:?}; managed RGBA is logical size, not driver allocation size; flush/readback/trim are test-only interventions",
+        "NAV100_RESOURCES phase={phase} managed_count={} managed_rgba_mib={:.2} working_mib={:.1} private_mib={:.1} gpu_local_nonlocal_mib={:?}; managed RGBA includes mip levels and is logical size, not driver allocation size; flush/readback/trim are test-only interventions",
         managed.len(),
-        mib(rgba_bytes as u64),
+        mib(rgba_bytes),
         mib(memory.working_set),
         mib(memory.private_bytes),
         memory

@@ -74,6 +74,7 @@ fn large_texture_upload_reports_settled_allocation_history() -> Result<()> {
         for index in 0..history {
             retained.push_back(TexturePool::create_managed_texture(
                 &device,
+                &context,
                 ImageData::Color(sources[index % 4].clone()),
                 egui::TextureOptions::LINEAR,
             )?);
@@ -95,6 +96,7 @@ fn large_texture_upload_reports_settled_allocation_history() -> Result<()> {
         let started = Instant::now();
         let uploaded = TexturePool::create_managed_texture(
             &device,
+            &context,
             ImageData::Color(source.clone()),
             egui::TextureOptions::LINEAR,
         )?;
@@ -205,6 +207,7 @@ fn repeated_texture_upload_compares_replacement_and_reuse() -> Result<()> {
             .collect();
         let mut texture = TexturePool::create_managed_texture(
             &device,
+            &context,
             ImageData::Color(frames[0].clone()),
             egui::TextureOptions::LINEAR,
         )?;
@@ -244,6 +247,7 @@ fn repeated_texture_upload_compares_replacement_and_reuse() -> Result<()> {
             } else {
                 texture = TexturePool::create_managed_texture(
                     &device,
+                    &context,
                     ImageData::Color(frames[next].clone()),
                     egui::TextureOptions::LINEAR,
                 )?;
@@ -391,10 +395,13 @@ fn large_texture_upload_compares_initial_data_and_update() -> Result<()> {
                     srv: srv.expect("view"),
                     size: [width, height],
                     options: egui::TextureOptions::LINEAR,
+                    mipmapped: false,
+                    mips_dirty: false,
                 }
             } else {
                 let Texture::Managed(texture) = TexturePool::create_managed_texture(
                     &device,
+                    &context,
                     ImageData::Color(image.clone()),
                     egui::TextureOptions::LINEAR,
                 )?
@@ -519,6 +526,7 @@ fn large_texture_upload_compares_default_and_immutable() -> Result<()> {
             let started = Instant::now();
             let result = TexturePool::create_managed_texture(
                 &device,
+                &context,
                 ImageData::Color(image.clone()),
                 egui::TextureOptions::LINEAR,
             );
@@ -561,6 +569,7 @@ fn large_texture_upload_compares_default_and_immutable() -> Result<()> {
             let started = Instant::now();
             let texture = TexturePool::create_managed_texture(
                 &device,
+                &context,
                 ImageData::Color(source.clone()),
                 egui::TextureOptions::LINEAR,
             )?;

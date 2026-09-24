@@ -13,12 +13,12 @@ fn report(app: &WindowApplication, phase: &str) {
     let renderer = app.renderer.as_ref().expect("renderer");
     let memory = renderer.verification_memory().expect("memory counters");
     let managed = renderer.verification_managed_textures();
-    let bytes: usize = managed.iter().map(|(_, [w, h])| w * h * 4).sum();
+    let bytes = renderer.verification_managed_texel_bytes();
     let mib = |bytes: u64| bytes as f64 / 1048576.0;
     eprintln!(
         "HOST100 phase={phase} managed_count={} managed_rgba_mib={:.2} working_mib={:.1} private_mib={:.1} peak_commit_mib={:.1} gpu_local_nonlocal_mib={:?}",
         managed.len(),
-        mib(bytes as u64),
+        mib(bytes),
         mib(memory.working_set),
         mib(memory.private_bytes),
         mib(memory.peak_commit),

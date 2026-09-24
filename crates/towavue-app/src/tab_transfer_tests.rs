@@ -344,11 +344,7 @@ fn edited_image_install_converts_only_the_selected_frame_with_current_sampling()
                     image.plays_left, 2,
                     "edits and undo preserve remaining plays"
                 );
-                let options = if nearest {
-                    TextureOptions::NEAREST
-                } else {
-                    TextureOptions::LINEAR
-                };
+                let options = app.image_sampling();
                 assert_eq!(image.sampling.get(), options);
                 let updates = context.tex_manager().write().take_delta().set;
                 assert_eq!(updates.len(), 1);
@@ -562,7 +558,7 @@ fn image_animation_suspends_until_resampling_finishes_or_undo_recovers() {
             (next - start).as_millis() % 2000,
             if image.frame_index == 0 { 1000 } else { 0 }
         );
-        assert_eq!(image.sampling.get(), TextureOptions::NEAREST);
+        assert_eq!(image.sampling.get(), app.image_sampling());
         assert_eq!(
             app.image_copy_request().expect("resumed copy").size,
             if succeeds { (3, 3) } else { (2, 2) }
@@ -570,7 +566,7 @@ fn image_animation_suspends_until_resampling_finishes_or_undo_recovers() {
         let updates = context.tex_manager().write().take_delta().set;
         assert_eq!(updates.len(), usize::from(image.frame_index != 0));
         for (_, delta) in updates {
-            assert_eq!(delta.options, TextureOptions::NEAREST);
+            assert_eq!(delta.options, app.image_sampling());
             assert!(
                 delta.image
                     == egui::ImageData::Color(Arc::new(color_image(

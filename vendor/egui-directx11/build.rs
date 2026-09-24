@@ -4,10 +4,32 @@ use windows::core::{PCSTR, s};
 
 fn main() {
     println!("cargo:rerun-if-changed=shaders/egui.hlsl");
-    let source = include_bytes!("shaders/egui.hlsl");
-    for (entry, target, output) in [
-        (s!("vs_egui"), s!("vs_5_0"), "egui-vertex.cso"),
-        (s!("ps_egui"), s!("ps_5_0"), "egui-pixel.cso"),
+    println!("cargo:rerun-if-changed=shaders/mipmap.hlsl");
+    for (source, entry, target, output) in [
+        (
+            include_bytes!("shaders/egui.hlsl").as_slice(),
+            s!("vs_egui"),
+            s!("vs_5_0"),
+            "egui-vertex.cso",
+        ),
+        (
+            include_bytes!("shaders/egui.hlsl").as_slice(),
+            s!("ps_egui"),
+            s!("ps_5_0"),
+            "egui-pixel.cso",
+        ),
+        (
+            include_bytes!("shaders/mipmap.hlsl").as_slice(),
+            s!("vs_mipmap"),
+            s!("vs_5_0"),
+            "mipmap-vertex.cso",
+        ),
+        (
+            include_bytes!("shaders/mipmap.hlsl").as_slice(),
+            s!("ps_mipmap"),
+            s!("ps_5_0"),
+            "mipmap-pixel.cso",
+        ),
     ] {
         let mut bytecode = None;
         // Source and strings remain valid throughout compilation. The owned blob

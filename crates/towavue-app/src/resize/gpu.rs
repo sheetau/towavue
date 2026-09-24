@@ -44,7 +44,7 @@ fn surface<N: Fn(AppEvent) + Send + Sync + 'static>(
             .as_chunks::<4>()
             .0
             .iter()
-            .any(|pixel| pixel[0] != pixel[1]),
+            .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
         "colored image must reach GPU"
     );
     pixels
@@ -220,6 +220,144 @@ fn resized_animations_recover_gpu_pixels_and_keep_undo_redo_at_three_densities()
         root,
         completed: false,
     };
+    let mut builder = EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut trial)
+        .expect("GPU trial");
+    assert!(trial.completed, "GPU trial must not silently skip");
+}
+
+#[test]
+#[ignore = "requires hardware D3D11; generated original-image minification at three densities"]
+fn image_minification_reaches_gpu_and_survives_recovery_at_three_densities() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "resize::gpu::image_minification_reaches_gpu_and_survives_recovery_at_three_densities",
+    ) else {
+        return;
+    };
+    struct Trial {
+        completed: bool,
+    }
+    impl ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            let window = event_loop
+                .create_window(Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            let mut renderer = FrameRenderer::new(&window).expect("hardware D3D11");
+            let (width, height) = (2577, 1291);
+            let source = Arc::new(DecodedImage {
+                animation_plays: 0,
+                format: "fixture",
+                frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                    width,
+                    height,
+                    rgba: (0..width * height)
+                        .flat_map(|index| {
+                            if (index % width + index / width) % 2 == 0 {
+                                [255, 0, 0, 255]
+                            } else {
+                                [0, 255, 0, 255]
+                            }
+                        })
+                        .collect(),
+                    delay: Duration::ZERO,
+                }],
+            });
+            for density in [1.0, 1.25, 2.0] {
+                let context = fonts::test_context();
+                context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_context = Some(context.clone());
+                let path = PathBuf::from("minification.png");
+                let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.path = Some(path.clone());
+                app.displayed_tab = Some(tab);
+                app.media_kind = Some(MediaKind::Image);
+                app.high_quality_minification = false;
+                app.image = Some(
+                    ImagePresentation::from_decoded_frame(
+                        &context,
+                        &path,
+                        source.clone(),
+                        0,
+                        app.image_sampling(),
+                    )
+                    .expect("original"),
+                );
+                app.image_view.fit();
+                let error = |pixels: &[u8]| {
+                    let stride = (640.0 * density) as usize;
+                    let mut sum = 0_u64;
+                    let mut count = 0_u64;
+                    for y in (210.0 * density) as usize..(270.0 * density) as usize {
+                        for x in (260.0 * density) as usize..(380.0 * density) as usize {
+                            let pixel = &pixels[(y * stride + x) * 4..][..4];
+                            assert_eq!(
+                                &pixel[2..],
+                                &[0, 255],
+                                "opaque original-image pixels at center"
+                            );
+                            sum += u64::from(pixel[0].abs_diff(128))
+                                + u64::from(pixel[1].abs_diff(128));
+                            count += 2;
+                        }
+                    }
+                    sum as f64 / count as f64
+                };
+                let fast = surface(&mut app, &context, &mut renderer, density, false);
+                assert!(
+                    error(&fast) > 10.0,
+                    "fast negative control must expose aliasing"
+                );
+                app.dispatch(towavue_core::CommandId::ToggleImageMinification);
+                app.update_image_sampling();
+                let smooth = surface(&mut app, &context, &mut renderer, density, false);
+                assert!(
+                    error(&smooth) < 2.0,
+                    "high-quality reduction must suppress false patterns"
+                );
+                app.dispatch(towavue_core::CommandId::ToggleImageInterpolation);
+                app.update_image_sampling();
+                let nearest = surface(&mut app, &context, &mut renderer, density, false);
+                assert!(
+                    error(&nearest) < 2.0,
+                    "nearest magnification must retain high-quality reduction"
+                );
+                let device = renderer.graphics_device();
+                renderer.release_surface();
+                renderer = FrameRenderer::with_graphics_device(&window, device)
+                    .expect("recreated renderer on the shared device");
+                assert!(
+                    surface(&mut app, &context, &mut renderer, density, true) == nearest,
+                    "full surface must survive graphics recovery"
+                );
+                app.dispatch(towavue_core::CommandId::ToggleImageInterpolation);
+                app.dispatch(towavue_core::CommandId::ToggleImageMinification);
+                app.update_image_sampling();
+                assert!(
+                    surface(&mut app, &context, &mut renderer, density, false) == fast,
+                    "fast mode restores original display exactly"
+                );
+                assert!(Arc::ptr_eq(
+                    &app.image.as_ref().expect("loaded original").decoded,
+                    &source
+                ));
+                assert!(app.edits.is_empty());
+                eprintln!(
+                    "IMAGE_MINIFY_GPU density={density} fast_mae={:.3} high_quality_mae={:.3}; source identity, five rendering transitions and recovery verified",
+                    error(&fast),
+                    error(&smooth)
+                );
+            }
+            self.completed = true;
+            event_loop.exit();
+        }
+        fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    }
+    let mut trial = Trial { completed: false };
     let mut builder = EventLoop::builder();
     builder.with_any_thread(true);
     builder

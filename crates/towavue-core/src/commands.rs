@@ -116,6 +116,7 @@ pub enum CommandId {
     PasteImage,
     ResizeImage,
     ToggleImageInterpolation,
+    ToggleImageMinification,
     CycleAudioRepeat,
     ToggleVideoRepeat,
     ToggleAudioShuffle,
@@ -321,6 +322,7 @@ impl CommandId {
             Self::StepAudioBackward => "step_audio_backward",
             Self::StepAudioForward => "step_audio_forward",
             Self::ToggleImageInterpolation => "toggle_image_interpolation",
+            Self::ToggleImageMinification => "toggle_image_minification",
         }
     }
 }
@@ -631,6 +633,7 @@ impl CommandDefinition {
                     | CommandId::SelectAspectNineSixteen
                     | CommandId::ToggleReadingMode
                     | CommandId::ToggleImageInterpolation
+                    | CommandId::ToggleImageMinification
             )
         {
             return false;
@@ -1086,6 +1089,11 @@ const COMMANDS: &[CommandDefinition] = &[
     command(
         CommandId::ToggleImageInterpolation,
         "Toggle image interpolation (smooth / nearest)",
+        &[MediaKind::Image],
+    ),
+    command(
+        CommandId::ToggleImageMinification,
+        "Toggle image minification (high quality / fast)",
         &[MediaKind::Image],
     ),
     command(

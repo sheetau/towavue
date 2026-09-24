@@ -97,6 +97,11 @@ impl FrameRenderer {
         self.ui_renderer.verification_managed_textures()
     }
 
+    /// Logical managed RGBA texel bytes including allocated mip levels, not physical VRAM usage.
+    pub fn verification_managed_texel_bytes(&self) -> u64 {
+        self.ui_renderer.verification_managed_texel_bytes()
+    }
+
     /// Diagnostic only: retire bindings on an isolated, idle test device, optionally trim its caches.
     pub fn verification_retire_resources(&mut self, trim: bool) -> Result<(), RenderError> {
         // The test owns this multithread-protected immediate context and performs no concurrent

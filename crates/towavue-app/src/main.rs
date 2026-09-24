@@ -598,12 +598,25 @@ impl From<ImagePresentation> for CachedImageTexture {
     fn from(image: ImagePresentation) -> Self {
         Self {
             decoded: Arc::downgrade(&image.decoded),
-            bytes: image.decoded.retained_bytes(),
+            bytes: image_texture_reservation(image.texture.size()),
             texture: image.texture,
             sampling: image.sampling,
             #[cfg(test)]
             retained_for_comparison: None,
         }
+    }
+}
+
+// Reserve the complete chain even in fast mode: cached handles share sampler
+// state with live presentations and can be promoted without a cache insertion.
+fn image_texture_reservation(mut size: [usize; 2]) -> usize {
+    let mut bytes = 0;
+    loop {
+        bytes += size[0] * size[1] * 4;
+        if size == [1, 1] {
+            return bytes;
+        }
+        size = size.map(|extent| (extent / 2).max(1));
     }
 }
 
@@ -652,7 +665,7 @@ impl ImageTextureCache {
             return Ok(image);
         }
         let image = ImagePresentation::from_decoded_frame(context, path, decoded, 0, options)?;
-        let bytes = image.decoded.retained_bytes();
+        let bytes = image_texture_reservation(image.texture.size());
         if !image.decoded.is_animated() && bytes <= self.byte_limit {
             // Match the three-spread decoded cache without increasing its pixel budget.
             while self.entries.len() >= 30
@@ -1031,6 +1044,7 @@ struct Application<N> {
     image_edit_pending: bool,
     image_materialized: bool,
     nearest_images: bool,
+    high_quality_minification: bool,
     resize_dialog: Option<resize::ResizeDialog>,
     rotation_dialog: Option<rotation::RotationDialog>,
     video_rotation_dialog: Option<video_rotation::VideoRotationDialog>,
@@ -1328,6 +1342,7 @@ where
             image_edit_pending: false,
             image_materialized: false,
             nearest_images: false,
+            high_quality_minification: true,
             resize_dialog: None,
             rotation_dialog: None,
             video_rotation_dialog: None,
@@ -7631,6 +7646,18 @@ where
                 ));
                 self.request_redraw();
             }
+            CommandId::ToggleImageMinification => {
+                self.high_quality_minification = !self.high_quality_minification;
+                self.set_status(format!(
+                    "Image minification: {} (pixels and edits unchanged)",
+                    if self.high_quality_minification {
+                        "high quality"
+                    } else {
+                        "fast"
+                    }
+                ));
+                self.request_redraw();
+            }
             CommandId::ResizeImage => {
                 let Some(image) = self.image.as_ref().filter(|_| self.image_error.is_none()) else {
                     self.set_status("Wait for the full image to load before resizing".into());
@@ -7930,11 +7957,16 @@ where
     }
 
     fn image_sampling(&self) -> TextureOptions {
-        if self.nearest_images {
+        let mut options = if self.nearest_images {
             TextureOptions::NEAREST
         } else {
             TextureOptions::LINEAR
+        };
+        if self.high_quality_minification {
+            options.minification = egui::TextureFilter::Linear;
+            options.mipmap_mode = Some(egui::TextureFilter::Linear);
         }
+        options
     }
 
     fn update_image_sampling(&mut self) {
@@ -23616,11 +23648,7 @@ mod tests {
                 assert_eq!(current_ids[..2], previous_ids[..2]);
                 assert_ne!(current_ids[2], previous_ids[2]);
             }
-            let options = if nearest {
-                TextureOptions::NEAREST
-            } else {
-                TextureOptions::LINEAR
-            };
+            let options = app.image_sampling();
             let updates = context.tex_manager().write().take_delta().set;
             assert_eq!(
                 updates.len(),
@@ -24279,6 +24307,123 @@ mod tests {
     }
 
     #[test]
+    fn texture_cache_reserves_mips_before_sampler_promotion() {
+        let context = fonts::test_context();
+        let source = tab_transfer::tests::decoded(false);
+        assert_eq!((source.frames[0].width, source.frames[0].height), (2, 2));
+        for limit in [16, 19, 20] {
+            let mut cache = ImageTextureCache::new(limit);
+            let image = cache
+                .load(
+                    &context,
+                    Path::new("mip-budget.png"),
+                    source.clone(),
+                    TextureOptions::LINEAR,
+                )
+                .expect("image fixture");
+            assert_eq!(cache.entries.len(), usize::from(limit >= 20));
+            if limit >= 20 {
+                assert_eq!(cache.entries[0].bytes, 20);
+                let high = cache
+                    .load(
+                        &context,
+                        Path::new("mip-budget.png"),
+                        source.clone(),
+                        TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
+                    )
+                    .expect("image fixture");
+                assert_eq!(high.texture.id(), image.texture.id());
+                assert_eq!(cache.entries[0].bytes, 20);
+            }
+        }
+        assert_eq!(image_texture_reservation([1, 17]), (17 + 8 + 4 + 2 + 1) * 4);
+    }
+
+    #[test]
+    fn image_minification_toggle_preserves_originals_edits_and_texture_handles() {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let path = PathBuf::from("reduction.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        let original = tab_transfer::tests::decoded(false);
+        let initial = app.image_sampling();
+        assert_eq!(initial.mipmap_mode, Some(egui::TextureFilter::Linear));
+        app.image = Some(
+            ImagePresentation::from_decoded_frame(&context, &path, original.clone(), 0, initial)
+                .expect("image"),
+        );
+        app.reading_pages
+            .push(Ok(app.image.as_ref().expect("image fixture").clone()));
+        app.push_visual_edit(EditOperation::RotateClockwise);
+        let edits = app.edits.clone();
+        let texture = app.image.as_ref().expect("image fixture").texture.id();
+        let _ = context.tex_manager().write().take_delta();
+        for reading in [false, true] {
+            app.reading_mode = reading;
+            for nearest in [false, true] {
+                app.nearest_images = nearest;
+                app.update_image_sampling();
+                let _ = context.tex_manager().write().take_delta();
+                for high_quality in [false, true] {
+                    app.dispatch(CommandId::ToggleImageMinification);
+                    app.update_image_sampling();
+                    assert_eq!(app.high_quality_minification, high_quality);
+                    let options = app.image_sampling();
+                    assert_eq!(
+                        options.magnification,
+                        if nearest {
+                            egui::TextureFilter::Nearest
+                        } else {
+                            egui::TextureFilter::Linear
+                        }
+                    );
+                    assert_eq!(
+                        options.minification,
+                        if !high_quality && nearest {
+                            egui::TextureFilter::Nearest
+                        } else {
+                            egui::TextureFilter::Linear
+                        }
+                    );
+                    assert_eq!(
+                        options.mipmap_mode,
+                        high_quality.then_some(egui::TextureFilter::Linear)
+                    );
+                    let delta = context.tex_manager().write().take_delta();
+                    assert_eq!(
+                        delta.set.len(),
+                        1,
+                        "shared reading image needs one sampler update"
+                    );
+                    assert!(delta.free.is_empty());
+                    let (id, update) = &delta.set[0];
+                    assert_eq!(*id, texture);
+                    assert_eq!(update.pos, Some([0, 0]));
+                    assert_eq!(
+                        update.image.size(),
+                        [0, 0],
+                        "no image conversion or pixel reupload"
+                    );
+                    let image = app.image.as_ref().expect("image fixture");
+                    assert!(Arc::ptr_eq(&image.decoded, &original));
+                    assert_eq!(app.edits, edits);
+                    app.update_image_sampling();
+                    assert!(context.tex_manager().write().take_delta().set.is_empty());
+                }
+            }
+        }
+        app.dispatch(CommandId::ToggleImageMinification);
+        app.remove_tab(tab, false);
+        assert!(
+            !app.high_quality_minification,
+            "window preference survives last close"
+        );
+    }
+
+    #[test]
     fn image_interpolation_changes_only_sampling_and_survives_animation_and_recovery() {
         use towavue_runtime_windows::DecodedImageFrame;
         let mut app = Application::new(None, |_| {}).expect("app");
@@ -24324,9 +24469,10 @@ mod tests {
         app.dispatch(CommandId::ToggleImageInterpolation);
         app.update_image_sampling();
         assert!(app.nearest_images);
+        let options = app.image_sampling();
         assert_eq!(
             cached.sampling.get(),
-            TextureOptions::NEAREST,
+            options,
             "cache clones share texture sampling state"
         );
         for image in app.image.iter().chain(
@@ -24334,14 +24480,14 @@ mod tests {
                 .iter()
                 .filter_map(|page| page.as_ref().ok()),
         ) {
-            assert_eq!(image.sampling.get(), TextureOptions::NEAREST);
+            assert_eq!(image.sampling.get(), options);
         }
         let uploaded = context.tex_manager().write().take_delta();
         assert_eq!(
             uploaded
                 .set
                 .iter()
-                .filter(|(_, delta)| delta.options == TextureOptions::NEAREST)
+                .filter(|(_, delta)| delta.options == options)
                 .count(),
             2
         );
@@ -24367,8 +24513,7 @@ mod tests {
                 .take_delta()
                 .set
                 .iter()
-                .any(|(id, delta)| *id == image.texture.id()
-                    && delta.options == TextureOptions::NEAREST)
+                .any(|(id, delta)| *id == image.texture.id() && delta.options == options)
         );
         let _ = context.run_ui(Default::default(), |ui| {
             ui.label("recovery fixture");
@@ -24377,7 +24522,7 @@ mod tests {
             app.restored_ui_textures(&context)
                 .iter()
                 .filter(|(id, _)| *id != egui::TextureId::default())
-                .all(|(_, delta)| delta.options == TextureOptions::NEAREST)
+                .all(|(_, delta)| delta.options == options)
         );
         app.reading_mode = true;
         app.dispatch(CommandId::ToggleImageInterpolation);

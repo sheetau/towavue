@@ -17,6 +17,5 @@ float4 ps_egui(
     in const float4 i_pos  : SV_POSITION,
     in const float2 i_uv   : TEXCOORD,
     in const float4 i_color: COLOR): SV_TARGET {
-    return i_color * g_texture.SampleLevel(g_sampler, i_uv, 0);
+    return i_color * g_texture.Sample(g_sampler, i_uv);
 }
-

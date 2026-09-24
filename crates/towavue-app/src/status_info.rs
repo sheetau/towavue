@@ -75,7 +75,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     (value.clone(), format!("{value} zoom"))
                 }
             };
-            details.push(Group::Display, short, help);
+            let reduction = if self.high_quality_minification {
+                "High-quality reduction; uses additional image memory"
+            } else {
+                "Fast reduction; lower memory use"
+            };
+            details.push(Group::Display, short, format!("{help}. {reduction}"));
         }
         if image.is_some_and(|image| image.decoded.is_animated()) {
             details.push(
@@ -187,10 +192,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let (short, help) = if self.nearest_images {
                 (
                     "Nearest",
-                    "Nearest-neighbor image scaling (sharp pixel edges)",
+                    "Nearest-neighbor magnification (sharp pixel edges)",
                 )
             } else {
-                ("Smooth", "Smooth image scaling (filtered)")
+                ("Smooth", "Smooth magnification (filtered)")
             };
             details.push(Group::Display, short, help);
         } else if self.session.is_some() {

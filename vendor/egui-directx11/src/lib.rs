@@ -146,25 +146,37 @@ fn sampler_description(options: egui::TextureOptions) -> D3D11_SAMPLER_DESC {
         TextureFilter::{Linear, Nearest},
         TextureWrapMode,
     };
-    let filter = match (options.minification, options.magnification) {
-        (Nearest, Nearest) => D3D11_FILTER_MIN_MAG_MIP_POINT,
-        (Nearest, Linear) => D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT,
-        (Linear, Nearest) => D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT,
-        (Linear, Linear) => D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT,
+    let filter = match (
+        options.minification,
+        options.magnification,
+        options.mipmap_mode == Some(Linear),
+    ) {
+        (Nearest, Nearest, false) => D3D11_FILTER_MIN_MAG_MIP_POINT,
+        (Nearest, Linear, false) => D3D11_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT,
+        (Linear, Nearest, false) => D3D11_FILTER_MIN_LINEAR_MAG_MIP_POINT,
+        (Linear, Linear, false) => D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT,
+        (Nearest, Nearest, true) => D3D11_FILTER_MIN_MAG_POINT_MIP_LINEAR,
+        (Nearest, Linear, true) => D3D11_FILTER_MIN_POINT_MAG_MIP_LINEAR,
+        (Linear, Nearest, true) => D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR,
+        (Linear, Linear, true) => D3D11_FILTER_MIN_MAG_MIP_LINEAR,
     };
     let address = match options.wrap_mode {
         TextureWrapMode::ClampToEdge => D3D11_TEXTURE_ADDRESS_CLAMP,
         TextureWrapMode::Repeat => D3D11_TEXTURE_ADDRESS_WRAP,
         TextureWrapMode::MirroredRepeat => D3D11_TEXTURE_ADDRESS_MIRROR,
     };
-    // Managed textures have one mip level. The shader explicitly samples level 0.
+    // Unrequested mips and user-owned views remain clamped to their base level.
     D3D11_SAMPLER_DESC {
         Filter: filter,
         AddressU: address,
         AddressV: address,
         AddressW: address,
         ComparisonFunc: D3D11_COMPARISON_ALWAYS,
-        MaxLOD: f32::MAX,
+        MaxLOD: if options.mipmap_mode.is_some() {
+            f32::MAX
+        } else {
+            0.0
+        },
         ..Default::default()
     }
 }
@@ -714,9 +726,22 @@ impl Renderer {
         );
         let zoom_factor = egui_ctx.zoom_factor();
 
+        let primitives = egui_ctx.tessellate(egui_output.shapes, egui_output.pixels_per_point);
+        for primitive in &primitives {
+            let mesh = match &primitive.primitive {
+                Primitive::Mesh(mesh) => Some(mesh),
+                Primitive::Callback(callback) => callback
+                    .callback
+                    .downcast_ref::<InvertMesh>()
+                    .map(|payload| &payload.0),
+            };
+            if let Some(mesh) = mesh.filter(|mesh| !mesh.indices.is_empty()) {
+                self.texture_pool
+                    .prepare_for_draw(device_context, mesh.texture_id)?;
+            }
+        }
         self.setup(device_context, render_target, frame_size);
-        let meshes = egui_ctx
-            .tessellate(egui_output.shapes, egui_output.pixels_per_point)
+        let meshes = primitives
             .into_iter()
             .filter_map(
                 |ClippedPrimitive {
@@ -819,6 +844,12 @@ impl Renderer {
     /// Calling-thread cumulative creation/source-release/pool-update wall times; nested, not additive.
     pub fn verification_upload_times(&self) -> [std::time::Duration; 3] {
         self.texture_pool.verification_upload_times()
+    }
+
+    /// Logical managed RGBA texel bytes including allocated mip levels, not driver allocation size.
+    #[cfg(feature = "render-verification")]
+    pub fn verification_managed_texel_bytes(&self) -> u64 {
+        self.texture_pool.verification_managed_texel_bytes()
     }
 
     fn setup(

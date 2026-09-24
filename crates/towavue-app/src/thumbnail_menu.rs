@@ -13,6 +13,7 @@ pub(crate) struct Owner {
 pub(crate) enum Scope {
     Gallery,
     Filmstrip,
+    Playlist,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,18 +60,20 @@ pub(crate) fn show(
         let keyboard = menu::MenuKeyboard::begin(ui);
         let mut items = Vec::new();
         let mut chosen = None;
-        for (label, action) in [
-            ("Open", Action::Open),
-            ("Open in new window", Action::Window),
-            ("Open in new tab", Action::Tab),
-        ] {
-            let response = ui.button(label);
-            items.push(response.id);
-            if response.clicked() {
-                chosen = Some(action);
+        if scope != Scope::Playlist {
+            for (label, action) in [
+                ("Open", Action::Open),
+                ("Open in new window", Action::Window),
+                ("Open in new tab", Action::Tab),
+            ] {
+                let response = ui.button(label);
+                items.push(response.id);
+                if response.clicked() {
+                    chosen = Some(action);
+                }
             }
+            chrome::separator(ui);
         }
-        chrome::separator(ui);
         for (label, action) in [
             ("Copy file path", Action::Copy),
             ("Reveal in File Explorer", Action::Reveal),
@@ -90,7 +93,7 @@ pub(crate) fn show(
                     chosen = Some(Action::RemoveHistory);
                 }
             }
-            Scope::Filmstrip => {
+            Scope::Filmstrip | Scope::Playlist => {
                 for (label, kind) in [
                     ("Rename file…", file_operations::Kind::Rename),
                     ("Move file…", file_operations::Kind::Move),
@@ -157,10 +160,27 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     return;
                 }
             }
+            Scope::Playlist => {
+                if self.media_kind != Some(MediaKind::Audio)
+                    || self.filmstrip_open
+                    || !self.folder_snapshot.as_ref().is_some_and(|snapshot| {
+                        snapshot
+                            .items
+                            .iter()
+                            .any(|item| item.kind == MediaKind::Audio && item.path == path)
+                    })
+                    || matches!(
+                        intent.action,
+                        Action::Open | Action::Window | Action::Tab | Action::RemoveHistory
+                    )
+                {
+                    return;
+                }
+            }
             Scope::Filmstrip if self.filmstrip_target(&path).is_none() => return,
             Scope::Filmstrip => {}
         }
-        if intent.scope == Scope::Filmstrip
+        if matches!(intent.scope, Scope::Filmstrip | Scope::Playlist)
             && self.current_source_deleted()
             && self.path.as_ref() == Some(&path)
             && !matches!(intent.action, Action::Open | Action::Copy)
@@ -177,7 +197,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Action::RemoveHistory if intent.scope == Scope::Gallery => self.handle_recent_action(
                 menu::RecentAction::Remove(path, towavue_runtime_windows::RecentKind::File),
             ),
-            Action::File(kind) if intent.scope == Scope::Filmstrip => {
+            Action::File(kind) if matches!(intent.scope, Scope::Filmstrip | Scope::Playlist) => {
                 self.begin_file_relocation_at(kind, path)
             }
             Action::Open if intent.scope == Scope::Filmstrip => {

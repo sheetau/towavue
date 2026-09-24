@@ -838,8 +838,8 @@ const COMMANDS: &[CommandDefinition] = &[
         "Cover window with media",
         VISUAL_MEDIA,
     ),
-    command(CommandId::SelectAll, "Select whole media", ANY_MEDIA),
-    command(CommandId::ClearSelection, "Clear selection", ANY_MEDIA),
+    command(CommandId::SelectAll, "Select all", ANY_MEDIA),
+    command(CommandId::ClearSelection, "Deselect all", ANY_MEDIA),
     command(CommandId::ZoomSelection, "Zoom to selection", VISUAL_MEDIA),
     command(
         CommandId::ToggleReadingMode,

@@ -30,6 +30,117 @@ fn access(node: egui::accesskit::NodeId, action: egui::accesskit::Action) -> egu
 }
 
 #[test]
+fn playlist_menu_routes_the_listed_file_without_switching_tracks() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "thumbnail_menu::tests::playlist_menu_routes_the_listed_file_without_switching_tracks",
+    ) else {
+        return;
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut app = Application::new(None, move |event| {
+        if matches!(event, AppEvent::FileOperationSource(..)) {
+            tx.send(event).expect("receiver");
+        }
+    })
+    .expect("app");
+    let current = root.join("current.wav");
+    let target = root.join("target.wav");
+    std::fs::write(&current, b"current owned audio source").expect("fixture");
+    std::fs::write(&target, b"target owned audio source").expect("fixture");
+    let tab = app.tabs.open_new(current.clone(), MediaKind::Audio);
+    app.path = Some(current.clone());
+    app.media_kind = Some(MediaKind::Audio);
+    app.state = PlaybackState::Playing;
+    let mut listing = snapshot(&root, &[current.clone(), target.clone()]);
+    for item in &mut listing.items {
+        item.kind = MediaKind::Audio;
+    }
+    app.folder_snapshot = Some(listing);
+    let owner = Owner {
+        tab,
+        instance: app.media_generation,
+    };
+    let intent = Intent {
+        owner: Some(owner),
+        scope: Scope::Playlist,
+        path: target.clone(),
+        action: Action::Copy,
+    };
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    let copied = context.run_ui(Default::default(), |_| {
+        app.handle_thumbnail_menu(intent.clone())
+    });
+    assert!(copied.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == &target.display().to_string())));
+    for action in [
+        Action::Open,
+        Action::Window,
+        Action::Tab,
+        Action::RemoveHistory,
+    ] {
+        app.handle_thumbnail_menu(Intent {
+            action,
+            ..intent.clone()
+        });
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        assert_eq!(app.tabs.tabs().len(), 1);
+        assert_eq!(app.path.as_ref(), Some(&current));
+    }
+    for kind in [
+        file_operations::Kind::Rename,
+        file_operations::Kind::Move,
+        file_operations::Kind::Delete,
+    ] {
+        app.handle_thumbnail_menu(Intent {
+            action: Action::File(kind),
+            ..intent.clone()
+        });
+        let pending = app
+            .file_operations
+            .pending
+            .as_ref()
+            .expect("shared native preparation");
+        assert_eq!(pending.path, target);
+        assert_eq!(pending.origin_path, current);
+        assert_eq!(pending.tab, tab);
+        assert_eq!(pending.kind, kind);
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(5))
+                .expect("preparation complete"),
+            AppEvent::FileOperationSource(_, Ok(_))
+        ));
+        app.file_operations.pending = None;
+        assert_eq!(app.state, PlaybackState::Playing);
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        assert_eq!(app.path.as_ref(), Some(&current));
+    }
+    for invalid in 0..4 {
+        let mut candidate = intent.clone();
+        candidate.action = Action::File(file_operations::Kind::Delete);
+        match invalid {
+            0 => {
+                candidate.owner = Some(Owner {
+                    instance: owner.instance + 1,
+                    ..owner
+                })
+            }
+            1 => candidate.path = root.join("unlisted.wav"),
+            2 => app.filmstrip_open = true,
+            _ => {
+                app.filmstrip_open = false;
+                app.folder_snapshot = None;
+            }
+        }
+        app.handle_thumbnail_menu(candidate);
+        assert!(app.file_operations.pending.is_none());
+    }
+    assert!(
+        current.is_file() && target.is_file(),
+        "preparation alone never mutates files"
+    );
+}
+
+#[test]
 fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions() {
     let Some(root) = crate::tests::isolated_test_root(
         "thumbnail_menu::tests::thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions",
@@ -37,13 +148,23 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
         return;
     };
     let paths = [root.join("current.png"), root.join("target.png")];
-    let listing = snapshot(&root, &paths);
     let mut tabs = TabSet::default();
     let owner = Owner {
         tab: tabs.open_new(paths[0].clone(), MediaKind::Image),
         instance: 7,
     };
-    for scope in [Scope::Gallery, Scope::Filmstrip] {
+    for scope in [Scope::Gallery, Scope::Filmstrip, Scope::Playlist] {
+        let paths = if scope == Scope::Playlist {
+            [root.join("current.wav"), root.join("target.wav")]
+        } else {
+            paths.clone()
+        };
+        let mut listing = snapshot(&root, &paths);
+        if scope == Scope::Playlist {
+            for item in &mut listing.items {
+                item.kind = MediaKind::Audio;
+            }
+        }
         let context = fonts::test_context();
         context.enable_accesskit();
         context.global_style_mut(chrome::style);
@@ -53,6 +174,7 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             || {},
         )
         .expect("strip");
+        let mut playlist = playlist::Playlist::default();
         let mut frame = |events, active_owner| {
             strip.menu_owner = Some(active_owner);
             let mut actions = Vec::new();
@@ -68,6 +190,20 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
                 |ui| match scope {
                     Scope::Gallery => {
                         strip.show_recent(ui, &paths, 1, true, &mut actions);
+                    }
+                    Scope::Playlist => {
+                        assert!(
+                            playlist
+                                .show_with_menu(
+                                    ui,
+                                    Some(&listing),
+                                    Some(&paths[0]),
+                                    true,
+                                    (Some(active_owner), &mut actions)
+                                )
+                                .is_none(),
+                            "context menu must not activate a row"
+                        );
                     }
                     Scope::Filmstrip => strip.show(
                         ui.ctx(),
@@ -94,6 +230,9 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             ("Copy file path", Action::Copy),
             ("Reveal in File Explorer", Action::Reveal),
         ];
+        if scope == Scope::Playlist {
+            choices.drain(..3);
+        }
         if scope == Scope::Gallery {
             choices.push(("Remove from history", Action::RemoveHistory));
         } else {
@@ -108,7 +247,14 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             let (target, node) = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("target.png"))
+                .find(|(_, node)| {
+                    node.label()
+                        == Some(if scope == Scope::Playlist {
+                            "2. target.wav"
+                        } else {
+                            "target.png"
+                        })
+                })
                 .expect("target thumbnail");
             let target = *target;
             if index == 0 {
@@ -153,7 +299,13 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
                 tree.nodes
                     .iter()
                     .any(|(_, n)| n.label() == Some("Delete file…")),
-                scope == Scope::Filmstrip
+                scope != Scope::Gallery
+            );
+            assert_eq!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("Open")),
+                scope != Scope::Playlist
             );
             let action = tree
                 .nodes
@@ -178,7 +330,14 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
         let target = tree
             .nodes
             .iter()
-            .find(|(_, n)| n.label() == Some("target.png"))
+            .find(|(_, n)| {
+                n.label()
+                    == Some(if scope == Scope::Playlist {
+                        "2. target.wav"
+                    } else {
+                        "target.png"
+                    })
+            })
             .expect("target")
             .0;
         frame(vec![access(target, egui::accesskit::Action::Focus)], owner);
@@ -196,7 +355,13 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             initial_menu
                 .nodes
                 .iter()
-                .any(|(id, node)| *id == initial_menu.focus && node.label() == Some("Open")),
+                .any(|(id, node)| *id == initial_menu.focus
+                    && node.label()
+                        == Some(if scope == Scope::Playlist {
+                            "Copy file path"
+                        } else {
+                            "Open"
+                        })),
             "keyboard menu initially selects Open"
         );
         frame(
@@ -209,7 +374,12 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
                 .nodes
                 .iter()
                 .any(|(id, node)| *id == menu_tree.focus
-                    && node.label() == Some("Open in new window")),
+                    && node.label()
+                        == Some(if scope == Scope::Playlist {
+                            "Reveal in File Explorer"
+                        } else {
+                            "Open in new window"
+                        })),
             "ArrowDown advances exactly one menu action"
         );
         frame(vec![key(egui::Key::Escape, egui::Modifiers::NONE)], owner);

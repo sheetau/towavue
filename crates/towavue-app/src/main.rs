@@ -97,6 +97,7 @@ mod thumbnail_menu;
 mod time_selection;
 mod timeline_edit;
 mod timeline_input;
+mod timeline_menu;
 mod track_drag;
 mod trim;
 #[cfg(test)]
@@ -316,6 +317,7 @@ enum UiAction {
     ScrubImage(PathBuf, u64, egui::Id),
     OpenGalleryBackground(PathBuf),
     ThumbnailMenu(thumbnail_menu::Intent),
+    TimelineMenu(timeline_menu::Intent),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
     OpenFilmstripWindow(PathBuf),
@@ -6737,6 +6739,7 @@ where
                         ));
                     }
                     self.draw_waveform_activity(ui, rect);
+                    self.draw_timeline_menu(ui, &response, actions);
                     return;
                 }
                 let enabled = !self.modal_input_blocked()
@@ -6788,6 +6791,7 @@ where
                     actions.push(UiAction::TimeAdjustment(tab.id, self.generation, self.time_selection, edit));
                 }
                 self.draw_waveform_activity(ui, rect);
+                self.draw_timeline_menu(ui, &response, actions);
             });
     }
 
@@ -6805,11 +6809,16 @@ where
             ui.disable();
             ui.set_opacity(opacity);
         }
-        if let Some(path) = self.playlist.show(
+        let owner = self.tabs.active_id().map(|tab| thumbnail_menu::Owner {
+            tab,
+            instance: self.media_generation,
+        });
+        if let Some(path) = self.playlist.show_with_menu(
             ui,
             self.folder_snapshot.as_ref(),
             self.path.as_deref(),
             enabled,
+            (owner, actions),
         ) {
             actions.push(UiAction::OpenMedia(path, false));
         }
@@ -7138,6 +7147,7 @@ where
             }
             UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::ThumbnailMenu(intent) => self.handle_thumbnail_menu(intent),
+            UiAction::TimelineMenu(intent) => self.handle_timeline_menu(intent),
             UiAction::RevealExport(shown) => {
                 if let Some(path) = self.export_notice_target(shown).map(Path::to_path_buf) {
                     self.reveal_path(path);

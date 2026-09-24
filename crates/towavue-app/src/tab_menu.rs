@@ -28,6 +28,16 @@ pub(crate) fn popup<A>(
     close: &egui::Response,
     contents: impl FnOnce(&mut egui::Ui) -> Option<A>,
 ) -> Option<(A, Option<egui::Id>)> {
+    popup_with_pointer(ui, response, close, false, contents)
+}
+
+pub(crate) fn popup_with_pointer<A>(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    close: &egui::Response,
+    pointer_clicked: bool,
+    contents: impl FnOnce(&mut egui::Ui) -> Option<A>,
+) -> Option<(A, Option<egui::Id>)> {
     let context = ui.ctx();
     let popup_id = egui::Popup::default_response_id(response);
     let was_open = egui::Popup::is_id_open(context, popup_id);
@@ -68,14 +78,14 @@ pub(crate) fn popup<A>(
             });
         });
         context.data_mut(|data| data.insert_temp(anchor_id, origin.id));
-    } else if response.secondary_clicked() {
+    } else if response.secondary_clicked() || (eligible && pointer_clicked) {
         response.surrender_focus();
         close.surrender_focus();
         context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
     }
     let keyboard_origin = context.data(|data| data.get_temp::<egui::Id>(anchor_id));
     let mut popup = egui::Popup::context_menu(response);
-    if origin.is_some() {
+    if origin.is_some() || (eligible && pointer_clicked) {
         popup = popup.open_memory(egui::SetOpenCommand::Bool(true));
     }
     if keyboard_origin.is_some() {

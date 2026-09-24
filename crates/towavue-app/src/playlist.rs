@@ -76,12 +76,27 @@ impl Playlist {
         self.durations.insert(request.path, duration);
     }
 
+    #[cfg(test)]
     pub fn show(
         &mut self,
         ui: &mut egui::Ui,
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
         allow_wheel: bool,
+    ) -> Option<PathBuf> {
+        self.show_with_menu(ui, snapshot, current, allow_wheel, (None, &mut Vec::new()))
+    }
+
+    pub fn show_with_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        snapshot: Option<&FolderSnapshot>,
+        current: Option<&Path>,
+        allow_wheel: bool,
+        menu: (
+            Option<crate::thumbnail_menu::Owner>,
+            &mut Vec<crate::UiAction>,
+        ),
     ) -> Option<PathBuf> {
         let mut chosen = None;
         self.scroll_rect = None;
@@ -298,6 +313,14 @@ impl Playlist {
                                     .unwrap_or_default()
                             ));
                         });
+                        crate::thumbnail_menu::show(
+                            ui,
+                            &response,
+                            &item.path,
+                            crate::thumbnail_menu::Scope::Playlist,
+                            menu.0,
+                            menu.1,
+                        );
                         if response.clicked() {
                             chosen = Some(item.path.clone());
                         }

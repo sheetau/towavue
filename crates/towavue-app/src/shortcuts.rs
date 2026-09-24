@@ -7,7 +7,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v10";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v11";
+const VOLUME_BINDING_HEADER: &str = "# towavue shortcuts v10";
 const ZOOM_BINDING_HEADER: &str = "# towavue shortcuts v9";
 const EDITOR_BINDING_HEADER: &str = "# towavue shortcuts v8";
 
@@ -176,6 +177,7 @@ pub fn defaults() -> ShortcutBindings {
         );
     }
     for (command, key) in [
+        (CommandId::ClearSelection, "Ctrl+Shift+A"),
         (CommandId::VolumeUp, "Ctrl+Up"),
         (CommandId::VolumeDown, "Ctrl+Down"),
         (CommandId::ZoomIn, "="),
@@ -201,9 +203,14 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
     let text = text.trim_start_matches('\u{feff}');
-    let volume_bindings = text
+    let selection_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let volume_bindings = selection_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == VOLUME_BINDING_HEADER);
+    let mut implicit_deselect = true;
     let zoom_bindings =
         volume_bindings || text.lines().any(|line| line.trim() == ZOOM_BINDING_HEADER);
     let mut implicit_volume =
@@ -259,6 +266,9 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             if command == CommandId::ZoomIn {
                 implicit_zoom = false;
             }
+            if command == CommandId::ClearSelection {
+                implicit_deselect = false;
+            }
             if command == CommandId::ToggleFullscreen {
                 implicit_fullscreen = false;
             }
@@ -282,6 +292,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 && sequences.len() == 1
                 && standard.get(command) == sequences.first();
         }
+        if command == CommandId::ClearSelection {
+            implicit_deselect = !selection_bindings
+                && sequences.len() == 1
+                && standard.get(command) == sequences.first();
+        }
         if command == CommandId::ZoomIn {
             implicit_zoom = !zoom_bindings
                 && sequences.len() == 1
@@ -295,6 +310,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             implicit_volume.remove(&command);
         }
         let inherit = (implicit_volume.contains(&command)
+            || command == CommandId::ClearSelection && implicit_deselect
             || legacy
                 && matches!(
                     command,
@@ -423,6 +439,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
+                || definition.id == CommandId::ClearSelection && implicit_deselect
                 || implicit_volume.contains(&definition.id)
         })
     {
@@ -458,6 +475,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                     return true;
                 }
                 if definition.id == CommandId::ZoomIn && candidate.to_string() != "=" {
+                    return true;
+                }
+                if definition.id == CommandId::ClearSelection
+                    && candidate.to_string() != "Ctrl+Shift+A"
+                {
                     return true;
                 }
                 !towavue_core::command_definitions().iter().any(|other| {
@@ -507,6 +529,64 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deselect_alternative_migrates_without_overriding_custom_keys() {
+        let alternative: KeySequence = "Ctrl+Shift+A".parse().expect("key");
+        for header in ["", VOLUME_BINDING_HEADER, CURRENT_BINDING_HEADER] {
+            let missing = parse(&format!("{header}\n"), defaults()).expect("settings");
+            assert!(
+                missing
+                    .all(CommandId::ClearSelection)
+                    .contains(&alternative)
+            );
+            for custom in ["Ctrl+Shift+A", "Ctrl+Shift+A X"] {
+                let preserved = parse(&format!("{header}\nopen_file = {custom}\n"), defaults())
+                    .expect("settings");
+                assert_eq!(
+                    preserved.all(CommandId::ClearSelection),
+                    &["Escape".parse().expect("key")]
+                );
+            }
+            for value in ["", "Alt+A"] {
+                let explicit = parse(
+                    &format!("{header}\nclear_selection = {value}\n"),
+                    defaults(),
+                )
+                .expect("settings");
+                assert!(
+                    !explicit
+                        .all(CommandId::ClearSelection)
+                        .contains(&alternative)
+                );
+                assert_eq!(
+                    parse(&serialize(&explicit), defaults()).expect("roundtrip"),
+                    explicit
+                );
+            }
+        }
+        for header in ["", VOLUME_BINDING_HEADER, CURRENT_BINDING_HEADER] {
+            let binding = parse(&format!("{header}\nclear_selection = Escape\n"), defaults())
+                .expect("settings");
+            assert_eq!(
+                binding
+                    .all(CommandId::ClearSelection)
+                    .contains(&alternative),
+                header != CURRENT_BINDING_HEADER
+            );
+        }
+        for kind in [MediaKind::Image, MediaKind::Audio, MediaKind::Video] {
+            let context = CommandContext {
+                media_kind: Some(kind),
+                timeline_open: true,
+                has_time_selection: true,
+                ..Default::default()
+            };
+            assert_eq!(
+                defaults().resolve(alternative.strokes(), context),
+                ShortcutMatch::Command(CommandId::ClearSelection)
+            );
+        }
+    }
 
     #[test]
     fn volume_alternatives_migrate_without_overriding_custom_keys() {

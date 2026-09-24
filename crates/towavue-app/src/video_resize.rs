@@ -1,5 +1,7 @@
+use crate::localization::{Language, Text, language};
 use crate::*;
 use towavue_core::VideoResize;
+use towavue_core::localization::formatted;
 
 pub(super) struct VideoResizeDialog {
     token: u64,
@@ -8,11 +10,16 @@ pub(super) struct VideoResizeDialog {
 }
 
 impl VideoResizeDialog {
+    #[cfg(test)]
     fn value(&self) -> Result<VideoResize, String> {
+        self.value_in(Language::English)
+    }
+
+    fn value_in(&self, display_language: Language) -> Result<VideoResize, String> {
         let dimensions = self
             .inputs
             .value()
-            .ok_or("Use even dimensions from 16 to 16384 pixels, up to 128 Mi pixels")?;
+            .ok_or(Text::VideoResizeLimits.in_language(display_language))?;
         let geometry = self.snapshot.geometry;
         let value = VideoResize::new(
             dimensions.size(),
@@ -20,39 +27,71 @@ impl VideoResizeDialog {
             (geometry.0, geometry.1),
             geometry.2,
         )
-        .ok_or("Use even dimensions from 16 to 16384 pixels")?;
+        .ok_or(Text::VideoResizeEven.in_language(display_language))?;
         self.snapshot.validate(EditOperation::ResizeVideo(value))?;
         Ok(value)
     }
 
     fn show(&mut self, context: &egui::Context) -> Option<Option<VideoResize>> {
+        let display_language = language(context);
         let mut action = None;
         let id = egui::Id::new("resize-video");
         let modal = chrome::modal(context, id, true).show(context, |ui| {
-            let value = chrome::modal_body(ui, 360.0, "Resize / resample video", &["Apply resize", "Cancel"], |ui| {
-                        ui.label("Preview on the video. Apply adds one undoable edit.");
-                        self.inputs.controls(ui);
-                        let value = self.value();
-                        match &value {
-                            Ok(value) => {
-                                ui.label(format!("{} x {} square pixels — ratio {:.4}:1{}",
-                                    value.size().0, value.size().1,
-                                    f64::from(value.size().0) / f64::from(value.size().1),
-                                    if value.is_identity() { " — no edit" } else { "" }));
-                            }
-                            Err(error) => { ui.label(error); }
+            let value = chrome::modal_body(
+                ui,
+                360.0,
+                Text::CommandResizeVideo.in_language(display_language),
+                &[
+                    Text::ApplyResize.in_language(display_language),
+                    Text::Cancel.in_language(display_language),
+                ],
+                |ui| {
+                    ui.label(Text::VideoEditPreview.in_language(display_language));
+                    self.inputs.controls(ui);
+                    let value = self.value_in(display_language);
+                    match &value {
+                        Ok(value) => {
+                            ui.label(formatted::video_resize_size(
+                                display_language,
+                                value.size().0,
+                                value.size().1,
+                                f64::from(value.size().0) / f64::from(value.size().1),
+                                if value.is_identity() {
+                                    Text::NoEditSuffix.in_language(display_language)
+                                } else {
+                                    ""
+                                },
+                            ));
                         }
-                        ui.label("Even dimensions; linked edge rounds to 2 pixels. Export encoding may differ.");
-                value
+                        Err(error) => {
+                            ui.label(error);
+                        }
+                    }
+                    ui.label(Text::VideoResizePreview.in_language(display_language));
+                    value
+                },
+            );
+            ui.horizontal_wrapped(|ui| {
+                crate::chrome::flat_buttons(ui);
+                if self
+                    .inputs
+                    .reveal_focus(ui.add_enabled(
+                        value.is_ok(),
+                        egui::Button::new(Text::ApplyResize.in_language(display_language)),
+                    ))
+                    .clicked()
+                {
+                    action = Some(value.ok());
+                }
+                if self
+                    .inputs
+                    .reveal_focus(ui.button(Text::Cancel.in_language(display_language)))
+                    .clicked()
+                {
+                    action = Some(None);
+                }
             });
-                        ui.horizontal_wrapped(|ui| {
-                            crate::chrome::flat_buttons(ui);
-                            if self.inputs.reveal_focus(ui.add_enabled(value.is_ok(), egui::Button::new("Apply resize"))).clicked() {
-                                action = Some(value.ok());
-                            }
-                            if self.inputs.reveal_focus(ui.button("Cancel")).clicked() { action = Some(None); }
-                        });
-            });
+        });
         if modal.is_top_modal
             && !modal.any_popup_open
             && context
@@ -104,7 +143,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|dialog| !self.video_edit_is_current(&dialog.snapshot))
         {
             self.video_resize_dialog = None;
-            self.set_status("Resize cancelled because the video changed".into());
+            self.set_status(Text::ResizeVideoChanged.in_language(self.language()).into());
         }
     }
 
@@ -139,7 +178,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             {
                 self.push_visual_edit(EditOperation::ResizeVideo(value));
             } else {
-                self.set_status("Resize cancelled because the video changed".into());
+                self.set_status(Text::ResizeVideoChanged.in_language(self.language()).into());
             }
         }
         self.request_redraw();
@@ -148,7 +187,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn video_resize_preview(&self) -> Option<VideoResize> {
         let dialog = self.video_resize_dialog.as_ref()?;
         self.video_edit_is_current(&dialog.snapshot)
-            .then(|| dialog.value().ok())
+            .then(|| dialog.value_in(self.language()).ok())
             .flatten()
             .filter(|value| !value.is_identity())
     }

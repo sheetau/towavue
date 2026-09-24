@@ -2,6 +2,56 @@ use super::*;
 use crate::audio_export_tests::drain_export;
 use std::os::windows::process::CommandExt;
 
+#[test]
+fn japanese_audio_options_choose_the_same_encoder_settings_and_keep_compact_actions_visible() {
+    use crate::localization::test_ui as ui;
+    for density in [1.0, 1.25, 2.0] {
+        let context = ui::japanese_context(density);
+        let mut tabs = TabSet::default();
+        let source = PathBuf::from("fixture.wav");
+        let mut dialog = AudioExportDialog {
+            token: 1,
+            tab: tabs.open_new(source.clone(), MediaKind::Audio),
+            source,
+            kind: MediaKind::Audio,
+            generation: 0,
+            options: AudioExportOptions::default(),
+            first_frame: true,
+            focused_option: None,
+        };
+        let size = egui::vec2(640.0, 700.0);
+        for label in ["ピーク（-1 dBFS）", "モノラル"] {
+            let output = ui::settle(&context, size, |context| dialog.show(context));
+            assert!(
+                ui::frame(
+                    &context,
+                    size,
+                    vec![ui::action(&output, label, None)],
+                    |context| dialog.show(context)
+                )
+                .1
+                .is_empty()
+            );
+        }
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "設定を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        let actions = ui::frame(
+            &context,
+            compact,
+            vec![ui::action(&output, "設定を適用", None)],
+            |context| dialog.show(context),
+        )
+        .1;
+        assert_eq!(actions, [Some(setting())]);
+        assert_eq!(
+            summary(setting(), Language::Japanese),
+            "ピーク -1 dBFS / モノラル"
+        );
+    }
+}
+
 pub(crate) fn setting() -> AudioExportOptions {
     AudioExportOptions {
         normalization: towavue_runtime_windows::AudioNormalization::Peak,
@@ -763,7 +813,7 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
             vec![access(node(&tree, "Apply options"), None)],
         );
         assert_eq!(app.audio_export_settings.get(&tab), Some(&expected));
-        assert!(summary(expected).contains("-18.5 LUFS / max -2.3 dBTP"));
+        assert!(summary(expected, Language::English).contains("-18.5 LUFS / max -2.3 dBTP"));
         assert!(
             app.edits
                 .get(&tab)

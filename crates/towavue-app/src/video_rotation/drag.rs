@@ -58,6 +58,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             };
             self.video_rotation_drag = Some(VideoRotationDrag { preview, origin });
         }
+        let display_language = self.language();
         let drag = self
             .video_rotation_drag
             .as_mut()
@@ -71,16 +72,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .clamp(-1800.0, 1800.0) as i16;
             drag.preview.angle = format!("{:.1}", f32::from(tenths) / 10.0);
         }
-        let value = drag.preview.value();
+        let value = drag.preview.value_in(display_language);
         response
             .clone()
             .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
         ui.put(
-            egui::Rect::from_min_size(ui.max_rect().min + egui::vec2(8.0, 8.0), egui::vec2((ui.max_rect().width() - 16.0).max(1.0), 48.0)),
+            egui::Rect::from_min_size(
+                ui.max_rect().min + egui::vec2(8.0, 8.0),
+                egui::vec2((ui.max_rect().width() - 16.0).max(1.0), 48.0),
+            ),
             egui::Label::new(match &value {
-                Ok(value) => format!("Rotation: {:.1} degrees · Release mouse to apply; release Alt or press Escape to cancel", f32::from(value.tenths()) / 10.0),
-                Err(error) => format!("{error} · Preview unchanged; release cancels"),
-            }).wrap(),
+                Ok(value) => formatted::rotation_drag(
+                    display_language,
+                    f32::from(value.tenths()) / 10.0,
+                    Text::RotationDragApplyHelp.in_language(display_language),
+                ),
+                Err(error) => formatted::rotation_drag_invalid(display_language, error),
+            })
+            .wrap(),
         );
         if input.release.is_some() {
             let drag = self
@@ -89,7 +98,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .expect("released video rotation");
             if input.released_with_alt {
                 if let Err(error) = &value {
-                    self.set_status(format!("Rotation cancelled: {error}"));
+                    self.set_status(formatted::rotation_cancelled(display_language, error));
                 }
                 self.commit_video_rotation(drag.preview, value.ok());
             } else {

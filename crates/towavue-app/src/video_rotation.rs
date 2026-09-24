@@ -1,5 +1,7 @@
+use crate::localization::{Language, Text, language};
 use crate::*;
 use towavue_core::VideoRotation;
+use towavue_core::localization::formatted;
 #[cfg(test)]
 use towavue_runtime_windows::VideoOrientation;
 use towavue_runtime_windows::video_edit_geometry;
@@ -15,20 +17,25 @@ pub(super) struct VideoRotationDialog {
 }
 
 impl VideoRotationDialog {
+    #[cfg(test)]
     fn value(&self) -> Result<VideoRotation, String> {
+        self.value_in(Language::English)
+    }
+
+    fn value_in(&self, display_language: Language) -> Result<VideoRotation, String> {
         let angle = self
             .angle
             .trim()
             .parse::<f64>()
             .ok()
             .filter(|angle| angle.is_finite() && (-180.0..=180.0).contains(angle))
-            .ok_or("Use a finite angle from -180 to 180 degrees")?;
+            .ok_or(Text::FiniteRotationAngle.in_language(display_language))?;
         let value = VideoRotation::new(
             (angle * 10.0).round() as i16,
             (self.snapshot.geometry.0, self.snapshot.geometry.1),
             self.snapshot.geometry.2,
         )
-        .ok_or("The rotated canvas exceeds the image size limit")?;
+        .ok_or(Text::RotatedCanvasLimit.in_language(display_language))?;
         if value.tenths() != 0 {
             self.snapshot.validate(EditOperation::RotateVideo(value))?;
         }
@@ -36,6 +43,7 @@ impl VideoRotationDialog {
     }
 
     fn show(&mut self, context: &egui::Context) -> Option<Option<VideoRotation>> {
+        let display_language = language(context);
         let previous_angle = self.angle.clone();
         let mut action = None;
         let id = egui::Id::new("free-rotate-video");
@@ -43,13 +51,19 @@ impl VideoRotationDialog {
             let value = chrome::modal_body(
                 ui,
                 340.0,
-                "Free rotate video",
-                &["Apply rotation", "Cancel"],
+                Text::CommandFreeRotateVideo.in_language(display_language),
+                &[
+                    Text::ApplyRotation.in_language(display_language),
+                    Text::Cancel.in_language(display_language),
+                ],
                 |ui| {
-                    ui.label("Preview on the video. Apply adds one undoable edit.");
-                    ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
-                    let response =
-                        resize::text_input(ui, "Video rotation angle in degrees", &mut self.angle);
+                    ui.label(Text::VideoEditPreview.in_language(display_language));
+                    ui.label(Text::RotationAngleHelp.in_language(display_language));
+                    let response = resize::text_input(
+                        ui,
+                        Text::VideoRotationAngleInput.in_language(display_language),
+                        &mut self.angle,
+                    );
                     if self.first_frame {
                         response.request_focus();
                         self.first_frame = false;
@@ -67,13 +81,13 @@ impl VideoRotationDialog {
                             egui::Slider::new(&mut degrees, -180.0..=180.0)
                                 .step_by(0.1)
                                 .show_value(false)
-                                .text("Video rotation angle"),
+                                .text(Text::VideoRotationAngle.in_language(display_language)),
                         )
                         .changed()
                     {
                         self.angle = format!("{degrees:.1}");
                     }
-                    let value = self.value();
+                    let value = self.value_in(display_language);
                     match &value {
                         Ok(value) if value.tenths() == 0 => {
                             ui.label("0 degrees — no edit or pixel-aspect change");
@@ -83,30 +97,36 @@ impl VideoRotationDialog {
                                 .snapshot
                                 .geometry_with(EditOperation::RotateVideo(*value))
                                 .expect("validated rotation");
-                            ui.label(format!(
-                                "{:.1} degrees — {} x {} pixels",
+                            ui.label(formatted::rotation_size(
+                                display_language,
                                 f64::from(value.tenths()) / 10.0,
                                 size.0,
-                                size.1
+                                size.1,
                             ));
                         }
                         Err(error) => {
                             ui.label(error);
                         }
                     }
-                    ui.label("Black canvas; resampled on the GPU. Export encoding may differ.");
+                    ui.label(Text::VideoRotationPreview.in_language(display_language));
                     value
                 },
             );
             ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
                 if ui
-                    .add_enabled(value.is_ok(), egui::Button::new("Apply rotation"))
+                    .add_enabled(
+                        value.is_ok(),
+                        egui::Button::new(Text::ApplyRotation.in_language(display_language)),
+                    )
                     .clicked()
                 {
                     action = Some(value.ok());
                 }
-                if ui.button("Cancel").clicked() {
+                if ui
+                    .button(Text::Cancel.in_language(display_language))
+                    .clicked()
+                {
                     action = Some(None);
                 }
             });
@@ -149,14 +169,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let session = self
             .session
             .as_ref()
-            .ok_or("Wait for video to load before editing")?;
+            .ok_or(Text::WaitVideoEdit.in_language(self.language()))?;
         let (width, height, aspect) = session
             .video_geometry()
-            .ok_or("Wait for a video frame before editing")?;
+            .ok_or(Text::WaitVideoFrameEdit.in_language(self.language()))?;
         let max_side = self
             .renderer
             .as_ref()
-            .ok_or("Video renderer is unavailable")?
+            .ok_or(Text::VideoRendererUnavailable.in_language(self.language()))?
             .max_texture_side();
         video_edit_geometry(
             (width, height),
@@ -197,7 +217,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         };
         dialog.angle = if clockwise { "5.0" } else { "-5.0" }.into();
-        match dialog.value() {
+        match dialog.value_in(self.language()) {
             Ok(value) => self.commit_video_rotation(dialog, Some(value)),
             Err(error) => self.set_status(error),
         }
@@ -232,7 +252,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|dialog| !self.video_rotation_is_current(dialog))
         {
             self.video_rotation_dialog = None;
-            self.set_status("Rotation cancelled because the video changed".into());
+            self.set_status(
+                Text::RotationVideoChanged
+                    .in_language(self.language())
+                    .into(),
+            );
         }
     }
 
@@ -268,7 +292,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             {
                 self.push_visual_edit(EditOperation::RotateVideo(value));
             } else {
-                self.set_status("Rotation cancelled because the video changed".into());
+                self.set_status(
+                    Text::RotationVideoChanged
+                        .in_language(self.language())
+                        .into(),
+                );
             }
         }
         self.request_redraw();
@@ -287,7 +315,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .as_ref()
             .or_else(|| self.video_rotation_drag.as_ref().map(|drag| &drag.preview))
             && self.video_rotation_is_current(dialog)
-            && let Ok(value) = dialog.value()
+            && let Ok(value) = dialog.value_in(self.language())
             && value.tenths() != 0
         {
             operations.push(EditOperation::RotateVideo(value));

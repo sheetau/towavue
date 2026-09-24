@@ -1,4 +1,6 @@
+use crate::localization::{Language, Text, language};
 use crate::*;
+use towavue_core::localization::formatted;
 use towavue_runtime_windows::{AudioChannels, AudioNormalization, LoudnessTarget};
 
 pub(super) struct AudioExportDialog {
@@ -12,22 +14,24 @@ pub(super) struct AudioExportDialog {
     focused_option: Option<egui::Id>,
 }
 
-pub(super) fn summary(options: AudioExportOptions) -> String {
+pub(super) fn summary(options: AudioExportOptions, display_language: Language) -> String {
     let normalization = match options.normalization {
-        AudioNormalization::Off => "Normalization off".into(),
-        AudioNormalization::Peak => "Peak -1 dBFS".into(),
-        AudioNormalization::Loudness(target) => format!(
-            "{:.1} LUFS / max {:.1} dBTP",
+        AudioNormalization::Off => Text::NormalizationOff.in_language(display_language).into(),
+        AudioNormalization::Peak => Text::NormalizationPeakSummary
+            .in_language(display_language)
+            .into(),
+        AudioNormalization::Loudness(target) => formatted::loudness_summary(
+            display_language,
             f64::from(target.integrated_tenths) / 10.0,
-            f64::from(target.true_peak_tenths) / 10.0
+            f64::from(target.true_peak_tenths) / 10.0,
         ),
     };
     format!(
         "{normalization} / {}",
         match options.channels {
-            AudioChannels::Keep => "Keep channels",
-            AudioChannels::Mono => "Mono",
-            AudioChannels::Stereo => "Stereo",
+            AudioChannels::Keep => Text::KeepChannels.in_language(display_language),
+            AudioChannels::Mono => Text::Mono.in_language(display_language),
+            AudioChannels::Stereo => Text::Stereo.in_language(display_language),
         }
     )
 }
@@ -65,6 +69,7 @@ fn target_control(
 
 impl AudioExportDialog {
     fn show(&mut self, context: &egui::Context) -> Option<Option<AudioExportOptions>> {
+        let display_language = language(context);
         let mut action = None;
         let mut focused_option = None;
         let mut reveal_focus = |response: &egui::Response| {
@@ -77,40 +82,104 @@ impl AudioExportDialog {
                 }
             }
         };
-        let modal = chrome::modal(context, "audio-export-options".into(), false).show(context, |ui| {
-            chrome::modal_body(ui, 340.0, "Audio export options", &["Apply options", "Cancel"], |ui| {
-                ui.label("Normalization");
-                for (value, label) in [
-                    (AudioNormalization::Off, "Off"),
-                    (AudioNormalization::Peak, "Peak (-1 dBFS)"),
-                    (AudioNormalization::Loudness(match self.options.normalization { AudioNormalization::Loudness(target) => target, _ => LoudnessTarget::default() }), "Loudness"),
-                ] {
-                    let response = ui.radio_value(&mut self.options.normalization, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
-                    if self.first_frame { response.request_focus(); self.first_frame = false; }
-                    reveal_focus(&response);
-                }
-                if let AudioNormalization::Loudness(target) = &mut self.options.normalization {
-                    reveal_focus(&target_control(ui, &mut target.integrated_tenths, -700..=-50, "Integrated loudness (LUFS)"));
-                    reveal_focus(&target_control(ui, &mut target.true_peak_tenths, -90..=0, "Maximum true peak (dBTP)"));
-                    ui.label("Encoded audio is checked within 0.1 LU of the target and below the true-peak ceiling. Correction can require additional passes. Unmeasurable audio or an unmet target fails without replacing the destination.");
-                }
-                ui.label("Output channels");
-                for (value, label) in [(AudioChannels::Keep, "Keep source channels"), (AudioChannels::Mono, "Mono"), (AudioChannels::Stereo, "Stereo")] {
-                    let response = ui.radio_value(&mut self.options.channels, value, label).on_hover_cursor(egui::CursorIcon::PointingHand);
-                    reveal_focus(&response);
-                }
-                crate::chrome::separator(ui);
-                ui.label("Applies to the next Save, Save as and Export audio only for this tab's current file. Playback and edit history stay unchanged.");
-                ui.label("Peak applies one common gain to reach -1 dBFS sample peak; lossy encoding may change peaks. Loudness analyzes edited audio after channel conversion, preserves dynamics when gain alone fits, and otherwise limits peaks without imposing a fixed loudness range. Normalization can override overall volume edits.");
-                ui.label("Mono averages left/right; Stereo duplicates mono. Conversion requires a mono or stereo input; use Keep for multichannel audio. The source must contain audio.");
-                ui.label("Settings last while this file stays in this tab. Apply does not export a file.");
+        let modal =
+            chrome::modal(context, "audio-export-options".into(), false).show(context, |ui| {
+                chrome::modal_body(
+                    ui,
+                    340.0,
+                    Text::CommandAudioExportOptions.in_language(display_language),
+                    &[
+                        Text::ApplyOptions.in_language(display_language),
+                        Text::Cancel.in_language(display_language),
+                    ],
+                    |ui| {
+                        ui.label(Text::Normalization.in_language(display_language));
+                        for (value, label) in [
+                            (
+                                AudioNormalization::Off,
+                                Text::RepeatOff.in_language(display_language),
+                            ),
+                            (
+                                AudioNormalization::Peak,
+                                Text::NormalizationPeak.in_language(display_language),
+                            ),
+                            (
+                                AudioNormalization::Loudness(match self.options.normalization {
+                                    AudioNormalization::Loudness(target) => target,
+                                    _ => LoudnessTarget::default(),
+                                }),
+                                Text::Loudness.in_language(display_language),
+                            ),
+                        ] {
+                            let response = ui
+                                .radio_value(&mut self.options.normalization, value, label)
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            if self.first_frame {
+                                response.request_focus();
+                                self.first_frame = false;
+                            }
+                            reveal_focus(&response);
+                        }
+                        if let AudioNormalization::Loudness(target) =
+                            &mut self.options.normalization
+                        {
+                            reveal_focus(&target_control(
+                                ui,
+                                &mut target.integrated_tenths,
+                                -700..=-50,
+                                Text::IntegratedLoudness.in_language(display_language),
+                            ));
+                            reveal_focus(&target_control(
+                                ui,
+                                &mut target.true_peak_tenths,
+                                -90..=0,
+                                Text::MaximumTruePeak.in_language(display_language),
+                            ));
+                            ui.label(Text::LoudnessVerificationHelp.in_language(display_language));
+                        }
+                        ui.label(Text::OutputChannels.in_language(display_language));
+                        for (value, label) in [
+                            (
+                                AudioChannels::Keep,
+                                Text::KeepSourceChannels.in_language(display_language),
+                            ),
+                            (
+                                AudioChannels::Mono,
+                                Text::Mono.in_language(display_language),
+                            ),
+                            (
+                                AudioChannels::Stereo,
+                                Text::Stereo.in_language(display_language),
+                            ),
+                        ] {
+                            let response = ui
+                                .radio_value(&mut self.options.channels, value, label)
+                                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                            reveal_focus(&response);
+                        }
+                        crate::chrome::separator(ui);
+                        ui.label(Text::AudioOptionsScope.in_language(display_language));
+                        ui.label(Text::NormalizationHelp.in_language(display_language));
+                        ui.label(Text::ChannelConversionHelp.in_language(display_language));
+                        ui.label(Text::AudioOptionsLifetime.in_language(display_language));
+                    },
+                );
+                ui.horizontal_wrapped(|ui| {
+                    crate::chrome::flat_buttons(ui);
+                    if ui
+                        .button(Text::ApplyOptions.in_language(display_language))
+                        .clicked()
+                    {
+                        action = Some(Some(self.options));
+                    }
+                    if ui
+                        .button(Text::Cancel.in_language(display_language))
+                        .clicked()
+                    {
+                        action = Some(None);
+                    }
+                });
             });
-            ui.horizontal_wrapped(|ui| {
-                crate::chrome::flat_buttons(ui);
-                if ui.button("Apply options").clicked() { action = Some(Some(self.options)); }
-                if ui.button("Cancel").clicked() { action = Some(None); }
-            });
-        });
         self.focused_option = focused_option;
         if modal.is_top_modal
             && !modal.any_popup_open
@@ -132,7 +201,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if self.active_export.is_some() {
             self.set_status(
-                "Wait for the current export or cancel it before changing export options.".into(),
+                Text::WaitExportForAudioOptions
+                    .in_language(self.language())
+                    .into(),
             );
             return;
         }
@@ -183,7 +254,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|dialog| !self.audio_export_dialog_is_current(dialog))
         {
             self.audio_export_dialog = None;
-            self.set_status("Audio export options cancelled because the source changed.".into());
+            self.set_status(
+                Text::AudioOptionsSourceChanged
+                    .in_language(self.language())
+                    .into(),
+            );
         }
     }
 
@@ -222,13 +297,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 } else {
                     self.audio_export_settings.insert(dialog.tab, value);
                 }
-                self.set_status(format!(
-                    "Next export: {}. Playback and edits unchanged.",
-                    summary(value)
+                self.set_status(formatted::next_audio_export(
+                    self.language(),
+                    &summary(value, self.language()),
                 ));
             } else {
                 self.set_status(
-                    "Audio export options cancelled because the source changed.".into(),
+                    Text::AudioOptionsSourceChanged
+                        .in_language(self.language())
+                        .into(),
                 );
             }
         }

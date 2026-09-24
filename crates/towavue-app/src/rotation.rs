@@ -1,5 +1,7 @@
+use crate::localization::{Text, language};
 use crate::*;
 use towavue_core::ImageRotation;
+use towavue_core::localization::formatted;
 
 mod drag;
 pub(super) use drag::{RotationDrag, RotationResponse, rotation_input};
@@ -45,20 +47,27 @@ impl RotationDialog {
     }
 
     pub(super) fn show(&mut self, context: &egui::Context) -> Option<Option<ImageRotation>> {
+        let display_language = language(context);
         let previous_angle = self.angle.clone();
         let mut action = None;
         let modal = chrome::modal(context, "free-rotate-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
                 420.0,
-                "Free rotate image",
-                &["Apply rotation", "Cancel"],
+                Text::CommandFreeRotateImage.in_language(display_language),
+                &[
+                    Text::ApplyRotation.in_language(display_language),
+                    Text::Cancel.in_language(display_language),
+                ],
                 |ui| {
-                    ui.label("Preview on the image. Apply adds one undoable edit.");
-                    ui.label("Tip: hold Alt and drag horizontally on the image.");
-                    ui.label("Angle in degrees (clockwise, 0.1 degree steps)");
-                    let response =
-                        resize::text_input(ui, "Rotation angle in degrees", &mut self.angle);
+                    ui.label(Text::ImageEditPreview.in_language(display_language));
+                    ui.label(Text::RotateDragTip.in_language(display_language));
+                    ui.label(Text::RotationAngleHelp.in_language(display_language));
+                    let response = resize::text_input(
+                        ui,
+                        Text::RotationAngleInput.in_language(display_language),
+                        &mut self.angle,
+                    );
                     if self.first_frame {
                         response.request_focus();
                         self.first_frame = false;
@@ -71,7 +80,7 @@ impl RotationDialog {
                             egui::Slider::new(&mut degrees, -180.0..=180.0)
                                 .step_by(0.1)
                                 .show_value(false)
-                                .text("Rotation angle"),
+                                .text(Text::RotationAngle.in_language(display_language)),
                         )
                         .changed()
                     {
@@ -80,18 +89,15 @@ impl RotationDialog {
                     let value = self.value();
                     if let Some(value) = value {
                         let size = self.result_size(value);
-                        ui.label(format!(
-                            "{:.1} degrees — {} x {} pixels",
+                        ui.label(formatted::rotation_size(
+                            display_language,
                             f64::from(value.tenths()) / 10.0,
                             size.0,
                             size.1,
                         ));
-                        ui.label("Placement preview; final pixels are resampled on Apply.");
+                        ui.label(Text::RotationPlacementPreview.in_language(display_language));
                     } else {
-                        ui.label(concat!(
-                            "Use -180 to 180 degrees; the canvas must fit ",
-                            "16384 pixels per side and 128 Mi pixels.",
-                        ));
+                        ui.label(Text::ImageRotationLimits.in_language(display_language));
                     }
                     value
                 },
@@ -99,12 +105,18 @@ impl RotationDialog {
             ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
                 if ui
-                    .add_enabled(value.is_some(), egui::Button::new("Apply rotation"))
+                    .add_enabled(
+                        value.is_some(),
+                        egui::Button::new(Text::ApplyRotation.in_language(display_language)),
+                    )
                     .clicked()
                 {
                     action = Some(value);
                 }
-                if ui.button("Cancel").clicked() {
+                if ui
+                    .button(Text::Cancel.in_language(display_language))
+                    .clicked()
+                {
                     action = Some(None);
                 }
             });
@@ -164,12 +176,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         let Some(mut dialog) = self.capture_rotation() else {
-            self.set_status("Wait for the full image to load before rotating".into());
+            self.set_status(Text::WaitImageRotate.in_language(self.language()).into());
             return;
         };
         dialog.angle = if clockwise { "5.0" } else { "-5.0" }.into();
         let Some(value) = dialog.value() else {
-            self.set_status("The rotated canvas exceeds the image size limit".into());
+            self.set_status(Text::RotatedCanvasLimit.in_language(self.language()).into());
             return;
         };
         self.commit_rotation(dialog, Some(value));
@@ -177,7 +189,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn open_rotation(&mut self) {
         let Some(dialog) = self.capture_rotation() else {
-            self.set_status("Wait for the full image to load before rotating".into());
+            self.set_status(Text::WaitImageRotate.in_language(self.language()).into());
             return;
         };
         self.guard_return_focus = self
@@ -301,7 +313,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.push_visual_edit(EditOperation::RotateImage(value));
                 }
             } else {
-                self.set_status("Rotation cancelled because the image changed".into());
+                self.set_status(
+                    Text::RotationImageChanged
+                        .in_language(self.language())
+                        .into(),
+                );
             }
         }
         self.request_redraw();

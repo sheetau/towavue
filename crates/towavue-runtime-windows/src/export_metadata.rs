@@ -45,18 +45,25 @@ impl MetadataField {
     }
 
     pub fn label(self) -> &'static str {
+        self.label_in(towavue_core::localization::Language::English)
+    }
+
+    /// Display translation is separate from canonical field/tag names.
+    pub fn label_in(self, language: towavue_core::localization::Language) -> &'static str {
+        use towavue_core::localization::Text;
         match self {
-            Self::Title => "Title",
-            Self::Artist => "Artist",
-            Self::Album => "Album",
-            Self::AlbumArtist => "Album artist",
-            Self::Composer => "Composer",
-            Self::Genre => "Genre",
-            Self::Date => "Date",
-            Self::Track => "Track",
-            Self::Comment => "Comment",
-            Self::Copyright => "Copyright",
+            Self::Title => Text::MetadataTitle,
+            Self::Artist => Text::MetadataArtist,
+            Self::Album => Text::MetadataAlbum,
+            Self::AlbumArtist => Text::MetadataAlbumArtist,
+            Self::Composer => Text::MetadataComposer,
+            Self::Genre => Text::MetadataGenre,
+            Self::Date => Text::MetadataDate,
+            Self::Track => Text::MetadataTrack,
+            Self::Comment => Text::MetadataComment,
+            Self::Copyright => Text::MetadataCopyright,
         }
+        .in_language(language)
     }
 }
 

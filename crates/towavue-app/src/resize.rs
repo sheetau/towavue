@@ -1,4 +1,6 @@
 use crate::chrome;
+use crate::localization::{Language, Text, language};
+use towavue_core::localization::formatted;
 use towavue_core::{ImageResize, ResampleFilter};
 
 #[cfg(test)]
@@ -57,9 +59,14 @@ impl ResizeDialog {
     }
 
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
+        let display_language = language(ui.ctx());
         let previous = (self.width.clone(), self.height.clone(), self.filter);
-        ui.label("Width (pixels)");
-        let width = text_input(ui, "Width in pixels", &mut self.width);
+        ui.label(Text::WidthPixels.in_language(display_language));
+        let width = text_input(
+            ui,
+            Text::WidthInPixels.in_language(display_language),
+            &mut self.width,
+        );
         if self.first_frame {
             width.request_focus();
             self.first_frame = false;
@@ -71,8 +78,12 @@ impl ResizeDialog {
         {
             self.height = self.round(f64::from(value) / self.ratio);
         }
-        ui.label("Height (pixels)");
-        let height = text_input(ui, "Height in pixels", &mut self.height);
+        ui.label(Text::HeightPixels.in_language(display_language));
+        let height = text_input(
+            ui,
+            Text::HeightInPixels.in_language(display_language),
+            &mut self.height,
+        );
         let height = self.reveal_focus(height);
         if height.changed()
             && self.keep_ratio
@@ -81,7 +92,10 @@ impl ResizeDialog {
             self.width = self.round(f64::from(value) * self.ratio);
         }
         let ratio = ui
-            .checkbox(&mut self.keep_ratio, "Keep aspect ratio")
+            .checkbox(
+                &mut self.keep_ratio,
+                Text::KeepAspectRatio.in_language(display_language),
+            )
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if self.reveal_focus(ratio).changed()
             && self.keep_ratio
@@ -89,23 +103,28 @@ impl ResizeDialog {
         {
             self.height = self.round(f64::from(value) / self.ratio);
         }
-        let filter = egui::ComboBox::from_label("Resampling filter")
-            .selected_text(filter_name(self.filter))
-            .show_ui(ui, |ui| {
-                for filter in [
-                    ResampleFilter::Nearest,
-                    ResampleFilter::Bilinear,
-                    ResampleFilter::Bicubic,
-                    ResampleFilter::Lanczos,
-                ] {
-                    if ui
-                        .selectable_value(&mut self.filter, filter, filter_name(filter))
-                        .clicked()
-                    {
-                        ui.close();
+        let filter =
+            egui::ComboBox::from_label(Text::ResamplingFilter.in_language(display_language))
+                .selected_text(filter_name(self.filter, display_language))
+                .show_ui(ui, |ui| {
+                    for filter in [
+                        ResampleFilter::Nearest,
+                        ResampleFilter::Bilinear,
+                        ResampleFilter::Bicubic,
+                        ResampleFilter::Lanczos,
+                    ] {
+                        if ui
+                            .selectable_value(
+                                &mut self.filter,
+                                filter,
+                                filter_name(filter, display_language),
+                            )
+                            .clicked()
+                        {
+                            ui.close();
+                        }
                     }
-                }
-            });
+                });
         self.reveal_focus(
             filter
                 .response
@@ -131,28 +150,34 @@ impl ResizeDialog {
     }
 
     pub fn show(&mut self, context: &egui::Context) -> Option<Option<ImageResize>> {
+        let display_language = language(context);
         let mut action = None;
         let modal = chrome::modal(context, "resize-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
                 360.0,
-                "Resize / resample image",
-                &["Apply resize", "Cancel"],
+                Text::CommandResizeImage.in_language(display_language),
+                &[
+                    Text::ApplyResize.in_language(display_language),
+                    Text::Cancel.in_language(display_language),
+                ],
                 |ui| {
-                    ui.label("Preview on the image. Apply adds one undoable edit.");
+                    ui.label(Text::ImageEditPreview.in_language(display_language));
                     self.controls(ui);
                     let value = self.value();
                     if let Some(value) = value {
-                        ui.label(format!("{} x {} pixels", value.size().0, value.size().1));
-                        ui.label(
-                            "Size preview; the selected resampling filter is applied on Apply.",
-                        );
+                        ui.label(formatted::pixel_size(
+                            display_language,
+                            value.size().0,
+                            value.size().1,
+                        ));
+                        ui.label(Text::ResizeFilterPreview.in_language(display_language));
                     } else {
-                        ui.label("Use 1–16384 pixels per side, up to 128 Mi pixels.");
+                        ui.label(Text::ImageResizeLimits.in_language(display_language));
                         if self.frame_count > 1 {
-                            ui.label(format!(
-                                "All {} animation frames must fit within 512 MiB.",
-                                self.frame_count
+                            ui.label(formatted::animation_resize_budget(
+                                display_language,
+                                self.frame_count,
                             ));
                         }
                     }
@@ -162,14 +187,18 @@ impl ResizeDialog {
             ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
                 if self
-                    .reveal_focus(
-                        ui.add_enabled(value.is_some(), egui::Button::new("Apply resize")),
-                    )
+                    .reveal_focus(ui.add_enabled(
+                        value.is_some(),
+                        egui::Button::new(Text::ApplyResize.in_language(display_language)),
+                    ))
                     .clicked()
                 {
                     action = Some(value);
                 }
-                if self.reveal_focus(ui.button("Cancel")).clicked() {
+                if self
+                    .reveal_focus(ui.button(Text::Cancel.in_language(display_language)))
+                    .clicked()
+                {
                     action = Some(None);
                 }
             });
@@ -273,18 +302,56 @@ fn text_input_rows(
     scroll_on_focus(response)
 }
 
-fn filter_name(filter: ResampleFilter) -> &'static str {
+fn filter_name(filter: ResampleFilter, display_language: Language) -> &'static str {
     match filter {
-        ResampleFilter::Nearest => "Nearest",
-        ResampleFilter::Bilinear => "Bilinear",
-        ResampleFilter::Bicubic => "Bicubic",
-        ResampleFilter::Lanczos => "Lanczos",
+        ResampleFilter::Nearest => Text::FilterNearest.in_language(display_language),
+        ResampleFilter::Bilinear => Text::FilterBilinear.in_language(display_language),
+        ResampleFilter::Bicubic => Text::FilterBicubic.in_language(display_language),
+        ResampleFilter::Lanczos => Text::FilterLanczos.in_language(display_language),
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn japanese_resize_inputs_validate_and_apply_without_clipping_compact_actions() {
+        use crate::localization::test_ui as ui;
+        for density in [1.0, 1.25, 2.0] {
+            let context = ui::japanese_context(density);
+            let size = egui::vec2(640.0, 600.0);
+            let mut dialog = ResizeDialog::new((640, 480), 1);
+            let output = ui::settle(&context, size, |context| dialog.show(context));
+            ui::frame(
+                &context,
+                size,
+                vec![ui::action(&output, "幅をピクセルで指定", Some("0"))],
+                |context| dialog.show(context),
+            );
+            let output = ui::settle(&context, size, |context| dialog.show(context));
+            ui::visible_button(&output, "サイズ変更を適用", size, false);
+            ui::frame(
+                &context,
+                size,
+                vec![ui::action(&output, "幅をピクセルで指定", Some("320"))],
+                |context| dialog.show(context),
+            );
+            let compact = egui::vec2(320.0, 240.0);
+            let output = ui::settle(&context, compact, |context| dialog.show(context));
+            ui::visible_button(&output, "サイズ変更を適用", compact, true);
+            ui::visible_button(&output, "キャンセル", compact, true);
+            let actions = ui::frame(
+                &context,
+                compact,
+                vec![ui::action(&output, "サイズ変更を適用", None)],
+                |context| dialog.show(context),
+            )
+            .1;
+            assert_eq!(actions.len(), 1);
+            assert_eq!(actions[0].expect("resize").size(), (320, 240));
+        }
+    }
 
     pub(crate) fn assert_centered_input(
         output: &egui::FullOutput,
@@ -401,7 +468,13 @@ pub(crate) mod tests {
                 egui::Popup::is_any_open(app.ui_context.as_ref().expect("context")),
                 "the app must not close a modal's popup on the next frame"
             );
-            frame(app, vec![access(node(&tree, filter_name(filter)), None)]);
+            frame(
+                app,
+                vec![access(
+                    node(&tree, filter_name(filter, Language::English)),
+                    None,
+                )],
+            );
             frame(app, vec![]);
             frame(app, vec![]);
             check(app, filter);

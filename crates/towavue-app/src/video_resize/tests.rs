@@ -1,4 +1,58 @@
 use super::*;
+
+#[test]
+fn japanese_video_resize_keeps_even_display_dimensions_and_compact_actions() {
+    use crate::localization::test_ui as ui;
+    for density in [1.0, 1.25, 2.0] {
+        let context = ui::japanese_context(density);
+        let mut tabs = TabSet::default();
+        let path = PathBuf::from("fixture.mkv");
+        let mut dialog = VideoResizeDialog {
+            token: 1,
+            snapshot: video_edit::VideoEditSnapshot {
+                tab: tabs.open_new(path.clone(), MediaKind::Video),
+                path,
+                media_generation: 0,
+                generation: PlaybackGeneration::default(),
+                source: (64, 48, 1.5),
+                geometry: (64, 48, 1.5),
+                orientation: towavue_runtime_windows::VideoOrientation::default(),
+                max_side: 16384,
+                operations: vec![],
+            },
+            inputs: resize::ResizeDialog::for_video((64, 48), 1.5),
+        };
+        let size = egui::vec2(640.0, 600.0);
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "幅をピクセルで指定", Some("17"))],
+            |context| dialog.show(context),
+        );
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::visible_button(&output, "サイズ変更を適用", size, false);
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "幅をピクセルで指定", Some("120"))],
+            |context| dialog.show(context),
+        );
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "サイズ変更を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        let actions = ui::frame(
+            &context,
+            compact,
+            vec![ui::action(&output, "サイズ変更を適用", None)],
+            |context| dialog.show(context),
+        )
+        .1;
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].expect("resize").size(), (120, 60));
+    }
+}
 use crate::video_rotation::tests::{access, frame, node};
 
 pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(

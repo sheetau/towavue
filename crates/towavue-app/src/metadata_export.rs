@@ -1,4 +1,6 @@
+use crate::localization::{Language, Text, language};
 use crate::*;
+use towavue_core::localization::formatted;
 use towavue_runtime_windows::{
     ImageMetadataFormat, MetadataExportOptions, MetadataField, MetadataSourceValue,
 };
@@ -38,20 +40,29 @@ impl MetadataDialog {
             .flatten()
     }
 
+    #[cfg(test)]
     fn options(&self) -> Result<MetadataExportOptions, String> {
+        self.options_in(Language::English)
+    }
+
+    fn options_in(&self, display_language: Language) -> Result<MetadataExportOptions, String> {
         if self.kind == MediaKind::Image {
             if self.image_format().is_none() {
-                return Err("Image metadata requires PNG, JPEG or WebP input.".into());
+                return Err(Text::MetadataImageInput
+                    .in_language(display_language)
+                    .into());
             }
             match &self.current {
                 Some(Ok(_)) => {}
                 Some(Err(_)) => {
-                    return Err("Image metadata must be readable before applying options.".into());
+                    return Err(Text::MetadataMustBeReadable
+                        .in_language(display_language)
+                        .into());
                 }
                 None => {
-                    return Err(
-                        "Wait for image metadata inspection before applying options.".into(),
-                    );
+                    return Err(Text::WaitMetadataInspection
+                        .in_language(display_language)
+                        .into());
                 }
             }
         }
@@ -64,7 +75,7 @@ impl MetadataDialog {
             };
             options
                 .set(field, value)
-                .map_err(|error| format!("{}: {error}", field.label()))?;
+                .map_err(|error| format!("{}: {error}", field.label_in(display_language)))?;
         }
         if let Some(format) = self.image_format() {
             format
@@ -75,6 +86,7 @@ impl MetadataDialog {
     }
 
     fn show(&mut self, context: &egui::Context) -> Option<Option<MetadataExportOptions>> {
+        let display_language = language(context);
         let mut action = None;
         let previous_focus = self.focused_control;
         let mut focused_control = None;
@@ -109,94 +121,212 @@ impl MetadataDialog {
                 !popup_open && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
             }
         });
-        let modal = chrome::modal(context, egui::Id::new(("metadata-export-options", self.token)), false).show(context, |ui| {
-            chrome::modal_body(ui, 420.0, "Metadata export options", &["Apply metadata", "Cancel"], |ui| {
-                ui.label("Metadata field");
-                let response = egui::ComboBox::from_id_salt("metadata-field")
-                    .selected_text(MetadataField::ALL[self.selected].label()).show_ui(ui, |ui| {
-                        for (index, field) in MetadataField::ALL.into_iter().enumerate() {
-                            if !fields.contains(&field) { continue; }
-                            if ui.selectable_value(&mut self.selected, index, field.label()).clicked() { ui.close(); }
-                        }
-                    }).response.on_hover_cursor(egui::CursorIcon::PointingHand);
-                if self.first_frame { response.request_focus(); self.first_frame = false; }
-                reveal_focus(&response);
-                let field = MetadataField::ALL[self.selected];
-                if image_format == Some(ImageMetadataFormat::Png) {
-                    ui.label(format!("PNG keyword: {}", match field {
-                        MetadataField::Artist => "Author",
-                        MetadataField::AlbumArtist => "Album Artist",
-                        MetadataField::Date => "Creation Time (text, no date conversion)",
-                        _ => field.label(),
-                    }));
-                } else if let Some(format @ (ImageMetadataFormat::Jpeg | ImageMetadataFormat::Webp)) = image_format {
-                    ui.label(format!("{} XMP property: {}", format.label(), match field {
-                        MetadataField::Title => "dc:title (language alternatives)",
-                        MetadataField::Artist => "dc:creator (ordered authors)",
-                        MetadataField::Album => "xmpDM:album (text)",
-                        MetadataField::Composer => "xmpDM:composer (text)",
-                        MetadataField::Genre => "xmpDM:genre (text)",
-                        MetadataField::Date => "xmpDM:releaseDate (release date, not capture time; YYYY, YYYY-MM, YYYY-MM-DD or date/time with optional timezone)",
-                        MetadataField::Track => "xmpDM:trackNumber (decimal integer with optional sign, not track/total)",
-                        MetadataField::Comment => "dc:description (language alternatives)",
-                        MetadataField::Copyright => "dc:rights (language alternatives)",
-                        _ => unreachable!("XMP field selector is restricted"),
-                    }));
-                }
-                let draft = &mut self.fields[self.selected];
-                for (mode, label) in [(Mode::Keep, "Keep source value"), (Mode::Set, "Set value"), (Mode::Remove, "Remove value")] {
-                    let response = ui.radio_value(&mut draft.mode, mode, label).on_hover_cursor(egui::CursorIcon::PointingHand);
-                    reveal_focus(&response);
-                }
-                if draft.mode == Mode::Set {
-                    let response = ui.push_id(self.selected, |ui| resize::multiline_text_input(ui, "Metadata value (empty removes the tag)", &mut draft.text)).inner;
-                    reveal_focus(&response);
-                }
-                crate::chrome::separator(ui);
-                ui.label("Current source values");
-                match &self.current {
-                    None => { ui.label("Reading metadata…"); }
-                    Some(Err(error)) => { ui.label(format!("Could not read metadata: {error}")); }
-                    Some(Ok(values)) => {
-                        let mut found = false;
-                        for value in values.iter().filter(|value| value.field == field) {
-                            found = true;
-                            ui.label(format!("{}{}: {}", value.scope, if value.truncated { " (truncated)" } else { "" }, value.value));
-                        }
-                        if !found { ui.label(if self.kind == MediaKind::Image { "No matching image text value." } else { "No value in the file or selected streams." }); }
+        let modal = chrome::modal(
+            context,
+            egui::Id::new(("metadata-export-options", self.token)),
+            false,
+        )
+        .show(context, |ui| {
+            chrome::modal_body(
+                ui,
+                420.0,
+                Text::CommandMetadataExportOptions.in_language(display_language),
+                &[
+                    Text::ApplyMetadata.in_language(display_language),
+                    Text::Cancel.in_language(display_language),
+                ],
+                |ui| {
+                    ui.label(Text::MetadataField.in_language(display_language));
+                    let response = egui::ComboBox::from_id_salt("metadata-field")
+                        .selected_text(MetadataField::ALL[self.selected].label_in(display_language))
+                        .show_ui(ui, |ui| {
+                            for (index, field) in MetadataField::ALL.into_iter().enumerate() {
+                                if !fields.contains(&field) {
+                                    continue;
+                                }
+                                if ui
+                                    .selectable_value(
+                                        &mut self.selected,
+                                        index,
+                                        field.label_in(display_language),
+                                    )
+                                    .clicked()
+                                {
+                                    ui.close();
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if self.first_frame {
+                        response.request_focus();
+                        self.first_frame = false;
                     }
-                }
-                crate::chrome::separator(ui);
-                if image_format == Some(ImageMetadataFormat::Png) {
-                    ui.label("PNG input and PNG output only. Applies to the next Save or Save as for this tab's current file. Applying options does not write the file. Save writes the current file; Save as adopts its destination and keeps Undo.");
-                    ui.label("Only these 10 PNG text fields are edited; EXIF, XMP and technical metadata are not edited. Keep preserves matching source text chunks in PNG output, including when all fields are Keep. Other formats do not guarantee preservation.");
-                    ui.label("PNG/APNG output with no image edits preserves compressed pixels, bit depth, palette and other chunks (including ICC, EXIF and unknown text). Image edits or format conversion still re-encode. Remove is not a privacy scrub: copies in other metadata remain.");
-                    ui.label("Set/Remove replaces all matching text variants. Choose a .png or .apng export path; other output formats fail without replacing the target. Reading rejects corrupt text or more than 128 text chunks / 1 MiB stored or expanded text.");
-                    ui.label("Supported APNG saves retain all frames, delays and loop count (1 to 65536 frames), including PREVIOUS disposal. A separate default poster receives the same edits and stays outside the animation. Frame compositing is shared with display. Other animation formats are separate capabilities.");
-                } else if image_format == Some(ImageMetadataFormat::Jpeg) {
-                    ui.label("JPEG input supports JPEG or WebP output. Applies to the next Save or Save as for this tab's current file. Applying options does not write the file. Save writes the current file; Save as adopts its destination and keeps Undo.");
-                    ui.label("JPEG output with no image edits preserves compressed pixels and all non-XMP markers (including EXIF, ICC, IPTC and comments). Image edits or format conversion still re-encode. Remove is not a privacy scrub: copies in other metadata remain.");
-                    ui.label("Only these 9 XMP fields are edited. EXIF, IPTC and JPEG comments (COM) are not synchronized. Same-format saves without image edits retain unselected XMP; all-Keep preserves the original packet. Image edits or format conversion retain these 9 fields plus XMP rights properties (Owner, UsageTerms, WebStatement, Marked) and keywords (dc:subject), plus contributor/publisher credits (dc:contributor, dc:publisher); other XMP properties are omitted. Set/Remove does not change those separate rights properties, keywords or credits. Keep preserves languages, author order and existing noncanonical Date/Track values; new values must match the displayed types.");
-                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .jpg, .jpeg or .webp export path; other output formats fail without replacing the target. Extended XMP, corrupt or oversized metadata is rejected (one packet, 65502 bytes, 128 text values).");
-                } else if image_format == Some(ImageMetadataFormat::Webp) {
-                    ui.label("WebP input supports WebP output, or JPEG output for static images. Applies to the next Save or Save as for this tab's current file. Applying options does not write the file. Save writes the current file; Save as adopts its destination and keeps Undo. Animated WebP retains all frames, exact timing and loops. With image edits, lossless full-canvas snapshots share display's compositing and edits.");
-                    ui.label("WebP output with no image edits preserves compressed pixels and all non-XMP chunks (including ICC, EXIF and animation controls). Image edits or format conversion still re-encode. Remove is not a privacy scrub: copies in other metadata remain.");
-                    ui.label("Only these 9 XMP fields are edited. EXIF and ICC are not synchronized. Same-format saves without image edits retain unselected XMP; all-Keep preserves the original packet. Image edits or format conversion retain these 9 fields plus XMP rights properties (Owner, UsageTerms, WebStatement, Marked) and keywords (dc:subject), plus contributor/publisher credits (dc:contributor, dc:publisher); other XMP properties are omitted. Set/Remove does not change those separate rights properties, keywords or credits. Keep preserves languages, author order and existing noncanonical Date/Track values; new values must match the displayed types.");
-                    ui.label("Set replaces all values of the field with one (x-default for language alternatives). Remove deletes all values. Choose a .webp export path, or .jpg/.jpeg for a static image; animated JPEG conversion and other output formats fail without replacing the target. JPEG cannot retain transparency. Corrupt or oversized metadata is rejected (one XMP packet, 65502 bytes, 128 text values).");
-                } else if self.kind == MediaKind::Image {
-                    ui.label("Image metadata supports PNG to PNG and JPEG/WebP output from JPEG or static WebP. Animated WebP metadata requires WebP output. Other image formats cannot apply metadata options.");
-                } else {
-                    ui.label("Applies to the next Save, Save as and Export audio only for this tab's current file. Applying options does not write the file or change playback. Save replaces the source; exports write separate files.");
-                    ui.label("Set/Remove affects the file and output streams. Unsupported tags or changed values fail before replacing the target. Keep is not a guarantee of complete metadata preservation across formats.");
-                }
-                ui.label("Up to 1024 UTF-8 bytes per field / 4096 total; no NUL. Settings reset on reload, another file or closing the tab. Apply does not export.");
-                if let Err(error) = self.options() { ui.label(error); }
-            });
-            let options = self.options();
+                    reveal_focus(&response);
+                    let field = MetadataField::ALL[self.selected];
+                    if image_format == Some(ImageMetadataFormat::Png) {
+                        ui.label(formatted::png_keyword(
+                            display_language,
+                            match field {
+                                MetadataField::Artist => "Author",
+                                MetadataField::AlbumArtist => "Album Artist",
+                                MetadataField::Date => {
+                                    Text::PngCreationTimeHelp.in_language(display_language)
+                                }
+                                _ => field.label(),
+                            },
+                        ));
+                    } else if let Some(
+                        format @ (ImageMetadataFormat::Jpeg | ImageMetadataFormat::Webp),
+                    ) = image_format
+                    {
+                        ui.label(formatted::xmp_property(
+                            display_language,
+                            format.label(),
+                            match field {
+                                MetadataField::Title => {
+                                    Text::XmpTitleHelp.in_language(display_language)
+                                }
+                                MetadataField::Artist => {
+                                    Text::XmpArtistHelp.in_language(display_language)
+                                }
+                                MetadataField::Album => {
+                                    Text::XmpAlbumHelp.in_language(display_language)
+                                }
+                                MetadataField::Composer => {
+                                    Text::XmpComposerHelp.in_language(display_language)
+                                }
+                                MetadataField::Genre => {
+                                    Text::XmpGenreHelp.in_language(display_language)
+                                }
+                                MetadataField::Date => {
+                                    Text::XmpDateHelp.in_language(display_language)
+                                }
+                                MetadataField::Track => {
+                                    Text::XmpTrackHelp.in_language(display_language)
+                                }
+                                MetadataField::Comment => {
+                                    Text::XmpCommentHelp.in_language(display_language)
+                                }
+                                MetadataField::Copyright => {
+                                    Text::XmpCopyrightHelp.in_language(display_language)
+                                }
+                                _ => unreachable!("XMP field selector is restricted"),
+                            },
+                        ));
+                    }
+                    let draft = &mut self.fields[self.selected];
+                    for (mode, label) in [
+                        (
+                            Mode::Keep,
+                            Text::KeepSourceValue.in_language(display_language),
+                        ),
+                        (
+                            Mode::Set,
+                            Text::SetMetadataValue.in_language(display_language),
+                        ),
+                        (
+                            Mode::Remove,
+                            Text::RemoveMetadataValue.in_language(display_language),
+                        ),
+                    ] {
+                        let response = ui
+                            .radio_value(&mut draft.mode, mode, label)
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        reveal_focus(&response);
+                    }
+                    if draft.mode == Mode::Set {
+                        let response = ui
+                            .push_id(self.selected, |ui| {
+                                resize::multiline_text_input(
+                                    ui,
+                                    Text::MetadataValueInput.in_language(display_language),
+                                    &mut draft.text,
+                                )
+                            })
+                            .inner;
+                        reveal_focus(&response);
+                    }
+                    crate::chrome::separator(ui);
+                    ui.label(Text::CurrentSourceValues.in_language(display_language));
+                    match &self.current {
+                        None => {
+                            ui.label(Text::ReadingMetadata.in_language(display_language));
+                        }
+                        Some(Err(error)) => {
+                            ui.label(formatted::metadata_read_failed(display_language, error));
+                        }
+                        Some(Ok(values)) => {
+                            let mut found = false;
+                            for value in values.iter().filter(|value| value.field == field) {
+                                found = true;
+                                ui.label(format!(
+                                    "{}{}: {}",
+                                    value.scope,
+                                    if value.truncated {
+                                        Text::TruncatedSuffix.in_language(display_language)
+                                    } else {
+                                        ""
+                                    },
+                                    value.value
+                                ));
+                            }
+                            if !found {
+                                ui.label(if self.kind == MediaKind::Image {
+                                    Text::NoImageMetadataValue.in_language(display_language)
+                                } else {
+                                    Text::NoStreamMetadataValue.in_language(display_language)
+                                });
+                            }
+                        }
+                    }
+                    crate::chrome::separator(ui);
+                    if image_format == Some(ImageMetadataFormat::Png) {
+                        ui.label(Text::PngMetadataScope.in_language(display_language));
+                        ui.label(Text::PngMetadataFieldsHelp.in_language(display_language));
+                        ui.label(Text::PngMetadataPreservationHelp.in_language(display_language));
+                        ui.label(Text::PngMetadataLimitsHelp.in_language(display_language));
+                        ui.label(Text::ApngMetadataHelp.in_language(display_language));
+                    } else if image_format == Some(ImageMetadataFormat::Jpeg) {
+                        ui.label(Text::JpegMetadataScope.in_language(display_language));
+                        ui.label(Text::JpegMetadataPreservationHelp.in_language(display_language));
+                        ui.label(Text::JpegXmpFieldsHelp.in_language(display_language));
+                        ui.label(Text::JpegXmpLimitsHelp.in_language(display_language));
+                    } else if image_format == Some(ImageMetadataFormat::Webp) {
+                        ui.label(Text::WebpMetadataScope.in_language(display_language));
+                        ui.label(Text::WebpMetadataPreservationHelp.in_language(display_language));
+                        ui.label(Text::WebpXmpFieldsHelp.in_language(display_language));
+                        ui.label(Text::WebpXmpLimitsHelp.in_language(display_language));
+                    } else if self.kind == MediaKind::Image {
+                        ui.label(Text::ImageMetadataFormatsHelp.in_language(display_language));
+                    } else {
+                        ui.label(Text::MediaMetadataScope.in_language(display_language));
+                        ui.label(Text::MediaMetadataPreservationHelp.in_language(display_language));
+                    }
+                    ui.label(Text::MetadataLimitsHelp.in_language(display_language));
+                    if let Err(error) = self.options_in(display_language) {
+                        ui.label(error);
+                    }
+                },
+            );
+            let options = self.options_in(display_language);
             ui.horizontal_wrapped(|ui| {
                 crate::chrome::flat_buttons(ui);
-                if ui.add_enabled(options.is_ok() && !self.ime_composing, egui::Button::new("Apply metadata")).clicked() { action = Some(Some(options.expect("valid options"))); }
-                if ui.button("Cancel").clicked() { action = Some(None); }
+                if ui
+                    .add_enabled(
+                        options.is_ok() && !self.ime_composing,
+                        egui::Button::new(Text::ApplyMetadata.in_language(display_language)),
+                    )
+                    .clicked()
+                {
+                    action = Some(Some(options.expect("valid options")));
+                }
+                if ui
+                    .button(Text::Cancel.in_language(display_language))
+                    .clicked()
+                {
+                    action = Some(None);
+                }
             });
         });
         self.focused_control = focused_control;
@@ -214,7 +344,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if self.active_export.is_some() {
             self.set_status(
-                "Wait for the current export or cancel it before changing metadata options.".into(),
+                Text::WaitExportForMetadata
+                    .in_language(self.language())
+                    .into(),
             );
             return;
         }
@@ -341,7 +473,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .is_some_and(|dialog| !self.metadata_dialog_is_current(dialog))
         {
             self.cancel_metadata_dialog();
-            self.set_status("Metadata options cancelled because the source changed.".into());
+            self.set_status(
+                Text::MetadataOptionsSourceChanged
+                    .in_language(self.language())
+                    .into(),
+            );
         }
     }
 
@@ -376,7 +512,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(value) = &value
             && current
             && dialog.kind == MediaKind::Image
-            && (dialog.options().is_err()
+            && (dialog.options_in(self.language()).is_err()
                 || dialog
                     .image_format()
                     .is_none_or(|format| format.validate_options(value).is_err()))
@@ -392,11 +528,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.metadata_export_settings.insert(tab, value);
                 }
                 self.set_status(
-                    "Metadata options applied to the next export. Playback and edits unchanged."
+                    Text::MetadataOptionsApplied
+                        .in_language(self.language())
                         .into(),
                 );
             } else {
-                self.set_status("Metadata options cancelled because the source changed.".into());
+                self.set_status(
+                    Text::MetadataOptionsSourceChanged
+                        .in_language(self.language())
+                        .into(),
+                );
             }
         }
         self.request_redraw();

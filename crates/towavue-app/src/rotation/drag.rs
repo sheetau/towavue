@@ -154,6 +154,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 tenths: 0,
             });
         }
+        let display_language = self.language();
         let drag = self.rotation_drag.as_mut().expect("rotation drag");
         if let Some(pointer) = release.or_else(|| ui.input(|input| input.pointer.hover_pos())) {
             drag.tenths = ((pointer.x - drag.origin.x) * 5.0)
@@ -184,14 +185,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 ui.max_rect().min + egui::vec2(8.0, 8.0),
                 egui::vec2((ui.max_rect().width() - 16.0).max(1.0), 48.0),
             ),
-            egui::Label::new(format!(
-                "Rotation: {:.1} degrees · {}",
+            egui::Label::new(formatted::rotation_drag(
+                display_language,
                 f32::from(drag.tenths) / 10.0,
                 if value.is_some() {
-                    "Release mouse to apply; release Alt or press Escape to cancel"
+                    Text::RotationDragApplyHelp.in_language(display_language)
                 } else {
-                    "Canvas exceeds image limits; release cancels"
-                }
+                    Text::RotationDragCanvasLimit.in_language(display_language)
+                },
             ))
             .wrap(),
         );
@@ -200,7 +201,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if released_with_alt {
                 if value.is_none() {
                     self.set_status(
-                        "Rotation cancelled because the canvas exceeds image limits".into(),
+                        Text::RotationCancelledCanvasLimit
+                            .in_language(display_language)
+                            .into(),
                     );
                 }
                 self.commit_rotation(drag.preview, value);

@@ -2,6 +2,45 @@ use super::*;
 use std::sync::mpsc;
 
 #[test]
+fn japanese_image_rotation_returns_an_edit_without_changing_history_during_preview() {
+    use crate::localization::test_ui as ui;
+    let Some(_root) = crate::tests::isolated_test_root(
+        "rotation::tests::japanese_image_rotation_returns_an_edit_without_changing_history_during_preview",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut app, _) = application();
+        let context = app.ui_context.clone().expect("context");
+        ui::configure_japanese(&context, density);
+        let before = app.edits.clone();
+        let mut dialog = app.capture_rotation().expect("image rotation");
+        let size = egui::vec2(640.0, 600.0);
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "回転角度（度）", Some("-31.74"))],
+            |context| dialog.show(context),
+        );
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "回転を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        let actions = ui::frame(
+            &context,
+            compact,
+            vec![ui::action(&output, "回転を適用", None)],
+            |context| dialog.show(context),
+        )
+        .1;
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].expect("rotation").tenths(), -317);
+        assert_eq!(app.edits, before);
+    }
+}
+
+#[test]
 fn video_resize_rejects_wrong_media_or_unavailable_source() {
     let (mut app, _) = application();
     app.image_view.selection = Some(UnitRect::FULL);

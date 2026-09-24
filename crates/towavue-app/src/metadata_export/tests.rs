@@ -5,6 +5,70 @@ use crate::video_rotation::tests::{access, node};
 
 mod image;
 
+#[test]
+fn japanese_metadata_keeps_canonical_png_keywords_user_text_and_compact_actions() {
+    use crate::localization::test_ui as ui;
+    for density in [1.0, 1.25, 2.0] {
+        let context = ui::japanese_context(density);
+        let mut tabs = TabSet::default();
+        let source = PathBuf::from("fixture.png");
+        let mut dialog = MetadataDialog {
+            token: 1,
+            tab: tabs.open_new(source.clone(), MediaKind::Image),
+            source,
+            kind: MediaKind::Image,
+            generation: 0,
+            fields: Default::default(),
+            selected: 0,
+            current: Some(Ok(vec![])),
+            first_frame: true,
+            focused_control: None,
+            ime_composing: false,
+        };
+        let size = egui::vec2(640.0, 700.0);
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "PNGのキーワード: Title")));
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "値を設定", None)],
+            |context| dialog.show(context),
+        );
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(
+                &output,
+                "メタデータの値（空欄でタグを削除）",
+                Some("日本語 {Album}"),
+            )],
+            |context| dialog.show(context),
+        );
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "メタデータ設定を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        let actions = ui::frame(
+            &context,
+            compact,
+            vec![ui::action(&output, "メタデータ設定を適用", None)],
+            |context| dialog.show(context),
+        )
+        .1;
+        assert_eq!(actions.len(), 1);
+        let options = actions[0].as_ref().expect("metadata options");
+        assert_eq!(options.get(MetadataField::Title), Some("日本語 {Album}"));
+        assert_eq!(MetadataField::Title.key(), "title");
+        assert_eq!(MetadataField::Title.label(), "Title");
+        assert_eq!(
+            MetadataField::Title.label_in(Language::Japanese),
+            "タイトル"
+        );
+    }
+}
+
 fn read_ready<N: Fn(AppEvent) + Send + Sync + 'static>(
     app: &mut Application<N>,
     events: &std::sync::mpsc::Receiver<AppEvent>,

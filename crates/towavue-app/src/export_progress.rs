@@ -364,7 +364,10 @@ pub(super) fn show_status(
     };
     let mut parts = vec![heading, status(export, Instant::now())];
     if export.options.audio != AudioExportOptions::default() {
-        parts.push(audio_export::summary(export.options.audio));
+        parts.push(audio_export::summary(
+            export.options.audio,
+            crate::localization::language(context),
+        ));
     }
     if !export.options.metadata.is_empty() {
         parts.push("Metadata changes: verified before replacing the target".into());

@@ -1,5 +1,60 @@
 use super::*;
 
+#[test]
+fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
+    use crate::localization::test_ui as ui;
+    for density in [1.0, 1.25, 2.0] {
+        let context = ui::japanese_context(density);
+        let mut tabs = TabSet::default();
+        let path = PathBuf::from("fixture.mkv");
+        let mut dialog = VideoRotationDialog {
+            token: 1,
+            snapshot: video_edit::VideoEditSnapshot {
+                tab: tabs.open_new(path.clone(), MediaKind::Video),
+                path,
+                media_generation: 0,
+                generation: PlaybackGeneration::default(),
+                source: (64, 48, 1.0),
+                geometry: (64, 48, 1.0),
+                orientation: VideoOrientation::default(),
+                max_side: 16384,
+                operations: vec![],
+            },
+            angle: "0".into(),
+            first_frame: true,
+        };
+        let size = egui::vec2(640.0, 600.0);
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "動画の回転角度（度）", Some("NaN"))],
+            |context| dialog.show(context),
+        );
+        let output = ui::settle(&context, size, |context| dialog.show(context));
+        ui::visible_button(&output, "回転を適用", size, false);
+        ui::frame(
+            &context,
+            size,
+            vec![ui::action(&output, "動画の回転角度（度）", Some("31.74"))],
+            |context| dialog.show(context),
+        );
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "回転を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        let actions = ui::frame(
+            &context,
+            compact,
+            vec![ui::action(&output, "回転を適用", None)],
+            |context| dialog.show(context),
+        )
+        .1;
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].expect("rotation").tenths(), 317);
+    }
+}
+
 #[path = "drag_tests.rs"]
 mod drag_tests;
 #[path = "view_tests.rs"]

@@ -46,6 +46,54 @@ fn geometry(window: &Window, name: &str, state: &str) -> Geometry {
             size_of::<RECT>() as u32,
         )
         .expect("visible bounds");
+        if state == "normal-before" {
+            let border = GetSystemMetricsForDpi(SM_CYSIZEFRAME, GetDpiForWindow(handle))
+                + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, GetDpiForWindow(handle));
+            let center = POINT {
+                x: (visible.left + visible.right) / 2,
+                y: (visible.top + visible.bottom) / 2,
+            };
+            for edge in ["top", "left", "right", "bottom"] {
+                let samples: Vec<_> = (-border..=border * 2)
+                    .map(|offset| {
+                        let point = match edge {
+                            "top" => POINT {
+                                x: center.x,
+                                y: visible.top + offset,
+                            },
+                            "left" => POINT {
+                                x: visible.left + offset,
+                                y: center.y,
+                            },
+                            "right" => POINT {
+                                x: visible.right - 1 - offset,
+                                y: center.y,
+                            },
+                            _ => POINT {
+                                x: center.x,
+                                y: visible.bottom - 1 - offset,
+                            },
+                        };
+                        let packed = (u32::from(point.x as u16) | (u32::from(point.y as u16) << 16))
+                            as isize;
+                        (
+                            offset,
+                            SendMessageW(
+                                handle,
+                                WM_NCHITTEST,
+                                Some(WPARAM(0)),
+                                Some(LPARAM(packed)),
+                            )
+                            .0,
+                        )
+                    })
+                    .collect();
+                eprintln!(
+                    "CAPTION_EDGE {name} dpi={} edge={edge} border={border} hits={samples:?}",
+                    GetDpiForWindow(handle)
+                );
+            }
+        }
         assert_eq!(info.rgstate[5] & 0x18000, 0, "visible close button");
         let close = info.rgrect[5];
         assert!(close.right > close.left && close.bottom > close.top);

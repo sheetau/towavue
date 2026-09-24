@@ -4,6 +4,7 @@ use std::thread;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use thiserror::Error;
+use towavue_core::localization::{Language, Text, formatted};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
@@ -22,7 +23,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetCursorPos, IDCANCEL, IDNO, IDOK, IDRETRY, IDYES, MB_DEFBUTTON2,
     MB_DEFBUTTON3, MB_ICONWARNING, MB_OK, MB_RETRYCANCEL, MB_YESNOCANCEL, MessageBoxW,
 };
-use windows::core::{PCWSTR, w};
+use windows::core::PCWSTR;
+#[cfg(test)]
+use windows::core::w;
 
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
 
@@ -47,6 +50,24 @@ pub enum DialogError {
     InvalidExportChoice(String),
 }
 
+impl DialogError {
+    /// App-owned explanation in the selected language; external OS/I/O errors
+    /// retain their original text. Display keeps its existing diagnostic form.
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::OwnerUnavailable => Text::DialogOwnerUnavailable.in_language(language).into(),
+            Self::Thread(error) => formatted::dialog_thread_failed(language, &error.to_string()),
+            Self::ThreadStopped => Text::DialogThreadStopped.in_language(language).into(),
+            Self::Windows(error) => formatted::dialog_windows_failed(language, &error.to_string()),
+            Self::InvalidPath(error) => {
+                formatted::dialog_invalid_path(language, &error.to_string())
+            }
+            Self::Export(error) => formatted::dialog_export_failed(language, &error.to_string()),
+            Self::InvalidExportChoice(message) => message.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum FileDialogKind {
     OpenFile,
@@ -68,6 +89,7 @@ pub enum FileDialogKind {
 
 /// Keeps the owner alive until its modal dialog closes, without blocking the caller.
 pub fn pick_path(
+    language: Language,
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     kind: FileDialogKind,
     notify: impl FnOnce(Result<Option<PathBuf>, DialogError>) + Send + 'static,
@@ -82,7 +104,7 @@ pub fn pick_path(
     start_dialog_worker(
         move || {
             let _owner = owner;
-            dialog_thread(native_owner, kind)
+            dialog_thread(language, native_owner, kind)
         },
         notify,
     )
@@ -92,6 +114,7 @@ pub fn pick_path(
 /// Only detached values cross the worker boundary; queued encoding must use this
 /// snapshot rather than recapturing whatever later occupies the chosen path.
 pub fn pick_save_as(
+    language: Language,
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     suggested_name: String,
     request: crate::ExportDialogRequest,
@@ -109,7 +132,9 @@ pub fn pick_save_as(
             let _owner = owner;
             if request.options.output != crate::ExportOutput::Media {
                 return Err(DialogError::InvalidExportChoice(
-                    "Save as requires a complete media document.".into(),
+                    Text::NativeSaveCompleteDocument
+                        .in_language(language)
+                        .into(),
                 ));
             }
             // SAFETY: the worker retains its owner and all native interfaces on
@@ -119,6 +144,7 @@ pub fn pick_save_as(
                 let _apartment = DialogApartment;
                 let choices = request.choices(&std::sync::atomic::AtomicBool::new(false))?;
                 export_save::show_initialized_save_as_dialog(
+                    language,
                     &suggested_name,
                     HWND(native_owner as *mut _),
                     choices,
@@ -166,6 +192,7 @@ fn delete_confirmation(button: i32, checked: bool) -> DeleteConfirmation {
 /// Presents the application's recycle confirmation, with native verification UI.
 /// Persistence is the caller's responsibility, after a confirmed response only.
 pub fn confirm_file_delete(
+    language: Language,
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     source: PathBuf,
     unsaved_edits: bool,
@@ -181,40 +208,46 @@ pub fn confirm_file_delete(
     start_dialog_worker(
         move || {
             let _owner = owner;
-            let message: Vec<u16> = format!(
-                "{}\n\nThe file will be moved to the Recycle Bin.{}",
-                source.display(),
-                if unsaved_edits { "\n\nOpen tabs keep this media and its edits until you leave or close them. Save recreates the file at its original location." } else { "" }
-            )
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+            let retained = if unsaved_edits {
+                Text::NativeDeleteRetained.in_language(language)
+            } else {
+                ""
+            };
+            let message = wide(&formatted::native_delete(
+                language,
+                &source.display().to_string(),
+                retained,
+            ));
+            let title = wide(Text::NativeDeleteTitle.in_language(language));
+            let instruction = wide(Text::NativeDeleteInstruction.in_language(language));
+            let verification = wide(
+                if unsaved_edits {
+                    Text::NativeDeleteCleanSuppression
+                } else {
+                    Text::NativeDeleteSuppression
+                }
+                .in_language(language),
+            );
             // SAFETY: the worker owns this STA and all modal buffers until the
             // native dialog returns. Only plain response values cross threads.
             unsafe { OleInitialize(None) }?;
             let _apartment = DialogApartment;
-            let buttons = [
-                TASKDIALOG_BUTTON {
-                    nButtonID: IDYES.0,
-                    pszButtonText: w!("Delete file"),
-                },
-                TASKDIALOG_BUTTON {
-                    nButtonID: IDCANCEL.0,
-                    pszButtonText: w!("Cancel"),
-                },
-            ];
+            let labels = button_labels(
+                language,
+                [
+                    (IDYES.0, Text::CommandDeleteFile),
+                    (IDCANCEL.0, Text::Cancel),
+                ],
+            );
+            let buttons = labels.each_ref().map(button_view);
             let config = TASKDIALOGCONFIG {
                 cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
                 hwndParent: HWND(native_owner as *mut _),
                 dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
-                pszWindowTitle: w!("Delete file - towavue"),
-                pszMainInstruction: w!("Delete this file?"),
+                pszWindowTitle: PCWSTR(title.as_ptr()),
+                pszMainInstruction: PCWSTR(instruction.as_ptr()),
                 pszContent: PCWSTR(message.as_ptr()),
-                pszVerificationText: if unsaved_edits {
-                    w!("Don't ask again for files without unsaved edits")
-                } else {
-                    w!("Don't ask again")
-                },
+                pszVerificationText: PCWSTR(verification.as_ptr()),
                 cButtons: buttons.len() as u32,
                 pButtons: buttons.as_ptr(),
                 nDefaultButton: IDCANCEL.0,
@@ -233,6 +266,7 @@ pub fn confirm_file_delete(
 
 /// Shows a GPU-independent modal prompt while retaining its owner on the worker.
 pub fn show_prompt(
+    language: Language,
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     message: String,
     buttons: PromptButtons,
@@ -257,27 +291,30 @@ pub fn show_prompt(
                 // on the same thread, including errors. Native accessibility uses COM.
                 unsafe { OleInitialize(None) }?;
                 let _apartment = DialogApartment;
-                let (choices, title, instruction, default_button) = match buttons {
+                let (labels, title, instruction, default_button) = match buttons {
                     PromptButtons::SaveDiscardCancel { discard_all } => (
-                        unsaved_prompt_buttons(discard_all).to_vec(),
-                        w!("Unsaved edits - towavue"),
-                        w!("Save edits before continuing?"),
+                        unsaved_prompt_buttons(language, discard_all).to_vec(),
+                        Text::NativeUnsavedTitle,
+                        Text::NativeUnsavedInstruction,
                         IDCANCEL.0,
                     ),
                     PromptButtons::InstallUpdate => (
-                        update_prompt_buttons().to_vec(),
-                        w!("towavue update"),
-                        w!("An update is ready to install"),
+                        update_prompt_buttons(language).to_vec(),
+                        Text::NativeUpdateTitle,
+                        Text::NativeUpdateInstruction,
                         IDNO.0,
                     ),
                     _ => unreachable!("task dialog buttons checked above"),
                 };
+                let choices: Vec<_> = labels.iter().map(button_view).collect();
+                let title = wide(title.in_language(language));
+                let instruction = wide(instruction.in_language(language));
                 let config = TASKDIALOGCONFIG {
                     cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
                     hwndParent: HWND(native_owner as *mut _),
                     dwFlags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW,
-                    pszWindowTitle: title,
-                    pszMainInstruction: instruction,
+                    pszWindowTitle: PCWSTR(title.as_ptr()),
+                    pszMainInstruction: PCWSTR(instruction.as_ptr()),
                     pszContent: PCWSTR(message.as_ptr()),
                     cButtons: choices.len() as u32,
                     pButtons: choices.as_ptr(),
@@ -333,38 +370,52 @@ pub fn show_prompt(
     )
 }
 
-fn update_prompt_buttons() -> [TASKDIALOG_BUTTON; 2] {
-    [
-        TASKDIALOG_BUTTON {
-            nButtonID: IDYES.0,
-            pszButtonText: w!("Install now"),
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: IDNO.0,
-            pszButtonText: w!("Install on next launch"),
-        },
-    ]
+fn wide(text: &str) -> Vec<u16> {
+    text.encode_utf16().chain(Some(0)).collect()
 }
 
-fn unsaved_prompt_buttons(discard_all: bool) -> [TASKDIALOG_BUTTON; 3] {
-    [
-        TASKDIALOG_BUTTON {
-            nButtonID: IDYES.0,
-            pszButtonText: w!("Save and continue"),
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: IDNO.0,
-            pszButtonText: if discard_all {
-                w!("Discard all edits and exit")
-            } else {
-                w!("Discard edits")
-            },
-        },
-        TASKDIALOG_BUTTON {
-            nButtonID: IDCANCEL.0,
-            pszButtonText: w!("Cancel"),
-        },
-    ]
+// UTF-16 storage is owned by the modal worker. Construct native pointer views
+// only after these buffers exist, and retain them through TaskDialogIndirect.
+fn button_labels<const N: usize>(
+    language: Language,
+    rows: [(i32, Text); N],
+) -> [(i32, Vec<u16>); N] {
+    rows.map(|(id, key)| (id, wide(key.in_language(language))))
+}
+
+fn button_view(label: &(i32, Vec<u16>)) -> TASKDIALOG_BUTTON {
+    TASKDIALOG_BUTTON {
+        nButtonID: label.0,
+        pszButtonText: PCWSTR(label.1.as_ptr()),
+    }
+}
+
+fn update_prompt_buttons(language: Language) -> [(i32, Vec<u16>); 2] {
+    button_labels(
+        language,
+        [
+            (IDYES.0, Text::NativeInstallNow),
+            (IDNO.0, Text::NativeInstallNext),
+        ],
+    )
+}
+
+fn unsaved_prompt_buttons(language: Language, discard_all: bool) -> [(i32, Vec<u16>); 3] {
+    button_labels(
+        language,
+        [
+            (IDYES.0, Text::NativeSaveContinue),
+            (
+                IDNO.0,
+                if discard_all {
+                    Text::NativeDiscardAll
+                } else {
+                    Text::NativeDiscard
+                },
+            ),
+            (IDCANCEL.0, Text::Cancel),
+        ],
+    )
 }
 
 fn start_dialog_worker<T: Send + 'static>(
@@ -416,6 +467,7 @@ impl Drop for DialogApartment {
 }
 
 fn dialog_thread(
+    language: Language,
     native_owner: isize,
     kind: FileDialogKind,
 ) -> Result<Option<PathBuf>, DialogError> {
@@ -426,14 +478,14 @@ fn dialog_thread(
         OleInitialize(None)?;
         let _apartment = DialogApartment;
         match kind {
-            FileDialogKind::OpenFile => show_initialized_dialog(false, owner_handle),
+            FileDialogKind::OpenFile => show_initialized_dialog(language, false, owner_handle),
             FileDialogKind::RenameFile { source } => {
-                show_relocation_dialog(&source, owner_handle, false)
+                show_relocation_dialog(language, &source, owner_handle, false)
             }
             FileDialogKind::MoveFile { source } => {
-                show_relocation_dialog(&source, owner_handle, true)
+                show_relocation_dialog(language, &source, owner_handle, true)
             }
-            FileDialogKind::OpenFolder => show_initialized_dialog(true, owner_handle),
+            FileDialogKind::OpenFolder => show_initialized_dialog(language, true, owner_handle),
             FileDialogKind::SaveExport {
                 suggested_name,
                 request,
@@ -441,6 +493,7 @@ fn dialog_thread(
                 let audio_only = request.options.output == crate::ExportOutput::AudioOnly;
                 let choices = request.choices(&std::sync::atomic::AtomicBool::new(false))?;
                 show_initialized_save_dialog(
+                    language,
                     &suggested_name,
                     owner_handle,
                     SaveFilter::Media {
@@ -449,14 +502,18 @@ fn dialog_thread(
                     },
                 )
             }
-            FileDialogKind::SaveFrame { suggested_name } => {
-                show_initialized_save_dialog(&suggested_name, owner_handle, SaveFilter::Frame)
-            }
+            FileDialogKind::SaveFrame { suggested_name } => show_initialized_save_dialog(
+                language,
+                &suggested_name,
+                owner_handle,
+                SaveFilter::Frame,
+            ),
         }
     }
 }
 
 unsafe fn show_relocation_dialog(
+    language: Language,
     source: &std::path::Path,
     owner: HWND,
     moving: bool,
@@ -482,16 +539,24 @@ unsafe fn show_relocation_dialog(
             save.SetFileName(PCWSTR(name.as_ptr()))?;
             save.cast()?
         };
-        dialog.SetTitle(if moving {
-            w!("Move file to folder")
-        } else {
-            w!("Rename file")
-        })?;
-        dialog.SetOkButtonLabel(if moving {
-            w!("Move here")
-        } else {
-            w!("Rename")
-        })?;
+        let title = wide(
+            if moving {
+                Text::NativeMoveTitle
+            } else {
+                Text::NativeRenameTitle
+            }
+            .in_language(language),
+        );
+        let accept = wide(
+            if moving {
+                Text::NativeMoveHere
+            } else {
+                Text::NativeRename
+            }
+            .in_language(language),
+        );
+        dialog.SetTitle(PCWSTR(title.as_ptr()))?;
+        dialog.SetOkButtonLabel(PCWSTR(accept.as_ptr()))?;
         if let Some(parent) = source.parent() {
             use std::os::windows::ffi::OsStrExt;
             let wide: Vec<u16> = parent.as_os_str().encode_wide().chain(Some(0)).collect();
@@ -513,6 +578,7 @@ unsafe fn show_relocation_dialog(
 }
 
 unsafe fn show_initialized_dialog(
+    language: Language,
     folder: bool,
     owner: HWND,
 ) -> Result<Option<PathBuf>, DialogError> {
@@ -524,6 +590,17 @@ unsafe fn show_initialized_dialog(
             options |= FOS_PICKFOLDERS;
         }
         dialog.SetOptions(options)?;
+        if language == Language::Japanese {
+            let title = wide(
+                if folder {
+                    Text::CommandOpenFolder
+                } else {
+                    Text::CommandOpenFile
+                }
+                .in_language(language),
+            );
+            dialog.SetTitle(PCWSTR(title.as_ptr()))?;
+        }
         if let Err(error) = dialog.Show(Some(owner)) {
             if error.code().0 as u32 == ERROR_CANCELLED_HRESULT {
                 return Ok(None);
@@ -552,6 +629,109 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dialog_errors_keep_english_diagnostics_and_localize_owned_explanations() {
+        let errors = [
+            DialogError::OwnerUnavailable,
+            DialogError::Thread(std::io::Error::other("external {thread}")),
+            DialogError::ThreadStopped,
+            DialogError::Windows(windows::core::Error::from_hresult(windows::core::HRESULT(
+                0x80004005_u32 as i32,
+            ))),
+            DialogError::InvalidPath(
+                String::from_utf16(&[0xd800]).expect_err("unpaired surrogate"),
+            ),
+            DialogError::Export(crate::ExportError::Failed("external {export}".into())),
+            DialogError::InvalidExportChoice("owned translated choice".into()),
+        ];
+        for error in &errors {
+            assert_eq!(error.message(Language::English), error.to_string());
+        }
+        assert_eq!(
+            errors[0].message(Language::Japanese),
+            "ダイアログの親ウィンドウを利用できません"
+        );
+        assert!(
+            errors[1]
+                .message(Language::Japanese)
+                .ends_with("external {thread}")
+        );
+        assert!(errors[3].message(Language::Japanese).contains("0x80004005"));
+        assert!(
+            errors[5]
+                .message(Language::Japanese)
+                .ends_with("external {export}")
+        );
+        assert_eq!(
+            errors[6].message(Language::Japanese),
+            "owned translated choice"
+        );
+    }
+
+    #[test]
+    fn japanese_native_buttons_keep_response_ids_and_owned_utf16_text() {
+        let labels = Box::new(update_prompt_buttons(Language::Japanese));
+        let buttons = labels.each_ref().map(button_view);
+        assert_eq!(buttons.map(|button| button.nButtonID), [IDYES.0, IDNO.0]);
+        assert_eq!(
+            buttons.map(|button| {
+                let ptr = button.pszButtonText;
+                // SAFETY: the owning buffers remain alive for every pointer read.
+                unsafe { ptr.to_string() }.expect("owned UTF-16")
+            }),
+            ["今すぐインストール", "次回起動時にインストール"]
+        );
+        for all in [false, true] {
+            let labels = unsaved_prompt_buttons(Language::Japanese, all);
+            let buttons = labels.each_ref().map(button_view);
+            assert_eq!(
+                buttons.map(|button| button.nButtonID),
+                [IDYES.0, IDNO.0, IDCANCEL.0]
+            );
+            assert_eq!(
+                buttons.map(|button| {
+                    let ptr = button.pszButtonText;
+                    // SAFETY: label owners outlive the native pointer views.
+                    unsafe { ptr.to_string() }.expect("owned UTF-16")
+                }),
+                [
+                    "保存して続行",
+                    if all {
+                        "すべての編集を破棄して終了"
+                    } else {
+                        "編集を破棄"
+                    },
+                    "キャンセル"
+                ]
+            );
+        }
+        let labels = button_labels(
+            Language::Japanese,
+            [
+                (IDYES.0, Text::CommandDeleteFile),
+                (IDCANCEL.0, Text::Cancel),
+            ],
+        );
+        assert_eq!(
+            labels
+                .each_ref()
+                .map(button_view)
+                .map(|button| button.nButtonID),
+            [IDYES.0, IDCANCEL.0]
+        );
+        let path = "C:\\日本語 {source}.png";
+        let message = formatted::native_delete(
+            Language::Japanese,
+            path,
+            Text::NativeDeleteRetained.in_language(Language::Japanese),
+        );
+        assert!(
+            message.starts_with(path)
+                && message.contains("ごみ箱")
+                && message.contains("編集内容は保持")
+        );
+    }
+
+    #[test]
     fn cancelled_delete_never_disables_future_confirmation() {
         for checked in [false, true] {
             for button in [IDCANCEL.0, IDNO.0, 0] {
@@ -575,12 +755,13 @@ mod tests {
 
     #[test]
     fn update_prompt_keeps_the_two_requested_native_actions() {
-        let buttons = update_prompt_buttons();
+        let labels = update_prompt_buttons(Language::English);
+        let buttons = labels.each_ref().map(button_view);
         assert_eq!(buttons.map(|button| button.nButtonID), [IDYES.0, IDNO.0]);
         assert_eq!(
             buttons.map(|button| {
                 let label = button.pszButtonText;
-                // SAFETY: the dialog buttons retain static NUL-terminated literals.
+                // SAFETY: the dialog buttons retain owned NUL-terminated labels for this scope.
                 unsafe { label.to_string() }.expect("static label")
             }),
             ["Install now", "Install on next launch"]
@@ -590,7 +771,8 @@ mod tests {
     #[test]
     fn unsaved_prompt_buttons_use_explicit_actions_and_exit_scope() {
         for all in [false, true] {
-            let buttons = unsaved_prompt_buttons(all);
+            let labels = unsaved_prompt_buttons(Language::English, all);
+            let buttons = labels.each_ref().map(button_view);
             assert_eq!(
                 buttons.map(|button| button.nButtonID),
                 [IDYES.0, IDNO.0, IDCANCEL.0]
@@ -598,7 +780,7 @@ mod tests {
             assert_eq!(
                 buttons.map(|button| {
                     let label = button.pszButtonText;
-                    // SAFETY: these labels are static, NUL-terminated w! literals.
+                    // SAFETY: the owning label buffers remain alive through these reads.
                     unsafe { label.to_string() }.expect("static label")
                 }),
                 [
@@ -624,6 +806,7 @@ mod tests {
                 OleInitialize(None).expect("STA");
                 let _apartment = DialogApartment;
                 let dialog = prepare_save_dialog(
+                    Language::English,
                     "動画.final-audio.wav",
                     SaveFilter::Media {
                         choices: crate::export::formats::Choices::new(
@@ -648,6 +831,7 @@ mod tests {
                 CoTaskMemFree(Some(name.0.cast()));
                 assert_eq!(text.expect("UTF-16"), "動画.final-audio.wav");
                 let regular = prepare_save_dialog(
+                    Language::English,
                     "image-export.png",
                     SaveFilter::Media {
                         choices: crate::export::formats::Choices::new(
@@ -663,8 +847,12 @@ mod tests {
                     regular.GetOptions().expect("regular options") & FOS_OVERWRITEPROMPT,
                     FOS_OVERWRITEPROMPT
                 );
-                let frame = prepare_save_dialog("video-frame-0ns.png", SaveFilter::Frame)
-                    .expect("frame save dialog");
+                let frame = prepare_save_dialog(
+                    Language::English,
+                    "video-frame-0ns.png",
+                    SaveFilter::Frame,
+                )
+                .expect("frame save dialog");
                 assert_eq!(frame.GetFileTypeIndex().expect("PNG type"), 1);
                 assert_eq!(
                     frame.GetOptions().expect("frame options") & FOS_OVERWRITEPROMPT,

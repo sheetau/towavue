@@ -27,6 +27,7 @@ pub enum AboutEvent {
 /// Owns a native About dialog on the retained owner's STA worker. Links are
 /// fixed identifiers; only value events cross back to the application's thread.
 pub fn show_about(
+    language: Language,
     owner: Arc<impl HasWindowHandle + Send + Sync + 'static>,
     version: &'static str,
     license: &'static str,
@@ -48,16 +49,9 @@ pub fn show_about(
             // through the synchronous dialog. All are dropped before COM teardown.
             unsafe { OleInitialize(None) }?;
             let _apartment = DialogApartment;
-            let title: Vec<_> = format!("towavue / Version {version}")
-                .encode_utf16()
-                .chain(Some(0))
-                .collect();
-            let content: Vec<_> = format!(
-                "Media viewer for Windows\n\nCreator: <a href=\"author\">sheeta</a>\n<a href=\"repository\">GitHub</a>\n\n{license}. Provided without warranty."
-            )
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
+            let title = wide(&formatted::native_about_title(language, version));
+            let content = wide(&formatted::native_about_content(language, license));
+            let window_title = wide(Text::CommandAbout.in_language(language));
             // SAFETY: resource 1 is the app's embedded icon. LoadIcon returns a
             // shared module resource, not an owned icon to destroy. Test hosts may
             // have no resource; omitting the icon must not prevent opening About.
@@ -71,16 +65,11 @@ pub fn show_about(
                 notify: notify.as_ref(),
                 icon,
             };
-            let buttons = [
-                TASKDIALOG_BUTTON {
-                    nButtonID: LICENSES,
-                    pszButtonText: w!("Licenses and sources"),
-                },
-                TASKDIALOG_BUTTON {
-                    nButtonID: IDOK.0,
-                    pszButtonText: w!("OK"),
-                },
-            ];
+            let labels = button_labels(
+                language,
+                [(LICENSES, Text::NativeLicenses), (IDOK.0, Text::NativeOk)],
+            );
+            let buttons = labels.each_ref().map(button_view);
             let config = TASKDIALOGCONFIG {
                 cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
                 hwndParent: HWND(native_owner as *mut _),
@@ -88,7 +77,7 @@ pub fn show_about(
                     | TDF_POSITION_RELATIVE_TO_WINDOW
                     | TDF_ENABLE_HYPERLINKS
                     | TDF_USE_HICON_MAIN,
-                pszWindowTitle: w!("About towavue"),
+                pszWindowTitle: PCWSTR(window_title.as_ptr()),
                 pszMainInstruction: PCWSTR(title.as_ptr()),
                 pszContent: PCWSTR(content.as_ptr()),
                 Anonymous1: TASKDIALOGCONFIG_0 { hMainIcon: icon },
@@ -171,6 +160,18 @@ fn response(button: i32) -> AboutResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn japanese_about_text_preserves_version_license_and_fixed_link_targets() {
+        let title = formatted::native_about_title(Language::Japanese, "1.0.3");
+        assert_eq!(title, "towavue / バージョン 1.0.3");
+        let content = formatted::native_about_content(Language::Japanese, "Apache-2.0");
+        assert!(content.contains("Apache-2.0") && content.contains("Windows用メディアビューアー"));
+        for href in ["author", "repository"] {
+            assert!(content.contains(&format!("href=\"{href}\"")));
+            assert!(project_link(&href.encode_utf16().collect::<Vec<_>>()).is_some());
+        }
+    }
 
     #[test]
     fn about_callback_routes_fixed_links_and_contains_panics() {

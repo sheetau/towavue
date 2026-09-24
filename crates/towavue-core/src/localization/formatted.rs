@@ -13,6 +13,22 @@ macro_rules! templates {
 }
 
 templates! {
+    dialog_thread_failed(error: &str) => ("the file-dialog thread could not start: {error}", "ファイルダイアログの処理を開始できませんでした: {error}"),
+    dialog_windows_failed(error: &str) => ("Windows file dialog failed: {error}", "Windowsのファイルダイアログでエラーが発生しました: {error}"),
+    dialog_invalid_path(error: &str) => ("Windows returned an invalid UTF-16 path: {error}", "Windowsが返したパスの文字情報が不正です（UTF-16）: {error}"),
+    dialog_export_failed(error: &str) => ("Could not prepare export formats: {error}", "書き出し形式を準備できませんでした: {error}"),
+    native_delete(path: &str, retained: &str) => ("{path}\n\nThe file will be moved to the Recycle Bin.{retained}", "{path}\n\nこのファイルをごみ箱へ移動します。{retained}"),
+    native_about_title(version: &str) => ("towavue / Version {version}", "towavue / バージョン {version}"),
+    native_about_content(license: &str) => ("Media viewer for Windows\n\nCreator: <a href=\"author\">sheeta</a>\n<a href=\"repository\">GitHub</a>\n\n{license}. Provided without warranty.", "Windows用メディアビューアー\n\n制作者：<a href=\"author\">sheeta</a>\n<a href=\"repository\">GitHub</a>\n\n{license}。無保証で提供されます。"),
+    native_extension_mismatch(format: &str) => ("The filename extension does not match {format}. Change the filename extension or select the matching file type.", "ファイル名の拡張子が{format}と一致しません。拡張子を変更するか、一致するファイル形式を選択してください。"),
+    native_update_notice(version: &str, failed: &str) => ("Version {version} is downloaded and ready to install.{failed}\n\nInstallation can take several minutes. towavue will close and reopen automatically.", "バージョン{version}をダウンロードしました。インストールできます。{failed}\n\nインストールには数分かかる場合があります。towavueは自動で終了し、起動し直します。"),
+    native_recovery(error: &str) => ("Graphics could not be restored.\n\n{error}\n\nRetry: restore graphics at the saved playback position.\nCancel: keep all edits. Press Alt+F4 afterward to export or close.", "描画を復元できませんでした。\n\n{error}\n\n再試行：保存した再生位置で描画を復元します。\nキャンセル：すべての編集を保持します。その後Alt+F4を押すと、書き出しまたは終了を選択できます。"),
+    native_save_guard(name: &str, save: &str) => ("{name}\n\n{save} Cancel keeps your edits and stops this action.", "{name}\n\n{save} キャンセルすると、編集内容を保持してこの操作を取り消します。"),
+    native_export_error(error: &str) => ("Export failed. Your edits are retained.\n\n{error}", "書き出しに失敗しました。編集内容は保持されています。\n\n{error}"),
+    about_failed(error: &str) => ("Could not show About: {error}", "アプリ情報を表示できませんでした: {error}"),
+    link_failed(error: &str) => ("Could not open link: {error}", "リンクを開けませんでした: {error}"),
+    update_notice_failed(error: &str) => ("Could not show the update notification: {error}", "更新通知を表示できませんでした: {error}"),
+    confirmation_failed(error: &str) => ("Could not show the confirmation; edits kept: {error}", "確認を表示できませんでした。編集内容は保持されています: {error}"),
     language_save_failed(error: &str) => ("Could not save the language: {error}", "表示言語を保存できませんでした: {error}"),
     rotation_drag(angle: f32, help: &str) => ("Rotation: {angle:.1} degrees · {help}", "回転: {angle:.1}度 · {help}"),
     rotation_drag_invalid(error: &str) => ("{error} · Preview unchanged; release cancels", "{error} · プレビューは変更しません。離すとキャンセル"),

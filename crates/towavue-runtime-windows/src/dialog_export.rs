@@ -19,6 +19,7 @@ pub(super) enum SaveFilter {
 /// Lives and drops on the caller's initialized STA. The dialog owns its advised
 /// callback; that callback owns values only, avoiding a COM reference cycle.
 pub(super) struct PreparedSave {
+    language: Language,
     dialog: IFileSaveDialog,
     choices: Choices,
     cookie: u32,
@@ -43,11 +44,8 @@ impl Drop for PreparedSave {
     }
 }
 
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(Some(0)).collect()
-}
-
 pub(super) unsafe fn prepare_save_dialog(
+    language: Language,
     suggested: &str,
     filter: SaveFilter,
 ) -> Result<PreparedSave, DialogError> {
@@ -60,15 +58,15 @@ pub(super) unsafe fn prepare_save_dialog(
         } => (
             choices,
             if audio_only {
-                "Export audio only (video edits remain unchanged)"
+                Text::NativeExportAudioTitle.in_language(language)
             } else {
-                "Export as"
+                Text::NativeExportTitle.in_language(language)
             },
         ),
-        SaveFilter::SaveAs { choices } => (choices, "Save as"),
+        SaveFilter::SaveAs { choices } => (choices, Text::NativeSaveAsTitle.in_language(language)),
         SaveFilter::Frame => (
             Choices::new(vec![Format::FramePng], std::path::Path::new("frame.png"))?,
-            "Export current edited frame",
+            Text::NativeFrameTitle.in_language(language),
         ),
     };
     let filters: Vec<_> = choices
@@ -82,7 +80,7 @@ pub(super) unsafe fn prepare_save_dialog(
                 .collect::<Vec<_>>()
                 .join(";");
             (
-                wide(&format!("{} ({pattern})", format.label())),
+                wide(&format!("{} ({pattern})", format.label_in(language))),
                 wide(&pattern),
             )
         })
@@ -107,12 +105,14 @@ pub(super) unsafe fn prepare_save_dialog(
         dialog.SetDefaultExtension(PCWSTR(wide(&choices.default_extension).as_ptr()))?;
         dialog.SetFileName(PCWSTR(wide(&choices.filename(suggested)).as_ptr()))?;
         let events: IFileDialogEvents = SaveEvents {
+            language,
             choices: choices.clone(),
             accepted: accepted.clone(),
         }
         .into();
         let cookie = dialog.Advise(&events)?;
         Ok(PreparedSave {
+            language,
             dialog,
             choices,
             cookie,
@@ -123,25 +123,27 @@ pub(super) unsafe fn prepare_save_dialog(
 }
 
 pub(super) unsafe fn show_initialized_save_dialog(
+    language: Language,
     suggested: &str,
     owner: HWND,
     filter: SaveFilter,
 ) -> Result<Option<PathBuf>, DialogError> {
     // SAFETY: caller retains the owner and STA until the native dialog closes.
     unsafe {
-        let prepared = prepare_save_dialog(suggested, filter)?;
+        let prepared = prepare_save_dialog(language, suggested, filter)?;
         show_prepared(&prepared, owner)
     }
 }
 
 pub(super) unsafe fn show_initialized_save_as_dialog(
+    language: Language,
     suggested: &str,
     owner: HWND,
     choices: Choices,
 ) -> Result<Option<crate::SaveAsTarget>, DialogError> {
     // SAFETY: caller retains the owner and STA for preparation, Show and Drop.
     unsafe {
-        let prepared = prepare_save_dialog(suggested, SaveFilter::SaveAs { choices })?;
+        let prepared = prepare_save_dialog(language, suggested, SaveFilter::SaveAs { choices })?;
         let Some(path) = show_prepared(&prepared, owner)? else {
             return Ok(None);
         };
@@ -158,7 +160,9 @@ impl PreparedSave {
         match target {
             Some(target) if target.path() == path => Ok(target),
             _ => Err(DialogError::InvalidExportChoice(
-                "The Save as destination was not accepted; choose it again.".into(),
+                Text::NativeSaveDestinationNotAccepted
+                    .in_language(self.language)
+                    .into(),
             )),
         }
     }
@@ -179,7 +183,7 @@ unsafe fn show_prepared(
         let path = result_path(&prepared.dialog.cast()?)?;
         prepared
             .choices
-            .validate(prepared.GetFileTypeIndex()?, &path)
+            .validate_in(prepared.language, prepared.GetFileTypeIndex()?, &path)
             .map_err(DialogError::InvalidExportChoice)?;
         Ok(Some(path))
     }
@@ -196,6 +200,7 @@ unsafe fn result_path(dialog: &IFileDialog) -> Result<PathBuf, DialogError> {
 
 #[windows::core::implement(IFileDialogEvents, Agile = false)]
 struct SaveEvents {
+    language: Language,
     choices: Choices,
     // STA-local shared values only; no dialog interface or native lease is held.
     accepted: Option<Rc<RefCell<Option<crate::SaveAsTarget>>>>,
@@ -206,7 +211,7 @@ impl SaveEvents {
         if let Some(accepted) = &self.accepted {
             accepted.borrow_mut().take();
         }
-        self.choices.validate(index, path)?;
+        self.choices.validate_in(self.language, index, path)?;
         if let Some(accepted) = &self.accepted {
             let target = crate::SaveAsTarget::capture(path).map_err(|error| error.to_string())?;
             *accepted.borrow_mut() = Some(target);
@@ -217,6 +222,7 @@ impl SaveEvents {
 
 impl IFileDialogEvents_Impl for SaveEvents_Impl {
     fn OnFileOk(&self, dialog: Ref<IFileDialog>) -> windows_core::Result<()> {
+        let language = self.language;
         if let Some(accepted) = &self.accepted {
             accepted.borrow_mut().take();
         }
@@ -228,7 +234,7 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
                 .GetFileTypeIndex()
                 .map_err(DialogError::from)
                 .and_then(|index| Ok((index, result_path(dialog)?)))
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.message(language))
                 .and_then(|(index, path)| self.accept(index, &path));
             if let Err(message) = choice {
                 let owner = dialog
@@ -240,9 +246,9 @@ impl IFileDialogEvents_Impl for SaveEvents_Impl {
                     PCWSTR(wide(&message).as_ptr()),
                     PCWSTR(
                         wide(if self.accepted.is_some() {
-                            "Save as"
+                            Text::NativeSaveAsTitle.in_language(language)
                         } else {
-                            "Export file type"
+                            Text::NativeExportTypeTitle.in_language(language)
                         })
                         .as_ptr(),
                     ),
@@ -291,6 +297,117 @@ mod tests {
     use super::*;
 
     #[test]
+    fn japanese_native_save_dialog_keeps_filters_names_acceptance_and_overwrite_semantics() {
+        thread::spawn(|| {
+            // SAFETY: this owned STA never calls Show or affects user focus.
+            // Every native interface and UTF-16 buffer drops before its apartment.
+            unsafe {
+                OleInitialize(None).expect("STA");
+                let _apartment = DialogApartment;
+                use Format::*;
+                let formats = vec![
+                    Png,
+                    FramePng,
+                    Jpeg,
+                    Webp,
+                    Avif,
+                    Gif,
+                    Tiff,
+                    Bmp,
+                    Mp4,
+                    Mkv,
+                    Mov,
+                    Webm,
+                    Avi,
+                    Wmv,
+                    ThreeGp,
+                    TransportStream,
+                    Wav,
+                    Flac,
+                    Mp3,
+                    M4a,
+                    Aac,
+                    Ogg,
+                    Opus,
+                ];
+                let choices =
+                    Choices::new(formats, std::path::Path::new("source.jpeg")).expect("choices");
+                let prepare = |language| {
+                    prepare_save_dialog(
+                        language,
+                        "日本語 {name}.jpeg",
+                        SaveFilter::SaveAs {
+                            choices: choices.clone(),
+                        },
+                    )
+                    .expect("prepared dialog")
+                };
+                let english = prepare(Language::English);
+                let japanese = prepare(Language::Japanese);
+                assert_eq!(english._filters.len(), 23);
+                assert_eq!(japanese._filters.len(), 23);
+                for ((_, english_glob), (_, japanese_glob)) in
+                    english._filters.iter().zip(&japanese._filters)
+                {
+                    assert_eq!(english_glob, japanese_glob, "file globs are not translated");
+                }
+                let png = &japanese._filters[0].0;
+                assert_eq!(
+                    String::from_utf16(&png[..png.len() - 1]).expect("label"),
+                    "PNG / APNG画像 (*.png;*.apng)"
+                );
+                assert_eq!(
+                    english.GetOptions().expect("options"),
+                    japanese.GetOptions().expect("options")
+                );
+                assert_eq!(
+                    japanese.GetOptions().expect("options") & FOS_OVERWRITEPROMPT,
+                    FOS_OVERWRITEPROMPT
+                );
+                assert_eq!(
+                    english.GetFileTypeIndex().expect("type"),
+                    japanese.GetFileTypeIndex().expect("type")
+                );
+                let name = japanese.GetFileName().expect("name");
+                let text = name.to_string();
+                CoTaskMemFree(Some(name.0.cast()));
+                assert_eq!(text.expect("UTF-16 filename"), "日本語 {name}.jpeg");
+                assert!(
+                    japanese
+                        .choices
+                        .validate_in(
+                            Language::Japanese,
+                            3,
+                            std::path::Path::new("unchanged.jpeg")
+                        )
+                        .is_ok()
+                );
+                let error = japanese
+                    .choices
+                    .validate_in(Language::Japanese, 3, std::path::Path::new("wrong.png"))
+                    .expect_err("mismatch");
+                assert!(error.contains("JPEG画像") && error.contains("一致しません"));
+                assert_eq!(
+                    japanese
+                        .choices
+                        .validate_in(Language::Japanese, 0, std::path::Path::new("x.png"))
+                        .expect_err("invalid index"),
+                    "対応するファイル形式を選択してください。"
+                );
+                assert!(
+                    japanese
+                        .take_accepted(std::path::Path::new("not-accepted.jpeg"))
+                        .expect_err("no native acceptance")
+                        .to_string()
+                        .contains("保存先が確定していません")
+                );
+            }
+        })
+        .join()
+        .expect("STA completed");
+    }
+
+    #[test]
     fn save_as_dialog_acceptance_preserves_selected_identity_and_rejects_stale_results() {
         std::thread::spawn(|| unsafe {
             OleInitialize(None).expect("owned STA");
@@ -308,10 +425,15 @@ mod tests {
             let missing = folder.join("new.png");
             std::fs::write(&existing, b"selected version").expect("destination fixture");
             let choices = Choices::new(vec![Format::Png], &existing).expect("formats");
-            let dialog = prepare_save_dialog("existing.png", SaveFilter::SaveAs { choices })
-                .expect("native Save as dialog");
+            let dialog = prepare_save_dialog(
+                Language::English,
+                "existing.png",
+                SaveFilter::SaveAs { choices },
+            )
+            .expect("native Save as dialog");
             assert_eq!(dialog.GetFileTypeIndex().expect("selected type"), 1);
             let sink = SaveEvents {
+                language: Language::English,
                 choices: dialog.choices.clone(),
                 accepted: dialog.accepted.clone(),
             };
@@ -364,6 +486,7 @@ mod tests {
             // Derivative export has no Save as snapshot and retains its path-only
             // behavior, including no filesystem capture during type validation.
             let derivative = SaveEvents {
+                language: Language::English,
                 choices: dialog.choices.clone(),
                 accepted: None,
             };
@@ -396,6 +519,7 @@ mod tests {
                 )
                 .expect("formats");
                 let dialog = prepare_save_dialog(
+                    Language::English,
                     source,
                     SaveFilter::Media {
                         choices,
@@ -431,7 +555,8 @@ mod tests {
                 // Drop unadvises before the STA guard; repeated dialogs do not
                 // retain a callback or a previous document's type restrictions.
             }
-            let frame = prepare_save_dialog("frame.png", SaveFilter::Frame).expect("PNG frame");
+            let frame = prepare_save_dialog(Language::English, "frame.png", SaveFilter::Frame)
+                .expect("PNG frame");
             assert!(
                 frame
                     .choices

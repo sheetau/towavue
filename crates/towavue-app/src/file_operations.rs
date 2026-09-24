@@ -189,7 +189,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn finish_file_destination(&mut self, result: Result<Option<PathBuf>, DialogError>) {
         if !self.file_relocation_is_current() {
             self.file_operations.pending = None;
-            self.set_status("The source changed while choosing a path; nothing was moved.".into());
+            self.set_status(
+                crate::localization::Text::MoveSourceChangedInDialog
+                    .in_language(self.language())
+                    .into(),
+            );
             return;
         }
         match result {
@@ -213,7 +217,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             Err(error) => {
                 self.file_operations.pending = None;
-                self.set_status(error.to_string());
+                self.set_status(error.message(self.language()));
             }
         }
         self.request_redraw();

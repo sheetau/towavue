@@ -71,7 +71,7 @@ impl PendingFrameExport {
             Ok(Some(target)) => target,
             Ok(None) => return,
             Err(error) => {
-                app.set_status(error.to_string());
+                app.set_status(error.message(app.language()));
                 return;
             }
         };

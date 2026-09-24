@@ -85,20 +85,27 @@ impl WindowHost {
             let app = &self.windows[&owner];
             let Some(window) = app.window.clone() else {
                 self.cancel_file_operation(
-                    "The delete dialog's owner window is unavailable.".into(),
+                    crate::localization::Text::DeleteDialogOwnerUnavailable
+                        .in_language(app.language())
+                        .into(),
                 );
                 return;
             };
             let notify = Arc::clone(&app.notify);
-            if let Err(error) =
-                towavue_runtime_windows::confirm_file_delete(window, path, dirty, move |result| {
+            let language = app.language();
+            if let Err(error) = towavue_runtime_windows::confirm_file_delete(
+                language,
+                window,
+                path,
+                dirty,
+                move |result| {
                     notify(AppEvent::FileDeleteConfirmed(
                         serial,
-                        result.map_err(|error| error.to_string()),
+                        result.map_err(|error| error.message(language)),
                     ));
-                })
-            {
-                self.cancel_file_operation(error.to_string());
+                },
+            ) {
+                self.cancel_file_operation(error.message(language));
             }
         } else {
             self.run_file_operation();

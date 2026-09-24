@@ -21,13 +21,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         let notify = std::sync::Arc::clone(&self.notify);
         match show_about(
+            self.language(),
             window,
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_LICENSE"),
             move |event| notify(AppEvent::About(event)),
         ) {
             Ok(()) => self.about_open = true,
-            Err(error) => self.set_status(format!("Could not show About: {error}")),
+            Err(error) => self.set_status(towavue_core::localization::formatted::about_failed(
+                self.language(),
+                &error.message(self.language()),
+            )),
         }
         self.request_redraw();
     }
@@ -39,7 +43,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         match event {
             AboutEvent::Link(link) => {
                 if let Err(error) = link.open() {
-                    self.set_status(format!("Could not open link: {error}"));
+                    self.set_status(towavue_core::localization::formatted::link_failed(
+                        self.language(),
+                        &error.to_string(),
+                    ));
                 }
             }
             AboutEvent::Closed(result) => {
@@ -48,7 +55,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 match result {
                     Ok(AboutResponse::Licenses) => self.show_licenses(),
                     Ok(AboutResponse::Close) => {}
-                    Err(error) => self.set_status(format!("Could not show About: {error}")),
+                    Err(error) => {
+                        self.set_status(towavue_core::localization::formatted::about_failed(
+                            self.language(),
+                            &error.message(self.language()),
+                        ))
+                    }
                 }
                 // A save can finish on the worker while About owns the window.
                 // Re-evaluate its existing continuation after releasing the dialog.

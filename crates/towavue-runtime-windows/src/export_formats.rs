@@ -1,5 +1,6 @@
 use super::*;
 use crate::MediaInput;
+use towavue_core::localization::{Language, Text, formatted};
 
 #[path = "export_format_alpha.rs"]
 mod alpha;
@@ -79,32 +80,38 @@ impl Format {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn label(self) -> &'static str {
-        match self {
-            Self::Png => "PNG / APNG image",
-            Self::FramePng => "PNG image",
-            Self::Jpeg => "JPEG image",
-            Self::Webp => "WebP image",
-            Self::Avif => "AVIF image",
-            Self::Gif => "GIF image (256 colors, binary transparency)",
-            Self::Tiff => "TIFF image",
-            Self::Bmp => "Bitmap image",
-            Self::Mp4 => "MP4 video",
-            Self::Mkv => "Matroska video",
-            Self::Mov => "QuickTime video",
-            Self::Webm => "WebM video",
-            Self::Avi => "AVI video",
-            Self::Wmv => "Windows Media video",
-            Self::ThreeGp => "3GP video",
-            Self::TransportStream => "MPEG transport stream",
-            Self::Wav => "WAV audio",
-            Self::Flac => "FLAC audio",
-            Self::Mp3 => "MP3 audio",
-            Self::M4a => "M4A / AAC audio",
-            Self::Aac => "AAC audio",
-            Self::Ogg => "Ogg / Opus audio",
-            Self::Opus => "Opus audio",
-        }
+        self.label_in(Language::English)
+    }
+
+    pub(crate) fn label_in(self, language: Language) -> &'static str {
+        let key = match self {
+            Self::Png => Text::FormatPng,
+            Self::FramePng => Text::FormatFramePng,
+            Self::Jpeg => Text::FormatJpeg,
+            Self::Webp => Text::FormatWebp,
+            Self::Avif => Text::FormatAvif,
+            Self::Gif => Text::FormatGif,
+            Self::Tiff => Text::FormatTiff,
+            Self::Bmp => Text::FormatBmp,
+            Self::Mp4 => Text::FormatMp4,
+            Self::Mkv => Text::FormatMkv,
+            Self::Mov => Text::FormatMov,
+            Self::Webm => Text::FormatWebm,
+            Self::Avi => Text::FormatAvi,
+            Self::Wmv => Text::FormatWmv,
+            Self::ThreeGp => Text::FormatThreeGp,
+            Self::TransportStream => Text::FormatTransportStream,
+            Self::Wav => Text::FormatWav,
+            Self::Flac => Text::FormatFlac,
+            Self::Mp3 => Text::FormatMp3,
+            Self::M4a => Text::FormatM4a,
+            Self::Aac => Text::FormatAac,
+            Self::Ogg => Text::FormatOgg,
+            Self::Opus => Text::FormatOpus,
+        };
+        key.in_language(language)
     }
 
     fn supports_metadata(self, options: &MetadataExportOptions) -> bool {
@@ -189,15 +196,29 @@ impl Choices {
         name.to_string_lossy().into_owned()
     }
 
+    #[cfg(test)]
     pub(crate) fn validate(&self, one_based: u32, path: &Path) -> Result<(), String> {
+        self.validate_in(Language::English, one_based, path)
+    }
+
+    pub(crate) fn validate_in(
+        &self,
+        language: Language,
+        one_based: u32,
+        path: &Path,
+    ) -> Result<(), String> {
         let format = one_based
             .checked_sub(1)
             .and_then(|i| self.formats.get(i as usize))
-            .ok_or_else(|| "Choose a supported file type.".to_owned())?;
+            .ok_or_else(|| {
+                Text::NativeChooseSupportedType
+                    .in_language(language)
+                    .to_owned()
+            })?;
         if !format.accepts(path) {
-            return Err(format!(
-                "The filename extension does not match {}. Change the filename extension or select the matching file type.",
-                format.label()
+            return Err(formatted::native_extension_mismatch(
+                language,
+                format.label_in(language),
             ));
         }
         Ok(())

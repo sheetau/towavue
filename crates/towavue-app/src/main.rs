@@ -8495,13 +8495,14 @@ where
                 request,
             } if request.options.output == ExportOutput::Media => {
                 towavue_runtime_windows::pick_save_as(
+                    self.language(),
                     window,
                     suggested_name,
                     *request,
                     move |result| notify(AppEvent::SaveAsDialogFinished(result)),
                 )
             }
-            kind => pick_path(window, kind, move |result| {
+            kind => pick_path(self.language(), window, kind, move |result| {
                 notify(AppEvent::DialogFinished(result))
             }),
         };
@@ -8521,7 +8522,7 @@ where
                 true
             }
             Err(error) => {
-                self.set_status(error.to_string());
+                self.set_status(error.message(self.language()));
                 false
             }
         }
@@ -8578,12 +8579,12 @@ where
             DialogIntent::OpenFile => match result {
                 Ok(Some(path)) => self.open_external(path, false),
                 Ok(None) => {}
-                Err(error) => self.set_status(error.to_string()),
+                Err(error) => self.set_status(error.message(self.language())),
             },
             DialogIntent::OpenFolder => match result {
                 Ok(Some(path)) => self.open_folder_path(path),
                 Ok(None) => {}
-                Err(error) => self.set_status(error.to_string()),
+                Err(error) => self.set_status(error.message(self.language())),
             },
             DialogIntent::Export {
                 tab,
@@ -8608,7 +8609,9 @@ where
                         } else {
                             self.pending_guard = continuation;
                             self.set_status(
-                                "The Save as destination was not accepted; choose it again.".into(),
+                                localization::Text::NativeSaveDestinationNotAccepted
+                                    .in_language(self.language())
+                                    .into(),
                             );
                         }
                     } else {
@@ -8618,9 +8621,10 @@ where
                 other => {
                     self.pending_guard = continuation;
                     match other {
-                        Err(error) => self.set_status(error.to_string()),
+                        Err(error) => self.set_status(error.message(self.language())),
                         Ok(Some(_)) => self.set_status(
-                            "The source changed while choosing an export path; nothing was exported."
+                            localization::Text::ExportSourceChangedInDialog
+                                .in_language(self.language())
                                 .into(),
                         ),
                         Ok(None) => {}
@@ -10105,45 +10109,9 @@ where
         let Some(window) = self.window.clone() else {
             return;
         };
-        let (message, buttons) = match &prompt {
-            FallbackPrompt::LanguageNotice(message) => (message.clone(), PromptButtons::Information),
-            FallbackPrompt::ConfigurationWarning(message) => (message.clone(), PromptButtons::Ok),
-            FallbackPrompt::UpdateNotice(notice) => (
-                format!(
-                    "Version {} is downloaded and ready to install.{}\n\nInstallation can take several minutes. towavue will close and reopen automatically.",
-                    notice.version,
-                    if notice.failed { "\n\nThe previous installation did not finish." } else { "" },
-                ),
-                PromptButtons::InstallUpdate,
-            ),
-            FallbackPrompt::Recovery { error, .. } => (
-                format!("Graphics could not be restored.\n\n{error}\n\nRetry: restore graphics at the saved playback position.\nCancel: keep all edits. Press Alt+F4 afterward to export or close."),
-                PromptButtons::RetryCancel,
-            ),
-            FallbackPrompt::Guard => {
-                let name = self.path.as_deref().map(display_name)
-                    .unwrap_or_else(|| image_paste::DEFAULT_NAME.into());
-                let save = if self.current_document_untitled() {
-                    "Save lets you choose a file location."
-                } else {
-                    "Save replaces the source file."
-                };
-                (format!("{name}\n\n{save} Cancel keeps your edits and stops this action."),
-                    PromptButtons::SaveDiscardCancel {
-                        discard_all: matches!(self.pending_guard, Some(GuardedAction::Exit | GuardedAction::UpdateExit(_))),
-                    })
-            }
-            FallbackPrompt::ExportError => (
-                format!("Export failed. Your edits are retained.\n\n{}", self.export_error.as_deref().unwrap_or_default()),
-                PromptButtons::Ok,
-            ),
-            FallbackPrompt::ExportBusy => (
-                "Export may finish while this dialog is open.\n\nYes: request cancellation and stop automatic leaving.\nNo or Cancel: keep waiting.\n\nIf already saved, the output is kept. Otherwise existing files and edits are retained.\nThe window title reports export progress.".into(),
-                PromptButtons::YesNoCancel,
-            ),
-        };
+        let (message, buttons) = self.native_prompt_content(&prompt);
         let notify = Arc::clone(&self.notify);
-        match show_prompt(window, message, buttons, move |result| {
+        match show_prompt(self.language(), window, message, buttons, move |result| {
             notify(AppEvent::PromptFinished(result))
         }) {
             Ok(()) => self.native_prompt = Some(prompt),
@@ -10155,12 +10123,16 @@ where
         towavue_runtime_windows::diagnostic!("towavue: native prompt failed: {error}");
         if matches!(prompt, FallbackPrompt::UpdateNotice(_)) {
             self.handle_update_action(updates::Action::Dismiss);
-            self.set_status(format!("Could not show the update notification: {error}"));
+            self.set_status(towavue_core::localization::formatted::update_notice_failed(
+                self.language(),
+                &error.message(self.language()),
+            ));
         }
         if matches!(prompt, FallbackPrompt::Guard) {
             self.resolve_guard(GuardDecision::Cancel);
-            self.set_status(format!(
-                "Could not show the confirmation; edits kept: {error}"
+            self.set_status(towavue_core::localization::formatted::confirmation_failed(
+                self.language(),
+                &error.message(self.language()),
             ));
         }
     }

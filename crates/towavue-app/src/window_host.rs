@@ -29,6 +29,12 @@ mod launch_tests;
 
 mod file_operations;
 mod idle_graphics;
+
+#[cfg(feature = "presentation-verification")]
+#[path = "seek_verification.rs"]
+mod seek_verification;
+#[cfg(feature = "presentation-verification")]
+pub(crate) use seek_verification::run as verify_reference_seek;
 mod source_save;
 mod updates;
 

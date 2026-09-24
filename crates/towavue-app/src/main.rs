@@ -167,6 +167,10 @@ const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
 const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "presentation-verification")]
+    if std::env::var_os("TOWAVUE_VERIFY_SEEK").is_some() {
+        return window_host::verify_reference_seek();
+    }
     let _diagnostics = towavue_runtime_windows::start_diagnostics().ok();
     let result = run();
     if let Err(error) = &result {
@@ -1507,6 +1511,12 @@ where
             .with_min_inner_size(LogicalSize::new(480, 300))
             .with_visible(false)
             .with_decorations(true);
+        #[cfg(feature = "presentation-verification")]
+        let attributes = if std::env::var_os("TOWAVUE_VERIFY_SEEK").is_some() {
+            attributes.with_active(false)
+        } else {
+            attributes
+        };
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(10);
         let window = Arc::new(event_loop.create_window(attributes)?);

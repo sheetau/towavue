@@ -18,6 +18,14 @@ macro_rules! messages {
 }
 
 messages! {
+    ShortcutPathNoParent => ("shortcut path has no parent", "ショートカット設定のパスに親フォルダーがありません"),
+    GridPathNoParent => ("grid path has no parent", "グリッド設定のパスに親フォルダーがありません"),
+    ShortcutsSaveBusy => ("Keyboard shortcuts are being saved by another window. Try again.", "別のウィンドウでショートカットを保存しています。もう一度お試しください。"),
+    ShortcutChangedOnDisk => ("This command changed on disk. Reload keyboard shortcuts before editing it again.", "このコマンドの設定がファイル上で変更されました。ショートカットを再読み込みしてから編集してください。"),
+    ShortcutsChangedDuringSave => ("Keyboard shortcuts changed while saving. Reload and try again.", "保存中にショートカットが変更されました。再読み込みしてからもう一度お試しください。"),
+    ShortcutsMissingEquals => ("Missing '=' in keyboard shortcuts", "ショートカット設定に「=」がありません"),
+    ShortcutUnknownCommand => ("Unknown shortcut command", "不明なショートカットコマンドです"),
+    ShortcutsNotPreserved => ("Keyboard shortcuts could not be preserved; the file was not changed.", "ショートカットを保持できなかったため、ファイルは変更していません。"),
     DropGuideBlocked => ("Close the dialog before dropping files", "ファイルをドロップする前にダイアログを閉じてください"),
     DropGuideOpen => ("Open with towavue", "towavueで開く"),
     DropGuideBlockedHelp => ("Dropping is unavailable while a dialog is open", "ダイアログを開いている間はドロップできません"),

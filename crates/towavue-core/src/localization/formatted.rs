@@ -13,6 +13,12 @@ macro_rules! templates {
 }
 
 templates! {
+    configuration_missing_equals(file: &str, line: usize) => ("{file} line {line} is missing '='", "{file}の{line}行目に「=」がありません"),
+    configuration_unknown_command(file: &str, line: usize) => ("unknown command on {file} line {line}", "{file}の{line}行目に不明なコマンドがあります"),
+    configuration_invalid_shortcut(line: usize) => ("invalid shortcut on shortcuts.conf line {line}", "shortcuts.confの{line}行目のショートカットが不正です"),
+    configuration_unknown_media_kind(line: usize) => ("unknown media kind on grid.conf line {line}", "grid.confの{line}行目のメディア種別が不明です"),
+    configuration_grid_count(line: usize, count: usize) => ("grid.conf line {line} has {count} commands; expected 16", "grid.confの{line}行目にコマンドが{count}個あります。16個指定してください"),
+    configuration_fallback(details: &str, file_menu: &str, reload: &str) => ("Using built-in defaults for the settings below. Existing configuration files have not been changed.\n\n{details}\n\nCorrect these files, then choose {file_menu} > {reload} from the towavue menu.", "以下の設定には初期設定を使用しています。既存の設定ファイルは変更していません。\n\n{details}\n\nファイルを修正してから、towavueのメニューで「{file_menu}」>「{reload}」を選択してください。"),
     selection_edge_focus(label: &str, value: u32) => ("{label}: {value} · Arrow keys adjust", "{label}: {value} · 矢印キーで調整"),
     track_duration_suffix(time: &str) => (" · Duration {time}", " · 長さ {time}"),
     preview_near(time: &str) => ("Preview near {time}", "{time}付近のプレビュー"),

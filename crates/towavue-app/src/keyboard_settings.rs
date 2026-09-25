@@ -329,7 +329,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 );
                 (self.notify)(AppEvent::ShortcutsChanged(bindings));
             }
-            Err(error) => self.keyboard_settings.message = Some(error),
+            Err(error) => self.keyboard_settings.message = Some(error.message(self.language())),
         }
         self.request_redraw();
     }

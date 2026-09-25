@@ -1,3 +1,5 @@
+use crate::configuration::Error;
+use crate::localization::Text;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,25 +21,27 @@ const READING_BINDING_HEADER: &str = "# towavue shortcuts v6";
 const RECENT_FOLDER_BINDING_HEADER: &str = "# towavue shortcuts v7";
 const FULLSCREEN_BINDING_HEADER: &str = "# towavue shortcuts v5";
 
-pub fn load() -> Result<(ShortcutBindings, PathBuf), String> {
-    let path = config_path()?;
+pub fn load() -> Result<(ShortcutBindings, PathBuf), Error> {
+    let path = config_path().map_err(Error::External)?;
     load_from(&path).map(|bindings| (bindings, path))
 }
 
-pub fn load_from(path: &Path) -> Result<ShortcutBindings, String> {
+pub fn load_from(path: &Path) -> Result<ShortcutBindings, Error> {
     let defaults = defaults();
     if !path.exists() {
-        let parent = path.parent().ok_or("shortcut path has no parent")?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let parent = path
+            .parent()
+            .ok_or(Error::Text(Text::ShortcutPathNoParent))?;
+        fs::create_dir_all(parent).map_err(Error::from)?;
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
             .and_then(|mut file| file.write_all(serialize(&defaults).as_bytes()))
-            .map_err(|error| error.to_string())?;
+            .map_err(Error::from)?;
         return Ok(defaults);
     }
-    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let text = fs::read_to_string(path).map_err(Error::from)?;
     parse(&text, defaults)
 }
 
@@ -201,7 +205,7 @@ pub fn defaults() -> ShortcutBindings {
     bindings
 }
 
-fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, String> {
+fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
     let selection_bindings = text
         .lines()
@@ -250,7 +254,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             continue;
         }
         let Some((command, sequence)) = line.split_once('=') else {
-            return Err(format!("shortcuts.conf line {} is missing '='", index + 1));
+            return Err(Error::MissingEquals {
+                file: "shortcuts.conf",
+                line: index + 1,
+            });
         };
         // Retired generated declarations must not invalidate unrelated custom keys.
         if command.trim() == "reverse_reading_folder_order" {
@@ -259,7 +266,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         let command = command
             .trim()
             .parse::<CommandId>()
-            .map_err(|_| format!("unknown command on shortcuts.conf line {}", index + 1))?;
+            .map_err(|_| Error::UnknownCommand {
+                file: "shortcuts.conf",
+                line: index + 1,
+            })?;
         declared.insert(command);
         if sequence.trim().is_empty() {
             implicit_volume.remove(&command);
@@ -284,7 +294,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .into_iter()
             .map(|part| part.trim().parse::<KeySequence>())
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| format!("invalid shortcut on shortcuts.conf line {}", index + 1))?;
+            .map_err(|_| Error::InvalidShortcut { line: index + 1 })?;
         // Old generated files listed every default. Preserve new alternatives
         // only for unchanged defaults; custom bindings remain exact replacements.
         if command == CommandId::ToggleFullscreen {

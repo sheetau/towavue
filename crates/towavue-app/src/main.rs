@@ -17,6 +17,7 @@ mod chrome;
 #[cfg(test)]
 mod chrome_resize_tests;
 mod closed_tabs;
+mod configuration;
 mod cursor;
 mod export_notice;
 mod export_progress;
@@ -1161,7 +1162,7 @@ struct Application<N> {
     restore_ui_textures: bool,
     queued_recovery: Option<FallbackPrompt>,
     native_prompt: Option<FallbackPrompt>,
-    configuration_warning: Option<String>,
+    configuration_warning: Option<configuration::Warning>,
     license_guide_pending: bool,
     clock: Option<PlaybackClock>,
     state: PlaybackState,
@@ -1231,21 +1232,20 @@ where
         let grid_path = grid::config_path()?;
         let mut warnings = Vec::new();
         let shortcuts = shortcuts::load_from(&shortcut_path).unwrap_or_else(|error| {
-            warnings.push(format!("{}\n{error}", shortcut_path.display()));
+            warnings.push((shortcut_path.clone(), error));
             shortcuts::defaults()
         });
         let grid_layouts = grid::load_from(&grid_path).unwrap_or_else(|error| {
-            warnings.push(format!("{}\n{error}", grid_path.display()));
+            warnings.push((grid_path.clone(), error));
             grid::defaults()
         });
-        let configuration_warning = (!warnings.is_empty()).then(|| {
-            let warning = format!(
-                "Using built-in defaults for the settings below. Existing configuration files have not been changed.\n\n{}\n\nCorrect these files, then choose File > Reload keyboard shortcuts from the towavue menu.",
-                warnings.join("\n\n")
+        let configuration_warning = configuration::Warning::new(warnings);
+        if let Some(warning) = &configuration_warning {
+            towavue_runtime_windows::diagnostic!(
+                "towavue: {}",
+                warning.message(localization::Language::English)
             );
-            towavue_runtime_windows::diagnostic!("towavue: {warning}");
-            warning
-        });
+        }
         let notify = Arc::new(notify);
         let image_notify = Arc::clone(&notify);
         let image_idle_notify = Arc::clone(&notify);
@@ -1629,10 +1629,7 @@ where
             self.state = PlaybackState::Paused;
         }
         self.refresh_title();
-        if let Some(warning) = self.configuration_warning.take() {
-            self.set_status(warning.clone());
-            self.open_native_prompt(FallbackPrompt::ConfigurationWarning(warning));
-        }
+        self.show_configuration_warning();
         self.request_redraw();
         Ok(())
     }
@@ -7945,7 +7942,7 @@ where
                         Err(error) => self.set_status(
                             towavue_core::localization::formatted::grid_reload_failed(
                                 language,
-                                &error.to_string(),
+                                &error.message(language),
                             ),
                         ),
                     }
@@ -7953,7 +7950,7 @@ where
                 Err(error) => self.set_status(
                     towavue_core::localization::formatted::shortcuts_reload_failed(
                         language,
-                        &error.to_string(),
+                        &error.message(language),
                     ),
                 ),
             },
@@ -13038,7 +13035,11 @@ mod tests {
             std::fs::read_to_string(&grid_path).expect("grid"),
             "# use built-in grid\n"
         );
-        let warning = app.configuration_warning.take().expect("startup warning");
+        let warning = app
+            .configuration_warning
+            .take()
+            .expect("startup warning")
+            .message(localization::Language::English);
         assert!(warning.contains(&app.shortcut_path.display().to_string()));
         assert!(warning.contains("line 2"));
         assert!(warning.contains("Using built-in defaults"));
@@ -13101,7 +13102,11 @@ mod tests {
             std::fs::write(&shortcut_path, shortcuts).expect("shortcut fixture");
             std::fs::write(&grid_path, grid).expect("grid fixture");
             let app = Application::new(None, |_| {}).expect("recoverable settings failure");
-            let warning = app.configuration_warning.as_ref().expect("warning");
+            let warning = app
+                .configuration_warning
+                .as_ref()
+                .expect("warning")
+                .message(localization::Language::English);
             assert_eq!(
                 warning.contains(&app.shortcut_path.display().to_string()),
                 failed_shortcuts
@@ -13141,6 +13146,7 @@ mod tests {
             app.configuration_warning
                 .as_ref()
                 .expect("warning")
+                .message(localization::Language::English)
                 .contains("shortcuts.conf")
         );
         assert!(shortcut_path.is_dir());
@@ -13178,7 +13184,8 @@ mod tests {
         let warning = app
             .configuration_warning
             .as_ref()
-            .expect("both failures visible");
+            .expect("both failures visible")
+            .message(localization::Language::English);
         assert!(warning.contains("shortcuts.conf"));
         assert!(warning.contains("grid.conf"));
         assert_eq!(

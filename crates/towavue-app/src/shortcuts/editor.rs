@@ -7,7 +7,7 @@ pub fn save_command(
     command: CommandId,
     expected: &[KeySequence],
     replacement: &[KeySequence],
-) -> Result<ShortcutBindings, String> {
+) -> Result<ShortcutBindings, Error> {
     let lock_path = path.with_extension("conf.lock");
     let lock = fs::OpenOptions::new()
         .read(true)
@@ -15,18 +15,15 @@ pub fn save_command(
         .create(true)
         .truncate(false)
         .open(&lock_path)
-        .map_err(|error| error.to_string())?;
-    lock.try_lock().map_err(|_| {
-        "Keyboard shortcuts are being saved by another window. Try again.".to_owned()
-    })?;
-    let original = fs::read(path).map_err(|error| error.to_string())?;
-    let text = std::str::from_utf8(&original).map_err(|error| error.to_string())?;
+        .map_err(|error| Error::External(error.to_string()))?;
+    lock.try_lock()
+        .map_err(|_| Error::Text(Text::ShortcutsSaveBusy))?;
+    let original = fs::read(path).map_err(|error| Error::External(error.to_string()))?;
+    let text =
+        std::str::from_utf8(&original).map_err(|error| Error::External(error.to_string()))?;
     let mut bindings = parse(text, defaults())?;
     if bindings.all(command) != expected {
-        return Err(
-            "This command changed on disk. Reload keyboard shortcuts before editing it again."
-                .into(),
-        );
+        return Err(Error::Text(Text::ShortcutChangedOnDisk));
     }
     bindings.remove(command);
     for sequence in replacement {
@@ -38,10 +35,10 @@ pub fn save_command(
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|error| error.to_string())?
+            .map_err(|error| Error::External(error.to_string()))?
             .as_nanos()
     ));
-    let result = (|| {
+    let result: Result<(), Error> = (|| {
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -51,20 +48,18 @@ pub fn save_command(
         drop(file);
         // External editors do not use our lock. Reject observed concurrent replacement.
         if fs::read(path)? != original {
-            return Err(std::io::Error::other(
-                "Keyboard shortcuts changed while saving. Reload and try again.",
-            ));
+            return Err(Error::Text(Text::ShortcutsChangedDuringSave));
         }
-        fs::rename(&temporary, path)
+        fs::rename(&temporary, path).map_err(Error::from)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
-    result.map_err(|error| error.to_string())?;
+    result?;
     Ok(bindings)
 }
 
-fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, String> {
+fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, Error> {
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut output = String::new();
     if text.starts_with('\u{feff}') {
@@ -82,14 +77,14 @@ fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, String> {
         } else {
             let (name, _) = line
                 .split_once('=')
-                .ok_or("Missing '=' in keyboard shortcuts")?;
+                .ok_or(Error::Text(Text::ShortcutsMissingEquals))?;
             if name.trim() == "reverse_reading_folder_order" {
                 continue;
             }
             let command: CommandId = name
                 .trim()
                 .parse()
-                .map_err(|_| "Unknown shortcut command")?;
+                .map_err(|_| Error::Text(Text::ShortcutUnknownCommand))?;
             if !written.insert(command) {
                 continue;
             }
@@ -106,7 +101,7 @@ fn rewrite(text: &str, bindings: &ShortcutBindings) -> Result<String, String> {
         }
     }
     if parse(&output, defaults())? != *bindings {
-        return Err("Keyboard shortcuts could not be preserved; the file was not changed.".into());
+        return Err(Error::Text(Text::ShortcutsNotPreserved));
     }
     Ok(output)
 }
@@ -222,7 +217,16 @@ mod tests {
             "Alt+F12"
         );
         let good = fs::read(&path).expect("shortcut editor fixture");
-        assert!(save_command(&path, CommandId::OpenFile, &[], &[]).is_err());
+        let stale =
+            save_command(&path, CommandId::OpenFile, &[], &[]).expect_err("same-command conflict");
+        assert_eq!(
+            stale.to_string(),
+            "This command changed on disk. Reload keyboard shortcuts before editing it again."
+        );
+        assert_eq!(
+            stale.message(crate::localization::Language::Japanese),
+            "このコマンドの設定がファイル上で変更されました。ショートカットを再読み込みしてから編集してください。"
+        );
         assert_eq!(fs::read(&path).expect("shortcut editor fixture"), good);
         let lock = fs::OpenOptions::new()
             .read(true)
@@ -230,14 +234,20 @@ mod tests {
             .open(path.with_extension("conf.lock"))
             .expect("shortcut editor fixture");
         lock.try_lock().expect("shortcut editor fixture");
-        assert!(
-            save_command(
-                &path,
-                CommandId::OpenFile,
-                saved.all(CommandId::OpenFile),
-                &[]
-            )
-            .is_err()
+        let busy = save_command(
+            &path,
+            CommandId::OpenFile,
+            saved.all(CommandId::OpenFile),
+            &[],
+        )
+        .expect_err("cooperating writer owns the lock");
+        assert_eq!(
+            busy.to_string(),
+            "Keyboard shortcuts are being saved by another window. Try again."
+        );
+        assert_eq!(
+            busy.message(crate::localization::Language::Japanese),
+            "別のウィンドウでショートカットを保存しています。もう一度お試しください。"
         );
         assert_eq!(fs::read(&path).expect("shortcut editor fixture"), good);
         drop(lock);

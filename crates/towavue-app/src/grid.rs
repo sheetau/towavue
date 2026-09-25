@@ -1,3 +1,5 @@
+use crate::configuration::Error;
+use crate::localization::Text;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -52,25 +54,25 @@ impl GridLayouts {
     }
 }
 
-pub fn load() -> Result<(GridLayouts, PathBuf), String> {
-    let path = config_path()?;
+pub fn load() -> Result<(GridLayouts, PathBuf), Error> {
+    let path = config_path().map_err(Error::External)?;
     load_from(&path).map(|layouts| (layouts, path))
 }
 
-pub fn load_from(path: &Path) -> Result<GridLayouts, String> {
+pub fn load_from(path: &Path) -> Result<GridLayouts, Error> {
     let defaults = defaults();
     if !path.exists() {
-        let parent = path.parent().ok_or("grid path has no parent")?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        let parent = path.parent().ok_or(Error::Text(Text::GridPathNoParent))?;
+        fs::create_dir_all(parent).map_err(Error::from)?;
         fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
             .and_then(|mut file| file.write_all(serialize(&defaults).as_bytes()))
-            .map_err(|error| error.to_string())?;
+            .map_err(Error::from)?;
         return Ok(defaults);
     }
-    let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let text = fs::read_to_string(path).map_err(Error::from)?;
     parse(&text, defaults)
 }
 
@@ -138,33 +140,32 @@ pub fn defaults() -> GridLayouts {
     }
 }
 
-fn parse(text: &str, mut layouts: GridLayouts) -> Result<GridLayouts, String> {
+fn parse(text: &str, mut layouts: GridLayouts) -> Result<GridLayouts, Error> {
     for (index, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let Some((kind, commands)) = line.split_once('=') else {
-            return Err(format!("grid.conf line {} is missing '='", index + 1));
+            return Err(Error::MissingEquals {
+                file: "grid.conf",
+                line: index + 1,
+            });
         };
         let media_kind = match kind.trim() {
             "image" => MediaKind::Image,
             "video" => MediaKind::Video,
             "audio" => MediaKind::Audio,
             _ => {
-                return Err(format!(
-                    "unknown media kind on grid.conf line {}",
-                    index + 1
-                ));
+                return Err(Error::UnknownMediaKind { line: index + 1 });
             }
         };
         let values: Vec<_> = commands.split(',').collect();
         if values.len() != 16 {
-            return Err(format!(
-                "grid.conf line {} has {} commands; expected 16",
-                index + 1,
-                values.len()
-            ));
+            return Err(Error::GridCommandCount {
+                line: index + 1,
+                count: values.len(),
+            });
         }
         let standard = defaults();
         let parsed = values
@@ -178,7 +179,10 @@ fn parse(text: &str, mut layouts: GridLayouts) -> Result<GridLayouts, String> {
                 value
                     .trim()
                     .parse::<CommandId>()
-                    .map_err(|_| format!("unknown command on grid.conf line {}", index + 1))
+                    .map_err(|_| Error::UnknownCommand {
+                        file: "grid.conf",
+                        line: index + 1,
+                    })
             })
             .collect::<Result<Vec<_>, _>>()?;
         let parsed: [CommandId; 16] = parsed.try_into().expect("validated grid length");
@@ -187,10 +191,7 @@ fn parse(text: &str, mut layouts: GridLayouts) -> Result<GridLayouts, String> {
             "video" => layouts.video = parsed,
             "audio" => layouts.audio = parsed,
             _ => {
-                return Err(format!(
-                    "unknown media kind on grid.conf line {}",
-                    index + 1
-                ));
+                return Err(Error::UnknownMediaKind { line: index + 1 });
             }
         }
     }
@@ -300,6 +301,6 @@ mod tests {
     fn rejects_non_rectangular_grid() {
         let error = parse("image = zoom_in, zoom_out", defaults()).expect_err("invalid grid");
 
-        assert!(error.contains("expected 16"));
+        assert!(error.to_string().contains("expected 16"));
     }
 }

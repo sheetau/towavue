@@ -18700,6 +18700,13 @@ mod tests {
         let is_hud = |output: &egui::FullOutput| {
             output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == chrome::FOREGROUND && (rect.rect.width() - 3.0).abs() < 0.01 && rect.rect.height() > 20.0 && rect.rect.left() < 10.0))
         };
+        // This control checks steady-state integration; opacity timing has its own deterministic fixture.
+        app.volume_hud = volume_hud::Hud::default();
+        app.volume_hud.changed(
+            tab,
+            app.media_generation,
+            Instant::now() - Duration::from_millis(120),
+        );
         let output = frame(&mut app);
         assert!(is_hud(&output));
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,

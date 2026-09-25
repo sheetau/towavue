@@ -145,12 +145,13 @@ fn show_control(
         crate::media_preview::fade::cancel(context, response.id.with("media-preview"));
     }
     let height = egui::lerp((1.0 / context.pixels_per_point())..=4.0, animation);
-    let travel = compact_travel(rect);
-    // Only the handle's center is inset. Track/progress keep their full
-    // width when hovered so expanding the bar does not shorten its ends.
+    // Grow the inset with the handle so its center and the progress endpoint
+    // stay joined throughout entry and exit. Input keeps the fully expanded
+    // travel, independent of animation timing.
+    let radius = compact_radius(rect) * animation;
+    let travel = rect.shrink2(egui::vec2(radius, 0.0));
     let track = Rect::from_center_size(rect.center(), egui::vec2(rect.width(), height));
     let x = egui::lerp(travel.x_range(), progress.clamp(0.0, 1.0));
-    let progress_x = egui::lerp(rect.x_range(), progress.clamp(0.0, 1.0));
     ui.painter().rect_filled(
         track,
         0.0,
@@ -174,14 +175,14 @@ fn show_control(
         );
     }
     ui.painter().rect_filled(
-        progress_rect(track, progress_x, reversed),
+        progress_rect(track, x, reversed),
         0.0,
         crate::chrome::FOREGROUND,
     );
     if active || animation > 0.0 {
         ui.painter().circle_filled(
             egui::pos2(x, rect.center().y),
-            compact_radius(rect) * animation,
+            radius,
             crate::chrome::FOREGROUND,
         );
     }
@@ -361,102 +362,143 @@ mod tests {
     use super::*;
 
     #[test]
-    fn animated_seek_geometry_keeps_centers_and_expanded_hit_bounds() {
+    fn animated_seek_geometry_joins_progress_and_handle_through_entry_and_exit() {
         for density in [1.0, 1.25, 2.0] {
-            for progress in [0.0, 0.5, 1.0] {
-                for inline in [false, true] {
-                    let context = Context::default();
-                    context.set_pixels_per_point(density);
-                    let status =
-                        Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0));
-                    let center = std::cell::Cell::new(0.0);
-                    let frame = |time, hover| {
-                        context.run_ui(
-                            egui::RawInput {
-                                time: Some(time),
-                                screen_rect: Some(Rect::from_min_size(
-                                    egui::Pos2::ZERO,
-                                    egui::vec2(500.0, 300.0),
-                                )),
-                                events: vec![egui::Event::PointerMoved(egui::pos2(
-                                    250.0,
-                                    if hover { 263.5 } else { 200.0 },
-                                ))],
-                                ..Default::default()
-                            },
-                            |ui| {
-                                let (response, drag) = if inline {
-                                    super::inline(
-                                        ui,
-                                        Rect::from_center_size(
-                                            egui::pos2(250.0, 270.0),
-                                            egui::vec2(500.0, HIT_HEIGHT),
-                                        ),
-                                        egui::Id::new("inline animation"),
-                                        progress,
-                                    )
+            for width in [8.0, 160.0, 500.0] {
+                for progress in [0.0, 0.1, 0.5, 0.9, 1.0] {
+                    for (inline, reversed) in
+                        [(false, false), (false, true), (true, false), (true, true)]
+                    {
+                        let context = Context::default();
+                        context.set_pixels_per_point(density);
+                        let status =
+                            Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(width, 30.0));
+                        let center = std::cell::Cell::new(0.0);
+                        let frame = |time, hover| {
+                            context.run_ui(
+                                egui::RawInput {
+                                    time: Some(time),
+                                    screen_rect: Some(Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(500.0, 300.0),
+                                    )),
+                                    events: vec![egui::Event::PointerMoved(egui::pos2(
+                                        width * 0.5,
+                                        if hover { 263.5 } else { 200.0 },
+                                    ))],
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let (response, drag) = if inline {
+                                        inline_directed(
+                                            ui,
+                                            Rect::from_center_size(
+                                                egui::pos2(width * 0.5, 270.0),
+                                                egui::vec2(width, HIT_HEIGHT),
+                                            ),
+                                            "inline animation".into(),
+                                            progress,
+                                            reversed,
+                                        )
+                                    } else {
+                                        show_drag_with_direction(
+                                            &context, status, progress, None, true, false, reversed,
+                                        )
+                                    };
+                                    center.set(response.rect.center().y);
+                                    assert_eq!(response.rect.height(), 14.0);
+                                    assert!(!drag.released && !drag.dragging);
+                                    if time >= 1.06 {
+                                        assert_eq!(response.hovered(), hover);
+                                    }
+                                },
+                            )
+                        };
+                        frame(0.0, false);
+                        frame(0.1, false);
+                        frame(1.0, true);
+                        for (time, expansion, hover) in [
+                            (1.03, 0.25, true),
+                            (1.06, 0.5, true),
+                            (1.09, 0.75, true),
+                            (1.2, 1.0, true),
+                            (2.0, 1.0, false),
+                            (2.03, 0.75, false),
+                            (2.06, 0.5, false),
+                            (2.09, 0.25, false),
+                        ] {
+                            let output = frame(time, hover);
+                            let circle = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Circle(circle) => Some(circle),
+                                    _ => None,
+                                })
+                                .expect("animated handle");
+                            let radius = (width * 0.5_f32).min(5.0) * expansion;
+                            assert!((circle.radius - radius).abs() < 0.001);
+                            let value = if reversed { 1.0 - progress } else { progress };
+                            assert!(
+                                (circle.center.x - (radius + (width - 2.0 * radius) * value)).abs()
+                                    < 0.001
+                            );
+                            assert_eq!(circle.center.y, center.get());
+                            assert!(
+                                circle.center.x - circle.radius >= -0.001
+                                    && circle.center.x + circle.radius <= width + 0.001
+                            );
+                            let played = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Rect(shape)
+                                        if shape.fill == crate::chrome::FOREGROUND =>
+                                    {
+                                        Some(shape.rect)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("progress line");
+                            assert_eq!(
+                                if reversed {
+                                    played.left()
                                 } else {
-                                    show_drag(&context, status, progress, None, true, false)
-                                };
-                                center.set(response.rect.center().y);
-                                assert_eq!(response.rect.height(), 14.0);
-                                assert!(!drag.released);
-                                if time >= 1.06 {
-                                    assert_eq!(response.hovered(), hover);
-                                }
-                            },
-                        )
-                    };
-                    frame(0.0, false);
-                    frame(0.1, false);
-                    frame(1.0, true);
-                    for (time, radius, hover) in [
-                        (1.06, 2.5, true),
-                        (1.2, 5.0, true),
-                        (2.0, 5.0, false),
-                        (2.06, 2.5, false),
-                    ] {
-                        let output = frame(time, hover);
-                        let circle = output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::Shape::Circle(circle) => Some(circle),
-                                _ => None,
-                            })
-                            .expect("animated handle");
-                        assert!((circle.radius - radius).abs() < 0.001);
-                        assert_eq!(
-                            circle.center,
-                            egui::pos2(5.0 + 490.0 * progress, center.get())
-                        );
+                                    played.right()
+                                },
+                                circle.center.x,
+                                "progress and handle stay joined"
+                            );
+                            assert_eq!(played.center().y, center.get());
+                            assert!(
+                                (played.height()
+                                    - ((1.0 / density) * (1.0 - expansion) + 4.0 * expansion))
+                                    .abs()
+                                    < 0.001
+                            );
+                            let track = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Rect(shape)
+                                        if [crate::chrome::HOVER, crate::chrome::BORDER]
+                                            .contains(&shape.fill) =>
+                                    {
+                                        Some(shape.rect)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("background track");
+                            assert_eq!(track.x_range(), status.x_range());
+                        }
+                        let output = frame(2.2, false);
                         assert!(
-                            circle.center.x - circle.radius >= 0.0
-                                && circle.center.x + circle.radius <= 500.0
+                            !output
+                                .shapes
+                                .iter()
+                                .any(|shape| matches!(shape.shape, egui::Shape::Circle(_)))
                         );
-                        let track = output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::Shape::Rect(shape)
-                                    if shape.fill == crate::chrome::FOREGROUND =>
-                                {
-                                    Some(shape.rect)
-                                }
-                                _ => None,
-                            })
-                            .expect("track");
-                        assert_eq!(track.center().y, center.get());
-                        let expected = egui::lerp((1.0 / density)..=4.0, radius / 5.0);
-                        assert!((track.height() - expected).abs() < 0.001);
                     }
-                    let output = frame(2.2, false);
-                    assert!(
-                        !output
-                            .shapes
-                            .iter()
-                            .any(|shape| matches!(shape.shape, egui::Shape::Circle(_)))
-                    );
                 }
             }
         }
@@ -478,7 +520,7 @@ mod tests {
                     let status =
                         Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(500.0, 300.0));
                     let mut output = egui::FullOutput::default();
-                    for frame in 0..3 {
+                    for frame in 0..5 {
                         output = context.run_ui(
                             egui::RawInput {
                                 time: Some(f64::from(frame)),
@@ -525,7 +567,7 @@ mod tests {
                             pointer.x.clamp(track.rect.left(), track.rect.right())
                         );
                         assert_eq!(preview.rect.y_range(), track.rect.y_range());
-                        assert_eq!(played.rect.right(), 500.0 * value);
+                        assert_eq!(played.rect.right(), 5.0 + 490.0 * value);
                         assert_eq!(played.rect.y_range(), preview.rect.y_range());
                     }
                 }
@@ -681,8 +723,11 @@ mod tests {
                                 })
                                 .expect("seek handle");
                             assert!(
-                                (circle.center.x - (5.0 + 490.0 * progress)).abs() < 0.001,
-                                "release must not paint the old transport position"
+                                (circle.center.x
+                                    - (circle.radius + (500.0 - 2.0 * circle.radius) * progress))
+                                    .abs()
+                                    < 0.001,
+                                "release must paint the committed value at the current expansion"
                             );
                             let played = output
                                 .shapes
@@ -696,7 +741,7 @@ mod tests {
                                     _ => None,
                                 })
                                 .expect("played track");
-                            assert!((played.rect.right() - 500.0 * progress).abs() < 0.001);
+                            assert!((played.rect.right() - circle.center.x).abs() < 0.001);
                         };
                         let committed = (end.x - 5.0) / 490.0;
                         assert_position(&output, committed);
@@ -752,7 +797,7 @@ mod tests {
                     let status =
                         Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(500.0, 300.0));
                     let mut output = egui::FullOutput::default();
-                    for frame in 0..3 {
+                    for frame in 0..5 {
                         let mut input = egui::RawInput {
                             time: Some(frame as f64),
                             screen_rect: Some(Rect::from_min_size(
@@ -778,8 +823,19 @@ mod tests {
                         egui::Shape::Circle(circle) => Some(circle),
                         _ => None,
                     });
+                    let played = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect) if rect.fill == crate::chrome::FOREGROUND => {
+                                Some(rect.rect)
+                            }
+                            _ => None,
+                        })
+                        .expect("progress line");
                     if active {
                         let circle = circle.expect("hover handle");
+                        assert_eq!(played.right(), circle.center.x);
                         assert_eq!(circle.center.x, 5.0 + 490.0 * value);
                         assert!(circle.center.x - circle.radius >= 0.0);
                         assert!(circle.center.x + circle.radius <= 500.0);
@@ -788,6 +844,7 @@ mod tests {
                         assert!((compact_ratio(hit, circle.center.x) - value).abs() < 0.00001);
                     } else {
                         assert!(circle.is_none());
+                        assert_eq!(played.right(), 500.0 * value);
                         let track = output
                             .shapes
                             .iter()

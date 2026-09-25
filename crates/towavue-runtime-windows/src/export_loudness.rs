@@ -57,15 +57,13 @@ impl Plan {
         // Its supported maximum is 50 LU; reject rather than promise preservation
         // for a range the selected dynamic algorithm cannot represent.
         if self.input.range > 50.0 || !(-99.0..=0.0).contains(&self.input.integrated) {
-            return Err(ExportError::Failed("The measured loudness range or level cannot be represented by the peak-limited normalization pass".into()));
+            return Err(ExportError::Message(Text::ExportLoudnessPeakLimit));
         }
         let limiter_peak = ceiling.max(-9.0);
         let attenuation = ceiling - limiter_peak;
         let offset = self.input.offset + self.correction - attenuation;
         if !(-99.0..=99.0).contains(&offset) {
-            return Err(ExportError::Failed(
-                "Loudness correction exceeds the supported gain range".into(),
-            ));
+            return Err(ExportError::Message(Text::ExportLoudnessGainRange));
         }
         Ok(vec![
             format!(
@@ -140,11 +138,7 @@ fn sample_rate(streams: &ExportStreams) -> Result<i32, ExportError> {
         .audio
         .map(|(_, base)| base.denominator())
         .filter(|rate| *rate > 0)
-        .ok_or_else(|| {
-            ExportError::Failed(
-                "Loudness normalization requires an audio stream with a valid sample rate".into(),
-            )
-        })
+        .ok_or(ExportError::Message(Text::ExportLoudnessSampleRate))
 }
 
 fn measure(
@@ -175,8 +169,7 @@ fn measure(
 }
 
 fn parse(log: &str, rate: i32) -> Result<Measurement, ExportError> {
-    let invalid =
-        || ExportError::Failed("Loudness analysis is incomplete, non-finite or ambiguous".into());
+    let invalid = || ExportError::Message(Text::ExportInvalidLoudnessAnalysis);
     let statistic = |name: &str| -> Result<f64, ExportError> {
         let mut values = log.lines().filter_map(|line| {
             line.strip_prefix("[astats@towavue_loudness_samples @ ")?
@@ -203,18 +196,13 @@ fn parse(log: &str, rate: i32) -> Result<Measurement, ExportError> {
     }
     let peak = statistic("Peak level dB: ")?;
     if peak == f64::NEG_INFINITY {
-        return Err(ExportError::Failed(
-            "Silent audio has no measurable integrated loudness; choose Off or Peak".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportSilentLoudness));
     }
     if !peak.is_finite() {
         return Err(invalid());
     }
     if samples / f64::from(rate) < 0.4 {
-        return Err(ExportError::Failed(
-            "Audio is too short for integrated loudness measurement (at least 400 ms is required)"
-                .into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAudioTooShortForLoudness));
     }
     let mut blocks = log
         .split("[loudnorm@towavue_loudness @ ")
@@ -247,7 +235,7 @@ fn parse(log: &str, rate: i32) -> Result<Measurement, ExportError> {
     };
     let integrated = value("input_i")?;
     if integrated == f64::NEG_INFINITY {
-        return Err(ExportError::Failed("Audio has no measurable gated integrated loudness; it may be below the absolute loudness gate".into()));
+        return Err(ExportError::Message(Text::ExportAudioBelowLoudnessGate));
     }
     let measurement = Measurement {
         integrated,

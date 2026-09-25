@@ -142,7 +142,7 @@ impl HighDepth {
         // SAFETY: descriptors are immutable FFmpeg storage. No native pointer
         // escapes this call; the plan copies only format/depth/color values.
         let descriptor = unsafe { ffmpeg::ffi::av_pix_fmt_desc_get(source.into()).as_ref() }
-            .ok_or_else(|| ExportError::Failed("Unknown video sample precision".into()))?;
+            .ok_or(ExportError::Message(Text::ExportUnknownVideoPrecision))?;
         let depth = descriptor.comp[..usize::from(descriptor.nb_components)]
             .iter()
             .map(|component| component.depth)
@@ -151,31 +151,24 @@ impl HighDepth {
         if (1..=8).contains(&depth) {
             return Ok(None);
         }
-        let pixel =
-            match source {
-                Pixel::YUV420P10LE | Pixel::YUV420P10BE | Pixel::P010LE | Pixel::P010BE => {
-                    Pixel::YUV420P10LE
-                }
-                Pixel::YUV422P10LE | Pixel::YUV422P10BE => Pixel::YUV422P10LE,
-                Pixel::YUV444P10LE | Pixel::YUV444P10BE => Pixel::YUV444P10LE,
-                Pixel::GBRP10LE | Pixel::GBRP10BE => Pixel::GBRP10LE,
-                Pixel::GRAY10LE | Pixel::GRAY10BE => Pixel::GRAY10LE,
-                Pixel::YUV420P12LE | Pixel::YUV420P12BE => Pixel::YUV420P12LE,
-                Pixel::YUV422P12LE | Pixel::YUV422P12BE => Pixel::YUV422P12LE,
-                Pixel::YUV444P12LE | Pixel::YUV444P12BE => Pixel::YUV444P12LE,
-                Pixel::GBRP12LE | Pixel::GBRP12BE => Pixel::GBRP12LE,
-                Pixel::GRAY12LE | Pixel::GRAY12BE => Pixel::GRAY12LE,
-                _ => return Err(ExportError::Failed(
-                    "This video sample format cannot yet be exported without reducing precision"
-                        .into(),
-                )),
-            };
+        let pixel = match source {
+            Pixel::YUV420P10LE | Pixel::YUV420P10BE | Pixel::P010LE | Pixel::P010BE => {
+                Pixel::YUV420P10LE
+            }
+            Pixel::YUV422P10LE | Pixel::YUV422P10BE => Pixel::YUV422P10LE,
+            Pixel::YUV444P10LE | Pixel::YUV444P10BE => Pixel::YUV444P10LE,
+            Pixel::GBRP10LE | Pixel::GBRP10BE => Pixel::GBRP10LE,
+            Pixel::GRAY10LE | Pixel::GRAY10BE => Pixel::GRAY10LE,
+            Pixel::YUV420P12LE | Pixel::YUV420P12BE => Pixel::YUV420P12LE,
+            Pixel::YUV422P12LE | Pixel::YUV422P12BE => Pixel::YUV422P12LE,
+            Pixel::YUV444P12LE | Pixel::YUV444P12BE => Pixel::YUV444P12LE,
+            Pixel::GBRP12LE | Pixel::GBRP12BE => Pixel::GBRP12LE,
+            Pixel::GRAY12LE | Pixel::GRAY12BE => Pixel::GRAY12LE,
+            _ => return Err(ExportError::Message(Text::ExportVideoPrecisionUnsupported)),
+        };
         let extension = extension(&request.target);
         if !matches!(extension.as_str(), "mp4" | "mkv" | "webm") {
-            return Err(ExportError::Failed(
-                "High-depth video export requires MP4, MKV or WebM to preserve sample precision"
-                    .into(),
-            ));
+            return Err(ExportError::Message(Text::ExportHighDepthFormats));
         }
         let chroma = matches!(pixel, Pixel::YUV420P10LE | Pixel::YUV420P12LE)
             .then_some(source_chroma)
@@ -370,9 +363,7 @@ impl HighDepth {
         };
         match verify() {
             Ok(true) => Ok(()),
-            _ => Err(ExportError::Failed(
-                "Encoded video did not retain the requested sample precision, color tags or baked orientation; existing output was not replaced".into(),
-            )),
+            _ => Err(ExportError::Message(Text::ExportVideoPropertiesChanged)),
         }
     }
 }

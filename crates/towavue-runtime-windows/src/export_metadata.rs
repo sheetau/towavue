@@ -128,9 +128,7 @@ pub fn read_export_metadata(
             Some(ImageMetadataFormat::Png) => png_metadata::inspect(path),
             Some(ImageMetadataFormat::Jpeg) => jpeg_metadata::inspect(path),
             Some(ImageMetadataFormat::Webp) => webp_metadata::inspect(path),
-            None => Err(ExportError::Failed(
-                "Image metadata currently supports PNG, JPEG or WebP input".into(),
-            )),
+            None => Err(ExportError::Message(Text::ExportImageMetadataFormats)),
         };
     }
     ffmpeg::init().map_err(|error| ExportError::Failed(error.to_string()))?;
@@ -185,9 +183,7 @@ impl MetadataExportOptions {
                 .map(|(_, value)| value.len())
                 .sum();
             if value.contains('\0') || value.len() > 1024 || other_bytes + value.len() > 4096 {
-                return Err(ExportError::Failed(
-                    "Metadata text must contain no NUL and fit 1024 UTF-8 bytes per field / 4096 total".into(),
-                ));
+                return Err(ExportError::Message(Text::ExportMetadataTextLimit));
             }
         }
         if let Some(value) = value {

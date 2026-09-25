@@ -6,6 +6,57 @@ use crate::video_rotation::tests::{access, node};
 mod image;
 
 #[test]
+fn japanese_metadata_worker_error_preserves_source_edits_and_dialog_cancellation() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "metadata_export::tests::japanese_metadata_worker_error_preserves_source_edits_and_dialog_cancellation",
+    ) else {
+        return;
+    };
+    let source = root.join("日本語 {source}.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let original = std::fs::read(&source).expect("original bytes");
+    let (sender, events) = std::sync::mpsc::channel();
+    let mut app = Application::new(None, move |event| {
+        let _ = sender.send(event);
+    })
+    .expect("app");
+    app.language_settings.display = Language::Japanese;
+    app.language_settings.next = Language::English;
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.path = Some(source.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = app.edits.clone();
+    app.open_metadata_export_options();
+    read_ready(&mut app, &events);
+    let dialog = app.metadata_dialog.as_mut().expect("owned dialog");
+    assert_eq!(dialog.source, source);
+    assert_eq!(
+        dialog
+            .current
+            .as_ref()
+            .expect("worker result")
+            .as_ref()
+            .expect_err("unsupported metadata input"),
+        "FFmpegの書き出しに失敗しました: 画像のメタデータ処理は現在PNG、JPEG、WebPの入力に対応しています"
+    );
+    let context = crate::localization::test_ui::japanese_context(1.0);
+    let output =
+        crate::localization::test_ui::settle(&context, egui::vec2(640.0, 700.0), |context| {
+            dialog.show(context)
+        });
+    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "メタデータを読み取れませんでした: FFmpegの書き出しに失敗しました: 画像のメタデータ処理は現在PNG、JPEG、WebPの入力に対応しています")));
+    app.cancel_metadata_dialog();
+    assert!(app.metadata_dialog.is_none());
+    assert!(app.metadata_export_settings.is_empty());
+    assert_eq!(app.edits, history);
+    assert_eq!(std::fs::read(&source).expect("unchanged source"), original);
+}
+
+#[test]
 fn japanese_metadata_keeps_canonical_png_keywords_user_text_and_compact_actions() {
     use crate::localization::test_ui as ui;
     for density in [1.0, 1.25, 2.0] {

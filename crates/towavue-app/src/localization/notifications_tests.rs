@@ -35,6 +35,11 @@ fn japanese_export_failures_keep_edits_and_guarded_continuations() {
             false,
             "FFmpegの書き出しに失敗しました: native 日本語 {error}\ncode=32",
         ),
+        (
+            ExportError::Message(localization::Text::ExportSourceChangedBeforePublish),
+            false,
+            "FFmpegの書き出しに失敗しました: 書き出し中に元ファイルが変更されました。保存先への書き込みは行っていません",
+        ),
     ] {
         let request = ExportRequest {
             source: source.clone(),

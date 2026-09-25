@@ -46,9 +46,7 @@ impl LoudnessTarget {
         if !(-700..=-50).contains(&self.integrated_tenths)
             || !(-90..=0).contains(&self.true_peak_tenths)
         {
-            return Err(ExportError::Failed(
-                "Loudness target must be -70 to -5 LUFS and maximum true peak -9 to 0 dBTP".into(),
-            ));
+            return Err(ExportError::Message(Text::ExportLoudnessTargetRange));
         }
         Ok(())
     }
@@ -75,15 +73,15 @@ impl AudioExportOptions {
         if self == Self::default() {
             return Ok(Vec::new());
         }
-        let channels = channels.filter(|count| *count > 0).ok_or_else(|| {
-            ExportError::Failed("Audio export options require an audio stream".into())
-        })?;
+        let channels = channels
+            .filter(|count| *count > 0)
+            .ok_or(ExportError::Message(Text::ExportAudioOptionsNeedStream))?;
         let mut filters = vec!["aformat=sample_fmts=dbl".into()];
         match (self.channels, channels) {
             (AudioChannels::Keep, _) | (AudioChannels::Mono, 1) | (AudioChannels::Stereo, 2) => {}
             (AudioChannels::Mono, 2) => filters.push("pan=mono|c0=0.5*c0+0.5*c1".into()),
             (AudioChannels::Stereo, 1) => filters.push("pan=stereo|c0=c0|c1=c0".into()),
-            _ => return Err(ExportError::Failed("Mono/stereo conversion requires a mono or stereo source; use Keep for multichannel audio".into())),
+            _ => return Err(ExportError::Message(Text::ExportAudioChannelConversion)),
         }
         Ok(filters)
     }
@@ -106,9 +104,7 @@ impl SourceStamp {
 
     pub(super) fn verify(&self, source: &Path) -> Result<(), ExportError> {
         if *self != Self::read(source)? {
-            return Err(ExportError::Failed(
-                "The source changed during export; nothing was published".into(),
-            ));
+            return Err(ExportError::Message(Text::ExportSourceChangedBeforePublish));
         }
         Ok(())
     }
@@ -155,9 +151,7 @@ fn sample_count_from_statistics(log: &str) -> Result<u64, ExportError> {
         .next()
         .and_then(|value| value.trim().parse::<u64>().ok());
     if values.next().is_some() || count.is_none_or(|count| count == 0) {
-        return Err(ExportError::Failed(
-            "Audio sample-count analysis is empty, invalid or ambiguous".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportInvalidAudioSampleAnalysis));
     }
     Ok(count.expect("validated count"))
 }
@@ -227,9 +221,7 @@ fn gain_from_statistics(log: &str) -> Result<f64, ExportError> {
         || value("Number of NaNs: ")? != 0.0
         || value("Number of Infs: ")? != 0.0
     {
-        return Err(ExportError::Failed(
-            "Audio normalization requires nonempty finite audio samples".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAudioNormalizationSamples));
     }
     let peak = value("Peak level dB: ")?;
     if peak == f64::NEG_INFINITY {
@@ -237,9 +229,7 @@ fn gain_from_statistics(log: &str) -> Result<f64, ExportError> {
     }
     let gain = 10_f64.powf((-1.0 - peak) / 20.0);
     if !peak.is_finite() || !gain.is_finite() || gain <= 0.0 {
-        return Err(ExportError::Failed(
-            "Audio normalization produced an invalid peak or gain".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAudioNormalizationGain));
     }
     Ok(gain)
 }

@@ -10,6 +10,9 @@ impl ExportError {
             Self::InvalidTimeline => Text::ExportInvalidTimeline.in_language(language).into(),
             Self::Start(error) => formatted::export_start_failed(language, &error.to_string()),
             Self::Failed(error) => formatted::ffmpeg_export_failed(language, error),
+            Self::Message(text) => {
+                formatted::ffmpeg_export_failed(language, text.in_language(language))
+            }
             Self::Cancelled => Text::ExportCancelledUnchanged.in_language(language).into(),
             Self::Output(error) => formatted::export_output_failed(language, &error.to_string()),
         }
@@ -95,6 +98,7 @@ mod tests {
             ExportError::InvalidTimeline,
             ExportError::Start(io()),
             ExportError::Failed(detail.into()),
+            ExportError::Message(Text::ExportFrameSourceChanged),
             ExportError::Cancelled,
             ExportError::Output(io()),
         ] {

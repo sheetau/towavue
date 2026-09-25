@@ -339,6 +339,7 @@ impl MetadataDialog {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn open_metadata_export_options(&mut self) {
+        let display_language = self.language();
         if self.modal_input_blocked() || self.media_kind.is_none() {
             return;
         }
@@ -415,7 +416,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     return;
                 }
                 let result = towavue_runtime_windows::read_export_metadata(input.path(), kind)
-                    .map_err(|error| error.to_string());
+                    .map_err(|error| error.message(display_language));
                 if !cancellation.is_cancelled() {
                     notify(AppEvent::MetadataLoaded(token, result));
                 }

@@ -141,7 +141,7 @@ fn frame_export_rejects_replacements_restored_timestamps_and_source_aliases() {
     fs::rename(&replacement, &fixture.source).expect("replace same-named source");
     assert!(matches!(
         export_video_frame(&snapshot, &target, &[]),
-        Err(ExportError::Failed(_))
+        Err(ExportError::Message(Text::ExportFrameSourceChanged))
     ));
     assert_eq!(fs::read(&target).expect("preserved target"), b"keep target");
     let snapshot = fixture.snapshot();
@@ -168,7 +168,7 @@ fn frame_export_rejects_replacements_restored_timestamps_and_source_aliases() {
     );
     assert!(matches!(
         export_video_frame(&snapshot, &target, &[]),
-        Err(ExportError::Failed(_))
+        Err(ExportError::Message(Text::ExportFrameSourceChanged))
     ));
     fs::write(&fixture.source, &bytes).expect("restore valid fixture");
     let alias = fixture.root.join("source-alias.png");

@@ -62,7 +62,9 @@ impl DialogError {
             Self::InvalidPath(error) => {
                 formatted::dialog_invalid_path(language, &error.to_string())
             }
-            Self::Export(error) => formatted::dialog_export_failed(language, &error.to_string()),
+            Self::Export(error) => {
+                formatted::dialog_export_failed(language, &error.message(language))
+            }
             Self::InvalidExportChoice(message) => message.clone(),
         }
     }
@@ -664,6 +666,16 @@ mod tests {
         assert_eq!(
             errors[6].message(Language::Japanese),
             "owned translated choice"
+        );
+        let error = DialogError::Export(crate::ExportError::Message(Text::ExportNoSupportedFormat));
+        assert_eq!(
+            error.message(Language::English),
+            "Could not prepare export formats: FFmpeg export failed: No export format supports this document and its current output options"
+        );
+        assert_eq!(error.to_string(), error.message(Language::English));
+        assert_eq!(
+            error.message(Language::Japanese),
+            "書き出し形式を準備できませんでした: FFmpegの書き出しに失敗しました: このメディアと現在の出力設定に対応する書き出し形式がありません"
         );
     }
 

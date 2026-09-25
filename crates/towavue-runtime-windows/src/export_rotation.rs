@@ -359,13 +359,23 @@ mod tests {
                 assert_eq!(fs::read(&target).expect("existing target"), saved);
             }
             for kind in [MediaKind::Image, MediaKind::Audio] {
+                let error = export_media(&ExportRequest {
+                    kind,
+                    ..request.clone()
+                })
+                .expect_err("video-only edit rejects other media");
                 assert!(matches!(
-                    export_media(&ExportRequest {
-                        kind,
-                        ..request.clone()
-                    }),
-                    Err(ExportError::Failed(_))
+                    error,
+                    ExportError::Message(Text::ExportVideoMediaRequired)
                 ));
+                assert_eq!(
+                    error.to_string(),
+                    "FFmpeg export failed: Video raster edits require video media"
+                );
+                assert_eq!(
+                    error.message(towavue_core::localization::Language::Japanese),
+                    "FFmpegの書き出しに失敗しました: 動画の画素編集には動画メディアが必要です"
+                );
                 assert_eq!(fs::read(&target).expect("existing target"), saved);
             }
             assert_eq!(fs::read(&source).expect("immutable source"), original);

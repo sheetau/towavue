@@ -164,9 +164,7 @@ pub(crate) struct Choices {
 impl Choices {
     pub(crate) fn new(formats: Vec<Format>, source: &Path) -> Result<Self, ExportError> {
         if formats.is_empty() {
-            return Err(ExportError::Failed(
-                "No export format supports this document and its current output options".into(),
-            ));
+            return Err(ExportError::Message(Text::ExportNoSupportedFormat));
         }
         let initial = formats
             .iter()
@@ -242,9 +240,7 @@ impl ExportDialogRequest {
             vec![FramePng]
         } else if self.kind == MediaKind::Audio || self.options.output == ExportOutput::AudioOnly {
             if self.kind == MediaKind::Image || ExportStreams::probe(&request)?.audio.is_none() {
-                return Err(ExportError::Failed(
-                    "This media has no audio stream to export".into(),
-                ));
+                return Err(ExportError::Message(Text::ExportMediaHasNoAudio));
             }
             AUDIO_FORMATS.to_vec()
         } else if self.kind == MediaKind::Video {
@@ -337,9 +333,9 @@ fn image_formats(
             webp_metadata::SnapshotConversion::prepare(path, &request.target, cancelled).map(|_| ())
         } else if let Some(gif) = &gif {
             match format {
-                Png | Webp if gif.has_timing() && !gif.is_animated() => Err(ExportError::Failed(
-                    "The single timed GIF frame requires GIF or AVIF output".into(),
-                )),
+                Png | Webp if gif.has_timing() && !gif.is_animated() => {
+                    Err(ExportError::Message(Text::ExportSingleTimedGifFormat))
+                }
                 Webp if gif.is_animated() => gif.webp_plays().map(|_| ()),
                 Avif => gif.avif_delays().map(|_| ()),
                 _ => Ok(()),

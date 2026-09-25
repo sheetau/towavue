@@ -1517,8 +1517,20 @@ mod tests {
                 )],
                 hardware_encode: false,
             });
-            assert!(
-                matches!(result, Err(crate::ExportError::Failed(message)) if message == "Image raster edits require image media")
+            let error = result.expect_err("image-only edit rejects other media");
+            assert!(matches!(
+                error,
+                crate::ExportError::Message(
+                    towavue_core::localization::Text::ExportImageMediaRequired
+                )
+            ));
+            assert_eq!(
+                error.to_string(),
+                "FFmpeg export failed: Image raster edits require image media"
+            );
+            assert_eq!(
+                error.message(towavue_core::localization::Language::Japanese),
+                "FFmpegの書き出しに失敗しました: 画像の画素編集には画像メディアが必要です"
             );
             assert_eq!(
                 std::fs::read(&guarded_target).expect("target preserved"),

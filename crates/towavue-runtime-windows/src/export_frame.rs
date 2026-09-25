@@ -140,15 +140,11 @@ pub(super) fn export_cancellable(
         .extension()
         .is_none_or(|extension| !extension.eq_ignore_ascii_case("png"))
     {
-        return Err(ExportError::Failed(
-            "Current frame export requires a PNG target".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportFramePngRequired));
     }
     let lease = SourceLease::open(frame.source_path()).map_err(ExportError::Output)?;
     if lease.source.stamp != frame.source.stamp {
-        return Err(ExportError::Failed(
-            "The frame source changed; reopen it before exporting".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportFrameSourceChanged));
     }
     match File::open(target) {
         Ok(file)

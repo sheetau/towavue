@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
+use towavue_core::localization::Text;
 use towavue_core::{EditOperation, EditState, MediaKind};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -128,9 +129,7 @@ impl ExportJob {
             .name("towavue-frame-export".into())
             .spawn(move || {
                 let result = if frame.source_path() != input.path() {
-                    Err(ExportError::Failed(
-                        "The frame input changed before export".into(),
-                    ))
+                    Err(ExportError::Message(Text::ExportFrameInputChanged))
                 } else if same_path(input.logical_path(), &target) {
                     Err(ExportError::SameAsSource)
                 } else {
@@ -194,8 +193,8 @@ impl ExportJob {
             .name("towavue-export".into())
             .spawn(move || {
                 if request.source != input.logical_path() {
-                    notify(ExportEvent::Finished(Err(ExportError::Failed(
-                        "The export input changed".into(),
+                    notify(ExportEvent::Finished(Err(ExportError::Message(
+                        Text::ExportInputChanged,
                     ))));
                     return;
                 }
@@ -255,6 +254,8 @@ pub enum ExportError {
     Start(#[source] std::io::Error),
     #[error("FFmpeg export failed: {0}")]
     Failed(String),
+    #[error("FFmpeg export failed: {}", .0.in_language(towavue_core::localization::Language::English))]
+    Message(towavue_core::localization::Text),
     #[error("export cancelled; existing files were not changed")]
     Cancelled,
     #[error("could not prepare or publish export: {0}")]
@@ -305,9 +306,7 @@ pub(crate) fn export_options_cancellable(
     analyzing: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
     if options.output == ExportOutput::VideoFrame {
-        return Err(ExportError::Failed(
-            "Frame export requires a playback frame snapshot".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportFrameSnapshotRequired));
     }
     if options.output == ExportOutput::Media {
         return export_audio_cancellable(
@@ -325,9 +324,7 @@ pub(crate) fn export_options_cancellable(
         return Err(ExportError::SameAsSource);
     }
     if request.kind == MediaKind::Image {
-        return Err(ExportError::Failed(
-            "Audio-only export requires video or audio media".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAudioMediaRequired));
     }
     let extension = request
         .target
@@ -339,9 +336,7 @@ pub(crate) fn export_options_cancellable(
         extension.as_str(),
         "wav" | "flac" | "mp3" | "m4a" | "aac" | "ogg" | "opus"
     ) {
-        return Err(ExportError::Failed(
-            "Audio-only export requires WAV, FLAC, MP3, M4A, AAC, Ogg or Opus output".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAudioFormatRequired));
     }
     let mut audio = request.clone();
     audio.kind = MediaKind::Audio;
@@ -410,9 +405,7 @@ fn export_audio_cancellable(
             )
         })
     {
-        return Err(ExportError::Failed(
-            "Image raster edits require image media".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportImageMediaRequired));
     }
     let state = EditState::from_operations(&request.operations);
     if request.kind != MediaKind::Video
@@ -423,9 +416,7 @@ fn export_audio_cancellable(
             )
         })
     {
-        return Err(ExportError::Failed(
-            "Video raster edits require video media".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportVideoMediaRequired));
     }
     if !state.trim_is_valid(None) {
         return Err(ExportError::InvalidTrim);
@@ -436,9 +427,7 @@ fn export_audio_cancellable(
     let jpeg_target = jpeg_metadata::jpeg_path(&request.target);
     let webp_target = webp_metadata::webp_path(&request.target);
     if xmp_source && !metadata.is_empty() && !jpeg_target && !webp_target {
-        return Err(ExportError::Failed(
-            "XMP export requires JPEG or WebP output".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportXmpFormatRequired));
     }
     let image_metadata = request.kind == MediaKind::Image
         && (!metadata.is_empty()
@@ -452,14 +441,10 @@ fn export_audio_cancellable(
     let avif_source = request.kind == MediaKind::Image && avif::avif_path(&request.source);
     let avif_target = request.kind == MediaKind::Image && avif::avif_path(&request.target);
     if avif_source && !metadata.is_empty() {
-        return Err(ExportError::Failed(
-            "AVIF metadata editing is not supported yet".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAvifMetadataUnsupported));
     }
     if gif_source && !metadata.is_empty() {
-        return Err(ExportError::Failed(
-            "GIF metadata editing is not supported yet".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportGifMetadataUnsupported));
     }
     let source_stamp = (request.kind == MediaKind::Video
         || options.normalization.is_enabled()
@@ -482,7 +467,7 @@ fn export_audio_cancellable(
         && !webp_metadata::webp_path(&request.target)
         && !gif_animation::gif_path(&request.target)
     {
-        return Err(ExportError::Failed("Animated AVIF export requires AVIF, APNG (.png/.apng), WebP, or GIF output; conversion must not discard frames".into()));
+        return Err(ExportError::Message(Text::ExportAnimatedAvifFormatRequired));
     }
     let gif_animation = gif_source
         .then(|| gif_animation::Animation::read(&request.source, cancelled))
@@ -515,10 +500,7 @@ fn export_audio_cancellable(
         && !gif_to_webp
         && gif_avif_delays.is_none()
     {
-        return Err(ExportError::Failed(
-            "Animated GIF export requires GIF, APNG (.png/.apng), WebP, or AVIF output; conversion must not discard frames"
-                .into(),
-        ));
+        return Err(ExportError::Message(Text::ExportAnimatedGifFormatRequired));
     }
     let gif_animation = gif_animation.filter(|_| {
         gif_animation::gif_path(&request.target)
@@ -570,9 +552,7 @@ fn export_audio_cancellable(
         streams.metadata = metadata.clone();
     }
     if request.kind == MediaKind::Audio && streams.audio.is_none() {
-        return Err(ExportError::Failed(
-            "The source has no audio stream to export".into(),
-        ));
+        return Err(ExportError::Message(Text::ExportSourceHasNoAudio));
     }
     rotation::validate(request)?;
     if request
@@ -772,7 +752,7 @@ fn export_audio_cancellable(
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
     if streams.timeline.is_none() && streams.audio.is_some() && state.rate != 1.0 {
         if !(0.25..=4.0).contains(&state.rate) {
-            return Err(ExportError::Failed("Invalid audio export rate".into()));
+            return Err(ExportError::Message(Text::ExportInvalidAudioRate));
         }
         // Container duration can include longer video or another audio stream.
         // Bound EOF context by the selected, trimmed samples before tempo instead.
@@ -792,9 +772,8 @@ fn export_audio_cancellable(
         const SCALE: u128 = 1 << 25;
         let rate_units = (f64::from(state.rate) * SCALE as f64) as u128;
         streams.audio_output_samples = Some(
-            u64::try_from((u128::from(samples) * SCALE).div_ceil(rate_units)).map_err(|_| {
-                ExportError::Failed("Audio output sample count is too large".into())
-            })?,
+            u64::try_from((u128::from(samples) * SCALE).div_ceil(rate_units))
+                .map_err(|_| ExportError::Message(Text::ExportAudioSampleCountTooLarge))?,
         );
     }
     if options.normalization == AudioNormalization::Peak {
@@ -979,7 +958,7 @@ impl StagedExport {
         let target = std::path::absolute(target).map_err(ExportError::Output)?;
         let parent = target
             .parent()
-            .ok_or_else(|| ExportError::Failed("export target has no parent directory".into()))?;
+            .ok_or(ExportError::Message(Text::ExportTargetNoParent))?;
         loop {
             let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
             let directory = parent.join(format!(".towavue-export-{}-{id}", std::process::id()));
@@ -1034,7 +1013,7 @@ impl StagedExport {
             .open(&self.output)
             .map_err(ExportError::Output)?;
         if output.metadata().map_err(ExportError::Output)?.len() == 0 {
-            return Err(ExportError::Failed("encoder produced an empty file".into()));
+            return Err(ExportError::Message(Text::ExportEmptyOutput));
         }
         output.sync_all().map_err(ExportError::Output)?;
         drop(output);
@@ -1166,7 +1145,7 @@ fn run_ffmpeg_with_input(
         let input_error = if let Some(producer) = producer {
             let result = producer
                 .join()
-                .map_err(|_| ExportError::Failed("PNG input worker panicked".into()))?;
+                .map_err(|_| ExportError::Message(Text::ExportPngWorkerPanicked))?;
             check_cancelled(cancelled)?;
             result.err()
         } else {

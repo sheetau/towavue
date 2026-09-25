@@ -1,3 +1,4 @@
+use crate::localization::Text;
 use crate::*;
 
 #[cfg(test)]
@@ -43,6 +44,7 @@ pub(crate) fn show(
     owner: Option<Owner>,
     actions: &mut Vec<UiAction>,
 ) {
+    let language = localization::language(ui.ctx());
     let popup = egui::Popup::default_response_id(response);
     let owner_id = popup.with("thumbnail-owner");
     if egui::Popup::is_id_open(ui.ctx(), popup)
@@ -62,9 +64,9 @@ pub(crate) fn show(
         let mut chosen = None;
         if scope != Scope::Playlist {
             for (label, action) in [
-                ("Open", Action::Open),
-                ("Open in new window", Action::Window),
-                ("Open in new tab", Action::Tab),
+                (Text::ThumbnailOpen.in_language(language), Action::Open),
+                (Text::ThumbnailWindow.in_language(language), Action::Window),
+                (Text::ThumbnailTab.in_language(language), Action::Tab),
             ] {
                 let response = ui.button(label);
                 items.push(response.id);
@@ -75,8 +77,14 @@ pub(crate) fn show(
             chrome::separator(ui);
         }
         for (label, action) in [
-            ("Copy file path", Action::Copy),
-            ("Reveal in File Explorer", Action::Reveal),
+            (
+                Text::CommandCopyFilePath.in_language(language),
+                Action::Copy,
+            ),
+            (
+                Text::CommandRevealFile.in_language(language),
+                Action::Reveal,
+            ),
         ] {
             let response = ui.button(label);
             items.push(response.id);
@@ -87,7 +95,7 @@ pub(crate) fn show(
         chrome::separator(ui);
         match scope {
             Scope::Gallery => {
-                let response = ui.button("Remove from history");
+                let response = ui.button(Text::RemoveHistory.in_language(language));
                 items.push(response.id);
                 if response.clicked() {
                     chosen = Some(Action::RemoveHistory);
@@ -95,9 +103,18 @@ pub(crate) fn show(
             }
             Scope::Filmstrip | Scope::Playlist => {
                 for (label, kind) in [
-                    ("Rename file…", file_operations::Kind::Rename),
-                    ("Move file…", file_operations::Kind::Move),
-                    ("Delete file…", file_operations::Kind::Delete),
+                    (
+                        Text::ThumbnailRename.in_language(language),
+                        file_operations::Kind::Rename,
+                    ),
+                    (
+                        Text::ThumbnailMove.in_language(language),
+                        file_operations::Kind::Move,
+                    ),
+                    (
+                        Text::ThumbnailDelete.in_language(language),
+                        file_operations::Kind::Delete,
+                    ),
                 ] {
                     let response = ui.button(label);
                     items.push(response.id);

@@ -4,6 +4,8 @@ use towavue_core::{CommandId, MediaKind, ShortcutBindings};
 
 use crate::chrome;
 use crate::hover_help::HoverHelp;
+use crate::localization::{self, Text};
+use towavue_core::localization::formatted;
 
 pub(super) fn tab(
     ui: &mut egui::Ui,
@@ -11,7 +13,13 @@ pub(super) fn tab(
     active: bool,
     can_close: bool,
 ) -> (egui::Response, egui::Response) {
-    named_tab(ui, rect, active, can_close, "Gallery")
+    named_tab(
+        ui,
+        rect,
+        active,
+        can_close,
+        localization::text(ui.ctx(), Text::Gallery),
+    )
 }
 
 pub(super) fn named_tab(
@@ -21,6 +29,7 @@ pub(super) fn named_tab(
     can_close: bool,
     title: &str,
 ) -> (egui::Response, egui::Response) {
+    let language = localization::language(ui.ctx());
     ui.painter().rect_filled(
         rect,
         3.0,
@@ -42,19 +51,19 @@ pub(super) fn named_tab(
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             response.enabled(),
-            format!("{title} tab"),
+            formatted::tab_label(language, title),
         )
     });
     let close_rect = egui::Rect::from_min_max(egui::pos2(label_rect.right(), rect.top()), rect.max);
     let close = ui
         .add_enabled_ui(can_close, |ui| chrome::tab_close(ui, close_rect, false))
         .inner
-        .help_text(format!("Close {title}"));
+        .help_text(formatted::close_title(language, title));
     close.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             close.enabled(),
-            format!("Close tab: {title}"),
+            formatted::close_tab(language, title),
         )
     });
     crate::tab_focus::release_pointer_focus(&response);
@@ -88,6 +97,7 @@ pub fn show(
     enabled: bool,
     recent: impl FnOnce(&mut egui::Ui, &str, Option<MediaKind>) -> Vec<crate::gallery_rail::Month>,
 ) -> Option<CommandId> {
+    let language = localization::language(ui.ctx());
     let previous_filter = *filter;
     let viewport = ui.available_rect_before_wrap();
     let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
@@ -118,10 +128,14 @@ pub fn show(
             ui.spacing_mut().button_padding = egui::vec2(2.0, 0.0);
             let search_changed = search_field(ui, query, filter, paths);
             for (command, label, icon) in [
-                (CommandId::OpenFile, "Open File…", chrome::Icon::OpenFile),
+                (
+                    CommandId::OpenFile,
+                    Text::GalleryOpenFile.in_language(language),
+                    chrome::Icon::OpenFile,
+                ),
                 (
                     CommandId::OpenFolder,
-                    "Open Folder…",
+                    Text::GalleryOpenFolder.in_language(language),
                     chrome::Icon::OpenFolder,
                 ),
             ] {
@@ -206,7 +220,7 @@ pub fn show(
                     if paths.is_empty() {
                         ui.add(
                             egui::Label::new(
-                                RichText::new("Drop media files or a folder here to begin.")
+                                RichText::new(Text::GalleryDrop.in_language(language))
                                     .color(chrome::MUTED),
                             )
                             .wrap(),
@@ -234,6 +248,7 @@ fn search_field(
     filter: &mut Option<MediaKind>,
     paths: &[std::path::PathBuf],
 ) -> bool {
+    let language = localization::language(ui.ctx());
     let (outer, _) = ui.allocate_exact_size(
         egui::vec2((ui.available_width() - 48.0).max(72.0), 24.0),
         egui::Sense::hover(),
@@ -254,7 +269,12 @@ fn search_field(
     );
     let mut search = ui.put(text_rect, |ui: &mut egui::Ui| {
         ui.spacing_mut().text_edit_width = f32::INFINITY;
-        crate::resize::unframed_text_input(ui, "Search Gallery", query)
+        crate::resize::unframed_text_input_with_id(
+            ui,
+            ui.make_persistent_id("Search Gallery"),
+            Text::GallerySearch.in_language(language),
+            query,
+        )
     });
     let filter_button = chrome::surface_icon_button_at(
         ui,
@@ -267,21 +287,30 @@ fn search_field(
         .stroke(egui::Stroke::NONE)
         .frame_when_inactive(false),
     )
-    .help_text("Filter media types");
+    .help_text(Text::GalleryFilter.in_language(language));
     filter_button.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             filter_button.enabled(),
-            "Filter media types",
+            Text::GalleryFilter.in_language(language),
         )
     });
     if ui.is_enabled() {
         egui::Popup::menu(&filter_button).show(|ui| {
             for (kind, label) in [
-                (None, "All"),
-                (Some(MediaKind::Image), "Images"),
-                (Some(MediaKind::Video), "Videos"),
-                (Some(MediaKind::Audio), "Audio"),
+                (None, Text::GalleryAll.in_language(language)),
+                (
+                    Some(MediaKind::Image),
+                    Text::GalleryImages.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Video),
+                    Text::GalleryVideos.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Audio),
+                    Text::GalleryAudio.in_language(language),
+                ),
             ] {
                 let available =
                     kind.is_none() || paths.iter().any(|path| MediaKind::from_path(path) == kind);
@@ -306,13 +335,13 @@ fn search_field(
             )
         })
         .inner
-        .help_text("Clear Gallery search (Escape)")
-        .disabled_help_text("Clear Gallery search (Escape)");
+        .help_text(Text::GalleryClearHelp.in_language(language))
+        .disabled_help_text(Text::GalleryClearHelp.in_language(language));
     clear.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
             clear.enabled(),
-            "Clear Gallery search",
+            Text::GalleryClear.in_language(language),
         )
     });
     let clear_key = ui.is_enabled()
@@ -365,6 +394,69 @@ pub(super) fn matches(path: &std::path::Path, query: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn japanese_gallery_search_accessibility_edits_and_clears_without_changing_filter() {
+        use crate::localization::test_ui;
+        for density in [1.0, 1.25, 2.0] {
+            let context = test_ui::japanese_context(density);
+            let mut query = String::new();
+            let mut filter = Some(MediaKind::Image);
+            let frame = |query: &mut String, filter: &mut Option<MediaKind>, events| {
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 238.0),
+                        )),
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        super::show(
+                            ui,
+                            &ShortcutBindings::default(),
+                            query,
+                            filter,
+                            &[],
+                            true,
+                            |_, _, _| vec![],
+                        );
+                    },
+                )
+            };
+            for _ in 0..3 {
+                frame(&mut query, &mut filter, vec![]);
+            }
+            let output = frame(&mut query, &mut filter, vec![]);
+            let query_id = |output: &egui::FullOutput, label: &str| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(label))
+                    .expect("query")
+                    .0
+            };
+            let japanese_id = query_id(&output, "ギャラリーを検索");
+            let set = test_ui::action(&output, "ギャラリーを検索", Some("日本語 {original}"));
+            let output = frame(&mut query, &mut filter, vec![set]);
+            assert_eq!(query, "日本語 {original}");
+            assert_eq!(filter, Some(MediaKind::Image));
+            let clear = test_ui::action(&output, "ギャラリーの検索を消去", None);
+            frame(&mut query, &mut filter, vec![clear]);
+            assert!(query.is_empty());
+            assert_eq!(filter, Some(MediaKind::Image));
+            // Identity must not depend on the displayed language, even across host launches.
+            localization::set_language(&context, localization::Language::English);
+            let output = frame(&mut query, &mut filter, vec![]);
+            assert_eq!(japanese_id, query_id(&output, "Search Gallery"));
+        }
+    }
 
     #[test]
     fn gallery_tab_hover_preserves_text_origin_and_fills_the_whole_tab() {
@@ -976,6 +1068,21 @@ mod tests {
 
     #[test]
     fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
+        welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
+            crate::localization::Language::English,
+        );
+    }
+
+    #[test]
+    fn japanese_welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
+        welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
+            crate::localization::Language::Japanese,
+        );
+    }
+
+    fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
+        language: crate::localization::Language,
+    ) {
         for (size, density) in [
             egui::vec2(960.0, 514.0),
             egui::vec2(480.0, 238.0),
@@ -985,6 +1092,9 @@ mod tests {
         .flat_map(|size| [1.0, 1.25, 2.0].map(|density| (size, density)))
         {
             let context = crate::fonts::test_context();
+            if language == crate::localization::Language::Japanese {
+                crate::localization::test_ui::configure_japanese(&context, 1.0);
+            }
             context.set_pixels_per_point(density);
             context.global_style_mut(chrome::style);
             let mut shortcuts = ShortcutBindings::default();
@@ -1016,11 +1126,11 @@ mod tests {
                 frame(vec![]);
             }
             let (output, _) = frame(vec![]);
-            let search = node_rect(&output, "Search Gallery");
-            let filter = node_rect(&output, "Filter media types");
-            let clear = node_rect(&output, "Clear Gallery search");
-            let open = node_rect(&output, "Open File…");
-            let folder = node_rect(&output, "Open Folder…");
+            let search = node_rect(&output, Text::GallerySearch.in_language(language));
+            let filter = node_rect(&output, Text::GalleryFilter.in_language(language));
+            let clear = node_rect(&output, Text::GalleryClear.in_language(language));
+            let open = node_rect(&output, Text::GalleryOpenFile.in_language(language));
+            let folder = node_rect(&output, Text::GalleryOpenFolder.in_language(language));
             assert!(
                 search.right() < filter.left()
                     && filter.right() < clear.left()
@@ -1034,7 +1144,8 @@ mod tests {
                 assert!((rect.center().y - search.center().y).abs() <= 1.0 / density);
             }
             assert!((search.height() - 24.0).abs() <= 1.0 / density);
-            let hint = text_rect(&output, "Search Gallery").expect("Gallery placeholder");
+            let hint = text_rect(&output, Text::GallerySearch.in_language(language))
+                .expect("Gallery placeholder");
             assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);
             assert!((search.left() - grid.get().left()).abs() <= 1.0 / density);
             assert!((folder.right() - grid.get().right()).abs() <= 1.0 / density);
@@ -1062,8 +1173,14 @@ mod tests {
             assert!((open.center().y - folder.center().y).abs() < 1.0);
             assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(folder));
             for (label, command) in [
-                ("Open File…", CommandId::OpenFile),
-                ("Open Folder…", CommandId::OpenFolder),
+                (
+                    Text::GalleryOpenFile.in_language(language),
+                    CommandId::OpenFile,
+                ),
+                (
+                    Text::GalleryOpenFolder.in_language(language),
+                    CommandId::OpenFolder,
+                ),
             ] {
                 let (output, _) = frame(vec![]);
                 let rect = node_rect(&output, label);

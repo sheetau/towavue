@@ -1,3 +1,4 @@
+use crate::localization::Text;
 use crate::*;
 
 #[cfg(test)]
@@ -74,6 +75,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         response: &egui::Response,
         actions: &mut Vec<UiAction>,
     ) {
+        let language = localization::language(ui.ctx());
         let popup = egui::Popup::default_response_id(response);
         let owner_id = popup.with("timeline-owner");
         let owner = self.timeline_menu_owner();
@@ -114,12 +116,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let mut items = Vec::new();
             let mut chosen = None;
             for (action, title) in [
-                (Action::SelectAll, "Select all"),
-                (Action::DeselectAll, "Deselect all"),
-                (Action::Delete, "Delete"),
-                (Action::Crop, "Crop"),
-                (Action::Mute, "Mute"),
-                (Action::Play, "Play selection"),
+                (
+                    Action::SelectAll,
+                    Text::CommandSelectAll.in_language(language),
+                ),
+                (
+                    Action::DeselectAll,
+                    Text::CommandClearSelection.in_language(language),
+                ),
+                (Action::Delete, Text::TimelineDelete.in_language(language)),
+                (Action::Crop, Text::TimelineCrop.in_language(language)),
+                (Action::Mute, Text::TimelineMute.in_language(language)),
+                (Action::Play, Text::TimelinePlay.in_language(language)),
             ] {
                 if matches!(action, Action::Delete | Action::Play) {
                     chrome::separator(ui);

@@ -248,8 +248,27 @@ fn text_input_rows(
     rows: usize,
     framed: bool,
 ) -> egui::Response {
+    text_input_rows_with_id(ui, ui.make_persistent_id(label), label, value, rows, framed)
+}
+
+pub(super) fn unframed_text_input_with_id(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    label: &str,
+    value: &mut String,
+) -> egui::Response {
+    text_input_rows_with_id(ui, id, label, value, 1, false)
+}
+
+fn text_input_rows_with_id(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    label: &str,
+    value: &mut String,
+    rows: usize,
+    framed: bool,
+) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
-    let id = ui.make_persistent_id(label);
     let mut changed = false;
     if ui.is_enabled() {
         ui.input_mut(|input| {

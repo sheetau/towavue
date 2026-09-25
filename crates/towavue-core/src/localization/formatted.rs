@@ -13,6 +13,11 @@ macro_rules! templates {
 }
 
 templates! {
+    tab_label(title: &str) => ("{title} tab", "{title} タブ"),
+    close_title(title: &str) => ("Close {title}", "{title}を閉じる"),
+    close_tab(title: &str) => ("Close tab: {title}", "タブを閉じる: {title}"),
+    file_search_summary(shown: usize, matches: u64, skipped: u64) => ("Showing {shown} of {matches} matches; {skipped} entries skipped", "{matches}件中{shown}件を表示、{skipped}件をスキップ"),
+    file_search_help(summary: &str) => ("{summary}\nUnreadable entries, links/junctions and folders deeper than 128 levels are skipped. Refine the query to narrow results.", "{summary}\n読み取れない項目、リンク／ジャンクション、128階層より深いフォルダーはスキップします。検索語を追加して結果を絞り込んでください。"),
     dialog_thread_failed(error: &str) => ("the file-dialog thread could not start: {error}", "ファイルダイアログの処理を開始できませんでした: {error}"),
     dialog_windows_failed(error: &str) => ("Windows file dialog failed: {error}", "Windowsのファイルダイアログでエラーが発生しました: {error}"),
     dialog_invalid_path(error: &str) => ("Windows returned an invalid UTF-16 path: {error}", "Windowsが返したパスの文字情報が不正です（UTF-16）: {error}"),

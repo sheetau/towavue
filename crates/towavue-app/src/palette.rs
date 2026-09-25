@@ -1,6 +1,8 @@
 use crate::list_navigation::Navigation;
+use crate::localization::{self, Text};
 use crate::scroll_style::ScrollAreaStyle;
 use egui::AtomExt;
+use towavue_core::localization::formatted;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 use crate::hover_help::HoverHelp;
@@ -157,6 +159,7 @@ impl CommandPalette {
         top: f32,
         sources: OpenSources<'_>,
     ) -> (Option<Choice>, bool) {
+        let language = localization::language(context);
         let mut chosen = None;
         let query_id = egui::Id::new("command-palette-query");
         let opened = self.fresh;
@@ -251,7 +254,7 @@ impl CommandPalette {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
-        egui::Window::new("Command palette")
+        egui::Window::new(Text::PaletteTitle.in_language(language))
             .id("command-palette".into())
             .order(egui::Order::Foreground)
             .anchor(
@@ -289,14 +292,14 @@ impl CommandPalette {
                         .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
                         .hint_text(if self.folders {
-                            "Select to open (hold Ctrl-key to force new window or Alt-key for same window)"
+                            Text::PaletteFolderHint.in_language(language)
                         } else if previous_query.starts_with('>') {
-                            "Type the name of a command to run."
+                            Text::PaletteCommandHint.in_language(language)
                         } else {
-                            "Search files by name (hold Ctrl-key to force new window or Alt-key for same window)"
+                            Text::PaletteFileHint.in_language(language)
                         }),
                 )
-                .help_text("Up / Down: select   Page Up / Down: page   Enter: open/run   Ctrl: new window   Alt: same tab   Esc: close");
+                .help_text(Text::PaletteHelp.in_language(language));
                 ui.visuals_mut().weak_text_color = weak_text_color;
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.query.starts_with('>');
@@ -305,8 +308,13 @@ impl CommandPalette {
                     self.folders = false;
                 }
                 context.accesskit_node_builder(query_id, |node| {
-                    node.set_label(if command_mode { "Search commands" }
-                        else if self.folders { "Search recent folders" } else { "Search files" });
+                    node.set_label(if command_mode {
+                        Text::SearchCommands.in_language(language)
+                    } else if self.folders {
+                        Text::SearchRecentFolders.in_language(language)
+                    } else {
+                        Text::SearchFiles.in_language(language)
+                    });
                     node.add_action(egui::accesskit::Action::SetValue);
                 });
                 let query_changed = opened || previous_query != self.query;
@@ -318,11 +326,19 @@ impl CommandPalette {
                     self.removed_selection = None;
                 }
                 if !command_mode {
-                    chosen = self.show_files(ui, &sources, navigation, enter, query_changed)
+                    chosen = self
+                        .show_files(ui, &sources, navigation, enter, query_changed)
                         .map(Choice::Open);
                     return;
                 }
-                chosen = self.show_commands(ui, commands, shortcuts, sources.commands, (navigation, enter.is_some()), query_changed);
+                chosen = self.show_commands(
+                    ui,
+                    commands,
+                    shortcuts,
+                    sources.commands,
+                    (navigation, enter.is_some()),
+                    query_changed,
+                );
             });
         (chosen, close || (!opened && self.outside_press(context)))
     }
@@ -335,6 +351,7 @@ impl CommandPalette {
         enter: Option<egui::Modifiers>,
         query_changed: bool,
     ) -> Option<RecentAction> {
+        let language = localization::language(ui.ctx());
         let recent = if self.folders {
             sources.folders
         } else {
@@ -425,8 +442,8 @@ impl CommandPalette {
                     )
                     .help_text(error);
                 } else if result.matches > result.paths.len() as u64 || result.skipped != 0 {
-                    let summary = format!(
-                        "Showing {} of {} matches; {} entries skipped",
+                    let summary = formatted::file_search_summary(
+                        language,
                         result.paths.len(),
                         result.matches,
                         result.skipped,
@@ -436,10 +453,10 @@ impl CommandPalette {
                             .truncate()
                             .show_tooltip_when_elided(false),
                     )
-                    .help_text(format!("{summary}\nUnreadable entries, links/junctions and folders deeper than 128 levels are skipped. Refine the query to narrow results."));
+                    .help_text(formatted::file_search_help(language, &summary));
                 }
             } else if sources.searching && !query.is_empty() {
-                ui.weak("Searching subfolders...");
+                ui.weak(Text::SearchingSubfolders.in_language(language));
             }
         }
         let row_height = 22.0;
@@ -477,9 +494,9 @@ impl CommandPalette {
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(if self.folders {
-                            "No matching recent folders"
+                            Text::NoMatchingFolders.in_language(language)
                         } else {
-                            "No matching files"
+                            Text::NoMatchingFiles.in_language(language)
                         })
                         .weak(),
                     )
@@ -507,11 +524,11 @@ impl CommandPalette {
                 let body = row_actions.body;
                 let background = ui.painter().add(egui::Shape::Noop);
                 let group = if self.folders && index == 0 {
-                    "folders"
+                    Text::FolderResults.in_language(language)
                 } else if !self.folders && index == 0 && recent_count > 0 {
-                    "recently opened"
+                    Text::RecentlyOpened.in_language(language)
                 } else if !self.folders && index == recent_count {
-                    "file results"
+                    Text::FileResults.in_language(language)
                 } else {
                     ""
                 };
@@ -555,9 +572,9 @@ impl CommandPalette {
                 });
                 if let Some(close_rect) = row_actions.remove {
                     let label = if self.folders || index < recent_count {
-                        "Remove from Recently Opened"
+                        Text::RemoveRecentlyOpened.in_language(language)
                     } else {
-                        "Dismiss search result"
+                        Text::DismissSearchResult.in_language(language)
                     };
                     let remove = ui
                         .push_id(("remove-path", path), |ui| {

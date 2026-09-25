@@ -38,6 +38,21 @@ fn access(target: egui::accesskit::NodeId, action: egui::accesskit::Action) -> e
 
 #[test]
 fn timeline_context_covers_children_without_retargeting_selection_or_seeking() {
+    timeline_context_covers_children_without_retargeting_selection_or_seeking_in_language(
+        crate::localization::Language::English,
+    );
+}
+
+#[test]
+fn japanese_timeline_context_covers_children_without_retargeting_selection_or_seeking() {
+    timeline_context_covers_children_without_retargeting_selection_or_seeking_in_language(
+        crate::localization::Language::Japanese,
+    );
+}
+
+fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_language(
+    language: crate::localization::Language,
+) {
     let Some(root) = crate::tests::isolated_test_root(
         "timeline_menu::tests::timeline_context_covers_children_without_retargeting_selection_or_seeking",
     ) else {
@@ -46,6 +61,9 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking() {
     for kind in [MediaKind::Audio, MediaKind::Video] {
         let mut app = media_app(&root, kind);
         let context = fonts::test_context();
+        if language == crate::localization::Language::Japanese {
+            crate::localization::test_ui::configure_japanese(&context, 1.0);
+        }
         context.enable_accesskit();
         context.global_style_mut(chrome::style);
         app.ui_context = Some(context.clone());
@@ -129,12 +147,12 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking() {
                             .collect::<Vec<_>>()
                     );
                     for label in [
-                        "Select all",
-                        "Deselect all",
-                        "Delete",
-                        "Crop",
-                        "Mute",
-                        "Play selection",
+                        Text::CommandSelectAll.in_language(language),
+                        Text::CommandClearSelection.in_language(language),
+                        Text::TimelineDelete.in_language(language),
+                        Text::TimelineCrop.in_language(language),
+                        Text::TimelineMute.in_language(language),
+                        Text::TimelinePlay.in_language(language),
                     ] {
                         let (_, node) = tree
                             .nodes
@@ -153,7 +171,8 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking() {
                             });
                         assert_eq!(
                             node.is_disabled(),
-                            label != "Select all" && selection.is_none(),
+                            label != Text::CommandSelectAll.in_language(language)
+                                && selection.is_none(),
                             "{label}"
                         );
                     }
@@ -184,7 +203,10 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking() {
         let target = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label().is_some_and(|text| text.starts_with("Mute")))
+            .find(|(_, node)| {
+                node.label()
+                    .is_some_and(|text| text.starts_with(Text::TimelineMute.in_language(language)))
+            })
             .expect("mute")
             .0;
         let actions = frame(

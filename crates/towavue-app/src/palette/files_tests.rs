@@ -2,6 +2,122 @@ use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
 #[test]
+fn japanese_file_search_preserves_paths_modifiers_and_remove_targets() {
+    for density in [1.0, 1.25, 2.0] {
+        for folders in [false, true] {
+            for size in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)] {
+                let context = crate::localization::test_ui::japanese_context(density);
+                let paths = [
+                    PathBuf::from("C:/media/日本語{original}.png"),
+                    PathBuf::from("C:/media/second.png"),
+                ];
+                let sources = OpenSources {
+                    files: &paths,
+                    folders: &paths,
+                    ..Default::default()
+                };
+                let mut palette = CommandPalette::default();
+                palette.open_files(folders);
+                let frame = |palette: &mut CommandPalette, events| {
+                    open_frame_at(&context, palette, sources, events, (size, 0.0, density))
+                };
+                for _ in 0..4 {
+                    assert!(frame(&mut palette, vec![]).1.is_empty());
+                }
+                let output = frame(&mut palette, vec![]).0;
+                let search_label = if folders {
+                    "最近開いたフォルダーを検索"
+                } else {
+                    "ファイルを検索"
+                };
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let query = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(search_label))
+                    .expect("localized query");
+                assert_eq!(
+                    query.0,
+                    egui::Id::new("command-palette-query").accesskit_id()
+                );
+                let group = if folders {
+                    "フォルダー"
+                } else {
+                    "最近開いた項目"
+                };
+                let (text, _) = picker_text(&output, group).expect("translated inline group");
+                if size.x >= 600.0 {
+                    assert!(
+                        !text.galley.elided,
+                        "{group} at {size:?}, density {density}"
+                    );
+                }
+                // Compact rows intentionally shorten secondary groups before filenames.
+                // The complete target remains available to accessibility and hover help.
+                assert!(tree.nodes.iter().any(|(_, node)| {
+                    node.label() == Some(paths[0].to_string_lossy().as_ref())
+                }));
+                let remove_label = format!("最近開いた履歴から削除: {}", paths[0].display());
+                let remove = button_rect(&output, &remove_label);
+                assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(remove));
+                assert!(text.pos.x + text.galley.size().x <= remove.left());
+                for (modifiers, target) in [
+                    (egui::Modifiers::CTRL, OpenTarget::Window),
+                    (egui::Modifiers::ALT, OpenTarget::Replace),
+                ] {
+                    assert_eq!(
+                        frame(&mut palette, vec![key(egui::Key::Enter, modifiers)]).1,
+                        [Choice::Open(RecentAction::Open(
+                            paths[0].clone(),
+                            if folders {
+                                RecentKind::Folder
+                            } else {
+                                RecentKind::File
+                            },
+                            target,
+                        ))]
+                    );
+                }
+                let output = frame(&mut palette, vec![]).0;
+                let action = crate::localization::test_ui::action(&output, &remove_label, None);
+                assert_eq!(
+                    frame(&mut palette, vec![action]).1,
+                    [Choice::Open(RecentAction::Remove(
+                        paths[0].clone(),
+                        if folders {
+                            RecentKind::Folder
+                        } else {
+                            RecentKind::File
+                        },
+                    ))]
+                );
+                assert_eq!(palette.selected_path.as_ref(), None);
+                assert_eq!(
+                    frame(
+                        &mut palette,
+                        vec![key(egui::Key::Enter, egui::Modifiers::ALT)]
+                    )
+                    .1,
+                    [Choice::Open(RecentAction::Open(
+                        paths[1].clone(),
+                        if folders {
+                            RecentKind::Folder
+                        } else {
+                            RecentKind::File
+                        },
+                        OpenTarget::Replace,
+                    ))]
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn japanese_command_search_displays_translated_result_and_executes_original_id() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();

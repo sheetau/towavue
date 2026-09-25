@@ -142,6 +142,15 @@ fn playlist_menu_routes_the_listed_file_without_switching_tracks() {
 
 #[test]
 fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions() {
+    thumbnail_context_menus_keep_exact_target_in_language(crate::localization::Language::English);
+}
+
+#[test]
+fn japanese_thumbnail_context_menus_keep_exact_target() {
+    thumbnail_context_menus_keep_exact_target_in_language(crate::localization::Language::Japanese);
+}
+
+fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::localization::Language) {
     let Some(root) = crate::tests::isolated_test_root(
         "thumbnail_menu::tests::thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions",
     ) else {
@@ -166,6 +175,9 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             }
         }
         let context = fonts::test_context();
+        if language == crate::localization::Language::Japanese {
+            crate::localization::test_ui::configure_japanese(&context, 1.0);
+        }
         context.enable_accesskit();
         context.global_style_mut(chrome::style);
         let mut strip = filmstrip::Filmstrip::new(
@@ -224,22 +236,40 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             frame(vec![], owner);
         }
         let mut choices = vec![
-            ("Open", Action::Open),
-            ("Open in new window", Action::Window),
-            ("Open in new tab", Action::Tab),
-            ("Copy file path", Action::Copy),
-            ("Reveal in File Explorer", Action::Reveal),
+            (Text::ThumbnailOpen.in_language(language), Action::Open),
+            (Text::ThumbnailWindow.in_language(language), Action::Window),
+            (Text::ThumbnailTab.in_language(language), Action::Tab),
+            (
+                Text::CommandCopyFilePath.in_language(language),
+                Action::Copy,
+            ),
+            (
+                Text::CommandRevealFile.in_language(language),
+                Action::Reveal,
+            ),
         ];
         if scope == Scope::Playlist {
             choices.drain(..3);
         }
         if scope == Scope::Gallery {
-            choices.push(("Remove from history", Action::RemoveHistory));
+            choices.push((
+                Text::RemoveHistory.in_language(language),
+                Action::RemoveHistory,
+            ));
         } else {
             choices.extend([
-                ("Rename file…", Action::File(file_operations::Kind::Rename)),
-                ("Move file…", Action::File(file_operations::Kind::Move)),
-                ("Delete file…", Action::File(file_operations::Kind::Delete)),
+                (
+                    Text::ThumbnailRename.in_language(language),
+                    Action::File(file_operations::Kind::Rename),
+                ),
+                (
+                    Text::ThumbnailMove.in_language(language),
+                    Action::File(file_operations::Kind::Move),
+                ),
+                (
+                    Text::ThumbnailDelete.in_language(language),
+                    Action::File(file_operations::Kind::Delete),
+                ),
             ]);
         }
         for (index, (label, expected)) in choices.into_iter().enumerate() {
@@ -292,19 +322,19 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
             assert_eq!(
                 tree.nodes
                     .iter()
-                    .any(|(_, n)| n.label() == Some("Remove from history")),
+                    .any(|(_, n)| n.label() == Some(Text::RemoveHistory.in_language(language))),
                 scope == Scope::Gallery
             );
             assert_eq!(
                 tree.nodes
                     .iter()
-                    .any(|(_, n)| n.label() == Some("Delete file…")),
+                    .any(|(_, n)| n.label() == Some(Text::ThumbnailDelete.in_language(language))),
                 scope != Scope::Gallery
             );
             assert_eq!(
-                tree.nodes
-                    .iter()
-                    .any(|(_, node)| node.label() == Some("Open")),
+                tree.nodes.iter().any(
+                    |(_, node)| node.label() == Some(Text::ThumbnailOpen.in_language(language))
+                ),
                 scope != Scope::Playlist
             );
             let action = tree
@@ -358,9 +388,9 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
                 .any(|(id, node)| *id == initial_menu.focus
                     && node.label()
                         == Some(if scope == Scope::Playlist {
-                            "Copy file path"
+                            Text::CommandCopyFilePath.in_language(language)
                         } else {
-                            "Open"
+                            Text::ThumbnailOpen.in_language(language)
                         })),
             "keyboard menu initially selects Open"
         );
@@ -376,9 +406,9 @@ fn thumbnail_context_menus_keep_exact_target_and_expose_only_their_scope_actions
                 .any(|(id, node)| *id == menu_tree.focus
                     && node.label()
                         == Some(if scope == Scope::Playlist {
-                            "Reveal in File Explorer"
+                            Text::CommandRevealFile.in_language(language)
                         } else {
-                            "Open in new window"
+                            Text::ThumbnailWindow.in_language(language)
                         })),
             "ArrowDown advances exactly one menu action"
         );

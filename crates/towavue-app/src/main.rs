@@ -20947,7 +20947,7 @@ mod tests {
             app.fullscreen = fullscreen;
             app.filmstrip_open = true;
             focus_button();
-            for key in ["F", "R", "Space", "Enter", "Tab"] {
+            for key in ["F", "R", "A", "D", "Space", "Enter", "Tab"] {
                 assert!(
                     !app.owns_focused_shortcut(&stroke(key)),
                     "unbound and UI keys remain with filmstrip: {key}"

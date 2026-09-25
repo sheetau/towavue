@@ -686,6 +686,38 @@ impl Filmstrip {
         let frame = context.cumulative_frame_nr();
         let can_focus =
             enabled && !egui::Popup::is_any_open(context) && context.input(|input| input.focused);
+        if can_focus && !context.text_edit_focused() {
+            let direction = context.input_mut(|input| {
+                let mut direction = None;
+                input.events.retain(|event| {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                        ..
+                    } = event
+                    {
+                        let next = match key {
+                            egui::Key::A => Some(egui::FocusDirection::Left),
+                            egui::Key::D => Some(egui::FocusDirection::Right),
+                            _ => None,
+                        };
+                        if next.is_some() {
+                            direction = next;
+                            return false;
+                        }
+                    }
+                    true
+                });
+                direction
+            });
+            if let Some(direction) = direction {
+                self.swipe.clear();
+                // Use the same spatial focus traversal and reveal as arrow keys.
+                // Consuming the event prevents another move on a discarded pass.
+                context.memory_mut(|memory| memory.move_focus(direction));
+            }
+        }
         let relocated_focus = if can_focus && !recenter && !self.focus_requested {
             context
                 .memory(|memory| memory.focused())
@@ -869,6 +901,12 @@ impl Filmstrip {
                     );
                 }
                 let output = scroll.show_viewport_styled(ui, |ui, viewport| {
+                    // The scrollbar keeps its inset track; cards and their hit regions
+                    // extend through the side gutters to the media boundary.
+                    let mut clip = ui.clip_rect();
+                    clip.min.x = screen.left();
+                    clip.max.x = screen.right();
+                    ui.set_clip_rect(clip);
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(content_width, viewport.height()));
                     let range = visible_range(viewport, padding, snapshot.items.len());
@@ -3696,7 +3734,16 @@ mod tests {
             context.enable_accesskit();
             let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 240.0));
             let mut time = 0.0;
-            let mut frame = |strip: &mut Filmstrip, events| {
+            let mut frame = |strip: &mut Filmstrip, events: Vec<egui::Event>| {
+                let discard = events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::A | egui::Key::D,
+                            ..
+                        }
+                    )
+                });
                 time += 0.1;
                 let mut actions = Vec::new();
                 let output = context.run_ui(
@@ -3714,7 +3761,10 @@ mod tests {
                             Some(&snapshot.items[0].path),
                             true,
                             &mut actions,
-                        )
+                        );
+                        if discard && context.current_pass_index() == 0 {
+                            context.request_discard("filmstrip alias pass regression");
+                        }
                     },
                 );
                 assert!(
@@ -3736,6 +3786,8 @@ mod tests {
             for (key, shift, indices) in [
                 (egui::Key::ArrowRight, false, (1..100).collect::<Vec<_>>()),
                 (egui::Key::ArrowLeft, false, (0..99).rev().collect()),
+                (egui::Key::D, false, (1..100).collect()),
+                (egui::Key::A, false, (0..99).rev().collect()),
                 (egui::Key::Tab, false, (1..100).chain([0]).collect()),
                 (egui::Key::Tab, true, (0..100).rev().collect()),
             ] {
@@ -3776,6 +3828,30 @@ mod tests {
                         "density {density}, {index}: {bounds:?}"
                     );
                 }
+            }
+            for modifiers in [
+                egui::Modifiers::CTRL,
+                egui::Modifiers::SHIFT,
+                egui::Modifiers::ALT,
+            ] {
+                let focus = context.memory(|memory| memory.focused());
+                for pressed in [true, false] {
+                    frame(
+                        &mut strip,
+                        vec![egui::Event::Key {
+                            key: egui::Key::D,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers,
+                        }],
+                    );
+                }
+                assert_eq!(
+                    context.memory(|memory| memory.focused()),
+                    focus,
+                    "modified keys must not act as plain filmstrip aliases"
+                );
             }
             frame(
                 &mut strip,

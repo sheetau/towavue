@@ -3176,3 +3176,76 @@ fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order
         assert!(!app.filmstrip.preserve_refresh_view);
     }
 }
+
+#[test]
+fn filmstrip_side_gutters_paint_and_hit_test_visible_card_pixels() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_side_gutters_paint_and_hit_test_visible_card_pixels",
+    ) else {
+        return;
+    };
+    let snapshot = snapshot(&root);
+    for density in [1.0, 1.25, 2.0] {
+        for (x, name, index) in [(2.0, "source.png", 0), (318.0, "third.png", 2)] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(chrome::style);
+            context.enable_accesskit();
+            let mut strip =
+                Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                    .expect("strip");
+            let render = |strip: &mut Filmstrip, events| {
+                let mut raw = input(events);
+                raw.screen_rect = Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(320.0, 240.0),
+                ));
+                raw.viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                frame(
+                    strip,
+                    &context,
+                    &snapshot,
+                    &snapshot.items[1].path,
+                    true,
+                    raw,
+                )
+            };
+            for _ in 0..3 {
+                render(&mut strip, vec![]);
+            }
+            let (output, _) = render(&mut strip, vec![]);
+            let bounds = card(&output, name);
+            let position = egui::pos2(x, bounds.center().y);
+            assert!(
+                bounds.contains(position),
+                "edge card at {density}: {bounds:?}"
+            );
+            let clip = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.rect == bounds && rect.fill == chrome::BORDER =>
+                    {
+                        Some(shape.clip_rect)
+                    }
+                    _ => None,
+                })
+                .expect("painted card background");
+            assert_eq!(clip.left(), 0.0);
+            assert_eq!(clip.right(), 320.0);
+            assert!(clip.contains(position));
+            render(&mut strip, vec![egui::Event::PointerMoved(position)]);
+            render(&mut strip, vec![pointer(position, true)]);
+            let (_, actions) = render(&mut strip, vec![pointer(position, false)]);
+            assert!(
+                matches!(actions.as_slice(),
+                    [UiAction::OpenFilmstripMedia(path, false)] if path == &snapshot.items[index].path
+                ),
+                "edge pixels must activate the card they display"
+            );
+        }
+    }
+}

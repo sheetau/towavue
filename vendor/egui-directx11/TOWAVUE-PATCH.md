@@ -14,8 +14,15 @@ Local changes:
 - Retain managed texture sampling options across full and partial updates, and
   select a cached D3D11 sampler per draw (minification, magnification, wrapping).
   User textures default to linear/clamp. No-mipmap options clamp LOD to zero.
-  Opted-in managed textures use a full RGBA8 chain and implicit LOD sampling;
-  magnification retains its independently selected nearest/linear filter.
+  Opted-in managed textures use a full RGBA8 chain and a dedicated pixel shader
+  with explicit UV-gradient LOD. Implicit LOD showed intermittent base-level
+  sampling in real hardware mixed UI/image draws, despite identical meshes and
+  correct retained mip pixels. A half-level refinement reduces trilinear blur;
+  two-texel or larger footprints stay above the original level. Mild reduction
+  and independent nearest/linear magnification retain their previous filters.
+  Shader selection follows each mesh's mip options; base-only UI, thumbnails
+  and user/video textures keep the original shader. No additional texture taps,
+  allocation, source upload or generation on ordinary input redraws.
 - Generate dirty chains on the same serialized GPU immediately before installing
   the UI pipeline. A fixed area-filter shader integrates the previous mip's texel
   footprints, including odd and one-pixel extents, with premultiplied alpha intact.
@@ -30,6 +37,10 @@ Local changes:
   promotes/demotes storage by a GPU base-level copy on its next draw, releasing
   the previous allocation through native ownership. Demotion removes the extra
   chain; no egui texture ID, source pixels or app edit state changes.
+- WARP/hardware controls also cover 100 repeated mixed UI/image draws after
+  sampler-only promotion, including half-texel crop bands. A generated-frequency
+  comparison uses an unbiased explicit-LOD shader and independent area reference
+  to bound blur reduction; mild scaling and one-pixel stripes remain identical.
 - WARP/hardware controls check full mip pixels against an independent CPU area
   reference, alpha, odd/thin extents, partial updates, sampler transitions and
   unchanged magnification/base pixels. A large-image Release opt-in measures

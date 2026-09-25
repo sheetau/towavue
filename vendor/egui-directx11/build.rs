@@ -19,6 +19,12 @@ fn main() {
             "egui-pixel.cso",
         ),
         (
+            include_bytes!("shaders/egui.hlsl").as_slice(),
+            s!("ps_egui_minification"),
+            s!("ps_5_0"),
+            "egui-minification.cso",
+        ),
+        (
             include_bytes!("shaders/mipmap.hlsl").as_slice(),
             s!("vs_mipmap"),
             s!("vs_5_0"),

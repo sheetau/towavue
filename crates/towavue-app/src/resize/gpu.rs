@@ -9,6 +9,17 @@ fn surface<N: Fn(AppEvent) + Send + Sync + 'static>(
     density: f32,
     restore: bool,
 ) -> Vec<u8> {
+    surface_input(app, context, renderer, density, restore, None)
+}
+
+fn surface_input<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    context: &egui::Context,
+    renderer: &mut FrameRenderer,
+    density: f32,
+    restore: bool,
+    interaction: Option<usize>,
+) -> Vec<u8> {
     let mut input = egui::RawInput {
         max_texture_side: Some(renderer.max_texture_side()),
         screen_rect: Some(egui::Rect::from_min_size(
@@ -22,7 +33,25 @@ fn surface<N: Fn(AppEvent) + Send + Sync + 'static>(
         .get_mut(&egui::ViewportId::ROOT)
         .expect("viewport")
         .native_pixels_per_point = Some(density);
-    let mut output = context.run_ui(input, |ui| app.draw_image(ui));
+    if let Some(frame) = interaction {
+        input.focused = true;
+        input.modifiers = if frame % 4 < 2 {
+            egui::Modifiers::CTRL
+        } else {
+            egui::Modifiers::NONE
+        };
+        input.events = vec![egui::Event::PointerMoved(egui::pos2(
+            120.0 + frame as f32,
+            300.0,
+        ))];
+    }
+    let mut output = context.run_ui(input, |ui| {
+        if interaction.is_some() {
+            app.draw_ui(ui, &mut Vec::new());
+        } else {
+            app.draw_image(ui);
+        }
+    });
     assert_eq!(context.pixels_per_point(), density);
     if restore {
         output
@@ -318,6 +347,22 @@ fn image_minification_reaches_gpu_and_survives_recovery_at_three_densities() {
                 assert!(
                     error(&smooth) < 2.0,
                     "high-quality reduction must suppress false patterns"
+                );
+                let mut worst_error = 0.0_f64;
+                for frame in 0..24 {
+                    let redraw = surface_input(
+                        &mut app,
+                        &context,
+                        &mut renderer,
+                        density,
+                        false,
+                        Some(frame),
+                    );
+                    worst_error = worst_error.max(error(&redraw));
+                }
+                assert!(
+                    worst_error < 2.0,
+                    "steady quality after input: density={density} error={worst_error}"
                 );
                 app.dispatch(towavue_core::CommandId::ToggleImageInterpolation);
                 app.update_image_sampling();

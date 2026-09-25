@@ -47,6 +47,7 @@ pub struct Renderer {
     input_layout: ID3D11InputLayout,
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
+    minification_shader: ID3D11PixelShader,
     rasterizer_state: ID3D11RasterizerState,
     sampler_state: ID3D11SamplerState,
     texture_samplers: HashMap<egui::TextureOptions, ID3D11SamplerState>,
@@ -113,10 +114,18 @@ struct VertexData {
 
 #[cfg(test)]
 fn compile_shader(entry: windows::core::PCSTR, target: windows::core::PCSTR) -> Result<Vec<u8>> {
+    compile_shader_source(include_bytes!("../shaders/egui.hlsl"), entry, target)
+}
+
+#[cfg(test)]
+fn compile_shader_source(
+    source: &[u8],
+    entry: windows::core::PCSTR,
+    target: windows::core::PCSTR,
+) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-    let source = include_bytes!("../shaders/egui.hlsl");
     let mut bytecode = None;
-    // Static source and entry/target strings remain valid during compilation.
+    // Borrowed source and entry/target strings remain valid during compilation.
     // The owned blob stays alive while its bytes are copied; no pointer escapes.
     unsafe {
         D3DCompile(
@@ -200,6 +209,11 @@ mod sampling_tests {
                 windows::core::s!("ps_egui"),
                 windows::core::s!("ps_5_0"),
                 include_bytes!(concat!(env!("OUT_DIR"), "/egui-pixel.cso")).as_slice(),
+            ),
+            (
+                windows::core::s!("ps_egui_minification"),
+                windows::core::s!("ps_5_0"),
+                include_bytes!(concat!(env!("OUT_DIR"), "/egui-minification.cso")).as_slice(),
             ),
         ] {
             assert_eq!(compile_shader(entry, target)?, expected);
@@ -577,6 +591,7 @@ impl Renderer {
         let mut input_layout = None;
         let mut vertex_shader = None;
         let mut pixel_shader = None;
+        let mut minification_shader = None;
         let mut rasterizer_state = None;
         let mut sampler_state = None;
         let mut blend_state = None;
@@ -596,6 +611,11 @@ impl Renderer {
             )?;
             device.CreateVertexShader(vs_blob, None, Some(&mut vertex_shader))?;
             device.CreatePixelShader(ps_blob, None, Some(&mut pixel_shader))?;
+            device.CreatePixelShader(
+                include_bytes!(concat!(env!("OUT_DIR"), "/egui-minification.cso")),
+                None,
+                Some(&mut minification_shader),
+            )?;
             device.CreateRasterizerState(&Self::RASTERIZER_DESC, Some(&mut rasterizer_state))?;
             device.CreateSamplerState(&Self::SAMPLER_DESC, Some(&mut sampler_state))?;
             device.CreateBlendState(&Self::BLEND_DESC, Some(&mut blend_state))?;
@@ -606,6 +626,8 @@ impl Renderer {
             input_layout: input_layout.unwrap(),
             vertex_shader: vertex_shader.unwrap(),
             pixel_shader: pixel_shader.unwrap(),
+            minification_shader: minification_shader
+                .expect("successful minification shader creation"),
             rasterizer_state: rasterizer_state.unwrap(),
             sampler_state: sampler_state.unwrap(),
             texture_samplers: HashMap::new(),
@@ -798,6 +820,7 @@ impl Renderer {
                     clip_rect: clip_rect * egui_output.pixels_per_point * zoom_factor,
                 })
             });
+        let mut mip_shader_bound = false;
         for mesh in meshes {
             let options = self.texture_pool.options(mesh.tex);
             let sampler = match self.texture_samplers.entry(options) {
@@ -818,6 +841,18 @@ impl Renderer {
             // The context and sampler belong to the same device; the sampler remains
             // owned throughout this draw, with immediate-context calls serialized.
             unsafe {
+                let use_mip_shader = options.mipmap_mode.is_some();
+                if use_mip_shader != mip_shader_bound {
+                    device_context.PSSetShader(
+                        if use_mip_shader {
+                            &self.minification_shader
+                        } else {
+                            &self.pixel_shader
+                        },
+                        None,
+                    );
+                    mip_shader_bound = use_mip_shader;
+                }
                 device_context.PSSetSamplers(0, Some(&[Some(sampler.clone())]));
                 device_context.OMSetBlendState(
                     if mesh.invert {

@@ -494,3 +494,212 @@ fn mip_generation_reports_upload_draw_and_texel_costs() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn minification_retains_detail_without_restoring_fine_pattern_aliasing() -> Result<()> {
+    let options = egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
+    // Compare only the LOD adjustment. Keep explicit derivatives in both paths
+    // so the old hardware flicker cannot contaminate this quality reference.
+    let source = include_str!("../../../shaders/egui.hlsl");
+    let unbiased = source.replace("lod = max(min(lod, 1.0), lod - 0.5);", "");
+    assert_ne!(source, unbiased);
+    let reference = crate::compile_shader_source(
+        unbiased.as_bytes(),
+        windows::core::s!("ps_egui_minification"),
+        windows::core::s!("ps_5_0"),
+    )?;
+    for driver in [D3D_DRIVER_TYPE_WARP, D3D_DRIVER_TYPE_HARDWARE] {
+        let Some(mut surface) = Surface::new(driver, [384, 192])? else {
+            continue;
+        };
+        let refined = surface.renderer.minification_shader.clone();
+        let mut reference_shader = None;
+        // Both shaders are fixture-owned and use the same input layout/device.
+        unsafe {
+            surface
+                .device
+                .CreatePixelShader(&reference, None, Some(&mut reference_shader))?;
+        }
+        let reference_shader = reference_shader.expect("reference shader");
+        let size = [512, 256];
+        let mut detail_errors = [0.0; 2];
+        for frequency in [0.025_f64, 0.06, 0.1, 0.5] {
+            let pixels = egui::ColorImage::new(
+                size,
+                (0..size[0] * size[1])
+                    .map(|i| {
+                        Color32::from_gray(
+                            (128.0
+                                + 110.0
+                                    * (std::f64::consts::TAU * frequency * (i % size[0]) as f64)
+                                        .cos())
+                            .round() as u8,
+                        )
+                    })
+                    .collect(),
+            );
+            let texture = surface
+                .context
+                .load_texture("detail", pixels.clone(), options);
+            for destination in [[320, 160], [192, 96], [96, 48], [48, 24]] {
+                let mut errors = [0.0; 2];
+                let mut renders = Vec::new();
+                for (index, shader) in [&reference_shader, &refined].into_iter().enumerate() {
+                    surface.renderer.minification_shader = shader.clone();
+                    let actual = surface.draw(texture.id(), destination)?;
+                    let ratio = size[0] as f64 / destination[0] as f64;
+                    for x in 2..destination[0] - 2 {
+                        let begin = x as f64 * ratio;
+                        let end = (x + 1) as f64 * ratio;
+                        let mut sum = 0.0;
+                        for sx in begin.floor() as usize..end.ceil() as usize {
+                            sum += f64::from(pixels.pixels[sx].r())
+                                * (end.min((sx + 1) as f64) - begin.max(sx as f64));
+                        }
+                        errors[index] +=
+                            (f64::from(actual[(destination[1] / 2) * surface.size[0] + x].r())
+                                - sum / ratio)
+                                .abs();
+                    }
+                    errors[index] /= (destination[0] - 4) as f64;
+                    renders.push(actual);
+                }
+                if destination[0] == 320 || frequency == 0.5 {
+                    assert!(
+                        renders[0] == renders[1],
+                        "preserve mild reduction and reject one-pixel stripes"
+                    );
+                } else if frequency * size[0] as f64 / (destination[0] as f64) < 0.5 {
+                    assert!(
+                        errors[1] < errors[0],
+                        "representable detail must approach independent area reference: {errors:?}"
+                    );
+                    for index in 0..2 {
+                        detail_errors[index] += errors[index];
+                    }
+                }
+                eprintln!(
+                    "MINIFY_DETAIL driver={} frequency={frequency} destination={destination:?} reference_mae={:.3} refined_mae={:.3}",
+                    driver.0, errors[0], errors[1]
+                );
+            }
+        }
+        assert!(
+            detail_errors[1] < detail_errors[0] * 0.6,
+            "retain more representable detail: {detail_errors:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn repeated_mixed_ui_draws_keep_minification_stable() -> Result<()> {
+    for driver in [D3D_DRIVER_TYPE_WARP, D3D_DRIVER_TYPE_HARDWARE] {
+        let Some(mut surface) = Surface::new(driver, [800, 600])? else {
+            continue;
+        };
+        let options =
+            egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
+        let mut texture = surface.context.load_texture(
+            "repeated",
+            checker([2577, 1291]),
+            egui::TextureOptions::LINEAR,
+        );
+        surface.draw(texture.id(), [800, 400])?;
+        texture.set_partial([0, 0], egui::ColorImage::new([0, 0], vec![]), options);
+        let font = surface.context.load_texture(
+            "ui",
+            egui::ColorImage::filled([1, 1], Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        let mut worst = 0.0_f64;
+        for frame in 0..100 {
+            let output = surface.context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let painter = ui.ctx().layer_painter(egui::LayerId::background());
+                    let uv = egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0));
+                    painter.image(
+                        font.id(),
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 30.0)),
+                        uv,
+                        Color32::WHITE,
+                    );
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(0.0, 100.875),
+                        egui::vec2(800.0, 400.775),
+                    );
+                    let mut mesh = egui::Mesh::with_texture(texture.id());
+                    let half = egui::vec2(0.5 / 2577.0, 0.5 / 1291.0);
+                    for y in [0.0, half.y, 1.0 - half.y, 1.0] {
+                        for x in [0.0, half.x, 1.0 - half.x, 1.0] {
+                            mesh.vertices.push(egui::epaint::Vertex {
+                                pos: rect.min + rect.size() * egui::vec2(x, y),
+                                uv: egui::pos2(
+                                    x.clamp(half.x, 1.0 - half.x),
+                                    y.clamp(half.y, 1.0 - half.y),
+                                ),
+                                color: Color32::WHITE,
+                            });
+                        }
+                    }
+                    for row in 0..3 {
+                        for col in 0..3 {
+                            let i = row * 4 + col;
+                            mesh.indices
+                                .extend_from_slice(&[i, i + 1, i + 5, i, i + 5, i + 4]);
+                        }
+                    }
+                    painter.add(mesh);
+                    painter.image(
+                        font.id(),
+                        egui::Rect::from_min_size(
+                            egui::pos2(frame as f32, 560.0),
+                            egui::vec2(100.0, 30.0),
+                        ),
+                        uv,
+                        Color32::WHITE,
+                    );
+                },
+            );
+            unsafe {
+                surface
+                    .immediate
+                    .ClearRenderTargetView(&surface.view, &[0.0; 4]);
+            }
+            surface.renderer.render(
+                &surface.immediate,
+                &surface.view,
+                &surface.context,
+                split_output(output).0,
+            )?;
+            if frame == 0 {
+                verify_mip_areas(&surface, texture.id(), &checker([2577, 1291]))?;
+            }
+            let pixels = readback(&surface.device, &surface.immediate, &surface.target)?;
+            let mut error = 0.0;
+            for y in 270..330 {
+                for x in 325..475 {
+                    error += f64::from(pixels[y * 800 + x].r().abs_diff(128));
+                }
+            }
+            error /= 9000.0;
+            worst = worst.max(error);
+            if error > 2.0 {
+                eprintln!("UNSTABLE driver={} frame={frame} mae={error}", driver.0);
+            }
+        }
+        assert!(
+            worst < 2.0,
+            "stable mixed minification driver={} worst_mae={worst}",
+            driver.0
+        );
+    }
+    Ok(())
+}

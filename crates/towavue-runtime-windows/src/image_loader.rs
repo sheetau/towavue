@@ -1971,6 +1971,30 @@ mod tests {
             started_rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("running prefetch");
+            let (changed_tx, changed_rx) = mpsc::channel();
+            if mode == "changed" {
+                let cache = Arc::clone(
+                    &loader
+                        .as_ref()
+                        .expect("loader")
+                        .shared
+                        .0
+                        .lock()
+                        .expect("mailbox")
+                        .cache,
+                );
+                let changed_path = path.clone();
+                let mut changed = false;
+                // The foreground stamp's read handle must close before mutation.
+                // Prefetch is still gated, so both readers retain the old stamp.
+                cache.lock().expect("cache").before_lookup = Some(Box::new(move || {
+                    if !changed {
+                        std::fs::write(&changed_path, [3, 4]).expect("replace owned source");
+                        changed = true;
+                        changed_tx.send(()).expect("source mutation");
+                    }
+                }));
+            }
             let generation = loader
                 .as_ref()
                 .expect("loader")
@@ -1983,7 +2007,9 @@ mod tests {
                     },
                 );
             match mode {
-                "changed" => std::fs::write(&path, [3, 4]).expect("replace owned source"),
+                "changed" => changed_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("source changes before prefetch is released"),
                 "cancel" => {
                     let next = loader
                         .as_ref()

@@ -13,6 +13,14 @@ macro_rules! templates {
 }
 
 templates! {
+    export_start_failed(error: &str) => ("could not start FFmpeg export: {error}", "FFmpegの書き出しを開始できませんでした: {error}"),
+    ffmpeg_export_failed(error: &str) => ("FFmpeg export failed: {error}", "FFmpegの書き出しに失敗しました: {error}"),
+    export_output_failed(error: &str) => ("could not prepare or publish export: {error}", "書き出しの準備または保存先への書き込みに失敗しました: {error}"),
+    file_operation_failed(error: &str) => ("file operation failed: {error}", "ファイル操作に失敗しました: {error}"),
+    windows_file_operation_failed(error: &str) => ("Windows file operation failed: {error}", "Windowsのファイル操作に失敗しました: {error}"),
+    file_deletion_recovery(message: &str, directory: &str) => ("file deletion failed and the original source cannot be verified: {message}; retained file directory: {directory}", "ファイルの削除に失敗し、元ファイルの状態を確認できません: {message}。保持したファイルのフォルダー: {directory}"),
+    source_save_failed(error: &str) => ("source save failed: {error}", "上書き保存に失敗しました: {error}"),
+    source_replacement_recovery(message: &str, directory: &str) => ("source replacement needs recovery: {message}; preserved files: {directory}", "元ファイルの置き換えに復旧が必要です: {message}。保持したファイル: {directory}"),
     configuration_missing_equals(file: &str, line: usize) => ("{file} line {line} is missing '='", "{file}の{line}行目に「=」がありません"),
     configuration_unknown_command(file: &str, line: usize) => ("unknown command on {file} line {line}", "{file}の{line}行目に不明なコマンドがあります"),
     configuration_invalid_shortcut(line: usize) => ("invalid shortcut on shortcuts.conf line {line}", "shortcuts.confの{line}行目のショートカットが不正です"),

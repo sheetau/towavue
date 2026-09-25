@@ -51,16 +51,32 @@ pub(super) struct Pending {
     pub prepared: Option<PreparedSourceSave>,
 }
 
-pub(super) struct PublicationError {
-    pub message: String,
-    pub source_uncertain: bool,
+pub(super) enum PublicationError {
+    Runtime(towavue_runtime_windows::SourceSaveError),
+    External(String),
+    Text(localization::Text),
+}
+impl PublicationError {
+    pub fn message(&self, language: localization::Language) -> String {
+        match self {
+            Self::Runtime(error) => error.message(language),
+            Self::External(message) => message.clone(),
+            Self::Text(text) => text.in_language(language).into(),
+        }
+    }
+    pub fn source_uncertain(&self) -> bool {
+        matches!(
+            self,
+            Self::Runtime(
+                towavue_runtime_windows::SourceSaveError::RecoveryRequired { .. }
+                    | towavue_runtime_windows::SourceSaveError::Source(_)
+            )
+        )
+    }
 }
 impl From<String> for PublicationError {
     fn from(message: String) -> Self {
-        Self {
-            message,
-            source_uncertain: false,
-        }
+        Self::External(message)
     }
 }
 impl From<&str> for PublicationError {
@@ -68,17 +84,14 @@ impl From<&str> for PublicationError {
         message.to_owned().into()
     }
 }
+impl From<localization::Text> for PublicationError {
+    fn from(text: localization::Text) -> Self {
+        Self::Text(text)
+    }
+}
 impl From<towavue_runtime_windows::SourceSaveError> for PublicationError {
     fn from(error: towavue_runtime_windows::SourceSaveError) -> Self {
-        let source_uncertain = matches!(
-            error,
-            towavue_runtime_windows::SourceSaveError::RecoveryRequired { .. }
-                | towavue_runtime_windows::SourceSaveError::Source(_)
-        );
-        Self {
-            message: error.to_string(),
-            source_uncertain,
-        }
+        Self::Runtime(error)
     }
 }
 
@@ -267,7 +280,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .in_language(display_language)
                         .into()))
                 }
-                Err(error) => self.finish_source_save(Err(error.to_string())),
+                Err(error) => self.finish_source_save(Err(error.message(display_language))),
             },
         }
         self.request_redraw();
@@ -462,7 +475,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
-    pub(super) fn reject_uncertain_source(&mut self, source: &Path, message: &str) {
+    pub(super) fn reject_uncertain_source(&mut self, source: &Path, error: &PublicationError) {
+        let message = error.message(self.language());
         let ids: Vec<_> = self
             .tabs
             .tabs()
@@ -479,12 +493,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if self.displayed_tab == Some(id) {
                 self.session.take();
                 self.file_operations.position = None;
-                self.fail(message.to_owned());
+                self.fail_with_message(
+                    error.message(localization::Language::English),
+                    message.clone(),
+                );
             }
             if let Some(tab) = self.retained_playback.get_mut(&id) {
                 tab.session = None;
                 tab.recovery_position = None;
-                tab.fail(message.to_owned());
+                tab.fail(message.clone());
             }
             self.edits.entry(id).or_default().invalidate_source();
         }

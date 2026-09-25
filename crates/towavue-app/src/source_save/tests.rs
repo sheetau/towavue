@@ -1,5 +1,54 @@
 use super::*;
 
+#[test]
+fn publication_error_keeps_uncertain_source_classification_after_localization() {
+    use towavue_runtime_windows::{FileOperationError, SourceSaveError};
+    for (error, uncertain) in [
+        (
+            SourceSaveError::Source(FileOperationError::SourceChanged),
+            true,
+        ),
+        (
+            SourceSaveError::Source(FileOperationError::Io(std::io::Error::other(
+                "source detail",
+            ))),
+            true,
+        ),
+        (
+            SourceSaveError::RecoveryRequired {
+                message: "native 日本語 {error}".into(),
+                directory: PathBuf::from(r"D:\日本語 {retained}"),
+            },
+            true,
+        ),
+        (SourceSaveError::Io(std::io::Error::other("detail")), false),
+        (SourceSaveError::Export(ExportError::Cancelled), false),
+        (SourceSaveError::InvalidRequest, false),
+    ] {
+        let english = error.to_string();
+        let japanese = error.message(localization::Language::Japanese);
+        let publication = PublicationError::from(error);
+        assert_eq!(publication.source_uncertain(), uncertain);
+        assert_eq!(
+            publication.message(localization::Language::English),
+            english
+        );
+        assert_eq!(
+            publication.message(localization::Language::Japanese),
+            japanese
+        );
+        assert_eq!(publication.source_uncertain(), uncertain);
+    }
+    for error in [
+        PublicationError::from("external 日本語 {error}"),
+        localization::Text::SaveReaderTimeout.into(),
+    ] {
+        assert!(!error.source_uncertain());
+        assert!(!error.message(localization::Language::Japanese).is_empty());
+        assert!(!error.source_uncertain());
+    }
+}
+
 // Single-application fixture driver for existing format/guard controls. The
 // production multi-window coordinator is exercised in window_host::source_save.
 pub(crate) fn finish<N: Fn(AppEvent) + Send + Sync + 'static>(

@@ -18,6 +18,21 @@ macro_rules! messages {
 }
 
 messages! {
+    ExportSameAsSource => ("export target must differ from the source path", "書き出し先には元ファイルと異なるパスを指定してください"),
+    ExportInvalidTrim => ("trim times must be non-negative and start must be earlier than end", "トリミングの時刻は0以上で、開始を終了より前にしてください"),
+    ExportInvalidTimeline => ("timeline edits require a known duration and valid nonempty source intervals", "タイムライン編集にはメディアの長さと、空ではない有効な範囲が必要です"),
+    ExportCancelledUnchanged => ("export cancelled; existing files were not changed", "書き出しをキャンセルしました。既存のファイルは変更していません"),
+    FileSourceChanged => ("the source changed; reopen it before changing the file", "元ファイルが変更されました。ファイルを開き直してから操作してください"),
+    FileNotRegular => ("the source must be a regular file, not a folder or reparse point", "元ファイルには通常のファイルを指定してください。フォルダーや再解析ポイントは使用できません"),
+    FileInvalidName => ("enter one valid file name, without a folder or reserved Windows name", "フォルダー名やWindowsの予約名を含めず、有効なファイル名を1つ入力してください"),
+    FileDestinationExists => ("the destination already exists; choose a different name or folder", "指定したパスがすでに存在します。別の名前またはフォルダーを選んでください"),
+    FileOperationIncomplete => ("Windows cancelled or did not complete the file operation", "Windowsがファイル操作をキャンセルしたか、操作が完了しませんでした"),
+    FileWorkerStopped => ("the file-operation worker stopped unexpectedly", "ファイル操作の処理が予期せず停止しました"),
+    SourceSaveInvalidRequest => ("source save requires the original target path and full-media output", "上書き保存には元の保存先パスとメディア全体の出力が必要です"),
+    SaveReaderTimeout => ("Save cancelled because a media reader did not stop. No destination was published.", "メディアの読み込み処理が停止しなかったため、保存をキャンセルしました。保存先への書き込みは行っていません。"),
+    SavePublicationBlocked => ("Save cancelled before replacing the source. Finish other loading/dialogs, or reopen another tab with an outdated source version.", "元ファイルを置き換える前に保存をキャンセルしました。ほかの読み込みやダイアログを終了するか、古い元ファイルを参照している別のタブを開き直してください。"),
+    SaveAsPublicationBlocked => ("Save as cancelled before publishing. Finish other loading/dialogs, or reopen a destination tab with an outdated source version.", "保存先に書き込む前に「名前を付けて保存」をキャンセルしました。ほかの読み込みやダイアログを終了するか、古い保存先ファイルを参照しているタブを開き直してください。"),
+    SaveAsCancelledBeforePublish => ("Save as cancelled before publishing the destination.", "保存先に書き込む前に「名前を付けて保存」をキャンセルしました。"),
     ShortcutPathNoParent => ("shortcut path has no parent", "ショートカット設定のパスに親フォルダーがありません"),
     GridPathNoParent => ("grid path has no parent", "グリッド設定のパスに親フォルダーがありません"),
     ShortcutsSaveBusy => ("Keyboard shortcuts are being saved by another window. Try again.", "別のウィンドウでショートカットを保存しています。もう一度お試しください。"),

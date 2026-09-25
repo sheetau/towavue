@@ -51,7 +51,11 @@ impl WindowHost {
             if pending.waiting_since.elapsed() >= Duration::from_secs(10) {
                 let owner = pending.owner;
                 let serial = pending.serial;
-                self.abort_save_publication(owner, serial, "Save cancelled because a media reader did not stop. No destination was published.".into());
+                self.abort_save_publication(
+                    owner,
+                    serial,
+                    localization::Text::SaveReaderTimeout.into(),
+                );
             }
             return;
         }
@@ -101,6 +105,7 @@ impl WindowHost {
     }
 
     fn begin_source_publication(&mut self, owner: WindowKey) {
+        let language = self.language.settings.display;
         let app = &self.windows[&owner];
         let update = app.update_save_token();
         let pending = app.source_save.pending.as_ref().expect("prepared save");
@@ -131,9 +136,12 @@ impl WindowHost {
                     })
             });
         if blocked {
-            self.windows.get_mut(&owner).expect("save owner").finish_source_save(Err(
-                "Save cancelled before replacing the source. Finish other loading/dialogs, or reopen another tab with an outdated source version.".into()
-            ));
+            self.windows
+                .get_mut(&owner)
+                .expect("save owner")
+                .finish_source_save(Err(localization::Text::SavePublicationBlocked
+                    .in_language(language)
+                    .into()));
             return;
         }
         let app = self.windows.get_mut(&owner).expect("save owner");
@@ -186,10 +194,10 @@ impl WindowHost {
             }
         }
         if let Err(error) = &result
-            && error.source_uncertain
+            && error.source_uncertain()
         {
             for app in self.windows.values_mut() {
-                app.reject_uncertain_source(&publication.source, &error.message);
+                app.reject_uncertain_source(&publication.source, error);
             }
         }
         // Every accepted result, including recovery-required failures, reaches
@@ -200,12 +208,17 @@ impl WindowHost {
         self.windows
             .get_mut(&owner)
             .expect("retained save owner")
-            .finish_source_save(result.map(|_| ()).map_err(|error| error.message));
+            .finish_source_save(
+                result
+                    .map(|_| ())
+                    .map_err(|error| error.message(self.language.settings.display)),
+            );
     }
 }
 
 impl WindowHost {
     fn begin_save_as_publication(&mut self, owner: WindowKey) {
+        let language = self.language.settings.display;
         let app = &self.windows[&owner];
         let update = app.update_save_token();
         let pending = app.source_save.save_as.as_ref().expect("prepared Save as");
@@ -239,8 +252,12 @@ impl WindowHost {
                     })
             });
         if blocked {
-            self.windows.get_mut(&owner).expect("Save as owner").finish_source_save(Err(
-                "Save as cancelled before publishing. Finish other loading/dialogs, or reopen a destination tab with an outdated source version.".into()));
+            self.windows
+                .get_mut(&owner)
+                .expect("Save as owner")
+                .finish_source_save(Err(localization::Text::SaveAsPublicationBlocked
+                    .in_language(language)
+                    .into()));
             return;
         }
         let app = self.windows.get_mut(&owner).expect("Save as owner");
@@ -291,10 +308,10 @@ impl WindowHost {
                 .adopt_save_as(saved);
         }
         if let Err(error) = &result
-            && error.source_uncertain
+            && error.source_uncertain()
         {
             for app in self.windows.values_mut() {
-                app.reject_uncertain_source(&publication.source, &error.message);
+                app.reject_uncertain_source(&publication.source, error);
             }
         }
         let app = self.windows.get_mut(&owner).expect("Save as owner");
@@ -314,6 +331,10 @@ impl WindowHost {
         self.windows
             .get_mut(&owner)
             .expect("retained Save as owner")
-            .finish_source_save(result.map(|_| ()).map_err(|error| error.message));
+            .finish_source_save(
+                result
+                    .map(|_| ())
+                    .map_err(|error| error.message(self.language.settings.display)),
+            );
     }
 }

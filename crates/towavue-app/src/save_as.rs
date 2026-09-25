@@ -137,6 +137,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn handle_save_as(&mut self, serial: u64, event: SaveAsEvent) {
+        let language = self.language();
         if self
             .source_save
             .save_as
@@ -164,10 +165,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .expect("Save as owner")
                         .prepared = Some(prepared);
                 }
-                Ok(_) => self.finish_source_save(Err(
-                    "Save as cancelled before publishing the destination.".into(),
-                )),
-                Err(error) => self.finish_source_save(Err(error.to_string())),
+                Ok(_) => {
+                    self.finish_source_save(Err(localization::Text::SaveAsCancelledBeforePublish
+                        .in_language(language)
+                        .into()))
+                }
+                Err(error) => self.finish_source_save(Err(error.message(language))),
             },
         }
         self.request_redraw();

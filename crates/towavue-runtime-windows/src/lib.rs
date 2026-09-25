@@ -18,6 +18,7 @@ pub use diagnostics::{Diagnostics, record_diagnostic, start_diagnostics};
 mod export;
 mod file_details;
 mod file_operation;
+mod operation_error_messages;
 mod source_save;
 pub use source_save::{
     PreparedSaveAs, PreparedSourceSave, RetainedSource, SaveAsEvent, SaveAsJob, SaveAsRequest,

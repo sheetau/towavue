@@ -2,6 +2,85 @@ use super::Language;
 use crate::*;
 
 #[test]
+fn japanese_export_failures_keep_edits_and_guarded_continuations() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::notifications_tests::japanese_export_failures_keep_edits_and_guarded_continuations",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.language_settings.display = Language::Japanese;
+    let source = root.join("日本語{source}.bmp");
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+    app.path = Some(source.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let history = app.edits.clone();
+    for (error, cancelling, message) in [
+        (
+            ExportError::Cancelled,
+            true,
+            "書き出しをキャンセルしました。既存のファイルは変更していません",
+        ),
+        (
+            ExportError::InvalidTimeline,
+            false,
+            "タイムライン編集にはメディアの長さと、空ではない有効な範囲が必要です",
+        ),
+        (
+            ExportError::Failed("native 日本語 {error}\ncode=32".into()),
+            false,
+            "FFmpegの書き出しに失敗しました: native 日本語 {error}\ncode=32",
+        ),
+    ] {
+        let request = ExportRequest {
+            source: source.clone(),
+            target: source.clone(),
+            kind: MediaKind::Image,
+            operations: vec![],
+            hardware_encode: false,
+        };
+        let options = ExportOptions::default();
+        app.active_export = Some(ActiveExport {
+            progress: export_progress::ExportProgress::new(&request, &options, None),
+            // This worker rejects a same-source request; the tested outcome is injected.
+            job: ExportJob::start(request.clone(), |_| {})
+                .expect("fixture worker")
+                .into(),
+            tab,
+            request,
+            options,
+            encoded: Duration::ZERO,
+            analyzing_audio: false,
+            cancelling,
+            continuation: Some(GuardedAction::Exit),
+        });
+        app.export_error = None;
+        app.status_message = None;
+        app.handle_export_event(ExportEvent::Finished(Err(error)));
+        assert!(app.active_export.is_none());
+        assert_eq!(app.edits, history);
+        assert!(matches!(app.pending_guard, Some(GuardedAction::Exit)));
+        assert!(!app.exit_requested);
+        if cancelling {
+            assert_eq!(app.status_notice().as_deref(), Some(message));
+            assert!(app.export_error.is_none());
+        } else {
+            assert_eq!(app.export_error.as_deref(), Some(message));
+            assert!(
+                app.native_prompt_content(&FallbackPrompt::ExportError)
+                    .0
+                    .contains(message)
+            );
+        }
+        assert!(!source.exists(), "failed export cannot create its target");
+    }
+}
+
+#[test]
 fn japanese_video_quality_and_resume_notices_keep_settings_and_error_details() {
     use towavue_runtime_windows::{VideoExportQuality, VideoResumeEvent};
     let Some(_root) = crate::tests::isolated_test_root(

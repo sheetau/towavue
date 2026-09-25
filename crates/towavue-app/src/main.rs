@@ -9321,9 +9321,9 @@ where
                     }
                     Err(error) => {
                         if matches!(error, ExportError::Cancelled) {
-                            self.set_status(error.to_string());
+                            self.set_status(error.message(language));
                         } else {
-                            self.export_error = Some(error.to_string());
+                            self.export_error = Some(error.message(language));
                         }
                         self.pending_guard = export.continuation.or(self.pending_guard.take());
                     }
@@ -11049,6 +11049,10 @@ where
     }
 
     fn fail(&mut self, error: String) {
+        self.fail_with_message(error.clone(), error);
+    }
+
+    fn fail_with_message(&mut self, diagnostic: String, message: String) {
         self.finish_track_drag(true);
         self.cancel_hold_speed();
         self.cancel_frame_steps();
@@ -11059,9 +11063,9 @@ where
             clock.set_paused(true);
         }
         self.pending_seek_started = None;
-        towavue_runtime_windows::diagnostic!("towavue: {error}");
-        self.playback_error = Some(error.clone());
-        self.set_status(error);
+        towavue_runtime_windows::diagnostic!("towavue: {diagnostic}");
+        self.playback_error = Some(message.clone());
+        self.set_status(message);
         self.state = PlaybackState::Faulted;
         self.refresh_title();
     }

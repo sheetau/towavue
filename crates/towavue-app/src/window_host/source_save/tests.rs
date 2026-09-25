@@ -379,48 +379,79 @@ fn source_save_ambiguous_publication_keeps_edits_and_rejects_untrusted_input() {
     ) else {
         return;
     };
-    let path = root.join("source.bmp");
-    crate::tab_transfer::tests::bitmap(&path);
-    let (mut host, owner, id) = setup(&path);
-    host.windows
-        .get_mut(&owner)
-        .expect("owner")
-        .edits
-        .entry(id)
-        .or_default()
-        .push(EditOperation::FlipHorizontal, MediaKind::Image);
-    host.windows
-        .get_mut(&owner)
-        .expect("owner")
-        .dispatch(CommandId::Save);
-    prepared(&mut host, owner);
-    host.begin_source_publication(owner);
-    let serial = host.source_save.as_ref().expect("publication").serial;
-    // Controlled delivery of an ambiguous native outcome, not an induced OS failure.
-    host.finish_source_publication(
-        owner,
-        serial,
-        Err(towavue_runtime_windows::SourceSaveError::RecoveryRequired {
+    for language in [
+        localization::Language::English,
+        localization::Language::Japanese,
+    ] {
+        let path = root.join(format!("{language:?}.bmp"));
+        crate::tab_transfer::tests::bitmap(&path);
+        let original = std::fs::read(&path).expect("original source bytes");
+        let (mut host, owner, id) = setup(&path);
+        host.language.settings.display = language;
+        host.windows
+            .get_mut(&owner)
+            .expect("owner")
+            .language_settings
+            .display = language;
+        let peer = host.add_application(None).expect("peer");
+        let peer_id = attach(&mut host, peer, &path);
+        host.windows
+            .get_mut(&owner)
+            .expect("owner")
+            .edits
+            .entry(id)
+            .or_default()
+            .push(EditOperation::FlipHorizontal, MediaKind::Image);
+        host.windows
+            .get_mut(&owner)
+            .expect("owner")
+            .dispatch(CommandId::Save);
+        prepared(&mut host, owner);
+        host.begin_source_publication(owner);
+        let serial = host.source_save.as_ref().expect("publication").serial;
+        // Controlled delivery of an ambiguous native outcome, not an induced OS failure.
+        host.finish_source_publication(
+            owner,
+            serial,
+            Err(towavue_runtime_windows::SourceSaveError::RecoveryRequired {
+                message: "controlled ambiguous replacement".into(),
+                directory: root.clone(),
+            }
+            .into()),
+        );
+        let app = &host.windows[&owner];
+        assert!(
+            app.export_error
+                .as_ref()
+                .expect("recovery details")
+                .contains("controlled ambiguous replacement")
+        );
+        assert!(app.edits[&id].is_dirty());
+        assert!(!app.edits[&id].source_available());
+        assert_eq!(app.source_versions[&id], None);
+        assert_eq!(
+            app.edits[&id].operations(),
+            &[EditOperation::FlipHorizontal]
+        );
+        assert!(!app.file_operations.locked && !app.source_save.frozen);
+        let expected = towavue_runtime_windows::SourceSaveError::RecoveryRequired {
             message: "controlled ambiguous replacement".into(),
             directory: root.clone(),
         }
-        .into()),
-    );
-    let app = &host.windows[&owner];
-    assert!(
-        app.export_error
-            .as_ref()
-            .expect("recovery details")
-            .contains("controlled ambiguous replacement")
-    );
-    assert!(app.edits[&id].is_dirty());
-    assert!(!app.edits[&id].source_available());
-    assert_eq!(app.source_versions[&id], None);
-    assert_eq!(
-        app.edits[&id].operations(),
-        &[EditOperation::FlipHorizontal]
-    );
-    assert!(!app.file_operations.locked && !app.source_save.frozen);
+        .message(language);
+        assert_eq!(app.export_error.as_deref(), Some(expected.as_str()));
+        for (window, tab) in [(owner, id), (peer, peer_id)] {
+            let app = &host.windows[&window];
+            assert_eq!(app.playback_error.as_deref(), Some(expected.as_str()));
+            assert!(!app.edits[&tab].source_available());
+            assert_eq!(app.source_versions[&tab], None);
+            assert!(!app.file_operations.locked && !app.source_save.frozen);
+        }
+        assert_eq!(
+            std::fs::read(&path).expect("unpublished source bytes"),
+            original
+        );
+    }
 }
 
 #[test]

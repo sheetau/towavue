@@ -87,6 +87,16 @@ fn definitions(
 
 pub fn reading_hint(text: &str, size: f32, color: egui::Color32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
+    append_reading_hint(&mut job, text, size, color);
+    job
+}
+
+pub fn append_reading_hint(
+    job: &mut egui::text::LayoutJob,
+    text: &str,
+    size: f32,
+    color: egui::Color32,
+) {
     for part in text.split_inclusive(['\u{2194}', '\u{2195}']) {
         let split = part
             .char_indices()
@@ -109,7 +119,6 @@ pub fn reading_hint(text: &str, size: f32, color: egui::Color32) -> egui::text::
             );
         }
     }
-    job
 }
 
 pub fn icon_font() -> egui::FontId {

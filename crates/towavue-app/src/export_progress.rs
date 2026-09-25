@@ -4,6 +4,20 @@ use towavue_core::localization::formatted;
 
 const LOADING_DELAY: Duration = Duration::from_millis(200);
 
+pub(super) enum GestureHint {
+    Text(String),
+    Reading(reading_input::ReadingHint),
+}
+
+impl GestureHint {
+    fn append_to(&self, job: &mut egui::text::LayoutJob, size: f32) {
+        match self {
+            Self::Text(text) => fonts::append_reading_hint(job, text, size, chrome::FOREGROUND),
+            Self::Reading(hint) => hint.append_to(job, size),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum LoadingOwner {
     Media(Option<TabId>, u64),
@@ -17,15 +31,18 @@ pub(super) struct LoadingProgress {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    pub(super) fn export_gesture_hint(&self) -> Option<String> {
+    pub(super) fn export_gesture_hint(&self) -> Option<GestureHint> {
         if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
-            Some(message.into())
+            Some(GestureHint::Text(message.into()))
         } else if self.reading_drag.is_some() {
-            Some(self.reading_status())
+            Some(self.reading_adjustment_hint().map_or_else(
+                || GestureHint::Text(self.reading_status()),
+                GestureHint::Reading,
+            ))
         } else if self.held_speed.is_some() || self.track_drag.is_some() {
-            self.status_notice()
+            self.status_notice().map(GestureHint::Text)
         } else if self.view_drag.is_some() {
-            self.visual_selection_status()
+            self.visual_selection_status().map(GestureHint::Text)
         } else {
             None
         }
@@ -355,7 +372,7 @@ pub(super) fn show_status(
     rect: egui::Rect,
     parent: Option<egui::LayerId>,
     export: &ActiveExport,
-    gesture: Option<String>,
+    gesture: Option<GestureHint>,
     enabled: bool,
     actions: &mut Vec<UiAction>,
 ) {
@@ -378,11 +395,20 @@ pub(super) fn show_status(
                 .into(),
         );
     }
+    let mut message = egui::text::LayoutJob::default();
+    let mut tooltip = fonts::reading_hint(
+        &format!("{}\n", export.request.target.display()),
+        14.0,
+        chrome::FOREGROUND,
+    );
     if let Some(gesture) = gesture {
-        parts.insert(0, gesture);
+        gesture.append_to(&mut message, 12.0);
+        fonts::append_reading_hint(&mut message, " · ", 12.0, chrome::FOREGROUND);
+        gesture.append_to(&mut tooltip, 14.0);
+        fonts::append_reading_hint(&mut tooltip, "\n", 14.0, chrome::FOREGROUND);
     }
-    let message = parts.join(" · ");
-    let tooltip = format!("{}\n{}", export.request.target.display(), parts.join("\n"));
+    fonts::append_reading_hint(&mut message, &parts.join(" · "), 12.0, chrome::FOREGROUND);
+    fonts::append_reading_hint(&mut tooltip, &parts.join("\n"), 14.0, chrome::FOREGROUND);
     if !export.cancelling && export.encoded.is_zero() {
         context.request_repaint_after(Duration::from_secs(1));
     }
@@ -453,12 +479,12 @@ pub(super) fn show_status(
                     actions.push(UiAction::CancelExport);
                 }
                 ui.add(
-                    egui::Label::new(fonts::reading_hint(&message, 12.0, chrome::FOREGROUND))
+                    egui::Label::new(message.clone())
                         .truncate()
                         .show_tooltip_when_elided(false),
                 )
                 .help_ui_above(|ui| {
-                    ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
+                    ui.label(tooltip.clone());
                 });
             });
         });

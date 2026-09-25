@@ -2,6 +2,135 @@ use super::*;
 use towavue_core::{TimeRange, TimelineEdit};
 
 #[test]
+fn reading_adjustment_colors_follow_the_active_axis_with_and_without_export() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::reading_adjustment_colors_follow_the_active_axis_with_and_without_export",
+    ) else {
+        return;
+    };
+    for language in [Language::English, Language::Japanese] {
+        for density in [1.0, 1.25, 2.0] {
+            for exporting in [false, true] {
+                let mut app = Application::new(None, |_| {}).expect("app");
+                let context = if language == Language::Japanese {
+                    crate::localization::test_ui::japanese_context(1.0)
+                } else {
+                    let context = fonts::test_context();
+                    context.global_style_mut(chrome::style);
+                    context.enable_accesskit();
+                    context
+                };
+                app.ui_context = Some(context);
+                let path = root.join("reading.png");
+                let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.media_kind = Some(MediaKind::Image);
+                app.path = Some(path.clone());
+                app.reading_mode = true;
+                app.reading_drag = Some(reading_input::ReadingDrag::new(
+                    app.reading_settings,
+                    true,
+                    f64::from(density),
+                ));
+                if exporting {
+                    app.active_export = Some(active(&path, tab, MediaKind::Image, None, false));
+                }
+                let mut time = 0.0;
+                for (delta, vertical) in [
+                    ((0.0, 0.0), None),
+                    ((0.0, -48.0), Some(true)),
+                    ((3.0, 0.0), Some(true)),
+                    ((-48.0, 0.0), Some(false)),
+                    ((-24.0, 0.0), Some(false)),
+                    ((0.0, -96.0), Some(false)),
+                    ((0.0, -96.0), Some(true)),
+                ] {
+                    app.move_reading_drag((
+                        delta.0 * f64::from(density),
+                        delta.1 * f64::from(density),
+                    ));
+                    for _ in 0..3 {
+                        time += 0.1;
+                        paint(&mut app, egui::vec2(1100.0, 400.0), density, time, vec![]);
+                    }
+                    time += 0.1;
+                    let output = paint(&mut app, egui::vec2(1100.0, 400.0), density, time, vec![]);
+                    let text = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text)
+                                if text.galley.text().starts_with("(\u{2195}) ") =>
+                            {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("painted reading gesture");
+                    assert!(text.override_text_color.is_none());
+                    assert!(!text.galley.elided);
+                    let pages = if language == Language::Japanese {
+                        format!(
+                            "(\u{2195}) \u{8aad}\u{66f8} {}\u{30da}\u{30fc}\u{30b8}",
+                            app.reading_settings.page_count
+                        )
+                    } else {
+                        format!("(\u{2195}) Reading {}", app.reading_settings.page_count)
+                    };
+                    let first = if language == Language::Japanese {
+                        format!(
+                            "(\u{2194}) \u{5148}\u{982d} {}\u{30da}\u{30fc}\u{30b8}",
+                            app.reading_settings.first_page_count
+                        )
+                    } else {
+                        format!("(\u{2194}) first {}", app.reading_settings.first_page_count)
+                    };
+                    let expected = format!("{pages} \u{00b7} {first}");
+                    assert!(text.galley.text().starts_with(&expected));
+                    for section in &text.galley.job.sections {
+                        if section.byte_range.is_empty() {
+                            continue;
+                        }
+                        let start = section.byte_range.start.0;
+                        let expected_color = if start < pages.len() {
+                            if vertical == Some(true) {
+                                chrome::FOREGROUND
+                            } else {
+                                chrome::MUTED
+                            }
+                        } else if start < pages.len() + " \u{00b7} ".len() {
+                            chrome::MUTED
+                        } else if start < expected.len() {
+                            if vertical == Some(false) {
+                                chrome::FOREGROUND
+                            } else {
+                                chrome::MUTED
+                            }
+                        } else {
+                            chrome::FOREGROUND
+                        };
+                        assert_eq!(
+                            section.format.color,
+                            expected_color,
+                            "{language:?}, exporting={exporting}, delta={delta:?}, axis={vertical:?}: {:?}",
+                            &text.galley.job.text[start..section.byte_range.end.0]
+                        );
+                    }
+                }
+                assert!(app.finish_reading_drag(true));
+                assert_eq!(
+                    app.reading_settings,
+                    towavue_core::ReadingSettings::default()
+                );
+                time += 0.1;
+                let output = paint(&mut app, egui::vec2(1100.0, 400.0), density, time, vec![]);
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with("(\u{2195}) "))));
+                assert!(!path.exists(), "UI fixture cannot publish a file");
+            }
+        }
+    }
+}
+
+#[test]
 fn japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progress() {
     let Some(root) = crate::tests::isolated_test_root(
         "export_progress::tests::japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progress",

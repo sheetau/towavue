@@ -6597,6 +6597,7 @@ where
                             })
                             .flatten();
                             let mut export_link = None;
+                            let mut reading_adjustment = None;
                             let (text, color, tooltip) = if let Some(message) =
                                 self.visual_selection_status().filter(|_| {
                                     matches!(
@@ -6611,6 +6612,7 @@ where
                             } else if let Some(message) = selection_hint {
                                 (message.clone(), chrome::FOREGROUND, message)
                             } else if let Some(message) = self.status_notice() {
+                                reading_adjustment = self.reading_adjustment_hint();
                                 export_link =
                                     self.export_notice.as_ref().map(|(shown, _)| *shown).filter(
                                         |shown| self.export_notice_target(*shown).is_some(),
@@ -6687,7 +6689,9 @@ where
                                 )
                             };
                             let reading_hint = self.reading_drag.is_some();
-                            let label: egui::WidgetText = if reading_hint {
+                            let label: egui::WidgetText = if let Some(hint) = &reading_adjustment {
+                                hint.layout(12.0).into()
+                            } else if reading_hint {
                                 fonts::reading_hint(&text, 12.0, color).into()
                             } else {
                                 RichText::new(text).size(12.0).color(color).into()
@@ -6705,7 +6709,9 @@ where
                                 )
                                 .help_ui_above(|ui| {
                                     ui.set_max_width(ui.spacing().tooltip_width);
-                                    if reading_hint {
+                                    if let Some(hint) = &reading_adjustment {
+                                        ui.label(hint.layout(14.0));
+                                    } else if reading_hint {
                                         ui.label(fonts::reading_hint(
                                             &tooltip,
                                             14.0,
@@ -11126,6 +11132,18 @@ where
             "{}s",
             seconds.trim_end_matches('0').trim_end_matches('.')
         ))
+    }
+
+    fn reading_adjustment_hint(&self) -> Option<reading_input::ReadingHint> {
+        if self
+            .ui_context
+            .as_ref()
+            .and_then(seekbar::precision_status)
+            .is_some()
+        {
+            return None;
+        }
+        self.reading_drag.as_ref()?.adjustment_hint(self.language())
     }
 
     fn reading_status(&self) -> String {

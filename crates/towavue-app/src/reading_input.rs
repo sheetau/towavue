@@ -6,6 +6,33 @@ const AXIS_EMA: f64 = 0.35;
 const SWITCH_RATIO: f64 = 1.5;
 const SWITCH_DISTANCE: f64 = 8.0;
 
+pub struct ReadingHint {
+    parts: [String; 2],
+    vertical: Option<bool>,
+}
+
+impl ReadingHint {
+    pub fn append_to(&self, job: &mut egui::text::LayoutJob, size: f32) {
+        for (index, part) in self.parts.iter().enumerate() {
+            if index != 0 {
+                crate::fonts::append_reading_hint(job, " · ", size, crate::chrome::MUTED);
+            }
+            let color = if self.vertical == Some(index == 0) {
+                crate::chrome::FOREGROUND
+            } else {
+                crate::chrome::MUTED
+            };
+            crate::fonts::append_reading_hint(job, part, size, color);
+        }
+    }
+
+    pub fn layout(&self, size: f32) -> egui::text::LayoutJob {
+        let mut job = egui::text::LayoutJob::default();
+        self.append_to(&mut job, size);
+        job
+    }
+}
+
 pub struct ReadingDrag {
     pub before: ReadingSettings,
     pub was_enabled: bool,
@@ -22,6 +49,22 @@ pub struct ReadingDrag {
 }
 
 impl ReadingDrag {
+    pub fn adjustment_hint(
+        &self,
+        language: towavue_core::localization::Language,
+    ) -> Option<ReadingHint> {
+        self.was_enabled.then(|| ReadingHint {
+            parts: towavue_core::localization::formatted::reading_status_parts(
+                language,
+                "(\u{2195}) ",
+                self.settings.page_count,
+                "(\u{2194}) ",
+                self.settings.first_page_count,
+            ),
+            vertical: self.axis,
+        })
+    }
+
     pub fn new(settings: ReadingSettings, was_enabled: bool, pixels_per_point: f64) -> Self {
         Self {
             before: settings,

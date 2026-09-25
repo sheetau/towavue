@@ -1,6 +1,29 @@
 //! Typed templates keep interpolation checked for every supported language.
 use super::Language;
 
+pub fn reading_status_parts(
+    language: Language,
+    pages_hint: &str,
+    pages: usize,
+    first_hint: &str,
+    first: usize,
+) -> [String; 2] {
+    [
+        reading_pages(language, pages_hint, pages),
+        reading_first(language, first_hint, first),
+    ]
+}
+
+pub fn reading_status(
+    language: Language,
+    pages_hint: &str,
+    pages: usize,
+    first_hint: &str,
+    first: usize,
+) -> String {
+    reading_status_parts(language, pages_hint, pages, first_hint, first).join(" · ")
+}
+
 macro_rules! templates {
     ($($name:ident($($arg:ident: $ty:ty),*) => ($english:literal, $japanese:literal),)*) => {
         $(pub fn $name(language: Language, $($arg: $ty),*) -> String {
@@ -95,7 +118,8 @@ templates! {
     preview_unavailable(error: &str) => ("\nPreview unavailable: {error}", "\nプレビューを表示できません: {error}"),
     mute_named_tab(name: &str) => ("Mute tab: {name}", "タブをミュート: {name}"),
     unmute_named_tab(name: &str) => ("Unmute tab: {name}", "タブのミュートを解除: {name}"),
-    reading_status(pages_hint: &str, pages: usize, first_hint: &str, first: usize) => ("{pages_hint}Reading {pages} · {first_hint}first {first}", "{pages_hint}読書 {pages}ページ · {first_hint}先頭 {first}ページ"),
+    reading_pages(pages_hint: &str, pages: usize) => ("{pages_hint}Reading {pages}", "{pages_hint}読書 {pages}ページ"),
+    reading_first(first_hint: &str, first: usize) => ("{first_hint}first {first}", "{first_hint}先頭 {first}ページ"),
     calendar_month(name: &str, year: u16) => ("{name} {year}", "{year}年{name}"),
     calendar_day(name: &str, year: u16, day: u16) => ("{name} {day}, {year}", "{year}年{name}{day}日"),
     preparation_elapsed(phase: &str, time: &str) => ("{phase} · elapsed {time}", "{phase} · 経過時間 {time}"),

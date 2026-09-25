@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn gallery_media_durations_have_readable_backdrops_above_ready_thumbnails() {
+fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::duration_tests::gallery_media_durations_have_readable_backdrops_above_ready_thumbnails",
+        "filmstrip::duration_tests::gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted",
     ) else {
         return;
     };
@@ -12,8 +12,24 @@ fn gallery_media_durations_have_readable_backdrops_above_ready_thumbnails() {
         root.join("audio.flac"),
         root.join("image.png"),
     ];
+    let snapshot = FolderSnapshot {
+        folder_identity: towavue_core::ShellIdentity::new(vec![]),
+        folder_path: root.clone(),
+        items: paths
+            .iter()
+            .map(|path| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path: path.clone(),
+                kind: MediaKind::from_path(path).expect("fixture kind"),
+            })
+            .collect(),
+        sort_columns: vec![],
+        source: towavue_core::FolderSnapshotSource::LiveExplorerView,
+        generation: 1,
+        captured_at: std::time::SystemTime::now(),
+    };
     for density in [1.0, 1.25, 2.0] {
-        for width in [260.0, 660.0] {
+        for (width, gallery) in [(260.0, true), (660.0, true), (660.0, false)] {
             let context = crate::fonts::test_context();
             context.global_style_mut(crate::chrome::style);
             let mut strip =
@@ -59,12 +75,23 @@ fn gallery_media_durations_have_readable_backdrops_above_ready_thumbnails() {
                             ..Default::default()
                         },
                         |ui| {
-                            strip.show_recent(ui, &paths, 1, enabled, &mut actions);
+                            if gallery {
+                                strip.show_recent(ui, &paths, 1, enabled, &mut actions);
+                            } else {
+                                strip.show(
+                                    ui.ctx(),
+                                    ui.max_rect(),
+                                    Some(&snapshot),
+                                    Some(&paths[0]),
+                                    enabled,
+                                    &mut actions,
+                                );
+                            }
                         },
                     );
                     assert!(actions.is_empty());
                     assert_eq!(output.pixels_per_point, density);
-                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(210))).count();
+                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == crate::chrome::HOVER)).count();
                     assert_eq!(backgrounds, 2, "only video/audio durations receive badges");
                     for (index, seconds) in [65, 3601].into_iter().enumerate() {
                         let label = format_time(media_time(Duration::from_secs(seconds)));
@@ -83,14 +110,32 @@ fn gallery_media_durations_have_readable_backdrops_above_ready_thumbnails() {
                         else {
                             panic!("backdrop before duration text");
                         };
-                        assert_eq!(background.fill, Color32::from_black_alpha(210));
+                        assert_eq!(background.fill, crate::chrome::HOVER);
                         assert_eq!(
                             background.rect,
-                            Rect::from_min_size(text.pos, text.galley.size()).expand(1.0)
+                            Rect::from_min_size(text.pos, text.galley.size()).expand(2.0)
                         );
-                        assert_eq!(background.corner_radius, egui::CornerRadius::same(1));
+                        assert_eq!(background.corner_radius, egui::CornerRadius::same(2));
                         let image_index = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[index])).expect("ready thumbnail");
                         assert!(image_index < text_index - 1, "badge is above its thumbnail");
+                        let egui::Shape::Rect(card) = &output.shapes[image_index - 1].shape else {
+                            panic!("card background");
+                        };
+                        assert!((card.rect.right() - background.rect.right() - 4.0).abs() < 0.01);
+                        assert!((card.rect.bottom() - background.rect.bottom() - 4.0).abs() < 0.01);
+                        let egui::Shape::Mesh(mesh) = &output.shapes[image_index].shape else {
+                            panic!("thumbnail mesh");
+                        };
+                        let color = if index == 1 {
+                            Color32::from_gray(0x80)
+                        } else {
+                            Color32::WHITE
+                        };
+                        assert!(
+                            mesh.vertices.iter().any(|v| v.color == color),
+                            "audio tint is independent of video pixels"
+                        );
+
                         assert!(
                             output.shapes[text_index]
                                 .clip_rect

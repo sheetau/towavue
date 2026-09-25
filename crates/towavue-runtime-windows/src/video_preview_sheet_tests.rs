@@ -1,7 +1,7 @@
 use super::*;
 use std::time::UNIX_EPOCH;
 
-const FILMSTRIP_FILTER: &str = "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba";
+const FILMSTRIP_FILTER: &str = "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba,pad=240:160:(ow-iw)/2:(oh-ih)/2:color=black@0";
 
 const THUMB_FILTER: &str =
     "scale=240:240:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba";

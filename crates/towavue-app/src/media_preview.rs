@@ -117,13 +117,34 @@ pub fn image(
         sw: 0,
         se: 0,
     };
-    let left = egui::Rect::from_min_size(bounds.min, egui::Vec2::splat(f32::from(corners.nw)));
-    let right = egui::Rect::from_min_max(
-        bounds.right_top() - egui::vec2(f32::from(corners.ne), 0.0),
-        bounds.right_top() + egui::vec2(0.0, f32::from(corners.ne)),
-    );
-    if !rect.intersects(left) && !rect.intersects(right) {
-        ui.painter().image(texture, rect, uv, egui::Color32::WHITE);
+    image_rounded(ui, texture, rect, uv, bounds, corners, egui::Color32::WHITE);
+}
+
+pub fn image_rounded(
+    ui: &Ui,
+    texture: egui::TextureId,
+    rect: egui::Rect,
+    uv: egui::Rect,
+    bounds: egui::Rect,
+    corners: egui::CornerRadius,
+    tint: egui::Color32,
+) {
+    let touches_corner = [
+        (bounds.left_top(), egui::vec2(1.0, 1.0), corners.nw),
+        (bounds.right_top(), egui::vec2(-1.0, 1.0), corners.ne),
+        (bounds.left_bottom(), egui::vec2(1.0, -1.0), corners.sw),
+        (bounds.right_bottom(), egui::vec2(-1.0, -1.0), corners.se),
+    ]
+    .into_iter()
+    .any(|(point, direction, radius)| {
+        radius > 0
+            && rect.intersects(egui::Rect::from_two_pos(
+                point,
+                point + direction * f32::from(radius),
+            ))
+    });
+    if !touches_corner {
+        ui.painter().image(texture, rect, uv, tint);
         return;
     }
     // Clip the card's rounded silhouette to each fitted image/page, including
@@ -134,11 +155,10 @@ pub fn image(
             egui::remap(point.y, rect.y_range(), uv.y_range()),
         )
     };
-    let shape = egui::epaint::RectShape::filled(bounds, corners, egui::Color32::WHITE)
-        .with_texture(
-            texture,
-            egui::Rect::from_min_max(map_uv(bounds.min), map_uv(bounds.max)),
-        );
+    let shape = egui::epaint::RectShape::filled(bounds, corners, tint).with_texture(
+        texture,
+        egui::Rect::from_min_max(map_uv(bounds.min), map_uv(bounds.max)),
+    );
     for primitive in ui.ctx().tessellate(
         vec![egui::epaint::ClippedShape {
             clip_rect: ui.clip_rect(),
@@ -428,6 +448,78 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn rounded_thumbnails_clip_all_corners_preserve_fitted_uvs_and_tint_without_new_textures() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let texture = context.load_texture(
+                "rounded-thumbnail",
+                egui::ColorImage::filled([3, 2], egui::Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            );
+            let bounds =
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 100.0));
+            let uv = egui::Rect::from_min_max(egui::pos2(0.25, 0.1), egui::pos2(0.75, 0.9));
+            for size in [
+                bounds.size(),
+                egui::vec2(196.0, 100.0),
+                egui::vec2(100.0, 50.0),
+            ] {
+                let target = egui::Rect::from_center_size(bounds.center(), size);
+                let tint = egui::Color32::from_gray(0x80);
+                let output = context.run_ui(Default::default(), |ui| {
+                    image_rounded(
+                        ui,
+                        texture.id(),
+                        target,
+                        uv,
+                        bounds,
+                        egui::CornerRadius::same(3),
+                        tint,
+                    )
+                });
+                let mesh = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => Some(mesh),
+                        _ => None,
+                    })
+                    .expect("thumbnail mesh");
+                assert!(mesh.vertices.iter().any(|v| v.color == tint));
+                for vertex in &mesh.vertices {
+                    assert!(target.contains(vertex.pos) && uv.contains(vertex.uv));
+                    let expected = egui::pos2(
+                        egui::remap(vertex.pos.x, target.x_range(), uv.x_range()),
+                        egui::remap(vertex.pos.y, target.y_range(), uv.y_range()),
+                    );
+                    assert!((vertex.uv - expected).length() < 0.00001);
+                    if vertex.color.a() == 255 {
+                        for corner in [
+                            bounds.left_top(),
+                            bounds.right_top(),
+                            bounds.left_bottom(),
+                            bounds.right_bottom(),
+                        ] {
+                            assert!(
+                                vertex.pos.distance(corner) > 0.5,
+                                "all four corners are clipped"
+                            );
+                        }
+                    }
+                }
+                if size == bounds.size() {
+                    assert!(mesh.vertices.len() > 4);
+                }
+            }
+            assert!(
+                context.tex_manager().write().take_delta().set.len() <= 2,
+                "reuse the source texture"
+            );
         }
     }
 

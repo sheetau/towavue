@@ -360,7 +360,7 @@ impl PreviewCache {
         self.check_cancelled()?;
         let variant = match kind {
             MediaKind::Image => IMAGE_PREVIEW_VARIANT,
-            MediaKind::Video => "filmstrip-video-v4",
+            MediaKind::Video => "filmstrip-video-v5",
             MediaKind::Audio => "waveform-v3-240-160",
         };
         let key = cache_key(source, variant)?;
@@ -399,8 +399,8 @@ impl PreviewCache {
             self.video_frame(
                 source,
                 duration.unwrap_or_default().mul_f64(0.1),
-                "filmstrip-video-v4",
-                "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba",
+                "filmstrip-video-v5",
+                "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba,pad=240:160:(ow-iw)/2:(oh-ih)/2:color=black@0",
             )?
         } else {
             let key = cache_key(source, IMAGE_PREVIEW_VARIANT)?;
@@ -1683,6 +1683,88 @@ mod tests {
     }
 
     #[test]
+    fn filmstrip_video_padding_is_transparent_without_erasing_black_content_or_reusing_v4() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("towavue-preview-alpha-{unique}"));
+        let cache = PreviewCache::new(root.join("cache")).expect("cache");
+        for size in ["128x64", "64x128", "120x80"] {
+            let source = root.join(format!("black-{size}.mkv"));
+            assert!(
+                hidden_command(
+                    &tool_path("ffmpeg.exe").expect("FFmpeg"),
+                    [
+                        "-v",
+                        "error",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        &format!("color=black:s={size}:r=5:d=1"),
+                        "-c:v",
+                        "ffv1"
+                    ]
+                )
+                .arg(&source)
+                .status()
+                .expect("black fixture")
+                .success()
+            );
+            let old_key = cache_key(&source, "filmstrip-video-v4").expect("old key");
+            cache
+                .load_or_generate(old_key, || {
+                    Ok(ready_preview_png(image::RgbaImage::from_pixel(
+                        240,
+                        160,
+                        image::Rgba([0, 0, 0, 255]),
+                    ))?
+                    .0)
+                })
+                .expect("seed opaque legacy padding");
+            let card = cache.filmstrip(&source, MediaKind::Video).expect("card");
+            let reference = decode_png(
+                &frame_preview(
+                    &source,
+                    Duration::from_millis(100),
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba",
+                    None,
+                )
+                .expect("unpadded reference"),
+            )
+            .expect("reference pixels");
+            let left = (240 - reference.width) / 2;
+            let top = (160 - reference.height) / 2;
+            for y in 0..160 {
+                for x in 0..240 {
+                    let actual = &card.image.rgba[((y * 240 + x) * 4) as usize..][..4];
+                    if x >= left
+                        && x < left + reference.width
+                        && y >= top
+                        && y < top + reference.height
+                    {
+                        let expected = &reference.rgba
+                            [(((y - top) * reference.width + x - left) * 4) as usize..][..4];
+                        assert_eq!(actual, expected, "source black is unchanged at {x},{y}");
+                        assert_eq!(actual[3], 255);
+                    } else {
+                        assert_eq!(actual[3], 0, "only added padding is transparent at {x},{y}");
+                    }
+                }
+            }
+            assert_eq!(
+                PreviewCache::new(root.join("cache"))
+                    .expect("fresh cache")
+                    .filmstrip(&source, MediaKind::Video)
+                    .expect("persistent card")
+                    .image,
+                card.image
+            );
+        }
+        fs::remove_dir_all(root).expect("remove owned fixtures");
+    }
+
+    #[test]
     fn video_previews_use_the_last_selected_frame_beyond_its_end() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1751,7 +1833,7 @@ mod tests {
         assert_eq!((card.image.width, card.image.height), (240, 160));
         let mut args =
             preview_input_arguments(&source, Duration::from_millis(799), None).expect("input");
-        args.extend(["-vf".into(), "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,pad=240:160:(ow-iw)/2:(oh-ih)/2,format=rgba".into(), "-frames:v".into(), "1".into()]);
+        args.extend(["-vf".into(), "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1,format=rgba,pad=240:160:(ow-iw)/2:(oh-ih)/2:color=black@0".into(), "-frames:v".into(), "1".into()]);
         assert_eq!(
             card.image,
             decode_png(&run_ffmpeg(&args, None).expect("reference card")).expect("PNG")

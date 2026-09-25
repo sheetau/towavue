@@ -986,16 +986,10 @@ impl Filmstrip {
                                         texture.size_vec2() * scale,
                                     ),
                                     Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                                    Color32::WHITE,
+                                    thumbnail_tint(item.kind),
                                 );
                                 if let Some(duration) = duration {
-                                    draw_preview_duration(
-                                        ui,
-                                        rect,
-                                        *duration,
-                                        10.0,
-                                        Vec2::splat(3.0),
-                                    );
+                                    draw_preview_duration(ui, rect, *duration, 10.0);
                                 }
                             }
                             _ if deleted => {
@@ -1257,20 +1251,19 @@ impl Filmstrip {
                                 image_rect.center(),
                                 texture.size_vec2() * scale,
                             );
-                            ui.painter().image(
+                            crate::media_preview::image_rounded(
+                                ui,
                                 texture.id(),
                                 target,
                                 Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                                Color32::WHITE,
+                                image_rect,
+                                egui::CornerRadius::same(3),
+                                thumbnail_tint(
+                                    MediaKind::from_path(path).unwrap_or(MediaKind::Image),
+                                ),
                             );
                             if let Some(duration) = duration {
-                                draw_preview_duration(
-                                    ui,
-                                    image_rect,
-                                    *duration,
-                                    11.0,
-                                    egui::vec2(4.0, 3.0),
-                                );
+                                draw_preview_duration(ui, image_rect, *duration, 11.0);
                             }
                         }
                         Some(Err(_)) => {
@@ -1428,23 +1421,27 @@ fn filmstrip_label(path: &Path, deleted: bool) -> String {
     }
 }
 
-fn draw_preview_duration(
-    ui: &egui::Ui,
-    rect: Rect,
-    duration: Duration,
-    font_size: f32,
-    inset: Vec2,
-) {
+fn draw_preview_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32) {
     let galley = ui.painter().layout_no_wrap(
         format_time(media_time(duration)),
         FontId::proportional(font_size),
         Color32::WHITE,
     );
-    let label_rect =
-        Rect::from_min_size(rect.right_bottom() - galley.size() - inset, galley.size());
-    ui.painter()
-        .rect_filled(label_rect.expand(1.0), 1.0, Color32::from_black_alpha(210));
-    ui.painter().galley(label_rect.min, galley, Color32::WHITE);
+    let padding = Vec2::splat(2.0);
+    let inset = Vec2::splat(4.0);
+    let size = galley.size() + 2.0 * padding;
+    let background = Rect::from_min_size(rect.right_bottom() - inset - size, size);
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(background, 2.0, crate::chrome::HOVER);
+    painter.galley(background.min + padding, galley, Color32::WHITE);
+}
+
+fn thumbnail_tint(kind: MediaKind) -> Color32 {
+    if kind == MediaKind::Audio {
+        Color32::from_gray(0x80)
+    } else {
+        Color32::WHITE
+    }
 }
 
 fn recent_rows(

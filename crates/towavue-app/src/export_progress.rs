@@ -40,6 +40,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .filter(|remaining| !remaining.is_zero())
     }
 
+    pub(super) fn folder_order_notice(&self) -> Option<&'static str> {
+        (matches!(self.pending_folder, Some((_, FolderIntent::Refresh(_))))
+            && self.folder_notice_delay(Instant::now()).is_none())
+        .then(|| Text::LoadingOrderNotice.in_language(self.language()))
+    }
+
     pub(super) fn sync_taskbar_progress(&mut self) {
         let progress = taskbar_progress(self.active_export.as_ref());
         if let Some(taskbar) = &mut self.native_taskbar
@@ -74,19 +80,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 )
             })
             .or_else(|| {
-                self.pending_folder.as_ref().map(|(generation, intent)| {
-                    (
-                        LoadingOwner::Folder(*generation),
-                        match intent {
-                            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
-                                Text::OpeningFolder.in_language(language)
-                            }
-                            FolderIntent::Refresh(_) => {
-                                Text::LoadingFolderOrder.in_language(language)
-                            }
-                        },
-                    )
-                })
+                self.pending_folder
+                    .as_ref()
+                    .and_then(|(generation, intent)| match intent {
+                        FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => Some((
+                            LoadingOwner::Folder(*generation),
+                            Text::OpeningFolder.in_language(language),
+                        )),
+                        FolderIntent::Refresh(_) => None,
+                    })
             });
         let progress = &mut self.loading_progress;
         let Some((owner, label)) = pending.filter(|_| self.active_export.is_none()) else {

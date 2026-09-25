@@ -260,26 +260,46 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 }
 
-/// Choose a prefix so widening only adds fields; never elide or split a field.
-pub(super) fn fitting_text(ui: &egui::Ui, details: &[String], width: f32) -> String {
+/// Match the path separator to the spacing between complete status fields.
+pub(super) fn field_gap(ui: &egui::Ui) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            "   ".into(),
+            egui::FontId::proportional(12.0),
+            chrome::MUTED,
+        )
+        .size()
+        .x
+}
+
+/// Reuse the measured right-aligned galley so fitting and painting share identical metrics.
+pub(super) fn fitting_text(
+    ui: &egui::Ui,
+    details: &[String],
+    width: f32,
+) -> Option<std::sync::Arc<egui::Galley>> {
     let mut text = String::new();
+    let mut fitted = None;
     for detail in details {
         let candidate = if text.is_empty() {
             detail.clone()
         } else {
             format!("{text}   {detail}")
         };
-        let galley = ui.painter().layout_no_wrap(
+        let mut job = egui::text::LayoutJob::simple_singleline(
             candidate.clone(),
             egui::FontId::proportional(12.0),
             chrome::MUTED,
         );
+        job.halign = egui::Align::RIGHT;
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
         if galley.size().x > width {
             break;
         }
+        fitted = Some(galley);
         text = candidate;
     }
-    text
+    fitted
 }
 
 fn frame_rate_text(fps: f64) -> String {

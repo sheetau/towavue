@@ -421,9 +421,15 @@ mod tests {
     fn status_fields_in_language(language: crate::localization::Language) {
         use crate::localization::{Language, Text};
         use crate::*;
-        let Some(root) = tests::isolated_test_root(
-            "status_file_details::tests::status_fields_expand_by_priority_without_elision_or_static_animation_details",
-        ) else {
+        let test_name = match language {
+            Language::English => {
+                "status_file_details::tests::status_fields_expand_by_priority_without_elision_or_static_animation_details"
+            }
+            Language::Japanese => {
+                "status_file_details::tests::japanese_status_fields_keep_cached_values_and_fit_whole_fields_by_priority"
+            }
+        };
+        let Some(root) = tests::isolated_test_root(test_name) else {
             return;
         };
         for density in [1.0, 1.25, 2.0] {
@@ -754,5 +760,154 @@ mod tests {
             !help.contains("2026-09-14 00:00:00"),
             "help shares the held image snapshot"
         );
+    }
+    #[test]
+    fn status_path_uses_free_space_with_fixed_gaps_and_symmetric_text_margins() {
+        use crate::localization::Language;
+        use crate::*;
+        let Some(root) = crate::tests::isolated_test_root(
+            "status_file_details::tests::status_path_uses_free_space_with_fixed_gaps_and_symmetric_text_margins",
+        ) else {
+            return;
+        };
+        for language in [Language::English, Language::Japanese] {
+            for density in [1.0, 1.25, 2.0] {
+                let context = fonts::test_context();
+                context.global_style_mut(chrome::style);
+                if language == Language::Japanese {
+                    crate::localization::test_ui::configure_japanese(&context, 1.0);
+                }
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_context = Some(context.clone());
+                app.state = PlaybackState::Paused;
+                let path = root.join("folder").join(format!("{}.png", "m".repeat(48)));
+                app.path = Some(path.clone());
+                app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.refresh_status_file_details();
+                for detailed in [false, true] {
+                    assert!(app.status_file_details.finish(
+                        app.status_file_details.ticket,
+                        Some(FileDetails {
+                            bytes: 4096,
+                            modified_local: detailed.then(|| "2024-02-29 12:34:56".into()),
+                        })
+                    ));
+                    for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+                        app.media_kind = Some(kind);
+                        for width in [320.0, 640.0, 960.0, 1280.0] {
+                            let mut raw = egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 320.0),
+                                )),
+                                ..Default::default()
+                            };
+                            raw.viewports
+                                .get_mut(&egui::ViewportId::ROOT)
+                                .expect("viewport")
+                                .native_pixels_per_point = Some(density);
+                            let mut gap = 0.0;
+                            let output = context.run_ui(raw, |ui| {
+                                gap = status_info::field_gap(ui);
+                                app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                            });
+                            let path_text =
+                                output.shapes.iter().find_map(|shape| match &shape.shape {
+                                    egui::Shape::Text(text)
+                                        if text.galley.text().contains("folder\\") =>
+                                    {
+                                        Some(text)
+                                    }
+                                    _ => None,
+                                });
+                            let Some(path_text) = path_text else {
+                                assert!(
+                                    width < 340.0 && kind != MediaKind::Image,
+                                    "missing path: {language:?} {density} {width} {kind:?}"
+                                );
+                                // Compact playback reserves the available area for its
+                                // clock/volume controls before showing a path.
+                                continue;
+                            };
+                            let details = app.status_details().join("   ");
+                            let info = output.shapes.iter().find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text)
+                                    if !text.galley.text().is_empty()
+                                        && details.starts_with(text.galley.text()) =>
+                                {
+                                    Some(text)
+                                }
+                                _ => None,
+                            });
+                            if let Some(info) = info {
+                                assert!(!info.galley.elided);
+                                let right = info.pos.x + info.galley.rect.right();
+                                let expected = (width * density).round()
+                                    - (chrome::STATUS_BUTTON_GAP * 2.0 * density).round();
+                                assert!(
+                                    (right * density - expected).abs() < 1.1,
+                                    "right inset: {kind:?} {density} {width}: {right} expected physical {expected}"
+                                );
+                                let actual_gap = info.pos.x + info.galley.rect.left()
+                                    - (path_text.pos.x + path_text.galley.job.wrap.max_width);
+                                assert!(
+                                    (actual_gap - gap).abs() < 3.0 / density,
+                                    "fixed path gap: {language:?} {kind:?} {density} {width}: {actual_gap} vs {gap}; info {:?} {:?} at {:?}; path {:?} wrap {} at {:?}",
+                                    info.galley.text(),
+                                    info.galley.rect,
+                                    info.pos,
+                                    path_text.galley.rect,
+                                    path_text.galley.job.wrap.max_width,
+                                    path_text.pos
+                                );
+                            }
+                            if width == 1280.0
+                                || width == 960.0 && !detailed && kind == MediaKind::Image
+                            {
+                                assert!(
+                                    !path_text.galley.elided,
+                                    "available space must not be reserved for absent fields: {language:?} {density} {width} {kind:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+                app.path = None;
+                app.media_kind = None;
+                app.status_file_details.update(None, app.notify.clone());
+                app.set_status("X".repeat(300));
+                let mut raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 320.0),
+                    )),
+                    ..Default::default()
+                };
+                raw.viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                let output = context.run_ui(raw, |ui| {
+                    app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                });
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text().starts_with("XXXX") => {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("text-only status");
+                let inset = chrome::STATUS_BUTTON_GAP * 2.0;
+                assert!((text.pos.x - inset).abs() <= 1.0 / density);
+                assert!(
+                    (640.0 - text.pos.x - text.galley.job.wrap.max_width - inset).abs()
+                        <= 1.0 / density,
+                    "matching right text inset"
+                );
+            }
+        }
     }
 }

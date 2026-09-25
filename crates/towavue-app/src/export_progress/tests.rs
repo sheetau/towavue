@@ -290,7 +290,11 @@ fn folder_order_notice_waits_for_its_request_and_preserves_explicit_feedback() {
     app.refresh_folder_snapshot();
     assert_ne!(app.pending_folder.as_ref().expect("new request").0, first);
     app.folder_refresh_started = Instant::now() - LOADING_DELAY;
-    assert_eq!(app.status_notice().as_deref(), Some("Loading order…"));
+    assert!(
+        app.status_notice().is_none(),
+        "refresh does not replace the path"
+    );
+    assert_eq!(app.folder_order_notice(), Some("Loading order…"));
     app.refresh_folder_snapshot();
     assert!(
         app.status_notice().is_none(),
@@ -410,6 +414,13 @@ fn toolbar_loading_waits_for_sustained_foreground_work_and_clears_without_flashe
             fill(&paint(&mut app, size, density, 4.3, vec![])).is_none(),
             "a new request restarts the quiet delay"
         );
+        for time in [4.55, 4.8, 5.0] {
+            let output = paint(&mut app, size, density, time, vec![]);
+            assert!(
+                fill(&output).is_none() && loading_indicator(&output).is_none(),
+                "background order refresh has no activity bar"
+            );
+        }
         app.pending_folder = None;
         app.state = PlaybackState::Faulted;
         for time in [4.4, 4.6, 4.8, 5.0] {
@@ -1067,6 +1078,72 @@ fn loudness_progress_stays_indeterminate_through_encoding_verification_and_retri
                 progress.fraction(Duration::from_secs(second), analyzing),
                 None
             );
+        }
+    }
+}
+
+#[test]
+fn folder_order_refresh_appends_muted_path_text_without_a_progress_bar() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::folder_order_refresh_appends_muted_path_text_without_a_progress_bar",
+    ) else {
+        return;
+    };
+    for language in [Language::English, Language::Japanese] {
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            context(&mut app);
+            if language == Language::Japanese {
+                crate::localization::test_ui::configure_japanese(
+                    app.ui_context.as_ref().expect("context"),
+                    1.0,
+                );
+            }
+            let path = root.join("photo.png");
+            app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.path = Some(path.clone());
+            app.media_kind = Some(MediaKind::Image);
+            let size = egui::vec2(960.0, 540.0);
+            app.pending_folder = Some((7, FolderIntent::Refresh(path.clone())));
+            app.folder_refresh_started = Instant::now() - Duration::from_secs(1);
+            let notice = Text::LoadingOrderNotice.in_language(language);
+            for (frame, waiting) in [true, true, false, true].into_iter().enumerate() {
+                app.pending_folder =
+                    waiting.then(|| (7 + frame as u64, FolderIntent::Refresh(path.clone())));
+                let output = paint(&mut app, size, density, frame as f64, vec![]);
+                assert!(fill(&output).is_none() && loading_indicator(&output).is_none());
+                let label = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.pos.y >= size.y - chrome::STATUS_HEIGHT
+                                && text.galley.text().contains("photo.png") =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("retained path label");
+                assert_eq!(label.galley.text().contains(notice), waiting);
+                if waiting {
+                    assert!(label.galley.text().ends_with(notice));
+                }
+                assert!(
+                    label
+                        .galley
+                        .job
+                        .sections
+                        .iter()
+                        .all(|section| section.format.color == chrome::MUTED)
+                );
+            }
+            app.set_status("Explicit diagnostic".into());
+            let output = paint(&mut app, size, density, 4.0, vec![]);
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text()=="Explicit diagnostic" && text.galley.job.sections.iter().all(|section| section.format.color == chrome::FOREGROUND))));
+            assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text().contains(notice))));
         }
     }
 }

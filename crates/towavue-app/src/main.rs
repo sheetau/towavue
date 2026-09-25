@@ -6284,6 +6284,7 @@ where
         } else {
             chrome::STATUS_BUTTON_GAP as i8
         };
+        frame.inner_margin.right = (chrome::STATUS_BUTTON_GAP * 2.0) as i8;
         let density = root.ctx().pixels_per_point();
         // Anchor to the physical edge, not the sum of independently rounded child widths.
         let info_right = ((root.max_rect().right() * density).round()
@@ -6532,18 +6533,34 @@ where
                     let full_info = info.tooltip();
                     let details = info.fields;
                     let remaining = ui.available_width();
+                    let field_gap = status_info::field_gap(ui);
                     let info_width = if details.is_empty() {
                         0.0
                     } else {
                         remaining * 0.52
                     };
                     let info_width = if self.active_export.is_some() {
-                        info_width.min((remaining - 80.0 - ui.spacing().item_spacing.x).max(0.0))
+                        info_width.min((remaining - 80.0 - field_gap).max(0.0))
                     } else {
                         info_width
                     };
-                    let path_width =
-                        (remaining - info_width - ui.spacing().item_spacing.x).max(0.0);
+                    // The proportional limit chooses a whole-field prefix, not a
+                    // reserved empty column. Give all unused space back to the path.
+                    let info_galley = status_info::fitting_text(
+                        ui,
+                        &details,
+                        ((info_width * density).floor() - 1.0).max(0.0) / density,
+                    );
+                    let info_width = info_galley.as_ref().map_or(0.0, |galley| {
+                        (galley.size().x * density).ceil() / density + 1.0 / density
+                    });
+                    let gap = if info_galley.is_some() {
+                        field_gap
+                    } else {
+                        0.0
+                    };
+                    ui.spacing_mut().item_spacing.x = gap;
+                    let path_width = (remaining - info_width - gap).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(path_width, 24.0),
                         egui::Layout::left_to_right(egui::Align::Center),
@@ -6605,9 +6622,13 @@ where
                                     .and_then(Path::file_name)
                                     .map(|name| name.to_string_lossy())
                                     .unwrap_or_default();
-                                let suffix = self
+                                let mut suffix = self
                                     .visual_selection_status()
                                     .map_or_else(String::new, |value| format!(" · {value}"));
+                                if let Some(notice) = self.folder_order_notice() {
+                                    suffix.push_str(" · ");
+                                    suffix.push_str(notice);
+                                }
                                 (
                                     format!(
                                         "{}{parent}\\{}{suffix}",
@@ -6723,24 +6744,16 @@ where
                         egui::Layout::right_to_left(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(info_width);
-                            // Leave one physical pixel for text/layout rounding at the boundary.
-                            let info = status_info::fitting_text(
-                                ui,
-                                &details,
-                                (info_width - 1.0 / density).max(0.0),
-                            );
-                            if info.is_empty() {
+                            let Some(galley) = info_galley else {
                                 return ui.allocate_response(
                                     egui::vec2(info_width, 24.0),
                                     egui::Sense::hover(),
                                 );
-                            }
+                            };
                             ui.add(
-                                egui::Label::new(
-                                    RichText::new(&info).size(12.0).color(chrome::MUTED),
-                                )
-                                .extend()
-                                .show_tooltip_when_elided(false),
+                                egui::Label::new(galley)
+                                    .extend()
+                                    .show_tooltip_when_elided(false),
                             )
                         },
                     );
@@ -11204,16 +11217,13 @@ where
         }
         self.pending_folder
             .as_ref()
-            .filter(|_| self.folder_notice_delay(Instant::now()).is_none())
-            .map(|(_, intent)| match intent {
-                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
+            .and_then(|(_, intent)| match intent {
+                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => Some(
                     localization::Text::OpeningFolderNotice
                         .in_language(language)
-                        .into()
-                }
-                FolderIntent::Refresh(_) => localization::Text::LoadingOrderNotice
-                    .in_language(language)
-                    .into(),
+                        .into(),
+                ),
+                FolderIntent::Refresh(_) => None,
             })
     }
 

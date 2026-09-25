@@ -13,6 +13,7 @@ macro_rules! templates {
 }
 
 templates! {
+    preparation_elapsed(phase: &str, time: &str) => ("{phase} · elapsed {time}", "{phase} · 経過時間 {time}"),
     tab_label(title: &str) => ("{title} tab", "{title} タブ"),
     close_title(title: &str) => ("Close {title}", "{title}を閉じる"),
     close_tab(title: &str) => ("Close tab: {title}", "タブを閉じる: {title}"),

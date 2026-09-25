@@ -1,3 +1,4 @@
+use crate::localization::{self, Text};
 use crate::*;
 use towavue_core::release::ReleaseVersion;
 
@@ -106,10 +107,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(close) = &self.update_close else {
             return;
         };
+        let language = localization::language(ui.ctx());
         let message = if close.committing {
-            "Restarting to install the update…"
+            Text::UpdateRestarting.in_language(language)
         } else {
-            "Preparing update. Complete any save prompts in the other windows."
+            Text::UpdatePreparing.in_language(language)
         };
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
@@ -136,7 +138,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     if !close.committing {
                         let cancel = chrome::status_button(
                             ui,
-                            egui::vec2(54.0, chrome::STATUS_BUTTON_SIZE),
+                            chrome::status_text_button_size(ui, Text::Cancel.in_language(language)),
                             egui::Button::new("")
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
@@ -151,7 +153,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                             cancel.rect.center()
                                 - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
                             egui::Align2::CENTER_CENTER,
-                            "Cancel",
+                            Text::Cancel.in_language(language),
                             egui::FontId::proportional(12.0),
                             ui.style().interact(&cancel).text_color(),
                         );
@@ -159,10 +161,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 cancel.enabled(),
-                                "Cancel update",
+                                Text::UpdateCancel.in_language(language),
                             )
                         });
-                        if cancel.help_text("Cancel update · Escape").clicked() {
+                        if cancel
+                            .help_text(Text::UpdateCancelHelp.in_language(language))
+                            .clicked()
+                        {
                             actions.push(UiAction::Update(Action::Cancel));
                         }
                     }

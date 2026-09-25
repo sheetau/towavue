@@ -1,4 +1,6 @@
+use crate::localization::{self, Language, Text};
 use crate::*;
+use towavue_core::localization::formatted;
 
 const LOADING_DELAY: Duration = Duration::from_millis(200);
 
@@ -51,12 +53,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         &mut self,
         context: &egui::Context,
     ) -> Option<(&'static str, f64)> {
+        let language = localization::language(context);
         let label = if self.media_kind == Some(MediaKind::Image) && self.image_loading {
-            Some("Loading images")
+            Some(Text::LoadingImages.in_language(language))
         } else if matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
             && self.state == PlaybackState::Loading
         {
-            Some("Loading media")
+            Some(Text::LoadingMedia.in_language(language))
         } else {
             None
         };
@@ -76,9 +79,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         LoadingOwner::Folder(*generation),
                         match intent {
                             FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
-                                "Opening folder"
+                                Text::OpeningFolder.in_language(language)
                             }
-                            FolderIntent::Refresh(_) => "Loading folder order",
+                            FolderIntent::Refresh(_) => {
+                                Text::LoadingFolderOrder.in_language(language)
+                            }
                         },
                     )
                 })
@@ -332,11 +337,11 @@ impl ExportProgress {
     }
 }
 
-fn preparation_label(analyzing: bool) -> &'static str {
+fn preparation_label(language: Language, analyzing: bool) -> &'static str {
     if analyzing {
-        "Preparing audio analysis"
+        Text::PreparingAudioAnalysis.in_language(language)
     } else {
-        "Preparing output"
+        Text::PreparingOutput.in_language(language)
     }
 }
 
@@ -352,25 +357,24 @@ pub(super) fn show_status(
     enabled: bool,
     actions: &mut Vec<UiAction>,
 ) {
-    let operation = if export.job.is_save() {
-        "Saving"
-    } else {
-        "Exporting"
-    };
-    let heading = if export.continuation.is_some() {
-        format!("{operation} before continuing")
-    } else {
-        operation.into()
-    };
-    let mut parts = vec![heading, status(export, Instant::now())];
+    let language = localization::language(context);
+    let heading = match (export.job.is_save(), export.continuation.is_some()) {
+        (true, true) => Text::SavingBeforeContinuing,
+        (false, true) => Text::ExportingBeforeContinuing,
+        (true, false) => Text::Saving,
+        (false, false) => Text::Exporting,
+    }
+    .in_language(language);
+    let mut parts = vec![heading.into(), status(language, export, Instant::now())];
     if export.options.audio != AudioExportOptions::default() {
-        parts.push(audio_export::summary(
-            export.options.audio,
-            crate::localization::language(context),
-        ));
+        parts.push(audio_export::summary(export.options.audio, language));
     }
     if !export.options.metadata.is_empty() {
-        parts.push("Metadata changes: verified before replacing the target".into());
+        parts.push(
+            Text::MetadataVerifiedBeforeReplacing
+                .in_language(language)
+                .into(),
+        );
     }
     if let Some(gesture) = gesture {
         parts.insert(0, gesture);
@@ -405,15 +409,15 @@ pub(super) fn show_status(
             ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
             ui.horizontal_centered(|ui| {
                 let label = if export.job.is_save() {
-                    "Cancel save"
+                    Text::CancelSave.in_language(language)
                 } else {
-                    "Cancel export"
+                    Text::CancelExport.in_language(language)
                 };
                 let cancel = ui
                     .add_enabled_ui(!export.cancelling && export.job.cancellable(), |ui| {
                         chrome::status_button(
                             ui,
-                            egui::vec2(54.0, chrome::STATUS_BUTTON_SIZE),
+                            chrome::status_text_button_size(ui, Text::Cancel.in_language(language)),
                             egui::Button::new("")
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
@@ -429,7 +433,7 @@ pub(super) fn show_status(
                 ui.painter().text(
                     cancel.rect.center() - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
                     egui::Align2::CENTER_CENTER,
-                    "Cancel",
+                    Text::Cancel.in_language(language),
                     egui::FontId::proportional(12.0),
                     ui.style().interact(&cancel).text_color(),
                 );
@@ -439,9 +443,9 @@ pub(super) fn show_status(
                 let cancel = cancel
                     .help_text(label)
                     .disabled_help_text(if export.cancelling {
-                        "Cancellation requested"
+                        Text::CancellationRequested.in_language(language)
                     } else {
-                        "Publishing the saved file"
+                        Text::PublishingFile.in_language(language)
                     });
                 if cancel.clicked() {
                     actions.push(UiAction::CancelExport);
@@ -458,31 +462,31 @@ pub(super) fn show_status(
         });
 }
 
-pub(super) fn status(export: &ActiveExport, now: Instant) -> String {
+pub(super) fn status(language: Language, export: &ActiveExport, now: Instant) -> String {
     if !export.job.cancellable() {
-        return "Publishing the saved file…".into();
+        return Text::PublishingFileStatus.in_language(language).into();
     }
     if export.cancelling {
         if export.job.is_save() {
-            "Cancelling save…".to_owned()
+            Text::CancellingSave.in_language(language).to_owned()
         } else {
-            "Cancelling export…".to_owned()
+            Text::CancellingExport.in_language(language).to_owned()
         }
     } else if export.encoded.is_zero() {
-        format!(
-            "{} · elapsed {}",
-            preparation_label(export.analyzing_audio),
-            format_time(media_time(
-                now.saturating_duration_since(export.progress.started)
-            ))
+        formatted::preparation_elapsed(
+            language,
+            preparation_label(language, export.analyzing_audio),
+            &format_time(media_time(
+                now.saturating_duration_since(export.progress.started),
+            )),
         )
     } else {
         format!(
             "{} {}",
             if export.analyzing_audio {
-                "Analyzing audio"
+                Text::AnalyzingAudio.in_language(language)
             } else {
-                "Encoded"
+                Text::Encoded.in_language(language)
             },
             format_time(media_time(export.encoded))
         )
@@ -495,6 +499,7 @@ pub(super) fn draw(
     export: Option<&mut ActiveExport>,
     loading: Option<(&'static str, f64)>,
 ) {
+    let language = localization::language(ui.ctx());
     let density = ui.ctx().pixels_per_point();
     let bottom = (panel.bottom() * density).round() / density;
     let track = egui::Rect::from_min_max(
@@ -515,7 +520,7 @@ pub(super) fn draw(
                 ui,
                 track,
                 "toolbar-media-loading",
-                "Media loading",
+                Text::MediaLoadingProgress.in_language(language),
                 label,
                 None,
             );
@@ -543,21 +548,21 @@ pub(super) fn draw(
         ui,
         track,
         "toolbar-export-progress",
-        "Export progress",
+        Text::ExportProgress.in_language(language),
         if export.cancelling {
-            "Cancelling export"
+            Text::ExportCancellingPhase.in_language(language)
         } else if export.encoded.is_zero() {
-            preparation_label(export.analyzing_audio)
+            preparation_label(language, export.analyzing_audio)
         } else if progress.verifies_loudness {
             if export.analyzing_audio {
-                "Analyzing and verifying audio"
+                Text::AnalyzingVerifyingAudio.in_language(language)
             } else {
-                "Encoding audio to meet loudness targets"
+                Text::EncodingLoudnessTargets.in_language(language)
             }
         } else if export.analyzing_audio {
-            "Analyzing audio (estimated progress)"
+            Text::AnalyzingAudioEstimated.in_language(language)
         } else {
-            "Encoding (estimated progress)"
+            Text::EncodingEstimated.in_language(language)
         },
         fraction,
     );

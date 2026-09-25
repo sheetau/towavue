@@ -348,6 +348,15 @@ fn update_approved_peer_is_invalidated_by_real_source_save_and_active_exports_de
 
 #[test]
 fn update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities() {
+    update_status_in_language(crate::localization::Language::English);
+}
+
+#[test]
+fn japanese_update_status_keeps_cancel_visible_and_obeys_modal_and_commit_guards() {
+    update_status_in_language(crate::localization::Language::Japanese);
+}
+
+fn update_status_in_language(language: crate::localization::Language) {
     let Some(_root) = crate::tests::isolated_test_root(
         "window_host::updates::tests::update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities",
     ) else {
@@ -363,6 +372,9 @@ fn update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities() 
             (true, false, true),
         ] {
             let context = crate::fonts::test_context();
+            if language == crate::localization::Language::Japanese {
+                crate::localization::test_ui::configure_japanese(&context, density);
+            }
             context.global_style_mut(chrome::style);
             context.set_pixels_per_point(density);
             context.enable_accesskit();
@@ -418,16 +430,30 @@ fn update_prepare_status_has_no_modal_and_keeps_escape_at_supported_densities() 
                         .platform_output
                         .accesskit_update
                         .expect("accessibility");
-                    let cancel = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| node.label() == Some("Cancel update"));
+                    let cancel = tree.nodes.iter().find(|(_, node)| {
+                        node.label()
+                            == Some(crate::localization::Text::UpdateCancel.in_language(language))
+                    });
                     if committing {
                         assert!(cancel.is_none());
                     } else {
                         let (_, node) = cancel.expect("status cancel");
                         assert_eq!(node.is_disabled(), native);
                         let bounds = node.bounds().expect("bounds");
+                        let label = crate::localization::Text::Cancel.in_language(language);
+                        let text = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text) if text.galley.text() == label => {
+                                    Some(text)
+                                }
+                                _ => None,
+                            })
+                            .expect("painted cancel");
+                        assert!(!text.galley.elided);
+                        assert!(f64::from(text.pos.x) >= bounds.x0);
+                        assert!(f64::from(text.pos.x + text.galley.size().x) <= bounds.x1);
                         assert!(bounds.y0 >= f64::from(360.0 - chrome::STATUS_HEIGHT));
                         assert!(bounds.y1 <= 360.0);
                         cancel_position = Some(egui::pos2(

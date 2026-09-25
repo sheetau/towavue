@@ -1,6 +1,130 @@
 use super::*;
 use towavue_core::{TimeRange, TimelineEdit};
 
+#[test]
+fn japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progress() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "export_progress::tests::japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progress",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for width in [240.0, 640.0] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = crate::localization::test_ui::japanese_context(density);
+            app.ui_context = Some(context.clone());
+            let path = root.join("日本語{original}.mp4");
+            let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+            app.active_export = Some(active(
+                &path,
+                tab,
+                MediaKind::Video,
+                Some(Duration::from_secs(20)),
+                false,
+            ));
+            let started = app.active_export.as_ref().expect("job").progress.started;
+            assert_eq!(
+                status(
+                    Language::Japanese,
+                    app.active_export.as_ref().expect("job"),
+                    started + Duration::from_secs(65)
+                ),
+                "出力を準備中 · 経過時間 01:05"
+            );
+            let size = egui::vec2(width, 400.0);
+            for (analyzing, verifies, phase, fraction) in [
+                (false, false, "エンコード中（進捗は推定値）", Some(20.0)),
+                (true, false, "音声を解析中（進捗は推定値）", Some(20.0)),
+                (
+                    false,
+                    true,
+                    "目標ラウドネスに合わせて音声をエンコード中",
+                    None,
+                ),
+                (true, true, "音声を解析・検証中", None),
+            ] {
+                let export = app.active_export.as_mut().expect("job");
+                export.encoded = Duration::from_secs(4);
+                export.analyzing_audio = analyzing;
+                export.progress.verifies_loudness = verifies;
+                let output = paint(&mut app, size, density, 1.0, vec![]);
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let node = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("書き出しの進捗"))
+                    .expect("progress");
+                assert_eq!(
+                    node.0,
+                    egui::Id::new("toolbar-export-progress").accesskit_id()
+                );
+                assert_eq!(node.1.value(), Some(phase));
+                match (node.1.numeric_value(), fraction) {
+                    (Some(actual), Some(expected)) => assert!((actual - expected).abs() < 0.001),
+                    (actual, expected) => assert_eq!(actual, expected),
+                }
+            }
+            for _ in 0..3 {
+                paint(&mut app, size, density, 2.0, vec![]);
+            }
+            let output = paint(&mut app, size, density, 2.1, vec![]);
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree");
+            let cancel = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("書き出しをキャンセル"))
+                .expect("cancel");
+            assert!(!cancel.1.is_disabled());
+            let bounds = cancel.1.bounds().expect("bounds");
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "キャンセル" => {
+                        Some(text)
+                    }
+                    _ => None,
+                })
+                .expect("painted cancel");
+            assert!(!label.galley.elided);
+            assert!(f64::from(label.pos.x) >= bounds.x0);
+            assert!(f64::from(label.pos.x + label.galley.size().x) <= bounds.x1);
+            assert!(bounds.x1 <= f64::from(width));
+            let cancel =
+                crate::localization::test_ui::action(&output, "書き出しをキャンセル", None);
+            paint(&mut app, size, density, 2.2, vec![cancel]);
+            let export = app.active_export.as_ref().expect("job");
+            assert!(export.cancelling);
+            assert_eq!(export.encoded, Duration::from_secs(4));
+            assert_eq!(export.request.target, path);
+            assert_eq!(
+                status(Language::Japanese, export, started),
+                "書き出しをキャンセル中…"
+            );
+            let output = paint(&mut app, size, density, 2.3, vec![]);
+            assert!(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("書き出しをキャンセル")
+                        && node.is_disabled())
+            );
+            assert!(!path.exists(), "UI-only job must not publish a file");
+        }
+    }
+}
+
 fn request(path: &Path, kind: MediaKind) -> ExportRequest {
     ExportRequest {
         source: path.into(),
@@ -327,8 +451,11 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
             let export = app.active_export.as_ref().expect("job");
             let started = export.progress.started;
             assert_eq!(
-                status(export, started + Duration::from_secs(65)),
-                format!("{} · elapsed 01:05", preparation_label(normalized))
+                status(Language::English, export, started + Duration::from_secs(65)),
+                format!(
+                    "{} · elapsed 01:05",
+                    preparation_label(Language::English, normalized)
+                )
             );
             assert_eq!(
                 taskbar_progress(Some(export)),
@@ -339,7 +466,10 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
             for time in [0.0, 0.1, 0.4] {
                 let output = paint(&mut app, size, density, time, vec![]);
                 let node = indicator(&output).expect("preparation indicator");
-                assert_eq!(node.value(), Some(preparation_label(normalized)));
+                assert_eq!(
+                    node.value(),
+                    Some(preparation_label(Language::English, normalized))
+                );
                 assert!(node.numeric_value().is_none());
                 positions.push(fill(&output).expect("moving segment").left());
             }
@@ -352,13 +482,18 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
                 .expect("fraction");
             assert!((fraction - if normalized { 55.0 } else { 10.0 }).abs() < 0.001);
             assert_eq!(
-                status(app.active_export.as_ref().expect("job"), started),
+                status(
+                    Language::English,
+                    app.active_export.as_ref().expect("job"),
+                    started
+                ),
                 "Encoded 00:02"
             );
             // A fallback encoder restarts its own output clock, not the job clock.
             app.handle_export_event(ExportEvent::Progress(Duration::ZERO));
             assert_eq!(
                 status(
+                    Language::English,
                     app.active_export.as_ref().expect("job"),
                     started + Duration::from_secs(70)
                 ),
@@ -366,7 +501,11 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
             );
             app.handle_ui_action(UiAction::CancelExport);
             assert_eq!(
-                status(app.active_export.as_ref().expect("job"), started),
+                status(
+                    Language::English,
+                    app.active_export.as_ref().expect("job"),
+                    started
+                ),
                 "Cancelling export…"
             );
             app.handle_export_event(ExportEvent::Finished(Err(ExportError::Cancelled)));

@@ -299,6 +299,13 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
 }
 
 /// Keep layout spacing fixed while moving only the status button by one pixel.
+pub(super) fn status_text_button_size(ui: &Ui, label: &str) -> egui::Vec2 {
+    let text =
+        ui.painter()
+            .layout_no_wrap(label.into(), egui::FontId::proportional(12.0), FOREGROUND);
+    egui::vec2((text.size().x + 12.0).max(54.0), STATUS_BUTTON_SIZE)
+}
+
 pub fn status_button(ui: &mut Ui, size: egui::Vec2, button: egui::Button<'_>) -> egui::Response {
     let (_, rect) = ui.allocate_space(size);
     ui.put(

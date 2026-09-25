@@ -1,3 +1,4 @@
+use crate::localization::{self, Text};
 use egui::{Color32, Context, Rect, pos2, vec2};
 
 pub(super) fn draw(context: &Context, blocked: bool) {
@@ -22,11 +23,13 @@ pub(super) fn draw(context: &Context, blocked: bool) {
     // Paint only: the centered guide never narrows the native whole-window drop target.
     dashed_border(&painter, card, context.pixels_per_point());
     let painter = painter.with_clip_rect(card.shrink(8.0));
+    let language = localization::language(context);
     let label = if blocked {
-        "Close the dialog before dropping files"
+        Text::DropGuideBlocked
     } else {
-        "Open with towavue"
-    };
+        Text::DropGuideOpen
+    }
+    .in_language(language);
     let text = painter.layout(
         label.into(),
         egui::FontId::proportional(16.0),
@@ -62,11 +65,14 @@ pub(super) fn draw(context: &Context, blocked: bool) {
             card.right().into(),
             card.bottom().into(),
         ));
-        node.set_description(if blocked {
-            "Dropping is unavailable while a dialog is open"
-        } else {
-            "Drop media files or a folder anywhere in the window; the outline is a visual guide"
-        });
+        node.set_description(
+            if blocked {
+                Text::DropGuideBlockedHelp
+            } else {
+                Text::DropGuideHelp
+            }
+            .in_language(language),
+        );
     });
 }
 
@@ -104,148 +110,176 @@ mod tests {
 
     #[test]
     fn drop_guide_matches_reference_geometry_and_retires_after_hover() {
-        for density in [1.0, 1.25, 2.0] {
-            for size in [vec2(1228.0, 708.0), vec2(240.0, 140.0), vec2(80.0, 64.0)] {
-                for blocked in [false, true] {
-                    let context = crate::fonts::test_context();
-                    context.set_pixels_per_point(density);
-                    context.enable_accesskit();
-                    let viewport = Rect::from_min_size(egui::Pos2::ZERO, size);
-                    let frame = |hovered| {
-                        context.run_ui(
-                            egui::RawInput {
-                                screen_rect: Some(viewport),
-                                hovered_files: if hovered {
-                                    vec![egui::HoveredFile::default()]
-                                } else {
-                                    vec![]
+        for language in [
+            localization::Language::English,
+            localization::Language::Japanese,
+        ] {
+            for density in [1.0, 1.25, 2.0] {
+                for size in [vec2(1228.0, 708.0), vec2(240.0, 140.0), vec2(80.0, 64.0)] {
+                    for blocked in [false, true] {
+                        let context = crate::fonts::test_context();
+                        if language == localization::Language::Japanese {
+                            localization::test_ui::configure_japanese(&context, density);
+                        }
+                        localization::set_language(&context, language);
+                        context.set_pixels_per_point(density);
+                        context.enable_accesskit();
+                        let viewport = Rect::from_min_size(egui::Pos2::ZERO, size);
+                        let frame = |hovered| {
+                            context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(viewport),
+                                    hovered_files: if hovered {
+                                        vec![egui::HoveredFile::default()]
+                                    } else {
+                                        vec![]
+                                    },
+                                    events: vec![egui::Event::PointerMoved(pos2(2.0, 2.0))],
+                                    ..Default::default()
                                 },
-                                events: vec![egui::Event::PointerMoved(pos2(2.0, 2.0))],
-                                ..Default::default()
-                            },
-                            |_| draw(&context, blocked),
-                        )
-                    };
-                    frame(true);
-                    let output = frame(true);
-                    let dim = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Rect(rect)
-                                if rect.fill == Color32::from_black_alpha(204) =>
-                            {
-                                Some(rect.rect)
-                            }
-                            _ => None,
-                        })
-                        .expect("full-client dimming");
-                    assert_eq!(dim, viewport);
-                    let card = Rect::from_center_size(
-                        viewport.center(),
-                        (size - vec2(32.0, 32.0)).min(vec2(344.0, 200.0)),
-                    );
-                    let dashes: Vec<_> = output
-                        .shapes
-                        .iter()
-                        .filter_map(|shape| match &shape.shape {
-                            egui::Shape::LineSegment { points, stroke }
-                                if (stroke.width * density - 1.0).abs() < 0.0001 =>
-                            {
-                                Some((points, stroke))
-                            }
-                            _ => None,
-                        })
-                        .collect();
-                    assert!(
-                        !dashes.is_empty(),
-                        "guide uses two-pixel dashes, not one-pixel dots"
-                    );
-                    let mut outline = Rect::NOTHING;
-                    for (points, stroke) in &dashes {
-                        assert_eq!(stroke.color, Color32::WHITE);
-                        assert!(points[0].distance(points[1]) * density <= 2.001);
-                        outline.extend_with(points[0]);
-                        outline.extend_with(points[1]);
-                    }
-                    let outline = outline.expand(0.5 / density);
-                    assert!((outline.min - card.min).length() < 2.1 / density);
-                    assert!((outline.max - card.max).length() < 2.1 / density);
-                    for axis in [0, 1] {
-                        for edge in [
-                            card.min[axis] + 0.5 / density,
-                            card.max[axis] - 0.5 / density,
-                        ] {
-                            let straight: Vec<_> = dashes
-                                .iter()
-                                .filter_map(|(points, _)| {
-                                    let midpoint = points[0].lerp(points[1], 0.5);
-                                    ((points[0][axis] - edge).abs() < 0.001
-                                        && (points[1][axis] - edge).abs() < 0.001
-                                        && midpoint[1 - axis]
-                                            > card.min[1 - axis] + 4.0 + 3.0 / density
-                                        && midpoint[1 - axis]
-                                            < card.max[1 - axis] - 4.0 - 3.0 / density)
-                                        .then_some(*points)
-                                })
-                                .collect();
-                            assert!(straight.len() >= 2, "exercise every straight edge");
-                            for points in &straight {
-                                assert!(
-                                    (points[0].distance(points[1]) * density - 2.0).abs() < 0.001,
-                                    "two physical pixels per dash at density {density}"
-                                );
-                            }
-                            for pair in straight.windows(2) {
-                                assert!(
-                                    (pair[0][1].distance(pair[1][0]) * density - 2.0).abs() < 0.001,
-                                    "two physical pixels per gap at density {density}"
-                                );
+                                |_| draw(&context, blocked),
+                            )
+                        };
+                        frame(true);
+                        let output = frame(true);
+                        let dim = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Rect(rect)
+                                    if rect.fill == Color32::from_black_alpha(204) =>
+                                {
+                                    Some(rect.rect)
+                                }
+                                _ => None,
+                            })
+                            .expect("full-client dimming");
+                        assert_eq!(dim, viewport);
+                        let card = Rect::from_center_size(
+                            viewport.center(),
+                            (size - vec2(32.0, 32.0)).min(vec2(344.0, 200.0)),
+                        );
+                        let dashes: Vec<_> = output
+                            .shapes
+                            .iter()
+                            .filter_map(|shape| match &shape.shape {
+                                egui::Shape::LineSegment { points, stroke }
+                                    if (stroke.width * density - 1.0).abs() < 0.0001 =>
+                                {
+                                    Some((points, stroke))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        assert!(
+                            !dashes.is_empty(),
+                            "guide uses two-pixel dashes, not one-pixel dots"
+                        );
+                        let mut outline = Rect::NOTHING;
+                        for (points, stroke) in &dashes {
+                            assert_eq!(stroke.color, Color32::WHITE);
+                            assert!(points[0].distance(points[1]) * density <= 2.001);
+                            outline.extend_with(points[0]);
+                            outline.extend_with(points[1]);
+                        }
+                        let outline = outline.expand(0.5 / density);
+                        assert!((outline.min - card.min).length() < 2.1 / density);
+                        assert!((outline.max - card.max).length() < 2.1 / density);
+                        for axis in [0, 1] {
+                            for edge in [
+                                card.min[axis] + 0.5 / density,
+                                card.max[axis] - 0.5 / density,
+                            ] {
+                                let straight: Vec<_> = dashes
+                                    .iter()
+                                    .filter_map(|(points, _)| {
+                                        let midpoint = points[0].lerp(points[1], 0.5);
+                                        ((points[0][axis] - edge).abs() < 0.001
+                                            && (points[1][axis] - edge).abs() < 0.001
+                                            && midpoint[1 - axis]
+                                                > card.min[1 - axis] + 4.0 + 3.0 / density
+                                            && midpoint[1 - axis]
+                                                < card.max[1 - axis] - 4.0 - 3.0 / density)
+                                            .then_some(*points)
+                                    })
+                                    .collect();
+                                assert!(straight.len() >= 2, "exercise every straight edge");
+                                for points in &straight {
+                                    assert!(
+                                        (points[0].distance(points[1]) * density - 2.0).abs()
+                                            < 0.001,
+                                        "two physical pixels per dash at density {density}"
+                                    );
+                                }
+                                for pair in straight.windows(2) {
+                                    assert!(
+                                        (pair[0][1].distance(pair[1][0]) * density - 2.0).abs()
+                                            < 0.001,
+                                        "two physical pixels per gap at density {density}"
+                                    );
+                                }
                             }
                         }
-                    }
-                    let label = if blocked {
-                        "Close the dialog before dropping files"
-                    } else {
-                        "Open with towavue"
-                    };
-                    let text = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text) if text.galley.text() == label => {
-                                Some((shape.clip_rect, text))
+                        let label = match (language, blocked) {
+                            (localization::Language::English, true) => {
+                                "Close the dialog before dropping files"
                             }
-                            _ => None,
-                        })
-                        .expect("drop instruction");
-                    assert!(card.contains_rect(text.0));
-                    if size.x >= 344.0 && !blocked {
+                            (localization::Language::English, false) => "Open with towavue",
+                            (localization::Language::Japanese, true) => {
+                                "ファイルをドロップする前にダイアログを閉じてください"
+                            }
+                            (localization::Language::Japanese, false) => "towavueで開く",
+                        };
+                        let text = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text) if text.galley.text() == label => {
+                                    Some((shape.clip_rect, text))
+                                }
+                                _ => None,
+                            })
+                            .expect("drop instruction");
+                        assert!(card.contains_rect(text.0));
+                        if size.x >= 344.0 && !blocked {
+                            assert!(
+                                (text.1.pos.x + text.1.galley.size().x * 0.5 - card.center().x)
+                                    .abs()
+                                    < 0.001
+                            );
+                            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if (stroke.width - 3.3).abs() < 0.001)), "reuse the 48-point app logo");
+                        }
                         assert!(
-                            (text.1.pos.x + text.1.galley.size().x * 0.5 - card.center().x).abs()
-                                < 0.001
+                            context.dragged_id().is_none(),
+                            "guide paints without owning input"
                         );
-                        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if (stroke.width - 3.3).abs() < 0.001)), "reuse the 48-point app logo");
+                        let notice = output
+                            .platform_output
+                            .accesskit_update
+                            .as_ref()
+                            .expect("accessibility")
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| node.label() == Some(label))
+                            .expect("drop notice");
+                        assert_eq!(notice.1.role(), egui::accesskit::Role::Label);
+                        assert_eq!(output.pixels_per_point, density);
+                        if language == localization::Language::Japanese {
+                            assert_eq!(
+                                notice.1.description(),
+                                Some(if blocked {
+                                    "ダイアログを開いている間はドロップできません"
+                                } else {
+                                    "ウィンドウ内のどこにでもメディアファイルやフォルダーをドロップできます。枠は表示上の目印です"
+                                })
+                            );
+                        }
+                        let cleared = frame(false);
+                        assert!(
+                            cleared.shapes.is_empty(),
+                            "leave/drop removes the entire guide"
+                        );
                     }
-                    assert!(
-                        context.dragged_id().is_none(),
-                        "guide paints without owning input"
-                    );
-                    let notice = output
-                        .platform_output
-                        .accesskit_update
-                        .as_ref()
-                        .expect("accessibility")
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| node.label() == Some(label))
-                        .expect("drop notice");
-                    assert_eq!(notice.1.role(), egui::accesskit::Role::Label);
-                    let cleared = frame(false);
-                    assert!(
-                        cleared.shapes.is_empty(),
-                        "leave/drop removes the entire guide"
-                    );
                 }
             }
         }

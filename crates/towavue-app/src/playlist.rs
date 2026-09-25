@@ -99,6 +99,7 @@ impl Playlist {
         ),
     ) -> Option<PathBuf> {
         let mut chosen = None;
+        let language = crate::localization::language(ui.ctx());
         self.scroll_rect = None;
         self.visible.clear();
         let key = snapshot.map(|snapshot| {
@@ -301,14 +302,15 @@ impl Playlist {
                             node.set_description(format!(
                                 "{}{}{}",
                                 item.path.display(),
-                                if selected { " (current track)" } else { "" },
+                                if selected {
+                                    crate::localization::Text::CurrentTrackSuffix.in_language(language)
+                                } else { "" },
                                 self.durations
                                     .get(&item.path)
                                     .copied()
                                     .flatten()
-                                    .map(|duration| format!(
-                                        " · Duration {}",
-                                        crate::format_time(crate::media_time(duration))
+                                    .map(|duration| towavue_core::localization::formatted::track_duration_suffix(
+                                        language, &crate::format_time(crate::media_time(duration))
                                     ))
                                     .unwrap_or_default()
                             ));
@@ -491,87 +493,121 @@ mod tests {
 
     #[test]
     fn durations_are_visible_only_refresh_safe_and_right_aligned_without_current_fill() {
-        for density in [1.0, 1.25, 2.0] {
-            let context = crate::fonts::test_context();
-            context.global_style_mut(crate::chrome::style);
-            context.set_pixels_per_point(density);
-            let mut playlist = Playlist::default();
-            let mut snapshot = snapshot(10_000);
-            snapshot.items[0].path = PathBuf::from(format!("{}.wav", "long-".repeat(30)));
-            let mut time = 0.0;
-            let mut frame = |playlist: &mut Playlist,
-                             snapshot: &FolderSnapshot,
-                             pointer: Option<Pos2>| {
-                time += 0.1;
-                context.run_ui(
-                    egui::RawInput {
-                        time: Some(time),
-                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(320.0, 240.0))),
-                        events: pointer.map(Event::PointerMoved).into_iter().collect(),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        playlist.show(ui, Some(snapshot), Some(&snapshot.items[0].path), true);
-                    },
-                )
-            };
-            frame(&mut playlist, &snapshot, None);
-            frame(&mut playlist, &snapshot, None);
-            let first = playlist.duration_request().expect("first visible duration");
-            assert_eq!(first.path, snapshot.items[0].path);
-            playlist.finish_duration(first.clone(), Some(Duration::from_secs(161)));
-            let second = playlist.duration_request().expect("next visible duration");
-            assert_eq!(second.path, snapshot.items[1].path);
-            playlist.finish_duration(second, None);
-            assert_eq!(
-                playlist.duration_request().expect("skip failed row").path,
-                snapshot.items[2].path
-            );
-            assert!(
-                playlist.visible.len() < 12,
-                "do not probe the entire folder"
-            );
-            let output = frame(&mut playlist, &snapshot, None);
-            let duration = texts(&output)
-                .into_iter()
-                .find(|text| text.galley.text() == "02:41")
-                .expect("duration caption");
-            assert!(duration.pos.x > 260.0 && duration.pos.x + duration.galley.size().x <= 312.0);
-            assert_eq!(duration.fallback_color, egui::Color32::WHITE);
-            let row =
-                Rect::from_min_size(Pos2::new(8.0, duration.pos.y - 5.0), Vec2::new(300.0, 32.0));
-            let backgrounds = |output: &egui::FullOutput| {
-                output.shapes.iter().filter(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::SURFACE_HOVER && rect.rect.intersects(row))).count()
-            };
-            assert_eq!(backgrounds(&output), 0, "current row is text-only");
-            frame(&mut playlist, &snapshot, Some(row.center()));
-            assert!(
-                backgrounds(&frame(&mut playlist, &snapshot, Some(row.center()))) > 0,
-                "current row still has hover feedback"
-            );
-            snapshot.generation += 1;
-            frame(&mut playlist, &snapshot, None);
-            playlist.finish_duration(first, Some(Duration::from_secs(99)));
-            assert!(
-                playlist.durations.is_empty(),
-                "reject stale snapshot results"
-            );
-            assert_eq!(
-                playlist.duration_request().expect("refresh retry").path,
-                snapshot.items[0].path
-            );
-            let request = playlist.duration_request().expect("visible request");
-            playlist.finish_duration(request.clone(), Some(Duration::from_secs(161)));
-            for index in 0..300 {
-                let mut offscreen = request.clone();
-                offscreen.path = PathBuf::from(format!("offscreen-{index}.wav"));
-                playlist.finish_duration(offscreen, None);
+        for language in [
+            crate::localization::Language::English,
+            crate::localization::Language::Japanese,
+        ] {
+            for density in [1.0, 1.25, 2.0] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                crate::localization::set_language(&context, language);
+                context.global_style_mut(crate::chrome::style);
+                context.set_pixels_per_point(density);
+                let mut playlist = Playlist::default();
+                let mut snapshot = snapshot(10_000);
+                snapshot.items[0].path = PathBuf::from(format!("{}.wav", "long-".repeat(30)));
+                let mut time = 0.0;
+                let mut frame = |playlist: &mut Playlist,
+                                 snapshot: &FolderSnapshot,
+                                 pointer: Option<Pos2>| {
+                    time += 0.1;
+                    context.run_ui(
+                        egui::RawInput {
+                            time: Some(time),
+                            screen_rect: Some(Rect::from_min_size(
+                                Pos2::ZERO,
+                                Vec2::new(320.0, 240.0),
+                            )),
+                            events: pointer.map(Event::PointerMoved).into_iter().collect(),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            playlist.show(ui, Some(snapshot), Some(&snapshot.items[0].path), true);
+                        },
+                    )
+                };
+                frame(&mut playlist, &snapshot, None);
+                frame(&mut playlist, &snapshot, None);
+                let first = playlist.duration_request().expect("first visible duration");
+                assert_eq!(first.path, snapshot.items[0].path);
+                playlist.finish_duration(first.clone(), Some(Duration::from_secs(161)));
+                let second = playlist.duration_request().expect("next visible duration");
+                assert_eq!(second.path, snapshot.items[1].path);
+                playlist.finish_duration(second, None);
+                assert_eq!(
+                    playlist.duration_request().expect("skip failed row").path,
+                    snapshot.items[2].path
+                );
+                assert!(
+                    playlist.visible.len() < 12,
+                    "do not probe the entire folder"
+                );
+                let output = frame(&mut playlist, &snapshot, None);
+                assert_eq!(output.pixels_per_point, density);
+                let expected = format!(
+                    "{}{}",
+                    snapshot.items[0].path.display(),
+                    match language {
+                        crate::localization::Language::English =>
+                            " (current track) · Duration 02:41",
+                        crate::localization::Language::Japanese => "（現在の曲） · 長さ 02:41",
+                    }
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("playlist accessibility");
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, node)| node.description() == Some(&expected))
+                );
+                let duration = texts(&output)
+                    .into_iter()
+                    .find(|text| text.galley.text() == "02:41")
+                    .expect("duration caption");
+                assert!(
+                    duration.pos.x > 260.0 && duration.pos.x + duration.galley.size().x <= 312.0
+                );
+                assert_eq!(duration.fallback_color, egui::Color32::WHITE);
+                let row = Rect::from_min_size(
+                    Pos2::new(8.0, duration.pos.y - 5.0),
+                    Vec2::new(300.0, 32.0),
+                );
+                let backgrounds = |output: &egui::FullOutput| {
+                    output.shapes.iter().filter(|shape| matches!(&shape.shape, Shape::Rect(rect) if rect.fill == crate::chrome::SURFACE_HOVER && rect.rect.intersects(row))).count()
+                };
+                assert_eq!(backgrounds(&output), 0, "current row is text-only");
+                frame(&mut playlist, &snapshot, Some(row.center()));
+                assert!(
+                    backgrounds(&frame(&mut playlist, &snapshot, Some(row.center()))) > 0,
+                    "current row still has hover feedback"
+                );
+                snapshot.generation += 1;
+                frame(&mut playlist, &snapshot, None);
+                playlist.finish_duration(first, Some(Duration::from_secs(99)));
+                assert!(
+                    playlist.durations.is_empty(),
+                    "reject stale snapshot results"
+                );
+                assert_eq!(
+                    playlist.duration_request().expect("refresh retry").path,
+                    snapshot.items[0].path
+                );
+                let request = playlist.duration_request().expect("visible request");
+                playlist.finish_duration(request.clone(), Some(Duration::from_secs(161)));
+                for index in 0..300 {
+                    let mut offscreen = request.clone();
+                    offscreen.path = PathBuf::from(format!("offscreen-{index}.wav"));
+                    playlist.finish_duration(offscreen, None);
+                }
+                assert_eq!(playlist.durations.len(), 256);
+                assert_eq!(
+                    playlist.durations[&request.path],
+                    Some(Duration::from_secs(161))
+                );
             }
-            assert_eq!(playlist.durations.len(), 256);
-            assert_eq!(
-                playlist.durations[&request.path],
-                Some(Duration::from_secs(161))
-            );
         }
     }
 

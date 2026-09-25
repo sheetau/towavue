@@ -6950,6 +6950,7 @@ where
     }
 
     fn draw_seek_preview(&mut self, response: &egui::Response, ratio: f32, duration: Duration) {
+        let language = self.language();
         let position = duration.mul_f32(ratio.clamp(0.0, 1.0));
         let source = self
             .session
@@ -7028,7 +7029,10 @@ where
                 );
             }
             let caption = if !sheet_ready && self.failed_thumbnails.contains(&bucket) {
-                format!("{} · No preview", format_time(media_time(position)))
+                towavue_core::localization::formatted::seek_preview_unavailable(
+                    language,
+                    &format_time(media_time(position)),
+                )
             } else {
                 format_time(media_time(position))
             };

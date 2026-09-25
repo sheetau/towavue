@@ -488,6 +488,7 @@ impl TabPreview {
         folder: Option<&crate::image_tab_preview::FolderPosition>,
     ) -> Option<crate::preview_transport::Action> {
         let kind = target.map_or(MediaKind::Image, |target| target.kind);
+        let language = crate::localization::language(&response.ctx);
         let label = target.map_or_else(
             || crate::image_paste::DEFAULT_NAME.into(),
             |target| crate::display_name(&target.path),
@@ -593,14 +594,14 @@ impl TabPreview {
                     });
                 crate::media_preview::caption(ui, |ui| {
                     if texture.is_some_and(|texture| texture.is_err()) {
-                        ui.label("No preview");
+                        ui.label(crate::localization::Text::NoPreview.in_language(language));
                     }
                     if kind == MediaKind::Video {
-                        ui.label(format!(
-                            "Preview near {}",
-                            crate::format_time(crate::media_time(
-                                target.expect("video target").position
-                            ))
+                        ui.label(towavue_core::localization::formatted::preview_near(
+                            language,
+                            &crate::format_time(crate::media_time(
+                                target.expect("video target").position,
+                            )),
                         ));
                     }
                     ui.add(egui::Label::new(&label).wrap());
@@ -1196,74 +1197,94 @@ mod tests {
 
     #[test]
     fn pending_tab_preview_is_quiet_and_retains_identity_time_and_failures() {
-        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
-            let context = crate::fonts::test_context();
-            context.global_style_mut(|style| {
-                crate::chrome::style(style);
-                style.interaction.tooltip_delay = 0.0;
-                style.interaction.show_tooltips_only_when_still = false;
-            });
-            let mut tabs = TabSet::default();
-            tabs.open_new("fixture-media".into(), kind);
-            let mut preview = TabPreview::new().expect("worker");
-            let target = preview
-                .target(tabs.active().expect("tab"))
-                .expect("file-backed preview");
-            preview.target = Some(target.clone());
-            let texture = context.load_texture(
-                "ready",
-                egui::ColorImage::filled([2, 1], egui::Color32::RED),
-                TextureOptions::LINEAR,
-            );
-            for state in 0..3 {
-                preview.texture = match state {
-                    1 => Some(Err("fixture failure".into())),
-                    2 => Some(Ok(texture.clone())),
-                    _ => None,
-                };
-                for pass in 0..4 {
-                    let rect =
-                        egui::Rect::from_min_size(egui::pos2(40.0, 20.0), egui::vec2(140.0, 24.0));
-                    let output = context.run_ui(
-                        egui::RawInput {
-                            screen_rect: Some(egui::Rect::from_min_size(
-                                egui::Pos2::ZERO,
-                                egui::vec2(480.0, 300.0),
-                            )),
-                            events: vec![egui::Event::PointerMoved(rect.center())],
-                            ..Default::default()
-                        },
-                        |ui| {
-                            let response = ui.allocate_rect(rect, egui::Sense::hover());
-                            preview.show(&response, &target, None);
-                        },
-                    );
-                    if pass < 3 {
-                        continue;
+        for language in [
+            crate::localization::Language::English,
+            crate::localization::Language::Japanese,
+        ] {
+            for density in [1.0, 1.25, 2.0] {
+                for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
+                    let context = crate::fonts::test_context();
+                    if language == crate::localization::Language::Japanese {
+                        crate::localization::test_ui::configure_japanese(&context, density);
                     }
-                    let text: Vec<_> = output
-                        .shapes
-                        .iter()
-                        .filter_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text) => Some(text.galley.text()),
+                    context.set_pixels_per_point(density);
+                    crate::localization::set_language(&context, language);
+                    context.global_style_mut(|style| {
+                        crate::chrome::style(style);
+                        style.interaction.tooltip_delay = 0.0;
+                        style.interaction.show_tooltips_only_when_still = false;
+                    });
+                    let mut tabs = TabSet::default();
+                    tabs.open_new("fixture-media".into(), kind);
+                    let mut preview = TabPreview::new().expect("worker");
+                    let target = preview
+                        .target(tabs.active().expect("tab"))
+                        .expect("file-backed preview");
+                    preview.target = Some(target.clone());
+                    let texture = context.load_texture(
+                        "ready",
+                        egui::ColorImage::filled([2, 1], egui::Color32::RED),
+                        TextureOptions::LINEAR,
+                    );
+                    for state in 0..3 {
+                        preview.texture = match state {
+                            1 => Some(Err("fixture failure".into())),
+                            2 => Some(Ok(texture.clone())),
                             _ => None,
-                        })
-                        .collect();
-                    assert!(
-                        !text
-                            .iter()
-                            .any(|text| matches!(*text, "…" | "Loading preview…"))
-                    );
-                    assert!(text.contains(&"fixture-media"));
-                    assert_eq!(
-                        text.contains(&"No preview"),
-                        state == 1 && kind != MediaKind::Audio
-                    );
-                    assert_eq!(
-                        text.iter().any(|text| text.starts_with("Preview near ")),
-                        kind == MediaKind::Video
-                    );
-                    assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2 && kind != MediaKind::Audio);
+                        };
+                        for pass in 0..4 {
+                            let rect = egui::Rect::from_min_size(
+                                egui::pos2(40.0, 20.0),
+                                egui::vec2(140.0, 24.0),
+                            );
+                            let output = context.run_ui(
+                                egui::RawInput {
+                                    screen_rect: Some(egui::Rect::from_min_size(
+                                        egui::Pos2::ZERO,
+                                        egui::vec2(480.0, 300.0),
+                                    )),
+                                    events: vec![egui::Event::PointerMoved(rect.center())],
+                                    ..Default::default()
+                                },
+                                |ui| {
+                                    let response = ui.allocate_rect(rect, egui::Sense::hover());
+                                    preview.show(&response, &target, None);
+                                },
+                            );
+                            if pass < 3 {
+                                continue;
+                            }
+                            let text: Vec<_> = output
+                                .shapes
+                                .iter()
+                                .filter_map(|shape| match &shape.shape {
+                                    egui::Shape::Text(text) => Some(text.galley.text()),
+                                    _ => None,
+                                })
+                                .collect();
+                            assert!(
+                                !text
+                                    .iter()
+                                    .any(|text| matches!(*text, "…" | "Loading preview…"))
+                            );
+                            assert!(text.contains(&"fixture-media"));
+                            assert_eq!(output.pixels_per_point, density);
+                            let (unavailable, time) = match language {
+                                crate::localization::Language::English => {
+                                    ("No preview", "Preview near 00:00")
+                                }
+                                crate::localization::Language::Japanese => {
+                                    ("プレビューなし", "00:00付近のプレビュー")
+                                }
+                            };
+                            assert_eq!(
+                                text.contains(&unavailable),
+                                state == 1 && kind != MediaKind::Audio
+                            );
+                            assert_eq!(text.contains(&time), kind == MediaKind::Video);
+                            assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2 && kind != MediaKind::Audio);
+                        }
+                    }
                 }
             }
         }

@@ -1,3 +1,4 @@
+use crate::localization::{self, Text};
 use egui::accesskit::{Action, ActionData, Orientation, TreeId};
 use egui::{Id, Rect, Ui};
 use towavue_core::{MediaKind, PixelCrop, UnitRect};
@@ -28,39 +29,49 @@ pub fn release_focus(context: &egui::Context) {
 #[cfg(test)]
 #[test]
 fn selection_paints_only_the_inverted_outline_and_reports_edge_focus_in_status() {
-    let context = crate::fonts::test_context();
-    let identity = Id::new("outline-focus-test");
-    let selected = UnitRect {
-        min: towavue_core::UnitPoint { x: 0.25, y: 0.25 },
-        max: towavue_core::UnitPoint { x: 0.75, y: 0.75 },
-    };
-    context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
-    let output = context.run_ui(egui::RawInput::default(), |ui| {
-        let rect = Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(420.0, 220.0));
-        crate::paint_selection(ui.painter(), rect, selected);
-        controls(
-            ui,
-            identity,
-            rect,
-            selected,
-            (400, 200),
-            MediaKind::Image,
-            true,
+    for language in [
+        localization::Language::English,
+        localization::Language::Japanese,
+    ] {
+        let context = crate::fonts::test_context();
+        localization::set_language(&context, language);
+        let identity = Id::new("outline-focus-test");
+        let selected = UnitRect {
+            min: towavue_core::UnitPoint { x: 0.25, y: 0.25 },
+            max: towavue_core::UnitPoint { x: 0.75, y: 0.75 },
+        };
+        context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
+        let output = context.run_ui(egui::RawInput::default(), |ui| {
+            let rect = Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(420.0, 220.0));
+            crate::paint_selection(ui.painter(), rect, selected);
+            controls(
+                ui,
+                identity,
+                rect,
+                selected,
+                (400, 200),
+                MediaKind::Image,
+                true,
+            );
+        });
+        assert_eq!(
+            output.shapes.len(),
+            1,
+            "no shade, handles or extra focus rectangle"
         );
-    });
-    assert_eq!(
-        output.shapes.len(),
-        1,
-        "no shade, handles or extra focus rectangle"
-    );
-    assert!(matches!(output.shapes[0].shape, egui::Shape::Callback(_)));
-    assert!(
-        focus_hint(&context)
-            .expect("focused edge description")
-            .contains("Selection left (pixels): 100")
-    );
-    context.memory_mut(|memory| memory.surrender_focus(identity.with(0_usize)));
-    assert!(focus_hint(&context).is_none());
+        assert!(matches!(output.shapes[0].shape, egui::Shape::Callback(_)));
+        assert_eq!(
+            focus_hint(&context).expect("focused edge description"),
+            match language {
+                localization::Language::English =>
+                    "Selection left (pixels): 100 · Arrow keys adjust",
+                localization::Language::Japanese =>
+                    "選択範囲の左端（ピクセル）: 100 · 矢印キーで調整",
+            }
+        );
+        context.memory_mut(|memory| memory.surrender_focus(identity.with(0_usize)));
+        assert!(focus_hint(&context).is_none());
+    }
 }
 
 pub fn focus_first(context: &egui::Context, identity: Id) {
@@ -126,12 +137,14 @@ pub fn controls(
         selected.center_top(),
         selected.center_bottom(),
     ];
+    let language = localization::language(ui.ctx());
     let labels = [
-        "Selection left (pixels)",
-        "Selection right (pixels)",
-        "Selection top (pixels)",
-        "Selection bottom (pixels)",
-    ];
+        Text::SelectionLeftPixels,
+        Text::SelectionRightPixels,
+        Text::SelectionTopPixels,
+        Text::SelectionBottomPixels,
+    ]
+    .map(|text| text.in_language(language));
     let enabled = enabled && ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx());
     let requested_focus = ui.input(|input| {
         input.events.iter().rev().find_map(|event| {
@@ -188,7 +201,11 @@ pub fn controls(
                             data.insert_temp(Id::new("selection-value-focus"), response.id);
                             data.insert_temp(
                                 Id::new("selection-value-description"),
-                                format!("{}: {} · Arrow keys adjust", labels[index], values[index]),
+                                towavue_core::localization::formatted::selection_edge_focus(
+                                    language,
+                                    labels[index],
+                                    values[index],
+                                ),
                             );
                         });
                         ui.ctx().memory_mut(|memory| {

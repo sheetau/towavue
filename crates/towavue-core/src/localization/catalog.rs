@@ -18,6 +18,15 @@ macro_rules! messages {
 }
 
 messages! {
+    DropGuideBlocked => ("Close the dialog before dropping files", "ファイルをドロップする前にダイアログを閉じてください"),
+    DropGuideOpen => ("Open with towavue", "towavueで開く"),
+    DropGuideBlockedHelp => ("Dropping is unavailable while a dialog is open", "ダイアログを開いている間はドロップできません"),
+    DropGuideHelp => ("Drop media files or a folder anywhere in the window; the outline is a visual guide", "ウィンドウ内のどこにでもメディアファイルやフォルダーをドロップできます。枠は表示上の目印です"),
+    SelectionLeftPixels => ("Selection left (pixels)", "選択範囲の左端（ピクセル）"),
+    SelectionRightPixels => ("Selection right (pixels)", "選択範囲の右端（ピクセル）"),
+    SelectionTopPixels => ("Selection top (pixels)", "選択範囲の上端（ピクセル）"),
+    SelectionBottomPixels => ("Selection bottom (pixels)", "選択範囲の下端（ピクセル）"),
+    CurrentTrackSuffix => (" (current track)", "（現在の曲）"),
     PlaybackRepeatOff => ("Repeat off", "リピート：オフ"),
     PlaybackRepeatAll => ("Repeat all", "リピート：全曲"),
     PlaybackRepeatOne => ("Repeat one", "リピート：1曲"),

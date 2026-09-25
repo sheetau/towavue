@@ -13,6 +13,10 @@ macro_rules! templates {
 }
 
 templates! {
+    selection_edge_focus(label: &str, value: u32) => ("{label}: {value} · Arrow keys adjust", "{label}: {value} · 矢印キーで調整"),
+    track_duration_suffix(time: &str) => (" · Duration {time}", " · 長さ {time}"),
+    preview_near(time: &str) => ("Preview near {time}", "{time}付近のプレビュー"),
+    seek_preview_unavailable(time: &str) => ("{time} · No preview", "{time} · プレビューなし"),
     audio_order_failed(error: &str) => ("Audio order unavailable: {error}", "音声ファイルの並び順を取得できません: {error}"),
     frame_step_failed(error: &str) => ("Frame step: {error}", "コマ送り: {error}"),
     hold_speed_progress(progress: u8, target: &str, hint: &str) => ("2× while held · {progress}% to lock {target}{hint}", "長押し中は2× · {target}への固定まで{progress}%{hint}"),

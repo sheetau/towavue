@@ -4794,12 +4794,12 @@ where
         }) {
             return;
         }
-        let excluded = (self.media_kind == Some(MediaKind::Audio))
+        let audio_list = (self.media_kind == Some(MediaKind::Audio))
             .then_some(self.playlist.scroll_rect)
             .flatten();
         let before = self.playback_volume();
         // Preserve reversals at either limit, but publish only the final setting.
-        let volume = wheel_input::volume_deltas(context, targets, excluded)
+        let volume = wheel_input::volume_deltas(context, targets, audio_list)
             .into_iter()
             .fold(before, |volume, delta| {
                 self.stepped_playback_volume(volume, delta)
@@ -18549,6 +18549,38 @@ mod tests {
                         actions.is_empty()
                     },
                     "each wheel belongs to its event-time position"
+                );
+            }
+            let ctrl = egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..Default::default()
+            };
+            for (pos, modifiers, expected) in [
+                (outside, ctrl, true),
+                (egui::pos2(width - 10.0, 100.0), ctrl, true),
+                (label.center(), ctrl, false),
+                (egui::pos2(100.0, 10.0), ctrl, false),
+                (outside, ctrl | egui::Modifiers::SHIFT, false),
+                (outside, ctrl | egui::Modifiers::ALT, false),
+            ] {
+                let actions = frame(vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Line,
+                        delta: egui::vec2(0.0, 1.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers,
+                    },
+                ])
+                .1;
+                assert!(
+                    if expected {
+                        actions == [UiAction::Volume(tab, 1.1)]
+                    } else {
+                        actions.is_empty()
+                    },
+                    "Ctrl-wheel follows the audio list, including inactive windows"
                 );
             }
             for (pos, expected) in [

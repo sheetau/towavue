@@ -26,7 +26,7 @@ pub fn begin_frame(context: &Context) {
 pub fn volume_deltas(
     context: &Context,
     targets: &[Response],
-    excluded: Option<egui::Rect>,
+    audio_list: Option<egui::Rect>,
 ) -> Vec<f32> {
     positioned_events(context)
         .into_iter()
@@ -36,15 +36,24 @@ pub fn volume_deltas(
                 delta,
                 modifiers,
                 phase: egui::TouchPhase::Move,
-            } if modifiers.is_none()
-                && position.is_some_and(|pos| {
-                    excluded.is_none_or(|rect| !rect.contains(pos))
-                        && targets.iter().any(|target| {
-                            target.enabled()
-                                && target.interact_rect.contains(pos)
-                                && context.layer_id_at(pos) == Some(target.layer_id)
-                        })
-                }) =>
+            } if position.is_some_and(|pos| {
+                let in_list = audio_list.is_some_and(|rect| rect.contains(pos));
+                let allowed = if modifiers.is_none() {
+                    !in_list
+                } else {
+                    in_list
+                        && modifiers.ctrl
+                        && !modifiers.shift
+                        && !modifiers.alt
+                        && !modifiers.mac_cmd
+                };
+                allowed
+                    && targets.iter().any(|target| {
+                        target.enabled()
+                            && target.interact_rect.contains(pos)
+                            && context.layer_id_at(pos) == Some(target.layer_id)
+                    })
+            }) =>
             {
                 Some(
                     delta.y
@@ -231,10 +240,15 @@ impl Scroll {
                         ..
                     }
                 );
+                // Remove volume input before egui combines deltas under the last
+                // event's modifiers; mixed Ctrl/plain events must remain independent.
+                let volume =
+                    matches!(&event, Event::MouseWheel { modifiers, .. } if modifiers.ctrl);
                 (ends
-                    || position.is_some_and(|pos| {
-                        rect.contains(pos) && context.layer_id_at(pos) == Some(ui.layer_id())
-                    }))
+                    || (!volume
+                        && position.is_some_and(|pos| {
+                            rect.contains(pos) && context.layer_id_at(pos) == Some(ui.layer_id())
+                        })))
                 .then(|| native::scroll_event(context, event, rect.size()))
             })
             .collect();
@@ -739,6 +753,98 @@ mod tests {
                 egui::Vec2::ZERO
             );
         }
+    }
+
+    #[test]
+    fn audio_list_splits_ctrl_volume_from_scroll_per_event() {
+        let context = Context::default();
+        let list = egui::Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(300.0, 250.0));
+        let outside = egui::pos2(350.0, 150.0);
+        let mut scroll = Scroll::default();
+        let mut frame = |events| {
+            let mut result = (Vec::new(), egui::Vec2::ZERO);
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let target = ui.interact(
+                        ui.max_rect(),
+                        Id::new("audio-surface"),
+                        egui::Sense::hover(),
+                    );
+                    result.0 = volume_deltas(ui.ctx(), &[target], Some(list));
+                    result.1 = scroll.delta(ui, list, true);
+                },
+            );
+            result
+        };
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        let wheel = |y, modifiers| Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, y),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        };
+        frame(vec![Event::PointerMoved(list.center())]);
+        for reversed in [false, true] {
+            let mut events = vec![wheel(-2.0, egui::Modifiers::NONE), wheel(50.0, ctrl)];
+            if reversed {
+                events.reverse();
+            }
+            assert_eq!(
+                frame(events),
+                (vec![1.0], egui::vec2(0.0, -2.0)),
+                "mixed modifiers retain separate event ownership"
+            );
+        }
+        assert_eq!(
+            frame(vec![wheel(50.0, ctrl)]),
+            (vec![1.0], egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            frame(vec![]),
+            (vec![], egui::Vec2::ZERO),
+            "volume adds no later scroll tail"
+        );
+        assert_eq!(
+            frame(vec![Event::PointerMoved(outside), wheel(50.0, ctrl)]),
+            (vec![], egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            frame(vec![wheel(-50.0, egui::Modifiers::NONE)]),
+            (vec![-1.0], egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            frame(vec![
+                Event::PointerMoved(list.center()),
+                wheel(50.0, ctrl | egui::Modifiers::SHIFT),
+                wheel(50.0, ctrl | egui::Modifiers::ALT)
+            ]),
+            (vec![], egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            frame(vec![
+                Event::PointerMoved(outside),
+                wheel(50.0, ctrl),
+                Event::PointerMoved(list.center()),
+                wheel(-50.0, ctrl)
+            ]),
+            (vec![-1.0], egui::Vec2::ZERO)
+        );
+        assert_eq!(
+            frame(vec![Event::WindowFocused(false), wheel(50.0, ctrl)]),
+            (vec![], egui::Vec2::ZERO)
+        );
     }
 
     #[test]

@@ -117,7 +117,7 @@ pub(super) fn show(
         if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
             return selected.map_or(Gesture::Select, Gesture::Stretch);
         }
-        if playhead_rect(rect, cti_x(rect, x_at(position), pixel)).contains(origin) {
+        if playhead_contains(rect, cti_x(rect, x_at(position), pixel), origin) {
             return Gesture::Seek;
         }
         if !modifiers.any()
@@ -398,16 +398,13 @@ pub(super) fn show(
         );
     }
     let x = cti_x(rect, x_at(head), pixel);
-    let marker = playhead_rect(rect, x);
     let mut cti = egui::Mesh::default();
-    for point in [
-        marker.left_top(),
-        marker.right_top(),
-        egui::pos2(x, marker.bottom()),
-    ] {
+    for point in playhead_points(rect.top(), x) {
         cti.colored_vertex(point, crate::chrome::FOREGROUND);
     }
-    cti.add_triangle(0, 1, 2);
+    for index in 1..5 {
+        cti.add_triangle(0, index, index + 1);
+    }
     cti.add_colored_rect(
         Rect::from_min_max(
             egui::pos2((x - pixel * 0.5).max(rect.left()), rect.top()),
@@ -521,14 +518,24 @@ fn cti_x(rect: Rect, x: f32, pixel: f32) -> f32 {
     left + pixel.min(rect.width()) * 0.5
 }
 
+fn playhead_points(top: f32, x: f32) -> [egui::Pos2; 6] {
+    [
+        egui::pos2(x - 3.5, top),
+        egui::pos2(x + 3.5, top),
+        egui::pos2(x + 3.5, top + 6.0),
+        egui::pos2(x + 0.5, top + 9.0),
+        egui::pos2(x - 0.5, top + 9.0),
+        egui::pos2(x - 3.5, top + 6.0),
+    ]
+}
+
 fn playhead_rect(rect: Rect, x: f32) -> Rect {
-    Rect::from_min_max(
-        egui::pos2((x - 6.0).max(rect.left()), rect.top()),
-        egui::pos2(
-            (x + 6.0).min(rect.right()),
-            (rect.top() + 8.0).min(rect.bottom()),
-        ),
-    )
+    Rect::from_points(&playhead_points(rect.top(), x)).intersect(rect)
+}
+
+fn playhead_contains(rect: Rect, x: f32, point: egui::Pos2) -> bool {
+    playhead_rect(rect, x).contains(point)
+        && (point.x - x).abs() <= 3.5 - (point.y - rect.top() - 6.0).max(0.0)
 }
 
 #[cfg(test)]
@@ -593,14 +600,14 @@ mod tests {
                         .collect();
                     let cti = meshes
                         .iter()
-                        .find(|mesh| mesh.vertices.len() == 7)
+                        .find(|mesh| mesh.vertices.len() == 10)
                         .expect("CTI");
                     let sides = meshes
                         .iter()
                         .find(|mesh| mesh.vertices.len() > 7 && mesh.vertices.len() % 4 == 0)
                         .expect("dotted boundaries");
                     let stem = Rect::from_points(
-                        &cti.vertices[3..].iter().map(|v| v.pos).collect::<Vec<_>>(),
+                        &cti.vertices[6..].iter().map(|v| v.pos).collect::<Vec<_>>(),
                     );
                     let side = if position == selection.start() {
                         &sides.vertices[..4]
@@ -1071,13 +1078,38 @@ mod tests {
             let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
             for position in [time(0.0), time(1.003), time(5.0), time(9.997), time(10.0)] {
                 let x = 20.0 + position.as_seconds_f64() as f32 * 40.0;
-                for (pointer, expected) in [
+                let mut pointers = vec![
                     (egui::pos2(x, 34.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(x, 70.0), egui::CursorIcon::Text),
                     (egui::pos2(120.0, 70.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(320.0, 70.0), egui::CursorIcon::ResizeHorizontal),
                     (egui::pos2(180.0, 80.0), egui::CursorIcon::ResizeRow),
-                ] {
+                ];
+                if position == time(5.0) {
+                    let axis = cti_x(rect, x, 1.0 / density);
+                    for (dx, dy, hits) in [
+                        (-3.0, 5.0, true),
+                        (3.0, 5.0, true),
+                        (-2.0, 7.0, true),
+                        (2.0, 7.0, true),
+                        (0.0, 8.9, true),
+                        (-3.0, 8.0, false),
+                        (3.0, 8.0, false),
+                        (-4.0, 3.0, false),
+                        (4.0, 3.0, false),
+                        (0.0, 9.1, false),
+                    ] {
+                        pointers.push((
+                            egui::pos2(axis + dx, rect.top() + dy),
+                            if hits {
+                                egui::CursorIcon::ResizeHorizontal
+                            } else {
+                                egui::CursorIcon::Text
+                            },
+                        ));
+                    }
+                }
+                for (pointer, expected) in pointers {
                     let mut output = egui::FullOutput::default();
                     for _ in 0..3 {
                         output = context.run_ui(
@@ -1118,7 +1150,7 @@ mod tests {
                         .iter()
                         .find_map(|shape| match &shape.shape {
                             egui::Shape::Mesh(mesh)
-                                if mesh.vertices.len() == 7
+                                if mesh.vertices.len() == 10
                                     && mesh.vertices.iter().all(|vertex| {
                                         vertex.color == crate::chrome::FOREGROUND
                                     }) =>
@@ -1128,9 +1160,9 @@ mod tests {
                             _ => None,
                         })
                         .expect("one CTI mesh");
-                    assert_eq!(cti.indices.len(), 9);
+                    assert_eq!(cti.indices.len(), 18);
                     let stem = Rect::from_points(
-                        &cti.vertices[3..]
+                        &cti.vertices[6..]
                             .iter()
                             .map(|vertex| vertex.pos)
                             .collect::<Vec<_>>(),
@@ -1140,13 +1172,20 @@ mod tests {
                     assert_eq!(stem.top(), rect.top());
                     assert_eq!(stem.bottom(), rect.bottom());
                     let marker: Vec<_> =
-                        cti.vertices[..3].iter().map(|vertex| vertex.pos).collect();
-                    assert!((marker[2].x - stem.center().x).abs() < 0.0001);
-                    assert!(
-                        marker
-                            .iter()
-                            .all(|point| rect.contains(*point) && point.y <= rect.top() + 8.0)
-                    );
+                        cti.vertices[..6].iter().map(|vertex| vertex.pos).collect();
+                    let bounds = Rect::from_points(&marker);
+                    assert_eq!(bounds.size(), egui::vec2(7.0, 9.0));
+                    assert!((bounds.center().x - stem.center().x).abs() < 0.0001);
+                    assert_eq!(marker[2].y - rect.top(), 6.0);
+                    assert_eq!(marker[5].y - rect.top(), 6.0);
+                    assert_eq!(marker[2].x - marker[3].x, 3.0);
+                    assert_eq!(marker[3].y - marker[2].y, 3.0);
+                    assert_eq!(marker[4].x - marker[5].x, 3.0);
+                    assert_eq!(marker[4].y - marker[5].y, 3.0);
+                    assert_eq!(marker[3].x - marker[4].x, 1.0);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Mesh(mesh) if mesh.vertices.len() == 10 && shape.clip_rect == rect)));
+
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == egui::Color32::from_white_alpha(128))));
                 }
             }
@@ -1869,8 +1908,8 @@ mod tests {
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 7 => {
-                                Some(mesh.vertices[2].pos.x)
+                            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 10 => {
+                                Some((mesh.vertices[3].pos.x + mesh.vertices[4].pos.x) * 0.5)
                             }
                             _ => None,
                         })

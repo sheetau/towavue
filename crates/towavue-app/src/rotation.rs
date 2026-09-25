@@ -53,25 +53,34 @@ impl RotationDialog {
         let modal = chrome::modal(context, "free-rotate-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
-                420.0,
                 Text::CommandFreeRotateImage.in_language(display_language),
                 &[
                     Text::ApplyRotation.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.label(Text::ImageEditPreview.in_language(display_language));
-                    ui.label(Text::RotateDragTip.in_language(display_language));
-                    ui.label(Text::RotationAngleHelp.in_language(display_language));
-                    let response = resize::text_input(
-                        ui,
-                        Text::RotationAngleInput.in_language(display_language),
-                        &mut self.angle,
-                    );
-                    if self.first_frame {
-                        response.request_focus();
-                        self.first_frame = false;
-                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().text_edit_width = 96.0;
+                        let response = resize::text_input(
+                            ui,
+                            Text::RotationAngleInput.in_language(display_language),
+                            &mut self.angle,
+                            "°",
+                        )
+                        .help_text(format!(
+                            "{}\n{}",
+                            Text::RotationAngleHelp.in_language(display_language),
+                            Text::RotateDragTip.in_language(display_language)
+                        ));
+                        if self.first_frame {
+                            response.request_focus();
+                            self.first_frame = false;
+                        }
+                        if let Some(value) = self.value() {
+                            let size = self.result_size(value);
+                            ui.label(formatted::pixel_size(display_language, size.0, size.1));
+                        }
+                    });
                     let mut degrees = self
                         .value()
                         .map_or(0.0, |value| f64::from(value.tenths()) / 10.0);
@@ -87,16 +96,7 @@ impl RotationDialog {
                         self.angle = format!("{degrees:.1}");
                     }
                     let value = self.value();
-                    if let Some(value) = value {
-                        let size = self.result_size(value);
-                        ui.label(formatted::rotation_size(
-                            display_language,
-                            f64::from(value.tenths()) / 10.0,
-                            size.0,
-                            size.1,
-                        ));
-                        ui.label(Text::RotationPlacementPreview.in_language(display_language));
-                    } else {
+                    if value.is_none() {
                         ui.label(Text::ImageRotationLimits.in_language(display_language));
                     }
                     value

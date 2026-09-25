@@ -4239,7 +4239,6 @@ where
                     chrome::modal(&context, "export-error".into(), false).show(&context, |ui| {
                         chrome::modal_body(
                             ui,
-                            520.0,
                             localization::Text::ExportFailed.in_language(language),
                             &[localization::Text::NativeOk.in_language(language)],
                             |ui| {
@@ -4313,7 +4312,6 @@ where
                 }
                 chrome::modal_body(
                     ui,
-                    520.0,
                     localization::Text::UnsavedEdits.in_language(language),
                     &labels,
                     |ui| {

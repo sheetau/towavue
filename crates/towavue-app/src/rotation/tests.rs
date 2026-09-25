@@ -17,6 +17,26 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
         let mut dialog = app.capture_rotation().expect("image rotation");
         let size = egui::vec2(640.0, 600.0);
         let output = ui::settle(&context, size, |context| dialog.show(context));
+        let input = resize::tests::assert_unit_input(
+            &output,
+            Text::RotationAngleInput.in_language(crate::localization::Language::Japanese),
+            "°",
+            96.0,
+            density,
+        );
+        let dimensions = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().ends_with(" px") => Some(text),
+                _ => None,
+            })
+            .expect("result dimensions beside input");
+        assert!(dimensions.pos.x > input.right());
+        assert!(
+            (dimensions.pos.y + dimensions.galley.size().y * 0.5 - input.center().y).abs()
+                <= 1.0 / density
+        );
         ui::frame(
             &context,
             size,

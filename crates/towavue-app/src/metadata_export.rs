@@ -129,7 +129,6 @@ impl MetadataDialog {
         .show(context, |ui| {
             chrome::modal_body(
                 ui,
-                420.0,
                 Text::CommandMetadataExportOptions.in_language(display_language),
                 &[
                     Text::ApplyMetadata.in_language(display_language),

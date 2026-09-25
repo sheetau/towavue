@@ -126,7 +126,7 @@ fn text_inputs_share_height_and_corners_without_collapsing_multiline_editors() {
                 .expect("root viewport")
                 .native_pixels_per_point = Some(density);
             context.run_ui(input, |ui| {
-                let single = crate::resize::text_input(ui, "Single", &mut value);
+                let single = crate::resize::text_input(ui, "Single", &mut value, "");
                 rects[0] = single.rect;
                 single.request_focus();
                 rects[1] = crate::resize::unframed_text_input(ui, "Search", &mut value).rect;

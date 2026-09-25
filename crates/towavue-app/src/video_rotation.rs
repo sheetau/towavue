@@ -50,24 +50,36 @@ impl VideoRotationDialog {
         let modal = chrome::modal(context, id, true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
-                340.0,
                 Text::CommandFreeRotateVideo.in_language(display_language),
                 &[
                     Text::ApplyRotation.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.label(Text::VideoEditPreview.in_language(display_language));
-                    ui.label(Text::RotationAngleHelp.in_language(display_language));
-                    let response = resize::text_input(
-                        ui,
-                        Text::VideoRotationAngleInput.in_language(display_language),
-                        &mut self.angle,
-                    );
-                    if self.first_frame {
-                        response.request_focus();
-                        self.first_frame = false;
-                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().text_edit_width = 96.0;
+                        let response = resize::text_input(
+                            ui,
+                            Text::VideoRotationAngleInput.in_language(display_language),
+                            &mut self.angle,
+                            "°",
+                        )
+                        .help_text(Text::RotationAngleHelp.in_language(display_language));
+                        if self.first_frame {
+                            response.request_focus();
+                            self.first_frame = false;
+                        }
+                        if let Ok(value) = self.value_in(display_language) {
+                            let size = if value.tenths() == 0 {
+                                self.snapshot.geometry
+                            } else {
+                                self.snapshot
+                                    .geometry_with(EditOperation::RotateVideo(value))
+                                    .expect("validated rotation")
+                            };
+                            ui.label(formatted::pixel_size(display_language, size.0, size.1));
+                        }
+                    });
                     let mut degrees = self
                         .angle
                         .trim()
@@ -88,27 +100,9 @@ impl VideoRotationDialog {
                         self.angle = format!("{degrees:.1}");
                     }
                     let value = self.value_in(display_language);
-                    match &value {
-                        Ok(value) if value.tenths() == 0 => {
-                            ui.label("0 degrees — no edit or pixel-aspect change");
-                        }
-                        Ok(value) => {
-                            let size = self
-                                .snapshot
-                                .geometry_with(EditOperation::RotateVideo(*value))
-                                .expect("validated rotation");
-                            ui.label(formatted::rotation_size(
-                                display_language,
-                                f64::from(value.tenths()) / 10.0,
-                                size.0,
-                                size.1,
-                            ));
-                        }
-                        Err(error) => {
-                            ui.label(error);
-                        }
+                    if let Err(error) = &value {
+                        ui.label(error);
                     }
-                    ui.label(Text::VideoRotationPreview.in_language(display_language));
                     value
                 },
             );

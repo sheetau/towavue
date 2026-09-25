@@ -4,6 +4,7 @@ use crate::scroll_style::ScrollAreaStyle;
 
 const MARGIN: f32 = 8.0;
 const FRAME_SPACE: f32 = 18.0;
+const CONTENT_WIDTH: f32 = 400.0;
 
 pub fn set_modal_bounds(context: &Context, bounds: Rect) {
     let pass = context.cumulative_pass_nr();
@@ -53,32 +54,12 @@ pub fn modal(context: &Context, id: Id, preview: bool) -> egui::Modal {
 /// one can use the media viewport before it needs to scroll.
 pub fn modal_body<R>(
     ui: &mut Ui,
-    width: f32,
     title: &str,
     actions: &[&str],
-    content: impl FnOnce(&mut Ui) -> R,
-) -> R {
-    modal_body_with_header(
-        ui,
-        width,
-        title,
-        actions,
-        |ui| ui.label(egui::RichText::new(title).color(super::FOREGROUND)),
-        content,
-    )
-}
-
-/// Retain the accessible title while allowing a compact identity header.
-pub fn modal_body_with_header<R>(
-    ui: &mut Ui,
-    width: f32,
-    title: &str,
-    actions: &[&str],
-    header: impl FnOnce(&mut Ui) -> egui::Response,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let bounds = bounds(ui.ctx());
-    ui.set_width(width.min((bounds.width() - FRAME_SPACE).max(1.0)));
+    ui.set_width(CONTENT_WIDTH.min((bounds.width() - FRAME_SPACE).max(1.0)));
     // Area remembers its previous content size; reset the maximum so a body can
     // grow beyond that size before the scroll area computes its available space.
     ui.set_max_height((bounds.height() - FRAME_SPACE).max(1.0));
@@ -90,7 +71,7 @@ pub fn modal_body_with_header<R>(
         node.set_label(title);
         node.set_modal();
     });
-    let heading = header(ui);
+    let heading = ui.label(egui::RichText::new(title).color(super::FOREGROUND));
     let font = egui::TextStyle::Button.resolve(ui.style());
     let row_height =
         ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
@@ -172,7 +153,6 @@ mod tests {
                                     .show(ui.ctx(), |ui| {
                                         modal_body(
                                             ui,
-                                            420.0,
                                             "Dialog title",
                                             &["Save and continue", "Discard edits", "Cancel"],
                                             |ui| {
@@ -228,6 +208,12 @@ mod tests {
                         "MODAL_LAYOUT density={density} preview={preview} size={size:?} media={media:?} geometry={before:?} title={title:?}"
                     );
                     assert!(title.is_positive(), "settled modal paints its title");
+                    let expected_width = 418.0_f32.min(media.width() - 16.0);
+                    assert!(
+                        (before.0.width() - expected_width).abs() <= 1.0 / density,
+                        "common outer width: {:?}",
+                        before.0
+                    );
                     assert!(
                         media.contains_rect(before.0),
                         "{density} {size:?}: {:?}",

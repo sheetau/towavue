@@ -25,6 +25,26 @@ fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
         };
         let size = egui::vec2(640.0, 600.0);
         let output = ui::settle(&context, size, |context| dialog.show(context));
+        let input = resize::tests::assert_unit_input(
+            &output,
+            Text::VideoRotationAngleInput.in_language(Language::Japanese),
+            "°",
+            96.0,
+            density,
+        );
+        let dimensions = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().ends_with(" px") => Some(text),
+                _ => None,
+            })
+            .expect("result dimensions beside input");
+        assert!(dimensions.pos.x > input.right());
+        assert!(
+            (dimensions.pos.y + dimensions.galley.size().y * 0.5 - input.center().y).abs()
+                <= 1.0 / density
+        );
         ui::frame(
             &context,
             size,

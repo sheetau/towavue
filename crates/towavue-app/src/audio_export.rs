@@ -88,7 +88,6 @@ impl AudioExportDialog {
             chrome::modal(context, "audio-export-options".into(), false).show(context, |ui| {
                 chrome::modal_body(
                     ui,
-                    340.0,
                     Text::CommandAudioExportOptions.in_language(display_language),
                     &[
                         Text::ApplyOptions.in_language(display_language),

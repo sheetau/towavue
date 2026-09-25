@@ -1,6 +1,5 @@
 use crate::chrome;
 use crate::localization::{Language, Text, language};
-use towavue_core::localization::formatted;
 use towavue_core::{ImageResize, ResampleFilter};
 
 #[cfg(test)]
@@ -61,36 +60,46 @@ impl ResizeDialog {
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
         let display_language = language(ui.ctx());
         let previous = (self.width.clone(), self.height.clone(), self.filter);
-        ui.label(Text::WidthPixels.in_language(display_language));
-        let width = text_input(
-            ui,
-            Text::WidthInPixels.in_language(display_language),
-            &mut self.width,
-        );
-        if self.first_frame {
-            width.request_focus();
-            self.first_frame = false;
-        }
-        let width = self.reveal_focus(width);
-        if width.changed()
-            && self.keep_ratio
-            && let Ok(value) = self.width.parse::<u32>()
-        {
-            self.height = self.round(f64::from(value) / self.ratio);
-        }
-        ui.label(Text::HeightPixels.in_language(display_language));
-        let height = text_input(
-            ui,
-            Text::HeightInPixels.in_language(display_language),
-            &mut self.height,
-        );
-        let height = self.reveal_focus(height);
-        if height.changed()
-            && self.keep_ratio
-            && let Ok(value) = self.height.parse::<u32>()
-        {
-            self.width = self.round(f64::from(value) * self.ratio);
-        }
+        egui::Grid::new("resize-dimensions")
+            .num_columns(2)
+            .spacing(egui::vec2(8.0, 4.0))
+            .show(ui, |ui| {
+                ui.spacing_mut().text_edit_width = 120.0;
+                ui.label(Text::WidthPixels.in_language(display_language));
+                let width = text_input(
+                    ui,
+                    Text::WidthInPixels.in_language(display_language),
+                    &mut self.width,
+                    "px",
+                );
+                if self.first_frame {
+                    width.request_focus();
+                    self.first_frame = false;
+                }
+                let width = self.reveal_focus(width);
+                if width.changed()
+                    && self.keep_ratio
+                    && let Ok(value) = self.width.parse::<u32>()
+                {
+                    self.height = self.round(f64::from(value) / self.ratio);
+                }
+                ui.end_row();
+                ui.label(Text::HeightPixels.in_language(display_language));
+                let height = text_input(
+                    ui,
+                    Text::HeightInPixels.in_language(display_language),
+                    &mut self.height,
+                    "px",
+                );
+                let height = self.reveal_focus(height);
+                if height.changed()
+                    && self.keep_ratio
+                    && let Ok(value) = self.height.parse::<u32>()
+                {
+                    self.width = self.round(f64::from(value) * self.ratio);
+                }
+                ui.end_row();
+            });
         let ratio = ui
             .checkbox(
                 &mut self.keep_ratio,
@@ -155,30 +164,23 @@ impl ResizeDialog {
         let modal = chrome::modal(context, "resize-image".into(), true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
-                360.0,
                 Text::CommandResizeImage.in_language(display_language),
                 &[
                     Text::ApplyResize.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.label(Text::ImageEditPreview.in_language(display_language));
                     self.controls(ui);
                     let value = self.value();
-                    if let Some(value) = value {
-                        ui.label(formatted::pixel_size(
-                            display_language,
-                            value.size().0,
-                            value.size().1,
-                        ));
-                        ui.label(Text::ResizeFilterPreview.in_language(display_language));
-                    } else {
+                    if value.is_none() {
                         ui.label(Text::ImageResizeLimits.in_language(display_language));
                         if self.frame_count > 1 {
-                            ui.label(formatted::animation_resize_budget(
-                                display_language,
-                                self.frame_count,
-                            ));
+                            ui.label(
+                                towavue_core::localization::formatted::animation_resize_budget(
+                                    display_language,
+                                    self.frame_count,
+                                ),
+                            );
                         }
                     }
                     value
@@ -221,8 +223,21 @@ fn scroll_on_focus(response: egui::Response) -> egui::Response {
     response
 }
 
-pub(super) fn text_input(ui: &mut egui::Ui, label: &str, value: &mut String) -> egui::Response {
-    text_input_rows(ui, label, value, 1, true)
+pub(super) fn text_input(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut String,
+    suffix: &'static str,
+) -> egui::Response {
+    text_input_rows_with_id(
+        ui,
+        ui.make_persistent_id(label),
+        label,
+        value,
+        1,
+        true,
+        suffix,
+    )
 }
 
 pub(super) fn unframed_text_input(
@@ -248,7 +263,15 @@ fn text_input_rows(
     rows: usize,
     framed: bool,
 ) -> egui::Response {
-    text_input_rows_with_id(ui, ui.make_persistent_id(label), label, value, rows, framed)
+    text_input_rows_with_id(
+        ui,
+        ui.make_persistent_id(label),
+        label,
+        value,
+        rows,
+        framed,
+        "",
+    )
 }
 
 pub(super) fn unframed_text_input_with_id(
@@ -257,7 +280,7 @@ pub(super) fn unframed_text_input_with_id(
     label: &str,
     value: &mut String,
 ) -> egui::Response {
-    text_input_rows_with_id(ui, id, label, value, 1, false)
+    text_input_rows_with_id(ui, id, label, value, 1, false, "")
 }
 
 fn text_input_rows_with_id(
@@ -267,6 +290,7 @@ fn text_input_rows_with_id(
     value: &mut String,
     rows: usize,
     framed: bool,
+    suffix: &'static str,
 ) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
     let mut changed = false;
@@ -288,12 +312,17 @@ fn text_input_rows_with_id(
         });
     }
     let editor = if rows == 1 {
-        egui::TextEdit::singleline(value).vertical_align(egui::Align::Center)
+        egui::TextEdit::singleline(value)
     } else {
         egui::TextEdit::multiline(value)
             .desired_rows(rows)
             .desired_width(f32::INFINITY)
             .char_limit(4097)
+    };
+    let editor = if suffix.is_empty() {
+        editor
+    } else {
+        editor.suffix(suffix)
     };
     let editor = if framed {
         editor
@@ -342,6 +371,41 @@ pub(crate) mod tests {
             let size = egui::vec2(640.0, 600.0);
             let mut dialog = ResizeDialog::new((640, 480), 1);
             let output = ui::settle(&context, size, |context| dialog.show(context));
+            let width = assert_unit_input(
+                &output,
+                Text::WidthInPixels.in_language(Language::Japanese),
+                "px",
+                120.0,
+                density,
+            );
+            let height = assert_unit_input(
+                &output,
+                Text::HeightInPixels.in_language(Language::Japanese),
+                "px",
+                120.0,
+                density,
+            );
+            assert_eq!(width.left(), height.left());
+            assert!((height.top() - width.bottom() - 4.0).abs() <= 1.0 / density);
+            for (label, input) in [(Text::WidthPixels, width), (Text::HeightPixels, height)] {
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text)
+                            if text.galley.text() == label.in_language(Language::Japanese) =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("dimension label");
+                assert!(text.pos.x + text.galley.size().x < input.left());
+                assert!(
+                    (text.pos.y + text.galley.size().y * 0.5 - input.center().y).abs()
+                        <= 1.0 / density
+                );
+            }
             ui::frame(
                 &context,
                 size,
@@ -370,6 +434,54 @@ pub(crate) mod tests {
             assert_eq!(actions.len(), 1);
             assert_eq!(actions[0].expect("resize").size(), (320, 240));
         }
+    }
+
+    pub(crate) fn assert_unit_input(
+        output: &egui::FullOutput,
+        label: &str,
+        unit: &str,
+        width: f32,
+        density: f32,
+    ) -> egui::Rect {
+        let node = &output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .expect(label)
+            .1;
+        let bounds = node.bounds().expect("input bounds");
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+        );
+        assert!(
+            (rect.width() - width).abs() <= 1.0 / density,
+            "{label}: {rect:?}"
+        );
+        assert!((rect.height() - 26.0).abs() <= 1.0 / density);
+        assert!(
+            !node.value().expect("numeric value").contains(unit),
+            "unit is not editable data"
+        );
+        let unit_rect = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == unit => {
+                    let painted = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    rect.expand(1.0 / density)
+                        .contains_rect(painted)
+                        .then_some(painted)
+                }
+                _ => None,
+            })
+            .expect("unit painted inside input");
+        assert!((unit_rect.center().y - rect.center().y).abs() <= 1.0 / density);
+        rect
     }
 
     pub(crate) fn assert_centered_input(
@@ -434,7 +546,7 @@ pub(crate) mod tests {
                     let mut frame = || {
                         context.run_ui(egui::RawInput::default(), |ui| {
                             let response = ui.add_sized([240.0, height], |ui: &mut egui::Ui| {
-                                text_input(ui, "Placeholder", &mut value)
+                                text_input(ui, "Placeholder", &mut value, "")
                             });
                             rect = response.rect;
                             response.request_focus();
@@ -671,7 +783,11 @@ pub(crate) mod tests {
     #[test]
     fn compact_resize_keyboard_navigation_keeps_focused_controls_visible() {
         for density in [1.0, 1.5, 2.0] {
-            for size in [egui::vec2(480.0, 180.0), egui::vec2(320.0, 240.0)] {
+            for size in [
+                egui::vec2(480.0, 140.0),
+                egui::vec2(480.0, 180.0),
+                egui::vec2(320.0, 240.0),
+            ] {
                 let mut dialog = ResizeDialog::new((600, 800), 1);
                 keyboard_focus_stays_visible(density, size, |context| {
                     dialog.show(context).is_none()
@@ -826,9 +942,9 @@ pub(crate) mod tests {
                 "arrows must reach {label}: {arrow_seen:?}"
             );
         }
-        // The taller image dialog can fit without scrolling; use the short
-        // viewport to require actual wheel movement in both dialog variants.
-        if size.y > 180.0 {
+        // Compact dimension rows now fit at 180 points. The smaller case still
+        // requires scrolling and must preserve manual scroll with unchanged focus.
+        if size.y > 140.0 {
             return;
         }
         let tree = frame(vec![]);

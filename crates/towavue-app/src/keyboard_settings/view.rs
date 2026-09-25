@@ -408,7 +408,6 @@ impl KeyboardSettings {
         chrome::modal(context, egui::Id::new("keyboard-edit"), false).show(context, |ui| {
             chrome::modal_body(
                 ui,
-                400.0,
                 Text::KeyboardShortcut.in_language(display_language),
                 &[],
                 |ui| {

@@ -1,7 +1,6 @@
 use crate::localization::{Language, Text, language};
 use crate::*;
 use towavue_core::VideoResize;
-use towavue_core::localization::formatted;
 
 pub(super) struct VideoResizeDialog {
     token: u64,
@@ -39,35 +38,17 @@ impl VideoResizeDialog {
         let modal = chrome::modal(context, id, true).show(context, |ui| {
             let value = chrome::modal_body(
                 ui,
-                360.0,
                 Text::CommandResizeVideo.in_language(display_language),
                 &[
                     Text::ApplyResize.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.label(Text::VideoEditPreview.in_language(display_language));
                     self.inputs.controls(ui);
                     let value = self.value_in(display_language);
-                    match &value {
-                        Ok(value) => {
-                            ui.label(formatted::video_resize_size(
-                                display_language,
-                                value.size().0,
-                                value.size().1,
-                                f64::from(value.size().0) / f64::from(value.size().1),
-                                if value.is_identity() {
-                                    Text::NoEditSuffix.in_language(display_language)
-                                } else {
-                                    ""
-                                },
-                            ));
-                        }
-                        Err(error) => {
-                            ui.label(error);
-                        }
+                    if let Err(error) = &value {
+                        ui.label(error);
                     }
-                    ui.label(Text::VideoResizePreview.in_language(display_language));
                     value
                 },
             );

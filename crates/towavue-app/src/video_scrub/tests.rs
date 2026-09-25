@@ -270,18 +270,22 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                     actions.as_slice(),
                     [UiAction::CommitVideoScrub(_)]
                 ));
-                let handle_x = |output: &egui::FullOutput| {
+                let handle_progress = |output: &egui::FullOutput| {
                     output
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Circle(circle) => Some(circle.center.x),
+                            egui::Shape::Circle(circle) => Some(
+                                (circle.center.x - bar.left() - circle.radius)
+                                    / (bar.width() - 2.0 * circle.radius),
+                            ),
                             _ => None,
                         })
                         .expect("compact seek handle")
                 };
                 assert!(
-                    (handle_x(&output) - handle_target).abs() < 0.001,
+                    (handle_progress(&output) - seekbar::compact_ratio(bar, handle_target)).abs()
+                        < 0.00001,
                     "release paint stays at the target, not the old clock or later pointer"
                 );
                 assert!(
@@ -312,7 +316,8 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
                 let (actions, output) = frame(app, vec![], false);
                 assert!(actions.is_empty());
                 assert!(
-                    (handle_x(&output) - handle_target).abs() < 0.001,
+                    (handle_progress(&output) - seekbar::compact_ratio(bar, handle_target)).abs()
+                        < 0.00001,
                     "committed transport takes over without a backward jump"
                 );
                 assert!(

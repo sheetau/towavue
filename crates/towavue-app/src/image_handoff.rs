@@ -21,9 +21,9 @@ impl ImageHandoff {
         )
     }
 
-    pub fn draw(&self, ui: &mut egui::Ui) {
+    pub fn draw(&self, ui: &mut egui::Ui, show_bars: bool) {
         if let Some(reading) = &self.reading {
-            reading.draw(ui, self.view);
+            reading.draw(ui, self.view, show_bars);
             return;
         }
         ImageEditView {
@@ -32,7 +32,7 @@ impl ImageHandoff {
             rotation_tenths: 0,
             resized_size: None,
         }
-        .draw(ui, self.image.texture.id());
+        .draw(ui, self.image.texture.id(), show_bars);
     }
 }
 
@@ -55,7 +55,7 @@ impl ImageEditView {
         self
     }
 
-    pub fn draw(self, ui: &mut egui::Ui, texture: egui::TextureId) {
+    pub fn draw(self, ui: &mut egui::Ui, texture: egui::TextureId, show_bars: bool) {
         let viewport = ui.max_rect();
         let density = ui.ctx().pixels_per_point();
         let mut view = self.view;
@@ -77,7 +77,9 @@ impl ImageEditView {
             return;
         }
         painter.add(transformed_image_mesh(texture, rect, self.transform));
-        image_scroll::held_bars(ui, viewport, displayed, view);
+        if show_bars {
+            image_scroll::held_bars(ui, viewport, displayed, view);
+        }
         if let Some(selection) = view.selection {
             paint_selection(&painter, rect, selection);
         }

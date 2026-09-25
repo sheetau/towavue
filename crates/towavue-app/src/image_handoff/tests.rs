@@ -947,3 +947,82 @@ fn handoff_does_not_survive_failure_departure_or_last_tab_close() {
         assert!(context.tex_manager().read().meta(old).is_none());
     }
 }
+
+#[test]
+fn fullscreen_hides_live_and_pending_image_bars_and_releases_their_surface() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "image_handoff::tests::fullscreen_hides_live_and_pending_image_bars_and_releases_their_surface",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for reading in [false, true] {
+            for pending in 0..3 {
+                if reading && pending == 2 {
+                    continue;
+                }
+                let (mut app, context, _) = fixture(&root);
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                app.image_view.zoom = ZoomMode::Custom(10.0);
+                app.reading_mode = reading;
+                if reading {
+                    app.reading_pages
+                        .push(Ok(app.image.as_ref().expect("source").clone()));
+                }
+                let history = app.edits.clone();
+                let pixels = app.image.as_ref().expect("image").decoded.clone();
+                let texture = app.image.as_ref().expect("image").texture.id();
+                if pending == 1 {
+                    app.image_handoff = app.take_navigation_handoff(MediaKind::Image);
+                    assert!(app.image_handoff.is_some());
+                    app.image_loading = true;
+                } else if pending == 2 {
+                    let held = app.capture_image_edit_view().expect("pending edit view");
+                    app.image.as_mut().expect("image").held_edit_view = Some(held);
+                    app.image_edit_pending = true;
+                }
+                for fullscreen in [false, true, false] {
+                    app.fullscreen = fullscreen;
+                    for _ in 0..3 {
+                        frame(&mut app, &context);
+                    }
+                    let output = frame(&mut app, &context);
+                    let count = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes
+                        .iter()
+                        .filter(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                        .count();
+                    assert_eq!(
+                        count,
+                        if fullscreen { 0 } else { 2 },
+                        "density={density}, reading={reading}, pending={pending}"
+                    );
+                    let viewport =
+                        egui::Rect::from_min_size(egui::pos2(0.0, 30.0), egui::vec2(640.0, 420.0));
+                    let surface =
+                        app.image_scroll_surface(viewport, egui::vec2(1600.0, 900.0), 5.0);
+                    if fullscreen {
+                        assert_eq!(surface, viewport);
+                    } else {
+                        assert!(
+                            surface.right() < viewport.right()
+                                && surface.bottom() < viewport.bottom()
+                        );
+                    }
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)), "original pixels remain visible");
+                    assert!(output.textures_delta.set.is_empty());
+                    assert_eq!(app.edits, history);
+                    assert!(Arc::ptr_eq(
+                        &app.image.as_ref().expect("image").decoded,
+                        &pixels
+                    ));
+                }
+            }
+        }
+    }
+}

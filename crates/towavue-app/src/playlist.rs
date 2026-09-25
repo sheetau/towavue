@@ -84,7 +84,14 @@ impl Playlist {
         current: Option<&Path>,
         allow_wheel: bool,
     ) -> Option<PathBuf> {
-        self.show_with_menu(ui, snapshot, current, allow_wheel, (None, &mut Vec::new()))
+        self.show_with_menu(
+            ui,
+            snapshot,
+            current,
+            allow_wheel,
+            true,
+            (None, &mut Vec::new()),
+        )
     }
 
     pub fn show_with_menu(
@@ -93,6 +100,7 @@ impl Playlist {
         snapshot: Option<&FolderSnapshot>,
         current: Option<&Path>,
         allow_wheel: bool,
+        show_scrollbar: bool,
         menu: (
             Option<crate::thumbnail_menu::Owner>,
             &mut Vec<crate::UiAction>,
@@ -186,6 +194,11 @@ impl Playlist {
             bar.min.y = (bar.top() + 8.0).min(bar.bottom());
             bar.max.y = (bar.bottom() - 8.0).max(bar.top());
             let mut scroll = egui::ScrollArea::vertical()
+                .scroll_bar_visibility(if show_scrollbar {
+                    egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+                } else {
+                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                })
                 .scroll_bar_rect(bar)
                 .id_salt("audio_playlist")
                 .vertical_scroll_offset(self.scroll_offset)
@@ -348,6 +361,84 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
     use super::*;
+
+    #[test]
+    fn hidden_playlist_scrollbar_preserves_wheel_navigation_and_returns_when_shown() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.set_pixels_per_point(density);
+            let snapshot = snapshot(100);
+            let mut playlist = Playlist::default();
+            let mut time = 0.0;
+            let mut frame = |playlist: &mut Playlist, show_bar, events| {
+                time += 0.02;
+                context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 240.0))),
+                        time: Some(time),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        assert!(
+                            playlist
+                                .show_with_menu(
+                                    ui,
+                                    Some(&snapshot),
+                                    Some(&snapshot.items[0].path),
+                                    true,
+                                    show_bar,
+                                    (None, &mut Vec::new())
+                                )
+                                .is_none()
+                        );
+                    },
+                )
+            };
+            for _ in 0..3 {
+                frame(&mut playlist, false, vec![]);
+            }
+            let output = frame(
+                &mut playlist,
+                false,
+                vec![
+                    egui::Event::PointerMoved(egui::pos2(240.0, 120.0)),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -80.0),
+                        phase: egui::TouchPhase::Move,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+            let count = |output: &egui::FullOutput| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                    .count()
+            };
+            assert_eq!(count(&output), 0);
+            for _ in 0..30 {
+                assert_eq!(count(&frame(&mut playlist, false, vec![])), 0);
+            }
+            let offset = playlist.scroll_offset;
+            assert!(offset > 0.0, "hidden bars do not disable list scrolling");
+            for _ in 0..3 {
+                frame(&mut playlist, true, vec![]);
+            }
+            assert_eq!(count(&frame(&mut playlist, true, vec![])), 1);
+            assert!(
+                (playlist.scroll_offset - offset).abs() < 0.1,
+                "showing the bar preserves position"
+            );
+        }
+    }
 
     #[test]
     fn pointer_rows_and_scrollbar_return_shortcuts_to_media_without_removing_explicit_focus() {

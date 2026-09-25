@@ -12,7 +12,7 @@ pub(super) struct ReadingHandoff {
 }
 
 impl ReadingHandoff {
-    pub fn draw(&self, ui: &mut egui::Ui, mut view: ImageViewState) {
+    pub fn draw(&self, ui: &mut egui::Ui, mut view: ImageViewState, show_bars: bool) {
         let viewport = ui.max_rect();
         let scale = scale(
             view,
@@ -36,7 +36,9 @@ impl ReadingHandoff {
                 Color32::WHITE,
             );
         }
-        image_scroll::held_bars(ui, viewport, displayed, view);
+        if show_bars {
+            image_scroll::held_bars(ui, viewport, displayed, view);
+        }
     }
 }
 
@@ -254,7 +256,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             for (pointer, event) in wheel_input::image_events(ui.ctx(), &response) {
                 match event {
                     wheel_input::ViewWheel::Zoom(factor) => {
-                        let surface = image_scroll::surface(
+                        let surface = self.image_scroll_surface(
                             viewport,
                             displayed,
                             ui.spacing().scroll.bar_width,
@@ -292,7 +294,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         }
         response.interact_rect =
-            image_scroll::surface(viewport, displayed, ui.spacing().scroll.bar_width);
+            self.image_scroll_surface(viewport, displayed, ui.spacing().scroll.bar_width);
         if displayed.x > viewport.width() || displayed.y > viewport.height() {
             self.update_pan(&response, ui.input(|input| input.pointer.hover_pos()));
             if matches!(self.view_drag, Some(ViewDrag::Pan { .. })) {
@@ -308,7 +310,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .map(|_| painter.add(egui::Shape::Noop))
             .collect();
         let enabled = self.view_wheel_allowed(ui.ctx()) && self.view_drag.is_none();
-        if image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled) {
+        if !self.fullscreen
+            && image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled)
+        {
             self.forget_pointer_selection_focus(ui.ctx());
         }
         let spread = egui::Rect::from_center_size(
@@ -372,10 +376,20 @@ fn zoom(
 ) {
     let current = scale(*view, extent, viewport, density) * density;
     let fitted = scale(ImageViewState::default(), extent, viewport, density) * density;
+    let covered = scale(
+        ImageViewState {
+            zoom: ZoomMode::Cover,
+            ..Default::default()
+        },
+        extent,
+        viewport,
+        density,
+    ) * density;
     view.zoom_by_from_scale(
         factor,
         (extent.x.ceil() as u32, extent.y.ceil() as u32),
         current,
         fitted,
+        covered,
     );
 }

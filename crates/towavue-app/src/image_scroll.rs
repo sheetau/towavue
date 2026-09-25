@@ -4,7 +4,21 @@ use crate::*;
 mod tests;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    /// Match the rendered scrollbar axes, including the joined reading extent.
+    pub(super) fn image_scroll_surface(
+        &self,
+        viewport: egui::Rect,
+        displayed: egui::Vec2,
+        bar_width: f32,
+    ) -> egui::Rect {
+        if self.fullscreen {
+            viewport
+        } else {
+            surface(viewport, displayed, bar_width)
+        }
+    }
+
+    /// Match overflowing axes, including the joined reading extent, even when
+    /// fullscreen hides their scrollbars.
     /// An overflowing axis retains ownership at its ends; it must never turn a
     /// held pan key into a file/page change merely because its offset is clamped.
     pub(super) fn image_arrow_pan(&self, stroke: &KeyStroke) -> Option<(egui::Vec2, egui::Vec2)> {

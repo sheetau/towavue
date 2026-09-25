@@ -235,26 +235,49 @@ fn reading_zoom_pan_and_actual_size_preserve_joined_pages_and_read_only_state() 
     }
 }
 #[test]
-fn reading_zoom_stops_at_exact_fractional_fit_then_continues() {
+fn reading_zoom_stops_at_exact_fractional_fit_and_cover_then_continues() {
     for density in [1.0, 1.25, 1.5, 2.0] {
         for extent in [egui::vec2(1234.375, 721.625), egui::vec2(83.125, 19_123.75)] {
             let viewport = egui::vec2(681.25, 432.75);
             let fitted = scale(ImageViewState::default(), extent, viewport, density);
-            for (start, factor) in [(0.9, 1.25), (1.1, 0.8), (0.8, 1.225), (1.2, 0.85)] {
-                let mut view = ImageViewState {
-                    zoom: ZoomMode::Custom(fitted * density * start),
+            let covered = scale(
+                ImageViewState {
+                    zoom: ZoomMode::Cover,
                     ..Default::default()
-                };
-                zoom(&mut view, factor, extent, viewport, density);
-                assert_eq!(view.zoom, ZoomMode::Fit);
-                assert_eq!(scale(view, extent, viewport, density), fitted);
-                let displayed = extent * scale(view, extent, viewport, density);
-                assert!(displayed.x <= viewport.x && displayed.y <= viewport.y);
-                zoom(&mut view, factor, extent, viewport, density);
-                assert!(matches!(view.zoom, ZoomMode::Custom(_)));
-                assert!(
-                    (scale(view, extent, viewport, density) - fitted * factor).abs() < 0.000001
-                );
+                },
+                extent,
+                viewport,
+                density,
+            );
+            for (stop, mode) in [(fitted, ZoomMode::Fit), (covered, ZoomMode::Cover)] {
+                for (direction, factor) in [(-1.0, 1.25), (1.0, 0.8)] {
+                    let between = (mode == ZoomMode::Fit && direction > 0.0)
+                        || (mode == ZoomMode::Cover && direction < 0.0);
+                    let distance = if between {
+                        (stop * 0.1).min((covered - fitted) * 0.4)
+                    } else {
+                        stop * 0.1
+                    };
+                    let mut view = ImageViewState {
+                        zoom: ZoomMode::Custom((stop + direction * distance) * density),
+                        ..Default::default()
+                    };
+                    zoom(&mut view, factor, extent, viewport, density);
+                    assert_eq!(view.zoom, mode);
+                    assert_eq!(scale(view, extent, viewport, density), stop);
+                    let displayed = extent * scale(view, extent, viewport, density);
+                    if mode == ZoomMode::Fit {
+                        assert!(displayed.x <= viewport.x && displayed.y <= viewport.y);
+                    } else {
+                        assert!(
+                            displayed.x + 0.0001 >= viewport.x
+                                && displayed.y + 0.0001 >= viewport.y
+                        );
+                    }
+                    zoom(&mut view, factor, extent, viewport, density);
+                    assert_ne!(view.zoom, mode, "next input leaves the stop");
+                    assert_eq!(scale(view, extent, viewport, density) > stop, factor > 1.0);
+                }
             }
         }
     }

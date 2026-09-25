@@ -4375,7 +4375,7 @@ where
 
     fn draw_image(&mut self, ui: &mut egui::Ui) {
         if let Some(held) = &self.image_handoff {
-            held.draw(ui);
+            held.draw(ui, !self.fullscreen);
             return;
         }
         self.cancel_stale_rotation_drag();
@@ -4385,7 +4385,7 @@ where
             if let Some(image) = &self.image
                 && let Some(held) = image.held_edit_view
             {
-                held.draw(ui, image.texture.id());
+                held.draw(ui, image.texture.id(), !self.fullscreen);
             }
             return;
         }
@@ -4430,7 +4430,7 @@ where
         };
         let texture = image.texture.id();
         if let Some(preview) = self.image_modal_preview() {
-            preview.draw(ui, texture);
+            preview.draw(ui, texture, !self.fullscreen);
             return;
         }
         let transform = self.visual_transform(image.dimensions());
@@ -4453,7 +4453,7 @@ where
             ui.id().with("image-surface"),
             egui::Sense::click_and_drag(),
         );
-        response.interact_rect = image_scroll::surface(
+        response.interact_rect = self.image_scroll_surface(
             viewport,
             egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
             ui.spacing().scroll.bar_width,
@@ -4484,7 +4484,7 @@ where
             for (pointer, event) in wheel_input::image_events(ui.ctx(), &wheel_response) {
                 match event {
                     wheel_input::ViewWheel::Zoom(zoom) => {
-                        let surface = image_scroll::surface(
+                        let surface = self.image_scroll_surface(
                             viewport,
                             egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
                             ui.spacing().scroll.bar_width,
@@ -4527,7 +4527,7 @@ where
         }
         let displayed = egui::vec2(transform.size.0 * scale, transform.size.1 * scale);
         response.interact_rect =
-            image_scroll::surface(viewport, displayed, ui.spacing().scroll.bar_width);
+            self.image_scroll_surface(viewport, displayed, ui.spacing().scroll.bar_width);
         let selection_moved = self.move_visual_selection(
             &response,
             egui::Rect::from_center_size(
@@ -4564,7 +4564,9 @@ where
         let painter = ui.painter_at(viewport);
         // Compute bar input first, but keep the updated image behind the bars.
         let image_shape = painter.add(egui::Shape::Noop);
-        if image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled) {
+        if !self.fullscreen
+            && image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled)
+        {
             self.forget_pointer_selection_focus(ui.ctx());
         }
         let center = viewport.center() + egui::vec2(self.image_view.pan.0, self.image_view.pan.1);
@@ -6139,34 +6141,13 @@ where
         volume_targets: &mut Vec<egui::Response>,
     ) {
         let screen = context.content_rect();
-        let over_image_bars = self.fullscreen
-            && self.media_kind == Some(MediaKind::Image)
-            && self.image.as_ref().is_some_and(|image| {
-                let transform = self.visual_transform(image.dimensions());
-                let size = (transform.size.0 as u32, transform.size.1 as u32);
-                let density = context.pixels_per_point();
-                let scale = self
-                    .image_view
-                    .logical_scale(size, screen.size().into(), density);
-                let surface = image_scroll::surface(
-                    screen,
-                    egui::vec2(transform.size.0 * scale, transform.size.1 * scale),
-                    context.global_style().spacing.scroll.bar_width,
-                );
-                context.input(|input| {
-                    input.pointer.hover_pos().is_some_and(|pointer| {
-                        screen.contains(pointer) && !surface.contains(pointer)
-                    })
-                })
-            });
         let eligible = self.fullscreen
             && !self.modal_input_blocked()
             && !self.palette_open
             && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(context)
-            && self.view_drag.is_none()
-            && !over_image_bars;
+            && self.view_drag.is_none();
         let controls_have_focus = || {
             context
                 .memory(egui::Memory::focused)
@@ -7180,6 +7161,7 @@ where
             self.folder_snapshot.as_ref(),
             self.path.as_deref(),
             enabled,
+            !self.fullscreen,
             (owner, actions),
         ) {
             actions.push(UiAction::OpenMedia(path, false));
@@ -17164,37 +17146,47 @@ mod tests {
                     );
                 }
                 app.modifiers = ModifiersState::empty();
-                for (start, delta) in [(0.9, 100.0), (1.1, -100.0), (0.9, 18.0), (1.1, -18.0)] {
-                    app.image_view.zoom = ZoomMode::Custom(2.0 * start);
-                    render(&mut app, density);
-                    for stop in [true, false] {
-                        let mut input = egui::RawInput {
-                            screen_rect: Some(egui::Rect::from_min_size(
-                                egui::Pos2::ZERO,
-                                egui::vec2(800.0, 600.0) / density,
-                            )),
-                            events: vec![
-                                egui::Event::PointerMoved(egui::pos2(400.0, 300.0) / density),
-                                egui::Event::MouseWheel {
-                                    unit: egui::MouseWheelUnit::Point,
-                                    delta: egui::vec2(0.0, delta),
-                                    phase: egui::TouchPhase::Move,
-                                    modifiers: egui::Modifiers::CTRL,
-                                },
-                            ],
-                            ..Default::default()
-                        };
-                        input
-                            .viewports
-                            .get_mut(&egui::ViewportId::ROOT)
-                            .expect("viewport")
-                            .native_pixels_per_point = Some(density);
-                        let _ = context.run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()));
-                        if stop {
-                            assert_eq!(app.image_view.zoom, ZoomMode::Fit);
-                            assert!((render(&mut app, density) - fitted).length() < 0.1);
-                        } else {
-                            assert!(matches!(app.image_view.zoom, ZoomMode::Custom(_)));
+                for (stop_scale, mode) in [(2.0, ZoomMode::Fit), (3.0, ZoomMode::Cover)] {
+                    for (start, delta) in [(0.9, 100.0), (1.1, -100.0), (0.9, 18.0), (1.1, -18.0)] {
+                        app.image_view.zoom = ZoomMode::Custom(stop_scale * start);
+                        render(&mut app, density);
+                        for stop in [true, false] {
+                            let mut input = egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(800.0, 600.0) / density,
+                                )),
+                                events: vec![
+                                    egui::Event::PointerMoved(egui::pos2(400.0, 300.0) / density),
+                                    egui::Event::MouseWheel {
+                                        unit: egui::MouseWheelUnit::Point,
+                                        delta: egui::vec2(0.0, delta),
+                                        phase: egui::TouchPhase::Move,
+                                        modifiers: egui::Modifiers::CTRL,
+                                    },
+                                ],
+                                ..Default::default()
+                            };
+                            input
+                                .viewports
+                                .get_mut(&egui::ViewportId::ROOT)
+                                .expect("viewport")
+                                .native_pixels_per_point = Some(density);
+                            let _ = context.run_ui(input, |ui| app.draw_ui(ui, &mut Vec::new()));
+                            if stop {
+                                assert_eq!(app.image_view.zoom, mode);
+                                assert!(
+                                    (render(&mut app, density) - fitted * (stop_scale / 2.0))
+                                        .length()
+                                        < 0.1
+                                );
+                            } else {
+                                assert_ne!(app.image_view.zoom, mode);
+                                assert_eq!(
+                                    render(&mut app, density).x > fitted.x * (stop_scale / 2.0),
+                                    delta > 0.0
+                                );
+                            }
                         }
                     }
                 }
@@ -24715,7 +24707,13 @@ mod tests {
                                 _ => None,
                             })
                             .expect("zoomed first page");
-                        assert!((zoomed.width() / bounds[0].width() - 1.25).abs() < 0.001);
+                        let cover_ratio = (viewport.size() / spread.size()).max_elem();
+                        let reaches_cover = cover_ratio > 1.000001 && 1.25 >= cover_ratio * 0.97;
+                        let expected_ratio = if reaches_cover { cover_ratio } else { 1.25 };
+                        assert!(
+                            (zoomed.width() / bounds[0].width() - expected_ratio).abs() < 0.001
+                        );
+                        assert_eq!(app.image_view.zoom == ZoomMode::Cover, reaches_cover);
                         assert!(app.image_view.selection.is_none());
                         app.dispatch(CommandId::FitToWindow);
                         assert!((spread.center() - viewport.center()).length() < 0.01);

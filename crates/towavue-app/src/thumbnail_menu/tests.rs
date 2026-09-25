@@ -211,6 +211,7 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
                                     Some(&listing),
                                     Some(&paths[0]),
                                     true,
+                                    true,
                                     (Some(active_owner), &mut actions)
                                 )
                                 .is_none(),

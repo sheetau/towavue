@@ -131,6 +131,11 @@ impl ImageViewState {
             image_size,
             self.scale(image_size, viewport_size),
             fit_scale(image_size, viewport_size),
+            Self {
+                zoom: ZoomMode::Cover,
+                ..*self
+            }
+            .scale(image_size, viewport_size),
         );
     }
 
@@ -142,20 +147,29 @@ impl ImageViewState {
         image_size: (u32, u32),
         current: f32,
         fitted: f32,
+        covered: f32,
     ) {
         let next = (current * factor).clamp(minimum_zoom(image_size), 64.0);
-        // Absorb a nearly-Fit stop into this input, but never stick when leaving Fit.
-        let approaches =
-            (current < fitted && next > current) || (current > fitted && next < current);
-        let near_fit = approaches && (next - fitted).abs() <= fitted * 0.03;
-        self.zoom = if near_fit
-            || (current < fitted && next >= fitted)
-            || (current > fitted && next <= fitted)
-        {
-            ZoomMode::Fit
-        } else {
-            ZoomMode::Custom(next)
-        };
+        // Stop at the first approached viewport scale. Treat rounding-equivalent
+        // Fit/Cover scales as one stop and never stick when leaving either one.
+        let tolerance = fitted.abs().max(covered.abs()) * f32::EPSILON * 4.0;
+        self.zoom = [(fitted, ZoomMode::Fit), (covered, ZoomMode::Cover)]
+            .into_iter()
+            .filter(|(stop, mode)| {
+                if (current - stop).abs() <= stop.abs() * f32::EPSILON * 4.0
+                    || (*mode == ZoomMode::Cover && (covered - fitted).abs() <= tolerance)
+                {
+                    return false;
+                }
+                let approaches =
+                    (current < *stop && next > current) || (current > *stop && next < current);
+                approaches
+                    && ((next - stop).abs() <= stop * 0.03
+                        || (current < *stop && next >= *stop)
+                        || (current > *stop && next <= *stop))
+            })
+            .min_by(|(a, _), (b, _)| (current - a).abs().total_cmp(&(current - b).abs()))
+            .map_or(ZoomMode::Custom(next), |(_, mode)| mode);
     }
 
     /// Returns logical display units per image pixel; density is positive physical
@@ -383,53 +397,120 @@ mod tests {
     }
 
     #[test]
-    fn relative_zoom_stops_at_fit_then_continues_in_both_directions() {
+    fn relative_zoom_stops_at_fit_and_cover_then_continues_in_both_directions() {
         for size in [(400, 200), (512, 16_384)] {
-            for viewport in [(400.0, 200.0), (801.0, 603.0), (464.0, 222.0)] {
+            for viewport in [(400.0, 200.0), (801.0, 603.0)] {
                 let fitted = fit_scale(size, viewport);
-                for (start, factor) in [(0.9, 1.25), (1.1, 0.8)] {
-                    let mut view = ImageViewState {
-                        zoom: ZoomMode::Custom(fitted * start),
-                        pan: (3.0, -4.0),
-                        selection: Some(UnitRect::FULL),
-                    };
-                    view.zoom_by(factor, size, viewport);
-                    assert_eq!(view.zoom, ZoomMode::Fit);
-                    assert_eq!(view.pan, (3.0, -4.0));
-                    assert_eq!(view.selection, Some(UnitRect::FULL));
-                    view.zoom_by(factor, size, viewport);
-                    assert_eq!(view.zoom, ZoomMode::Custom(fitted * factor));
+                let covered = ImageViewState {
+                    zoom: ZoomMode::Cover,
+                    ..Default::default()
+                }
+                .scale(size, viewport);
+                for (stop, mode) in [(fitted, ZoomMode::Fit), (covered, ZoomMode::Cover)] {
+                    if mode == ZoomMode::Cover && covered == fitted {
+                        continue;
+                    }
+                    for (start, factor) in [(0.9, 1.25), (1.1, 0.8)] {
+                        let mut view = ImageViewState {
+                            zoom: ZoomMode::Custom(stop * start),
+                            pan: (3.0, -4.0),
+                            selection: Some(UnitRect::FULL),
+                        };
+                        view.zoom_by(factor, size, viewport);
+                        assert_eq!(view.zoom, mode);
+                        assert_eq!(view.scale(size, viewport), stop);
+                        assert_eq!(view.pan, (3.0, -4.0));
+                        assert_eq!(view.selection, Some(UnitRect::FULL));
+                        view.zoom_by(factor, size, viewport);
+                        assert_eq!(view.zoom, ZoomMode::Custom(stop * factor));
+                    }
                 }
             }
         }
     }
 
     #[test]
-    fn relative_zoom_snaps_near_fit_only_when_approaching() {
-        for fitted in [0.013, 0.5, 1.0, 2.375, 32.0] {
-            for (start, next, snaps) in [
-                (0.8, 0.98, true),
-                (1.2, 1.02, true),
-                (0.8, 0.969, false),
-                (1.2, 1.031, false),
-                (0.99, 0.98, false),
-                (1.01, 1.02, false),
-                (0.99, 0.99, false),
-                (1.0, 1.01, false),
-                (1.0, 0.99, false),
-            ] {
-                let mut view = ImageViewState {
-                    zoom: ZoomMode::Custom(fitted * start),
-                    ..Default::default()
-                };
-                view.zoom_by_from_scale(next / start, (512, 16_384), fitted * start, fitted);
-                assert_eq!(view.zoom == ZoomMode::Fit, snaps, "{fitted} {start} {next}");
-                if snaps {
-                    view.zoom_by_from_scale(next / start, (512, 16_384), fitted, fitted);
-                    assert!(
-                        matches!(view.zoom, ZoomMode::Custom(_)),
-                        "leave Fit immediately"
+    fn zoom_visits_nearest_stops_and_deduplicates_equal_fit_and_cover() {
+        let size = (400, 200);
+        let mut view = ImageViewState {
+            zoom: ZoomMode::Custom(0.5),
+            ..Default::default()
+        };
+        for mode in [ZoomMode::Fit, ZoomMode::Cover] {
+            view.zoom_by(4.0, size, (464.0, 222.0));
+            assert_eq!(view.zoom, mode);
+        }
+        view.zoom_by(4.0, size, (464.0, 222.0));
+        assert!(matches!(view.zoom, ZoomMode::Custom(_)));
+        for mode in [ZoomMode::Cover, ZoomMode::Fit] {
+            view.zoom_by(0.1, size, (464.0, 222.0));
+            assert_eq!(view.zoom, mode);
+        }
+        view.zoom_by(0.1, size, (464.0, 222.0));
+        assert!(matches!(view.zoom, ZoomMode::Custom(_)));
+        for viewport in [(400.0, 200.0), (823.625, 411.8125)] {
+            view.zoom = ZoomMode::Custom(0.5);
+            view.zoom_by(4.0, size, viewport);
+            assert_eq!(view.zoom, ZoomMode::Fit);
+            view.zoom_by(1.25, size, viewport);
+            assert!(matches!(view.zoom, ZoomMode::Custom(_)));
+            view.cover();
+            view.zoom_by(0.8, size, viewport);
+            assert!(
+                matches!(view.zoom, ZoomMode::Custom(_)),
+                "equivalent Cover must not stick at Fit"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_zoom_snaps_near_viewport_stops_only_when_approaching() {
+        for mode in [ZoomMode::Fit, ZoomMode::Cover] {
+            for fitted in [0.013, 0.5, 1.0, 2.375, 32.0] {
+                for (start, next, snaps) in [
+                    (0.8, 0.98, true),
+                    (1.2, 1.02, true),
+                    (0.8, 0.969, false),
+                    (1.2, 1.031, false),
+                    (0.99, 0.98, false),
+                    (1.01, 1.02, false),
+                    (0.99, 0.99, false),
+                    (1.0, 1.01, false),
+                    (1.0, 0.99, false),
+                ] {
+                    let mut view = ImageViewState {
+                        zoom: ZoomMode::Custom(fitted * start),
+                        ..Default::default()
+                    };
+                    view.zoom_by_from_scale(
+                        next / start,
+                        (512, 16_384),
+                        fitted * start,
+                        if mode == ZoomMode::Fit {
+                            fitted
+                        } else {
+                            fitted * 0.25
+                        },
+                        fitted,
                     );
+                    assert_eq!(view.zoom == mode, snaps, "{fitted} {start} {next}");
+                    if snaps {
+                        view.zoom_by_from_scale(
+                            next / start,
+                            (512, 16_384),
+                            fitted,
+                            if mode == ZoomMode::Fit {
+                                fitted
+                            } else {
+                                fitted * 0.25
+                            },
+                            fitted,
+                        );
+                        assert!(
+                            matches!(view.zoom, ZoomMode::Custom(_)),
+                            "leave the viewport stop immediately"
+                        );
+                    }
                 }
             }
         }
@@ -453,7 +534,11 @@ mod tests {
         view.zoom_by(f32::MAX, size, viewport);
         assert_eq!(view.zoom, ZoomMode::Fit);
         view.zoom_by(f32::MAX, size, viewport);
+        assert_eq!(view.zoom, ZoomMode::Cover);
+        view.zoom_by(f32::MAX, size, viewport);
         assert_eq!(view.scale(size, viewport), 64.0);
+        view.zoom_by(0.0, (8, 8), viewport);
+        assert_eq!(view.zoom, ZoomMode::Cover);
         view.zoom_by(0.0, (8, 8), viewport);
         assert_eq!(view.zoom, ZoomMode::Fit);
         view.zoom_by(0.0, (8, 8), viewport);

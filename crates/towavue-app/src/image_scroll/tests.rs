@@ -258,7 +258,7 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
                         .collect::<Vec<_>>()
                 );
                 assert!(
-                    output
+                    !output
                         .platform_output
                         .accesskit_update
                         .as_ref()
@@ -328,7 +328,7 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         .close_gallery(app.tabs.gallery().expect("media-only fixture"));
     app.path = Some(path.clone());
     app.media_kind = Some(MediaKind::Image);
-    app.fullscreen = true;
+    app.fullscreen = false;
     app.ui_context = Some(context.clone());
     app.image = Some(
         ImagePresentation::from_decoded(
@@ -448,7 +448,7 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
                 .all(|bar| (bar.width().min(bar.height()) - 5.0).abs() < 0.01),
             "scrollbar hit width follows the shared narrow style"
         );
-        let limit = (egui::vec2(1000.0, 800.0) / density - size) * 0.5;
+        let limit = (egui::vec2(1000.0, 800.0) / density - app.image_viewport) * 0.5;
         frame(&mut app, vec![button(start, true)], density, size);
         let output = frame(
             &mut app,
@@ -528,7 +528,10 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         assert_eq!(app.edits, history);
         assert!(output.textures_delta.set.is_empty());
         assert_eq!(app.image.as_ref().expect("image").texture.id(), texture);
-        assert!(!app.fullscreen_controls_visible, "bars own the bottom edge");
+        assert!(
+            !app.fullscreen_controls_visible,
+            "windowed bars do not open fullscreen controls"
+        );
         for bar in bars(&output) {
             let axis = usize::from(bar.width() < bar.height());
             let center = egui::pos2(
@@ -641,7 +644,7 @@ fn image_pan_wheel_and_bars_share_bounded_offsets_without_editing_pixels() {
         );
         assert_eq!(app.image_view.pan.0, 0.0);
         assert!(
-            (app.image_view.pan.1 + (800.0 / density - 300.0) * 0.5).abs() < 0.01,
+            (app.image_view.pan.1 + (800.0 / density - app.image_viewport.y) * 0.5).abs() < 0.01,
             "resize limit: density={density}, pan={:?}, viewport={:?}",
             app.image_view.pan,
             app.image_viewport

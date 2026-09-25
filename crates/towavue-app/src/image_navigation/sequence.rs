@@ -32,15 +32,29 @@ pub(crate) struct ImageSequence {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(crate) fn repeat_image_shortcut(&mut self, stroke: KeyStroke) {
-        // Repeat only standalone image navigation, never a chord prefix or a
-        // command rebound to the same physical key. Reuse the presentation queue.
-        if self.image_sequence_blocked() || self.filmstrip_open || !self.entered_shortcut.is_empty()
-        {
+        // Resolve standalone bindings before repeating; never consume a chord prefix.
+        if self.image_repeat_blocked() || self.filmstrip_open || !self.entered_shortcut.is_empty() {
+            return;
+        }
+        let resolved = self
+            .shortcuts
+            .resolve(std::slice::from_ref(&stroke), self.command_context());
+        if self.reading_mode {
+            if let ShortcutMatch::Command(
+                command @ (CommandId::PreviousImage
+                | CommandId::NextImage
+                | CommandId::ReadingLeft
+                | CommandId::ReadingRight),
+            ) = resolved
+            {
+                // Reading requests already retain the last complete spread and replace
+                // superseded destinations. No deferred steps remain after key release.
+                self.dispatch(command);
+            }
             return;
         }
         if let ShortcutMatch::Command(command @ (CommandId::PreviousImage | CommandId::NextImage)) =
-            self.shortcuts
-                .resolve(std::slice::from_ref(&stroke), self.command_context())
+            resolved
         {
             self.coalesce_image_repeats(Instant::now());
             if self.image_sequence.awaiting.is_some() {
@@ -62,8 +76,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn image_sequence_blocked(&self) -> bool {
+        self.reading_mode || self.image_repeat_blocked()
+    }
+
+    fn image_repeat_blocked(&self) -> bool {
         self.media_kind != Some(MediaKind::Image)
-            || self.reading_mode
             || self.image_edit_pending
             || self.modal_input_blocked()
             || self.active_export.is_some()

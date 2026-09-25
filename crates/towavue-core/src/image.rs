@@ -290,6 +290,35 @@ impl ReadingSettings {
         start..start.saturating_add(count).min(image_count)
     }
 
+    /// Number of fixed spreads, including a short first or final spread.
+    pub fn spread_count(&self, image_count: usize) -> usize {
+        if image_count == 0 {
+            return 0;
+        }
+        let first = self.spread(0, image_count).end;
+        1 + (image_count - first).div_ceil(self.page_count.clamp(2, 10))
+    }
+
+    pub fn spread_index(&self, image_index: usize, image_count: usize) -> usize {
+        let first = self.spread(0, image_count).end;
+        let index = image_index.min(image_count.saturating_sub(1));
+        if index < first || image_count == 0 {
+            0
+        } else {
+            1 + (index - first) / self.page_count.clamp(2, 10)
+        }
+    }
+
+    /// First image of a spread, clamped to the available sequence.
+    pub fn spread_start(&self, spread_index: usize, image_count: usize) -> usize {
+        let index = spread_index.min(self.spread_count(image_count).saturating_sub(1));
+        if index == 0 {
+            0
+        } else {
+            self.spread(0, image_count).end + (index - 1) * self.page_count.clamp(2, 10)
+        }
+    }
+
     pub fn adjacent_spread(
         &self,
         image_index: usize,
@@ -596,10 +625,13 @@ mod tests {
                     };
                     let mut covered = Vec::new();
                     let mut start = 0;
+                    let mut ordinal = 0;
                     while start < total {
                         let range = settings.spread(start, total);
                         assert_eq!(range.start, start);
+                        assert_eq!(settings.spread_start(ordinal, total), start);
                         for index in range.clone() {
+                            assert_eq!(settings.spread_index(index, total), ordinal);
                             assert_eq!(settings.spread(index, total), range);
                         }
                         covered.extend(range.clone());
@@ -616,7 +648,17 @@ mod tests {
                             assert_eq!(settings.adjacent_spread(start, total, false), None);
                         }
                         start = range.end;
+                        ordinal += 1;
                     }
+                    assert_eq!(settings.spread_count(total), ordinal);
+                    assert_eq!(
+                        settings.spread_index(usize::MAX, total),
+                        ordinal.saturating_sub(1)
+                    );
+                    assert_eq!(
+                        settings.spread_start(usize::MAX, total),
+                        settings.spread(usize::MAX, total).start
+                    );
                     assert_eq!(covered, (0..total).collect::<Vec<_>>());
                     if total == 0 {
                         assert_eq!(settings.spread(usize::MAX, total), 0..0);
@@ -638,6 +680,14 @@ mod tests {
         settings.increase_pages();
         assert_eq!(settings.first_page_count, 3);
         assert_eq!(settings.spread(usize::MAX, usize::MAX).end, usize::MAX);
+        assert_eq!(
+            settings.spread_index(usize::MAX, usize::MAX),
+            settings.spread_count(usize::MAX) - 1
+        );
+        assert_eq!(
+            settings.spread_start(usize::MAX, usize::MAX),
+            settings.spread(usize::MAX, usize::MAX).start
+        );
     }
 
     #[test]

@@ -425,7 +425,7 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
             instance: 1,
             count: 5,
             pages: None,
-            index: 1,
+            index: 3,
             revision: 2,
             reading,
         };
@@ -469,21 +469,22 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
                 _ => None,
             })
             .expect("folder progress fill");
+        let progress = if reading.is_some() { 0.5 } else { 0.75 };
         let expected_left = thumbnail.left()
             + if reversed {
-                thumbnail.width() * 0.75
+                thumbnail.width() * (1.0 - progress)
             } else {
                 0.0
             };
         assert!((fill.left() - expected_left).abs() < 0.01);
-        assert!((fill.width() - thumbnail.width() * 0.25).abs() < 0.01);
+        assert!((fill.width() - thumbnail.width() * progress).abs() < 0.01);
         let tree = output.platform_output.accesskit_update.expect("tree");
         let (node_id, node) = tree
             .nodes
             .iter()
             .find(|(_, node)| node.label() == Some("Preview image position"))
             .expect("image position");
-        assert_eq!(node.numeric_value(), Some(2.0));
+        assert_eq!(node.numeric_value(), Some(4.0));
         assert_eq!(node.min_numeric_value(), Some(1.0));
         assert_eq!(node.max_numeric_value(), Some(5.0));
         let bounds = node.bounds().expect("bounds");
@@ -577,8 +578,8 @@ fn folder_card_pointer_numeric_and_cancel_paths_use_image_indices() {
         }
         for (value, expected) in [
             (1.0, Some(0)),
-            (2.0, None),
-            (4.0, Some(3)),
+            (2.0, Some(1)),
+            (4.0, None),
             (100.0, Some(4)),
         ] {
             let event = egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
@@ -619,8 +620,9 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                     ((120, 160), (200, 20))
                 };
                 write_bitmap(&paths[0], source_size.0, source_size.1, [10, 20, 40, 255]);
+                let destination = if reading { 2 } else { 3 };
                 write_bitmap(
-                    &paths[3],
+                    &paths[destination],
                     destination_size.0,
                     destination_size.1,
                     [10, 20, 130, 255],
@@ -717,7 +719,7 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                 assert!(frame(&mut app, vec![button(true)]).1.is_empty());
                 let (_, actions) = frame(&mut app, vec![button(false)]);
                 assert!(
-                    matches!(actions.as_slice(), [UiAction::PreviewImageSeek(tab, _, source, path)] if *tab == id && source == &paths[0] && path == &paths[3]),
+                    matches!(actions.as_slice(), [UiAction::PreviewImageSeek(tab, _, source, path)] if *tab == id && source == &paths[0] && path == &paths[destination]),
                     "one image navigation action"
                 );
                 assert_eq!(app.tabs.active_id(), foreground);
@@ -730,7 +732,7 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                         .target
                         .current_path()
                         .expect("file-backed tab"),
-                    paths[3]
+                    paths[destination]
                 );
                 let (output, actions) = frame(&mut app, vec![]);
                 assert!(actions.is_empty());
@@ -1012,12 +1014,12 @@ fn unopened_image_card_prepares_order_and_navigates_without_loading_or_activatin
         &app.image.as_ref().expect("unchanged foreground").decoded,
         &pixels
     ));
-    // Hovering must not freeze the defaults a fresh tab would inherit later.
+    // A metadata-only hover must not make a fresh activation inherit reading mode.
     app.reading_mode = true;
     app.reading_settings.page_count = 2;
     app.activate_tab(id);
     wait_image(&mut app);
-    assert!(app.reading_mode);
+    assert!(!app.reading_mode);
     assert_eq!(app.reading_settings.page_count, 2);
     assert_eq!(app.path.as_ref(), Some(&paths[3]));
     assert_eq!(

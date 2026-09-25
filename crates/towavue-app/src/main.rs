@@ -2160,6 +2160,7 @@ where
             // starts closed; an existing destination restores its own state below.
             self.filmstrip_open = false;
             self.filmstrip_return_focus = None;
+            self.reading_mode = false;
         }
         if !self
             .retained_playback
@@ -6808,11 +6809,8 @@ where
                 return;
             };
             let reversed = self.reading_mode && self.reading_settings.reversed;
-            let progress = if images.len() > 1 {
-                index as f32 / (images.len() - 1) as f32
-            } else {
-                0.0
-            };
+            let reading = self.reading_mode.then_some(self.reading_settings);
+            let progress = image_navigation::image_seek_progress(reading, index, images.len());
             let (response, drag) =
                 seekbar::show_directed_drag(context, status, progress, parent, enabled, reversed);
             let commit = drag.released.then_some(drag.position).flatten();
@@ -6830,7 +6828,8 @@ where
                 .or(response.interact_pointer_pos())
                 .or_else(|| media_preview::hover_pos(&response))
             {
-                let target = seekbar::item_index(
+                let target = image_navigation::image_seek_target(
+                    reading,
                     seekbar::directed_ratio(response.rect, pointer.x, reversed),
                     images.len(),
                 );
@@ -6889,7 +6888,8 @@ where
                 commit
                     .or_else(|| live.then_some(drag.position).flatten())
                     .map(|pointer| {
-                        seekbar::item_index(
+                        image_navigation::image_seek_target(
+                            reading,
                             seekbar::directed_ratio(response.rect, pointer.x, reversed),
                             images.len(),
                         )
@@ -18231,7 +18231,10 @@ mod tests {
             loop {
                 let (output, actions) = draw(
                     &mut app,
-                    vec![egui::Event::PointerMoved(egui::pos2(480.0, 548.0))],
+                    vec![egui::Event::PointerMoved(egui::pos2(
+                        if reading { 240.0 } else { 480.0 },
+                        548.0,
+                    ))],
                 );
                 assert!(actions.is_empty());
                 assert_eq!(app.path.as_ref(), Some(&source));
@@ -18248,7 +18251,7 @@ mod tests {
                     .count();
                 if images == if reading { 2 } else { 1 } {
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text().contains(if reading { "1–2 / 3  a-next.png" } else { "2 / 3  a-next.png" }))));
+                        egui::Shape::Text(text) if text.galley.text().contains(if reading { "1–2 / 3  z-current.png" } else { "2 / 3  a-next.png" }))));
                     break;
                 }
                 assert!(
@@ -24141,8 +24144,10 @@ mod tests {
                 }
             }
         };
-        app.reading_mode = true;
         app.load_path(broken.clone(), MediaKind::Image);
+        wait(&mut app);
+        assert!(!app.reading_mode, "a fresh tab starts in ordinary view");
+        app.set_reading_layout(true, app.reading_settings);
         wait(&mut app);
         assert_eq!(app.state, PlaybackState::Faulted);
         assert!(app.image.is_none() && app.image_error.is_some());

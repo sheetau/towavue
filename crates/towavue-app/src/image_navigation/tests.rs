@@ -180,11 +180,20 @@ fn jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_hi
                     )
                     .parse::<CommandId>()
                     .expect("jump command");
-                    let target = if forward {
-                        (current + count).min(names.len() - 1)
+                    let positions: Vec<_> = if reading {
+                        vec![0, 1, 3, 5, 7, 9, 11]
                     } else {
-                        current.saturating_sub(count)
+                        (0..names.len()).collect()
                     };
+                    let ordinal = positions
+                        .iter()
+                        .position(|index| *index == current)
+                        .expect("current group");
+                    let target = positions[if forward {
+                        (ordinal + count).min(positions.len() - 1)
+                    } else {
+                        ordinal.saturating_sub(count)
+                    }];
                     let generation = app.media_generation;
                     app.dispatch(command);
                     if target == current {
@@ -231,7 +240,7 @@ fn jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_hi
         }
         app.resolve_guard(GuardDecision::Cancel);
     }
-    for (key, expected) in [("Ctrl+Space", 5), ("Ctrl+Right", 1), ("Ctrl+0", 10)] {
+    for (key, expected) in [("Ctrl+Space", 9), ("Ctrl+Right", 1), ("Ctrl+0", 11)] {
         app.process_shortcut(key.parse().expect("jump key"));
         assert!(
             matches!(&app.pending_guard,Some(GuardedAction::Navigate(path)) if *path==root.join(names[expected]))
@@ -312,11 +321,11 @@ fn jumps_load_actual_images_keep_the_tab_and_preserve_reading_spreads() {
         wait(&mut app);
         let settings = app.reading_settings;
         for (key, index) in [
-            ("Ctrl+5", 5),
+            ("Ctrl+5", if reading { 9 } else { 5 }),
             ("Ctrl+0", 11),
             ("Ctrl+0", 11),
-            ("Ctrl+Shift+3", 8),
-            ("Ctrl+Backspace", 3),
+            ("Ctrl+Shift+3", if reading { 5 } else { 8 }),
+            ("Ctrl+Backspace", if reading { 0 } else { 3 }),
             ("Ctrl+Shift+0", 0),
             ("Ctrl+Shift+0", 0),
         ] {

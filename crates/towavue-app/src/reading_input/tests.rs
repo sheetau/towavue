@@ -338,6 +338,7 @@ fn reversed_seek_mirrors_paint_hover_drag_and_focused_keys_but_not_numeric_indic
                 app.media_kind = Some(MediaKind::Image);
                 app.reading_mode = reading;
                 app.reading_settings.reversed = reversed;
+                app.reading_settings.first_page_count = 1;
                 let shell_paths = paths.clone();
                 app.folder_snapshot = Some(FolderSnapshot {
                     folder_identity: towavue_core::ShellIdentity::new(vec![]),
@@ -404,10 +405,10 @@ fn reversed_seek_mirrors_paint_hover_drag_and_focused_keys_but_not_numeric_indic
                     .expect("progress fill");
                 if mirror {
                     assert_eq!(fill.right(), 960.0);
-                    assert!((fill.left() - 800.0).abs() < 0.1);
+                    assert!((fill.left() - 640.0).abs() < 0.1);
                 } else {
                     assert_eq!(fill.left(), 0.0);
-                    assert!((fill.right() - 160.0).abs() < 0.1);
+                    assert!((fill.right() - if reading { 320.0 } else { 160.0 }).abs() < 0.1);
                 }
                 let tree = output
                     .platform_output
@@ -428,7 +429,7 @@ fn reversed_seek_mirrors_paint_hover_drag_and_focused_keys_but_not_numeric_indic
                 for _ in 0..12 {
                     frame(&mut app, vec![egui::Event::PointerMoved(point)]);
                 }
-                let target = if mirror { 5 } else { 1 };
+                let target = if mirror { 3 } else { 1 };
                 let (hover, _) = frame(&mut app, vec![]);
                 assert!(hover.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text().contains(&display_name(&paths[target])))),
@@ -442,7 +443,7 @@ fn reversed_seek_mirrors_paint_hover_drag_and_focused_keys_but_not_numeric_indic
                 };
                 frame(&mut app, vec![button(point, true)]);
                 let (_, actions) = frame(&mut app, vec![button(point, false)]);
-                let target = if mirror { 5 } else { 1 };
+                let target = if mirror { 3 } else { 1 };
                 if target != 1 {
                     assert!(
                         matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if path == &paths[target])

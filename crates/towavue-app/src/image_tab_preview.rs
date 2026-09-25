@@ -55,7 +55,7 @@ impl FolderPosition {
         );
         let count = self.count;
         let reversed = self.reading.is_some_and(|settings| settings.reversed);
-        let progress = self.index as f32 / count.saturating_sub(1).max(1) as f32;
+        let progress = image_navigation::image_seek_progress(self.reading, self.index, count);
         ui.add_enabled_ui(count > 1, |ui| {
             let (response, drag) = seekbar::inline_directed(
                 ui,
@@ -81,7 +81,8 @@ impl FolderPosition {
                         .then_some(drag.position)
                         .flatten()
                         .map(|point| {
-                            seekbar::item_index(
+                            image_navigation::image_seek_target(
+                                self.reading,
                                 seekbar::directed_ratio(rect, point.x, reversed),
                                 count,
                             )

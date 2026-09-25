@@ -143,6 +143,15 @@ fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
         }
         app.reading_mode = reading;
         let tab = app.tabs.active_id();
+        let count = if reading { 50 } else { 100 };
+        let point =
+            |index: usize| egui::pos2(4.0 + 492.0 * index as f32 / (count - 1) as f32, 270.0);
+        let button = |index, pressed| egui::Event::PointerButton {
+            pos: point(index),
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
         let loaded = |app: &mut App, target: usize| {
             let deadline = Instant::now() + Duration::from_secs(10);
             while app.image_loading && Instant::now() < deadline {
@@ -162,20 +171,18 @@ fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
             scrub_frame(
                 &mut app,
                 density,
-                vec![
-                    egui::Event::PointerMoved(scrub_point(0)),
-                    scrub_button(0, true)
-                ]
+                vec![egui::Event::PointerMoved(point(0)), button(0, true)]
             )
             .is_empty()
         );
         let mut stale = None;
         for step in 0..100 {
-            let target = (step * 37 + 20) % paths.len();
+            let ordinal = (step * 37 + 20) % count;
+            let target = if reading { ordinal * 2 } else { ordinal };
             let actions = scrub_frame(
                 &mut app,
                 density,
-                vec![egui::Event::PointerMoved(scrub_point(target))],
+                vec![egui::Event::PointerMoved(point(ordinal))],
             );
             assert_eq!(actions.len(), 1, "one latest target per frame");
             assert!(
@@ -232,12 +239,13 @@ fn held_image_scrub_replaces_pending_targets_and_displays_before_release() {
             app.image_error.is_none(),
             "old completion cannot overwrite the latest target"
         );
-        let actions = scrub_frame(&mut app, density, vec![scrub_button(99, false)]);
+        let actions = scrub_frame(&mut app, density, vec![button(count - 1, false)]);
         assert_eq!(actions.len(), 1);
         app.handle_ui_action(actions[0].clone());
-        assert_eq!(app.path.as_ref(), Some(&paths[99]));
+        let last = if reading { 98 } else { 99 };
+        assert_eq!(app.path.as_ref(), Some(&paths[last]));
         assert!(!timeline_input::is_active(&context));
-        loaded(&mut app, 99);
+        loaded(&mut app, last);
         assert!(app.image_handoff.is_none());
         assert!(app.edits.values().all(|history| !history.is_dirty()));
         assert_eq!(context.pixels_per_point(), density);
@@ -1412,3 +1420,5 @@ fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_pa
     );
     assert!(app.edits.values().all(|history| !history.is_dirty()));
 }
+
+mod reading;

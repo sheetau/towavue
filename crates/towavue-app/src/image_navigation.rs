@@ -65,15 +65,23 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         let navigation = self.navigation_snapshot();
-        let (Some(snapshot), Some(path)) = (navigation.as_deref(), &self.path) else {
+        let (Some(snapshot), Some(path)) = (navigation.as_deref(), self.reading_focus_path())
+        else {
             return;
         };
         let images: Vec<_> = snapshot.items_of_kind(MediaKind::Image).collect();
         let Some(current) = images.iter().position(|item| &item.path == path) else {
             return;
         };
-        let target =
-            (current as i128 + i128::from(offset)).clamp(0, images.len() as i128 - 1) as usize;
+        let target = if self.reading_mode {
+            let ordinal = self.reading_settings.spread_index(current, images.len());
+            let count = self.reading_settings.spread_count(images.len());
+            let target = (ordinal as i128 + i128::from(offset)).clamp(0, count as i128 - 1);
+            self.reading_settings
+                .spread_start(target as usize, images.len())
+        } else {
+            (current as i128 + i128::from(offset)).clamp(0, images.len() as i128 - 1) as usize
+        };
         if target == current {
             return;
         }
@@ -136,3 +144,38 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
 #[cfg(test)]
 mod tests;
+
+pub(super) fn image_seek_progress(
+    reading: Option<ReadingSettings>,
+    index: usize,
+    count: usize,
+) -> f32 {
+    let (index, count) = if let Some(settings) = reading {
+        (
+            settings.spread_index(index, count),
+            settings.spread_count(count),
+        )
+    } else {
+        (index, count)
+    };
+    if count > 1 {
+        index as f32 / (count - 1) as f32
+    } else if reading.is_some() && count == 1 {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+pub(super) fn image_seek_target(
+    reading: Option<ReadingSettings>,
+    ratio: f32,
+    count: usize,
+) -> usize {
+    if let Some(settings) = reading {
+        let spread = seekbar::item_index(ratio, settings.spread_count(count));
+        settings.spread_start(spread, count)
+    } else {
+        seekbar::item_index(ratio, count)
+    }
+}

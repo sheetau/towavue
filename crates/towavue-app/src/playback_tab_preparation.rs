@@ -172,7 +172,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             input,
             device,
             volume,
-            edit.rate,
+            self.preview_rate_for(id),
             edit.playback_range(),
             true,
             move |event| notify(AppEvent::Playback(instance, event)),

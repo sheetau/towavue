@@ -443,6 +443,7 @@ mod tests {
             let session = app.session.as_ref().expect("live audio session");
             assert_eq!(session.verification_volume(), (level, Some(level)));
             assert_eq!(app.playback_volume(), level);
+            assert_eq!(session.rate(), app.preview_rate());
             let tab = app.tabs.active().expect("active tab");
             assert_eq!(app.tab_audio_indicator(tab), Some(level == 0.0));
             assert!(app.playback_error.is_none(), "{:?}", app.playback_error);
@@ -583,6 +584,11 @@ mod tests {
                 app.dispatch(CommandId::Undo);
                 check(&app, 2.0);
                 let history = app.edits[&first].clone();
+                app.set_preview_rate(1.5);
+                app.seek_to(media_time(Duration::from_millis(400)));
+                check(&app, 2.0);
+                assert_eq!(app.edits[&first], history);
+                assert_eq!(app.session.as_ref().expect("preview session").rate(), 1.5);
 
                 let second = app.tabs.open_new(self.path.clone(), MediaKind::Audio);
                 app.playback_volumes.insert(
@@ -595,6 +601,33 @@ mod tests {
                 app.load_path(self.path.clone(), MediaKind::Audio);
                 app.media_duration = Some(Duration::from_secs(10));
                 check(&app, 0.8);
+                assert_eq!(
+                    app.preview_rate(),
+                    1.0,
+                    "new tab defaults to normal preview speed"
+                );
+                app.set_preview_rate(2.5);
+                let preview = app
+                    .preview_transport(first, &self.path)
+                    .expect("background preview");
+                let before_seek = app.retained_playback[&first]
+                    .session
+                    .as_ref()
+                    .expect("session")
+                    .generation();
+                app.handle_preview_seek(
+                    first,
+                    preview.instance,
+                    &self.path,
+                    media_time(Duration::from_millis(500)),
+                );
+                let saved = app.retained_playback[&first]
+                    .session
+                    .as_ref()
+                    .expect("background seek");
+                assert_ne!(saved.generation(), before_seek);
+                assert_eq!(saved.rate(), 1.5);
+                assert_eq!(app.edits[&first], history);
                 app.dispatch(CommandId::ToggleMute);
                 check(&app, 0.0);
                 assert_eq!(
@@ -904,6 +937,15 @@ mod tests {
                 app.recover_graphics_device(position);
                 assert!(app.graphics_epoch > epoch);
                 check(&app, 2.0);
+                assert_eq!(app.preview_rate(), 1.5);
+                assert_eq!(
+                    app.retained_playback[&second]
+                        .session
+                        .as_ref()
+                        .expect("recovered speed")
+                        .rate(),
+                    2.5
+                );
                 assert_eq!(
                     app.retained_playback[&second]
                         .session
@@ -951,6 +993,26 @@ mod tests {
                     .expect("live transfer request");
                 let packet = app.take_tab_transfer(&request, None);
                 let moved = destination.accept_tab_transfer(packet, 0);
+                assert_eq!(destination.preview_rate(), 1.5);
+                assert!(!app.preview_rates.contains_key(&first));
+                assert_eq!(
+                    destination
+                        .session
+                        .as_ref()
+                        .expect("moved session")
+                        .generation(),
+                    generation
+                );
+                destination.seek_to(media_time(Duration::from_millis(300)));
+                assert_eq!(
+                    destination.session.as_ref().expect("moved seek").rate(),
+                    1.5
+                );
+                let generation = destination
+                    .session
+                    .as_ref()
+                    .expect("moved seek")
+                    .generation();
                 check(&destination, 0.0);
                 assert_eq!(
                     destination
@@ -966,6 +1028,7 @@ mod tests {
                 destination.remove_tab(moved, false);
                 assert!(destination.session.is_none());
                 assert!(destination.playback_volumes.is_empty());
+                assert!(destination.preview_rates.is_empty());
                 check(&app, 0.0);
                 app.dispatch(CommandId::ToggleMute);
                 check(&app, 0.8);

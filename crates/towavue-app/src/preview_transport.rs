@@ -306,11 +306,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .get(&tab)
                 .map(EditHistory::state)
                 .unwrap_or_default();
+            let rate = self.preview_rate_for(tab);
             let saved = self
                 .retained_playback
                 .get_mut(&tab)
                 .expect("validated playback");
-            saved.seek_to(target, edit);
+            saved.seek_to(target, edit, rate);
             if saved.state == PlaybackState::Playing {
                 self.arm_audio_queue(tab);
             }

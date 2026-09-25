@@ -243,6 +243,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         let position = self.current_position();
         let volume = state.volume * self.playback_volume();
+        let rate = self.preview_rate();
         let Some(session) = &mut self.session else {
             return;
         };
@@ -256,7 +257,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let range_changed = plan.is_none()
             && self.playback_selection.is_none()
             && session.range() != state.playback_range();
-        if changed || range_changed || session.rate() != state.rate {
+        if changed || range_changed || session.rate() != rate {
             if changed {
                 self.time_selection = None;
                 self.playback_selection = None;
@@ -389,3 +390,61 @@ pub(super) fn waveform_regions(
 #[cfg(test)]
 #[path = "timeline_edit_tests.rs"]
 mod tests;
+
+/// Paint-only stretch on the press snapshot's time axis. Reuse the coarse
+/// waveform texture while dragging; no decode, rasterization or history change.
+pub(super) fn stretch_waveform_regions(
+    regions: Vec<(egui::Rect, egui::Rect)>,
+    rect: egui::Rect,
+    duration: MediaTime,
+    preview: Option<(towavue_core::TimeRange, MediaTime)>,
+) -> Vec<(egui::Rect, egui::Rect)> {
+    let Some((range, length)) = preview.filter(|(range, length)| {
+        *length > MediaTime::ZERO && range.end() <= duration && duration > MediaTime::ZERO
+    }) else {
+        return regions;
+    };
+    let at = |time: MediaTime| {
+        rect.left() + rect.width() * (time.as_seconds_f64() / duration.as_seconds_f64()) as f32
+    };
+    let left = at(range.start());
+    let right = at(range.end());
+    let scale = (length.as_seconds_f64() / range.duration().as_seconds_f64()) as f32;
+    let shift = (right - left) * (scale - 1.0);
+    let remap = |x: f32| {
+        if x <= left {
+            x
+        } else if x >= right {
+            x + shift
+        } else {
+            left + (x - left) * scale
+        }
+    };
+    let mut output = Vec::with_capacity(regions.len());
+    for (destination, uv) in regions {
+        if destination.width() <= 0.0 {
+            continue;
+        }
+        let mut cuts = [
+            destination.left(),
+            left.clamp(destination.left(), destination.right()),
+            right.clamp(destination.left(), destination.right()),
+            destination.right(),
+        ];
+        cuts.sort_by(f32::total_cmp);
+        for pair in cuts.windows(2).filter(|pair| pair[0] < pair[1]) {
+            let u = |x| egui::lerp(uv.x_range(), (x - destination.left()) / destination.width());
+            output.push((
+                egui::Rect::from_min_max(
+                    egui::pos2(remap(pair[0]), destination.top()),
+                    egui::pos2(remap(pair[1]), destination.bottom()),
+                ),
+                egui::Rect::from_min_max(
+                    egui::pos2(u(pair[0]), uv.top()),
+                    egui::pos2(u(pair[1]), uv.bottom()),
+                ),
+            ));
+        }
+    }
+    output
+}

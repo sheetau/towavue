@@ -132,7 +132,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             &[SetTrimStart, SetTrimEnd],
             &[DeleteTimeSelection, KeepTimeSelection, PlayTimeSelection],
             &[VolumeDown, VolumeUp, ToggleMute, CycleVolumeStep],
-            &[RateDown, RateUp, ResetRate],
+            &[EditSpeed],
         ],
     ),
     (
@@ -141,6 +141,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             &[ToggleFullscreen],
             &[ToggleImageInterpolation, ToggleImageMinification],
             &[TogglePause, SeekBackward, SeekForward],
+            &[RateDown, RateUp, ResetRate],
             &[PreviousVideoFrame, NextVideoFrame],
             &[StepAudioBackward, StepAudioForward],
             &[CycleAudioRepeat, ToggleVideoRepeat, ToggleAudioShuffle],
@@ -1577,7 +1578,7 @@ mod tests {
             (
                 "View",
                 2,
-                4,
+                7,
                 "step_audio_",
                 StepAudioForward,
                 towavue_core::MediaKind::Audio,
@@ -1744,8 +1745,12 @@ mod tests {
                 }
                 let (output, chosen) = frame(vec![]);
                 assert!(chosen.is_empty());
-                let position =
-                    text_position(&output, definition.title).expect("focused command is visible");
+                let position = text_position(&output, definition.title).unwrap_or_else(|| {
+                    panic!(
+                        "focused command is visible: {category} / {}",
+                        definition.title
+                    )
+                });
                 let focused = context.memory(|memory| memory.focused()).expect("focus");
                 let response = context.read_response(focused).expect("response");
                 let rect = context

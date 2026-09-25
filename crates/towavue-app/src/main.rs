@@ -64,6 +64,7 @@ mod playback_tab_preparation;
 mod playback_tab_tests;
 mod playback_volume;
 mod playlist;
+mod preview_rate;
 mod preview_transport;
 mod reading_input;
 mod reading_view;
@@ -87,6 +88,7 @@ mod selection_aspect;
 mod shortcuts;
 mod source_backing;
 mod source_save;
+mod speed_edit;
 mod status_file_details;
 mod status_info;
 mod tab_drag;
@@ -342,6 +344,7 @@ enum UiAction {
     FinishRotation(u64, Option<towavue_core::ImageRotation>),
     FinishVideoRotation(u64, Option<towavue_core::VideoRotation>),
     FinishVideoResize(u64, Option<towavue_core::VideoResize>),
+    FinishSpeedEdit(u64, Option<MediaTime>),
     FinishAudioExportOptions(u64, Option<AudioExportOptions>),
     FinishMetadataOptions(u64, Option<MetadataExportOptions>),
 }
@@ -1021,6 +1024,7 @@ struct Application<N> {
     retained_playback: BTreeMap<TabId, playback_tab::RetainedPlaybackTab>,
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
+    preview_rates: BTreeMap<TabId, f32>,
     language_settings: localization::Settings,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
@@ -1061,6 +1065,7 @@ struct Application<N> {
     rotation_dialog: Option<rotation::RotationDialog>,
     video_rotation_dialog: Option<video_rotation::VideoRotationDialog>,
     video_resize_dialog: Option<video_resize::VideoResizeDialog>,
+    speed_dialog: Option<speed_edit::Dialog>,
     audio_export_dialog: Option<audio_export::AudioExportDialog>,
     audio_export_generation: u64,
     audio_export_settings: BTreeMap<TabId, AudioExportOptions>,
@@ -1319,6 +1324,7 @@ where
             retained_playback: BTreeMap::new(),
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
+            preview_rates: BTreeMap::new(),
             language_settings: localization::Settings::default(),
             last_playback_volume: Arc::default(),
             playback_volume_preferences: None,
@@ -1360,6 +1366,7 @@ where
             rotation_dialog: None,
             video_rotation_dialog: None,
             video_resize_dialog: None,
+            speed_dialog: None,
             audio_export_dialog: None,
             audio_export_generation: 0,
             audio_export_settings: BTreeMap::new(),
@@ -2351,7 +2358,7 @@ where
             self.media_input(&path),
             graphics_device,
             self.edit_state().volume * self.playback_volume(),
-            self.edit_state().rate,
+            self.preview_rate(),
             self.edit_state().playback_range(),
             false,
             move |event| notify(AppEvent::Playback(media_generation, event)),
@@ -4053,6 +4060,7 @@ where
         self.refresh_status_file_details();
         self.cancel_stale_video_rotation();
         self.cancel_stale_video_resize();
+        self.cancel_stale_speed_edit();
         self.cancel_stale_audio_export_options();
         self.cancel_stale_metadata_dialog();
         self.video_raster_operations = None;
@@ -4294,6 +4302,8 @@ where
                 self.show_audio_export_options(&context, actions);
             } else if self.metadata_dialog.is_some() {
                 self.show_metadata_options(&context, actions);
+            } else if self.speed_dialog.is_some() {
+                self.show_speed_edit(&context, actions);
             } else if self.video_resize_dialog.is_some() {
                 self.show_video_resize(&context, actions);
             } else if self.video_rotation_dialog.is_some() {
@@ -7149,16 +7159,27 @@ where
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
                 );
-                if let Some(mesh) = self.detailed_waveform(ui.ctx(), rect, result.gain_preview) {
+                let detail = result
+                    .stretch_preview
+                    .is_none()
+                    .then(|| self.detailed_waveform(ui.ctx(), rect, result.gain_preview))
+                    .flatten();
+                if let Some(mesh) = detail {
                     waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
                 } else if let Some(waveform) = &self.waveform {
                     let mut mesh = egui::Mesh::with_texture(waveform.id());
-                    for (destination, uv) in timeline_edit::waveform_regions(
+                    let regions = timeline_edit::waveform_regions(
                         rect,
                         self.media_duration.unwrap_or(duration),
                         self.session.as_ref().and_then(PlaybackSession::timeline),
                         self.edit_state().volume,
                         result.gain_preview,
+                    );
+                    for (destination, uv) in timeline_edit::stretch_waveform_regions(
+                        regions,
+                        rect,
+                        media_time(duration),
+                        result.stretch_preview,
                     ) {
                         mesh.add_rect_with_uv(destination, uv, waveform_detail::color());
                     }
@@ -7413,6 +7434,11 @@ where
                         && self.pending_guard.is_none()
                         && self.export_error.is_none()
                 }
+                UiAction::FinishSpeedEdit(..) => {
+                    self.speed_dialog.is_some()
+                        && self.pending_guard.is_none()
+                        && self.export_error.is_none()
+                }
                 UiAction::FinishVideoResize(..) => {
                     self.video_resize_dialog.is_some()
                         && self.pending_guard.is_none()
@@ -7444,6 +7470,7 @@ where
                 self.finish_audio_export_options(token, value)
             }
             UiAction::FinishVideoRotation(token, value) => self.finish_video_rotation(token, value),
+            UiAction::FinishSpeedEdit(token, value) => self.finish_speed_edit(token, value),
             UiAction::FinishVideoResize(token, value) => self.finish_video_resize(token, value),
             UiAction::FinishRotation(token, value) => self.finish_rotation(token, value),
             UiAction::FinishResize(value) => {
@@ -7737,6 +7764,7 @@ where
                     | CommandId::FreeRotateImage
                     | CommandId::FreeRotateVideo
                     | CommandId::ResizeVideo
+                    | CommandId::EditSpeed
                     | CommandId::AudioExportOptions
                     | CommandId::MetadataExportOptions
                     | CommandId::SelectAll
@@ -7774,6 +7802,7 @@ where
             CommandId::FreeRotateImage
                 | CommandId::FreeRotateVideo
                 | CommandId::ResizeVideo
+                | CommandId::EditSpeed
                 | CommandId::AudioExportOptions
                 | CommandId::MetadataExportOptions
         ) && (self.palette_open || self.grid_open)
@@ -8117,6 +8146,7 @@ where
             CommandId::RotateFineClockwise => self.step_rotation(true),
             CommandId::RotateFineCounterclockwise => self.step_rotation(false),
             CommandId::ResizeVideo => self.open_video_resize(),
+            CommandId::EditSpeed => self.open_speed_edit(),
             CommandId::PasteImage => self.paste_image(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
@@ -8287,15 +8317,9 @@ where
                 );
                 self.request_redraw();
             }
-            CommandId::RateDown => {
-                let rate = (self.edit_state().rate - 0.25).max(0.25);
-                self.push_edit(EditOperation::SetRate(rate));
-            }
-            CommandId::RateUp => {
-                let rate = (self.edit_state().rate + 0.25).min(4.0);
-                self.push_edit(EditOperation::SetRate(rate));
-            }
-            CommandId::ResetRate => self.push_edit(EditOperation::SetRate(1.0)),
+            CommandId::RateDown => self.set_preview_rate(self.preview_rate() - 0.25),
+            CommandId::RateUp => self.set_preview_rate(self.preview_rate() + 0.25),
+            CommandId::ResetRate => self.set_preview_rate(1.0),
             CommandId::DeleteFile => self.begin_file_relocation(file_operations::Kind::Delete),
             CommandId::RenameFile => self.begin_file_relocation(file_operations::Kind::Rename),
             CommandId::MoveFile => self.begin_file_relocation(file_operations::Kind::Move),
@@ -8467,6 +8491,7 @@ where
         self.rotation_dialog = None;
         self.video_rotation_dialog = None;
         self.video_resize_dialog = None;
+        self.speed_dialog = None;
         self.audio_export_dialog = None;
         self.cancel_metadata_dialog();
         self.video_raster_operations = None;
@@ -9637,6 +9662,14 @@ where
             );
             return;
         }
+        if self.speed_dialog.is_some() {
+            self.set_status(
+                localization::Text::CloseDialogBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
+            return;
+        }
         if self.video_resize_dialog.is_some() {
             self.set_status(
                 localization::Text::VideoResizeBeforeLeaving
@@ -9978,6 +10011,7 @@ where
         }
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
+        self.preview_rates.remove(&id);
         if remember
             && !deleted
             && let Some(path) = removed.target.current_path()
@@ -10585,18 +10619,19 @@ where
             },
         );
         let edited = plan.is_some();
+        let rate = self.preview_rate();
         let session = self.session.as_mut()?;
         let pause =
             self.state == PlaybackState::Ended || end == Some(target) || !range.contains(target);
         let result = match plan {
             Some(plan) => session.seek_with_timeline_selection(
                 target,
-                edit.rate,
+                rate,
                 plan,
                 self.playback_selection,
                 pause,
             ),
-            None => session.seek_with_edits(target, edit.rate, range, pause),
+            None => session.seek_with_edits(target, rate, range, pause),
         };
         match result {
             Ok(generation) => {
@@ -11453,6 +11488,7 @@ where
             || self.rotation_dialog.is_some()
             || self.video_rotation_dialog.is_some()
             || self.video_resize_dialog.is_some()
+            || self.speed_dialog.is_some()
             || self.pending_dialog.is_some()
             || self.audio_export_dialog.is_some()
             || self.metadata_dialog.is_some()

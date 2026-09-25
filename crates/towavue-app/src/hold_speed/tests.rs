@@ -197,7 +197,7 @@ fn run_session_trial(audio: bool, test: &str) {
             );
             app.media_duration = Some(Duration::from_secs(4));
             app.push_edit(EditOperation::SetVolume(0.0));
-            app.push_edit(EditOperation::SetRate(1.25));
+            app.set_preview_rate(1.25);
             let time = |ms: i64| MediaTime::from_nanoseconds(ms * 1_000_000);
             let range = |a, b| towavue_core::TimeRange::new(time(a), time(b)).expect("range");
             app.push_edit(EditOperation::Timeline(towavue_core::TimelineEdit::Delete(
@@ -440,7 +440,7 @@ fn run_session_trial(audio: bool, test: &str) {
                 app.set_time_selection(None);
                 app.playback_selection = None;
                 for original in [1.0, 1.25, 2.0, 3.0] {
-                    app.push_edit(EditOperation::SetRate(original));
+                    app.set_preview_rate(original);
                     for paused in [false, true] {
                         for commit in [false, true] {
                             app.seek_to(time(400));
@@ -482,10 +482,7 @@ fn run_session_trial(audio: bool, test: &str) {
                                 }
                             );
                             assert_eq!(app.playback_rate(), if commit { target } else { original });
-                            assert_eq!(
-                                app.edit_state().rate,
-                                if commit { target } else { original }
-                            );
+                            assert_eq!(app.preview_rate(), if commit { target } else { original });
                             let after = app.edits[&tab].operations().to_vec();
                             app.handle_hold_speed(
                                 app.media_generation,
@@ -493,13 +490,11 @@ fn run_session_trial(audio: bool, test: &str) {
                                 Action::Commit(token),
                             );
                             assert_eq!(app.edits[&tab].operations(), after);
+                            assert_eq!(after, before, "latching speed cannot change edits");
+                            assert_eq!(app.edit_state().rate, 1.0);
                             if commit {
-                                app.undo_edit(false);
+                                app.set_preview_rate(original);
                                 assert_eq!(app.playback_rate(), original);
-                                assert_eq!(app.edits[&tab].operations(), before);
-                                app.undo_edit(true);
-                                assert_eq!(app.playback_rate(), target);
-                                app.undo_edit(false);
                             } else {
                                 assert_eq!(after, before);
                                 assert!(
@@ -511,6 +506,7 @@ fn run_session_trial(audio: bool, test: &str) {
                     }
                 }
                 app.edits.insert(tab, history.clone());
+                app.set_preview_rate(1.25);
                 app.sync_playback_edits();
             }
             // A held press never leaks its rate into the retained background tab.
@@ -675,8 +671,8 @@ fn run_session_trial(audio: bool, test: &str) {
                     assert_eq!(app.state, PlaybackState::Paused);
                     assert_eq!(app.playback_rate(), if commit { 2.0 } else { 1.25 });
                     if commit {
-                        assert_eq!(app.edits[&tab].operations().len(), before.len() + 1);
-                        app.undo_edit(false);
+                        assert_eq!(app.preview_rate(), 2.0);
+                        app.set_preview_rate(1.25);
                     }
                     assert_eq!(app.edits[&tab].operations(), before);
                 }

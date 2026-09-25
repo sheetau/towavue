@@ -115,6 +115,7 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::RateDown => Text::CommandRateDown,
         CommandId::RateUp => Text::CommandRateUp,
         CommandId::ResetRate => Text::CommandResetRate,
+        CommandId::EditSpeed => Text::CommandEditSpeed,
         CommandId::DeleteFile => Text::CommandDeleteFile,
         CommandId::RenameFile => Text::CommandRenameFile,
         CommandId::MoveFile => Text::CommandMoveFile,

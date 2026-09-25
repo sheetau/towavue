@@ -338,11 +338,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     if held.was_paused && self.state == PlaybackState::Playing {
                         self.toggle_pause();
                     }
-                    self.push_edit(EditOperation::SetRate(if held.rate == 2.0 {
-                        1.0
-                    } else {
-                        2.0
-                    }));
+                    self.set_preview_rate(if held.rate == 2.0 { 1.0 } else { 2.0 });
                 } else {
                     self.handle_hold_speed(media, generation, Action::End(token));
                 }
@@ -417,7 +413,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         true
     }
 
-    fn set_temporary_rate(&mut self, rate: f32, paused: bool) -> bool {
+    pub(super) fn set_temporary_rate(&mut self, rate: f32, paused: bool) -> bool {
         let position = self.current_position();
         let Some(session) = self.session.as_mut() else {
             return false;

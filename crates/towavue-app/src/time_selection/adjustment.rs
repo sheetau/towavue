@@ -16,7 +16,7 @@ pub(super) fn gain_y(rect: Rect, gain: f32) -> f32 {
     rect.center().y + (1.0 - gain) * gain_height(rect)
 }
 
-pub(super) fn stretch_limits(
+pub(crate) fn stretch_limits(
     range: TimeRange,
     plan: Option<&EditTimeline>,
 ) -> std::ops::RangeInclusive<f64> {

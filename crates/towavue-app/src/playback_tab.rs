@@ -232,7 +232,7 @@ impl RetainedPlaybackTab {
     }
 
     /// Seek on the edited axis without activating the tab or waking hidden video.
-    pub fn seek_to(&mut self, target: MediaTime, edit: towavue_core::EditState) {
+    pub fn seek_to(&mut self, target: MediaTime, edit: towavue_core::EditState, rate: f32) {
         let Some(session) = self.session.as_mut() else {
             return;
         };
@@ -281,12 +281,12 @@ impl RetainedPlaybackTab {
         let result = match plan {
             Some(plan) => session.seek_with_timeline_selection(
                 target,
-                edit.rate,
+                rate,
                 plan,
                 self.playback_selection,
                 pause,
             ),
-            None => session.seek_with_edits(target, edit.rate, range, pause),
+            None => session.seek_with_edits(target, rate, range, pause),
         };
         match result {
             Ok(_) => {

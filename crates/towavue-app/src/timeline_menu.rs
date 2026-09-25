@@ -19,6 +19,7 @@ pub(crate) enum Action {
     Delete,
     Crop,
     Silence,
+    Speed,
     Play,
 }
 
@@ -30,6 +31,7 @@ impl Action {
             Self::Delete => CommandId::DeleteTimeSelection,
             Self::Crop => CommandId::KeepTimeSelection,
             Self::Play => CommandId::PlayTimeSelection,
+            Self::Speed => CommandId::EditSpeed,
             Self::Silence => return None,
         })
     }
@@ -61,7 +63,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self
                 .playback_duration()
                 .is_some_and(|duration| !duration.is_zero())
-            && (matches!(action, Action::SelectAll | Action::Silence)
+            && (matches!(action, Action::SelectAll | Action::Silence | Action::Speed)
                 || self.time_selection.is_some())
             && action.command().is_none_or(|command| {
                 command_definitions().iter().any(|definition| {
@@ -133,6 +135,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 (Action::Delete, Text::TimelineDelete.in_language(language)),
                 (Action::Crop, Text::TimelineCrop.in_language(language)),
                 (Action::Silence, Text::TimelineSilence.in_language(language)),
+                (Action::Speed, Text::CommandEditSpeed.in_language(language)),
                 (Action::Play, Text::TimelinePlay.in_language(language)),
             ] {
                 if matches!(action, Action::Delete | Action::Play) {

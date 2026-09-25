@@ -82,6 +82,7 @@ pub enum CommandId {
     RateDown,
     RateUp,
     ResetRate,
+    EditSpeed,
     DeleteFile,
     RenameFile,
     MoveFile,
@@ -261,6 +262,7 @@ impl CommandId {
             Self::RateDown => "rate_down",
             Self::RateUp => "rate_up",
             Self::ResetRate => "reset_rate",
+            Self::EditSpeed => "edit_speed",
             Self::DeleteFile => "delete_file",
             Self::RenameFile => "rename_file",
             Self::MoveFile => "move_file",
@@ -589,6 +591,11 @@ impl CommandDefinition {
             return false;
         }
 
+        if self.id == CommandId::EditSpeed
+            && (!context.timeline_open || context.playback_blocked || context.source_deleted)
+        {
+            return false;
+        }
         if self.id == CommandId::ExportFrame && !context.has_video_frame {
             return false;
         }
@@ -828,6 +835,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::RateDown, PLAYABLE_MEDIA),
     command(CommandId::RateUp, PLAYABLE_MEDIA),
     command(CommandId::ResetRate, PLAYABLE_MEDIA),
+    command(CommandId::EditSpeed, PLAYABLE_MEDIA),
     command(CommandId::DeleteFile, ANY_MEDIA),
     command(CommandId::RenameFile, ANY_MEDIA),
     command(CommandId::MoveFile, ANY_MEDIA),

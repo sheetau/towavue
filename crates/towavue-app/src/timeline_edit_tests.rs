@@ -1416,3 +1416,66 @@ fn run_app_trial(root: PathBuf, audio: bool) {
     event_loop.run_app(&mut trial).expect("timeline app trial");
     assert!(trial.completed);
 }
+
+#[test]
+fn waveform_stretch_preview_matches_committed_source_regions_on_the_original_axis() {
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(400.0, 100.0));
+    let source_duration = Duration::from_secs(4);
+    let mut plan = EditTimeline::new(time(4000), PlaybackRange::default()).expect("plan");
+    assert!(plan.apply(TimelineEdit::Delete(range(1000, 2000))));
+    assert!(plan.apply(TimelineEdit::Stretch(range(1000, 2000), time(2000))));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(0, 1000), 0.5)));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(1000, 3000), 0.0)));
+    assert!(plan.apply(TimelineEdit::SetVolume(range(3000, 4000), 1.5)));
+    let before = plan.clone();
+    let regions = waveform_regions(rect, source_duration, Some(&plan), 2.0, None);
+    for length in [time(1500), time(4500)] {
+        let selection = range(500, 3500);
+        let preview = stretch_waveform_regions(
+            regions.clone(),
+            rect,
+            plan.duration(),
+            Some((selection, length)),
+        );
+        let mut committed = plan.clone();
+        assert!(committed.apply(TimelineEdit::Stretch(selection, length)));
+        let mut expanded = rect;
+        expanded.max.x = rect.left()
+            + rect.width()
+                * (committed.duration().as_seconds_f64() / plan.duration().as_seconds_f64()) as f32;
+        let expected = waveform_regions(expanded, source_duration, Some(&committed), 2.0, None);
+        assert_eq!(preview.len(), expected.len());
+        for ((destination, uv), (expected_destination, expected_uv)) in
+            preview.into_iter().zip(expected)
+        {
+            for (actual, expected) in [destination.min, destination.max, uv.min, uv.max]
+                .into_iter()
+                .zip([
+                    expected_destination.min,
+                    expected_destination.max,
+                    expected_uv.min,
+                    expected_uv.max,
+                ])
+            {
+                assert!(
+                    (actual - expected).length() < 0.0001,
+                    "{actual:?} != {expected:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(plan, before);
+    assert_eq!(
+        stretch_waveform_regions(regions.clone(), rect, plan.duration(), None),
+        regions
+    );
+    assert_eq!(
+        stretch_waveform_regions(
+            regions.clone(),
+            rect,
+            plan.duration(),
+            Some((range(0, 1000), MediaTime::ZERO))
+        ),
+        regions
+    );
+}

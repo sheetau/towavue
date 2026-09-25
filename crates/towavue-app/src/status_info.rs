@@ -110,7 +110,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let value = if self.held_speed.is_some() {
                 Text::StatusHeldSpeed.in_language(language).into()
             } else {
-                format!("{:.2}\u{00d7}", self.edit_state().rate)
+                format!("{:.2}\u{00d7}", self.preview_rate())
             };
             details.push(
                 Group::Playback,

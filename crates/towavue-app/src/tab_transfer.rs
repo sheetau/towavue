@@ -29,6 +29,7 @@ pub(super) struct MediaTabTransfer {
     metadata_options: Option<MetadataExportOptions>,
     audio_queue: Option<audio_playback::AudioTab>,
     playback_volume: Option<playback_volume::PlaybackVolume>,
+    preview_rate: Option<f32>,
     focus: Option<egui::Id>,
     timeline: Option<egui::containers::panel::PanelState>,
 }
@@ -307,6 +308,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             metadata_options: self.metadata_export_settings.remove(&id),
             audio_queue: self.audio_queues.remove(&id),
             playback_volume: self.playback_volumes.remove(&id),
+            preview_rate: self.preview_rates.remove(&id),
             focus,
             timeline,
         };
@@ -381,6 +383,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(options) = transfer.metadata_options {
             self.metadata_export_settings.insert(id, options);
+        }
+        if let Some(rate) = transfer.preview_rate {
+            self.preview_rates.insert(id, rate);
         }
         if let Some(volume) = transfer.playback_volume {
             self.playback_volumes.insert(id, volume);

@@ -4,6 +4,7 @@ use towavue_core::localization::formatted;
 use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
+pub(super) use adjustment::stretch_limits;
 #[cfg(test)]
 mod presentation_tests;
 
@@ -63,6 +64,7 @@ pub(super) struct Output {
     pub seek: Option<MediaTime>,
     pub edit: Option<TimelineEdit>,
     pub gain_preview: Option<(TimeRange, f32)>,
+    pub stretch_preview: Option<(TimeRange, MediaTime)>,
 }
 
 pub(super) fn show(
@@ -101,6 +103,12 @@ pub(super) fn show(
     let gain_preview_id = response.id.with("gain-preview");
     let mut gain_preview = ui.ctx().data(|data| {
         data.get_temp::<(u64, (TimeRange, f32))>(gain_preview_id)
+            .filter(|(painted, _)| enabled && *painted == frame)
+            .map(|(_, preview)| preview)
+    });
+    let stretch_preview_id = response.id.with("stretch-preview");
+    let mut stretch_preview = ui.ctx().data(|data| {
+        data.get_temp::<(u64, (TimeRange, MediaTime))>(stretch_preview_id)
             .filter(|(painted, _)| enabled && *painted == frame)
             .map(|(_, preview)| preview)
     });
@@ -274,6 +282,7 @@ pub(super) fn show(
                                 .saturating_add(length.as_nanoseconds()),
                         ),
                     );
+                    stretch_preview = Some((range, length));
                     TimelineEdit::Stretch(range, length)
                 }
                 _ => unreachable!(),
@@ -498,6 +507,14 @@ pub(super) fn show(
         && !crate::timeline_input::is_active(ui.ctx())
     {
         output.edit = adjustment::values(ui, response, duration, preview, plan, held_gain, enabled);
+    }
+    output.stretch_preview = stretch_preview.or(match output.edit {
+        Some(TimelineEdit::Stretch(range, length)) => Some((range, length)),
+        _ => None,
+    });
+    if let Some(preview) = output.stretch_preview {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(stretch_preview_id, (frame, preview)));
     }
     output.gain_preview = gain_preview.or(match output.edit {
         Some(TimelineEdit::ScaleVolume(range, gain)) => Some((range, gain)),
@@ -2173,5 +2190,94 @@ mod tests {
         let plan = app.edits[&tab].timeline(time(10.0)).expect("kept plan");
         assert_eq!(plan.duration(), time(4.0));
         assert_eq!(plan.spans()[0].source(), selected.expect("selected"));
+    }
+
+    #[test]
+    fn held_stretch_previews_each_pass_and_cancellation_restores_unedited_waveform() {
+        let selected = TimeRange::new(time(2.5), time(7.5));
+        for cancel in [false, true] {
+            let context = egui::Context::default();
+            let run = |events| {
+                let mut results = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 200.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let rect =
+                            Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0));
+                        let response = ui.interact(
+                            rect,
+                            "stretch-waveform-test".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        results.push(show(
+                            ui,
+                            &response,
+                            time(10.0),
+                            time(0.0),
+                            selected,
+                            None,
+                            true,
+                        ));
+                        if context.current_pass_index() == 0 {
+                            context.request_discard("preview persists across passes");
+                        }
+                    },
+                );
+                results
+            };
+            run(vec![]);
+            run(vec![egui::Event::PointerButton {
+                pos: egui::pos2(220.0, 70.0),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::ALT,
+            }]);
+            for x in [300.0, 260.0] {
+                let outputs = run(vec![egui::Event::PointerMoved(egui::pos2(x, 70.0))]);
+                assert!(outputs.len() > 1, "discard path exercised");
+                let expected = Some((
+                    selected.expect("range"),
+                    time(5.0 + f64::from(x - 220.0) / 40.0),
+                ));
+                for output in outputs {
+                    assert_eq!(output.stretch_preview, expected);
+                    assert!(
+                        output.edit.is_none()
+                            && output.selection.is_none()
+                            && output.seek.is_none()
+                    );
+                }
+            }
+            if cancel {
+                crate::timeline_input::cancel(&context);
+            }
+            let released = run(vec![button(260.0, false)]);
+            assert_eq!(
+                released
+                    .iter()
+                    .filter(|output| output.edit.is_some())
+                    .count(),
+                usize::from(!cancel)
+            );
+            if cancel {
+                assert!(
+                    released
+                        .iter()
+                        .all(|output| output.stretch_preview.is_none())
+                );
+            }
+            assert!(
+                run(vec![])
+                    .iter()
+                    .all(|output| output.stretch_preview.is_none() && output.edit.is_none())
+            );
+        }
     }
 }

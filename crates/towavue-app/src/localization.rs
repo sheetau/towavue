@@ -10,6 +10,8 @@ pub(crate) struct Settings {
 }
 
 #[cfg(test)]
+mod surfaces_tests;
+#[cfg(test)]
 pub(crate) mod test_ui;
 
 pub(crate) fn language(context: &egui::Context) -> Language {

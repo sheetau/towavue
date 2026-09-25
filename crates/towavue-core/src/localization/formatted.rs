@@ -13,6 +13,9 @@ macro_rules! templates {
 }
 
 templates! {
+    edit_grid_file(path: &str) => ("Edit {path}", "編集: {path}"),
+    last_opened(date: &str) => ("Last opened: {date}", "最後に開いた日: {date}"),
+    shortcuts_file(path: &str) => ("Shortcuts: {path}", "ショートカット設定: {path}"),
     status_zoom(value: &str) => ("{value} zoom", "表示倍率 {value}"),
     status_reduction(zoom: &str, reduction: &str) => ("{zoom}. {reduction}", "{zoom}。{reduction}"),
     status_speed(value: &str) => ("Speed {value}", "再生速度 {value}"),

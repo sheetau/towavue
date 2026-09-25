@@ -3945,6 +3945,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let language = self.language();
         self.filmstrip.menu_owner = self.tabs.active_id().map(|tab| thumbnail_menu::Owner {
             tab,
             instance: self.media_generation,
@@ -4179,12 +4180,21 @@ where
             if let Some(error) = &self.export_error {
                 let modal =
                     chrome::modal(&context, "export-error".into(), false).show(&context, |ui| {
-                        chrome::modal_body(ui, 520.0, "Export failed", &["OK"], |ui| {
-                            ui.label("Your edits and existing files have been kept.");
-                            ui.label(error);
-                        });
+                        chrome::modal_body(
+                            ui,
+                            520.0,
+                            localization::Text::ExportFailed.in_language(language),
+                            &[localization::Text::NativeOk.in_language(language)],
+                            |ui| {
+                                ui.label(localization::Text::ExportEditsKept.in_language(language));
+                                ui.label(error);
+                            },
+                        );
                         chrome::flat_buttons(ui);
-                        if ui.button("OK").clicked() {
+                        if ui
+                            .button(localization::Text::NativeOk.in_language(language))
+                            .clicked()
+                        {
                             actions.push(UiAction::DismissExportError);
                         }
                     });
@@ -4229,48 +4239,70 @@ where
     }
 
     fn draw_unsaved_guard(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
+        let language = self.language();
         let name = self
             .path
             .as_deref()
             .map_or_else(|| image_paste::DEFAULT_NAME.to_owned(), display_name);
         let modal =
             chrome::modal(context, "unsaved-edit-guard".into(), false).show(context, |ui| {
-                let mut labels = vec!["Save and continue", "Discard edits", "Cancel"];
+                let mut labels = vec![
+                    localization::Text::NativeSaveContinue.in_language(language),
+                    localization::Text::NativeDiscard.in_language(language),
+                    localization::Text::Cancel.in_language(language),
+                ];
                 if self.active_export.is_some() {
-                    labels.push("Cancel current export");
+                    labels.push(localization::Text::CancelCurrentExport.in_language(language));
                 }
-                chrome::modal_body(ui, 520.0, "Unsaved edits", &labels, |ui| {
-                    ui.label(if self.current_document_untitled() {
-                        "Save this image to a file?"
-                    } else {
-                        "Save over the source file?"
-                    });
-                    ui.add(
-                        egui::Label::new(&name)
-                            .truncate()
-                            .show_tooltip_when_elided(false),
-                    )
-                    .help_text(&name);
-                    ui.label("Undo is kept in open tabs.");
-                });
+                chrome::modal_body(
+                    ui,
+                    520.0,
+                    localization::Text::UnsavedEdits.in_language(language),
+                    &labels,
+                    |ui| {
+                        ui.label(if self.current_document_untitled() {
+                            localization::Text::SavePastedQuestion.in_language(language)
+                        } else {
+                            localization::Text::SaveSourceQuestion.in_language(language)
+                        });
+                        ui.add(
+                            egui::Label::new(&name)
+                                .truncate()
+                                .show_tooltip_when_elided(false),
+                        )
+                        .help_text(&name);
+                        ui.label(localization::Text::UndoKeptInTabs.in_language(language));
+                    },
+                );
                 ui.horizontal_wrapped(|ui| {
                     chrome::flat_buttons(ui);
                     if ui
                         .add_enabled(
                             self.active_export.is_none(),
-                            egui::Button::new("Save and continue"),
+                            egui::Button::new(
+                                localization::Text::NativeSaveContinue.in_language(language),
+                            ),
                         )
                         .clicked()
                     {
                         actions.push(UiAction::ResolveGuard(GuardDecision::Save));
                     }
-                    if ui.button("Discard edits").clicked() {
+                    if ui
+                        .button(localization::Text::NativeDiscard.in_language(language))
+                        .clicked()
+                    {
                         actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui
+                        .button(localization::Text::Cancel.in_language(language))
+                        .clicked()
+                    {
                         actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
                     }
-                    if self.active_export.is_some() && ui.button("Cancel current export").clicked()
+                    if self.active_export.is_some()
+                        && ui
+                            .button(localization::Text::CancelCurrentExport.in_language(language))
+                            .clicked()
                     {
                         actions.push(UiAction::CancelExport);
                     }
@@ -5235,6 +5267,7 @@ where
     }
 
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let language = self.language();
         if self.palette_open {
             logo_menu::cancel(root.ctx());
             tab_drag::cancel(root.ctx());
@@ -5336,14 +5369,14 @@ where
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             menu.response.enabled(),
-                            "towavue menu",
+                            localization::Text::MainMenu.in_language(language),
                         )
                     });
                     if menu.response.clicked_by(egui::PointerButton::Middle) {
                         actions.push(UiAction::Command(CommandId::OpenGallery));
                     }
                     menu.response
-                        .help_text("towavue menu · drag → File / ↘ Edit / ↓ View");
+                        .help_text(localization::Text::MainMenuDragHelp.in_language(language));
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
                     let width = chrome::tab_width(
@@ -5436,7 +5469,8 @@ where
                                                     rect,
                                                     active,
                                                     self.tabs.can_close(id),
-                                                    "Keyboard Shortcuts",
+                                                    localization::Text::CommandOpenKeyboardSettings
+                                                        .in_language(language),
                                                 )
                                             } else {
                                                 welcome::tab(
@@ -5576,9 +5610,11 @@ where
                                     if let Some(muted) = audio {
                                         tab_ui.ctx().accesskit_node_builder(response.id, |node| {
                                             node.set_description(if muted {
-                                                "Playing audio — Muted"
+                                                localization::Text::TabPlayingMuted
+                                                    .in_language(language)
                                             } else {
-                                                "Playing audio"
+                                                localization::Text::TabPlayingAudio
+                                                    .in_language(language)
                                             });
                                         });
                                     }
@@ -5621,7 +5657,10 @@ where
                                         rect.max,
                                     );
                                     let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
-                                        .help_text("Close tab");
+                                        .help_text(
+                                            localization::Text::CommandCloseTab
+                                                .in_language(language),
+                                        );
                                     tab_focus::release_pointer_focus(&close);
                                     let tab_hovered = response.hovered()
                                         || close.hovered()
@@ -5657,14 +5696,14 @@ where
                                         egui::WidgetInfo::labeled(
                                             egui::WidgetType::Button,
                                             tab_ui.is_enabled(),
-                                            format!(
-                                                "Close tab: {}",
-                                                tab.target
+                                            towavue_core::localization::formatted::close_tab(
+                                                language,
+                                                &tab.target
                                                     .current_path()
                                                     .map(display_name)
-                                                    .unwrap_or_else(
-                                                        || image_paste::DEFAULT_NAME.into()
-                                                    )
+                                                    .unwrap_or_else(|| {
+                                                        image_paste::DEFAULT_NAME.into()
+                                                    }),
                                             ),
                                         )
                                     });
@@ -5677,7 +5716,12 @@ where
                                                     .unwrap_or_else(
                                                         || image_paste::DEFAULT_NAME.into()
                                                     ),
-                                                if dirty { " — Unsaved changes" } else { "" }
+                                                if dirty {
+                                                    localization::Text::TabUnsavedSuffix
+                                                        .in_language(language)
+                                                } else {
+                                                    ""
+                                                }
                                             ));
                                     });
                                     if !self.modal_input_blocked()
@@ -6021,8 +6065,13 @@ where
                         });
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(format!("Edit {}", self.grid_path.display()))
-                                .weak(),
+                            egui::RichText::new(
+                                towavue_core::localization::formatted::edit_grid_file(
+                                    self.language(),
+                                    &self.grid_path.display().to_string(),
+                                ),
+                            )
+                            .weak(),
                         )
                         .truncate()
                         .show_tooltip_when_elided(false),
@@ -6180,6 +6229,7 @@ where
         actions: &mut Vec<UiAction>,
         volume_targets: &mut Vec<egui::Response>,
     ) -> egui::Rect {
+        let language = self.language();
         let mut frame = chrome::bar();
         frame.inner_margin.left = if self.media_kind.is_none() {
             (chrome::STATUS_BUTTON_GAP * 2.0) as i8
@@ -6198,8 +6248,11 @@ where
             .show(root, |ui| {
                 // Give padding its own non-focusable target before the controls,
                 // so egui's nearest-widget hit assistance cannot click a nearby button.
-                ui.interact(ui.max_rect() + frame.inner_margin, ui.id().with("status-padding"),
-                    egui::Sense::CLICK | egui::Sense::DRAG);
+                ui.interact(
+                    ui.max_rect() + frame.inner_margin,
+                    ui.id().with("status-padding"),
+                    egui::Sense::CLICK | egui::Sense::DRAG,
+                );
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
                     ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
@@ -6210,32 +6263,68 @@ where
                     }
                     if self.media_kind.is_some_and(|kind| kind != MediaKind::Image) {
                         let playing = self.state == PlaybackState::Playing;
-                        let play = ui.add_enabled_ui(!self.command_context().playback_blocked, |ui| chrome::transport_button(
-                            ui,
-                            self.track_drag.as_ref().and_then(track_drag::Drag::icon)
-                                .unwrap_or(if playing { chrome::Icon::Pause } else { chrome::Icon::Play }),
-                            &self.command_hint(
-                                CommandId::TogglePause,
-                                if playing { "Pause" } else { "Play / replay" },
-                            ),
-                        )).inner.disabled_help_text(if self.playback_duration() == Some(Duration::ZERO) {
-                            "No playable time remains in the timeline"
-                        } else {
-                            "Playback is unavailable while loading or after an error"
-                        });
+                        let play = ui
+                            .add_enabled_ui(!self.command_context().playback_blocked, |ui| {
+                                chrome::transport_button(
+                                    ui,
+                                    self.track_drag
+                                        .as_ref()
+                                        .and_then(track_drag::Drag::icon)
+                                        .unwrap_or(if playing {
+                                            chrome::Icon::Pause
+                                        } else {
+                                            chrome::Icon::Play
+                                        }),
+                                    &self.command_hint(
+                                        CommandId::TogglePause,
+                                        if playing {
+                                            localization::Text::Pause.in_language(language)
+                                        } else {
+                                            localization::Text::PlayReplay.in_language(language)
+                                        },
+                                    ),
+                                )
+                            })
+                            .inner
+                            .disabled_help_text(
+                                if self.playback_duration() == Some(Duration::ZERO) {
+                                    localization::Text::TimelineEmptyHelp.in_language(language)
+                                } else {
+                                    localization::Text::PlaybackUnavailableHelp
+                                        .in_language(language)
+                                },
+                            );
                         let dragging = self.track_drag.is_some();
-                        if !dragging && self.held_speed.is_none()
+                        if !dragging
+                            && self.held_speed.is_none()
                             && let Some((origin, delta)) = track_drag::completed(&play)
                         {
-                            actions.push(UiAction::BeginTrackDrag(self.media_generation, origin, delta, true));
-                        } else if !dragging && self.held_speed.is_none()
+                            actions.push(UiAction::BeginTrackDrag(
+                                self.media_generation,
+                                origin,
+                                delta,
+                                true,
+                            ));
+                        } else if !dragging
+                            && self.held_speed.is_none()
                             && play.drag_started_by(egui::PointerButton::Primary)
-                            && ui.input(|input| input.pointer.primary_down() && input.modifiers.is_none())
-                            && let Some((origin, position)) = ui.input(|input|
-                                input.pointer.press_origin().zip(input.pointer.interact_pos()))
+                            && ui.input(|input| {
+                                input.pointer.primary_down() && input.modifiers.is_none()
+                            })
+                            && let Some((origin, position)) = ui.input(|input| {
+                                input
+                                    .pointer
+                                    .press_origin()
+                                    .zip(input.pointer.interact_pos())
+                            })
                             && (position.x - origin.x).abs() > (position.y - origin.y).abs()
                         {
-                            actions.push(UiAction::BeginTrackDrag(self.media_generation, origin, position - origin, false));
+                            actions.push(UiAction::BeginTrackDrag(
+                                self.media_generation,
+                                origin,
+                                position - origin,
+                                false,
+                            ));
                         }
                         let held = !dragging && self.hold_response(&play, actions);
                         if play.clicked() && !held && !dragging {
@@ -6247,8 +6336,17 @@ where
                             ui,
                             chrome::AudioIcon::Repeat,
                             self.video_repeat,
-                            &self.command_hint(CommandId::ToggleVideoRepeat, if self.video_repeat { "Video repeat on" } else { "Video repeat off" }),
-                        ).clicked() {
+                            &self.command_hint(
+                                CommandId::ToggleVideoRepeat,
+                                if self.video_repeat {
+                                    localization::Text::VideoRepeatOn.in_language(language)
+                                } else {
+                                    localization::Text::VideoRepeatOff.in_language(language)
+                                },
+                            ),
+                        )
+                        .clicked()
+                        {
                             actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
                         }
                         let clock_format = if self.timeline_is_visible() {
@@ -6270,10 +6368,14 @@ where
                         };
                         time_text.append(&position, 0.0, format.clone());
                         if let Some(delta) = self.relative_seek_text() {
-                            time_text.append(&format!(" {delta}"), 0.0, egui::TextFormat {
-                                color: chrome::FOREGROUND,
-                                ..format.clone()
-                            });
+                            time_text.append(
+                                &format!(" {delta}"),
+                                0.0,
+                                egui::TextFormat {
+                                    color: chrome::FOREGROUND,
+                                    ..format.clone()
+                                },
+                            );
                         }
                         let full_time = format!("{} / {duration}", time_text.text);
                         if !compact {
@@ -6281,17 +6383,30 @@ where
                         }
                         if compact {
                             // Keep volume and mode controls visible before truncating a long clock.
-                            let controls_width = 40.0 + ui.spacing().item_spacing.x
-                                + if self.active_export.is_some() { 100.0 } else { 0.0 };
+                            let controls_width = 40.0
+                                + ui.spacing().item_spacing.x
+                                + if self.active_export.is_some() {
+                                    100.0
+                                } else {
+                                    0.0
+                                };
                             let time_width = (ui.available_width() - controls_width).max(0.0);
                             ui.allocate_ui_with_layout(
                                 egui::vec2(time_width, 24.0),
                                 egui::Layout::left_to_right(egui::Align::Center),
                                 |ui| {
-                                    ui.add(egui::Label::new(time_text).truncate().show_tooltip_when_elided(false))
+                                    ui.add(
+                                        egui::Label::new(time_text)
+                                            .truncate()
+                                            .show_tooltip_when_elided(false),
+                                    )
                                 },
-                            ).inner.help_text(full_time);
-                        } else { ui.label(time_text); }
+                            )
+                            .inner
+                            .help_text(full_time);
+                        } else {
+                            ui.label(time_text);
+                        }
                         let volume = ui
                             .add_sized(
                                 [40.0, 24.0],
@@ -6304,15 +6419,27 @@ where
                                     .color(chrome::MUTED),
                                 ),
                             )
-                            .help_text("Playback volume · wheel to adjust (does not change export)");
+                            .help_text(
+                                localization::Text::PlaybackVolumeHelp.in_language(language),
+                            );
                         volume_targets.push(volume);
-
                     } else if self.media_kind == Some(MediaKind::Image) {
-                        let label = self.command_hint(CommandId::ToggleReadingMode, "Reading mode");
-                        let enabled = self.image_handoff.is_none() && (self.reading_mode || !self.command_context().has_unsaved_edits);
-                        let direction = self.reading_drag.as_ref()
-                            .filter(|drag| !drag.was_enabled).and_then(|drag| drag.direction).or_else(|| self.reading_mode.then_some(self.reading_settings.reversed));
-                        let response = chrome::reading_button(ui, enabled, self.reading_mode, direction);
+                        let label = self.command_hint(
+                            CommandId::ToggleReadingMode,
+                            localization::Text::ReadingMode.in_language(language),
+                        );
+                        let enabled = self.image_handoff.is_none()
+                            && (self.reading_mode || !self.command_context().has_unsaved_edits);
+                        let direction = self
+                            .reading_drag
+                            .as_ref()
+                            .filter(|drag| !drag.was_enabled)
+                            .and_then(|drag| drag.direction)
+                            .or_else(|| {
+                                self.reading_mode.then_some(self.reading_settings.reversed)
+                            });
+                        let response =
+                            chrome::reading_button(ui, enabled, self.reading_mode, direction);
                         if let Some(drag) = &self.reading_drag {
                             // A pending spread may temporarily disable the button, but
                             // the pinned gesture still owns its cursor until release.
@@ -6322,22 +6449,37 @@ where
                                 egui::CursorIcon::ResizeHorizontal
                             });
                         }
-                        response.widget_info(|| egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button, response.enabled(), &label));
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                response.enabled(),
+                                &label,
+                            )
+                        });
                         if response.drag_started_by(egui::PointerButton::Primary)
-                            && ui.input(|input| input.pointer.primary_down() && input.modifiers.is_none())
-                            && let Some((origin, position)) = ui.input(|input|
-                                input.pointer.press_origin().zip(input.pointer.interact_pos()))
+                            && ui.input(|input| {
+                                input.pointer.primary_down() && input.modifiers.is_none()
+                            })
+                            && let Some((origin, position)) = ui.input(|input| {
+                                input
+                                    .pointer
+                                    .press_origin()
+                                    .zip(input.pointer.interact_pos())
+                            })
                         {
                             actions.push(UiAction::BeginReadingDrag(origin, position - origin));
                         }
                         if response.clicked() {
                             actions.push(UiAction::Command(CommandId::ToggleReadingMode));
                         }
-                        response.help_ui(|ui| {
-                            ui.label(label);
-                            ui.label("Drag up/down: images per page\nDrag left/right: images on the first page\nRelease to keep; Escape to cancel");
-                        }).disabled_help_text("Save or undo unsaved edits before entering reading mode");
+                        response
+                            .help_ui(|ui| {
+                                ui.label(label);
+                                ui.label(localization::Text::ReadingDragHelp.in_language(language));
+                            })
+                            .disabled_help_text(
+                                localization::Text::ReadingUnsavedHelp.in_language(language),
+                            );
                     }
                     let info = self.status_info();
                     let full_info = info.tooltip();
@@ -6350,98 +6492,178 @@ where
                     };
                     let info_width = if self.active_export.is_some() {
                         info_width.min((remaining - 80.0 - ui.spacing().item_spacing.x).max(0.0))
-                    } else { info_width };
-                    let path_width = (remaining - info_width - ui.spacing().item_spacing.x).max(0.0);
+                    } else {
+                        info_width
+                    };
+                    let path_width =
+                        (remaining - info_width - ui.spacing().item_spacing.x).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(path_width, 24.0),
                         egui::Layout::left_to_right(egui::Align::Center),
                         |ui| {
                             ui.set_min_width(path_width);
-                            if let Some(export) = self.active_export.as_ref().filter(|_| self.export_error.is_none()) {
-                                let (slot, _) = ui.allocate_exact_size(egui::vec2(path_width, 24.0), egui::Sense::hover());
-                                export_progress::show_status(ui.ctx(), slot,
-                                    (ui.layer_id().order == egui::Order::Middle).then_some(ui.layer_id()),
-                                    export, self.export_gesture_hint(), !self.dialog_input_blocked(), actions);
+                            if let Some(export) = self
+                                .active_export
+                                .as_ref()
+                                .filter(|_| self.export_error.is_none())
+                            {
+                                let (slot, _) = ui.allocate_exact_size(
+                                    egui::vec2(path_width, 24.0),
+                                    egui::Sense::hover(),
+                                );
+                                export_progress::show_status(
+                                    ui.ctx(),
+                                    slot,
+                                    (ui.layer_id().order == egui::Order::Middle)
+                                        .then_some(ui.layer_id()),
+                                    export,
+                                    self.export_gesture_hint(),
+                                    !self.dialog_input_blocked(),
+                                    actions,
+                                );
                                 return;
                             }
-                            let selection_hint = (!self.modal_input_blocked() && self.reading_drag.is_none()).then(|| {
+                            let selection_hint = (!self.modal_input_blocked()
+                                && self.reading_drag.is_none())
+                            .then(|| {
                                 selection::focus_hint(ui.ctx()).or_else(|| {
                                     self.timeline_is_visible()
-                                        .then(|| time_selection::focus_hint(ui.ctx())).flatten()
+                                        .then(|| time_selection::focus_hint(ui.ctx()))
+                                        .flatten()
                                 })
-                            }).flatten();
+                            })
+                            .flatten();
                             let mut export_link = None;
-                            let (text, color, tooltip) =
-                                if let Some(message) = self.visual_selection_status().filter(|_| self.view_drag.is_some()) {
-                                    (message.clone(), chrome::FOREGROUND, message)
-                                } else if let Some(message) = selection_hint {
-                                    (message.clone(), chrome::FOREGROUND, message)
-                                } else if let Some(message) = self.status_notice() {
-                                    export_link = self.export_notice.as_ref().map(|(shown, _)| *shown)
-                                        .filter(|shown| self.export_notice_target(*shown).is_some());
-                                    (self.compact_export_notice(&message).unwrap_or_else(|| message.clone()), chrome::FOREGROUND, message)
-                                } else if let Some(path) = self.displayed_image_path() {
-                                    let parent = path
-                                        .parent()
-                                        .and_then(Path::file_name)
-                                        .map(|name| name.to_string_lossy())
-                                        .unwrap_or_default();
-                                    let suffix = self.visual_selection_status().map_or_else(String::new, |value| format!(" · {value}"));
-                                    (
-                                        format!("{}{parent}\\{}{suffix}", self.deleted_path_prefix(), display_name(path)),
-                                        chrome::MUTED,
-                                        format!("{}{}{suffix}", self.deleted_path_prefix(), path.display()),
-                                    )
-                                } else if self.media_kind.is_none() && !self.keyboard_settings_active()
-                                    && let Some(date) = self.gallery_listing.status_date() {
-                                    (date.clone(), chrome::MUTED, format!("Last opened: {date}"))
-                                } else if self.current_document_untitled() {
-                                    (image_paste::DEFAULT_NAME.into(), chrome::MUTED,
-                                     "Pasted image without a saved file".into())
-                                } else {
-                                    (
-                                        if self.keyboard_settings_active() {
-                                            "Double-click a command to edit its keybinding".into()
-                                        } else {
-                                            "Open a file or folder to begin".into()
-                                        },
-                                        chrome::MUTED,
-                                        format!("Shortcuts: {}", self.shortcut_path.display()),
-                                    )
-                                };
+                            let (text, color, tooltip) = if let Some(message) = self
+                                .visual_selection_status()
+                                .filter(|_| self.view_drag.is_some())
+                            {
+                                (message.clone(), chrome::FOREGROUND, message)
+                            } else if let Some(message) = selection_hint {
+                                (message.clone(), chrome::FOREGROUND, message)
+                            } else if let Some(message) = self.status_notice() {
+                                export_link =
+                                    self.export_notice.as_ref().map(|(shown, _)| *shown).filter(
+                                        |shown| self.export_notice_target(*shown).is_some(),
+                                    );
+                                (
+                                    self.compact_export_notice(&message)
+                                        .unwrap_or_else(|| message.clone()),
+                                    chrome::FOREGROUND,
+                                    message,
+                                )
+                            } else if let Some(path) = self.displayed_image_path() {
+                                let parent = path
+                                    .parent()
+                                    .and_then(Path::file_name)
+                                    .map(|name| name.to_string_lossy())
+                                    .unwrap_or_default();
+                                let suffix = self
+                                    .visual_selection_status()
+                                    .map_or_else(String::new, |value| format!(" · {value}"));
+                                (
+                                    format!(
+                                        "{}{parent}\\{}{suffix}",
+                                        self.deleted_path_prefix(),
+                                        display_name(path)
+                                    ),
+                                    chrome::MUTED,
+                                    format!(
+                                        "{}{}{suffix}",
+                                        self.deleted_path_prefix(),
+                                        path.display()
+                                    ),
+                                )
+                            } else if self.media_kind.is_none()
+                                && !self.keyboard_settings_active()
+                                && let Some(date) = self.gallery_listing.status_date()
+                            {
+                                (
+                                    date.clone(),
+                                    chrome::MUTED,
+                                    towavue_core::localization::formatted::last_opened(
+                                        language, &date,
+                                    ),
+                                )
+                            } else if self.current_document_untitled() {
+                                (
+                                    image_paste::DEFAULT_NAME.into(),
+                                    chrome::MUTED,
+                                    localization::Text::StatusPasted
+                                        .in_language(language)
+                                        .into(),
+                                )
+                            } else {
+                                (
+                                    if self.keyboard_settings_active() {
+                                        localization::Text::ShortcutEditHint
+                                            .in_language(language)
+                                            .into()
+                                    } else {
+                                        localization::Text::OpenToBegin.in_language(language).into()
+                                    },
+                                    chrome::MUTED,
+                                    towavue_core::localization::formatted::shortcuts_file(
+                                        language,
+                                        &self.shortcut_path.display().to_string(),
+                                    ),
+                                )
+                            };
                             let reading_hint = self.reading_drag.is_some();
                             let label: egui::WidgetText = if reading_hint {
                                 fonts::reading_hint(&text, 12.0, color).into()
                             } else {
                                 RichText::new(text).size(12.0).color(color).into()
                             };
-                            let response = ui.add(
-                                egui::Label::new(label)
-                                    .truncate()
-                                    .show_tooltip_when_elided(false)
-                                    .sense(if export_link.is_some() { egui::Sense::click() } else { egui::Sense::hover() }),
-                            )
-                            .help_ui_above(|ui| {
-                                ui.set_max_width(ui.spacing().tooltip_width);
-                                if reading_hint {
-                                    ui.label(fonts::reading_hint(&tooltip, 14.0, chrome::FOREGROUND));
-                                } else {
-                                    let hint = if export_link.is_some_and(|shown| self.export_notice_open_target(shown).is_some()) {
-                                        "\nClick: show file in Explorer\nMiddle-click: open file in a new tab"
-                                    } else if export_link.is_some() {
-                                        "\nClick: show file in Explorer"
-                                    } else { "" };
-                                    ui.label(format!("{tooltip}{hint}"));
-                                }
-                            });
+                            let response = ui
+                                .add(
+                                    egui::Label::new(label)
+                                        .truncate()
+                                        .show_tooltip_when_elided(false)
+                                        .sense(if export_link.is_some() {
+                                            egui::Sense::click()
+                                        } else {
+                                            egui::Sense::hover()
+                                        }),
+                                )
+                                .help_ui_above(|ui| {
+                                    ui.set_max_width(ui.spacing().tooltip_width);
+                                    if reading_hint {
+                                        ui.label(fonts::reading_hint(
+                                            &tooltip,
+                                            14.0,
+                                            chrome::FOREGROUND,
+                                        ));
+                                    } else {
+                                        let hint = if export_link.is_some_and(|shown| {
+                                            self.export_notice_open_target(shown).is_some()
+                                        }) {
+                                            localization::Text::ExportLinkOpenHelp
+                                                .in_language(language)
+                                        } else if export_link.is_some() {
+                                            localization::Text::ExportLinkRevealHelp
+                                                .in_language(language)
+                                        } else {
+                                            ""
+                                        };
+                                        ui.label(format!("{tooltip}{hint}"));
+                                    }
+                                });
                             if let Some(shown) = export_link {
-                                response.widget_info(|| egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button, response.enabled(), "Show exported file in Explorer"));
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        response.enabled(),
+                                        localization::Text::RevealExportedFile
+                                            .in_language(language),
+                                    )
+                                });
                                 if response.clicked() {
                                     actions.push(UiAction::RevealExport(shown));
                                 }
                                 if response.clicked_by(egui::PointerButton::Middle)
-                                    && self.export_notice_open_target(shown).is_some() {
+                                    && self.export_notice_open_target(shown).is_some()
+                                {
                                     actions.push(UiAction::OpenExport(shown));
                                 }
                                 response.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -6455,9 +6677,16 @@ where
                         |ui| {
                             ui.set_min_width(info_width);
                             // Leave one physical pixel for text/layout rounding at the boundary.
-                            let info = status_info::fitting_text(ui, &details, (info_width - 1.0 / density).max(0.0));
+                            let info = status_info::fitting_text(
+                                ui,
+                                &details,
+                                (info_width - 1.0 / density).max(0.0),
+                            );
                             if info.is_empty() {
-                                return ui.allocate_response(egui::vec2(info_width, 24.0), egui::Sense::hover());
+                                return ui.allocate_response(
+                                    egui::vec2(info_width, 24.0),
+                                    egui::Sense::hover(),
+                                );
                             }
                             ui.add(
                                 egui::Label::new(
@@ -6484,6 +6713,7 @@ where
         parent: Option<egui::LayerId>,
         actions: &mut Vec<UiAction>,
     ) {
+        let language = self.language();
         let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
         if self.media_kind == Some(MediaKind::Image) {
             let held_order = self
@@ -6515,7 +6745,7 @@ where
             let commit = drag.released.then_some(drag.position).flatten();
             let value = seekbar::directed_value_input(
                 &response,
-                "Image position",
+                localization::Text::ImagePosition.in_language(language),
                 (index + 1) as f64,
                 1.0..=images.len() as f64,
                 1.0,
@@ -6630,7 +6860,7 @@ where
         }
         let value = seekbar::value_input(
             &response,
-            "Playback position (seconds)",
+            localization::Text::PlaybackPositionSeconds.in_language(language),
             self.current_position().as_seconds_f64(),
             0.0..=duration.as_secs_f64(),
             KEYBOARD_SEEK_STEP.as_secs_f64(),
@@ -6751,6 +6981,7 @@ where
     }
 
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let language = self.language();
         if !self.timeline_is_visible() {
             return;
         }
@@ -6762,7 +6993,16 @@ where
             .default_size(96.0)
             .size_range(min_height..=max_height)
             .resizable(resizable)
-            .frame(egui::Frame::NONE.fill(chrome::BACKGROUND).inner_margin(egui::Margin { left: 8, right: 8, top: 8, bottom: 0 }))
+            .frame(
+                egui::Frame::NONE
+                    .fill(chrome::BACKGROUND)
+                    .inner_margin(egui::Margin {
+                        left: 8,
+                        right: 8,
+                        top: 8,
+                        bottom: 0,
+                    }),
+            )
             .show(root, |ui| {
                 let background = ui.available_rect_before_wrap();
                 ui.set_min_size(background.size());
@@ -6776,13 +7016,21 @@ where
                 if duration.is_zero() {
                     self.clear_detailed_waveform();
                     if let Some(waveform) = &self.waveform
-                        && self.session.as_ref().and_then(PlaybackSession::timeline).is_none()
+                        && self
+                            .session
+                            .as_ref()
+                            .and_then(PlaybackSession::timeline)
+                            .is_none()
                     {
-                        waveform_painter.set(waveform_slot, egui::Shape::image(
-                            waveform.id(), rect,
-                            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                            waveform_detail::color(),
-                        ));
+                        waveform_painter.set(
+                            waveform_slot,
+                            egui::Shape::image(
+                                waveform.id(),
+                                rect,
+                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                                waveform_detail::color(),
+                            ),
+                        );
                     }
                     self.draw_waveform_activity(ui, rect);
                     self.draw_timeline_menu(ui, &response, actions);
@@ -6817,11 +7065,20 @@ where
                     }
                 }
                 if self.playback_selection.is_some() {
-                    ui.ctx().accesskit_node_builder(response.id, |node| node.set_description("Selection playback; Space pauses or resumes, Escape returns to full range"));
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.set_description(
+                            localization::Text::SelectionPlaybackHelp.in_language(language),
+                        )
+                    });
                 }
                 if self.playback_selection.is_some() && rect.width() >= 440.0 {
-                    ui.painter().with_clip_rect(rect).text(rect.center_top() + egui::vec2(0.0, 2.0), Align2::CENTER_TOP,
-                        "Selection playback", egui::FontId::proportional(11.0), chrome::FOREGROUND);
+                    ui.painter().with_clip_rect(rect).text(
+                        rect.center_top() + egui::vec2(0.0, 2.0),
+                        Align2::CENTER_TOP,
+                        localization::Text::SelectionPlayback.in_language(language),
+                        egui::FontId::proportional(11.0),
+                        chrome::FOREGROUND,
+                    );
                 }
                 if let Some(tab) = self.tabs.active()
                     && let Some(selection) = result.selection
@@ -6834,7 +7091,12 @@ where
                 if let Some(tab) = self.tabs.active()
                     && let Some(edit) = result.edit
                 {
-                    actions.push(UiAction::TimeAdjustment(tab.id, self.generation, self.time_selection, edit));
+                    actions.push(UiAction::TimeAdjustment(
+                        tab.id,
+                        self.generation,
+                        self.time_selection,
+                        edit,
+                    ));
                 }
                 self.draw_waveform_activity(ui, rect);
                 self.draw_timeline_menu(ui, &response, actions);

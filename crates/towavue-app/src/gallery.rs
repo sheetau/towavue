@@ -3,7 +3,10 @@ use std::path::PathBuf;
 
 use towavue_core::MediaKind;
 
+use crate::localization::{Language, Text};
 use crate::{Application, UiAction, gallery_rail, welcome};
+
+type LocalDate = (u16, u16, u16);
 
 /// Derived UI data only. Invalidate on history delivery/clear; source files are
 /// never queried here. Query/type changes rebuild the filtered projection once.
@@ -18,16 +21,30 @@ pub(super) struct Listing {
     months: Vec<(Option<(u16, u16)>, usize)>,
     query: String,
     filter: Option<MediaKind>,
-    visible_date: Option<Option<(u16, u16, u16)>>,
+    visible_dates: Option<[Option<LocalDate>; 2]>,
 }
 
 impl Listing {
-    pub fn status_date(&self) -> Option<String> {
-        self.visible_date.map(|date| {
-            date.map_or_else(
-                || "Date unknown".into(),
-                |(year, month, day)| format!("{year:04}-{month:02}-{day:02}"),
-            )
+    pub fn status_date(&self, language: Language) -> Option<String> {
+        self.visible_dates.map(|[first, last]| {
+            let format = |date: Option<LocalDate>| {
+                date.map_or_else(
+                    || Text::DateUnknown.in_language(language).into(),
+                    |(year, month, day)| {
+                        towavue_core::localization::formatted::calendar_day(
+                            language,
+                            gallery_rail::month_name(month, language),
+                            year,
+                            day,
+                        )
+                    },
+                )
+            };
+            if first == last {
+                format(first)
+            } else {
+                format!("{} - {}", format(first), format(last))
+            }
         })
     }
 
@@ -48,7 +65,7 @@ impl Listing {
 
     pub fn invalidate(&mut self) {
         self.source_valid = false;
-        self.visible_date = None;
+        self.visible_dates = None;
     }
 }
 
@@ -134,7 +151,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             query: old_query,
             filter: old_filter,
             filter_valid,
-            visible_date,
+            visible_dates,
             ..
         } = listing;
         if let Some(command) = ui
@@ -197,11 +214,14 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             actions,
                             policy,
                         );
-                        let date = grid
-                            .first_visible
-                            .map(|index| self.recent_dates.get(&filtered[index]).copied());
-                        if *visible_date != date {
-                            *visible_date = date;
+                        let dates = (!grid.visible.is_empty()).then(|| {
+                            // Only the first and last visible records are needed. Focus
+                            // overscan and cached thumbnails do not affect this range.
+                            [grid.visible.start, grid.visible.end - 1]
+                                .map(|index| self.recent_dates.get(&filtered[index]).copied())
+                        });
+                        if *visible_dates != dates {
+                            *visible_dates = dates;
                             // Status is laid out before media input in this frame.
                             ui.ctx().request_repaint();
                         }
@@ -219,5 +239,55 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         {
             actions.push(UiAction::Command(command));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn date_range_formats_single_days_cross_months_and_unknown_visits() {
+        let mut listing = Listing::default();
+        assert_eq!(listing.status_date(Language::English), None);
+        for (dates, english, japanese) in [
+            (
+                [Some((2026, 9, 23)); 2],
+                "September 23, 2026",
+                "2026\u{5e74}9\u{6708}23\u{65e5}",
+            ),
+            (
+                [Some((2026, 9, 23)), Some((2026, 9, 22))],
+                "September 23, 2026 - September 22, 2026",
+                "2026\u{5e74}9\u{6708}23\u{65e5} - 2026\u{5e74}9\u{6708}22\u{65e5}",
+            ),
+            (
+                [Some((2026, 1, 1)), Some((2025, 12, 31))],
+                "January 1, 2026 - December 31, 2025",
+                "2026\u{5e74}1\u{6708}1\u{65e5} - 2025\u{5e74}12\u{6708}31\u{65e5}",
+            ),
+            (
+                [Some((2026, 9, 23)), None],
+                "September 23, 2026 - Date unknown",
+                "2026\u{5e74}9\u{6708}23\u{65e5} - \u{65e5}\u{4ed8}\u{4e0d}\u{660e}",
+            ),
+            (
+                [None; 2],
+                "Date unknown",
+                "\u{65e5}\u{4ed8}\u{4e0d}\u{660e}",
+            ),
+        ] {
+            listing.visible_dates = Some(dates);
+            assert_eq!(
+                listing.status_date(Language::English).as_deref(),
+                Some(english)
+            );
+            assert_eq!(
+                listing.status_date(Language::Japanese).as_deref(),
+                Some(japanese)
+            );
+        }
+        listing.invalidate();
+        assert_eq!(listing.status_date(Language::English), None);
     }
 }

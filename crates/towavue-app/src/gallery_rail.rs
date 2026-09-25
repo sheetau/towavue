@@ -16,29 +16,31 @@ pub(super) struct Month {
 
 impl Month {
     fn label(&self, language: Language) -> String {
-        const NAMES: [Text; 12] = [
-            Text::January,
-            Text::February,
-            Text::March,
-            Text::April,
-            Text::May,
-            Text::June,
-            Text::July,
-            Text::August,
-            Text::September,
-            Text::October,
-            Text::November,
-            Text::December,
-        ];
         match self.date {
-            Some((year, month)) => formatted::calendar_month(
-                language,
-                NAMES[usize::from(month) - 1].in_language(language),
-                year,
-            ),
+            Some((year, month)) => {
+                formatted::calendar_month(language, month_name(month, language), year)
+            }
             None => Text::DateUnknown.in_language(language).into(),
         }
     }
+}
+
+pub(super) fn month_name(month: u16, language: Language) -> &'static str {
+    const NAMES: [Text; 12] = [
+        Text::January,
+        Text::February,
+        Text::March,
+        Text::April,
+        Text::May,
+        Text::June,
+        Text::July,
+        Text::August,
+        Text::September,
+        Text::October,
+        Text::November,
+        Text::December,
+    ];
+    NAMES[usize::from(month) - 1].in_language(language)
 }
 
 // Equal slots expose only populated months, including months sharing a card row.

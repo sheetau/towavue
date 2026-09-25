@@ -97,6 +97,7 @@ templates! {
     unmute_named_tab(name: &str) => ("Unmute tab: {name}", "タブのミュートを解除: {name}"),
     reading_status(pages_hint: &str, pages: usize, first_hint: &str, first: usize) => ("{pages_hint}Reading {pages} · {first_hint}first {first}", "{pages_hint}読書 {pages}ページ · {first_hint}先頭 {first}ページ"),
     calendar_month(name: &str, year: u16) => ("{name} {year}", "{year}年{name}"),
+    calendar_day(name: &str, year: u16, day: u16) => ("{name} {day}, {year}", "{year}年{name}{day}日"),
     preparation_elapsed(phase: &str, time: &str) => ("{phase} · elapsed {time}", "{phase} · 経過時間 {time}"),
     tab_label(title: &str) => ("{title} tab", "{title} タブ"),
     close_title(title: &str) => ("Close {title}", "{title}を閉じる"),

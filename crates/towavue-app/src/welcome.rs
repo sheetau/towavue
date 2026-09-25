@@ -115,9 +115,7 @@ pub fn show(
     let width = (ui.available_width() - 40.0).max(0.0);
     let gap = (ui.available_width() - width).max(0.0);
     let left = (gap / 2.0).min((gap - 40.0).max(0.0));
-    let top = (ui.available_height() * 0.04).clamp(6.0, 20.0);
     let mut chosen = None;
-    ui.add_space(top);
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
         ui.cursor().min + egui::vec2(left, 0.0),
         egui::vec2(width, 24.0),
@@ -165,7 +163,7 @@ pub fn show(
         })
         .inner;
     ui.advance_cursor_after_rect(header.min_rect());
-    ui.add_space(16.0);
+    ui.add_space(8.0 - ui.spacing().item_spacing.y);
     let content_style = ui.style().clone();
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
@@ -186,6 +184,7 @@ pub fn show(
     };
     let keyboard_offset = crate::list_navigation::unfocused_scroll(ui, "welcome", 40.0);
     let mut scroll = egui::ScrollArea::vertical()
+        .content_margin(egui::Margin::ZERO)
         .id_salt("welcome")
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .auto_shrink([false, false]);
@@ -197,41 +196,33 @@ pub fn show(
     }
     let mut output = scroll.show_styled(ui, |ui| {
         ui.set_style(content_style);
-        let scrolled_top = ui.max_rect().top();
         if gutter_scroll != 0.0 {
             ui.scroll_with_delta_animation(
                 egui::vec2(0.0, gutter_scroll),
                 egui::style::ScrollAnimation::none(),
             );
         }
-        ui.horizontal(|ui| {
-            ui.add_space(left);
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    // Preserve the existing initial grid inset. ScrollArea's shadow
-                    // margin must not paint above that unscrolled origin on later rows.
-                    let grid_top = body.top() + ui.max_rect().top() - scrolled_top;
-                    let grid_clip =
-                        egui::Rect::from_min_max(egui::pos2(body.left(), grid_top), body.max);
-                    ui.set_clip_rect(ui.clip_rect().intersect(grid_clip));
-                    let months = recent(ui, query, *filter);
-                    if paths.is_empty() {
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(Text::GalleryDrop.in_language(language))
-                                    .color(chrome::MUTED),
-                            )
-                            .wrap(),
-                        );
-                    }
-                    ui.add_space(16.0);
-                    months
-                },
-            )
-            .inner
-        })
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                // Keep scrolling cards below the fixed header without introducing
+                // a horizontal row's vertical centering offset.
+                ui.set_clip_rect(ui.clip_rect().intersect(body));
+                let months = recent(ui, query, *filter);
+                if paths.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(Text::GalleryDrop.in_language(language))
+                                .color(chrome::MUTED),
+                        )
+                        .wrap(),
+                    );
+                }
+                ui.add_space(16.0);
+                months
+            },
+        )
         .inner
     });
     let rail = egui::Rect::from_min_max(
@@ -704,6 +695,7 @@ mod tests {
                     context.global_style_mut(chrome::style);
                     context.enable_accesskit();
                     let mut output = egui::FullOutput::default();
+                    let grid_top = std::cell::Cell::new(0.0);
                     for _ in 0..3 {
                         output = context.run_ui(
                             egui::RawInput {
@@ -722,7 +714,10 @@ mod tests {
                                     &mut selected,
                                     &[],
                                     true,
-                                    |_, _, _| vec![],
+                                    |ui, _, _| {
+                                        grid_top.set(ui.cursor().top());
+                                        vec![]
+                                    },
                                 );
                             },
                         );
@@ -763,6 +758,15 @@ mod tests {
                             _ => None,
                         })
                         .expect("search border contains editor and inline buttons");
+                    assert!(
+                        (border.top() - 8.0).abs() <= 1.0 / density,
+                        "header top matches its side inset: {border:?}"
+                    );
+                    assert!(
+                        (grid_top.get() - border.bottom() - 8.0).abs() <= 1.0 / density,
+                        "header/body gap matches the side inset: {} vs {border:?}",
+                        grid_top.get()
+                    );
                     assert!(border.right() - clear.right() >= 1.0);
                     assert!(node_rect(&output, "Open File…").left() > border.right());
                     let icon = output

@@ -83,7 +83,7 @@ impl View {
 pub struct RecentGrid {
     columns: usize,
     row_height: f32,
-    pub first_visible: Option<usize>,
+    pub visible: Range<usize>,
 }
 
 impl RecentGrid {
@@ -1399,12 +1399,18 @@ impl Filmstrip {
         RecentGrid {
             columns,
             row_height,
-            first_visible: (!paths.is_empty() && ui.clip_rect().is_positive()).then(|| {
-                let row = ((ui.clip_rect().top() - origin + GAP) / row_height)
+            visible: if ui.clip_rect().is_positive() {
+                let start = ((ui.clip_rect().top() - origin + GAP) / row_height)
                     .floor()
                     .max(0.0) as usize;
-                (row * columns).min(paths.len() - 1)
-            }),
+                let end = ((ui.clip_rect().bottom() - origin) / row_height)
+                    .ceil()
+                    .max(0.0) as usize;
+                (start.min(row_count) * columns).min(paths.len())
+                    ..(end.min(row_count) * columns).min(paths.len())
+            } else {
+                0..0
+            },
         }
     }
 

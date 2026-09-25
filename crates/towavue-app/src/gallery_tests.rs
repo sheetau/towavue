@@ -102,12 +102,37 @@ fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_d
                 egui::Shape::Text(text) if text.galley.text().starts_with("tile-"))),
                 "filenames remain accessible without painted captions"
             );
+            let expected_dates = |bounds: &[(String, egui::accesskit::Rect)]| {
+                let mut indices: Vec<usize> = bounds
+                    .iter()
+                    .filter(|(_, rect)| {
+                        rect.y1 > top + 0.1 && rect.y0 < f64::from(size.y - chrome::STATUS_HEIGHT)
+                    })
+                    .map(|(name, _)| {
+                        name.strip_prefix("tile-")
+                            .expect("prefix")
+                            .trim_end_matches(".png")
+                            .parse()
+                            .expect("index")
+                    })
+                    .collect();
+                indices.sort_unstable();
+                let first = 24 - indices.first().expect("first") / 10;
+                let last = 24 - indices.last().expect("last") / 10;
+                if first == last {
+                    format!("September {first}, 2026")
+                } else {
+                    format!("September {first}, 2026 - September {last}, 2026")
+                }
+            };
+            let expected = expected_dates(&bounds);
             assert_eq!(
-                app.gallery_listing.status_date().as_deref(),
-                Some("2026-09-24")
+                app.gallery_listing
+                    .status_date(localization::Language::English),
+                Some(expected.clone())
             );
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                egui::Shape::Text(text) if text.galley.text() == "2026-09-24")));
+                egui::Shape::Text(text) if text.galley.text() == expected)));
             frame(
                 &mut app,
                 size,
@@ -139,8 +164,9 @@ fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_d
                 .expect("index");
             assert!(index > 0, "wheel scroll changes the top visible visit");
             assert_eq!(
-                app.gallery_listing.status_date(),
-                Some(format!("2026-09-{:02}", 24 - index / 10))
+                app.gallery_listing
+                    .status_date(localization::Language::English),
+                Some(expected_dates(&cards(&output)))
             );
             app.gallery_search = "tile-119".into();
             app.recent_dates.remove(&app.recent_paths[119]);
@@ -149,12 +175,18 @@ fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_d
                 frame(&mut app, size, vec![]);
             }
             assert_eq!(
-                app.gallery_listing.status_date().as_deref(),
+                app.gallery_listing
+                    .status_date(localization::Language::English)
+                    .as_deref(),
                 Some("Date unknown")
             );
             app.gallery_search = "no matching tile".into();
             frame(&mut app, size, vec![]);
-            assert!(app.gallery_listing.status_date().is_none());
+            assert!(
+                app.gallery_listing
+                    .status_date(localization::Language::English)
+                    .is_none()
+            );
         }
     }
 }

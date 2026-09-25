@@ -6644,7 +6644,7 @@ where
                                 )
                             } else if self.media_kind.is_none()
                                 && !self.keyboard_settings_active()
-                                && let Some(date) = self.gallery_listing.status_date()
+                                && let Some(date) = self.gallery_listing.status_date(language)
                             {
                                 (
                                     date.clone(),

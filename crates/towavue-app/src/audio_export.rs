@@ -46,7 +46,9 @@ fn target_control(
     let response = ui
         .horizontal(|ui| {
             let label = ui.label(label);
-            ui.add(
+            chrome::input_style(ui);
+            ui.add_sized(
+                [ui.spacing().interact_size.x, chrome::INPUT_HEIGHT],
                 egui::DragValue::new(&mut number)
                     .range(f64::from(*range.start()) / 10.0..=f64::from(*range.end()) / 10.0)
                     .speed(0.1)

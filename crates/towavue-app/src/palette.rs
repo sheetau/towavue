@@ -269,7 +269,7 @@ impl CommandPalette {
                     .fill(crate::chrome::FLOATING_BACKGROUND)
                     .stroke(egui::Stroke::new(1.0, crate::chrome::BORDER))
                     .inner_margin(6)
-                    .corner_radius(4),
+                    .corner_radius(context.global_style().visuals.menu_corner_radius),
             )
             .show(context, |ui| {
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
@@ -284,8 +284,9 @@ impl CommandPalette {
                 });
                 let weak_text_color = ui.visuals().weak_text_color;
                 ui.visuals_mut().weak_text_color = Some(crate::chrome::BORDER);
-                ui.add_sized(
-                    [ui.available_width(), 24.0],
+                ui.spacing_mut().text_edit_width = f32::INFINITY;
+                crate::chrome::text_edit(
+                    ui,
                     egui::TextEdit::singleline(&mut self.query)
                         .vertical_align(egui::Align::Center)
                         .id(query_id)
@@ -298,6 +299,7 @@ impl CommandPalette {
                         } else {
                             Text::PaletteFileHint.in_language(language)
                         }),
+                    false,
                 )
                 .help_text(Text::PaletteHelp.in_language(language));
                 ui.visuals_mut().weak_text_color = weak_text_color;
@@ -2146,7 +2148,8 @@ mod tests {
                     egui::Shape::Rect(rect)
                         if rect.fill == crate::chrome::FLOATING_BACKGROUND
                             && rect.stroke.color == crate::chrome::BORDER
-                            && rect.corner_radius == egui::CornerRadius::same(4) =>
+                            && rect.corner_radius
+                                == context.global_style().visuals.menu_corner_radius =>
                     {
                         Some(rect.rect)
                     }
@@ -2164,6 +2167,7 @@ mod tests {
                 .read_response("command-palette-query".into())
                 .expect("search widget")
                 .rect;
+            assert!((search.height() - 26.0).abs() <= 1.0);
             assert!(
                 search.width() >= panel.width() - 24.0,
                 "full-width search: {search:?} inside {panel:?} at {size:?}"

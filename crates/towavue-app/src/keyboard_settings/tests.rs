@@ -479,7 +479,7 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
             let record = rect("Record keys");
             let sort = rect("Sort by precedence");
             let clear = rect("Clear keybindings search input");
-            assert_eq!(record.size(), egui::Vec2::splat(20.0));
+            assert_eq!(record.size(), egui::Vec2::splat(22.0));
             assert_eq!(sort.left() - record.right(), 2.0);
             assert_eq!(clear.left() - sort.right(), 2.0);
             assert!(clear.right() <= width - 10.0);

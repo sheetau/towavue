@@ -840,3 +840,34 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
         assert_eq!(app.audio_export_settings.get(&tab), Some(&expected));
     }
 }
+
+#[test]
+fn loudness_numeric_input_keeps_26_point_height_when_editing() {
+    for density in [1.0, 1.25, 2.0] {
+        for editing in [false, true] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(chrome::style);
+            let mut value = -160;
+            for _ in 0..3 {
+                let mut input = egui::RawInput::default();
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("root viewport")
+                    .native_pixels_per_point = Some(density);
+                let _ = context.run_ui(input, |ui| {
+                    let response = target_control(ui, &mut value, -700..=-50, "Target");
+                    assert!(
+                        (response.rect.height() - 26.0).abs() <= 1.0 / density,
+                        "editing {editing}: {:?}",
+                        response.rect
+                    );
+                    if editing {
+                        response.request_focus();
+                    }
+                });
+            }
+            assert_eq!(value, -160);
+        }
+    }
+}

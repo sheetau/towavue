@@ -64,6 +64,9 @@ pub const STATUS_HEIGHT: f32 = 30.0;
 pub const STATUS_BUTTON_SIZE: f32 = 20.0;
 pub const STATUS_BUTTON_GAP: f32 = (STATUS_HEIGHT - STATUS_BUTTON_SIZE) * 0.5;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
+pub const INPUT_HEIGHT: f32 = 26.0;
+pub const INPUT_RADIUS: u8 = 3;
+pub const SEARCH_BUTTON_SIZE: f32 = INPUT_HEIGHT - 4.0;
 // Match the visible close glyph's inset in its 24-point slot.
 pub const TAB_PADDING: f32 = 7.0;
 
@@ -164,6 +167,38 @@ pub fn style(style: &mut egui::Style) {
         visuals.expansion = 0.0;
     }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
+}
+
+pub fn input_style(ui: &mut Ui) {
+    let style = ui.style_mut();
+    for visuals in [
+        &mut style.visuals.widgets.noninteractive,
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        visuals.corner_radius = egui::CornerRadius::same(INPUT_RADIUS);
+    }
+    style.spacing.interact_size.y = INPUT_HEIGHT;
+}
+
+pub fn text_edit(ui: &mut Ui, editor: egui::TextEdit<'_>, multiline: bool) -> egui::Response {
+    ui.scope(|ui| {
+        input_style(ui);
+        if multiline {
+            ui.add(editor)
+        } else {
+            ui.add_sized(
+                [
+                    ui.spacing().text_edit_width.min(ui.available_width()),
+                    INPUT_HEIGHT,
+                ],
+                editor.vertical_align(egui::Align::Center),
+            )
+        }
+    })
+    .inner
 }
 
 pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, button: egui::Button<'_>) -> egui::Response {

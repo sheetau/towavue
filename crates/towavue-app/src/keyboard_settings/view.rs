@@ -288,13 +288,16 @@ impl KeyboardSettings {
 
     fn search(&mut self, ui: &mut egui::Ui) {
         let display_language = language(ui.ctx());
-        let (outer, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+        let (outer, _) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), chrome::INPUT_HEIGHT),
+            egui::Sense::hover(),
+        );
         let background = ui.painter().add(egui::Shape::Noop);
-        let buttons = [0.0, 22.0, 44.0].map(|offset| {
+        let button_step = chrome::SEARCH_BUTTON_SIZE + 2.0;
+        let buttons = [0.0, button_step, 2.0 * button_step].map(|offset| {
             egui::Rect::from_min_size(
-                outer.right_top() + egui::vec2(-22.0 - offset, 2.0),
-                egui::Vec2::splat(20.0),
+                outer.right_top() + egui::vec2(-button_step - offset, 2.0),
+                egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
             )
         });
         let text_rect = egui::Rect::from_min_max(
@@ -383,7 +386,7 @@ impl KeyboardSettings {
             background,
             egui::epaint::RectShape::new(
                 outer,
-                2.0,
+                chrome::INPUT_RADIUS,
                 egui::Color32::BLACK,
                 stroke,
                 egui::StrokeKind::Inside,
@@ -410,11 +413,14 @@ impl KeyboardSettings {
                 &[],
                 |ui| {
                     ui.label(Text::PressKeyCombination.in_language(display_language));
-                    ui.add(
+                    ui.spacing_mut().text_edit_width = f32::INFINITY;
+                    chrome::text_edit(
+                        ui,
                         egui::TextEdit::singleline(&mut edit.text)
                             .interactive(false)
                             .horizontal_align(egui::Align::Center)
                             .desired_width(f32::INFINITY),
+                        false,
                     );
                     let parsed = edit.text.trim().parse::<KeySequence>();
                     if let Ok(sequence) = &parsed {

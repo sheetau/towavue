@@ -303,7 +303,7 @@ fn text_input_rows_with_id(
     let mut response = ui
         .scope(|ui| {
             ui.visuals_mut().weak_text_color = Some(crate::chrome::BORDER);
-            ui.add(editor.id(id).hint_text(label))
+            chrome::text_edit(ui, editor.id(id).hint_text(label), rows > 1)
         })
         .inner;
     response.widget_info(|| {

@@ -118,7 +118,7 @@ pub fn show(
     let mut chosen = None;
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
         ui.cursor().min + egui::vec2(left, 0.0),
-        egui::vec2(width, 24.0),
+        egui::vec2(width, chrome::INPUT_HEIGHT),
     )));
     let search_changed = header
         .horizontal_centered(|ui| {
@@ -141,7 +141,7 @@ pub fn show(
                     .scope(|ui| {
                         chrome::surface_hover(ui);
                         ui.add_sized(
-                            [20.0, 20.0],
+                            [chrome::SEARCH_BUTTON_SIZE, chrome::SEARCH_BUTTON_SIZE],
                             egui::Button::new(icon.text())
                                 .stroke(egui::Stroke::NONE)
                                 .frame_when_inactive(false),
@@ -241,17 +241,20 @@ fn search_field(
 ) -> bool {
     let language = localization::language(ui.ctx());
     let (outer, _) = ui.allocate_exact_size(
-        egui::vec2((ui.available_width() - 48.0).max(72.0), 24.0),
+        egui::vec2(
+            (ui.available_width() - 2.0 * (chrome::SEARCH_BUTTON_SIZE + 4.0)).max(72.0),
+            chrome::INPUT_HEIGHT,
+        ),
         egui::Sense::hover(),
     );
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     let ui = &mut content;
     let background = ui.painter().add(egui::Shape::Noop);
     let clear_rect = egui::Rect::from_min_size(
-        outer.right_top() + egui::vec2(-22.0, 2.0),
-        egui::vec2(20.0, 20.0),
+        outer.right_top() + egui::vec2(-chrome::SEARCH_BUTTON_SIZE - 2.0, 2.0),
+        egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
     );
-    let filter_rect = clear_rect.translate(egui::vec2(-22.0, 0.0));
+    let filter_rect = clear_rect.translate(egui::vec2(-chrome::SEARCH_BUTTON_SIZE - 2.0, 0.0));
     // The editor owns only the text slot. Its native horizontal scrolling and
     // caret clipping stop before the two independent button hit regions.
     let text_rect = egui::Rect::from_min_max(
@@ -368,10 +371,14 @@ fn search_field(
     };
     ui.painter().set(
         background,
-        egui::Shape::rect_filled(outer, 2.0, chrome::BACKGROUND),
+        egui::Shape::rect_filled(outer, chrome::INPUT_RADIUS, chrome::BACKGROUND),
     );
-    ui.painter()
-        .rect_stroke(outer, 2.0, stroke, egui::StrokeKind::Inside);
+    ui.painter().rect_stroke(
+        outer,
+        chrome::INPUT_RADIUS,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
     search.changed()
 }
 
@@ -1143,11 +1150,11 @@ mod tests {
                 "separate slots: {search:?}, {filter:?}, {clear:?}, {open:?}, {folder:?}"
             );
             for rect in [filter, clear, open, folder] {
-                assert!((rect.width() - 20.0).abs() <= 1.0 / density);
-                assert!((rect.height() - 20.0).abs() <= 1.0 / density);
+                assert!((rect.width() - 22.0).abs() <= 1.0 / density);
+                assert!((rect.height() - 22.0).abs() <= 1.0 / density);
                 assert!((rect.center().y - search.center().y).abs() <= 1.0 / density);
             }
-            assert!((search.height() - 24.0).abs() <= 1.0 / density);
+            assert!((search.height() - 26.0).abs() <= 1.0 / density);
             let hint = text_rect(&output, Text::GallerySearch.in_language(language))
                 .expect("Gallery placeholder");
             assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);

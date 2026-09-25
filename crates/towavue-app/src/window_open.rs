@@ -97,6 +97,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         point: egui::Pos2,
         anchor: egui::Vec2,
     ) {
+        let display_language = self.language();
         if !point.is_finite()
             || !anchor.is_finite()
             || !self.can_open_gallery_window(&path, revision)
@@ -106,7 +107,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if !self.hosted_graphics {
             if let Err(error) = spawn_new_window(&path) {
-                self.set_status(format!("Could not open new window: {error}"));
+                self.set_status(towavue_core::localization::formatted::new_window_failed(
+                    display_language,
+                    &error.to_string(),
+                ));
             }
             return;
         }

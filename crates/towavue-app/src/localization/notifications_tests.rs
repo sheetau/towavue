@@ -2,6 +2,51 @@ use super::Language;
 use crate::*;
 
 #[test]
+fn japanese_video_quality_and_resume_notices_keep_settings_and_error_details() {
+    use towavue_runtime_windows::{VideoExportQuality, VideoResumeEvent};
+    let Some(_root) = crate::tests::isolated_test_root(
+        "localization::notifications_tests::japanese_video_quality_and_resume_notices_keep_settings_and_error_details",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let mut peer = Application::new(None, |_| {}).expect("peer");
+    peer.video_export_quality = Arc::clone(&app.video_export_quality);
+    app.language_settings.display = Language::Japanese;
+    let history = app.edits.clone();
+    for (quality, english, japanese) in [
+        (VideoExportQuality::High, "High quality", "高品質"),
+        (VideoExportQuality::Balanced, "Balanced", "バランス"),
+        (
+            VideoExportQuality::Smaller,
+            "Smaller file",
+            "ファイルサイズ優先",
+        ),
+    ] {
+        assert_eq!(quality.label(), english);
+        app.set_video_export_quality(quality);
+        assert_eq!(
+            app.status_notice(),
+            Some(format!("動画の書き出し品質: {japanese}"))
+        );
+        assert_eq!(peer.video_export_quality(), quality);
+        assert_eq!(app.edits, history);
+    }
+    let detail = "Windows {detail}: 日本語.mp4 / 0x80004005";
+    app.handle_video_resume(VideoResumeEvent::SaveFailed(detail.into()));
+    assert_eq!(
+        app.status_notice(),
+        Some(format!("動画の再生位置を保存できませんでした: {detail}"))
+    );
+    app.handle_video_resume(VideoResumeEvent::ClearFailed(detail.into()));
+    assert_eq!(
+        app.status_notice(),
+        Some(format!("動画の再生位置を消去できませんでした: {detail}"))
+    );
+    assert_eq!(app.edits, history);
+}
+
+#[test]
 fn japanese_operation_notices_keep_edits_and_external_values() {
     let Some(root) = crate::tests::isolated_test_root(
         "localization::notifications_tests::japanese_operation_notices_keep_edits_and_external_values",

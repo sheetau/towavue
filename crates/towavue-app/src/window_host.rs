@@ -230,6 +230,7 @@ impl WindowHost {
     }
 
     fn open_pending_launches(&mut self, event_loop: &ActiveEventLoop, visible: bool) {
+        let display_language = self.language.settings.display;
         if self.updates.startup
             || self.update_committing()
             || self.file_operation.is_some()
@@ -254,7 +255,10 @@ impl WindowHost {
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
-                app.set_status(format!("Could not open new window: {error}"));
+                app.set_status(towavue_core::localization::formatted::new_window_failed(
+                    display_language,
+                    &error.to_string(),
+                ));
             }
         }
         for request in std::mem::take(&mut self.pending_launches) {
@@ -457,12 +461,15 @@ impl WindowHost {
     }
 
     fn route(&mut self, event: Event) {
+        let display_language = self.language.settings.display;
         match event {
             Event::Launch(request) => {
                 if self.update_committing() {
                     request.acknowledge(false);
                 } else {
-                    self.cancel_update("Update cancelled because another launch was requested.");
+                    self.cancel_update(
+                        localization::Text::UpdateCancelledByLaunch.in_language(display_language),
+                    );
                     self.updates.startup = false;
                     self.pending_launches.push(request);
                 }
@@ -479,7 +486,12 @@ impl WindowHost {
             Event::LanguageSaved(result) => self.finish_language_save(result),
             Event::PlaybackVolumePreferenceFailed(error) => {
                 if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
-                    app.set_status(format!("Could not save playback volume: {error}"));
+                    app.set_status(
+                        towavue_core::localization::formatted::playback_volume_save_failed(
+                            display_language,
+                            &error.to_string(),
+                        ),
+                    );
                     app.request_redraw();
                 }
             }
@@ -538,6 +550,7 @@ impl WindowHost {
         visible: bool,
         pick: impl Fn(&Self, WindowKey, egui::Pos2) -> Option<(WindowKey, egui::Pos2)>,
     ) {
+        let display_language = self.language.settings.display;
         let requests: Vec<_> = self
             .windows
             .iter_mut()
@@ -578,7 +591,12 @@ impl WindowHost {
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
-                app.set_status(format!("Could not open dragged media: {error}"));
+                app.set_status(
+                    towavue_core::localization::formatted::dragged_media_open_failed(
+                        display_language,
+                        &error.to_string(),
+                    ),
+                );
             }
         }
     }

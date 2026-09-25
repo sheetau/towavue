@@ -351,6 +351,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn begin_hold_speed(&mut self, token: u64) {
+        let display_language = self.language();
         self.cancel_frame_steps();
         let held = Held {
             token,
@@ -363,12 +364,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if self.media_kind == Some(MediaKind::Video) {
                 self.show_hold_progress(0);
             } else {
-                self.set_status("2× while held · release to restore playback".into());
+                self.set_status(
+                    localization::Text::HoldSpeedHint
+                        .in_language(display_language)
+                        .into(),
+                );
             }
         }
     }
 
     fn show_hold_progress(&mut self, progress: u8) {
+        let display_language = self.language();
         let target = if self
             .held_speed
             .as_ref()
@@ -378,13 +384,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             "2×"
         };
-        self.set_status(format!(
-            "2× while held · {progress}% to lock {target}{}",
+        self.set_status(towavue_core::localization::formatted::hold_speed_progress(
+            display_language,
+            progress,
+            target,
             if progress == 100 {
-                " · release to apply"
+                localization::Text::HoldApplySuffix.in_language(display_language)
             } else {
-                " · drag down"
-            }
+                localization::Text::HoldDragSuffix.in_language(display_language)
+            },
         ));
     }
 

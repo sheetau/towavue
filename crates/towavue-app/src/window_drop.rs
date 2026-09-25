@@ -27,6 +27,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(crate) fn request_tab_drop(&mut self, id: TabId, point: egui::Pos2, anchor: egui::Vec2) {
+        let display_language = self.language();
         if !self.hosted_graphics {
             self.request_guarded(GuardedAction::DetachTab(id));
             return;
@@ -36,7 +37,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         match self.tab_detach_request(id) {
             Ok(request) => self.pending_tab_drop = Some((request, point, anchor)),
-            Err(error) => self.set_status(format!("Could not move tab: {error}")),
+            Err(error) => self.set_status(towavue_core::localization::formatted::tab_move_failed(
+                display_language,
+                &error.to_string(),
+            )),
         }
     }
 
@@ -192,6 +196,7 @@ impl WindowHost {
         mut feedback: Option<DragFeedback>,
         visible: bool,
     ) -> Option<DragFeedback> {
+        let display_language = self.language.settings.display;
         let Some(item) = feedback.as_ref().filter(|item| item.badge.is_some()) else {
             self.tab_badge = None;
             self.tab_badge_failed = false;
@@ -220,7 +225,12 @@ impl WindowHost {
                 self.tab_badge = None;
                 self.tab_badge_failed = true;
                 if let Some(app) = self.windows.get_mut(&item.source) {
-                    app.set_status(format!("Could not show tab drag feedback: {error}"));
+                    app.set_status(
+                        towavue_core::localization::formatted::tab_drag_feedback_failed(
+                            display_language,
+                            &error.to_string(),
+                        ),
+                    );
                 }
             }
         }
@@ -302,6 +312,7 @@ impl WindowHost {
         visible: bool,
         pick: impl Fn(&Self, WindowKey, egui::Pos2) -> Option<(WindowKey, egui::Pos2)>,
     ) {
+        let display_language = self.language.settings.display;
         let pending: Vec<_> = self
             .windows
             .iter_mut()
@@ -326,7 +337,9 @@ impl WindowHost {
                 .get(&source)
                 .is_some_and(|app| app.tabs.tab_ids().count() <= 1)
             {
-                Err("Move the last tab to another window".into())
+                Err(localization::Text::MoveLastTabHint
+                    .in_language(display_language)
+                    .into())
             } else {
                 self.source_client_position(source, point)
                     .and_then(|position| {
@@ -337,7 +350,10 @@ impl WindowHost {
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
-                app.set_status(format!("Could not move tab: {error}"));
+                app.set_status(towavue_core::localization::formatted::tab_move_failed(
+                    display_language,
+                    &error.to_string(),
+                ));
             }
         }
         let feedback = self.tab_drag_feedback(pick);

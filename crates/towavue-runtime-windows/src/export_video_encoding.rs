@@ -28,11 +28,17 @@ pub enum VideoExportQuality {
 
 impl VideoExportQuality {
     pub fn label(self) -> &'static str {
+        self.label_in(towavue_core::localization::Language::English)
+    }
+
+    pub fn label_in(self, language: towavue_core::localization::Language) -> &'static str {
+        use towavue_core::localization::Text;
         match self {
-            Self::High => "High quality",
-            Self::Balanced => "Balanced",
-            Self::Smaller => "Smaller file",
+            Self::High => Text::QualityHigh,
+            Self::Balanced => Text::QualityBalanced,
+            Self::Smaller => Text::QualitySmaller,
         }
+        .in_language(language)
     }
 
     pub(super) fn av1_crf(self, svt: bool) -> &'static str {

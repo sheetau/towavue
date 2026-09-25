@@ -1,3 +1,4 @@
+use crate::localization;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -98,6 +99,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn step_video_frame(&mut self, forward: bool) {
+        let display_language = self.language();
         if self.media_kind != Some(MediaKind::Video)
             || !matches!(
                 self.state,
@@ -112,13 +114,21 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         if self.frame_steps.cursor.is_none() {
             if session.video_refresh_pending() || session.current_video_time().is_none() {
-                self.set_status("Wait for the current video frame".into());
+                self.set_status(
+                    localization::Text::WaitForVideoFrame
+                        .in_language(display_language)
+                        .into(),
+                );
                 return;
             }
             self.frame_steps.cursor = session.current_video_time();
         }
         if self.frame_steps.queued.len() + usize::from(self.frame_steps.pending.is_some()) >= 32 {
-            self.set_status("Frame step queue is full (32 operations)".into());
+            self.set_status(
+                localization::Text::FrameStepQueueFull
+                    .in_language(display_language)
+                    .into(),
+            );
             return;
         }
         if let Err(error) = session.set_paused(true) {
@@ -150,6 +160,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn start_frame_step(&mut self) {
+        let display_language = self.language();
         if self.frame_steps.pending.is_some() {
             return;
         }
@@ -211,9 +222,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         });
         self.set_status(
             if forward {
-                "Finding next video frame"
+                localization::Text::FindingNextFrame.in_language(display_language)
             } else {
-                "Finding previous video frame"
+                localization::Text::FindingPreviousFrame.in_language(display_language)
             }
             .into(),
         );
@@ -224,6 +235,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         serial: u64,
         result: Result<Option<MediaTime>, String>,
     ) {
+        let display_language = self.language();
         let Some(request) = self
             .frame_steps
             .pending
@@ -257,15 +269,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             Ok(None) => self.set_status(
                 if request.forward {
-                    "No next video frame"
+                    localization::Text::NoNextFrame.in_language(display_language)
                 } else {
-                    "No previous video frame"
+                    localization::Text::NoPreviousFrame.in_language(display_language)
                 }
                 .into(),
             ),
             Err(error) => {
                 self.cancel_frame_steps();
-                self.set_status(format!("Frame step: {error}"));
+                self.set_status(towavue_core::localization::formatted::frame_step_failed(
+                    display_language,
+                    &error.to_string(),
+                ));
                 return;
             }
         }

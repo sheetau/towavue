@@ -2,6 +2,89 @@ use super::*;
 use crate::file_operations::{Kind, Pending};
 use std::sync::mpsc;
 
+#[test]
+fn japanese_file_operation_notices_preserve_rename_and_cancelled_delete_ownership() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::tests::japanese_file_operation_notices_preserve_rename_and_cancelled_delete_ownership",
+    ) else {
+        return;
+    };
+    let source = root.join("日本語{source}.bmp");
+    let target = root.join("日本語{renamed}.bmp");
+    let bytes = b"owned rename fixture; no media decoder";
+    std::fs::write(&source, bytes).expect("fixture");
+    let mut host = WindowHost::new(None, None).expect("host");
+    host.language.settings.display = localization::Language::Japanese;
+    host.language.settings.next = localization::Language::Japanese;
+    let owner = *host.windows.keys().next().expect("owner");
+    host.add_application(None).expect("peer");
+    *host.captured_events.lock().expect("events") = Some(VecDeque::new());
+    for app in host.windows.values_mut() {
+        app.language_settings = host.language.settings;
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Image);
+        app.path = Some(source.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.displayed_tab = Some(tab);
+        app.state = PlaybackState::Paused;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::FlipHorizontal, MediaKind::Image);
+        app.source_versions.insert(
+            tab,
+            Some(FileOperationSource::capture(&source).expect("version")),
+        );
+    }
+    let histories: Vec<_> = host.windows.values().map(|app| app.edits.clone()).collect();
+    choose(&mut host, owner, Kind::Rename, target.clone());
+    assert!(!source.exists());
+    assert_eq!(std::fs::read(&target).expect("renamed bytes"), bytes);
+    assert_eq!(
+        host.windows[&owner].status_notice(),
+        Some(format!("ファイルを移動しました: {}", target.display()))
+    );
+    let expected = FileOperationSource::capture(&target).expect("renamed version");
+    host.file_operation = Some(Transaction {
+        owner,
+        serial: 500,
+        source: target.clone(),
+        action: Some((expected.clone(), FileOperationAction::Recycle)),
+        suppress_confirmation: false,
+        expected,
+        waiting_since: None,
+        retain_copy: false,
+    });
+    for app in host.windows.values_mut() {
+        app.file_operations.locked = true;
+    }
+    let cancel = || {
+        Ok(towavue_runtime_windows::DeleteConfirmation {
+            confirmed: false,
+            dont_ask_again: false,
+        })
+    };
+    host.finish_delete_confirmation(owner, 499, cancel());
+    assert!(
+        host.file_operation.is_some(),
+        "stale cancellation cannot unlock the transaction"
+    );
+    host.finish_delete_confirmation(owner, 500, cancel());
+    assert!(host.file_operation.is_none());
+    assert_eq!(
+        host.windows[&owner].status_notice().as_deref(),
+        Some("ファイルの削除をキャンセルしました。")
+    );
+    for (app, history) in host.windows.values().zip(histories) {
+        assert!(!app.file_operations.locked && !app.exit_requested);
+        assert_eq!(app.path.as_ref(), Some(&target));
+        assert_eq!(app.edits, history);
+    }
+    assert_eq!(
+        std::fs::read(target).expect("cancelled deletion retains bytes"),
+        bytes
+    );
+}
+
 fn choose(host: &mut WindowHost, owner: WindowKey, kind: Kind, target: PathBuf) {
     let path = host.windows[&owner].path.clone().expect("source path");
     choose_at(host, owner, kind, path, target);

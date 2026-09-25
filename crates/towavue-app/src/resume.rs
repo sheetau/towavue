@@ -129,9 +129,12 @@ pub(super) fn record<N>(app: &mut Application<N>, force: bool) {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn clear_video_resume(&mut self) {
+        let display_language = self.language();
         if self.resume_history.is_none() {
             self.set_status(
-                "Could not clear video positions: resume history is unavailable".into(),
+                localization::Text::ResumeHistoryUnavailable
+                    .in_language(display_language)
+                    .into(),
             );
             return;
         }
@@ -170,6 +173,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
     pub(super) fn handle_video_resume(&mut self, event: VideoResumeEvent) {
+        let display_language = self.language();
         match event {
             VideoResumeEvent::Loaded {
                 token,
@@ -191,7 +195,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 let resume = match result {
                     Ok(resume) => Some(resume),
                     Err(error) => {
-                        self.set_status(format!("Video resume unavailable: {error}"));
+                        self.set_status(
+                            towavue_core::localization::formatted::video_resume_failed(
+                                display_language,
+                                &error.to_string(),
+                            ),
+                        );
                         None
                     }
                 };
@@ -202,12 +211,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     self.open_playback_path(path, resume);
                 }
             }
-            VideoResumeEvent::SaveFailed(error) => {
-                self.set_status(format!("Could not save video position: {error}"))
-            }
-            VideoResumeEvent::ClearFailed(error) => {
-                self.set_status(format!("Could not clear video positions: {error}"))
-            }
+            VideoResumeEvent::SaveFailed(error) => self.set_status(
+                towavue_core::localization::formatted::video_position_save_failed(
+                    display_language,
+                    &error.to_string(),
+                ),
+            ),
+            VideoResumeEvent::ClearFailed(error) => self.set_status(
+                towavue_core::localization::formatted::video_positions_clear_failed(
+                    display_language,
+                    &error.to_string(),
+                ),
+            ),
         }
     }
 

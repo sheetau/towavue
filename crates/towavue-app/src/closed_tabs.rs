@@ -19,6 +19,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn reopen_closed_tab(&mut self) {
+        let display_language = self.language();
         if self.modal_input_blocked() {
             return;
         }
@@ -48,7 +49,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.tabs.gallery().map(|id| (id, position))
             }
             None => {
-                self.set_status("No closed tabs to reopen.".into());
+                self.set_status(
+                    localization::Text::NoClosedTabs
+                        .in_language(display_language)
+                        .into(),
+                );
                 None
             }
         };

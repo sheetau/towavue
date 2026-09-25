@@ -2,6 +2,7 @@ use crate::*;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn select_aspect(&mut self, aspect: (u32, u32)) {
+        let display_language = self.language();
         let Some(kind) = self.media_kind else {
             return;
         };
@@ -21,7 +22,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             _ => return,
         };
         let Some((width, height, pixel_aspect)) = geometry else {
-            self.set_status("Wait for media to load before selecting".into());
+            self.set_status(
+                localization::Text::WaitForSelectionMedia
+                    .in_language(display_language)
+                    .into(),
+            );
             return;
         };
         let transform = self.visual_transform((width, height));
@@ -29,7 +34,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(crop) =
             PixelCrop::centered_aspect(size, kind, aspect, transform.pixel_aspect(pixel_aspect))
         else {
-            self.set_status("Media dimensions cannot form this selection".into());
+            self.set_status(
+                localization::Text::SelectionDimensionsInvalid
+                    .in_language(display_language)
+                    .into(),
+            );
             return;
         };
         self.set_time_selection(None);
@@ -37,9 +46,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(context) = &self.ui_context {
             selection::focus_first(context, self.selection_identity());
         }
-        self.set_status(format!(
-            "Selection {}:{} ({} x {} pixels)",
-            aspect.0, aspect.1, crop.width, crop.height
+        self.set_status(towavue_core::localization::formatted::selected_aspect(
+            display_language,
+            aspect.0,
+            aspect.1,
+            crop.width,
+            crop.height,
         ));
         self.request_redraw();
     }

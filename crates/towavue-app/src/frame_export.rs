@@ -37,9 +37,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn export_current_frame(&mut self) {
+        let display_language = self.language();
         let Some(intent) = self.capture_frame_export() else {
             self.set_status(
-                "No current frame is available for export, or another dialog/export is active."
+                localization::Text::FrameExportUnavailable
+                    .in_language(display_language)
                     .into(),
             );
             return;
@@ -67,6 +69,7 @@ impl PendingFrameExport {
         app: &mut Application<N>,
         result: Result<Option<PathBuf>, DialogError>,
     ) {
+        let display_language = app.language();
         let target = match result {
             Ok(Some(target)) => target,
             Ok(None) => return,
@@ -87,7 +90,8 @@ impl PendingFrameExport {
             })
         {
             app.set_status(
-                "The source changed while choosing a frame export path; nothing was exported."
+                localization::Text::FrameExportSourceChanged
+                    .in_language(display_language)
                     .into(),
             );
             return;

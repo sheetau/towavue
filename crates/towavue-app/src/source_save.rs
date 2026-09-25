@@ -84,6 +84,7 @@ impl From<towavue_runtime_windows::SourceSaveError> for PublicationError {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn save_source(&mut self, continuation: Option<GuardedAction>) -> bool {
+        let display_language = self.language();
         if self.modal_input_blocked()
             || self.active_export.is_some()
             || self.image_loading
@@ -106,7 +107,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .and_then(Option::as_ref)
             .cloned()
         else {
-            self.export_error = Some("The loaded source version is unavailable. Reopen the file before saving, or use Save as to keep the current edits.".into());
+            self.export_error = Some(
+                localization::Text::SaveSourceVersionUnavailable
+                    .in_language(display_language)
+                    .into(),
+            );
             self.request_redraw();
             return false;
         };
@@ -144,7 +149,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .get(&id)
                 .is_none_or(|history| !history.is_dirty())
         {
-            self.set_status("No changes to save.".into());
+            self.set_status(
+                localization::Text::NoChangesToSave
+                    .in_language(display_language)
+                    .into(),
+            );
             if let Some(action) = continuation {
                 self.request_guarded(action);
             }
@@ -223,6 +232,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn handle_source_save(&mut self, serial: u64, event: SourceSaveEvent) {
+        let display_language = self.language();
         if self
             .source_save
             .pending
@@ -252,8 +262,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .expect("save owner")
                         .prepared = Some(prepared);
                 }
-                Ok(_) => self
-                    .finish_source_save(Err("Save cancelled before replacing the source.".into())),
+                Ok(_) => {
+                    self.finish_source_save(Err(localization::Text::SaveCancelledBeforeReplace
+                        .in_language(display_language)
+                        .into()))
+                }
                 Err(error) => self.finish_source_save(Err(error.to_string())),
             },
         }
@@ -261,13 +274,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn finish_source_save(&mut self, result: Result<(), String>) {
+        let display_language = self.language();
         let pending = self.source_save.pending.take();
         let save_as = self.source_save.save_as.take();
         let export = self.active_export.take();
         if let Some(export) = export {
             match result {
                 Ok(()) => {
-                    self.set_status(format!("Saved {}", export.request.target.display()));
+                    self.set_status(towavue_core::localization::formatted::saved_file(
+                        display_language,
+                        &export.request.target.display().to_string(),
+                    ));
                     self.export_notice = self
                         .status_message
                         .as_ref()

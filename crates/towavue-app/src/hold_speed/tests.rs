@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn japanese_hold_progress_keeps_target_rate_history_and_gesture_lifetime() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "hold_speed::tests::japanese_hold_progress_keeps_target_rate_history_and_gesture_lifetime",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let context = localization::test_ui::japanese_context(density);
+        app.ui_context = Some(context.clone());
+        app.media_kind = Some(MediaKind::Video);
+        app.state = PlaybackState::Playing;
+        let history = app.edits.clone();
+        for (rate, target) in [(1.0, "2×"), (2.0, "1×")] {
+            app.held_speed = Some(Held {
+                token: 1,
+                media: app.media_generation,
+                rate,
+                was_paused: false,
+            });
+            for progress in [0, 50, 100] {
+                app.show_hold_progress(progress);
+                app.status_message.as_mut().expect("notice").1 =
+                    Instant::now() - Duration::from_secs(60);
+                let hint = if progress == 100 {
+                    "離すと適用"
+                } else {
+                    "下にドラッグ"
+                };
+                let expected = format!("長押し中は2× · {target}への固定まで{progress}% · {hint}");
+                assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
+                for _ in 0..3 {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1000.0, 300.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                        },
+                    );
+                    assert_eq!(output.pixels_per_point, density);
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+                }
+                assert_eq!(app.held_speed.as_ref().expect("gesture").rate, rate);
+                assert_eq!(app.edits, history);
+            }
+        }
+    }
+}
+
+#[test]
 fn held_video_progress_reaches_painted_status_and_does_not_expire_mid_gesture() {
     let Some(_root) = crate::tests::isolated_test_root(
         "hold_speed::tests::held_video_progress_reaches_painted_status_and_does_not_expire_mid_gesture",

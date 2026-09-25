@@ -65,6 +65,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn begin_file_relocation_at(&mut self, kind: Kind, path: PathBuf) {
+        let display_language = self.language();
         if self.path.as_ref() == Some(&path) && self.current_source_deleted() {
             return;
         }
@@ -74,7 +75,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             || self.image_edit_pending
             || self.state == PlaybackState::Loading
         {
-            self.set_status("Wait for the current operation before changing the file.".into());
+            self.set_status(
+                localization::Text::WaitBeforeFileChange
+                    .in_language(display_language)
+                    .into(),
+            );
             return;
         }
         let Some(tab) = self.tabs.active() else {
@@ -130,6 +135,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         serial: u64,
         result: Result<FileOperationSource, String>,
     ) {
+        let display_language = self.language();
         if self
             .file_operations
             .pending
@@ -151,7 +157,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     .is_none_or(|pending| source.path() != pending.path)
                 {
                     self.file_operations.pending = None;
-                    self.set_status("The inspected file does not match this operation.".into());
+                    self.set_status(
+                        localization::Text::InspectedFileMismatch
+                            .in_language(display_language)
+                            .into(),
+                    );
                     return;
                 }
                 let pending = self

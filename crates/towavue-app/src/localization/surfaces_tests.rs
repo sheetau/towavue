@@ -9,6 +9,89 @@ enum Surface {
     Status,
 }
 
+#[test]
+fn japanese_audio_mode_controls_keep_commands_and_compact_bounds() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::surfaces_tests::japanese_audio_mode_controls_keep_commands_and_compact_bounds",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for width in [240.0, 960.0] {
+            let size = egui::vec2(width, 300.0);
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.ui_context = Some(test_ui::japanese_context(density));
+            let path = root.join("日本語{track}.wav");
+            let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
+            app.path = Some(path);
+            app.media_kind = Some(MediaKind::Audio);
+            app.state = PlaybackState::Paused;
+            app.ensure_audio_queue();
+            let history = app.edits.clone();
+            for (title, command, repeat, shuffled) in [
+                (
+                    "リピート：オフ",
+                    CommandId::CycleAudioRepeat,
+                    towavue_core::RepeatMode::All,
+                    false,
+                ),
+                (
+                    "リピート：全曲",
+                    CommandId::CycleAudioRepeat,
+                    towavue_core::RepeatMode::One,
+                    false,
+                ),
+                (
+                    "リピート：1曲",
+                    CommandId::CycleAudioRepeat,
+                    towavue_core::RepeatMode::Off,
+                    false,
+                ),
+                (
+                    "シャッフル：オフ",
+                    CommandId::ToggleAudioShuffle,
+                    towavue_core::RepeatMode::Off,
+                    true,
+                ),
+                (
+                    "シャッフル：オン",
+                    CommandId::ToggleAudioShuffle,
+                    towavue_core::RepeatMode::Off,
+                    false,
+                ),
+            ] {
+                let output = settle(&mut app, Surface::Status, size);
+                assert_eq!(output.pixels_per_point, density);
+                let label = app.command_hint(command, title);
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                let node = &tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(&label))
+                    .expect("audio mode")
+                    .1;
+                let bounds = node.bounds().expect("bounds");
+                assert!(!node.is_disabled());
+                assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width));
+                assert!((bounds.width() - bounds.height()).abs() < 0.1);
+                let event = test_ui::action(&output, &label, None);
+                let (_, actions) = paint(&mut app, Surface::Status, size, vec![event]);
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::Command(chosen)] if *chosen == command)
+                );
+                app.dispatch(command);
+                assert_eq!(app.audio_mode(), (repeat, shuffled));
+                assert_eq!(app.edits, history);
+                assert_eq!(app.tabs.active_id(), Some(tab));
+            }
+        }
+    }
+}
+
 fn paint(
     app: &mut Application<impl Fn(AppEvent) + Send + Sync + 'static>,
     surface: Surface,

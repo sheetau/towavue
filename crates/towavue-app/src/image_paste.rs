@@ -17,6 +17,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn paste_image(&mut self) {
+        let display_language = self.language();
         if self.modal_input_blocked() || self.active_export.is_some() {
             return;
         }
@@ -26,14 +27,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         match ImagePasteJob::start(move |result| notify(AppEvent::ImagePasted(serial, result))) {
             Ok(job) => {
                 self.image_paste.pending = Some(job);
-                self.set_status("Pasting image...".into());
+                self.set_status(
+                    localization::Text::PastingImage
+                        .in_language(display_language)
+                        .into(),
+                );
             }
-            Err(error) => self.set_status(format!("Could not paste image: {error}")),
+            Err(error) => {
+                self.set_status(towavue_core::localization::formatted::image_paste_failed(
+                    display_language,
+                    &error.to_string(),
+                ))
+            }
         }
         self.request_redraw();
     }
 
     pub(super) fn finish_image_paste(&mut self, serial: u64, result: Result<PastedImage, String>) {
+        let display_language = self.language();
         if serial != self.image_paste.serial || self.image_paste.pending.is_none() {
             return;
         }
@@ -43,7 +54,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         match result.and_then(|pasted| self.open_pasted_image(pasted)) {
             Ok(()) => {}
-            Err(error) => self.set_status(format!("Could not paste image: {error}")),
+            Err(error) => {
+                self.set_status(towavue_core::localization::formatted::image_paste_failed(
+                    display_language,
+                    &error.to_string(),
+                ))
+            }
         }
         self.request_redraw();
     }

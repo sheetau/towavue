@@ -118,6 +118,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn play_time_selection(&mut self) {
+        let display_language = self.language();
         let Some(range) = self.time_selection else {
             return;
         };
@@ -136,7 +137,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if self.state == PlaybackState::Playing {
             self.set_status(
-                "Playing selected time · Space pauses · Escape returns to full range".into(),
+                localization::Text::SelectedTimePlaying
+                    .in_language(display_language)
+                    .into(),
             );
         }
     }
@@ -182,15 +185,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn prepare_timeline_edit(&mut self, operation: EditOperation) -> bool {
+        let display_language = self.language();
         let (Some(tab), Some(kind), Some(duration)) =
             (self.tabs.active(), self.media_kind, self.media_duration)
         else {
-            self.set_status("Wait for the source duration before editing time".into());
+            self.set_status(
+                localization::Text::WaitForTimelineDuration
+                    .in_language(display_language)
+                    .into(),
+            );
             return false;
         };
         let mut candidate = self.edits.get(&tab.id).cloned().unwrap_or_default();
         if !candidate.push(operation, kind) || candidate.timeline(media_time(duration)).is_none() {
-            self.set_status("Timeline unchanged: invalid range, gain or duration".into());
+            self.set_status(
+                localization::Text::InvalidTimelineEdit
+                    .in_language(display_language)
+                    .into(),
+            );
             return false;
         }
         true

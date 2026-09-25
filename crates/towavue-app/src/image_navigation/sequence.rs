@@ -83,6 +83,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn enqueue_image_step(&mut self, step: ImageStep) -> bool {
+        let display_language = self.language();
         #[cfg(feature = "presentation-verification")]
         let forward = step.forward;
         if self.image_sequence.awaiting.is_none() {
@@ -101,7 +102,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 u64::from(forward),
             );
             self.set_status(
-                "Image navigation queue is full. Wait for accepted steps to finish.".into(),
+                localization::Text::ImageNavigationQueueFull
+                    .in_language(display_language)
+                    .into(),
             );
         } else {
             self.image_sequence.steps.push_back(step);

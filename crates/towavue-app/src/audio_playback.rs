@@ -109,11 +109,21 @@ impl AudioTab {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn draw_audio_mode_buttons(&self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let display_language = self.language();
         let (repeat, shuffled) = self.audio_mode();
         let (icon, label) = match repeat {
-            RepeatMode::Off => (chrome::AudioIcon::Repeat, "Repeat off"),
-            RepeatMode::All => (chrome::AudioIcon::Repeat, "Repeat all"),
-            RepeatMode::One => (chrome::AudioIcon::RepeatOne, "Repeat one"),
+            RepeatMode::Off => (
+                chrome::AudioIcon::Repeat,
+                localization::Text::PlaybackRepeatOff.in_language(display_language),
+            ),
+            RepeatMode::All => (
+                chrome::AudioIcon::Repeat,
+                localization::Text::PlaybackRepeatAll.in_language(display_language),
+            ),
+            RepeatMode::One => (
+                chrome::AudioIcon::RepeatOne,
+                localization::Text::PlaybackRepeatOne.in_language(display_language),
+            ),
         };
         if chrome::audio_button(
             ui,
@@ -132,9 +142,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             &self.command_hint(
                 CommandId::ToggleAudioShuffle,
                 if shuffled {
-                    "Shuffle on"
+                    localization::Text::ShuffleOn.in_language(display_language)
                 } else {
-                    "Shuffle off"
+                    localization::Text::ShuffleOff.in_language(display_language)
                 },
             ),
         )
@@ -159,6 +169,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn ensure_audio_queue_for(&mut self, id: TabId, path: &Path) {
+        let display_language = self.language();
         let Some(folder) = path.parent().map(Path::to_owned) else {
             return;
         };
@@ -177,7 +188,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Some(provider)
             }
             Err(error) => {
-                self.set_status(format!("Audio order unavailable: {error}"));
+                self.set_status(towavue_core::localization::formatted::audio_order_failed(
+                    display_language,
+                    &error.to_string(),
+                ));
                 None
             }
         };
@@ -302,6 +316,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn advance_audio_queues(&mut self) {
+        let display_language = self.language();
         if self.file_operations.locked {
             return;
         }
@@ -389,8 +404,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .as_ref()
                         .is_some_and(|export| export.tab == id))
             {
-                let message =
-                    "Automatic next track stopped to preserve edits or an active export".to_owned();
+                let message = localization::Text::AutoNextStopped
+                    .in_language(display_language)
+                    .to_owned();
                 if active == Some(id) {
                     self.set_status(message);
                 } else if let Some(saved) = self.retained_playback.get_mut(&id) {

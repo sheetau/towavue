@@ -100,6 +100,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         delta: egui::Vec2,
         released: bool,
     ) {
+        let display_language = self.language();
         if media != self.media_generation
             || self.track_drag.is_some()
             || self.held_speed.is_some()
@@ -121,7 +122,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             ) {
                 Ok(cursor) => Some(cursor),
                 Err(error) => {
-                    self.set_status(format!("Could not start track drag: {error}"));
+                    self.set_status(towavue_core::localization::formatted::track_drag_failed(
+                        display_language,
+                        &error.to_string(),
+                    ));
                     return;
                 }
             }
@@ -134,7 +138,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             distance: 0.0,
             cursor,
         });
-        self.set_status("Drag left/right for previous/next track · release to cancel".into());
+        self.set_status(
+            localization::Text::TrackDragHint
+                .in_language(display_language)
+                .into(),
+        );
         self.move_track_drag((f64::from(delta.x) * density, 0.0));
         if released {
             self.finish_track_drag(false);
@@ -142,6 +150,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn move_track_drag(&mut self, delta: (f64, f64)) {
+        let display_language = self.language();
         if let Some(drag) = &mut self.track_drag {
             let previous = drag.direction();
             drag.distance += delta.0 / drag.density;
@@ -149,9 +158,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 return;
             }
             let message = match drag.direction() {
-                Some(true) => "Release for next track · return to center or Escape to cancel",
-                Some(false) => "Release for previous track · return to center or Escape to cancel",
-                None => "Drag left/right for previous/next track · release to cancel",
+                Some(true) => localization::Text::TrackDragNext.in_language(display_language),
+                Some(false) => localization::Text::TrackDragPrevious.in_language(display_language),
+                None => localization::Text::TrackDragHint.in_language(display_language),
             };
             self.set_status(message.into());
             self.request_redraw();
@@ -159,6 +168,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn finish_track_drag(&mut self, cancel: bool) -> bool {
+        let display_language = self.language();
         let Some(mut drag) = self.track_drag.take() else {
             return false;
         };
@@ -174,7 +184,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 CommandId::PreviousMedia
             });
         } else if drag.media == self.media_generation {
-            self.set_status("Track drag cancelled".into());
+            self.set_status(
+                localization::Text::TrackDragCancelled
+                    .in_language(display_language)
+                    .into(),
+            );
         }
         self.request_redraw();
         true

@@ -17,6 +17,7 @@ pub(super) struct Transaction {
 
 impl WindowHost {
     pub(super) fn start_pending_file_operation(&mut self) {
+        let display_language = self.language.settings.display;
         if self.file_operation.is_some() || self.source_save.is_some() {
             return;
         }
@@ -40,7 +41,8 @@ impl WindowHost {
             app.file_operations.ready = None;
             app.file_operations.pending = None;
             app.set_status(
-                "Finish loading, exporting or the other open dialog before changing the file."
+                localization::Text::FileChangeBusy
+                    .in_language(display_language)
                     .into(),
             );
             return;
@@ -137,6 +139,7 @@ impl WindowHost {
         serial: u64,
         result: Result<towavue_runtime_windows::DeleteConfirmation, String>,
     ) {
+        let display_language = self.language.settings.display;
         let Some(pending) = self.file_operation.as_mut().filter(|pending| {
             pending.owner == owner
                 && pending.serial == serial
@@ -149,12 +152,17 @@ impl WindowHost {
                 pending.suppress_confirmation = choice.dont_ask_again;
                 self.run_file_operation();
             }
-            Ok(_) => self.cancel_file_operation("File deletion cancelled.".into()),
+            Ok(_) => self.cancel_file_operation(
+                localization::Text::FileDeleteCancelled
+                    .in_language(display_language)
+                    .into(),
+            ),
             Err(error) => self.cancel_file_operation(error),
         }
     }
 
     fn run_file_operation(&mut self) {
+        let display_language = self.language.settings.display;
         let pending = self.file_operation.as_ref().expect("accepted transaction");
         if pending.waiting_since.is_some() || pending.action.is_none() {
             return;
@@ -190,7 +198,11 @@ impl WindowHost {
                 if version.is_some_and(|version| version.as_ref() != Some(&pending.expected))
                     || (version.is_none() && loaded)
                 {
-                    self.cancel_file_operation("Deletion cancelled because an open document has an outdated or unavailable source version. Export or reopen that document first.".into());
+                    self.cancel_file_operation(
+                        localization::Text::DeleteSourceVersionChanged
+                            .in_language(display_language)
+                            .into(),
+                    );
                     return;
                 }
                 retain_copy = true;
@@ -206,6 +218,7 @@ impl WindowHost {
     }
 
     pub(super) fn advance_file_operation(&mut self) {
+        let display_language = self.language.settings.display;
         let Some(pending) = self.file_operation.as_ref() else {
             return;
         };
@@ -217,7 +230,11 @@ impl WindowHost {
         }
         if !self.windows.values().all(|app| app.source_readers_idle()) {
             if waiting_since.elapsed() >= Duration::from_secs(10) {
-                self.cancel_file_operation("Deletion cancelled because a media reader did not stop. The file was not deleted.".into());
+                self.cancel_file_operation(
+                    localization::Text::DeleteReaderDidNotStop
+                        .in_language(display_language)
+                        .into(),
+                );
             }
             return;
         }
@@ -315,6 +332,7 @@ impl WindowHost {
         serial: u64,
         result: Result<Completed, String>,
     ) {
+        let display_language = self.language.settings.display;
         if self.file_operation.as_ref().is_none_or(|pending| {
             pending.owner != owner || pending.serial != serial || pending.action.is_some()
         }) {
@@ -344,15 +362,20 @@ impl WindowHost {
                         recent.remove(pending.source, towavue_runtime_windows::RecentKind::File);
                         recent.record(path.clone());
                     }
-                    app.set_status(format!("File moved: {}", path.display()));
+                    app.set_status(towavue_core::localization::formatted::moved_file(
+                        display_language,
+                        &path.display().to_string(),
+                    ));
                 }
                 Ok(Completed {
                     outcome: FileOperationOutcome::CopiedButSourceRetained(path),
                     ..
-                }) => app.set_status(format!(
-                    "A copy was created at {}; the original could not be removed and remains open.",
-                    path.display()
-                )),
+                }) => app.set_status(
+                    towavue_core::localization::formatted::copied_source_retained(
+                        display_language,
+                        &path.display().to_string(),
+                    ),
+                ),
                 Ok(Completed {
                     outcome: FileOperationOutcome::Recycled,
                     preference_warning,
@@ -367,15 +390,18 @@ impl WindowHost {
                         .as_ref()
                         .is_some_and(|report| report.after.is_none())
                     {
-                        "File recycled; the folder could not be refreshed."
+                        localization::Text::RecycledFolderRefreshFailed
+                            .in_language(display_language)
                     } else {
-                        "File moved to the Recycle Bin."
+                        localization::Text::FileRecycled.in_language(display_language)
                     };
                     app.set_status(preference_warning.map_or_else(
                         || message.into(),
                         |error| {
-                            format!(
-                                "{message} The confirmation preference could not be saved: {error}"
+                            towavue_core::localization::formatted::delete_preference_failed(
+                                display_language,
+                                message,
+                                &error.to_string(),
                             )
                         },
                     ));

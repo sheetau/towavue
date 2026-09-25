@@ -51,6 +51,7 @@ pub(super) fn open_preferences(
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     fn remember_playback_volume(&mut self, volume: PlaybackVolume) {
+        let display_language = self.language();
         *self
             .last_playback_volume
             .lock()
@@ -58,7 +59,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(preferences) = &self.playback_volume_preferences
             && let Err(error) = preferences.remember(volume.level, volume.unmuted)
         {
-            self.set_status(format!("Could not save playback volume: {error}"));
+            self.set_status(
+                towavue_core::localization::formatted::playback_volume_save_failed(
+                    display_language,
+                    &error.to_string(),
+                ),
+            );
         }
     }
 

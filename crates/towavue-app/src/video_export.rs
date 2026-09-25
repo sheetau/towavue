@@ -22,6 +22,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn set_video_export_quality(&mut self, quality: VideoExportQuality) {
+        let display_language = self.language();
         // All hosted windows share this session setting. Workers own copied
         // ExportOptions so changing it never retunes an in-flight export.
         *self
@@ -29,6 +30,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .lock()
             .expect("video export quality") = quality;
         (self.notify)(AppEvent::VideoExportQualityChanged);
-        self.set_status(format!("Video export quality: {}", quality.label()));
+        self.set_status(towavue_core::localization::formatted::video_export_quality(
+            display_language,
+            quality.label_in(display_language),
+        ));
     }
 }

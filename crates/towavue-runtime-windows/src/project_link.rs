@@ -8,6 +8,7 @@ use windows::core::{PCWSTR, w};
 pub enum ProjectLink {
     Author,
     Repository,
+    Website,
 }
 
 impl ProjectLink {
@@ -26,6 +27,7 @@ impl ProjectLink {
                 let url = match self {
                     Self::Author => w!("https://linktr.ee/sheetau"),
                     Self::Repository => w!("https://github.com/sheetau/towavue"),
+                    Self::Website => w!("https://sheetau.github.io/towavue/"),
                 };
                 // SAFETY: static, NUL-terminated HTTPS literals; no parameters,
                 // working directory, borrowed window or returned owned handle.

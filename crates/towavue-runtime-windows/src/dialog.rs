@@ -30,6 +30,7 @@ use windows::core::w;
 const ERROR_CANCELLED_HRESULT: u32 = 0x8007_04c7;
 
 mod about;
+mod caption_icon;
 pub use about::{AboutEvent, AboutResponse, show_about};
 
 #[derive(Debug, Error)]
@@ -427,8 +428,11 @@ fn start_dialog_worker<T: Send + 'static>(
     thread::Builder::new()
         .name("towavue-file-dialog-sta".into())
         .spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(choose))
-                .unwrap_or(Err(DialogError::ThreadStopped));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _caption_icon = caption_icon::DialogCaptionIcon::new();
+                choose()
+            }))
+            .unwrap_or(Err(DialogError::ThreadStopped));
             notify(result);
         })?;
     Ok(())

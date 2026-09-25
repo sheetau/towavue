@@ -1,13 +1,8 @@
 use super::*;
 use crate::ProjectLink;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::{
-    TASKDIALOG_NOTIFICATIONS, TASKDIALOGCONFIG_0, TDF_ENABLE_HYPERLINKS, TDF_USE_HICON_MAIN,
-    TDN_CREATED, TDN_HYPERLINK_CLICKED,
-};
-use windows::Win32::UI::WindowsAndMessaging::{
-    HICON, ICON_BIG, ICON_SMALL, LoadIconW, SendMessageW, WM_SETICON,
+    TASKDIALOG_NOTIFICATIONS, TDF_ENABLE_HYPERLINKS, TDN_HYPERLINK_CLICKED,
 };
 use windows::core::HRESULT;
 
@@ -52,18 +47,8 @@ pub fn show_about(
             let title = wide(&formatted::native_about_title(language, version));
             let content = wide(&formatted::native_about_content(language, license));
             let window_title = wide(Text::CommandAbout.in_language(language));
-            // SAFETY: resource 1 is the app's embedded icon. LoadIcon returns a
-            // shared module resource, not an owned icon to destroy. Test hosts may
-            // have no resource; omitting the icon must not prevent opening About.
-            let icon = unsafe {
-                GetModuleHandleW(None)
-                    .ok()
-                    .and_then(|module| LoadIconW(Some(module.into()), PCWSTR(1 as _)).ok())
-                    .unwrap_or_default()
-            };
             let callback = Callback {
                 notify: notify.as_ref(),
-                icon,
             };
             let labels = button_labels(
                 language,
@@ -75,12 +60,10 @@ pub fn show_about(
                 hwndParent: HWND(native_owner as *mut _),
                 dwFlags: TDF_ALLOW_DIALOG_CANCELLATION
                     | TDF_POSITION_RELATIVE_TO_WINDOW
-                    | TDF_ENABLE_HYPERLINKS
-                    | TDF_USE_HICON_MAIN,
+                    | TDF_ENABLE_HYPERLINKS,
                 pszWindowTitle: PCWSTR(window_title.as_ptr()),
                 pszMainInstruction: PCWSTR(title.as_ptr()),
                 pszContent: PCWSTR(content.as_ptr()),
-                Anonymous1: TASKDIALOGCONFIG_0 { hMainIcon: icon },
                 cButtons: buttons.len() as u32,
                 pButtons: buttons.as_ptr(),
                 nDefaultButton: IDOK.0,
@@ -100,11 +83,10 @@ pub fn show_about(
 
 struct Callback<'a> {
     notify: &'a dyn Fn(AboutEvent),
-    icon: HICON,
 }
 
 unsafe extern "system" fn dialog_callback(
-    window: HWND,
+    _: HWND,
     notification: TASKDIALOG_NOTIFICATIONS,
     _: WPARAM,
     parameter: LPARAM,
@@ -115,19 +97,7 @@ unsafe extern "system" fn dialog_callback(
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         // SAFETY: TaskDialog receives this context from the live stack above.
         let context = unsafe { &*(context as *const Callback<'_>) };
-        if notification == TDN_CREATED && !context.icon.is_invalid() {
-            // SAFETY: callback HWND is live and the shared icon outlives the dialog.
-            unsafe {
-                for size in [ICON_SMALL, ICON_BIG] {
-                    SendMessageW(
-                        window,
-                        WM_SETICON,
-                        Some(WPARAM(size as usize)),
-                        Some(LPARAM(context.icon.0 as isize)),
-                    );
-                }
-            }
-        } else if notification == TDN_HYPERLINK_CLICKED && parameter.0 != 0 {
+        if notification == TDN_HYPERLINK_CLICKED && parameter.0 != 0 {
             let pointer = PCWSTR(parameter.0 as *const u16);
             // SAFETY: this notification supplies a NUL-terminated UTF-16 href.
             let href = unsafe { pointer.as_wide() };
@@ -144,6 +114,8 @@ fn project_link(href: &[u16]) -> Option<ProjectLink> {
         Some(ProjectLink::Author)
     } else if href.iter().copied().eq("repository".encode_utf16()) {
         Some(ProjectLink::Repository)
+    } else if href.iter().copied().eq("website".encode_utf16()) {
+        Some(ProjectLink::Website)
     } else {
         None
     }
@@ -163,11 +135,19 @@ mod tests {
 
     #[test]
     fn japanese_about_text_preserves_version_license_and_fixed_link_targets() {
+        let english = formatted::native_about_content(Language::English, "Apache-2.0");
+        assert!(
+            english.starts_with("Windows media viewer created by <a href=\"author\">sheeta</a>")
+        );
+        assert!(english.contains(
+            "<a href=\"repository\">GitHub</a> \u{00b7} <a href=\"website\">Website</a>"
+        ));
+        assert!(!english.contains("Creator:"));
         let title = formatted::native_about_title(Language::Japanese, "1.0.3");
         assert_eq!(title, "towavue / バージョン 1.0.3");
         let content = formatted::native_about_content(Language::Japanese, "Apache-2.0");
         assert!(content.contains("Apache-2.0") && content.contains("Windows用メディアビューアー"));
-        for href in ["author", "repository"] {
+        for href in ["author", "repository", "website"] {
             assert!(content.contains(&format!("href=\"{href}\"")));
             assert!(project_link(&href.encode_utf16().collect::<Vec<_>>()).is_some());
         }
@@ -182,13 +162,11 @@ mod tests {
                 received.lock().expect("links").push(link);
             }
         };
-        let callback = Callback {
-            notify: &notify,
-            icon: HICON::default(),
-        };
+        let callback = Callback { notify: &notify };
         for href in [
             "author",
             "repository",
+            "website",
             "https://example.com",
             "file:///C:/",
             "",
@@ -206,12 +184,16 @@ mod tests {
             };
             assert!(result.is_ok());
         }
-        assert!(*received.lock().expect("links") == [ProjectLink::Author, ProjectLink::Repository]);
+        assert!(
+            *received.lock().expect("links")
+                == [
+                    ProjectLink::Author,
+                    ProjectLink::Repository,
+                    ProjectLink::Website
+                ]
+        );
         let notify = |_| panic!("callback failure");
-        let callback = Callback {
-            notify: &notify,
-            icon: HICON::default(),
-        };
+        let callback = Callback { notify: &notify };
         // SAFETY: live context and static NUL-terminated href; no HWND is used.
         assert!(
             unsafe {

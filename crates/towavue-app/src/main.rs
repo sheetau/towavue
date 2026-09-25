@@ -3954,7 +3954,10 @@ where
                 root.disable();
                 self.draw_status_bar(root, actions, &mut Vec::new());
             } else {
-                root.label("Saving a file…");
+                root.label(localization::text(
+                    root.ctx(),
+                    localization::Text::SavingFileOverlay,
+                ));
             }
             return;
         }
@@ -5901,9 +5904,12 @@ where
                     drag_rect.min.y = layout.drag_top;
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
-                            chrome::caption_accessibility(ui, &caption.accessible_buttons())
-                                .into_iter()
-                                .map(UiAction::NativeCaption),
+                            chrome::caption_accessibility(
+                                ui,
+                                &caption.accessible_buttons(localization::language(ui.ctx())),
+                            )
+                            .into_iter()
+                            .map(UiAction::NativeCaption),
                         );
                         caption.set_drag_region(
                             ui.is_enabled()
@@ -10566,17 +10572,24 @@ where
     }
 
     fn reading_status(&self) -> String {
+        let language = self.language();
         if let Some(drag) = &self.reading_drag
             && !drag.was_enabled
         {
             return match drag.direction {
-                Some(true) => "(\u{2194}) Reading left: release to enable".into(),
-                Some(false) => "(\u{2194}) Reading right: release to enable".into(),
-                None => "(\u{2194}) Reading: drag left or right to choose direction".into(),
+                Some(true) => localization::Text::ReadingEnableLeft
+                    .in_language(language)
+                    .into(),
+                Some(false) => localization::Text::ReadingEnableRight
+                    .in_language(language)
+                    .into(),
+                None => localization::Text::ReadingChooseDirection
+                    .in_language(language)
+                    .into(),
             };
         }
-        format!(
-            "{}Reading {} · {}first {}",
+        towavue_core::localization::formatted::reading_status(
+            language,
             if self.reading_drag.is_some() {
                 "(\u{2195}) "
             } else {
@@ -10711,6 +10724,8 @@ where
     }
 
     fn title(&self) -> String {
+        use localization::Text;
+        let language = self.language();
         let mut name = self.path.as_deref().map(display_name).unwrap_or_else(|| {
             if self
                 .tabs
@@ -10719,9 +10734,9 @@ where
             {
                 image_paste::DEFAULT_NAME
             } else if self.keyboard_settings_active() {
-                "Keyboard Shortcuts"
+                Text::CommandOpenKeyboardSettings.in_language(language)
             } else {
-                "Gallery"
+                Text::Gallery.in_language(language)
             }
             .to_owned()
         });
@@ -10739,14 +10754,22 @@ where
             return format!(
                 "{name} — towavue ({} {:.1}s)",
                 if export.job.is_save() {
-                    "Saving"
+                    Text::Saving.in_language(language)
                 } else {
-                    "Exporting"
+                    Text::Exporting.in_language(language)
                 },
                 export.encoded.as_secs_f64()
             );
         }
-        format!("{name} — towavue ({:?})", self.state)
+        let state = match self.state {
+            PlaybackState::Loading => Text::StateLoading,
+            PlaybackState::Playing => Text::StatePlaying,
+            PlaybackState::Paused => Text::StatePaused,
+            PlaybackState::Ended => Text::StateEnded,
+            PlaybackState::Faulted => Text::StateFaulted,
+        }
+        .in_language(language);
+        format!("{name} — towavue ({state})")
     }
 
     fn command_hint(&self, command: CommandId, title: &str) -> String {
@@ -12005,11 +12028,17 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-fn snapshot_source(source: FolderSnapshotSource) -> &'static str {
+fn snapshot_source(language: localization::Language, source: FolderSnapshotSource) -> &'static str {
     match source {
-        FolderSnapshotSource::LiveExplorerView => "Explorer live order",
-        FolderSnapshotSource::PersistedShellView => "Explorer saved order",
-        FolderSnapshotSource::NaturalNameFallback => "Natural-name fallback",
+        FolderSnapshotSource::LiveExplorerView => {
+            localization::Text::ExplorerLiveOrder.in_language(language)
+        }
+        FolderSnapshotSource::PersistedShellView => {
+            localization::Text::ExplorerSavedOrder.in_language(language)
+        }
+        FolderSnapshotSource::NaturalNameFallback => {
+            localization::Text::NaturalNameOrder.in_language(language)
+        }
     }
 }
 
@@ -24033,8 +24062,14 @@ mod tests {
     #[test]
     fn source_labels_distinguish_shell_fallback() {
         assert_ne!(
-            snapshot_source(FolderSnapshotSource::LiveExplorerView),
-            snapshot_source(FolderSnapshotSource::NaturalNameFallback)
+            snapshot_source(
+                localization::Language::English,
+                FolderSnapshotSource::LiveExplorerView
+            ),
+            snapshot_source(
+                localization::Language::English,
+                FolderSnapshotSource::NaturalNameFallback
+            )
         );
     }
 

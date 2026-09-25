@@ -410,6 +410,16 @@ mod tests {
 
     #[test]
     fn status_fields_expand_by_priority_without_elision_or_static_animation_details() {
+        status_fields_in_language(crate::localization::Language::English);
+    }
+
+    #[test]
+    fn japanese_status_fields_keep_cached_values_and_fit_whole_fields_by_priority() {
+        status_fields_in_language(crate::localization::Language::Japanese);
+    }
+
+    fn status_fields_in_language(language: crate::localization::Language) {
+        use crate::localization::{Language, Text};
         use crate::*;
         let Some(root) = tests::isolated_test_root(
             "status_file_details::tests::status_fields_expand_by_priority_without_elision_or_static_animation_details",
@@ -419,8 +429,13 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             for frames in [1, 2] {
                 let context = fonts::test_context();
+                if language == Language::Japanese {
+                    // RawInput supplies the native density; keep the UI zoom at unity.
+                    crate::localization::test_ui::configure_japanese(&context, 1.0);
+                }
                 context.global_style_mut(chrome::style);
                 let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_context = Some(context.clone());
                 let path = root.join("source.png");
                 let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
                 app.path = Some(path.clone());
@@ -461,32 +476,70 @@ mod tests {
                     let help = app.status_info().tooltip();
                     let file = help
                         .lines()
-                        .find(|line| line.starts_with("\u{2022} File:"))
+                        .find(|line| {
+                            line.starts_with(&format!(
+                                "\u{2022} {}:",
+                                Text::MenuFile.in_language(language)
+                            ))
+                        })
                         .expect("grouped file details");
                     assert!(
                         file.contains(&format_size(12_345_678))
                             && file.contains("PNG")
-                            && file.contains("4\u{00d7}2 pixels")
+                            && file.contains(
+                                &towavue_core::localization::formatted::status_pixels(
+                                    language,
+                                    "4\u{00d7}2"
+                                )
+                            )
                     );
                     assert!(help.lines().all(|line| line.starts_with("\u{2022} ")));
                     assert!(help.contains(if nearest {
-                        "Nearest-neighbor magnification"
+                        Text::StatusNearestHelp.in_language(language)
                     } else {
-                        "Smooth magnification"
+                        Text::StatusSmoothHelp.in_language(language)
                     }));
                     assert!(
-                        help.contains("Fit within the window") && help.contains("Unsaved changes")
+                        help.contains(Text::StatusFitHelp.in_language(language))
+                            && help.contains(Text::StatusUnsavedHelp.in_language(language))
                     );
-                    assert_eq!(help.contains("animation speed"), frames > 1);
-                    assert_eq!(help.contains("animation frames"), frames > 1);
+                    assert_eq!(
+                        help.contains(if language == Language::English {
+                            "animation speed"
+                        } else {
+                            "アニメーションの再生速度"
+                        }),
+                        frames > 1
+                    );
+                    assert_eq!(
+                        help.contains(if language == Language::English {
+                            "animation frames"
+                        } else {
+                            "アニメーションのフレーム数"
+                        }),
+                        frames > 1
+                    );
                     assert!(help.lines().count() <= 5, "compact grouping: {help}");
                 }
                 app.nearest_images = false;
                 let details = app.status_details();
-                assert_eq!(details[0], "Fit");
-                assert_eq!(details[1], if frames == 1 { "Unsaved" } else { "1.00×" });
+                assert_eq!(details[0], Text::StatusFit.in_language(language));
                 assert_eq!(
-                    details.iter().any(|field| field.contains("frames")),
+                    details[1],
+                    if frames == 1 {
+                        Text::StatusUnsaved.in_language(language)
+                    } else {
+                        "1.00×"
+                    }
+                );
+                assert_eq!(
+                    details
+                        .iter()
+                        .any(|field| field.contains(if language == Language::English {
+                            "frames"
+                        } else {
+                            "フレーム"
+                        })),
                     frames > 1
                 );
                 assert_eq!(details.iter().any(|field| field == "1.00×"), frames > 1);
@@ -509,11 +562,17 @@ mod tests {
                     let output = context.run_ui(raw, |ui| {
                         app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
                     });
+                    assert_eq!(output.pixels_per_point, density);
                     let (shape, text) = output
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text) if text.galley.text().starts_with("Fit") => {
+                            egui::Shape::Text(text)
+                                if text
+                                    .galley
+                                    .text()
+                                    .starts_with(Text::StatusFit.in_language(language)) =>
+                            {
                                 Some((shape, text))
                             }
                             _ => None,

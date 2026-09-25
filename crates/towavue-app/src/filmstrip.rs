@@ -1,3 +1,4 @@
+use crate::localization::{self, Text};
 use crate::scroll_style::ScrollAreaStyle;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -634,7 +635,7 @@ impl Filmstrip {
                     ui.painter().with_clip_rect(cell).text(
                         cell.center(),
                         Align2::CENTER_CENTER,
-                        "No preview",
+                        localization::text(ui.ctx(), Text::NoPreview),
                         FontId::proportional(11.0),
                         Color32::GRAY,
                     );
@@ -801,7 +802,7 @@ impl Filmstrip {
                     ui.painter().text(
                         screen.center(),
                         Align2::CENTER_CENTER,
-                        "Loading folder order…",
+                        localization::text(ui.ctx(), Text::LoadingFolderOrderEllipsis),
                         FontId::proportional(14.0),
                         Color32::WHITE,
                     );
@@ -826,13 +827,20 @@ impl Filmstrip {
                 } else {
                     0.0
                 };
-                let background = ui.interact(screen, ui.id().with("filmstrip-swipe"), egui::Sense::drag());
+                let background =
+                    ui.interact(screen, ui.id().with("filmstrip-swipe"), egui::Sense::drag());
                 let padding = ((inset.width() - STEP) / 2.0).max(0.0);
                 let content_width = snapshot.items.len() as f32 * STEP + padding * 2.0;
                 self.swipe.update(
-                    &background, snapshot, current, &mut self.scroll_offset,
+                    &background,
+                    snapshot,
+                    current,
+                    &mut self.scroll_offset,
                     (content_width - inset.width()).max(0.0),
-                    recenter || self.focus_requested || tab_target.is_some() || relocated_focus.is_some(),
+                    recenter
+                        || self.focus_requested
+                        || tab_target.is_some()
+                        || relocated_focus.is_some(),
                 );
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;
@@ -912,7 +920,11 @@ impl Filmstrip {
                             .interact(
                                 rect,
                                 ui.id().with(("filmstrip-item", &item.path)),
-                                if deleted { egui::Sense::click() } else { egui::Sense::click_and_drag() },
+                                if deleted {
+                                    egui::Sense::click()
+                                } else {
+                                    egui::Sense::click_and_drag()
+                                },
                             )
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
                         self.card_paths
@@ -987,13 +999,19 @@ impl Filmstrip {
                                 }
                             }
                             _ if deleted => {
-                                ui.painter().text(rect.center(), Align2::CENTER_CENTER, "Deleted", FontId::proportional(12.0), Color32::GRAY);
+                                ui.painter().text(
+                                    rect.center(),
+                                    Align2::CENTER_CENTER,
+                                    localization::text(ui.ctx(), Text::Deleted),
+                                    FontId::proportional(12.0),
+                                    Color32::GRAY,
+                                );
                             }
                             Some(Err(_)) => {
                                 ui.painter().text(
                                     rect.center(),
                                     Align2::CENTER_CENTER,
-                                    "No preview",
+                                    localization::text(ui.ctx(), Text::NoPreview),
                                     FontId::proportional(12.0),
                                     Color32::GRAY,
                                 );
@@ -1024,7 +1042,14 @@ impl Filmstrip {
                             );
                         }
                         if !deleted {
-                            crate::thumbnail_menu::show(ui, &response, &item.path, crate::thumbnail_menu::Scope::Filmstrip, self.menu_owner, actions);
+                            crate::thumbnail_menu::show(
+                                ui,
+                                &response,
+                                &item.path,
+                                crate::thumbnail_menu::Scope::Filmstrip,
+                                self.menu_owner,
+                                actions,
+                            );
                         }
                         if response.clicked() {
                             actions.push(if !deleted && click_modifiers(&response).ctrl {
@@ -1038,28 +1063,40 @@ impl Filmstrip {
                         }
                         let mut tooltip = item.path.display().to_string();
                         tooltip.push_str(if deleted {
-                            "\nDeleted file retained in this tab. Save to recreate it."
+                            localization::text(ui.ctx(), Text::DeletedRetainedHelp)
                         } else {
-                            "\nDrag beyond the thumbnail band, then outside the window to open in a new window."
+                            localization::text(ui.ctx(), Text::ThumbnailDragHelp)
                         });
                         if let Some(Err(error)) = self.previews.get(&item.path) {
-                            tooltip.push_str(&format!("\nPreview unavailable: {error}"));
+                            tooltip.push_str(
+                                &towavue_core::localization::formatted::preview_unavailable(
+                                    localization::language(ui.ctx()),
+                                    error,
+                                ),
+                            );
                         }
                         response.help_text(tooltip);
                     }
                 });
                 self.scroll_offset = output.state.offset.x;
                 self.swipe.exclusions.clear();
-                self.swipe.exclusions.extend(self.card_paths.iter().filter_map(|(id, _, _)| {
-                    context.read_response(*id).map(|response| response.interact_rect)
-                }));
+                self.swipe
+                    .exclusions
+                    .extend(self.card_paths.iter().filter_map(|(id, _, _)| {
+                        context
+                            .read_response(*id)
+                            .map(|response| response.interact_rect)
+                    }));
                 if let Some(bar) = context.read_response(output.id.with(0usize)) {
                     self.swipe.exclusions.push(bar.interact_rect);
                 }
-                band = Some(Rect::from_center_size(
-                    egui::pos2(screen.center().x, output.inner_rect.center().y),
-                    egui::vec2(screen.width(), HEIGHT),
-                ).intersect(screen));
+                band = Some(
+                    Rect::from_center_size(
+                        egui::pos2(screen.center().x, output.inner_rect.center().y),
+                        egui::vec2(screen.width(), HEIGHT),
+                    )
+                    .intersect(screen),
+                );
             });
         self.set_visible(wanted);
         self.drag.finish(context, band, actions);
@@ -1240,7 +1277,7 @@ impl Filmstrip {
                             ui.painter().text(
                                 image_rect.center(),
                                 Align2::CENTER_CENTER,
-                                "No preview",
+                                localization::text(ui.ctx(), Text::NoPreview),
                                 FontId::proportional(12.0),
                                 crate::chrome::MUTED,
                             );
@@ -4164,6 +4201,15 @@ mod tests {
 
     #[test]
     fn pending_preview_cards_are_quiet_but_failures_and_ready_pixels_remain() {
+        preview_placeholders_in_language(localization::Language::English);
+    }
+
+    #[test]
+    fn japanese_preview_placeholders_preserve_pending_and_ready_pixels() {
+        preview_placeholders_in_language(localization::Language::Japanese);
+    }
+
+    fn preview_placeholders_in_language(language: localization::Language) {
         let root = std::env::temp_dir().join(format!(
             "towavue-preview-placeholder-{}",
             std::process::id()
@@ -4187,6 +4233,10 @@ mod tests {
             Filmstrip::new(PreviewCache::new(root.clone()).expect("cache"), || {}).expect("worker");
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
+            if language == localization::Language::Japanese {
+                // RawInput supplies the native density; keep the UI zoom at unity.
+                crate::localization::test_ui::configure_japanese(&context, 1.0);
+            }
             context.global_style_mut(|style| {
                 crate::chrome::style(style);
                 style.interaction.tooltip_delay = 0.0;
@@ -4277,7 +4327,11 @@ mod tests {
                                 .any(|text| matches!(*text, "…" | "Loading preview…")),
                             "mode {mode}, state {state}"
                         );
-                        assert_eq!(text.contains(&"No preview"), state == 1, "mode {mode}");
+                        assert_eq!(
+                            text.contains(&Text::NoPreview.in_language(language)),
+                            state == 1,
+                            "mode {mode}"
+                        );
                         assert_eq!(
                             text.iter().any(|text| text.contains("fixture.png")),
                             mode != 2,

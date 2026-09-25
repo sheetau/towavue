@@ -11,7 +11,8 @@ fn japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progres
     for density in [1.0, 1.25, 2.0] {
         for width in [240.0, 640.0] {
             let mut app = Application::new(None, |_| {}).expect("app");
-            let context = crate::localization::test_ui::japanese_context(density);
+            // paint supplies native density; do not multiply it by a UI zoom.
+            let context = crate::localization::test_ui::japanese_context(1.0);
             app.ui_context = Some(context.clone());
             let path = root.join("日本語{original}.mp4");
             let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
@@ -186,6 +187,7 @@ fn paint<N: Fn(AppEvent) + Send + Sync + 'static>(
         .native_pixels_per_point = Some(density);
     let mut actions = Vec::new();
     let output = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
+    assert_eq!(output.pixels_per_point, density);
     for action in actions {
         app.handle_ui_action(action);
     }

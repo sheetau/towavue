@@ -97,10 +97,10 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                 let (_, tree) = frame(&mut app, vec![]);
                 let mut points = vec![egui::pos2(260.0, 350.0), egui::pos2(620.0, 350.0)];
                 for label in [
-                    "Time selection start (seconds)",
-                    "Time selection end (seconds)",
-                    "Relative volume (%)",
-                    "Selected duration (seconds)",
+                    Text::SelectionStartSeconds.in_language(language),
+                    Text::SelectionEndSeconds.in_language(language),
+                    Text::RelativeVolumePercent.in_language(language),
+                    Text::SelectedDurationSeconds.in_language(language),
                 ] {
                     let bounds = tree
                         .nodes
@@ -244,7 +244,9 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
         let timeline = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Playback position (seconds)"))
+            .find(|(_, node)| {
+                node.label() == Some(Text::PlaybackPositionSeconds.in_language(language))
+            })
             .expect("timeline access node")
             .0;
         frame(

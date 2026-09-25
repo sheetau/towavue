@@ -1,4 +1,6 @@
 use crate::chrome;
+use crate::localization::{self, Language, Text};
+use towavue_core::localization::formatted;
 
 #[derive(Clone, Copy)]
 struct Position {
@@ -13,24 +15,28 @@ pub(super) struct Month {
 }
 
 impl Month {
-    fn label(&self) -> String {
-        const NAMES: [&str; 12] = [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
+    fn label(&self, language: Language) -> String {
+        const NAMES: [Text; 12] = [
+            Text::January,
+            Text::February,
+            Text::March,
+            Text::April,
+            Text::May,
+            Text::June,
+            Text::July,
+            Text::August,
+            Text::September,
+            Text::October,
+            Text::November,
+            Text::December,
         ];
         match self.date {
-            Some((year, month)) => format!("{} {year}", NAMES[usize::from(month) - 1]),
-            None => "Date unknown".into(),
+            Some((year, month)) => formatted::calendar_month(
+                language,
+                NAMES[usize::from(month) - 1].in_language(language),
+                year,
+            ),
+            None => Text::DateUnknown.in_language(language).into(),
         }
     }
 }
@@ -42,6 +48,7 @@ pub(super) fn show(
     output: &mut egui::scroll_area::ScrollAreaOutput<Vec<Month>>,
     rect: egui::Rect,
 ) {
+    let language = localization::language(ui.ctx());
     let months = &output.inner;
     let position_id = output.id.with("gallery-rail-position");
     if months.is_empty() || rect.height() < 12.0 {
@@ -78,7 +85,7 @@ pub(super) fn show(
             output.id.with(("month", month.date)),
             egui::Sense::click_and_drag(),
         );
-        let label = month.label();
+        let label = month.label(language);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), &label)
         });
@@ -182,7 +189,7 @@ pub(super) fn show(
     {
         let index = ((position * months.len() as f32) as usize).min(months.len() - 1);
         let anchor = egui::pos2(*line_x.start() - 4.0, egui::lerp(travel, position));
-        show_label(ui, output.id, anchor, months[index].label());
+        show_label(ui, output.id, anchor, months[index].label(language));
     }
     crate::wheel_input::record_scroll_area(ui, output);
 }

@@ -1,4 +1,6 @@
+use crate::localization::{self, Language, Text};
 use egui::{Rect, Response, Ui};
+use towavue_core::localization::formatted;
 use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
@@ -16,6 +18,7 @@ pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
 }
 
 fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64, time: bool) {
+    let language = localization::language(&response.ctx);
     if response.has_focus() {
         response.ctx.data_mut(|data| {
             let key = "time-selection-focus-hint".into();
@@ -25,15 +28,15 @@ fn describe_focus(response: &Response, enabled: bool, label: &str, value: f64, t
                     (
                         response.id,
                         if time {
-                            format!(
-                                "{}: {} · Left/Right adjust",
-                                label.trim_end_matches(" (seconds)"),
-                                crate::format_time_precise(MediaTime::from_nanoseconds(
-                                    (value * 1e9) as i64
-                                ))
+                            formatted::time_focus(
+                                language,
+                                label.trim_end_matches(Text::SecondsSuffix.in_language(language)),
+                                &crate::format_time_precise(MediaTime::from_nanoseconds(
+                                    (value * 1e9) as i64,
+                                )),
                             )
                         } else {
-                            format!("{label}: {value:.3} · Left/Right adjust")
+                            formatted::value_focus(language, label, value)
                         },
                     ),
                 );
@@ -71,6 +74,7 @@ pub(super) fn show(
     plan: Option<&EditTimeline>,
     enabled: bool,
 ) -> Output {
+    let language = localization::language(ui.ctx());
     let rect = response.rect;
     let seconds = duration.as_seconds_f64();
     let at = |x: f32| {
@@ -154,7 +158,7 @@ pub(super) fn show(
             Gesture::Seek => Some((
                 playhead_rect(rect, cti_x(rect, x_at(position), pixel)),
                 "head",
-                "Playback position · drag the playhead to seek",
+                Text::TimelinePositionHelp.in_language(language),
             )),
             Gesture::Resize(range, start) => {
                 let x = x_at(if start { range.start() } else { range.end() });
@@ -162,9 +166,9 @@ pub(super) fn show(
                     Rect::from_x_y_ranges(x - 6.0..=x + 6.0, rect.y_range()),
                     if start { "start" } else { "end" },
                     if start {
-                        "Selection start · drag to adjust"
+                        Text::TimelineStartHelp.in_language(language)
                     } else {
-                        "Selection end · drag to adjust"
+                        Text::TimelineEndHelp.in_language(language)
                     },
                 ))
             }
@@ -176,7 +180,7 @@ pub(super) fn show(
                         y - 4.0..=y + 4.0,
                     ),
                     "gain",
-                    "Relative gain · drag to multiply the selection or whole track; drag to the bottom to mute",
+                    Text::TimelineGainHelp.in_language(language),
                 ))
             }
             Gesture::Select
@@ -191,7 +195,7 @@ pub(super) fn show(
                             rect.y_range(),
                         ),
                         "selection",
-                        "Time selection · drag to replace · Alt+drag to stretch",
+                        Text::TimelineSelectionHelp.in_language(language),
                     )
                 })
             }
@@ -352,7 +356,7 @@ pub(super) fn show(
     }
     if let Some(value) = crate::seekbar::value_input(
         response,
-        "Playback position (seconds)",
+        Text::PlaybackPositionSeconds.in_language(language),
         position.as_seconds_f64(),
         0.0..=seconds,
         5.0,
@@ -379,7 +383,7 @@ pub(super) fn show(
         );
     }
     let held_gain = gain_preview.filter(|_| crate::timeline_input::is_active(ui.ctx()));
-    adjustment::paint(&painter, rect, duration, held_gain);
+    adjustment::paint(&painter, rect, duration, held_gain, language);
     if preview != selection
         && drag.dragging
         && gain_preview.is_none()
@@ -388,7 +392,7 @@ pub(super) fn show(
         painter.text(
             rect.center_top() + egui::vec2(0.0, 2.0),
             egui::Align2::CENTER_TOP,
-            format!("Length {}", crate::format_time_precise(range.duration())),
+            formatted::timeline_length(language, &crate::format_time_precise(range.duration())),
             egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
@@ -448,7 +452,11 @@ pub(super) fn show(
                 },
                 format!(
                     "{} {}",
-                    if start { "In" } else { "Out" },
+                    if start {
+                        Text::TimelineIn.in_language(language)
+                    } else {
+                        Text::TimelineOut.in_language(language)
+                    },
                     crate::format_time_precise(current)
                 ),
                 egui::FontId::proportional(LABEL_SIZE),
@@ -456,9 +464,9 @@ pub(super) fn show(
             );
         }
         let label = if start {
-            "Time selection start (seconds)"
+            Text::SelectionStartSeconds.in_language(language)
         } else {
-            "Time selection end (seconds)"
+            Text::SelectionEndSeconds.in_language(language)
         };
         // Stretch can preview an endpoint beyond the old timeline. Report it
         // without clamping, but do not edit a range the model does not own yet.

@@ -121,6 +121,15 @@ fn label(frame: &Frame, expected: &str) -> egui::Rect {
 
 #[test]
 fn year_labels_mark_the_oldest_boundary_instead_of_the_newest_month_center() {
+    month_labels_in_language(Language::English);
+}
+
+#[test]
+fn japanese_month_labels_keep_dates_and_rail_geometry() {
+    month_labels_in_language(Language::Japanese);
+}
+
+fn month_labels_in_language(language: Language) {
     for density in [1.0, 1.25, 2.0] {
         for dates in [
             vec![Some((2026, 9))],
@@ -135,6 +144,9 @@ fn year_labels_mark_the_oldest_boundary_instead_of_the_newest_month_center() {
             vec![None],
         ] {
             let context = crate::fonts::test_context();
+            if language == Language::Japanese {
+                crate::localization::test_ui::configure_japanese(&context, density);
+            }
             context.set_pixels_per_point(density);
             context.enable_accesskit();
             context.global_style_mut(chrome::style);
@@ -176,7 +188,7 @@ fn year_labels_mark_the_oldest_boundary_instead_of_the_newest_month_center() {
                     tree.nodes
                         .iter()
                         .any(|(_, node)| node.role() == egui::accesskit::Role::Button
-                            && node.label() == Some(month.label().as_str()))
+                            && node.label() == Some(month.label(language).as_str()))
                 );
             }
         }

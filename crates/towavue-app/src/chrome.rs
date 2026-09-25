@@ -271,7 +271,12 @@ pub fn tab_audio_button(
     muted: bool,
     name: &str,
 ) -> egui::Response {
-    let label = format!("{} tab: {name}", if muted { "Unmute" } else { "Mute" });
+    let language = crate::localization::language(ui.ctx());
+    let label = if muted {
+        towavue_core::localization::formatted::unmute_named_tab(language, name)
+    } else {
+        towavue_core::localization::formatted::mute_named_tab(language, name)
+    };
     let response = ui
         .interact(rect, ui.id().with("audio"), egui::Sense::click())
         .on_hover_cursor(egui::CursorIcon::PointingHand)

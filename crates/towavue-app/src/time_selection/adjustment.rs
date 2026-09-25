@@ -65,6 +65,7 @@ pub(super) fn paint(
     rect: Rect,
     duration: MediaTime,
     preview: Option<(TimeRange, f32)>,
+    language: Language,
 ) {
     let stroke = (1.0, egui::Color32::from_white_alpha(128));
     if let Some((range, gain)) = preview {
@@ -90,7 +91,7 @@ pub(super) fn paint(
         painter.text(
             rect.left_top() + egui::vec2(LABEL_INSET, 10.0),
             egui::Align2::LEFT_CENTER,
-            format!("Gain {:.0}%", gain * 100.0),
+            formatted::timeline_gain(language, f64::from(gain * 100.0)),
             egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
@@ -106,6 +107,7 @@ pub(super) fn values(
     preview: Option<(TimeRange, f32)>,
     enabled: bool,
 ) -> Option<TimelineEdit> {
+    let language = localization::language(ui.ctx());
     let range = selection.or_else(|| TimeRange::new(MediaTime::ZERO, duration))?;
     let gain = preview.map_or(1.0, |(_, gain)| gain);
     let mut result = None;
@@ -128,9 +130,9 @@ pub(super) fn values(
             egui::Sense::focusable_noninteractive(),
         );
         let name = if stretch {
-            "Selected duration (seconds)"
+            Text::SelectedDurationSeconds.in_language(language)
         } else {
-            "Relative volume (%)"
+            Text::RelativeVolumePercent.in_language(language)
         };
         let value = if stretch {
             range.duration().as_seconds_f64()
@@ -159,9 +161,9 @@ pub(super) fn values(
         // ordinary gain caption, but retain its numeric/accessibility control.
         if (control.has_focus() || selection.is_some()) && (stretch || preview.is_none()) {
             let label = if stretch {
-                format!("Length {}", crate::format_time_precise(range.duration()))
+                formatted::timeline_length(language, &crate::format_time_precise(range.duration()))
             } else {
-                format!("Gain {value:.0}%")
+                formatted::timeline_gain(language, value)
             };
             ui.painter().with_clip_rect(rect).text(
                 if stretch {

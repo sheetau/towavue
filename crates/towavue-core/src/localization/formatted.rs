@@ -13,6 +13,23 @@ macro_rules! templates {
 }
 
 templates! {
+    status_zoom(value: &str) => ("{value} zoom", "表示倍率 {value}"),
+    status_reduction(zoom: &str, reduction: &str) => ("{zoom}. {reduction}", "{zoom}。{reduction}"),
+    status_speed(value: &str) => ("Speed {value}", "再生速度 {value}"),
+    source_frame_rate(value: &str) => ("Source frame rate: {value} (stream-reported; independent of playback speed)", "元のフレームレート: {value}（ストリームの値。再生速度には依存しません）"),
+    status_pixels(value: &str) => ("{value} pixels", "{value} ピクセル"),
+    status_frames(count: usize) => ("{count} frames", "{count}フレーム"),
+    status_animation_frames(count: usize) => ("{count} animation frames", "アニメーションのフレーム数: {count}"),
+    status_modified(value: &str) => ("Modified (local): {value}", "更新日時（ローカル）: {value}"),
+    time_focus(label: &str, time: &str) => ("{label}: {time} · Left/Right adjust", "{label}: {time} · ←／→で調整"),
+    value_focus(label: &str, value: f64) => ("{label}: {value:.3} · Left/Right adjust", "{label}: {value:.3} · ←／→で調整"),
+    timeline_length(value: &str) => ("Length {value}", "長さ {value}"),
+    timeline_gain(value: f64) => ("Gain {value:.0}%", "倍率 {value:.0}%"),
+    preview_unavailable(error: &str) => ("\nPreview unavailable: {error}", "\nプレビューを表示できません: {error}"),
+    mute_named_tab(name: &str) => ("Mute tab: {name}", "タブをミュート: {name}"),
+    unmute_named_tab(name: &str) => ("Unmute tab: {name}", "タブのミュートを解除: {name}"),
+    reading_status(pages_hint: &str, pages: usize, first_hint: &str, first: usize) => ("{pages_hint}Reading {pages} · {first_hint}first {first}", "{pages_hint}読書 {pages}ページ · {first_hint}先頭 {first}ページ"),
+    calendar_month(name: &str, year: u16) => ("{name} {year}", "{year}年{name}"),
     preparation_elapsed(phase: &str, time: &str) => ("{phase} · elapsed {time}", "{phase} · 経過時間 {time}"),
     tab_label(title: &str) => ("{title} tab", "{title} タブ"),
     close_title(title: &str) => ("Close {title}", "{title}を閉じる"),

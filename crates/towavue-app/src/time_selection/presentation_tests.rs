@@ -1,5 +1,151 @@
 use super::*;
 
+#[test]
+fn japanese_timeline_numeric_controls_keep_ids_units_and_edit_routing() {
+    use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::localization::test_ui::japanese_context(density);
+        let id = egui::Id::new("localized-timeline");
+        let range = TimeRange::new(time(2), time(8)).expect("range");
+        let frame = |events| {
+            let mut results = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 220.0),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.interact(
+                        Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(400.0, 100.0)),
+                        id,
+                        egui::Sense::click_and_drag(),
+                    );
+                    results.push(show(
+                        ui,
+                        &response,
+                        time(10),
+                        time(1),
+                        Some(range),
+                        None,
+                        true,
+                    ));
+                },
+            );
+            (output, results)
+        };
+        let output = frame(vec![]).0;
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let controls = [
+            ("再生位置（秒）", id, 1.0),
+            (
+                "選択範囲の開始位置（秒）",
+                id.with(("selection-value", true)),
+                2.0,
+            ),
+            (
+                "選択範囲の終了位置（秒）",
+                id.with(("selection-value", false)),
+                8.0,
+            ),
+            (
+                "相対音量（%）",
+                id.with(("timeline-adjustment-value", false)),
+                100.0,
+            ),
+            (
+                "選択範囲の長さ（秒）",
+                id.with(("timeline-adjustment-value", true)),
+                6.0,
+            ),
+        ];
+        for (label, id, value) in controls {
+            let (node_id, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .expect("numeric control");
+            assert_eq!(*node_id, id.accesskit_id());
+            assert_eq!(node.numeric_value(), Some(value));
+        }
+        let event = |id: egui::Id, action, value: Option<f64>| {
+            egui::Event::AccessKitActionRequest(ActionRequest {
+                action,
+                target_tree: TreeId::ROOT,
+                target_node: id.accesskit_id(),
+                data: value.map(ActionData::NumericValue),
+            })
+        };
+        let seconds = |value| crate::media_time(std::time::Duration::from_secs_f64(value));
+        let result = frame(vec![event(id, Action::SetValue, Some(4.5))])
+            .1
+            .remove(0);
+        assert_eq!(result.seek, Some(seconds(4.5)));
+        assert!(result.selection.is_none() && result.edit.is_none());
+        for (start, value) in [(true, 3.25), (false, 7.5)] {
+            let result = frame(vec![event(
+                id.with(("selection-value", start)),
+                Action::SetValue,
+                Some(value),
+            )])
+            .1
+            .remove(0);
+            assert_eq!(
+                result.selection,
+                Some(TimeRange::new(
+                    if start { seconds(value) } else { time(2) },
+                    if start { time(8) } else { seconds(value) }
+                ))
+            );
+            assert!(result.seek.is_none() && result.edit.is_none());
+        }
+        for (stretch, value, expected) in [
+            (false, 125.0, TimelineEdit::ScaleVolume(range, 1.25)),
+            (true, 5.0, TimelineEdit::Stretch(range, time(5))),
+        ] {
+            let result = frame(vec![event(
+                id.with(("timeline-adjustment-value", stretch)),
+                Action::SetValue,
+                Some(value),
+            )])
+            .1
+            .remove(0);
+            assert_eq!(result.edit, Some(expected));
+            assert!(result.selection.is_none() && result.seek.is_none());
+        }
+        frame(vec![event(
+            id.with(("selection-value", true)),
+            Action::Focus,
+            None,
+        )]);
+        frame(vec![]);
+        let hint = focus_hint(&context).expect("focus hint");
+        assert!(hint.starts_with("選択範囲の開始位置: 00:00:02:000"));
+        assert!(hint.ends_with("←／→で調整"));
+        let result = frame(vec![egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }])
+        .1
+        .remove(0);
+        assert_eq!(
+            result.selection,
+            Some(TimeRange::new(seconds(2.1), time(8)))
+        );
+    }
+}
+
 fn context(density: f32) -> egui::Context {
     let context = crate::fonts::test_context();
     context.set_pixels_per_point(density);
@@ -38,6 +184,15 @@ fn text_bounds(output: &egui::FullOutput, prefix: &str) -> Rect {
 
 #[test]
 fn timeline_captions_share_font_and_edges_without_covering_loading() {
+    caption_layout(Language::English);
+}
+
+#[test]
+fn japanese_timeline_captions_preserve_alignment_and_leave_loading_visible() {
+    caption_layout(Language::Japanese);
+}
+
+fn caption_layout(language: Language) {
     let Some(_root) = crate::tests::isolated_test_root(
         "time_selection::presentation_tests::timeline_captions_share_font_and_edges_without_covering_loading",
     ) else {
@@ -48,6 +203,9 @@ fn timeline_captions_share_font_and_edges_without_covering_loading() {
     for density in [1.0, 1.25, 2.0] {
         for width in [240.0, 640.0] {
             let context = context(density);
+            if language == Language::Japanese {
+                crate::localization::test_ui::configure_japanese(&context, density);
+            }
             let rect = Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(width, 80.0));
             let output = context.run_ui(
                 egui::RawInput {
@@ -77,11 +235,46 @@ fn timeline_captions_share_font_and_edges_without_covering_loading() {
                     app.draw_waveform_activity(ui, rect);
                 },
             );
-            let volume = text_bounds(&output, "Gain ");
-            let length = text_bounds(&output, "Length ");
-            let start = text_bounds(&output, "In ");
-            let end = text_bounds(&output, "Out ");
-            let loading = text_bounds(&output, "Loading waveform");
+            let volume = text_bounds(
+                &output,
+                if language == Language::English {
+                    "Gain "
+                } else {
+                    "倍率 "
+                },
+            );
+            let length = text_bounds(
+                &output,
+                if language == Language::English {
+                    "Length "
+                } else {
+                    "長さ "
+                },
+            );
+            let start = text_bounds(
+                &output,
+                if language == Language::English {
+                    "In "
+                } else {
+                    "開始 "
+                },
+            );
+            let end = text_bounds(
+                &output,
+                if language == Language::English {
+                    "Out "
+                } else {
+                    "終了 "
+                },
+            );
+            let loading = text_bounds(
+                &output,
+                if language == Language::English {
+                    "Loading waveform"
+                } else {
+                    "波形を読み込み中"
+                },
+            );
             let tolerance = 1.0 / density;
             for left in [volume.left(), start.left()] {
                 assert!((left - rect.left() - LABEL_INSET).abs() <= tolerance);

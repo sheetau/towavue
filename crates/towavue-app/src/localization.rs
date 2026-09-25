@@ -41,6 +41,54 @@ mod tests {
     use towavue_core::{CommandContext, CommandId, MediaKind};
 
     #[test]
+    fn japanese_window_titles_and_save_overlay_keep_user_names_and_dirty_state() {
+        use crate::{Application, EditHistory, EditOperation, PlaybackState};
+        let Some(root) = crate::tests::isolated_test_root(
+            "localization::tests::japanese_window_titles_and_save_overlay_keep_user_names_and_dirty_state",
+        ) else {
+            return;
+        };
+        let context = test_ui::japanese_context(1.0);
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        app.state = PlaybackState::Paused;
+        assert_eq!(app.title(), "ギャラリー — towavue (一時停止)");
+        let path = root.join("日本語{original}.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Image);
+        app.edits
+            .entry(tab)
+            .or_insert_with(EditHistory::default)
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        for (state, english, japanese) in [
+            (PlaybackState::Loading, "Loading", "読み込み中"),
+            (PlaybackState::Playing, "Playing", "再生中"),
+            (PlaybackState::Paused, "Paused", "一時停止"),
+            (PlaybackState::Ended, "Ended", "再生終了"),
+            (PlaybackState::Faulted, "Faulted", "エラー"),
+        ] {
+            app.state = state;
+            for (language, label) in [(Language::English, english), (Language::Japanese, japanese)]
+            {
+                set_language(&context, language);
+                assert_eq!(
+                    app.title(),
+                    format!("日本語{{original}}.png * — towavue ({label})")
+                );
+            }
+        }
+        app.reading_settings.page_count = 2;
+        app.reading_settings.first_page_count = 1;
+        assert_eq!(app.reading_status(), "読書 2ページ · 先頭 1ページ");
+        app.source_save.frozen = true;
+        let output = context.run_ui(Default::default(), |ui| app.draw_ui(ui, &mut Vec::new()));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "ファイルを保存中…")));
+        assert!(app.edits[&tab].is_dirty());
+    }
+
+    #[test]
     fn japanese_menu_cascade_preserves_command_identity_and_readable_choices() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();

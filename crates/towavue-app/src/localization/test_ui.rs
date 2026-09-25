@@ -7,6 +7,8 @@ pub(crate) fn japanese_context(density: f32) -> egui::Context {
     context
 }
 
+// Pass 1.0 when the caller supplies native_pixels_per_point in RawInput.
+// Otherwise this helper supplies the requested scale through egui UI zoom.
 pub(crate) fn configure_japanese(context: &egui::Context, density: f32) {
     if !crate::fonts::install(context) {
         eprintln!(

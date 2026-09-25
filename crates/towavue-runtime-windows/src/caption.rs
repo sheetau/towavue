@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
+use towavue_core::localization::{Language, Text};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -313,7 +314,7 @@ impl NativeCaption {
         )
     }
 
-    pub fn accessible_buttons(&self) -> Vec<CaptionButton> {
+    pub fn accessible_buttons(&self, language: Language) -> Vec<CaptionButton> {
         let mut buttons = Vec::with_capacity(3);
         if self.state.fullscreen.get() {
             return buttons;
@@ -325,17 +326,25 @@ impl NativeCaption {
         unsafe {
             let maximized = IsZoomed(self.handle).as_bool();
             for (index, action, label) in [
-                (2, CaptionAction::Minimize, "Minimize window"),
+                (
+                    2,
+                    CaptionAction::Minimize,
+                    Text::CaptionMinimize.in_language(language),
+                ),
                 (
                     3,
                     CaptionAction::ToggleMaximize,
                     if maximized {
-                        "Restore window"
+                        Text::CaptionRestore.in_language(language)
                     } else {
-                        "Maximize window"
+                        Text::CaptionMaximize.in_language(language)
                     },
                 ),
-                (5, CaptionAction::Close, "Close window"),
+                (
+                    5,
+                    CaptionAction::Close,
+                    Text::CaptionClose.in_language(language),
+                ),
             ] {
                 let rect = info.rgrect[index];
                 // TITLEBARINFOEX uses STATE_SYSTEM_INVISIBLE/OFFSCREEN/UNAVAILABLE.
@@ -1370,8 +1379,26 @@ mod tests {
                                     visible.right - origin.x,
                                     visible.bottom - origin.y
                                 );
-                                let buttons = caption.accessible_buttons();
+                                let buttons = caption.accessible_buttons(Language::English);
                                 assert_eq!(buttons.len(), 3);
+                                let japanese = caption.accessible_buttons(Language::Japanese);
+                                assert_eq!(japanese.len(), buttons.len());
+                                for ((english, japanese), expected) in
+                                    buttons.iter().zip(&japanese).zip([
+                                        "ウィンドウを最小化",
+                                        if maximized {
+                                            "ウィンドウを元のサイズに戻す"
+                                        } else {
+                                            "ウィンドウを最大化"
+                                        },
+                                        "ウィンドウを閉じる",
+                                    ])
+                                {
+                                    assert_eq!(japanese.label, expected);
+                                    assert_eq!(japanese.action, english.action);
+                                    assert_eq!(japanese.bounds, english.bounds);
+                                    assert_eq!(japanese.enabled, english.enabled);
+                                }
                                 let reserved = caption.controls_bounds();
                                 assert_eq!(reserved.left(), buttons[0].bounds.left());
                                 let size = window.inner_size();

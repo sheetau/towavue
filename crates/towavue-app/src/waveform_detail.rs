@@ -611,10 +611,11 @@ impl Detail {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn draw_waveform_activity(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let language = localization::language(ui.ctx());
         let label = if self.waveform_loading {
-            "Loading waveform…"
+            localization::Text::LoadingWaveform.in_language(language)
         } else if self.waveform_detail.is_pending() {
-            "Refining waveform…"
+            localization::Text::RefiningWaveform.in_language(language)
         } else {
             return;
         };

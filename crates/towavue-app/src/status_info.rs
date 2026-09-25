@@ -1,4 +1,6 @@
+use crate::localization::{Language, Text};
 use crate::*;
+use towavue_core::localization::formatted;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Group {
@@ -12,6 +14,7 @@ enum Group {
 
 #[derive(Default)]
 pub(super) struct StatusInfo {
+    language: Language,
     pub fields: Vec<String>,
     help: Vec<(Group, String)>,
 }
@@ -23,13 +26,14 @@ impl StatusInfo {
     }
 
     pub fn tooltip(&self) -> String {
+        let language = self.language;
         [
-            (Group::File, "File"),
-            (Group::Display, "Display"),
-            (Group::Playback, "Playback"),
-            (Group::Document, "Edits"),
-            (Group::Folder, "Folder"),
-            (Group::Modified, "Modified (local)"),
+            (Group::File, Text::MenuFile.in_language(language)),
+            (Group::Display, Text::StatusDisplay.in_language(language)),
+            (Group::Playback, Text::StatusPlayback.in_language(language)),
+            (Group::Document, Text::StatusEdits.in_language(language)),
+            (Group::Folder, Text::StatusFolder.in_language(language)),
+            (Group::Modified, Text::StatusModified.in_language(language)),
         ]
         .into_iter()
         .filter_map(|(group, label)| {
@@ -55,7 +59,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     /// Compact fields and grouped explanations share the same cached snapshot.
     /// Drawing performs no filesystem work, including during image handoff.
     pub(super) fn status_info(&self) -> StatusInfo {
-        let mut details = StatusInfo::default();
+        let language = self.language();
+        let mut details = StatusInfo {
+            language,
+            ..Default::default()
+        };
         let held = self.image_handoff.as_ref();
         let image = held.map(|held| &held.image).or(self.image.as_ref());
         let file = held.map_or_else(
@@ -64,37 +72,51 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         );
         if matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video)) {
             let (short, help) = match held.map_or(self.image_view.zoom, |held| held.view.zoom) {
-                ZoomMode::Fit => ("Fit".into(), "Fit within the window".into()),
-                ZoomMode::Cover => (
-                    "Cover".into(),
-                    "Fill the window; edges may extend outside the view".into(),
+                ZoomMode::Fit => (
+                    Text::StatusFit.in_language(language).into(),
+                    Text::StatusFitHelp.in_language(language).into(),
                 ),
-                ZoomMode::Actual => ("100%".into(), "100% zoom".into()),
+                ZoomMode::Cover => (
+                    Text::StatusCover.in_language(language).into(),
+                    Text::StatusCoverHelp.in_language(language).into(),
+                ),
+                ZoomMode::Actual => (
+                    "100%".into(),
+                    Text::StatusActualZoom.in_language(language).into(),
+                ),
                 ZoomMode::Custom(scale) => {
                     let value = format!("{:.*}%", if scale < 0.1 { 2 } else { 0 }, scale * 100.0);
-                    (value.clone(), format!("{value} zoom"))
+                    (value.clone(), formatted::status_zoom(language, &value))
                 }
             };
             let reduction = if self.high_quality_minification {
-                "High-quality reduction; uses additional image memory"
+                Text::StatusHighQualityReduction.in_language(language)
             } else {
-                "Fast reduction; lower memory use"
+                Text::StatusFastReduction.in_language(language)
             };
-            details.push(Group::Display, short, format!("{help}. {reduction}"));
+            details.push(
+                Group::Display,
+                short,
+                formatted::status_reduction(language, &help, reduction),
+            );
         }
         if image.is_some_and(|image| image.decoded.is_animated()) {
             details.push(
                 Group::Playback,
                 "1.00\u{00d7}",
-                "1.00\u{00d7} animation speed",
+                Text::StatusAnimationSpeed.in_language(language),
             );
         } else if image.is_none() && self.session.is_some() {
             let value = if self.held_speed.is_some() {
-                "2\u{00d7} while held".into()
+                Text::StatusHeldSpeed.in_language(language).into()
             } else {
                 format!("{:.2}\u{00d7}", self.edit_state().rate)
             };
-            details.push(Group::Playback, &value, format!("Speed {value}"));
+            details.push(
+                Group::Playback,
+                &value,
+                formatted::status_speed(language, &value),
+            );
         }
         if self.media_kind == Some(MediaKind::Video)
             && let Some(fps) = self
@@ -106,9 +128,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             details.push(
                 Group::File,
                 &value,
-                format!(
-                    "Source frame rate: {value} (stream-reported; independent of playback speed)"
-                ),
+                formatted::source_frame_rate(language, &value),
             );
         }
         if self
@@ -116,7 +136,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .active()
             .is_some_and(|tab| self.edits.get(&tab.id).is_some_and(EditHistory::is_dirty))
         {
-            details.push(Group::Document, "Unsaved", "Unsaved changes");
+            details.push(
+                Group::Document,
+                Text::StatusUnsaved.in_language(language),
+                Text::StatusUnsavedHelp.in_language(language),
+            );
         }
         if let Some(file) = file {
             let value = format_size(file.bytes);
@@ -130,7 +154,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let value = extension.to_uppercase();
             details.push(Group::File, &value, &value);
         } else if self.current_document_untitled() {
-            details.push(Group::Document, "PNG", "Pasted image without a saved file");
+            details.push(
+                Group::Document,
+                "PNG",
+                Text::StatusPasted.in_language(language),
+            );
         } else if let Some(image) = image {
             let value = image.decoded.format.to_uppercase();
             details.push(Group::File, &value, &value);
@@ -143,7 +171,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         });
         if let Some((width, height)) = dimensions {
             let value = format!("{width}\u{00d7}{height}");
-            details.push(Group::File, &value, format!("{value} pixels"));
+            details.push(
+                Group::File,
+                &value,
+                formatted::status_pixels(language, &value),
+            );
         }
         if self.media_kind == Some(MediaKind::Image)
             && self.reading_mode
@@ -173,29 +205,32 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if let Some((index, count)) = position {
                 let value = format!("{} / {}", index + 1, count);
                 let kind = if self.reading_mode && self.media_kind == Some(MediaKind::Image) {
-                    "Image"
+                    Text::StatusImage.in_language(language)
                 } else {
-                    "Item"
+                    Text::StatusItem.in_language(language)
                 };
                 details.push(Group::Folder, &value, format!("{kind} {value}"));
             }
         }
         if let Some(image) = image {
             if image.decoded.is_animated() {
-                let value = format!("{} frames", image.decoded.frames.len());
+                let value = formatted::status_frames(language, image.decoded.frames.len());
                 details.push(
                     Group::Playback,
                     &value,
-                    format!("{} animation frames", image.decoded.frames.len()),
+                    formatted::status_animation_frames(language, image.decoded.frames.len()),
                 );
             }
             let (short, help) = if self.nearest_images {
                 (
-                    "Nearest",
-                    "Nearest-neighbor magnification (sharp pixel edges)",
+                    Text::StatusNearest.in_language(language),
+                    Text::StatusNearestHelp.in_language(language),
                 )
             } else {
-                ("Smooth", "Smooth magnification (filtered)")
+                (
+                    Text::StatusSmooth.in_language(language),
+                    Text::StatusSmoothHelp.in_language(language),
+                )
             };
             details.push(Group::Display, short, help);
         } else if self.session.is_some() {
@@ -203,22 +238,23 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             if edit.trim_start.is_some() || edit.trim_end.is_some() {
                 details.push(
                     Group::Document,
-                    "Trim (T)",
-                    "Trimmed playback range; open the timeline to adjust",
+                    Text::StatusTrim.in_language(language),
+                    Text::StatusTrimHelp.in_language(language),
                 );
             }
         }
         if let Some(modified) = file.and_then(|file| file.modified_local.as_ref()) {
             details.push(
                 Group::Modified,
-                format!("Modified (local): {modified}"),
+                formatted::status_modified(language, modified),
                 modified,
             );
         }
         if let Some(snapshot) = &self.folder_snapshot {
-            details
-                .help
-                .push((Group::Folder, snapshot_source(snapshot.source).into()));
+            details.help.push((
+                Group::Folder,
+                snapshot_source(language, snapshot.source).into(),
+            ));
         }
         details
     }

@@ -5978,9 +5978,12 @@ where
                                 );
                             });
                         });
+                    // ScrollArea reports its pre-shrink viewport. Reserve only the
+                    // content's visible width so unused space belongs to the caption.
+                    let visible_width = strip_scroll.content_size.x.min(strip_rect.width());
                     ui.advance_cursor_after_rect(egui::Rect::from_min_size(
                         strip_rect.min,
-                        egui::vec2(strip_scroll.inner_rect.width(), layout.tab_height),
+                        egui::vec2(visible_width, layout.tab_height),
                     ));
                     ui.spacing_mut().scroll.fade = scroll_fade;
                     // egui 0.35 uses the ScrollArea ID plus its usize axis for the bar.
@@ -5998,7 +6001,20 @@ where
                     );
                     // The empty caption also owns the space above the inset tab row.
                     // Native hit testing still gives normal-window resize edges priority.
+                    drag_rect.min.x = strip_rect.left() + visible_width;
                     drag_rect.min.y = layout.drag_top;
+                    #[cfg(test)]
+                    ui.ctx().data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new("tab-strip-test-geometry"),
+                            (
+                                strip_scroll.inner_rect,
+                                strip_scroll.content_size,
+                                drag_rect,
+                                width,
+                            ),
+                        );
+                    });
                     if let Some(caption) = &self.native_caption {
                         actions.extend(
                             chrome::caption_accessibility(
@@ -16301,12 +16317,15 @@ mod tests {
     }
 
     fn finish_isolated_test(test_name: &str, root: &Path, result: std::process::Output) {
-        if result.status.success() {
+        let selected_one = String::from_utf8_lossy(&result.stdout)
+            .lines()
+            .any(|line| line == "running 1 test");
+        if result.status.success() && selected_one {
             std::fs::remove_dir_all(root).expect("remove isolated test files");
         }
         eprint!("{}", String::from_utf8_lossy(&result.stderr));
         assert!(
-            result.status.success(),
+            result.status.success() && selected_one,
             "Isolated test {test_name} exited with {} (code: {}). Fixture retained at {}.\n{}\n{}",
             result.status,
             result.status.code().map_or_else(
@@ -16332,7 +16351,7 @@ mod tests {
         std::fs::create_dir(&fixture).expect("fixture directory");
         let evidence = fixture.join("evidence.txt");
         std::fs::write(&evidence, "retained evidence").expect("fixture evidence");
-        for code in [101, 0xc0000005] {
+        for code in [0, 101, 0xc0000005] {
             let failure = std::panic::catch_unwind(|| {
                 finish_isolated_test(
                     "native_failure_probe",
@@ -16365,7 +16384,7 @@ mod tests {
             &fixture,
             std::process::Output {
                 status: std::process::ExitStatus::from_raw(0),
-                stdout: Vec::new(),
+                stdout: b"running 1 test\n".to_vec(),
                 stderr: Vec::new(),
             },
         );
@@ -18461,8 +18480,9 @@ mod tests {
 
     #[test]
     fn audio_volume_wheel_accepts_list_exterior_and_preserves_list_scroll() {
-        let Some(root) = isolated_test_root("tests::audio_volume_wheel_accepts_list_exterior")
-        else {
+        let Some(root) = isolated_test_root(
+            "tests::audio_volume_wheel_accepts_list_exterior_and_preserves_list_scroll",
+        ) else {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
@@ -18471,6 +18491,7 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
+        app.set_playback_volume(1.0);
         for (width, focused) in [240.0, 480.0, 960.0]
             .into_iter()
             .flat_map(|width| [true, false].map(|focused| (width, focused)))
@@ -18588,7 +18609,8 @@ mod tests {
                 (egui::pos2(100.0, 100.0), false),
                 (egui::pos2(width - 10.0, 100.0), false),
                 (egui::pos2(2.0, 100.0), true),
-                (egui::pos2(100.0, 225.0), true),
+                (egui::pos2(100.0, 225.0), false),
+                (egui::pos2(100.0, 280.0), true),
                 (egui::pos2(100.0, 10.0), false),
             ] {
                 let actions = frame(vec![
@@ -18606,7 +18628,8 @@ mod tests {
                         .iter()
                         .filter(|action| matches!(action, UiAction::Volume(..)))
                         .count(),
-                    usize::from(expected)
+                    usize::from(expected),
+                    "width={width} focused={focused} position={pos:?}"
                 );
                 if expected {
                     assert!(actions == [UiAction::Volume(tab, 0.9)]);
@@ -18617,7 +18640,9 @@ mod tests {
 
     #[test]
     fn playlist_duration_worker_populates_visible_labels_and_rejects_old_tickets() {
-        let Some(root) = isolated_test_root("tests::playlist_duration_worker") else {
+        let Some(root) = isolated_test_root(
+            "tests::playlist_duration_worker_populates_visible_labels_and_rejects_old_tickets",
+        ) else {
             return;
         };
         let source =

@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, Stroke, Ui};
+use egui::{Color32, Pos2, Rect, Stroke, Ui, emath::GuiRounding};
 use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
 use crate::hover_help::HoverHelp;
@@ -445,8 +445,12 @@ pub fn reading_button(
 }
 
 pub fn tab_width(available: f32, count: usize, gap: f32) -> f32 {
-    let gaps = count.saturating_sub(1) as f32 * gap;
-    ((available - gaps) / count.max(1) as f32).clamp(72.0, 160.0)
+    // Match the allocator's logical rounding and round each width down, so
+    // repeated fractional tabs cannot manufacture a scrollable remainder.
+    let gaps = count.saturating_sub(1) as f32 * gap.round_ui();
+    ((available - gaps) / count.max(1) as f32)
+        .floor_ui()
+        .clamp(72.0, 160.0)
 }
 
 pub fn tab_drop_gap(tabs: &[Rect], strip: Rect, pointer: Pos2) -> Option<(usize, f32)> {

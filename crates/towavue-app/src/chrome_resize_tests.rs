@@ -302,3 +302,75 @@ fn tab_scrollbar_fills_lower_gutter_and_keeps_title_controls_aligned() {
         }
     }
 }
+
+#[test]
+fn tabs_shrink_before_scrollbars_and_caption_follows_actual_content() {
+    let Some(root) = tests::isolated_test_root(
+        "chrome_resize_tests::tabs_shrink_before_scrollbars_and_caption_follows_actual_content",
+    ) else {
+        return;
+    };
+    let mut failures = Vec::new();
+    for density in [1.0, 1.25, 1.5, 2.0] {
+        for window_width in [640.0, 801.0, 1024.0] {
+            for count in [0_usize, 1, 2, 3, 5, 8, 20] {
+                let mut app = Application::new(None, |_| {}).expect("app");
+                for index in 0..count {
+                    app.tabs
+                        .open_new(root.join(format!("fit-{index}.png")), MediaKind::Image);
+                }
+                let count = app.tabs.len();
+                let context = fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.enable_accesskit();
+                context.global_style_mut(chrome::style);
+                context.global_style_mut(|style| style.animation_time = 0.0);
+                let mut output = None;
+                for tick in 0..5 {
+                    output = Some(context.run_ui(
+                        egui::RawInput {
+                            time: Some(tick as f64),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(window_width, 300.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(egui::pos2(120.0, 30.0))],
+                            ..Default::default()
+                        },
+                        |ui| app.draw_top_bar(ui, &mut Vec::new()),
+                    ));
+                }
+                let (strip, content, caption, tab_width) = context
+                    .data(|data| {
+                        data.get_temp::<(egui::Rect, egui::Vec2, egui::Rect, f32)>(egui::Id::new(
+                            "tab-strip-test-geometry",
+                        ))
+                    })
+                    .expect("rendered geometry");
+                let gap = (2.0_f32 * density).round() / density;
+                let expected_content =
+                    count as f32 * tab_width + count.saturating_sub(1) as f32 * gap;
+                let tree = output
+                    .expect("settled tab frame")
+                    .platform_output
+                    .accesskit_update
+                    .expect("tree");
+                let bars = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                    .count();
+                let overflow = expected_content > strip.width() + 1.0 / density;
+                if bars != usize::from(overflow) {
+                    failures.push(format!("bars={bars} density={density} window={window_width} count={count} tab={tab_width} strip={strip:?} content={content:?}"));
+                }
+                if !overflow
+                    && (caption.left() - (strip.left() + expected_content)).abs() > 1.0 / density
+                {
+                    failures.push(format!("caption must follow final tab: density={density} window={window_width} count={count} tab={tab_width} strip={strip:?} content={content:?} caption={caption:?}"));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

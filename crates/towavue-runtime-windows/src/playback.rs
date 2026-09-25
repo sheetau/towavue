@@ -582,6 +582,7 @@ impl PlaybackSession {
         }
         if let Some(audio) = self.audio.as_ref().map(AudioOutput::sender) {
             let timeline = self.timeline.clone();
+            let precise_audio = self.range != PlaybackRange::default() || self.rate != 1.0;
             let rate = self.rate;
             let format = self.audio_format.expect("started audio output");
             let path = self.path.clone();
@@ -610,7 +611,7 @@ impl PlaybackSession {
                                 .finish()
                                 .map_err(|_| decode::DecodeError::ConsumerClosed)
                         } else {
-                            run_audio_decode(&path, &audio, target, end, &cancelled)
+                            run_audio_decode(&path, &audio, target, end, precise_audio, &cancelled)
                         }
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
@@ -1056,22 +1057,27 @@ fn run_audio_decode(
     audio: &AudioOutputSender,
     target: MediaTime,
     end: Option<MediaTime>,
+    precise: bool,
     cancelled: &AtomicBool,
 ) -> Result<(), decode::DecodeError> {
-    decode::decode_file_parallel_cancellable(
-        path,
-        target,
-        end,
-        Some(DecodeStream::Audio),
-        &|| cancelled.load(Ordering::Relaxed),
-        |output| match output {
-            ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
-                audio.push(chunk).is_ok()
-            }
-            ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
-            _ => unreachable!("audio-only decoder emitted video"),
-        },
-    )
+    let cancelled = || cancelled.load(Ordering::Relaxed);
+    let emit = |output| match output {
+        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => audio.push(chunk).is_ok(),
+        ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
+        _ => unreachable!("audio-only decoder emitted video"),
+    };
+    if precise {
+        decode::decode_file_parallel_cancellable(
+            path,
+            target,
+            end,
+            Some(DecodeStream::Audio),
+            &cancelled,
+            emit,
+        )
+    } else {
+        decode::decode_playback_audio_cancellable(path, target, end, &cancelled, emit)
+    }
     .map(|_| ())
 }
 

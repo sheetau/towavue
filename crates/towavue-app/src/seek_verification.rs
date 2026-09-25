@@ -8,6 +8,9 @@ struct Sample {
     started: Instant,
     ready: Option<Duration>,
     command: Option<Duration>,
+    submitted: Option<Duration>,
+    sync_since: Option<(Instant, MediaTime, MediaTime)>,
+    sync_gap: (f64, f64),
     target: MediaTime,
     pointer: Option<egui::Pos2>,
     release_pending: bool,
@@ -38,7 +41,7 @@ impl Trial {
                     sample.ready.get_or_insert(sample.started.elapsed());
                 }
             }
-            if self.app.seek_latencies.len() > sample.latency_count {
+            if sample.submitted.is_none() && self.app.seek_latencies.len() > sample.latency_count {
                 let elapsed = sample.started.elapsed();
                 let session = self.app.session.as_ref().expect("session");
                 assert!(!session.video_refresh_pending(), "fresh frame submitted");
@@ -53,6 +56,25 @@ impl Trial {
                     session
                         .current_source_video_time()
                         .is_some_and(|time| time >= session.target())
+                );
+                let audio_time = session.audio_position();
+                let video_time = session
+                    .current_source_video_time()
+                    .expect("presented source time");
+                if self.index >= 6 {
+                    let audio_time = audio_time.expect("playing reference has an audio clock");
+                    assert!(
+                        audio_time >= session.target(),
+                        "fresh audio clock after seeking"
+                    );
+                }
+                eprintln!(
+                    "APP_SEEK_SYNC index={} audio_s={:?} video_s={:.6} video_minus_audio_ms={:?}",
+                    self.index,
+                    audio_time.map(MediaTime::as_seconds_f64),
+                    video_time.as_seconds_f64(),
+                    audio_time
+                        .map(|time| (video_time.as_seconds_f64() - time.as_seconds_f64()) * 1000.0)
                 );
                 eprintln!(
                     "APP_SEEK index={} pointer={} playing={} target_s={:.3} command_ms={:.3} ready_ms={:?} submitted_ms={:.3} production_ms={:.3} hardware={} transfers={}",
@@ -72,9 +94,60 @@ impl Trial {
                     session.metrics().hardware_frame_count,
                     session.metrics().cpu_transfer_count
                 );
-                self.index += 1;
-                self.sample = None;
-                self.next_at = Instant::now() + Duration::from_millis(100);
+                sample.submitted = Some(elapsed);
+            }
+            if let Some(submitted) = sample.submitted {
+                let mut settled = self.index < 6;
+                if self.index >= 6 {
+                    let elapsed = sample.started.elapsed();
+                    assert!(
+                        elapsed < submitted + Duration::from_secs(2),
+                        "playing audio/video must settle after the first fresh frame"
+                    );
+                    let session = self.app.session.as_ref().expect("session");
+                    let audio = session.audio_position().expect("playing audio clock");
+                    let video = session.current_source_video_time().expect("video time");
+                    let gap_ms = (video.as_seconds_f64() - audio.as_seconds_f64()) * 1000.0;
+                    // A held frame ages by one source frame between presentations.
+                    // The late-drop cutoff applies to the next candidate, not to
+                    // every observation of the already displayed frame.
+                    let frame_ms = 1000.0 / session.source_video_frame_rate().expect("source FPS");
+                    let late_ms = VIDEO_LATE_TOLERANCE.as_secs_f64() * 1000.0 + frame_ms;
+                    let early_ms = VIDEO_EARLY_TOLERANCE.as_secs_f64() * 1000.0;
+                    if elapsed >= submitted + Duration::from_millis(100)
+                        && (-late_ms..=early_ms).contains(&gap_ms)
+                    {
+                        let (since, first_audio, first_video) = sample
+                            .sync_since
+                            .get_or_insert_with(|| (Instant::now(), audio, video));
+                        sample.sync_gap.0 = sample.sync_gap.0.min(gap_ms);
+                        sample.sync_gap.1 = sample.sync_gap.1.max(gap_ms);
+                        settled = since.elapsed() >= Duration::from_millis(100)
+                            && audio
+                                .as_nanoseconds()
+                                .saturating_sub(first_audio.as_nanoseconds())
+                                >= 50_000_000
+                            && video > *first_video;
+                    } else {
+                        sample.sync_since = None;
+                        sample.sync_gap = (f64::INFINITY, f64::NEG_INFINITY);
+                    }
+                    if settled {
+                        eprintln!(
+                            "APP_SEEK_SETTLED index={} elapsed_ms={:.3} video_minus_audio_ms={:.3} observed_gap_ms={:?} allowed_gap_ms={:?}",
+                            self.index,
+                            elapsed.as_secs_f64() * 1000.0,
+                            gap_ms,
+                            sample.sync_gap,
+                            (-late_ms, early_ms)
+                        );
+                    }
+                }
+                if settled {
+                    self.index += 1;
+                    self.sample = None;
+                    self.next_at = Instant::now() + Duration::from_millis(100);
+                }
             }
         }
     }
@@ -99,6 +172,9 @@ impl Trial {
             started: Instant::now(),
             ready: None,
             command: None,
+            submitted: None,
+            sync_since: None,
+            sync_gap: (f64::INFINITY, f64::NEG_INFINITY),
             target,
             pointer,
             release_pending: pointer.is_some(),

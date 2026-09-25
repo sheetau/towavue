@@ -2,27 +2,6 @@ use super::*;
 use std::os::windows::process::CommandExt;
 use std::time::Instant;
 
-thread_local! {
-    static APPROXIMATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-pub(super) fn approximate_seek() -> bool {
-    APPROXIMATE.get()
-}
-
-fn with_approximate<T>(enabled: bool, run: impl FnOnce() -> T) -> T {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            APPROXIMATE.set(self.0);
-        }
-    }
-    // Both preroll decisions happen on the calling thread before worker creation.
-    // No process-global policy is changed, including on assertion/unwind.
-    let _restore = Restore(APPROXIMATE.replace(enabled));
-    run()
-}
-
 struct Samples {
     values: Vec<f32>,
     rate: u32,
@@ -45,36 +24,40 @@ fn read(path: &Path, target: MediaTime, approximate: bool) -> Samples {
     let mut first_ms = None;
     let started = Instant::now();
     let end = target.saturating_add(Duration::from_secs(1));
-    with_approximate(approximate, || {
+    let emit = |output| {
+        if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(mut chunk)) = output {
+            clip_audio_chunk(&mut chunk, target, Some(end));
+            if chunk.frames > 0 {
+                assert_eq!(chunk.format.channels, 2);
+                first_ms.get_or_insert_with(|| started.elapsed().as_secs_f64() * 1000.0);
+                if rate != 0 {
+                    assert_eq!(rate, chunk.format.sample_rate);
+                }
+                rate = chunk.format.sample_rate;
+                values.extend(
+                    chunk
+                        .bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|sample| f32::from_ne_bytes(*sample)),
+                );
+            }
+        }
+        true
+    };
+    let cancelled = || started.elapsed() > Duration::from_secs(120);
+    if approximate {
+        input.decode_playback_audio(target, Some(end), &cancelled, emit)
+    } else {
         input.decode_software(
             target,
             Some(end),
             Some(DecodeStream::Audio),
-            &|| started.elapsed() > Duration::from_secs(120),
-            |output| {
-                if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(mut chunk)) = output {
-                    clip_audio_chunk(&mut chunk, target, Some(end));
-                    if chunk.frames > 0 {
-                        assert_eq!(chunk.format.channels, 2);
-                        first_ms.get_or_insert_with(|| started.elapsed().as_secs_f64() * 1000.0);
-                        if rate != 0 {
-                            assert_eq!(rate, chunk.format.sample_rate);
-                        }
-                        rate = chunk.format.sample_rate;
-                        values.extend(
-                            chunk
-                                .bytes
-                                .as_chunks::<4>()
-                                .0
-                                .iter()
-                                .map(|sample| f32::from_ne_bytes(*sample)),
-                        );
-                    }
-                }
-                true
-            },
+            &cancelled,
+            emit,
         )
-    })
+    }
     .expect("bounded audio comparison");
     assert!(values.iter().all(|value| value.is_finite()));
     assert!(
@@ -89,7 +72,7 @@ fn read(path: &Path, target: MediaTime, approximate: bool) -> Samples {
     }
 }
 
-fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) -> (f64, f64) {
+pub(super) fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) -> (f64, f64) {
     let fast = &fast[offset.max(0) as usize * 2..];
     let exact = &exact[(-offset).max(0) as usize * 2..];
     let mut squared = 0.0;
@@ -105,7 +88,7 @@ fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) -> (f64, f6
     ((squared / count as f64).sqrt(), peak)
 }
 
-fn alignment(fast: &[f32], exact: &[f32], bound: i32) -> i32 {
+pub(super) fn alignment(fast: &[f32], exact: &[f32], bound: i32) -> i32 {
     (-bound..=bound)
         .min_by(|a, b| {
             error_at(fast, exact, *a, 16)
@@ -192,8 +175,6 @@ fn alignment_detects_known_stereo_offsets_and_retains_waveform_error() {
         let (rms, peak) = error_at(&changed, exact, offset, 1);
         assert!((rms - 0.125).abs() < 1e-8 && (peak - 0.125).abs() < 1e-8);
     }
-    with_approximate(true, || assert!(approximate_seek()));
-    assert!(!approximate_seek());
 }
 
 #[test]

@@ -205,6 +205,12 @@ enum ParallelVideoPipeline {
     Hardware(HardwareVideoPipeline),
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum AudioSeekPolicy {
+    Exact,
+    Playback,
+}
+
 struct StreamConfig {
     index: usize,
     time_base: Rational,
@@ -252,10 +258,6 @@ impl StreamConfig {
             && parameters.profile == ffmpeg::ffi::AV_PROFILE_AAC_LOW
             && matches!(parameters.frame_size, 960 | 1024)
         {
-            #[cfg(test)]
-            if audio_seek_comparison::approximate_seek() {
-                return Option::None;
-            }
             let warmup = target.saturating_sub(Duration::from_millis(250));
             return (warmup > MediaTime::ZERO).then_some((
                 warmup,
@@ -263,6 +265,28 @@ impl StreamConfig {
             ));
         }
         Option::None
+    }
+
+    fn seek_preroll(
+        &self,
+        target: MediaTime,
+        policy: AudioSeekPolicy,
+    ) -> Option<(MediaTime, PrerollSamples)> {
+        let exact = self.sample_preroll(target);
+        // Ordinary listening can accept sub-millisecond container rounding.
+        // Keep coarse/unknown time bases, other codecs and every edit/export
+        // consumer on the exact sample axis. The ordinary compressed seek still
+        // warms the decoder for 250 ms; it must not seed exact checkpoints.
+        if policy == AudioSeekPolicy::Playback
+            && matches!(exact, Some((_, PrerollSamples::AacLc(_))))
+            && self.time_base.numerator() > 0
+            && i64::from(self.time_base.numerator()) * 1000
+                <= i64::from(self.time_base.denominator())
+        {
+            None
+        } else {
+            exact
+        }
     }
 
     fn independent_samples(&self) -> Option<PrerollSamples> {
@@ -704,6 +728,23 @@ pub(crate) fn decode_file_parallel_cancellable(
     )
 }
 
+/// Ordinary unedited listening only. Editing/export consumers keep the exact
+/// entry points; this policy never reaches retained-interval decoding.
+pub(crate) fn decode_playback_audio_cancellable(
+    path: &Path,
+    minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    ParallelInput::open(path, cancelled)?.decode_playback_audio(
+        minimum_time,
+        maximum_time,
+        cancelled,
+        emit,
+    )
+}
+
 /// Decode ordered retained intervals on one continuous sample axis. The audio worker
 /// may count independently decodable packets in gaps; other codecs decode normally.
 /// Intervals are ordered, non-overlapping hints, not output clipping: callers still
@@ -722,6 +763,7 @@ pub(crate) fn decode_audio_intervals_cancellable(
         Some(maximum_time),
         Some(DecodeStream::Audio),
         intervals,
+        AudioSeekPolicy::Exact,
         cancelled,
         |output| match output {
             ParallelDecodeOutput::Audio(chunk) => emit(chunk),
@@ -793,6 +835,42 @@ impl ParallelInput {
         maximum_time: Option<MediaTime>,
         stream: Option<DecodeStream>,
         cancelled: &(dyn Fn() -> bool + Sync),
+        emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        self.decode_software_with_policy(
+            minimum_time,
+            maximum_time,
+            stream,
+            AudioSeekPolicy::Exact,
+            cancelled,
+            emit,
+        )
+    }
+
+    fn decode_playback_audio(
+        &mut self,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        self.decode_software_with_policy(
+            minimum_time,
+            maximum_time,
+            Some(DecodeStream::Audio),
+            AudioSeekPolicy::Playback,
+            cancelled,
+            emit,
+        )
+    }
+
+    fn decode_software_with_policy(
+        &mut self,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        stream: Option<DecodeStream>,
+        audio_seek: AudioSeekPolicy,
+        cancelled: &(dyn Fn() -> bool + Sync),
         mut emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
         self.decode(
@@ -801,6 +879,7 @@ impl ParallelInput {
             maximum_time,
             stream,
             &[],
+            audio_seek,
             cancelled,
             |output| match output {
                 ParallelDecodeOutput::SoftwareVideo(frame) => emit(
@@ -838,6 +917,7 @@ impl ParallelInput {
             maximum_time,
             Some(DecodeStream::Video),
             &[],
+            AudioSeekPolicy::Exact,
             cancelled,
             |output| match output {
                 ParallelDecodeOutput::HardwareVideo(frame) => emit(
@@ -865,6 +945,7 @@ impl ParallelInput {
         maximum_time: Option<MediaTime>,
         stream: Option<DecodeStream>,
         audio_intervals: &[TimeRange],
+        audio_seek: AudioSeekPolicy,
         cancelled: &(dyn Fn() -> bool + Sync),
         mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
@@ -912,10 +993,10 @@ impl ParallelInput {
             }
             return Err(DecodeError::NoMediaStream);
         }
-        let sample_preroll = video.is_none()
-            && audio
-                .as_ref()
-                .is_some_and(|audio| audio.sample_preroll(minimum_time).is_some());
+        let sample_preroll = audio
+            .as_ref()
+            .filter(|_| video.is_none())
+            .and_then(|audio| audio.seek_preroll(minimum_time, audio_seek));
         let compressed_preroll = video.is_none()
             && audio.as_ref().is_some_and(|audio| {
                 matches!(
@@ -923,7 +1004,7 @@ impl ParallelInput {
                     codec::Id::AAC | codec::Id::MP3 | codec::Id::OPUS | codec::Id::VORBIS
                 )
             });
-        let seek_target = if sample_preroll {
+        let seek_target = if sample_preroll.is_some() {
             MediaTime::ZERO
         } else if compressed_preroll {
             // Warm overlap/reservoir state before clipping at the requested target.
@@ -934,7 +1015,7 @@ impl ParallelInput {
         } else {
             minimum_time
         };
-        let resume = if self.started && sample_preroll {
+        let resume = if self.started && sample_preroll.is_some() {
             self.audio_checkpoints.resume(
                 input,
                 audio.as_ref().expect("audio sample preroll"),
@@ -971,6 +1052,7 @@ impl ParallelInput {
             (input, &mut self.audio_checkpoints, resume, audio_intervals),
             video,
             audio,
+            sample_preroll,
             minimum_time,
             maximum_time,
             cancelled,
@@ -979,6 +1061,7 @@ impl ParallelInput {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_parallel_workers(
     input: (
         &mut format::context::Input,
@@ -988,6 +1071,7 @@ fn run_parallel_workers(
     ),
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
+    sample_preroll: Option<(MediaTime, PrerollSamples)>,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
@@ -1001,10 +1085,6 @@ fn run_parallel_workers(
         ParallelVideoConfig::Hardware(config, _) => config.index,
     });
     let audio_stream_index = audio.as_ref().map(|config| config.index);
-    let sample_preroll = audio
-        .as_ref()
-        .filter(|_| video.is_none())
-        .and_then(|config| config.sample_preroll(minimum_time));
     let trusted_audio_axis =
         video.is_none() && (minimum_time <= MediaTime::ZERO || sample_preroll.is_some());
     let mut video_finished = video.is_none();

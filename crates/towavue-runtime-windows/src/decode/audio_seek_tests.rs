@@ -447,6 +447,20 @@ fn aac_prefix_requires_lc_frame_length_and_matching_packet_duration() {
         }
         assert_eq!(config.sample_preroll(target).is_some(), accepted);
     }
+    for time_base in [Rational(1, 1000), Rational(1, 2000), Rational(1, 100)] {
+        config.time_base = time_base;
+        assert!(
+            config
+                .seek_preroll(target, AudioSeekPolicy::Exact)
+                .is_some()
+        );
+        assert_eq!(
+            config
+                .seek_preroll(target, AudioSeekPolicy::Playback)
+                .is_some(),
+            time_base == Rational(1, 100)
+        );
+    }
     config.time_base = Rational(1, 44_100);
     assert!(
         config.sample_preroll(target).is_none(),
@@ -592,6 +606,55 @@ fn compare_aac_noise_substitution(report_alignment: bool) {
                         actual == samples(&encoded, target, end, target).0,
                         "identical seek starts must be deterministic"
                     );
+                    if pns == "0" {
+                        let mut played = Vec::new();
+                        input
+                            .decode_playback_audio(target, Some(end), &|| false, |output| {
+                                if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(
+                                    mut chunk,
+                                )) = output
+                                {
+                                    clip_audio_chunk(&mut chunk, target, Some(end));
+                                    played.extend(chunk.bytes);
+                                }
+                                true
+                            })
+                            .expect("ordinary playback decode");
+                        let to_values = |bytes: &[u8]| {
+                            bytes
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .map(|value| f32::from_ne_bytes(*value))
+                                .collect::<Vec<_>>()
+                        };
+                        let played = to_values(&played);
+                        let precise = to_values(&expected);
+                        let bound = (rate / 1000) as i32;
+                        assert!(
+                            played.len().abs_diff(precise.len()) <= bound as usize * 2,
+                            "EOF sample count stays within one container tick"
+                        );
+                        if played.len().min(precise.len()) > bound as usize * 2 {
+                            let offset =
+                                super::audio_seek_comparison::alignment(&played, &precise, bound);
+                            assert_eq!(
+                                super::audio_seek_comparison::error_at(
+                                    &played, &precise, offset, 1
+                                ),
+                                (0.0, 0.0),
+                                "AAC playback/{rate}/{extension} at {ns}: waveform after sub-millisecond alignment"
+                            );
+                            if extension == "m4a" {
+                                assert_eq!(offset, 0, "sample-precision playback remains exact");
+                            }
+                        }
+                        assert!(
+                            collect(&mut input, target, end, target).0 == expected,
+                            "playback policy cannot leak into the next exact run"
+                        );
+                    }
+
                     let error = actual
                         .as_chunks::<4>()
                         .0
@@ -638,6 +701,16 @@ fn compare_aac_noise_substitution(report_alignment: bool) {
                         MediaTime::from_nanoseconds(2_917_000_000),
                         None,
                         Some(DecodeStream::Audio),
+                        &|| checks.fetch_add(1, Ordering::Relaxed) > 10,
+                        |_| true,
+                    ),
+                    Err(DecodeError::ConsumerClosed)
+                ));
+                let checks = AtomicUsize::new(0);
+                assert!(matches!(
+                    input.decode_playback_audio(
+                        MediaTime::from_nanoseconds(2_917_000_000),
+                        None,
                         &|| checks.fetch_add(1, Ordering::Relaxed) > 10,
                         |_| true,
                     ),

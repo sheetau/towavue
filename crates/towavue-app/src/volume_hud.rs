@@ -113,15 +113,7 @@ impl Hud {
         }
         let mut painter = ui.painter_at(viewport);
         painter.multiply_opacity(opacity);
-        painter.add(
-            egui::epaint::Shadow {
-                offset: [0, 0],
-                blur: 12,
-                spread: 1,
-                color: Color32::from_black_alpha(80),
-            }
-            .as_shape(track, 2),
-        );
+        paint_shadow(&painter, track);
         painter.rect_filled(
             track,
             1.5,
@@ -131,6 +123,20 @@ impl Hud {
             painter.rect_filled(fill, 1.5, Color32::WHITE);
         }
         changed
+    }
+}
+
+// The generic rectangle blur clamps its penumbra to the three-point track's
+// thickness and can leave dark cap artifacts. Nested capsules approximate the
+// soft twelve-point penumbra without that thin-rectangle tessellation path.
+fn paint_shadow(painter: &egui::Painter, track: Rect) {
+    for layer in 0..12 {
+        let spread = 7.0 - layer as f32 * 0.5;
+        painter.rect_filled(
+            track.expand(spread),
+            egui::CornerRadius::same(u8::MAX),
+            Color32::from_black_alpha(8),
+        );
     }
 }
 
@@ -431,3 +437,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod pixel_tests;

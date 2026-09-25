@@ -1471,7 +1471,7 @@ fn draw_preview_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_siz
         FontId::proportional(font_size),
         Color32::WHITE,
     );
-    let padding = Vec2::splat(2.0);
+    let padding = Vec2::new(4.0, 2.0);
     let inset = Vec2::splat(4.0);
     let size = galley.size() + 2.0 * padding;
     let background = Rect::from_min_size(rect.right_bottom() - inset - size, size);

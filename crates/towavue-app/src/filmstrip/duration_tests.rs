@@ -113,7 +113,8 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         assert_eq!(background.fill, crate::chrome::HOVER);
                         assert_eq!(
                             background.rect,
-                            Rect::from_min_size(text.pos, text.galley.size()).expand(2.0)
+                            Rect::from_min_size(text.pos, text.galley.size())
+                                .expand2(egui::vec2(4.0, 2.0))
                         );
                         assert_eq!(background.corner_radius, egui::CornerRadius::same(2));
                         let image_index = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[index])).expect("ready thumbnail");

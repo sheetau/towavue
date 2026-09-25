@@ -735,7 +735,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
         let selection_status = app.visual_selection_status();
         assert_eq!(
             selection_status.as_deref(),
-            Some("Selection: x=18 y=32 · 54×96 px")
+            Some("Selection(XY:18,32 · 54×96px)")
         );
         let old = app.image.as_ref().expect("original").texture.id();
         for _ in 0..3 {
@@ -787,7 +787,7 @@ fn handoff_is_original_display_only_until_the_latest_source_is_ready() {
                 .shapes
                 .iter()
                 .any(|shape| matches!(&shape.shape, egui::Shape::Text(text)
-            if text.galley.text().ends_with("old.png · Selection: x=18 y=32 · 54×96 px")))
+            if text.galley.text().ends_with("old.png · Selection(XY:18,32 · 54×96px)")))
         );
         assert!(
             !output

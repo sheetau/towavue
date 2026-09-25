@@ -69,7 +69,7 @@ templates! {
     rate_edited(rate: f32) => ("Rate {rate:.2}× · playback and export (source unchanged)", "速度 {rate:.2}× · 再生と書き出しに適用（元ファイルは変更していません）"),
     trim_edited(start: &str, end: &str) => ("Trim {start} – {end} · playback and export", "トリミング {start} – {end} · 再生と書き出しに適用"),
     exported_file(prefix: &str, path: &str, encoder: &str) => ("{prefix} {path} ({encoder} encode)", "{prefix} {path}（{encoder}エンコード）"),
-    selection_rectangle(x: u32, y: u32, width: u32, height: u32) => ("Selection: x={x} y={y} · {width}×{height} px", "選択範囲: x={x} y={y} · {width}×{height} px"),
+    selection_rectangle(x: u32, y: u32, width: u32, height: u32) => ("Selection(XY:{x},{y} · {width}×{height}px)", "選択範囲(XY:{x},{y} · {width}×{height}px)"),
     detach_failed(error: &str) => ("Could not detach tab: {error}", "タブを別のウィンドウに移動できませんでした: {error}"),
     new_window_failed(error: &str) => ("Could not open new window: {error}", "新しいウィンドウを開けませんでした: {error}"),
     reading_drag_failed(error: &str) => ("Could not start reading drag: {error}", "読書モードのドラッグ操作を開始できませんでした: {error}"),

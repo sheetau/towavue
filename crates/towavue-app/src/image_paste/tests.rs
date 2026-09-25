@@ -96,7 +96,8 @@ fn untitled_paste_edits_and_save_as_preserve_original_history_and_pathless_state
         context.global_style_mut(chrome::style);
         context.set_pixels_per_point(density);
         context.enable_accesskit();
-        for _ in 0..3 {
+        for selected in [false, true, false] {
+            app.image_view.selection = selected.then_some(UnitRect::FULL);
             let mut actions = Vec::new();
             let output = context.run_ui(
                 egui::RawInput {
@@ -110,6 +111,14 @@ fn untitled_paste_edits_and_save_as_preserve_original_history_and_pathless_state
                     app.draw_status_bar(ui, &mut actions, &mut Vec::new());
                 },
             );
+            let expected = if selected {
+                "image.png · Selection(XY:0,0 · 3×2px)"
+            } else {
+                "image.png"
+            };
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected)));
+            assert!(!app.edits[&id].is_dirty());
             let tree = output.platform_output.accesskit_update.expect("tree");
             let (_, button) = tree
                 .nodes

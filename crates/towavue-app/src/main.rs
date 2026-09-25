@@ -842,6 +842,7 @@ enum ViewDrag {
     ZoomSelection,
     Selection {
         mode: SelectionDrag,
+        point: UnitPoint,
         before: Option<UnitRect>,
         origin: egui::Pos2,
         started_at: f64,
@@ -5093,13 +5094,20 @@ where
                 .or(Some(SelectionDrag::OutsideImage(origin)))
         {
             self.forget_pointer_selection_focus(&response.ctx);
+            if matches!(mode, SelectionDrag::New(_) | SelectionDrag::OutsideImage(_)) {
+                self.image_view.selection = None;
+            }
             self.view_drag = Some(ViewDrag::Selection {
                 mode,
+                point,
                 before: self.image_view.selection,
                 origin,
                 started_at: response.ctx.input(|input| input.time),
                 moved: false,
             });
+        }
+        if let Some(ViewDrag::Selection { point: current, .. }) = &mut self.view_drag {
+            *current = point;
         }
         let selection_owned = matches!(self.view_drag, Some(ViewDrag::Selection { .. }));
         if selection_owned && !released {
@@ -5192,17 +5200,8 @@ where
                     .map(|crop| crop.unit_rect(image_size))
             });
         }
-        if released && let Some(ViewDrag::Selection { mode, origin, .. }) = self.view_drag {
+        if released && matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
             self.view_drag = None;
-            if !dragging && let Some(selection) = self.image_view.selection {
-                let selected = selection_rect(image_rect, selection);
-                if matches!(mode, SelectionDrag::New(_) | SelectionDrag::OutsideImage(_))
-                    && !selected.contains(origin)
-                    && !selected.contains(pointer)
-                {
-                    self.image_view.selection = None;
-                }
-            }
         }
     }
 
@@ -6598,10 +6597,16 @@ where
                             })
                             .flatten();
                             let mut export_link = None;
-                            let (text, color, tooltip) = if let Some(message) = self
-                                .visual_selection_status()
-                                .filter(|_| self.view_drag.is_some())
-                            {
+                            let (text, color, tooltip) = if let Some(message) =
+                                self.visual_selection_status().filter(|_| {
+                                    matches!(
+                                        self.view_drag,
+                                        Some(
+                                            ViewDrag::Selection { .. }
+                                                | ViewDrag::MoveSelection { .. }
+                                        )
+                                    )
+                                }) {
                                 (message.clone(), chrome::FOREGROUND, message)
                             } else if let Some(message) = selection_hint {
                                 (message.clone(), chrome::FOREGROUND, message)
@@ -6654,12 +6659,16 @@ where
                                     ),
                                 )
                             } else if self.current_document_untitled() {
+                                let suffix = self
+                                    .visual_selection_status()
+                                    .map_or_else(String::new, |value| format!(" · {value}"));
                                 (
-                                    image_paste::DEFAULT_NAME.into(),
+                                    format!("{}{suffix}", image_paste::DEFAULT_NAME),
                                     chrome::MUTED,
-                                    localization::Text::StatusPasted
-                                        .in_language(language)
-                                        .into(),
+                                    format!(
+                                        "{}{suffix}",
+                                        localization::Text::StatusPasted.in_language(language)
+                                    ),
                                 )
                             } else {
                                 (
@@ -9360,10 +9369,26 @@ where
                 kind,
             )?
         };
+        let (right, bottom) = match (self.view_drag, self.image_view.selection) {
+            (Some(ViewDrag::Selection { mode, point, .. }), Some(selection)) => {
+                let right = point.x >= (selection.min.x + selection.max.x) * 0.5;
+                let bottom = point.y >= (selection.min.y + selection.max.y) * 0.5;
+                match mode {
+                    SelectionDrag::New(start) => (point.x >= start.x, point.y >= start.y),
+                    SelectionDrag::Left => (false, bottom),
+                    SelectionDrag::Right => (true, bottom),
+                    SelectionDrag::Top => (right, false),
+                    SelectionDrag::Bottom => (right, true),
+                    SelectionDrag::Corner { left, top } => (!left, !top),
+                    SelectionDrag::OutsideImage(_) => (false, false),
+                }
+            }
+            _ => (false, false),
+        };
         Some(towavue_core::localization::formatted::selection_rectangle(
             language,
-            crop.x,
-            crop.y,
+            crop.x + if right { crop.width } else { 0 },
+            crop.y + if bottom { crop.height } else { 0 },
             crop.width,
             crop.height,
         ))
@@ -14187,6 +14212,7 @@ mod tests {
         let selected = app.image_view.selection;
         app.view_drag = Some(ViewDrag::Selection {
             mode: SelectionDrag::Right,
+            point: UnitPoint { x: 0.0, y: 0.0 },
             before: selected,
             origin: egui::Pos2::ZERO,
             started_at: 0.0,
@@ -16173,6 +16199,7 @@ mod tests {
                 10 => {
                     app.view_drag = Some(ViewDrag::Selection {
                         mode: SelectionDrag::Left,
+                        point: UnitPoint { x: 0.0, y: 0.0 },
                         before: None,
                         origin: egui::Pos2::ZERO,
                         started_at: 0.0,
@@ -20403,8 +20430,11 @@ mod tests {
                 )
                 .expect("pixel selection");
                 let expected = format!(
-                    "Selection: x={} y={} · {}×{} px",
-                    crop.x, crop.y, crop.width, crop.height
+                    "Selection(XY:{},{} · {}×{}px)",
+                    crop.x + crop.width,
+                    crop.y + crop.height,
+                    crop.width,
+                    crop.height
                 );
                 assert_eq!(
                     tree.nodes
@@ -20414,6 +20444,10 @@ mod tests {
                     "drag metrics do not reveal fullscreen status: {expected}"
                 );
                 frame(&mut app, vec![button(end, false)]);
+                let expected = format!(
+                    "Selection(XY:{},{} · {}×{}px)",
+                    crop.x, crop.y, crop.width, crop.height
+                );
                 let mut tree = frame(&mut app, vec![]);
                 if fullscreen {
                     assert!(!app.fullscreen_controls_visible);
@@ -20836,6 +20870,7 @@ mod tests {
             app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
             app.view_drag = (blocked == 4).then_some(ViewDrag::Selection {
                 mode: SelectionDrag::Left,
+                point: UnitPoint { x: 0.0, y: 0.0 },
                 before: None,
                 origin: egui::Pos2::ZERO,
                 started_at: 0.0,
@@ -23596,6 +23631,7 @@ mod tests {
                 app.image_view.selection = Some(before);
                 app.view_drag = Some(ViewDrag::Selection {
                     mode: edge,
+                    point: UnitPoint { x: 0.0, y: 0.0 },
                     before: Some(before),
                     origin: egui::Pos2::ZERO,
                     started_at: 0.0,
@@ -27003,7 +27039,7 @@ mod tests {
                         egui::pos2(20.0, 20.0),
                         egui::pos2(20.0, 400.0),
                         Some(rectangle(100, 100, 200, 200)),
-                        Some(rectangle(100, 100, 200, 200)),
+                        None,
                     ),
                     (
                         egui::pos2(48.0, 250.0),

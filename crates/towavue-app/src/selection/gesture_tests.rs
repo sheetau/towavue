@@ -442,9 +442,9 @@ fn interior_press_zooms_once_and_holding_cannot_start_a_new_selection() {
 }
 
 #[test]
-fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
+fn outside_press_clears_selection_without_stealing_disabled_or_control_input() {
     let Some(_) = tests::isolated_test_root(
-        "selection::gesture_tests::outside_click_clears_selection_but_drags_controls_and_cancellation_do_not",
+        "selection::gesture_tests::outside_press_clears_selection_without_stealing_disabled_or_control_input",
     ) else {
         return;
     };
@@ -500,7 +500,7 @@ fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
             frame(&mut app, vec![egui::Event::PointerMoved(start)]);
             if case == 1 || case == 2 {
                 frame(&mut app, vec![event(start, true)]);
-                assert_eq!(app.image_view.selection, Some(original));
+                assert_eq!(app.image_view.selection, None, "clear on press");
                 if case == 2 {
                     app.cancel_view_drag();
                 }
@@ -528,7 +528,7 @@ fn outside_click_clears_selection_but_drags_controls_and_cancellation_do_not() {
                 }
                 frame(&mut app, events);
             }
-            if matches!(case, 0 | 1 | 6 | 7) {
+            if matches!(case, 0 | 1 | 2 | 6 | 7) || case == 3 && start == margin {
                 assert_eq!(
                     app.image_view.selection, None,
                     "start={start:?}, case={case}"
@@ -801,5 +801,208 @@ fn selection_translation_keeps_pixel_extent_and_cancels_without_panning() {
             output.platform_output.cursor_icon,
             egui::CursorIcon::Default
         );
+    }
+}
+
+#[test]
+fn selection_press_clears_old_bounds_and_status_follows_the_dragged_corner() {
+    let Some(root) = tests::isolated_test_root(
+        "selection::gesture_tests::selection_press_clears_old_bounds_and_status_follows_the_dragged_corner",
+    ) else {
+        return;
+    };
+    let size = (100, 80);
+    let image = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(400.0, 320.0));
+    let original = PixelCrop {
+        x: 20,
+        y: 20,
+        width: 40,
+        height: 30,
+    }
+    .unit_rect(size);
+    let selected = selection_rect(image, original);
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            let context = fonts::test_context();
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.ui_context = Some(context.clone());
+            app.media_kind = Some(MediaKind::Image);
+            let path = root.join("selection.png");
+            app.path = Some(path.clone());
+            app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.image = Some(
+                ImagePresentation::from_decoded(
+                    &context,
+                    &path,
+                    DecodedImage {
+                        animation_plays: 0,
+                        format: "test",
+                        frames: vec![towavue_runtime_windows::DecodedImageFrame {
+                            width: size.0,
+                            height: size.1,
+                            rgba: vec![255; 100 * 80 * 4],
+                            delay: Duration::ZERO,
+                        }],
+                    }
+                    .into(),
+                )
+                .expect("image"),
+            );
+            let mut tick = 0.0;
+            let mut frame = |app: &mut Application<_>, events| {
+                tick += 0.05;
+                let mut raw = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(500.0, 420.0),
+                    )),
+                    events,
+                    time: Some(tick),
+                    ..Default::default()
+                };
+                raw.viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                let _ = context.run_ui(raw, |ui| {
+                    let response = ui.interact(
+                        ui.max_rect(),
+                        "status-corner-test".into(),
+                        egui::Sense::click_and_drag(),
+                    );
+                    app.update_selection(
+                        &response,
+                        image,
+                        size,
+                        false,
+                        ui.input(|input| input.pointer.hover_pos()),
+                    );
+                    if discard && context.current_pass_index() == 0 {
+                        context.request_discard("selection status pass");
+                    }
+                });
+            };
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            // Both empty image pixels and the exterior clear the old selection on press.
+            for start in [egui::pos2(80.0, 80.0), egui::pos2(20.0, 20.0)] {
+                app.image_view.selection = Some(original);
+                frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+                frame(&mut app, vec![button(start, true)]);
+                assert!(app.image_view.selection.is_none());
+                assert!(app.visual_selection_status().is_none());
+                assert!(app.cancel_view_drag());
+                assert!(
+                    app.image_view.selection.is_none(),
+                    "cancel cannot resurrect the cleared selection"
+                );
+                frame(&mut app, vec![button(start, false)]);
+            }
+            for (start, end, right, bottom, resize) in [
+                (
+                    egui::pos2(80.0, 80.0),
+                    egui::pos2(320.0, 280.0),
+                    true,
+                    true,
+                    false,
+                ),
+                (
+                    egui::pos2(320.0, 280.0),
+                    egui::pos2(80.0, 80.0),
+                    false,
+                    false,
+                    false,
+                ),
+                (
+                    selected.left_center(),
+                    selected.left_center() + egui::vec2(-40.0, 20.0),
+                    false,
+                    true,
+                    true,
+                ),
+                (
+                    selected.right_center(),
+                    selected.right_center() + egui::vec2(40.0, -20.0),
+                    true,
+                    false,
+                    true,
+                ),
+                (
+                    selected.center_top(),
+                    selected.center_top() + egui::vec2(20.0, -40.0),
+                    true,
+                    false,
+                    true,
+                ),
+                (
+                    selected.center_bottom(),
+                    selected.center_bottom() + egui::vec2(-20.0, 40.0),
+                    false,
+                    true,
+                    true,
+                ),
+                (
+                    selected.left_top(),
+                    selected.left_top() - egui::vec2(40.0, 40.0),
+                    false,
+                    false,
+                    true,
+                ),
+                (
+                    selected.right_top(),
+                    selected.right_top() + egui::vec2(40.0, -40.0),
+                    true,
+                    false,
+                    true,
+                ),
+                (
+                    selected.left_bottom(),
+                    selected.left_bottom() + egui::vec2(-40.0, 40.0),
+                    false,
+                    true,
+                    true,
+                ),
+                (
+                    selected.right_bottom(),
+                    selected.right_bottom() + egui::vec2(40.0, 40.0),
+                    true,
+                    true,
+                    true,
+                ),
+            ] {
+                app.image_view.selection = resize.then_some(original);
+                frame(&mut app, vec![egui::Event::PointerMoved(start)]);
+                frame(&mut app, vec![button(start, true)]);
+                frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+                let crop = PixelCrop::from_selection(
+                    app.image_view.selection.expect("drag"),
+                    size,
+                    MediaKind::Image,
+                )
+                .expect("crop");
+                assert_eq!(
+                    app.visual_selection_status(),
+                    Some(format!(
+                        "Selection(XY:{},{} \u{00b7} {}\u{00d7}{}px)",
+                        crop.x + if right { crop.width } else { 0 },
+                        crop.y + if bottom { crop.height } else { 0 },
+                        crop.width,
+                        crop.height
+                    ))
+                );
+                frame(&mut app, vec![button(end, false)]);
+                assert_eq!(
+                    app.visual_selection_status(),
+                    Some(format!(
+                        "Selection(XY:{},{} \u{00b7} {}\u{00d7}{}px)",
+                        crop.x, crop.y, crop.width, crop.height
+                    ))
+                );
+            }
+        }
     }
 }

@@ -186,7 +186,7 @@ fn selection_zoom_keeps_the_full_image_and_clears_selection_in_the_input_frame()
                 )
                 .expect("edited selection");
                 let expected = format!(
-                    "Selection: x={} y={} · {}×{} px",
+                    "Selection(XY:{},{} · {}×{}px)",
                     crop.x, crop.y, crop.width, crop.height
                 );
                 assert!(

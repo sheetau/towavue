@@ -235,7 +235,7 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
                 .cursor_icon,
             egui::CursorIcon::Grabbing
         );
-        verify_status(app, "Selection: x=4 y=6 · 20×18 px");
+        verify_status(app, "Selection(XY:4,6 · 20×18px)");
         frame(
             app,
             vec![egui::Event::PointerMoved(end), button(end, false)],
@@ -254,7 +254,7 @@ fn verify_video_selection_zoom<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mu
         assert_eq!(app.image_view.pan, (0.0, 0.0));
         assert_eq!(app.image_view.zoom, ZoomMode::Fit);
         assert!(app.view_drag.is_none());
-        verify_status(app, "Selection: x=10 y=2 · 20×18 px");
+        verify_status(app, "Selection(XY:10,2 · 20×18px)");
         app.timeline_open = false;
         assert!(
             app.visual_selection_status().is_none(),

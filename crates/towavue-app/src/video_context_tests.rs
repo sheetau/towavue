@@ -109,6 +109,7 @@ fn video_visual_commands_and_selection_follow_the_visible_timeline() {
     });
     assert!(selection::has_focus(&context));
     app.view_drag = Some(ViewDrag::Selection {
+        point: UnitPoint { x: 0.1, y: 0.1 },
         origin: egui::Pos2::ZERO,
         started_at: 0.0,
         moved: false,

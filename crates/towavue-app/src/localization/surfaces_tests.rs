@@ -59,6 +59,106 @@ fn painted(output: &egui::FullOutput, label: &str) {
 }
 
 #[test]
+fn japanese_export_notices_keep_destination_links_and_cancelled_continuations() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::surfaces_tests::japanese_export_notices_keep_destination_links_and_cancelled_continuations",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(test_ui::japanese_context(density));
+        let source = root.join("日本語{source}.mp4");
+        let target = root.join("日本語{export}.png");
+        let tab = app.tabs.open_new(source.clone(), MediaKind::Video);
+        app.path = Some(source);
+        app.state = PlaybackState::Paused;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Video);
+        let history = app.edits.clone();
+        for (output_kind, prefix) in [
+            (ExportOutput::Media, "書き出しました"),
+            (
+                ExportOutput::AudioOnly,
+                "音声を書き出しました（動画の保存状態は変更していません）:",
+            ),
+            (
+                ExportOutput::VideoFrame,
+                "フレームを書き出しました（動画の保存状態は変更していません）:",
+            ),
+        ] {
+            for cancelling in [false, true] {
+                let request = ExportRequest {
+                    source: target.clone(),
+                    target: target.clone(),
+                    kind: MediaKind::Video,
+                    operations: Vec::new(),
+                    hardware_encode: false,
+                };
+                let options = ExportOptions {
+                    output: output_kind,
+                    ..Default::default()
+                };
+                app.active_export = Some(ActiveExport {
+                    progress: export_progress::ExportProgress::new(&request, &options, None),
+                    // This worker refuses its same-source request; completion below is injected.
+                    job: ExportJob::start(request.clone(), |_| {})
+                        .expect("fixture worker")
+                        .into(),
+                    tab,
+                    request,
+                    options,
+                    encoded: Duration::ZERO,
+                    analyzing_audio: false,
+                    cancelling,
+                    continuation: cancelling.then_some(GuardedAction::Exit),
+                });
+                app.handle_export_event(ExportEvent::Finished(Ok(
+                    towavue_runtime_windows::ExportOutcome {
+                        used_hardware_encoder: cancelling,
+                    },
+                )));
+                let prefix = if cancelling {
+                    "キャンセル前に書き出しが完了しました。書き出し後の移動・終了は取り消しました:"
+                } else {
+                    prefix
+                };
+                let encoder = if cancelling {
+                    "ハードウェア"
+                } else {
+                    "ソフトウェア"
+                };
+                let message = format!("{prefix} {}（{encoder}エンコード）", target.display());
+                assert_eq!(app.status_notice(), Some(message.clone()));
+                assert_eq!(
+                    app.compact_export_notice(&message),
+                    Some(format!(
+                        "{} （{encoder}エンコード）",
+                        prefix.trim_end_matches(':')
+                    ))
+                );
+                let shown = app.export_notice.as_ref().expect("notice").0;
+                assert_eq!(app.export_notice_target(shown), Some(target.as_path()));
+                assert_eq!(app.export_notice_open_target(shown), Some(target.as_path()));
+                let size = egui::vec2(1000.0, 300.0);
+                let output = settle(&mut app, Surface::Status, size);
+                assert_eq!(output.pixels_per_point, density);
+                let event =
+                    test_ui::action(&output, "書き出したファイルをエクスプローラーで表示", None);
+                let (_, actions) = paint(&mut app, Surface::Status, size, vec![event]);
+                assert!(
+                    matches!(actions.as_slice(), [UiAction::RevealExport(stamp)] if *stamp == shown)
+                );
+                assert_eq!(app.edits, history);
+                assert!(!app.exit_requested && app.pending_guard.is_none());
+            }
+        }
+    }
+}
+
+#[test]
 fn japanese_fallback_guard_keeps_decisions_and_export_disable_state() {
     let Some(root) = crate::tests::isolated_test_root(
         "localization::surfaces_tests::japanese_fallback_guard_keeps_decisions_and_export_disable_state",

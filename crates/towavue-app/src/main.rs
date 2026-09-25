@@ -1680,15 +1680,23 @@ where
     }
 
     fn open_external(&mut self, path: PathBuf, force_new_tab: bool) {
+        let language = self.language();
         let path = match canonical_shell_path(&path) {
             Ok(path) => path,
             Err(error) => {
-                self.set_status(format!("Could not open {}: {error}", path.display()));
+                self.set_status(towavue_core::localization::formatted::open_failed(
+                    language,
+                    &path.display().to_string(),
+                    &error.to_string(),
+                ));
                 return;
             }
         };
         let Some(kind) = MediaKind::from_path(&path) else {
-            self.set_status(format!("Unsupported media: {}", path.display()));
+            self.set_status(towavue_core::localization::formatted::unsupported_media(
+                language,
+                &path.display().to_string(),
+            ));
             return;
         };
         let folder = path.parent().unwrap_or_else(|| Path::new(""));
@@ -1735,8 +1743,13 @@ where
     }
 
     fn open_dropped_path(&mut self, path: PathBuf) {
+        let language = self.language();
         if self.modal_input_blocked() {
-            self.set_status("Close the dialog before dropping files.".into());
+            self.set_status(
+                localization::Text::CloseDialogBeforeDrop
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         self.palette_open = false;
@@ -1759,6 +1772,7 @@ where
     }
 
     fn handle_recent_action(&mut self, action: menu::RecentAction) {
+        let language = self.language();
         if self.modal_input_blocked() {
             return;
         }
@@ -1817,7 +1831,11 @@ where
                 let path = match canonical_shell_path(&path) {
                     Ok(path) => path,
                     Err(error) => {
-                        self.set_status(format!("Could not open {}: {error}", path.display()));
+                        self.set_status(towavue_core::localization::formatted::open_failed(
+                            language,
+                            &path.display().to_string(),
+                            &error.to_string(),
+                        ));
                         return;
                     }
                 };
@@ -2421,6 +2439,7 @@ where
     }
 
     fn load_duration_for(&mut self, path: PathBuf, generation: u64) {
+        let language = self.language();
         let cache = self.preview_cache.clone();
         let notify = Arc::clone(&self.notify);
         if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -2431,7 +2450,12 @@ where
                     entry.insert(worker);
                 }
                 Err(error) => {
-                    self.set_status(format!("Duration worker unavailable: {error}"));
+                    self.set_status(
+                        towavue_core::localization::formatted::duration_worker_failed(
+                            language,
+                            &error.to_string(),
+                        ),
+                    );
                     return;
                 }
             }
@@ -2482,6 +2506,7 @@ where
     }
 
     fn finish_folder_load(&mut self) {
+        let language = self.language();
         let Some(snapshot) = self.folder_order.take_completed() else {
             return;
         };
@@ -2534,9 +2559,9 @@ where
                     if self.tabs.is_empty() && !self.exit_requested {
                         self.tabs.open_gallery();
                     }
-                    self.set_status(format!(
-                        "No supported media in {}",
-                        snapshot.folder_path.display()
+                    self.set_status(towavue_core::localization::formatted::no_folder_media(
+                        language,
+                        &snapshot.folder_path.display().to_string(),
                     ));
                     self.refresh_folder_snapshot();
                 }
@@ -2550,6 +2575,7 @@ where
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {
+        let language = self.language();
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::record_burst(
             towavue_runtime_windows::BurstEvent::FolderApplied,
@@ -2622,7 +2648,11 @@ where
                 .map(|item| (item.path.clone(), item.kind))
         });
         if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
-            self.set_status("Explorer order unavailable; using natural-name order".into());
+            self.set_status(
+                localization::Text::FolderOrderFallback
+                    .in_language(language)
+                    .into(),
+            );
         }
         #[cfg(feature = "presentation-verification")]
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 4);
@@ -3145,6 +3175,7 @@ where
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
+        let language = self.language();
         if self.source_save.frozen {
             self.source_save.deferred.push(event);
             return;
@@ -3249,13 +3280,21 @@ where
             AppEvent::LicenseGuideRevealed(result) => {
                 self.license_guide_pending = false;
                 self.set_status(match result {
-                    Ok(_) => "License and source guide selected in Explorer.".into(),
+                    Ok(_) => localization::Text::LicenseGuideRevealed
+                        .in_language(language)
+                        .into(),
                     Err(error) => error.to_string(),
                 });
             }
             AppEvent::FileRevealed(result) => self.set_status(match result {
-                Ok(path) => format!("Selected in Explorer: {}", path.display()),
-                Err(error) => format!("Could not reveal file: {error}"),
+                Ok(path) => towavue_core::localization::formatted::revealed_file(
+                    language,
+                    &path.display().to_string(),
+                ),
+                Err(error) => towavue_core::localization::formatted::reveal_failed(
+                    language,
+                    &error.to_string(),
+                ),
             }),
             AppEvent::PickerPreviewReady => {
                 if let Some(context) = &self.ui_context
@@ -3308,8 +3347,13 @@ where
             AppEvent::ImageCopied(result) => {
                 self.image_copy = None;
                 self.set_status(match result {
-                    Ok((width, height)) => format!("Copied image {width} × {height} px"),
-                    Err(error) => format!("Could not copy image: {error}"),
+                    Ok((width, height)) => {
+                        towavue_core::localization::formatted::copied_image(language, width, height)
+                    }
+                    Err(error) => towavue_core::localization::formatted::image_copy_failed(
+                        language,
+                        &error.to_string(),
+                    ),
                 });
             }
             AppEvent::ImageEdited(generation, result) => {
@@ -3379,7 +3423,12 @@ where
                             if self.resume_open.take().is_some() {
                                 self.open_playback_path(path, None);
                             }
-                            self.set_status(format!("Duration unavailable: {error}"));
+                            self.set_status(
+                                towavue_core::localization::formatted::duration_failed(
+                                    language,
+                                    &error.to_string(),
+                                ),
+                            );
                         }
                     }
                 } else if let Some((id, saved)) = self
@@ -3395,8 +3444,13 @@ where
                             }
                         }
                         Err(error) => {
-                            saved.status =
-                                Some((format!("Duration unavailable: {error}"), Instant::now()))
+                            saved.status = Some((
+                                towavue_core::localization::formatted::duration_failed(
+                                    language,
+                                    &error.to_string(),
+                                ),
+                                Instant::now(),
+                            ))
                         }
                     }
                     saved.poll();
@@ -3434,7 +3488,12 @@ where
                             self.request_redraw();
                         }
                     }
-                    Err(error) => self.set_status(format!("Waveform unavailable: {error}")),
+                    Err(error) => {
+                        self.set_status(towavue_core::localization::formatted::waveform_failed(
+                            language,
+                            &error.to_string(),
+                        ))
+                    }
                 }
             }
             AppEvent::DetailedWaveform(generation, key, result) => {
@@ -4674,6 +4733,7 @@ where
     }
 
     fn selection_controls(&mut self, ui: &mut egui::Ui, rect: egui::Rect, size: (u32, u32)) {
+        let language = self.language();
         if !self.visual_selection_enabled() {
             selection::release_focus(ui.ctx());
             return;
@@ -4697,7 +4757,11 @@ where
                 self.image_view.selection = Some(changed);
             }
             if invalid {
-                self.set_status("Selection edges must leave a non-empty rectangle".into());
+                self.set_status(
+                    localization::Text::SelectionNonempty
+                        .in_language(language)
+                        .into(),
+                );
             }
             self.request_redraw();
         }
@@ -7264,6 +7328,7 @@ where
     }
 
     fn handle_ui_action(&mut self, action: UiAction) {
+        let language = self.language();
         if !matches!(action, UiAction::BeginTrackDrag(..)) {
             self.finish_track_drag(true);
         }
@@ -7380,7 +7445,10 @@ where
                     && let Some(caption) = &self.native_caption
                     && let Err(error) = caption.invoke(action)
                 {
-                    self.set_status(format!("Could not perform window action: {error}"));
+                    self.set_status(towavue_core::localization::formatted::window_action_failed(
+                        language,
+                        &error.to_string(),
+                    ));
                 }
             }
             UiAction::HoldSpeed(media, generation, action) => {
@@ -7563,6 +7631,7 @@ where
     }
 
     fn dispatch(&mut self, command: CommandId) {
+        let language = self.language();
         if !matches!(
             command,
             CommandId::PreviousVideoFrame | CommandId::NextVideoFrame
@@ -7594,7 +7663,11 @@ where
                     | CommandId::ToggleReadingMode
             )
         {
-            self.set_status("Wait for image resampling to finish".into());
+            self.set_status(
+                localization::Text::WaitForResampling
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if !command_definitions().iter().any(|definition| {
@@ -7859,12 +7932,26 @@ where
                         Ok((layouts, grid_path)) => {
                             self.grid_layouts = layouts;
                             self.grid_path = grid_path;
-                            self.set_status("Keyboard shortcuts and grid reloaded".into());
+                            self.set_status(
+                                localization::Text::ShortcutsGridReloaded
+                                    .in_language(language)
+                                    .into(),
+                            );
                         }
-                        Err(error) => self.set_status(format!("Grid reload failed: {error}")),
+                        Err(error) => self.set_status(
+                            towavue_core::localization::formatted::grid_reload_failed(
+                                language,
+                                &error.to_string(),
+                            ),
+                        ),
                     }
                 }
-                Err(error) => self.set_status(format!("Shortcut reload failed: {error}")),
+                Err(error) => self.set_status(
+                    towavue_core::localization::formatted::shortcuts_reload_failed(
+                        language,
+                        &error.to_string(),
+                    ),
+                ),
             },
             CommandId::ZoomIn => self.zoom_image(1.25),
             CommandId::ZoomOut => self.zoom_image(0.8),
@@ -7912,7 +7999,11 @@ where
                     _ => None,
                 };
                 if size.is_none() {
-                    self.set_status("Wait for media to load before selecting".into());
+                    self.set_status(
+                        localization::Text::WaitForSelectionMedia
+                            .in_language(language)
+                            .into(),
+                    );
                     return;
                 }
                 self.image_view.selection = Some(UnitRect::FULL);
@@ -7930,31 +8021,37 @@ where
             CommandId::SelectAspectNineSixteen => self.select_aspect((9, 16)),
             CommandId::ToggleImageInterpolation => {
                 self.nearest_images = !self.nearest_images;
-                self.set_status(format!(
-                    "Image display: {} (pixels and edits unchanged)",
-                    if self.nearest_images {
-                        "nearest"
+                self.set_status(
+                    (if self.nearest_images {
+                        localization::Text::ImageDisplayNearest
                     } else {
-                        "smooth"
-                    }
-                ));
+                        localization::Text::ImageDisplaySmooth
+                    })
+                    .in_language(language)
+                    .into(),
+                );
                 self.request_redraw();
             }
             CommandId::ToggleImageMinification => {
                 self.high_quality_minification = !self.high_quality_minification;
-                self.set_status(format!(
-                    "Image minification: {} (pixels and edits unchanged)",
-                    if self.high_quality_minification {
-                        "high quality"
+                self.set_status(
+                    (if self.high_quality_minification {
+                        localization::Text::ImageReductionQuality
                     } else {
-                        "fast"
-                    }
-                ));
+                        localization::Text::ImageReductionFast
+                    })
+                    .in_language(language)
+                    .into(),
+                );
                 self.request_redraw();
             }
             CommandId::ResizeImage => {
                 let Some(image) = self.image.as_ref().filter(|_| self.image_error.is_none()) else {
-                    self.set_status("Wait for the full image to load before resizing".into());
+                    self.set_status(
+                        localization::Text::WaitForResizeImage
+                            .in_language(language)
+                            .into(),
+                    );
                     return;
                 };
                 let size = self.visual_transform(image.dimensions()).size;
@@ -7984,11 +8081,19 @@ where
             CommandId::PasteImage => self.paste_image(),
             CommandId::CopyImage => {
                 if self.image_copy.is_some() {
-                    self.set_status("Image copy is already in progress".into());
+                    self.set_status(
+                        localization::Text::ImageCopyInProgress
+                            .in_language(language)
+                            .into(),
+                    );
                     return;
                 }
                 let Some(request) = self.image_copy_request() else {
-                    self.set_status("Wait for the full image to load before copying".into());
+                    self.set_status(
+                        localization::Text::WaitForCopyImage
+                            .in_language(language)
+                            .into(),
+                    );
                     return;
                 };
                 let notify = Arc::clone(&self.notify);
@@ -7997,9 +8102,18 @@ where
                 }) {
                     Ok(job) => {
                         self.image_copy = Some(job);
-                        self.set_status("Copying image…".into());
+                        self.set_status(
+                            localization::Text::CopyingImage
+                                .in_language(language)
+                                .into(),
+                        );
                     }
-                    Err(error) => self.set_status(format!("Could not start image copy: {error}")),
+                    Err(error) => self.set_status(
+                        towavue_core::localization::formatted::image_copy_start_failed(
+                            language,
+                            &error.to_string(),
+                        ),
+                    ),
                 }
             }
             CommandId::ZoomSelection => {
@@ -8070,7 +8184,11 @@ where
                 if let Some(size) = size {
                     self.crop_selection(size);
                 } else {
-                    self.set_status("Wait for media to load before cropping".into());
+                    self.set_status(
+                        localization::Text::WaitForCropMedia
+                            .in_language(language)
+                            .into(),
+                    );
                 }
             }
             CommandId::RotateClockwise => self.push_visual_edit(EditOperation::RotateClockwise),
@@ -8122,10 +8240,12 @@ where
                     5 => 10,
                     _ => 2,
                 };
-                self.set_status(format!(
-                    "Listening volume step: {}%",
-                    self.volume_step_percent
-                ));
+                self.set_status(
+                    towavue_core::localization::formatted::listening_volume_step(
+                        language,
+                        self.volume_step_percent,
+                    ),
+                );
                 self.request_redraw();
             }
             CommandId::RateDown => {
@@ -8187,9 +8307,13 @@ where
             CommandId::ToggleHardwareEncode => {
                 self.prefer_hardware_encode = !self.prefer_hardware_encode;
                 self.set_status(if self.prefer_hardware_encode {
-                    "Hardware encode preferred; software remains the fallback".into()
+                    localization::Text::HardwareEncodePreferred
+                        .in_language(language)
+                        .into()
                 } else {
-                    "Software encode selected".into()
+                    localization::Text::SoftwareEncodeSelected
+                        .in_language(language)
+                        .into()
                 });
             }
         }
@@ -8224,19 +8348,32 @@ where
     }
 
     fn crop_selection(&mut self, source_size: (u32, u32)) {
+        let language = self.language();
         let (Some(selection), Some(kind)) = (self.image_view.selection, self.media_kind) else {
-            self.set_status("Drag on the media to create a crop selection".into());
+            self.set_status(
+                localization::Text::CreateCropSelection
+                    .in_language(language)
+                    .into(),
+            );
             return;
         };
         let transform = self.visual_transform(source_size);
         let size = (transform.size.0 as u32, transform.size.1 as u32);
         let Some(crop) = PixelCrop::from_selection(selection, size, kind) else {
-            self.set_status("Cannot crop this selection; video needs at least 16 × 16 px".into());
+            self.set_status(
+                localization::Text::InvalidVideoCrop
+                    .in_language(language)
+                    .into(),
+            );
             return;
         };
         // The pinned default H.264 encoder rejects dimensions smaller than one macroblock.
         if kind == MediaKind::Video && (crop.width < 16 || crop.height < 16) {
-            self.set_status("Video crop needs at least 16 × 16 px; selection kept".into());
+            self.set_status(
+                localization::Text::SmallVideoCrop
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if (crop.width, crop.height) != size {
@@ -8244,9 +8381,10 @@ where
         }
         self.image_view.selection = None;
         self.image_view.fit();
-        self.set_status(format!(
-            "Crop {} × {} px (source unchanged)",
-            crop.width, crop.height
+        self.set_status(towavue_core::localization::formatted::cropped_size(
+            language,
+            crop.width,
+            crop.height,
         ));
     }
 
@@ -8461,6 +8599,7 @@ where
     }
 
     fn finish_image_edits(&mut self, generation: u64, result: Result<Arc<DecodedImage>, String>) {
+        let language = self.language();
         if generation != self.image_edit_generation || !self.image_edit_pending {
             return;
         }
@@ -8468,13 +8607,17 @@ where
         match result.and_then(|decoded| self.install_edited_image(decoded)) {
             Ok(()) => {
                 self.image_materialized = true;
-                self.set_status("Image resampled (source unchanged)".into());
+                self.set_status(
+                    localization::Text::ImageResampled
+                        .in_language(language)
+                        .into(),
+                );
             }
             Err(error) => {
                 self.image_error = Some(error.clone());
-                self.set_status(format!(
-                    "Could not resample image: {error}. Undo to restore the previous edit."
-                ));
+                self.set_status(
+                    towavue_core::localization::formatted::image_resample_failed(language, &error),
+                );
             }
         }
         self.request_redraw();
@@ -8537,6 +8680,7 @@ where
     }
 
     fn push_edit(&mut self, operation: EditOperation) {
+        let language = self.language();
         if self.image_handoff.is_some() {
             return;
         }
@@ -8600,16 +8744,19 @@ where
                     .changed(id, self.media_generation, Instant::now());
             } else {
                 self.set_status(match operation {
-                    EditOperation::SetRate(_) => format!(
-                        "Rate {:.2}× · playback and export (source unchanged)",
-                        self.edit_state().rate
-                    ),
+                    EditOperation::SetRate(_) => {
+                        towavue_core::localization::formatted::rate_edited(
+                            language,
+                            self.edit_state().rate,
+                        )
+                    }
                     EditOperation::SetTrimStart(_) | EditOperation::SetTrimEnd(_) => trim::label(
+                        language,
                         &self.edit_state(),
                         media_time(self.media_duration.unwrap_or_default()),
                     )
                     .unwrap_or_default(),
-                    _ => "Edit added (source unchanged)".into(),
+                    _ => localization::Text::EditAdded.in_language(language).into(),
                 });
             }
             self.refresh_title();
@@ -8618,8 +8765,13 @@ where
     }
 
     fn prepare_trim_edit(&mut self, operation: EditOperation) -> bool {
+        let language = self.language();
         if self.history_timeline().is_ok_and(|plan| plan.is_some()) {
-            self.set_status("Use a timeline selection to keep or delete time".into());
+            self.set_status(
+                localization::Text::UseTimelineSelection
+                    .in_language(language)
+                    .into(),
+            );
             return false;
         }
         if !self
@@ -8633,7 +8785,11 @@ where
             .filter(|duration| !duration.is_zero())
             .map(media_time)
         else {
-            self.set_status("Wait for the media duration before setting trim".into());
+            self.set_status(
+                localization::Text::WaitForTrimDuration
+                    .in_language(language)
+                    .into(),
+            );
             return false;
         };
         let previous = self.edit_state();
@@ -8644,14 +8800,18 @@ where
             _ => return false,
         }
         if !next.trim_is_valid(Some(duration)) {
-            self.set_status("Trim unchanged: use 0 ≤ start < end ≤ source duration".into());
+            self.set_status(localization::Text::InvalidTrim.in_language(language).into());
             return false;
         }
         if previous.trim_start.unwrap_or(MediaTime::ZERO)
             == next.trim_start.unwrap_or(MediaTime::ZERO)
             && previous.trim_end.unwrap_or(duration) == next.trim_end.unwrap_or(duration)
         {
-            self.set_status("Trim unchanged: this endpoint is already selected".into());
+            self.set_status(
+                localization::Text::TrimEndpointUnchanged
+                    .in_language(language)
+                    .into(),
+            );
             return false;
         }
         self.set_fullscreen(false);
@@ -8661,6 +8821,7 @@ where
     }
 
     fn undo_edit(&mut self, redo: bool) {
+        let language = self.language();
         if self.image_handoff.is_some() {
             return;
         }
@@ -8704,8 +8865,14 @@ where
             }
             if (previous.trim_start, previous.trim_end) != (next.trim_start, next.trim_end) {
                 self.set_status(
-                    trim::label(&next, media_time(self.media_duration.unwrap_or_default()))
-                        .unwrap_or_else(|| "Trim cleared · source playback".into()),
+                    trim::label(
+                        language,
+                        &next,
+                        media_time(self.media_duration.unwrap_or_default()),
+                    )
+                    .unwrap_or_else(|| {
+                        localization::Text::TrimCleared.in_language(language).into()
+                    }),
                 );
             }
             self.image_view.selection = None;
@@ -8728,6 +8895,7 @@ where
     }
 
     fn show_licenses(&mut self) {
+        let language = self.language();
         if self.modal_input_blocked() || self.license_guide_pending {
             return;
         }
@@ -8735,18 +8903,27 @@ where
         match reveal_license_guide(move |result| notify(AppEvent::LicenseGuideRevealed(result))) {
             Ok(()) => {
                 self.license_guide_pending = true;
-                self.set_status("Opening license and source materials...".into());
+                self.set_status(
+                    localization::Text::OpeningLicenseGuide
+                        .in_language(language)
+                        .into(),
+                );
             }
             Err(error) => self.set_status(error.to_string()),
         }
     }
 
     fn begin_dialog(&mut self, kind: FileDialogKind, intent: DialogIntent) -> bool {
+        let language = self.language();
         if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
             return false;
         }
         let Some(window) = self.window.clone() else {
-            self.set_status("The file dialog's owner window is unavailable.".into());
+            self.set_status(
+                localization::Text::FileDialogOwnerUnavailable
+                    .in_language(language)
+                    .into(),
+            );
             return false;
         };
         if matches!(
@@ -8925,12 +9102,15 @@ where
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
+        let language = self.language();
         if self.image_handoff.is_some() {
             return false;
         }
         if self.active_export.is_some() || self.pending_dialog.is_some() {
             self.set_status(
-                "An export is already running. Wait for it or choose Cancel export.".into(),
+                localization::Text::ExportAlreadyRunning
+                    .in_language(language)
+                    .into(),
             );
             return false;
         }
@@ -8998,15 +9178,20 @@ where
         continuation: Option<GuardedAction>,
         output: ExportOutput,
     ) -> bool {
+        let language = self.language();
         if output == ExportOutput::Media {
-            self.export_error =
-                Some("Save as requires an accepted destination. Choose Save as again.".into());
+            self.export_error = Some(
+                localization::Text::SaveAsChooseAgain
+                    .in_language(language)
+                    .into(),
+            );
             self.request_redraw();
             return false;
         }
         if !self.document_source_available(Some(id)) {
             self.export_error = Some(
-                "The original source needs recovery. Reopen the recovered file before exporting."
+                localization::Text::RecoverBeforeExport
+                    .in_language(language)
                     .into(),
             );
             self.request_redraw();
@@ -9073,6 +9258,7 @@ where
     }
 
     fn handle_export_event(&mut self, event: ExportEvent) {
+        let language = self.language();
         match event {
             ExportEvent::AnalyzingAudio(time) => {
                 if let Some(export) = &mut self.active_export
@@ -9098,22 +9284,24 @@ where
                     Ok(outcome) => {
                         self.refresh_folder_snapshot_from_disk();
                         let encoder = if outcome.used_hardware_encoder {
-                            "hardware"
+                            localization::Text::HardwareEncoder.in_language(language)
                         } else {
-                            "software"
+                            localization::Text::SoftwareEncoder.in_language(language)
                         };
-                        self.set_status(format!(
-                            "{} {} ({encoder} encode)",
+                        self.set_status(towavue_core::localization::formatted::exported_file(
+                            language,
                             if export.cancelling {
-                                "Export completed before cancellation; automatic leaving cancelled:"
+                                localization::Text::ExportFinishedWhileCancelling
+                                    .in_language(language)
                             } else if export.options.output == ExportOutput::AudioOnly {
-                                "Exported audio (video save state unchanged):"
+                                localization::Text::ExportedAudio.in_language(language)
                             } else if export.options.output == ExportOutput::VideoFrame {
-                                "Exported frame (video save state unchanged):"
+                                localization::Text::ExportedFrame.in_language(language)
                             } else {
-                                "Exported"
+                                localization::Text::Exported.in_language(language)
                             },
-                            export.request.target.display()
+                            &export.request.target.display().to_string(),
+                            encoder,
                         ));
                         self.export_notice = self
                             .status_message
@@ -9146,6 +9334,7 @@ where
     }
 
     fn visual_selection_status(&self) -> Option<String> {
+        let language = self.language();
         let kind = self.media_kind?;
         if kind == MediaKind::Audio || self.reading_mode || !self.visual_selection_enabled() {
             return None;
@@ -9170,9 +9359,12 @@ where
                 kind,
             )?
         };
-        Some(format!(
-            "Selection: x={} y={} · {}×{} px",
-            crop.x, crop.y, crop.width, crop.height
+        Some(towavue_core::localization::formatted::selection_rectangle(
+            language,
+            crop.x,
+            crop.y,
+            crop.width,
+            crop.height,
         ))
     }
 
@@ -9261,6 +9453,7 @@ where
     }
 
     fn dispatch_tab_command(&mut self, id: TabId, command: CommandId) {
+        let language = self.language();
         if self.modal_input_blocked() {
             return;
         }
@@ -9296,7 +9489,11 @@ where
             CommandId::CopyFilePath => {
                 if let (Some(context), Some(path)) = (&self.ui_context, path) {
                     context.copy_text(path.display().to_string());
-                    self.set_status("File path copied.".into());
+                    self.set_status(
+                        localization::Text::FilePathCopied
+                            .in_language(language)
+                            .into(),
+                    );
                 }
             }
             CommandId::RevealFile => {
@@ -9317,6 +9514,7 @@ where
     }
 
     fn request_guarded(&mut self, action: GuardedAction) {
+        let language = self.language();
         if matches!(action, GuardedAction::UpdateExit(token) if self.update_close.as_ref().is_none_or(|close| close.token != token))
         {
             return;
@@ -9332,7 +9530,9 @@ where
         }
         if self.file_operations.busy() {
             self.set_status(
-                "Wait for the file operation or close its dialog before leaving.".into(),
+                localization::Text::FileOperationBeforeLeaving
+                    .in_language(language)
+                    .into(),
             );
             return;
         }
@@ -9343,27 +9543,51 @@ where
             self.cancel_frame_steps();
         }
         if self.metadata_dialog.is_some() {
-            self.set_status("Apply or cancel metadata options before leaving.".into());
+            self.set_status(
+                localization::Text::MetadataBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if self.audio_export_dialog.is_some() {
-            self.set_status("Apply or cancel audio export options before leaving.".into());
+            self.set_status(
+                localization::Text::AudioOptionsBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if self.resize_dialog.is_some() {
-            self.set_status("Apply or cancel image resize before leaving.".into());
+            self.set_status(
+                localization::Text::ImageResizeBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if self.rotation_dialog.is_some() {
-            self.set_status("Apply or cancel image rotation before leaving.".into());
+            self.set_status(
+                localization::Text::ImageRotationBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if self.video_rotation_dialog.is_some() {
-            self.set_status("Apply or cancel video rotation before leaving.".into());
+            self.set_status(
+                localization::Text::VideoRotationBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if self.video_resize_dialog.is_some() {
-            self.set_status("Apply or cancel video resize before leaving.".into());
+            self.set_status(
+                localization::Text::VideoResizeBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if matches!(&action, GuardedAction::Navigate(path) | GuardedAction::View(path) if self.path.as_ref() == Some(path) && self.reading_source_visible())
@@ -9380,7 +9604,11 @@ where
             self.cancel_view_drag();
         }
         if self.pending_dialog.is_some() || self.native_prompt.is_some() || self.about_open {
-            self.set_status("Close the dialog before leaving.".into());
+            self.set_status(
+                localization::Text::CloseDialogBeforeLeaving
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         if !background_image
@@ -9411,7 +9639,8 @@ where
                     self.open_native_prompt(FallbackPrompt::ExportBusy);
                 }
                 self.set_status(
-                    "Export is in progress. Wait for it or choose Cancel export before leaving."
+                    localization::Text::ExportBeforeLeaving
+                        .in_language(language)
                         .into(),
                 );
                 return;
@@ -9553,6 +9782,7 @@ where
     }
 
     fn detach_tab_unchecked(&mut self, id: TabId) {
+        let language = self.language();
         let Some(path) = self
             .tabs
             .tabs()
@@ -9568,7 +9798,10 @@ where
         let result = spawn_new_window(&path);
         match result {
             Ok(()) => self.remove_tab(id, false),
-            Err(error) => self.set_status(format!("Could not detach tab: {error}")),
+            Err(error) => self.set_status(towavue_core::localization::formatted::detach_failed(
+                language,
+                &error.to_string(),
+            )),
         }
     }
 
@@ -9582,12 +9815,18 @@ where
         generation: u64,
         launch: impl FnOnce(&Path) -> std::io::Result<()>,
     ) {
+        let language = self.language();
         if !self.can_open_filmstrip_window(&path, generation) {
             return;
         }
         match launch(&path) {
             Ok(()) => self.close_filmstrip(),
-            Err(error) => self.set_status(format!("Could not open new window: {error}")),
+            Err(error) => {
+                self.set_status(towavue_core::localization::formatted::new_window_failed(
+                    language,
+                    &error.to_string(),
+                ))
+            }
         }
         self.request_redraw();
     }
@@ -9928,6 +10167,7 @@ where
     }
 
     fn begin_reading_drag(&mut self, position: egui::Pos2, delta: egui::Vec2) {
+        let language = self.language();
         if self.reading_drag.is_some()
             || self.media_kind != Some(MediaKind::Image)
             || self.command_context().has_unsaved_edits
@@ -9955,7 +10195,10 @@ where
         ) {
             Ok(cursor) => cursor,
             Err(error) => {
-                self.set_status(format!("Could not start reading drag: {error}"));
+                self.set_status(towavue_core::localization::formatted::reading_drag_failed(
+                    language,
+                    &error.to_string(),
+                ));
                 return;
             }
         };
@@ -10089,6 +10332,7 @@ where
     }
 
     fn toggle_pause(&mut self) {
+        let language = self.language();
         let Some(next) = self.state.after_play_pause() else {
             return;
         };
@@ -10107,7 +10351,11 @@ where
         }
         let range = self.playback_range();
         if range.end == Some(MediaTime::ZERO) {
-            self.set_status("The timeline is empty; Undo restores deleted time".into());
+            self.set_status(
+                localization::Text::EmptyTimelineUndo
+                    .in_language(language)
+                    .into(),
+            );
             return;
         }
         let restart = next == PlaybackState::Playing
@@ -10148,9 +10396,9 @@ where
         if self.playback_selection.is_some() {
             self.set_status(
                 if paused {
-                    "Selected time paused · Space resumes · Escape returns to full range"
+                    localization::Text::SelectedTimePaused.in_language(language)
                 } else {
-                    "Playing selected time · Space pauses · Escape returns to full range"
+                    localization::Text::SelectedTimePlaying.in_language(language)
                 }
                 .into(),
             );
@@ -10215,6 +10463,7 @@ where
 
     // Return a replaceable position notice only; keep empty/trim diagnostics intact.
     fn seek_to_target(&mut self, target: MediaTime) -> Option<MediaTime> {
+        let language = self.language();
         self.cancel_video_scrub();
         self.cancel_hold_speed();
         self.cancel_frame_steps();
@@ -10303,16 +10552,19 @@ where
                 self.metrics_recorded = false;
                 self.pending_seek_started =
                     (self.media_kind == Some(MediaKind::Video)).then_some(started);
-                const OUTSIDE: &str =
-                    "Outside trim · paused source preview; Play returns to trim start";
+                let outside = localization::Text::OutsideTrimPreview.in_language(language);
                 if end == Some(MediaTime::ZERO) {
-                    self.set_status("Empty timeline · Undo restores deleted time".into());
+                    self.set_status(
+                        localization::Text::EmptyTimelinePreview
+                            .in_language(language)
+                            .into(),
+                    );
                 } else if !edited && !range.contains(target) {
-                    self.set_status(OUTSIDE.into());
+                    self.set_status(outside.into());
                 } else if self
                     .status_message
                     .as_ref()
-                    .is_some_and(|(text, _)| text == OUTSIDE)
+                    .is_some_and(|(text, _)| text == outside)
                 {
                     self.status_message = None;
                 }
@@ -10406,6 +10658,7 @@ where
     }
 
     fn finish_native_prompt(&mut self, result: Result<PromptResponse, DialogError>) {
+        let language = self.language();
         self.refresh_pointer_position();
         let Some(prompt) = self.native_prompt.take() else {
             return;
@@ -10449,7 +10702,9 @@ where
                     } else {
                         self.pending_guard = None;
                         self.set_status(
-                            "Export already finished; automatic leaving cancelled.".into(),
+                            localization::Text::ExportAlreadyFinished
+                                .in_language(language)
+                                .into(),
                         );
                     }
                 }
@@ -10701,6 +10956,7 @@ where
     }
 
     fn check_eof(&mut self) {
+        let language = self.language();
         if self.source_save.frozen {
             return;
         }
@@ -10740,7 +10996,9 @@ where
             }
             if self.playback_selection.is_some() {
                 self.set_status(
-                    "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
+                    localization::Text::SelectionEnded
+                        .in_language(language)
+                        .into(),
                 );
             }
             if !was_playing {
@@ -10868,6 +11126,7 @@ where
     }
 
     fn status_notice(&self) -> Option<String> {
+        let language = self.language();
         if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
             return Some(message.into());
         }
@@ -10886,15 +11145,17 @@ where
         }
         if self.media_kind == Some(MediaKind::Image) {
             if self.image_edit_pending {
-                return Some("Resampling image…".into());
+                return Some(
+                    localization::Text::ResamplingImage
+                        .in_language(language)
+                        .into(),
+                );
             }
             if let Some(error) = &self.image_error {
                 return Some(if self.image_edit_source.is_some() {
-                    format!(
-                        "Could not resample image: {error} · Undo to restore the previous edit."
-                    )
+                    towavue_core::localization::formatted::image_resample_notice(language, error)
                 } else {
-                    format!("Could not load image: {error}")
+                    towavue_core::localization::formatted::image_load_failed(language, error)
                 });
             }
             if self.reading_mode {
@@ -10905,10 +11166,10 @@ where
                     .map(String::as_str)
                     .collect();
                 if !errors.is_empty() {
-                    return Some(format!(
-                        "Could not load {} reading page(s): {}",
+                    return Some(towavue_core::localization::formatted::reading_pages_failed(
+                        language,
                         errors.len(),
-                        errors.join("; ")
+                        &errors.join("; "),
                     ));
                 }
             }
@@ -10916,24 +11177,44 @@ where
                 return None;
             }
             if self.image_loading {
-                return Some("Loading images…".into());
+                return Some(
+                    localization::Text::LoadingImagesNotice
+                        .in_language(language)
+                        .into(),
+                );
             }
             if self.reading_mode && self.image.is_none() && self.reading_pages.is_empty() {
-                return Some("No image pages available".into());
+                return Some(
+                    localization::Text::NoImagePages
+                        .in_language(language)
+                        .into(),
+                );
             }
         } else if self.state == PlaybackState::Faulted {
             if let Some(error) = &self.playback_error {
-                return Some(format!("Could not play media: {error}"));
+                return Some(towavue_core::localization::formatted::playback_failed(
+                    language, error,
+                ));
             }
         } else if self.media_kind.is_some() && self.state == PlaybackState::Loading {
-            return Some("Loading media…".into());
+            return Some(
+                localization::Text::LoadingMediaNotice
+                    .in_language(language)
+                    .into(),
+            );
         }
         self.pending_folder
             .as_ref()
             .filter(|_| self.folder_notice_delay(Instant::now()).is_none())
             .map(|(_, intent)| match intent {
-                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => "Opening folder…".into(),
-                FolderIntent::Refresh(_) => "Loading order…".into(),
+                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
+                    localization::Text::OpeningFolderNotice
+                        .in_language(language)
+                        .into()
+                }
+                FolderIntent::Refresh(_) => localization::Text::LoadingOrderNotice
+                    .in_language(language)
+                    .into(),
             })
     }
 
@@ -11133,6 +11414,7 @@ where
     }
 
     fn set_fullscreen(&mut self, enabled: bool) {
+        let language = self.language();
         if enabled == self.fullscreen {
             return;
         }
@@ -11178,14 +11460,14 @@ where
                 window.set_fullscreen(enabled.then_some(Fullscreen::Borderless(monitor)));
             }
         }
-        const HINT: &str = "Fullscreen — Bottom edge for controls · Escape/Enter to return";
+        let hint = localization::Text::FullscreenHint.in_language(language);
         if enabled {
-            self.set_status(HINT.into());
+            self.set_status(hint.into());
         } else {
             if self
                 .status_message
                 .as_ref()
-                .is_some_and(|(text, _)| text == HINT)
+                .is_some_and(|(text, _)| text == hint)
             {
                 self.status_message = None;
             }

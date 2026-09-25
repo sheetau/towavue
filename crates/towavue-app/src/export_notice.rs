@@ -54,7 +54,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let notify = Arc::clone(&self.notify);
         if let Err(error) = reveal_file(path, move |result| notify(AppEvent::FileRevealed(result)))
         {
-            self.set_status(format!("Could not reveal file: {error}"));
+            self.set_status(towavue_core::localization::formatted::reveal_failed(
+                self.language(),
+                &error.to_string(),
+            ));
         }
     }
 }

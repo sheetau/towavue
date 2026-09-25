@@ -349,69 +349,89 @@ fn pasted_tabs_preview_retained_pixels_and_never_expose_private_paths() {
             .path()
             .to_string_lossy()
             .into_owned();
-        let second = inject(&mut app, &events);
         app.tabs.close_gallery(app.tabs.gallery().expect("gallery"));
-        let mut output = egui::FullOutput::default();
-        for frame in 0..8 {
-            output = context.run_ui(
-                egui::RawInput {
-                    time: Some(f64::from(frame) * 0.1),
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(960.0, 576.0),
-                    )),
-                    events: vec![egui::Event::PointerMoved(egui::pos2(90.0, 16.0))],
-                    ..Default::default()
-                },
-                |ui| {
-                    let mut actions = Vec::new();
-                    app.draw_top_bar(ui, &mut actions);
-                    assert!(actions.is_empty());
-                },
+        let mut time = 0.0;
+        for background in [false, true] {
+            let active = if background {
+                inject(&mut app, &events)
+            } else {
+                first
+            };
+            let mut output = egui::FullOutput::default();
+            for _ in 0..8 {
+                time += 0.1;
+                output = context.run_ui(
+                    egui::RawInput {
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        events: vec![egui::Event::PointerMoved(egui::pos2(90.0, 16.0))],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let mut actions = Vec::new();
+                        app.draw_top_bar(ui, &mut actions);
+                        assert!(actions.is_empty());
+                    },
+                );
+            }
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == texture)),
+                "retained hover pixels at {density}"
+            );
+            let tab = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.corner_radius == egui::CornerRadius::same(3)
+                            && rect.rect.contains(egui::pos2(90.0, 16.0)) =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("painted tab bounds including its close button");
+            let pixels = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .expect("preview pixels");
+            assert!(
+                (pixels.center().x - tab.center().x).abs() <= 1.0 / density,
+                "preview centers on the full tab, not its shortened label: {pixels:?}, {tab:?}"
+            );
+            let labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text()),
+                    _ => None,
+                })
+                .collect();
+            assert!(labels.contains(&DEFAULT_NAME));
+            assert!(labels.iter().all(|text| !text.contains(&private)));
+            assert_eq!(app.tabs.active_id(), Some(active));
+            assert!(app.tab_preview.is_idle());
+            assert!(
+                app.tabs
+                    .tabs()
+                    .iter()
+                    .find(|tab| tab.id == first)
+                    .expect("pasted tab")
+                    .target
+                    .current_path()
+                    .is_none()
             );
         }
-        assert!(
-            output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Mesh(mesh) if mesh.texture_id == texture)),
-            "retained hover pixels at {density}"
-        );
-        let tab = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect)
-                    if rect.corner_radius == egui::CornerRadius::same(3)
-                        && rect.rect.contains(egui::pos2(90.0, 16.0)) =>
-                {
-                    Some(rect.rect)
-                }
-                _ => None,
-            })
-            .expect("painted tab bounds including its close button");
-        let pixels = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.calc_bounds()),
-                _ => None,
-            })
-            .expect("preview pixels");
-        assert!(
-            (pixels.center().x - tab.center().x).abs() <= 1.0 / density,
-            "preview centers on the full tab, not its shortened label: {pixels:?}, {tab:?}"
-        );
-        let labels: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some(text.galley.text()),
-                _ => None,
-            })
-            .collect();
-        assert!(labels.contains(&DEFAULT_NAME));
-        assert!(labels.iter().all(|text| !text.contains(&private)));
-        assert_eq!(app.tabs.active_id(), Some(second));
-        assert!(app.tab_preview.is_idle());
         assert!(app.retained_images[&first].path.is_none());
         app.request_guarded(GuardedAction::CloseTab(first));
         assert!(app.pending_guard.is_none());

@@ -692,16 +692,6 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                 }
                 let (output, _) = frame(&mut app, vec![]);
                 let tree = output.platform_output.accesskit_update.expect("tree");
-                if !background {
-                    assert!(
-                        !tree
-                            .nodes
-                            .iter()
-                            .any(|(_, node)| node.label() == Some("Preview image position")),
-                        "active tab has no image-seek card"
-                    );
-                    continue;
-                }
                 let node = &tree
                     .nodes
                     .iter()
@@ -781,7 +771,17 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                             .find(|(_, node)| node.label() == Some("Preview image position"))
                             .expect("card stays open when the destination finishes loading")
                             .1;
-                        assert_eq!(seek.numeric_value(), Some(4.0));
+                        assert_eq!(
+                            seek.numeric_value(),
+                            Some(if reading { 3.0 } else { 4.0 }),
+                            "reading reports the leading page of the destination spread"
+                        );
+                        if reading {
+                            assert_eq!(
+                                app.reading_focus.as_ref().expect("leading page").path,
+                                paths[2]
+                            );
+                        }
                         assert_eq!(
                             seek.bounds(),
                             Some(bounds),
@@ -808,10 +808,7 @@ fn image_tab_card_clicks_keep_card_open_for_animation_reading_and_background() {
                         .1
                         .bounds()
                         .expect("reopened bounds");
-                    assert!(
-                        (reopened.y0 - bounds.y0).abs() > 20.0,
-                        "reopening restores natural destination geometry"
-                    );
+                    assert_eq!(reopened, bounds, "reopening keeps the fixed image viewport");
                 }
             }
         }

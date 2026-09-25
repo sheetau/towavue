@@ -5807,18 +5807,7 @@ where
                                     if close.clicked() {
                                         actions.push(UiAction::CloseTab(tab.id));
                                     }
-                                    if preview_allowed && active {
-                                        response.clone().help_text(
-                                            tab.target
-                                                .current_path()
-                                                .map(|path| path.display().to_string())
-                                                .unwrap_or_else(|| {
-                                                    image_paste::DEFAULT_NAME.into()
-                                                }),
-                                        );
-                                    }
                                     if preview_allowed
-                                        && !active
                                         && tab.target.current_path().is_none()
                                         && !egui::Popup::is_any_open(tab_ui.ctx())
                                     {
@@ -5834,7 +5823,6 @@ where
                                         self.tab_preview.show_pasted(&response, retained.as_ref());
                                     }
                                     if preview_allowed
-                                        && !active
                                         && tab.target.current_path().is_some()
                                         && !egui::Popup::is_any_open(tab_ui.ctx())
                                     {

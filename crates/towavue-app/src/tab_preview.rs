@@ -30,11 +30,7 @@ impl RetainedPreview {
         }
     }
 
-    fn show_reading(
-        &self,
-        ui: &mut egui::Ui,
-        control: Option<&egui::Response>,
-    ) -> Option<egui::Rect> {
+    fn show_reading(&self, ui: &mut egui::Ui) -> Option<egui::Rect> {
         let Self::Reading { pages, settings } = self else {
             return None;
         };
@@ -50,21 +46,11 @@ impl RetainedPreview {
             .copied()
             .reduce(egui::Rect::union)
             .expect("reading pages");
-        let natural = spread.height().max(40.0);
-        let height = control.map_or(natural, |response| card_viewport_height(response, natural));
-        let scale = (height / spread.height()).min(1.0);
-        let (bounds, _) = ui.allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
-        let rect = egui::Rect::from_center_size(bounds.center(), spread.size() * scale);
+        let (bounds, _) = ui.allocate_exact_size(SIZE, egui::Sense::hover());
+        let rect = egui::Rect::from_center_size(bounds.center(), spread.size());
         for ((texture, _), page) in pages.iter().zip(rects) {
             if let Some(texture) = texture {
-                let page = if scale == 1.0 {
-                    page.translate(rect.min - spread.min)
-                } else {
-                    egui::Rect::from_min_max(
-                        rect.min + (page.min - spread.min) * scale,
-                        rect.min + (page.max - spread.min) * scale,
-                    )
-                };
+                let page = page.translate(rect.min - spread.min);
                 crate::media_preview::image(
                     ui,
                     texture.id(),
@@ -496,9 +482,7 @@ impl TabPreview {
         crate::media_preview::Preview::tab(response)
             .show(|ui| {
                 ui.set_max_width(SIZE.x);
-                if let Some(thumbnail) =
-                    retained.and_then(|preview| preview.show_reading(ui, folder.map(|_| response)))
-                {
+                if let Some(thumbnail) = retained.and_then(|preview| preview.show_reading(ui)) {
                     let action = folder.and_then(|folder| folder.show(ui, thumbnail));
                     crate::media_preview::caption(ui, |ui| {
                         ui.add(egui::Label::new(&label).wrap());
@@ -543,14 +527,7 @@ impl TabPreview {
                     } else {
                         let scale = (SIZE.x / size.x).min(SIZE.y / size.y).min(1.0);
                         let size = size * scale;
-                        let height = if transport.is_some() || folder.is_some() {
-                            card_viewport_height(response, size.y.max(40.0))
-                        } else {
-                            size.y
-                        };
-                        let size = size * (height / size.y).min(1.0);
-                        let (bounds, _) = ui
-                            .allocate_exact_size(egui::vec2(SIZE.x, height), egui::Sense::hover());
+                        let (bounds, _) = ui.allocate_exact_size(SIZE, egui::Sense::hover());
                         thumbnail = Some(bounds);
                         crate::media_preview::image(
                             ui,
@@ -561,22 +538,19 @@ impl TabPreview {
                         );
                     }
                 }
-                if thumbnail.is_none() && (transport.is_some() || folder.is_some()) {
+                if thumbnail.is_none()
+                    && (kind == MediaKind::Image || transport.is_some() || folder.is_some())
+                {
                     thumbnail = Some(
                         ui.allocate_exact_size(
                             egui::vec2(
                                 SIZE.x,
                                 if kind == MediaKind::Video {
                                     video_viewport_height(response, None)
+                                } else if kind == MediaKind::Audio {
+                                    40.0
                                 } else {
-                                    card_viewport_height(
-                                        response,
-                                        if kind == MediaKind::Audio {
-                                            40.0
-                                        } else {
-                                            SIZE.y
-                                        },
-                                    )
+                                    SIZE.y
                                 },
                             ),
                             egui::Sense::hover(),
@@ -630,28 +604,6 @@ fn video_viewport_height(response: &egui::Response, natural: Option<f32>) -> f32
                 .filter(|previous| previous.frame.saturating_add(1) >= frame)
                 .map_or(SIZE.y, |previous| previous.height)
         });
-        data.insert_temp(id, CardViewportHeight { frame, height });
-        height
-    })
-}
-
-fn card_viewport_height(response: &egui::Response, natural: f32) -> f32 {
-    let context = &response.ctx;
-    let id = response.id.with("card-viewport-height");
-    let frame = context.cumulative_frame_nr();
-    let inside_card = context
-        .pointer_hover_pos()
-        .is_some_and(|point| !response.interact_rect.contains(point));
-    // Preview::tab has already validated this card's hover/captured-seek owner.
-    // Keep its controls stationary across a media/preview replacement while the
-    // pointer is off the source tab; otherwise a shorter preview can remove
-    // the card from beneath the pointer. Reopening or returning to the tab allows
-    // the natural preview size again. Only geometry is retained, never old pixels.
-    context.data_mut(|data| {
-        let previous = data.get_temp::<CardViewportHeight>(id);
-        let height = previous
-            .filter(|previous| inside_card && previous.frame.saturating_add(1) >= frame)
-            .map_or(natural, |previous| previous.height);
         data.insert_temp(id, CardViewportHeight { frame, height });
         height
     })
@@ -1513,7 +1465,7 @@ mod tests {
     }
 
     #[test]
-    fn active_image_has_only_path_help_and_background_hover_reuses_retained_pixels() {
+    fn active_and_background_hover_reuse_current_edited_and_animated_pixels() {
         let mut app = crate::Application::new(None, |_| {}).expect("headless app");
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
@@ -1573,12 +1525,9 @@ mod tests {
         for _ in 0..12 {
             frame(&mut app, pointer);
         }
-        assert!(frame(&mut app, pointer).shapes.iter().any(|shape|
-            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == path.display().to_string())),
-            "active tab retains ordinary delayed path help");
         assert!(
-            !painted(&frame(&mut app, pointer), texture),
-            "active tabs have no preview card"
+            painted(&frame(&mut app, pointer), texture),
+            "active tab borrows its displayed image"
         );
         assert!(
             app.tab_preview.target.is_none(),
@@ -1593,7 +1542,7 @@ mod tests {
         assert!(image.advance_animation(end));
         assert!(image.next_frame_at.is_none());
         let _ = context.tex_manager().write().take_delta();
-        assert!(!painted(&frame(&mut app, pointer), texture));
+        assert!(painted(&frame(&mut app, pointer), texture));
         assert!(context.tex_manager().write().take_delta().set.is_empty());
         let original = app.image.as_ref().expect("image").decoded.clone();
         let edited = towavue_runtime_windows::render_image_edits(
@@ -1606,7 +1555,7 @@ mod tests {
             .expect("edited presentation");
         let edited_texture = app.image.as_ref().expect("edited").texture.id();
         let _ = context.tex_manager().write().take_delta();
-        assert!(!painted(&frame(&mut app, pointer), edited_texture));
+        assert!(painted(&frame(&mut app, pointer), edited_texture));
         assert!(!painted(&frame(&mut app, pointer), texture));
         assert!(context.tex_manager().write().take_delta().set.is_empty());
         app.tabs.open_new("other.png".into(), MediaKind::Image);

@@ -392,3 +392,116 @@ fn audio_card_is_compact_and_keeps_controls_stationary_without_artwork() {
         }
     }
 }
+
+#[test]
+fn image_cards_keep_the_viewport_across_aspect_changes_pending_and_reading() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(crate::chrome::style);
+        let mut tabs = TabSet::default();
+        let tab = tabs.open_new("image.png".into(), MediaKind::Image);
+        let preview = TabPreview::new().expect("worker");
+        let target = Target {
+            tab,
+            path: "image.png".into(),
+            kind: MediaKind::Image,
+            position: Duration::ZERO,
+        };
+        let source = egui::Rect::from_min_size(egui::pos2(220.0, 20.0), egui::vec2(100.0, 24.0));
+        let id = egui::Id::new("fixed-image-card");
+        let textures = [[320, 40], [40, 320], [2, 1]].map(|size| {
+            context.load_texture(
+                "aspect",
+                egui::ColorImage::filled(size, egui::Color32::RED),
+                TextureOptions::LINEAR,
+            )
+        });
+        let mut time = 0.0;
+        let mut card = None;
+        for pasted in [false, true] {
+            for stage in 0..7 {
+                let retained = match stage {
+                    0 | 4 => None,
+                    1..=3 => Some(RetainedPreview::Image(textures[stage - 1].clone())),
+                    _ => Some(RetainedPreview::Reading {
+                        pages: textures[..2]
+                            .iter()
+                            .map(|texture| (Some(texture.clone()), texture.size_vec2()))
+                            .collect(),
+                        settings: towavue_core::ReadingSettings {
+                            axis: if stage == 5 {
+                                towavue_core::ReadingAxis::Horizontal
+                            } else {
+                                towavue_core::ReadingAxis::Vertical
+                            },
+                            ..Default::default()
+                        },
+                    }),
+                };
+                for pass in 0..4 {
+                    time += 0.1;
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            time: Some(time),
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(600.0, 400.0),
+                            )),
+                            events: vec![egui::Event::PointerMoved(source.center())],
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.interact(source, id, egui::Sense::hover());
+                            if pasted {
+                                preview.show_pasted(&response, retained.as_ref());
+                            } else {
+                                preview.show(&response, &target, retained.as_ref());
+                            }
+                        },
+                    );
+                    if pass < 3 {
+                        continue;
+                    }
+                    let bounds = context
+                        .memory(|memory| memory.area_rect(id.with("media-preview")))
+                        .expect("card");
+                    if let Some(previous) = card {
+                        assert_eq!(
+                            bounds, previous,
+                            "image aspect and pending pixels do not move the card"
+                        );
+                    } else {
+                        card = Some(bounds);
+                    }
+                    let viewport =
+                        egui::Rect::from_min_size(bounds.min + egui::vec2(1.0, 1.0), SIZE);
+                    for texture in &textures {
+                        if let Some(mesh) =
+                            output.shapes.iter().find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                                    Some(mesh)
+                                }
+                                _ => None,
+                            })
+                        {
+                            let pixels = mesh.calc_bounds();
+                            assert!(viewport.expand(1.0 / density).contains_rect(pixels));
+                            assert!(
+                                (pixels.aspect_ratio()
+                                    - texture.size_vec2().x / texture.size_vec2().y)
+                                    .abs()
+                                    < 0.001
+                            );
+                            if stage <= 3 {
+                                assert!(
+                                    pixels.center().distance(viewport.center()) <= 1.0 / density
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -182,16 +182,7 @@ fn click_preview_transport<N: Fn(AppEvent) + Send + Sync + 'static>(
             frame(app, source, None);
         }
         let (output, _) = frame(app, source, None);
-        if tab == active {
-            assert!(
-                card(&output).is_none(),
-                "active tab has no interactive card"
-            );
-            assert_eq!(app.tabs.active().expect("foreground").id, active);
-            assert_eq!(app.edits[&tab], history);
-            continue;
-        }
-        let bounds = card(&output).expect("inactive card remains open");
+        let bounds = card(&output).expect("active or background card remains open");
         let point = node_center(&output, "Toggle preview playback");
         frame(app, point, None);
         let (output, _) = frame(app, point, None);

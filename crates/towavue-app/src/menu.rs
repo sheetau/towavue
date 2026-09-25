@@ -6,6 +6,8 @@ use CommandId::*;
 
 mod choices;
 #[cfg(test)]
+mod image_choices_tests;
+#[cfg(test)]
 mod language_tests;
 pub(crate) use choices::Choices;
 
@@ -365,9 +367,15 @@ fn show_items(
                     {
                         continue;
                     }
-                    if let Some((response, command)) =
-                        choices::submenu(ui, *id, context, &recent.choices, requested, ancestor)
-                    {
+                    if let Some((response, command)) = choices::submenu(
+                        ui,
+                        *id,
+                        context,
+                        &recent.choices,
+                        shortcuts,
+                        requested,
+                        ancestor,
+                    ) {
                         if response.enabled() {
                             items.push(response.id);
                         }
@@ -1771,8 +1779,18 @@ mod tests {
                 assert!(!group.is_empty());
                 for command in *group {
                     if let Some((_, rows)) = choices::options(*command) {
-                        for (child, _) in rows {
-                            assert!(placed.insert(*child), "duplicate choice command: {child:?}");
+                        if matches!(command, ToggleImageInterpolation | ToggleImageMinification) {
+                            assert_eq!(rows.len(), 2);
+                            assert_ne!(rows[0].1, rows[1].1);
+                            assert!(rows.iter().all(|(child, _)| child == command));
+                            assert!(placed.insert(*command), "duplicate image toggle");
+                        } else {
+                            for (child, _) in rows {
+                                assert!(
+                                    placed.insert(*child),
+                                    "duplicate choice command: {child:?}"
+                                );
+                            }
                         }
                     } else {
                         assert!(

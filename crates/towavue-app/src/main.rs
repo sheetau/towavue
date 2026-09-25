@@ -5399,6 +5399,8 @@ where
                             volume_step: self.volume_step_percent,
                             audio_repeat: self.audio_mode().0,
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
+                            nearest_images: self.nearest_images,
+                            high_quality_minification: self.high_quality_minification,
                         },
                     };
                     let menu = logo_menu::show_with_recent(

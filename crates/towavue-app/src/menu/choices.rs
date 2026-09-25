@@ -7,6 +7,8 @@ pub(crate) struct Choices {
     pub video_quality: VideoExportQuality,
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
+    pub nearest_images: bool,
+    pub high_quality_minification: bool,
 }
 
 impl Default for Choices {
@@ -16,6 +18,8 @@ impl Default for Choices {
             video_quality: VideoExportQuality::High,
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
+            nearest_images: false,
+            high_quality_minification: true,
         }
     }
 }
@@ -24,6 +28,22 @@ type Options = (Text, &'static [(CommandId, Text)]);
 
 pub(super) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
+        // Both display states keep the existing configurable toggle command.
+        // The checked state is a no-op; only its alternative dispatches it.
+        ToggleImageInterpolation => (
+            Text::ImageInterpolation,
+            &[
+                (ToggleImageInterpolation, Text::StatusSmooth),
+                (ToggleImageInterpolation, Text::StatusNearest),
+            ],
+        ),
+        ToggleImageMinification => (
+            Text::ImageMinification,
+            &[
+                (ToggleImageMinification, Text::QualityHigh),
+                (ToggleImageMinification, Text::MinificationFast),
+            ],
+        ),
         ExportQualityHigh => (
             Text::ExportQuality,
             &[
@@ -113,6 +133,7 @@ pub(super) fn submenu(
     command: CommandId,
     context: CommandContext,
     choices: &Choices,
+    shortcuts: &ShortcutBindings,
     requested: Option<egui::Id>,
     ancestor: Option<egui::Rect>,
 ) -> Option<(egui::Response, Option<CommandId>)> {
@@ -140,7 +161,21 @@ pub(super) fn submenu(
                 FolderNavigationStop
             }
         }
+        ToggleImageInterpolation | ToggleImageMinification => command,
         _ => return None,
+    };
+    let toggle = matches!(command, ToggleImageInterpolation | ToggleImageMinification);
+    let selected = match command {
+        ToggleImageInterpolation if choices.nearest_images => Text::StatusNearest,
+        ToggleImageInterpolation => Text::StatusSmooth,
+        ToggleImageMinification if choices.high_quality_minification => Text::QualityHigh,
+        ToggleImageMinification => Text::MinificationFast,
+        _ => {
+            rows.iter()
+                .find(|(id, _)| *id == selected)
+                .expect("selected choice")
+                .1
+        }
     };
     let enabled = command_definitions()
         .iter()
@@ -168,7 +203,19 @@ pub(super) fn submenu(
                     state.open_item = Some(id)
                 });
             }
-            ui.menu_button(text(ui.ctx(), title), |ui| {
+            let shortcut = if toggle {
+                shortcuts.label(command, context)
+            } else {
+                String::new()
+            };
+            let arrow = egui::containers::menu::SubMenuButton::RIGHT_ARROW;
+            let button = egui::Button::new(text(ui.ctx(), title));
+            let button = if shortcut.is_empty() {
+                button.right_text(arrow)
+            } else {
+                button.right_text((shortcut_text(ui, shortcut, enabled), arrow))
+            };
+            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 let frame = egui::Frame::popup(ui.style()).total_margin().sum().x;
@@ -180,11 +227,14 @@ pub(super) fn submenu(
                 let mut chosen = None;
                 let mut items = Vec::new();
                 for (id, label) in rows {
-                    let mut checked = *id == selected;
+                    let was_selected = *label == selected;
+                    let mut checked = was_selected;
                     let response = ui.checkbox(&mut checked, text(ui.ctx(), *label));
                     items.push(response.id);
                     if response.clicked() {
-                        chosen = Some(*id);
+                        if !toggle || !was_selected {
+                            chosen = Some(*id);
+                        }
                         ui.close();
                     }
                 }
@@ -193,12 +243,13 @@ pub(super) fn submenu(
             })
         })
         .inner;
-    let (chosen, back) = menu.inner.unwrap_or_default();
+    let (response, contents) = menu;
+    let (chosen, back) = contents.map(|inner| inner.inner).unwrap_or_default();
     if back {
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
-        menu.response.request_focus();
+        response.request_focus();
     }
-    Some((menu.response, chosen))
+    Some((response, chosen))
 }
 
 #[cfg(test)]
@@ -288,6 +339,24 @@ mod tests {
                 for (nested, right_edge) in [(false, false), (false, true), (true, false)] {
                     for (section, title, labels, selected, target, expected, kind) in [
                         (
+                            Section::View,
+                            "Image interpolation",
+                            vec!["Smooth", "Nearest"],
+                            "Smooth",
+                            "Nearest",
+                            ToggleImageInterpolation,
+                            towavue_core::MediaKind::Image,
+                        ),
+                        (
+                            Section::View,
+                            "Image minification",
+                            vec!["High quality", "Fast"],
+                            "High quality",
+                            "Fast",
+                            ToggleImageMinification,
+                            towavue_core::MediaKind::Image,
+                        ),
+                        (
                             Section::File,
                             "Export quality",
                             vec!["High quality", "Balanced", "Smaller file"],
@@ -352,6 +421,7 @@ mod tests {
                                                     volume_step: 5,
                                                     audio_repeat: RepeatMode::One,
                                                     folder_loop: false,
+                                                    ..Default::default()
                                                 },
                                                 ..Default::default()
                                             };

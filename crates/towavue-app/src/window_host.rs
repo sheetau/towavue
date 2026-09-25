@@ -36,6 +36,7 @@ mod seek_verification;
 #[cfg(feature = "presentation-verification")]
 pub(crate) use seek_verification::run as verify_reference_seek;
 mod language;
+mod placement;
 mod source_save;
 mod updates;
 
@@ -81,6 +82,7 @@ pub(crate) struct WindowHost {
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
     last_active_window: Option<WindowKey>,
+    window_placement: Option<towavue_runtime_windows::WindowPlacementPreferences>,
     pending_launches: Vec<towavue_runtime_windows::LaunchRequest>,
     preview_cache: PreviewCache,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
@@ -115,6 +117,7 @@ impl WindowHost {
             source_save: None,
             windows: BTreeMap::new(),
             last_active_window: None,
+            window_placement: placement::open(),
             proxy,
             next_key: 1,
             pending_launches: Vec::new(),
@@ -129,7 +132,8 @@ impl WindowHost {
             #[cfg(test)]
             captured_events: Arc::default(),
         };
-        host.add_application(initial_path)?;
+        let key = host.add_application(initial_path)?;
+        host.restore_initial_placement(key);
         Ok(host)
     }
 
@@ -867,6 +871,7 @@ impl WindowHost {
     }
 
     fn remove_closed(&mut self) {
+        self.remember_closed_placement();
         // Only the existing per-window close/save guard may approve this removal.
         // Release bound/deferred swap-chain references while the HWND is still owned.
         self.windows.retain(|_, app| {

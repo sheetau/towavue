@@ -992,6 +992,7 @@ struct Application<N> {
     window_size: Option<winit::dpi::PhysicalSize<u32>>,
     surface_resize_pending: bool,
     native_caption: Option<NativeCaption>,
+    initial_window_placement: Option<towavue_runtime_windows::SavedWindowPlacement>,
     native_taskbar: Option<NativeTaskbar>,
     taskbar_ui: taskbar::State,
     fullscreen: bool,
@@ -1289,6 +1290,7 @@ where
             window_size: None,
             surface_resize_pending: false,
             native_caption: None,
+            initial_window_placement: None,
             native_taskbar: None,
             taskbar_ui: taskbar::State::default(),
             fullscreen: false,
@@ -1515,7 +1517,7 @@ where
         let attributes = Window::default_attributes()
             .with_title(self.title())
             .with_inner_size(LogicalSize::new(960, 576))
-            .with_min_inner_size(LogicalSize::new(480, 300))
+            .with_min_inner_size(LogicalSize::new(420, 260))
             .with_visible(false)
             .with_decorations(true);
         #[cfg(feature = "presentation-verification")]
@@ -1530,6 +1532,20 @@ where
         window_icon::apply(&window, window.scale_factor());
         self.media_cursors = Some(cursor::MediaCursors::new(event_loop, window.scale_factor()));
         let native_caption = NativeCaption::new(window.clone())?;
+        let restore_maximized = self
+            .initial_window_placement
+            .take()
+            .is_some_and(|placement| {
+                match native_caption.restore_placement(placement, LogicalSize::new(420, 260)) {
+                    Ok(()) => placement.maximized(),
+                    Err(error) => {
+                        towavue_runtime_windows::diagnostic!(
+                            "Could not restore window placement: {error}"
+                        );
+                        false
+                    }
+                }
+            });
         let notify = Arc::clone(&self.notify);
         let native_taskbar = match NativeTaskbar::new(window.clone(), move |event| {
             notify(match event {
@@ -1588,6 +1604,15 @@ where
         );
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(26);
+        // Winit's set_maximized shows a hidden HWND. Delay it until graphics,
+        // accessibility and UI setup are ready at the ordinary visibility boundary.
+        if visible && restore_maximized {
+            window.set_maximized(true);
+            // A ready image can draw before queued size events are delivered.
+            // Use the final client size for that first frame and its surface.
+            self.window_size = Some(window.inner_size());
+            self.surface_resize_pending = true;
+        }
         window.set_visible(visible);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(14);

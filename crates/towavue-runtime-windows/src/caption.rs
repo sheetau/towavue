@@ -25,6 +25,8 @@ use winit::window::Window;
 
 const SUBCLASS_ID: usize = 0x7476_6361;
 
+mod placement;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CaptionAction {
     Minimize,
@@ -61,6 +63,7 @@ pub struct NativeCaption {
     state: Rc<CaptionState>,
     windowed_size: Cell<Option<winit::dpi::LogicalSize<f64>>>,
     transitions_suppressed: Cell<bool>,
+    windowed_placement: Cell<Option<crate::SavedWindowPlacement>>,
 }
 
 impl NativeCaption {
@@ -211,6 +214,7 @@ impl NativeCaption {
             state,
             windowed_size: Cell::new(None),
             transitions_suppressed: Cell::new(false),
+            windowed_placement: Cell::new(None),
         };
         // SAFETY: DWM copies this scalar attribute synchronously. Older systems may
         // reject dark mode; their native frame remains functional with its OS colors.
@@ -271,6 +275,7 @@ impl NativeCaption {
         #[cfg(test)]
         let started = std::time::Instant::now();
         if fullscreen {
+            self.windowed_placement.set(self.saved_placement());
             self.windowed_size.set(Some(
                 self.window
                     .inner_size()

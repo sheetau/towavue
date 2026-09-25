@@ -75,7 +75,9 @@ mod tempo;
 mod watch;
 mod waveform;
 mod window_activation;
+mod window_placement;
 mod window_point;
+pub use window_placement::{SavedWindowPlacement, WindowPlacementPreferences};
 
 pub use launch::{LaunchRequest, LaunchRole, LaunchServer};
 pub use window_activation::activate_window;

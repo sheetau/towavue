@@ -36,6 +36,8 @@ pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
 pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
 #[cfg(test)]
+mod audio_seek_comparison;
+#[cfg(test)]
 mod audio_seek_tests;
 #[cfg(test)]
 mod seek_contention_tests;
@@ -250,6 +252,10 @@ impl StreamConfig {
             && parameters.profile == ffmpeg::ffi::AV_PROFILE_AAC_LOW
             && matches!(parameters.frame_size, 960 | 1024)
         {
+            #[cfg(test)]
+            if audio_seek_comparison::approximate_seek() {
+                return Option::None;
+            }
             let warmup = target.saturating_sub(Duration::from_millis(250));
             return (warmup > MediaTime::ZERO).then_some((
                 warmup,

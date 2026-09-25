@@ -9,7 +9,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v11";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v12";
+const SELECTION_BINDING_HEADER: &str = "# towavue shortcuts v11";
 const VOLUME_BINDING_HEADER: &str = "# towavue shortcuts v10";
 const ZOOM_BINDING_HEADER: &str = "# towavue shortcuts v9";
 const EDITOR_BINDING_HEADER: &str = "# towavue shortcuts v8";
@@ -192,6 +193,9 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::PreviousImage, "PageUp"),
         (CommandId::PreviousImage, "Backspace"),
         (CommandId::PreviousImage, "A"),
+        (CommandId::PreviousImage, "Shift+Space"),
+        (CommandId::ReadingLeft, "A"),
+        (CommandId::ReadingRight, "D"),
         (CommandId::NextImage, "PageDown"),
         (CommandId::NextImage, "Space"),
         (CommandId::NextImage, "D"),
@@ -207,9 +211,19 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
-    let selection_bindings = text
+    let navigation_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let selection_bindings = navigation_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == SELECTION_BINDING_HEADER);
+    let mut implicit_navigation = std::collections::BTreeSet::from([
+        CommandId::PreviousImage,
+        CommandId::ReadingLeft,
+        CommandId::ReadingRight,
+    ]);
+    let mut unchanged_navigation_images = std::collections::BTreeSet::new();
     let volume_bindings = selection_bindings
         || text
             .lines()
@@ -245,6 +259,12 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         image_bindings || text.lines().any(|line| line.trim() == FRAME_BINDING_HEADER);
     let legacy = !frame_bindings && !text.lines().any(|line| line.trim() == MULTI_BINDING_HEADER);
     let standard = defaults();
+    let previous_image_defaults: Vec<_> = standard
+        .all(CommandId::PreviousImage)
+        .iter()
+        .filter(|key| key.to_string() != "Shift+Space")
+        .cloned()
+        .collect();
     let has_apply_crop = text
         .lines()
         .any(|line| line.trim_start().starts_with("apply_crop"));
@@ -272,6 +292,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             })?;
         declared.insert(command);
         if sequence.trim().is_empty() {
+            implicit_navigation.remove(&command);
             implicit_volume.remove(&command);
             if command == CommandId::ZoomIn {
                 implicit_zoom = false;
@@ -352,9 +373,30 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         }
         if !reading_bindings
             && matches!(command, CommandId::PreviousImage | CommandId::NextImage)
-            && sequences == standard.all(command)
+            && (sequences == standard.all(command)
+                || command == CommandId::PreviousImage && sequences == previous_image_defaults)
         {
             unchanged_image_bindings.insert(command);
+        }
+        if !navigation_bindings
+            && matches!(command, CommandId::PreviousImage | CommandId::NextImage)
+            && (sequences == standard.all(command)
+                || command == CommandId::PreviousImage && sequences == previous_image_defaults)
+        {
+            unchanged_navigation_images.insert(command);
+        }
+        if implicit_navigation.contains(&command) {
+            let unchanged = match command {
+                CommandId::PreviousImage => {
+                    sequences == previous_image_defaults || !image_bindings && inherit
+                }
+                _ => sequences.len() == 1 && standard.get(command) == sequences.first(),
+            };
+            if !navigation_bindings && unchanged {
+                sequences = standard.all(command).to_vec();
+            } else {
+                implicit_navigation.remove(&command);
+            }
         }
         bindings.set(command, sequences[0].clone());
         for sequence in sequences.into_iter().skip(1) {
@@ -451,6 +493,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 || definition.id == CommandId::ZoomIn && implicit_zoom
                 || definition.id == CommandId::ClearSelection && implicit_deselect
                 || implicit_volume.contains(&definition.id)
+                || implicit_navigation.contains(&definition.id)
         })
     {
         let contexts: Vec<_> = [
@@ -477,7 +520,17 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .all(definition.id)
             .iter()
             .filter(|candidate| {
-                // Only the newly inherited Equals alternative may be pruned here.
+                if definition.id == CommandId::PreviousImage
+                    && candidate.to_string() != "Shift+Space"
+                    || matches!(
+                        definition.id,
+                        CommandId::ReadingLeft | CommandId::ReadingRight
+                    ) && declared.contains(&definition.id)
+                        && *candidate == standard.get(definition.id).expect("reading primary")
+                {
+                    return true;
+                }
+                // Only newly inherited alternatives may be pruned here.
                 // Preserve the old primary Plus binding and explicit custom choices.
                 if implicit_volume.contains(&definition.id)
                     && !candidate.to_string().starts_with("Ctrl+")
@@ -499,6 +552,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                             definition.id,
                             CommandId::ReadingLeft | CommandId::ReadingRight
                         ) && unchanged_image_bindings.contains(&other.id))
+                        && !(matches!(
+                            (definition.id, candidate.to_string().as_str()),
+                            (CommandId::ReadingLeft, "A") | (CommandId::ReadingRight, "D")
+                        ) && unchanged_navigation_images.contains(&other.id))
                         && contexts.iter().any(|context| other.is_enabled(*context))
                         && bindings.all(other.id).iter().any(|bound| {
                             bound.strokes().starts_with(candidate.strokes())
@@ -885,7 +942,7 @@ mod tests {
             };
             for (keys, command) in [
                 (
-                    &["Left"][..],
+                    &["Left", "A"][..],
                     if reading_mode {
                         CommandId::ReadingLeft
                     } else {
@@ -893,15 +950,18 @@ mod tests {
                     },
                 ),
                 (
-                    &["Right"][..],
+                    &["Right", "D"][..],
                     if reading_mode {
                         CommandId::ReadingRight
                     } else {
                         CommandId::NextImage
                     },
                 ),
-                (&["PageUp", "Backspace", "A"][..], CommandId::PreviousImage),
-                (&["PageDown", "Space", "D"][..], CommandId::NextImage),
+                (
+                    &["PageUp", "Backspace", "Shift+Space"][..],
+                    CommandId::PreviousImage,
+                ),
+                (&["PageDown", "Space"][..], CommandId::NextImage),
                 (&["Ctrl+Space"][..], CommandId::JumpImagesForward5),
                 (&["Ctrl+Backspace"][..], CommandId::JumpImagesBackward5),
                 (&["Ctrl+Left"][..], CommandId::PreviousSameKind),
@@ -1658,6 +1718,8 @@ mod tests {
                         ),
                         if enabled {
                             ShortcutMatch::Command(CommandId::PlayTimeSelection)
+                        } else if kind == MediaKind::Image {
+                            ShortcutMatch::Command(CommandId::PreviousImage)
                         } else {
                             ShortcutMatch::None
                         }

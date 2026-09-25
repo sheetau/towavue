@@ -91,6 +91,42 @@ fn untitled_paste_edits_and_save_as_preserve_original_history_and_pathless_state
             "{command:?}"
         );
     }
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        for _ in 0..3 {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    app.draw_status_bar(ui, &mut actions, &mut Vec::new());
+                },
+            );
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let (_, button) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label()
+                        .is_some_and(|label| label.starts_with("Reading mode"))
+                })
+                .expect("reading control");
+            assert!(button.is_disabled(), "pathless image at density {density}");
+            assert!(actions.is_empty());
+        }
+    }
+    assert!(!app.reading_control_enabled());
+    app.dispatch(CommandId::ToggleReadingMode);
+    app.begin_reading_drag(egui::Pos2::ZERO, egui::vec2(48.0, 0.0));
+    assert!(!app.reading_mode && app.reading_drag.is_none() && app.reading_cursor.is_none());
     app.dispatch(CommandId::FlipHorizontal);
     app.dispatch(CommandId::RotateClockwise);
     let applied = app.edits[&id].operations().to_vec();
@@ -108,6 +144,10 @@ fn untitled_paste_edits_and_save_as_preserve_original_history_and_pathless_state
     crate::source_save::tests::finish(&mut app, &events);
     assert!(app.export_error.is_none(), "{:?}", app.export_error);
     assert_eq!(app.path, Some(target.clone()));
+    assert!(
+        app.reading_control_enabled(),
+        "saved image can enter reading"
+    );
     assert_eq!(app.tabs.active().expect("tab").id, id);
     assert!(!app.edits[&id].is_dirty());
     assert_eq!(

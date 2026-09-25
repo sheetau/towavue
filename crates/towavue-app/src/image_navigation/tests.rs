@@ -213,10 +213,10 @@ fn jumps_count_only_shell_ordered_images_clamp_and_preserve_reading_and_dirty_hi
     for (key, expected) in [
         ("PageDown", Some(1)),
         ("Space", Some(1)),
-        ("D", Some(1)),
+        ("D", (!app.reading_settings.reversed).then_some(1)),
         ("PageUp", None),
         ("Backspace", None),
-        ("A", None),
+        ("A", app.reading_settings.reversed.then_some(1)),
     ] {
         app.process_shortcut(key.parse().expect("alias"));
         match expected {

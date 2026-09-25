@@ -6489,8 +6489,7 @@ where
                             CommandId::ToggleReadingMode,
                             localization::Text::ReadingMode.in_language(language),
                         );
-                        let enabled = self.image_handoff.is_none()
-                            && (self.reading_mode || !self.command_context().has_unsaved_edits);
+                        let enabled = self.reading_control_enabled();
                         let direction = self
                             .reading_drag
                             .as_ref()
@@ -10167,10 +10166,17 @@ where
         }
     }
 
+    fn reading_control_enabled(&self) -> bool {
+        command_definitions().iter().any(|definition| {
+            definition.id == CommandId::ToggleReadingMode
+                && definition.is_enabled(self.command_context())
+        })
+    }
+
     fn begin_reading_drag(&mut self, position: egui::Pos2, delta: egui::Vec2) {
         let language = self.language();
         if self.reading_drag.is_some()
-            || self.media_kind != Some(MediaKind::Image)
+            || !self.reading_control_enabled()
             || self.command_context().has_unsaved_edits
             || self.modal_input_blocked()
             || self.palette_open

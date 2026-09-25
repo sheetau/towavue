@@ -274,9 +274,12 @@ fn reading_arrows_keep_fixed_shell_spreads_and_ordinary_commands_keep_their_mean
                     .set_current_path(paths[index].clone(), MediaKind::Image);
                 for (key, forward) in [
                     ("Left", reversed),
+                    ("A", reversed),
                     ("Right", !reversed),
+                    ("D", !reversed),
                     ("Space", true),
                     ("Backspace", false),
+                    ("Shift+Space", false),
                 ] {
                     let target = app
                         .reading_settings

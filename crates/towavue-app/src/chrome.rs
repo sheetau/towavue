@@ -425,10 +425,12 @@ pub fn reading_button(
         })
         .inner;
     crate::tab_focus::observe_pointer_control(&response, "reading-mode");
-    let color = if response.enabled() {
+    let color = if !response.enabled() {
+        MUTED
+    } else if selected || direction.is_some() {
         FOREGROUND
     } else {
-        MUTED
+        ui.style().interact(&response).fg_stroke.color
     };
     reading_icon::paint(ui, response.rect, selected, direction, color);
     let cursor = if selected {

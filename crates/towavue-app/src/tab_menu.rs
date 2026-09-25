@@ -35,7 +35,7 @@ pub(crate) fn popup_with_pointer<A>(
     ui: &egui::Ui,
     response: &egui::Response,
     close: &egui::Response,
-    pointer_clicked: bool,
+    pointer_requested: bool,
     contents: impl FnOnce(&mut egui::Ui) -> Option<A>,
 ) -> Option<(A, Option<egui::Id>)> {
     let context = ui.ctx();
@@ -46,7 +46,10 @@ pub(crate) fn popup_with_pointer<A>(
         && (!egui::Popup::is_any_open(context) || was_open)
         && ui.input(|input| {
             input.focused
-                && !input.pointer.any_down()
+                && (!input.pointer.any_down()
+                    || (pointer_requested
+                        && input.pointer.button_down(egui::PointerButton::Secondary)
+                        && !input.pointer.button_down(egui::PointerButton::Primary)))
                 && !input.events.contains(&egui::Event::WindowFocused(false))
         });
     for widget in [response, close] {
@@ -78,14 +81,14 @@ pub(crate) fn popup_with_pointer<A>(
             });
         });
         context.data_mut(|data| data.insert_temp(anchor_id, origin.id));
-    } else if response.secondary_clicked() || (eligible && pointer_clicked) {
+    } else if response.secondary_clicked() || (eligible && pointer_requested) {
         response.surrender_focus();
         close.surrender_focus();
         context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
     }
     let keyboard_origin = context.data(|data| data.get_temp::<egui::Id>(anchor_id));
     let mut popup = egui::Popup::context_menu(response);
-    if origin.is_some() || (eligible && pointer_clicked) {
+    if origin.is_some() || (eligible && pointer_requested) {
         popup = popup.open_memory(egui::SetOpenCommand::Bool(true));
     }
     if keyboard_origin.is_some() {
@@ -97,8 +100,20 @@ pub(crate) fn popup_with_pointer<A>(
                 .left_bottom(),
         );
     }
+    // A menu opened on secondary press must survive that button's release.
+    // Item activation still closes explicitly, and Escape keeps its normal path.
+    if ui.input(|input| {
+        input
+            .pointer
+            .button_released(egui::PointerButton::Secondary)
+    }) {
+        popup = popup.close_behavior(egui::PopupCloseBehavior::IgnoreClicks);
+    }
     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
     let chosen = popup.show(contents).and_then(|inner| inner.inner);
+    if egui::Popup::is_id_open(context, popup_id) {
+        crate::overlay_input::context_menu_shown(context, popup_id);
+    }
     if (was_open || origin.is_some()) && !egui::Popup::is_id_open(context, popup_id) {
         if (escape || chosen.is_some())
             && !egui::Popup::is_any_open(context)

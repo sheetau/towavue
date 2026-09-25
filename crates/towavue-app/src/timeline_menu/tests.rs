@@ -53,9 +53,15 @@ fn japanese_timeline_context_covers_children_without_retargeting_selection_or_se
 fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_language(
     language: crate::localization::Language,
 ) {
-    let Some(root) = crate::tests::isolated_test_root(
-        "timeline_menu::tests::timeline_context_covers_children_without_retargeting_selection_or_seeking",
-    ) else {
+    let test = match language {
+        crate::localization::Language::English => {
+            "timeline_menu::tests::timeline_context_covers_children_without_retargeting_selection_or_seeking"
+        }
+        crate::localization::Language::Japanese => {
+            "timeline_menu::tests::japanese_timeline_context_covers_children_without_retargeting_selection_or_seeking"
+        }
+    };
+    let Some(root) = crate::tests::isolated_test_root(test) else {
         return;
     };
     for kind in [MediaKind::Audio, MediaKind::Video] {
@@ -151,7 +157,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                         Text::CommandClearSelection.in_language(language),
                         Text::TimelineDelete.in_language(language),
                         Text::TimelineCrop.in_language(language),
-                        Text::TimelineMute.in_language(language),
+                        Text::TimelineSilence.in_language(language),
                         Text::TimelinePlay.in_language(language),
                     ] {
                         let (_, node) = tree
@@ -172,6 +178,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                         assert_eq!(
                             node.is_disabled(),
                             label != Text::CommandSelectAll.in_language(language)
+                                && label != Text::TimelineSilence.in_language(language)
                                 && selection.is_none(),
                             "{label}"
                         );
@@ -204,10 +211,11 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
             .nodes
             .iter()
             .find(|(_, node)| {
-                node.label()
-                    .is_some_and(|text| text.starts_with(Text::TimelineMute.in_language(language)))
+                node.label().is_some_and(|text| {
+                    text.starts_with(Text::TimelineSilence.in_language(language))
+                })
             })
-            .expect("mute")
+            .expect("silence")
             .0;
         let actions = frame(
             &mut app,
@@ -218,10 +226,73 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
             actions
                 == [UiAction::TimelineMenu(Intent {
                     owner: app.timeline_menu_owner().expect("owner"),
-                    action: Action::Mute
+                    action: Action::Silence
                 })]
         );
         assert!(!egui::Popup::is_any_open(&context));
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert!(egui::Popup::is_any_open(&context));
+        let (_, tree) = frame(&mut app, vec![]);
+        let bounds = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label().is_some_and(|label| {
+                    label.starts_with(Text::TimelineSilence.in_language(language))
+                })
+            })
+            .expect("silence item")
+            .1
+            .bounds()
+            .expect("item bounds");
+        let inside = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+        for pressed in [true, false] {
+            let actions = frame(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(inside),
+                    egui::Event::PointerButton {
+                        pos: inside,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )
+            .0;
+            if pressed {
+                assert!(actions.is_empty());
+                assert!(
+                    egui::Popup::is_any_open(&context),
+                    "inside press keeps the item available"
+                );
+            } else {
+                assert!(
+                    actions
+                        == [UiAction::TimelineMenu(Intent {
+                            owner: app.timeline_menu_owner().expect("owner"),
+                            action: Action::Silence
+                        })]
+                );
+                assert!(!egui::Popup::is_any_open(&context));
+            }
+        }
         for pressed in [true, false] {
             frame(
                 &mut app,
@@ -289,7 +360,7 @@ fn timeline_context_edits_current_range_and_undo_restores_history() {
     let mut app = media_app(&root, MediaKind::Audio);
     for (action, edit) in [
         (
-            Action::Mute,
+            Action::Silence,
             towavue_core::TimelineEdit::ScaleVolume(range(), 0.0),
         ),
         (Action::Crop, towavue_core::TimelineEdit::Keep(range())),
@@ -361,7 +432,7 @@ fn timeline_context_rejects_changed_owners_selection_and_blocked_views() {
     ] {
         app.handle_timeline_menu(Intent {
             owner: stale,
-            action: Action::Mute,
+            action: Action::Silence,
         });
         assert!(app.edits.is_empty());
     }
@@ -379,8 +450,209 @@ fn timeline_context_rejects_changed_owners_selection_and_blocked_views() {
         };
         app.handle_timeline_menu(Intent {
             owner,
-            action: Action::Mute,
+            action: Action::Silence,
         });
         assert!(app.edits.is_empty(), "blocked view {gate}");
+    }
+}
+
+#[test]
+fn timeline_menu_outside_press_hands_off_selection_and_secondary_retargeting() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "timeline_menu::tests::timeline_menu_outside_press_hands_off_selection_and_secondary_retargeting",
+    ) else {
+        return;
+    };
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = media_app(&root, kind);
+            let context = fonts::test_context();
+            context.global_style_mut(chrome::style);
+            context.set_pixels_per_point(density);
+            app.ui_context = Some(context.clone());
+            let frame = |app: &mut Application<_>, events| {
+                let mut actions = Vec::new();
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(660.0, 400.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        overlay_input::dismiss_menu_on_outside_press(&context);
+                        app.draw_timeline(ui, &mut actions);
+                    },
+                );
+                actions
+            };
+            let button = |pos, button, pressed| {
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            for _ in 0..3 {
+                frame(&mut app, vec![]);
+            }
+            let source = egui::pos2(100.0, 350.0);
+            let target = egui::pos2(560.0, 350.0);
+            for pressed in [true, false] {
+                assert!(
+                    frame(
+                        &mut app,
+                        button(source, egui::PointerButton::Secondary, pressed)
+                    )
+                    .is_empty()
+                );
+            }
+            frame(&mut app, vec![]);
+            assert!(egui::Popup::is_any_open(&context));
+            let actions = frame(&mut app, button(target, egui::PointerButton::Primary, true));
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "press inside the context owner but outside its menu dismisses immediately"
+            );
+            assert!(
+                timeline_input::is_active(&context),
+                "the same press owns the timeline gesture"
+            );
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::Seek(_)))
+            );
+            let end = target - egui::vec2(100.0, 0.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(end)]);
+            let actions = frame(&mut app, button(end, egui::PointerButton::Primary, false));
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| matches!(action, UiAction::TimeSelection(_, _, Some(_)))),
+                "one uninterrupted drag creates a selection"
+            );
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    button(source, egui::PointerButton::Secondary, pressed),
+                );
+            }
+            frame(&mut app, vec![]);
+            assert!(egui::Popup::is_any_open(&context));
+            let mut events = button(target, egui::PointerButton::Primary, true);
+            events.push(egui::Event::PointerMoved(end));
+            events.extend(button(end, egui::PointerButton::Primary, false));
+            let actions = frame(&mut app, events);
+            assert!(!egui::Popup::is_any_open(&context));
+            assert_eq!(
+                actions
+                    .iter()
+                    .filter(|action| matches!(action, UiAction::TimeSelection(_, _, Some(_))))
+                    .count(),
+                1,
+                "batched outside press/move/release keeps one complete selection gesture"
+            );
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    button(source, egui::PointerButton::Secondary, pressed),
+                );
+            }
+            frame(&mut app, vec![]);
+            assert!(egui::Popup::is_any_open(&context));
+            assert!(
+                frame(
+                    &mut app,
+                    button(target, egui::PointerButton::Secondary, true)
+                )
+                .is_empty()
+            );
+            assert!(
+                egui::Popup::is_any_open(&context),
+                "secondary press opens the replacement menu immediately"
+            );
+            let layers = context.memory(|memory| memory.layer_ids().collect::<Vec<_>>());
+            let popup = layers
+                .into_iter()
+                .find(|layer| egui::Popup::is_id_open(&context, layer.id));
+            let popup = popup.expect("replacement menu");
+            let rect = context
+                .memory(|memory| memory.area_rect(popup.id))
+                .expect("menu bounds");
+            assert!(
+                rect.left() > 300.0,
+                "menu moves to the new pointer: {rect:?}"
+            );
+            frame(
+                &mut app,
+                button(target, egui::PointerButton::Secondary, false),
+            );
+            egui::Popup::close_all(&context);
+        }
+    }
+}
+
+#[test]
+fn silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "timeline_menu::tests::silence_without_selection_edits_the_whole_timeline_and_undo_restores_gain",
+    ) else {
+        return;
+    };
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        let mut app = media_app(&root, kind);
+        let tab = app.tabs.active_id().expect("tab");
+        let duration = media_time(Duration::from_secs(10));
+        app.push_edit(EditOperation::Timeline(
+            towavue_core::TimelineEdit::ScaleVolume(range(), 0.5),
+        ));
+        let before = app.edits[&tab].clone();
+        let volume = app.playback_volume();
+        app.time_selection = None;
+        assert!(app.timeline_menu_enabled(Action::Silence));
+        app.handle_timeline_menu(Intent {
+            owner: app.timeline_menu_owner().expect("owner"),
+            action: Action::Silence,
+        });
+        let history = &app.edits[&tab];
+        assert_eq!(
+            history.operations().last(),
+            Some(&EditOperation::Timeline(
+                towavue_core::TimelineEdit::ScaleVolume(
+                    towavue_core::TimeRange::new(MediaTime::ZERO, duration).expect("whole range"),
+                    0.0
+                )
+            ))
+        );
+        assert!(
+            history
+                .timeline(duration)
+                .expect("plan")
+                .spans()
+                .iter()
+                .all(|span| span.volume() == 0.0)
+        );
+        assert_eq!(app.playback_volume(), volume);
+        assert!(app.time_selection.is_none());
+        app.dispatch(CommandId::Undo);
+        assert_eq!(app.edits[&tab].operations(), before.operations());
+        app.dispatch(CommandId::Redo);
+        assert!(
+            app.edits[&tab]
+                .timeline(duration)
+                .expect("redo")
+                .spans()
+                .iter()
+                .all(|span| span.volume() == 0.0)
+        );
+        app.media_duration = Some(Duration::ZERO);
+        assert!(!app.timeline_menu_enabled(Action::Silence));
     }
 }

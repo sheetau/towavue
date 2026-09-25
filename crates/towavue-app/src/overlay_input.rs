@@ -3,6 +3,12 @@ use egui::{Context, Event, Popup};
 #[cfg(test)]
 mod tests;
 
+/// Context-menu owners do not toggle their popup with a primary click.
+/// Remember only the latest root; ordinary menu buttons retain toggle semantics.
+pub fn context_menu_shown(context: &Context, popup: egui::Id) {
+    context.data_mut(|data| data.insert_temp("context-menu-root".into(), popup));
+}
+
 /// Dismiss an existing menu before laying out the destination of an outside
 /// press. Keep the original event so that destination owns its normal gesture.
 pub fn dismiss_menu_on_outside_press(context: &Context) {
@@ -36,12 +42,14 @@ pub fn dismiss_menu_on_outside_press(context: &Context) {
             .copied()
             .collect::<Vec<_>>()
     });
-    if opener
-        .into_iter()
-        .filter_map(|id| context.read_response(id))
-        .any(|response| {
-            response.rect.contains(position) && Popup::default_response_id(&response) == root.id
-        })
+    let context_menu = context.data(|data| data.get_temp::<egui::Id>("context-menu-root".into()));
+    if context_menu != Some(root.id)
+        && opener
+            .into_iter()
+            .filter_map(|id| context.read_response(id))
+            .any(|response| {
+                response.rect.contains(position) && Popup::default_response_id(&response) == root.id
+            })
     {
         return;
     }

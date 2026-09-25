@@ -18,7 +18,7 @@ pub(crate) enum Action {
     DeselectAll,
     Delete,
     Crop,
-    Mute,
+    Silence,
     Play,
 }
 
@@ -30,7 +30,7 @@ impl Action {
             Self::Delete => CommandId::DeleteTimeSelection,
             Self::Crop => CommandId::KeepTimeSelection,
             Self::Play => CommandId::PlayTimeSelection,
-            Self::Mute => return None,
+            Self::Silence => return None,
         })
     }
 }
@@ -61,7 +61,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self
                 .playback_duration()
                 .is_some_and(|duration| !duration.is_zero())
-            && (action == Action::SelectAll || self.time_selection.is_some())
+            && (matches!(action, Action::SelectAll | Action::Silence)
+                || self.time_selection.is_some())
             && action.command().is_none_or(|command| {
                 command_definitions().iter().any(|definition| {
                     definition.id == command && definition.is_enabled(self.command_context())
@@ -97,19 +98,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         // Child gain/endpoint controls also belong to this context. Observe only a
-        // secondary click in our visible layer, without adding a primary-input overlay.
-        let (clicked, position) = ui.input(|input| {
+        // secondary press in our visible layer, without adding a primary-input overlay.
+        let (pressed, position) = ui.input(|input| {
             (
-                input.pointer.button_clicked(egui::PointerButton::Secondary),
+                input.pointer.button_pressed(egui::PointerButton::Secondary),
                 input.pointer.interact_pos(),
             )
         });
-        let pointer_clicked = clicked
+        let pointer_pressed = pressed
             && position.is_some_and(|position| {
+                let layer = ui.ctx().layer_id_at(position);
+                // egui retains a just-closed popup's hit geometry for one pass.
+                // It must not block reopening the same owner after an action.
+                let closed_popup = layer.is_some_and(|layer| layer.id == popup)
+                    && !egui::Popup::is_id_open(ui.ctx(), popup);
                 response.rect.intersect(ui.clip_rect()).contains(position)
-                    && ui.ctx().layer_id_at(position) == Some(ui.layer_id())
+                    && (layer == Some(ui.layer_id()) || closed_popup)
             });
-        let chosen = tab_menu::popup_with_pointer(ui, response, response, pointer_clicked, |ui| {
+        let chosen = tab_menu::popup_with_pointer(ui, response, response, pointer_pressed, |ui| {
             chrome::flat_buttons(ui);
             ui.set_min_width(170.0);
             let keyboard = menu::MenuKeyboard::begin(ui);
@@ -126,7 +132,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 ),
                 (Action::Delete, Text::TimelineDelete.in_language(language)),
                 (Action::Crop, Text::TimelineCrop.in_language(language)),
-                (Action::Mute, Text::TimelineMute.in_language(language)),
+                (Action::Silence, Text::TimelineSilence.in_language(language)),
                 (Action::Play, Text::TimelinePlay.in_language(language)),
             ] {
                 if matches!(action, Action::Delete | Action::Play) {
@@ -175,11 +181,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(command) = intent.action.command() {
             self.dispatch(command);
-        } else if let Some(range) = intent.owner.selection {
+        } else if let Some(range) = intent.owner.selection.or_else(|| {
+            towavue_core::TimeRange::new(MediaTime::ZERO, media_time(self.playback_duration()?))
+        }) {
             self.handle_ui_action(UiAction::TimeAdjustment(
                 intent.owner.tab,
                 intent.owner.generation,
-                Some(range),
+                intent.owner.selection,
                 towavue_core::TimelineEdit::ScaleVolume(range, 0.0),
             ));
         }

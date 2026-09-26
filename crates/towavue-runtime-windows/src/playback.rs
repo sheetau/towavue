@@ -169,7 +169,7 @@ pub struct PlaybackSession {
     rate: f32,
     range: PlaybackRange,
     timeline: Option<Arc<EditTimeline>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "presentation-verification"))]
     seek_stage_ms: [f64; 5],
     // Drop after reusable decoder inputs and every other reader. Cleanup of the
     // final retained source must not race native reader handle destruction.
@@ -296,7 +296,7 @@ impl PlaybackSession {
             rate: rate.clamp(0.25, 4.0).max(0.25),
             range,
             timeline: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "presentation-verification"))]
             seek_stage_ms: [0.0; 5],
         };
         session.start_pipeline()?;
@@ -316,6 +316,13 @@ impl PlaybackSession {
 
     #[cfg(test)]
     pub(crate) fn seek_stage_ms(&self) -> [f64; 5] {
+        self.seek_stage_ms
+    }
+
+    /// Synchronous seek stages for the explicit presentation probe, in milliseconds:
+    /// output retirement, video join, audio join, output startup, producer startup.
+    #[cfg(feature = "presentation-verification")]
+    pub fn verification_seek_stages(&self) -> [f64; 5] {
         self.seek_stage_ms
     }
 
@@ -521,7 +528,7 @@ impl PlaybackSession {
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         if self
             .timeline
@@ -562,11 +569,11 @@ impl PlaybackSession {
             audio.set_paused(true)?;
         }
         self.audio = audio;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[3] = stage.elapsed().as_secs_f64() * 1000.0;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         self.decode_cancel = Arc::new(AtomicBool::new(false));
         self.completion = Arc::new(DecodeCompletion::default());
@@ -632,7 +639,7 @@ impl PlaybackSession {
                 }
             }
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[4] = stage.elapsed().as_secs_f64() * 1000.0;
         }
@@ -728,7 +735,7 @@ impl PlaybackSession {
     }
 
     fn stop_pipeline(&mut self) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         self.recovery_frame = None;
         self.decode_cancel.store(true, Ordering::Relaxed);
@@ -738,23 +745,23 @@ impl PlaybackSession {
         self.video_rx.take();
         // Release the bounded audio receiver before joining its producer.
         self.audio.take();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[0] = stage.elapsed().as_secs_f64() * 1000.0;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         self.stop_video(false);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[1] = stage.elapsed().as_secs_f64() * 1000.0;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         if let Some(thread) = self.audio_thread.take() {
             let _ = thread.join();
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[2] = stage.elapsed().as_secs_f64() * 1000.0;
         }

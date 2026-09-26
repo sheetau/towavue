@@ -2,7 +2,33 @@
 use crate::*;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+#[path = "seek_verification/drag.rs"]
+mod drag;
+
 type App = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
+
+#[derive(Clone, Copy, Debug)]
+enum EditMode {
+    None,
+    Crop,
+    Trim,
+    Timeline,
+}
+
+impl EditMode {
+    fn from_environment() -> Self {
+        match std::env::var("TOWAVUE_SEEK_EDIT")
+            .as_deref()
+            .unwrap_or("none")
+        {
+            "none" => Self::None,
+            "crop" => Self::Crop,
+            "trim" => Self::Trim,
+            "timeline" => Self::Timeline,
+            _ => panic!("TOWAVUE_SEEK_EDIT must be none, crop, trim or timeline"),
+        }
+    }
+}
 
 struct Sample {
     started: Instant,
@@ -15,11 +41,17 @@ struct Sample {
     pointer: Option<egui::Pos2>,
     release_pending: bool,
     latency_count: usize,
+    render_times: Vec<Duration>,
 }
 
 struct Trial {
     app: App,
     source: PathBuf,
+    mode: EditMode,
+    timeline_open: bool,
+    expected_edits: Option<Vec<EditOperation>>,
+    configured_at: Option<Instant>,
+    drag: Option<drag::Probe>,
     sample: Option<Sample>,
     index: usize,
     next_at: Instant,
@@ -42,6 +74,13 @@ impl Trial {
             "{:?}",
             self.app.playback_error
         );
+        if let Some(expected) = &self.expected_edits {
+            assert_eq!(
+                self.app.video_operations(),
+                expected.as_slice(),
+                "measurement must preserve configured edits"
+            );
+        }
         if let Some(sample) = &mut self.sample {
             if self.app.pending_seek_started.is_some() {
                 sample.command.get_or_insert(sample.started.elapsed());
@@ -60,15 +99,24 @@ impl Trial {
                         .abs_diff(sample.target.as_nanoseconds())
                         < 1_000_000_000
                 );
-                assert!(
-                    session
-                        .current_source_video_time()
-                        .is_some_and(|time| time >= session.target())
-                );
-                let audio_time = session.audio_position();
-                let video_time = session
+                let source_target = session.timeline().map_or(session.target(), |plan| {
+                    plan.source_time(session.target())
+                        .expect("target source mapping")
+                });
+                let source_time = session
                     .current_source_video_time()
                     .expect("presented source time");
+                assert!(
+                    source_time >= source_target,
+                    "fresh source frame at mapped target"
+                );
+                assert!(
+                    (source_time.as_seconds_f64() - source_target.as_seconds_f64())
+                        <= 2.0 / session.source_video_frame_rate().expect("source FPS") + 0.001,
+                    "source frame stays within two source frames of the requested target"
+                );
+                let audio_time = session.audio_position();
+                let video_time = session.current_video_time().expect("presented output time");
                 if self.index >= 6 {
                     let audio_time = audio_time.expect("playing reference has an audio clock");
                     assert!(
@@ -77,10 +125,12 @@ impl Trial {
                     );
                 }
                 eprintln!(
-                    "APP_SEEK_SYNC index={} audio_s={:?} video_s={:.6} video_minus_audio_ms={:?}",
+                    "APP_SEEK_SYNC index={} audio_s={:?} video_s={:.6} source_s={:.6} source_target_s={:.6} video_minus_audio_ms={:?}",
                     self.index,
                     audio_time.map(MediaTime::as_seconds_f64),
                     video_time.as_seconds_f64(),
+                    source_time.as_seconds_f64(),
+                    source_target.as_seconds_f64(),
                     audio_time
                         .map(|time| (video_time.as_seconds_f64() - time.as_seconds_f64()) * 1000.0)
                 );
@@ -102,6 +152,11 @@ impl Trial {
                     session.metrics().hardware_frame_count,
                     session.metrics().cpu_transfer_count
                 );
+                eprintln!(
+                    "APP_SEEK_STAGES index={} stages_ms={:?}",
+                    self.index,
+                    session.verification_seek_stages()
+                );
                 sample.submitted = Some(elapsed);
             }
             if let Some(submitted) = sample.submitted {
@@ -114,7 +169,7 @@ impl Trial {
                     );
                     let session = self.app.session.as_ref().expect("session");
                     let audio = session.audio_position().expect("playing audio clock");
-                    let video = session.current_source_video_time().expect("video time");
+                    let video = session.current_video_time().expect("output video time");
                     let gap_ms = (video.as_seconds_f64() - audio.as_seconds_f64()) * 1000.0;
                     // A held frame ages by one source frame between presentations.
                     // The late-drop cutoff applies to the next candidate, not to
@@ -152,6 +207,20 @@ impl Trial {
                     }
                 }
                 if settled {
+                    let mut times: Vec<_> = sample
+                        .render_times
+                        .iter()
+                        .map(|time| time.as_secs_f64() * 1000.0)
+                        .collect();
+                    times.sort_by(f64::total_cmp);
+                    assert!(!times.is_empty(), "actual rendering was measured");
+                    eprintln!(
+                        "APP_SEEK_RENDER index={} frames={} median_ms={:.3} max_ms={:.3}",
+                        self.index,
+                        times.len(),
+                        times[times.len() / 2],
+                        times.last().expect("render sample")
+                    );
                     self.index += 1;
                     self.sample = None;
                     self.next_at = Instant::now() + Duration::from_millis(100);
@@ -160,21 +229,125 @@ impl Trial {
         }
     }
 
+    fn configure(&mut self) {
+        if self.app.state == PlaybackState::Playing {
+            self.app.toggle_pause();
+        }
+        self.app.timeline_open = self.timeline_open;
+        let duration = self.app.media_duration.expect("original duration");
+        let range = towavue_core::TimeRange::new(
+            media_time(duration.mul_f64(0.25)),
+            media_time(duration.mul_f64(0.75)),
+        )
+        .expect("middle half");
+        let started = Instant::now();
+        self.configured_at = Some(started);
+        match self.mode {
+            EditMode::None => {}
+            EditMode::Crop => {
+                let (width, height, _) = self
+                    .app
+                    .validate_video_operations(&[])
+                    .expect("source geometry");
+                let crop = towavue_core::PixelCrop {
+                    x: (width / 4) & !1,
+                    y: (height / 4) & !1,
+                    width: (width / 2) & !1,
+                    height: (height / 2) & !1,
+                };
+                self.app.push_visual_edit(EditOperation::Crop(crop));
+                assert_eq!(self.app.video_operations(), &[EditOperation::Crop(crop)]);
+            }
+            EditMode::Trim => {
+                self.app
+                    .push_edit(EditOperation::SetTrimStart(range.start()));
+                self.app.push_edit(EditOperation::SetTrimEnd(range.end()));
+                assert_eq!(
+                    self.app.video_operations(),
+                    &[
+                        EditOperation::SetTrimStart(range.start()),
+                        EditOperation::SetTrimEnd(range.end())
+                    ]
+                );
+                assert!(
+                    self.app
+                        .session
+                        .as_ref()
+                        .expect("session")
+                        .timeline()
+                        .is_none()
+                );
+            }
+            EditMode::Timeline => {
+                let operation = EditOperation::Timeline(towavue_core::TimelineEdit::Keep(range));
+                self.app.push_edit(operation);
+                assert_eq!(self.app.video_operations(), &[operation]);
+                let plan = self
+                    .app
+                    .session
+                    .as_ref()
+                    .expect("session")
+                    .timeline()
+                    .expect("edited plan");
+                assert_eq!(plan.spans().len(), 1);
+                assert_eq!(plan.spans()[0].source(), range);
+            }
+        }
+        self.expected_edits = Some(self.app.video_operations().to_vec());
+        self.next_at = Instant::now() + Duration::from_millis(150);
+        eprintln!(
+            "APP_SEEK_CONFIGURATION edit={:?} timeline_open={} apply_ms={:.3}",
+            self.mode,
+            self.timeline_open,
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+
     fn begin(&mut self) {
+        if self.index == 0 {
+            eprintln!(
+                "APP_SEEK_CONFIGURATION_READY edit={:?} elapsed_ms={:.3}",
+                self.mode,
+                self.configured_at
+                    .expect("configured")
+                    .elapsed()
+                    .as_secs_f64()
+                    * 1000.0
+            );
+        }
         let playing = self.index >= 6;
         if (self.app.state == PlaybackState::Playing) != playing {
             self.app.toggle_pause();
         }
         let fraction = [0.5, 0.75, 0.25][self.index % 3];
         let duration = self.app.playback_duration().expect("duration");
-        let target = media_time(duration.mul_f64(fraction));
+        let range = self.app.playback_range();
+        let start = range.start.as_seconds_f64();
+        let end = range.end.unwrap_or(media_time(duration)).as_seconds_f64();
+        let target = media_time(Duration::from_secs_f64(start + (end - start) * fraction));
+        let display_fraction = target.as_seconds_f64() / duration.as_secs_f64();
         let pointer = (self.index % 6 >= 3).then(|| {
             let context = self.app.ui_context.as_ref().expect("context");
-            let screen = context.content_rect();
-            egui::pos2(
-                screen.left() + 5.0 + (screen.width() - 10.0) * fraction as f32,
-                screen.bottom() - chrome::STATUS_HEIGHT,
-            )
+            if self.app.timeline_is_visible() {
+                let outer = egui::containers::panel::PanelState::load(
+                    context,
+                    self.app.timeline_panel_id(),
+                )
+                .expect("timeline panel")
+                .outer_rect;
+                let left = outer.left() + 8.0;
+                let right = outer.right() - 8.0;
+                egui::pos2(
+                    left + (right - left) * display_fraction as f32,
+                    outer.top() + 8.0 + (outer.height() - 8.0) * 0.72,
+                )
+            } else {
+                let screen = context.content_rect();
+                egui::pos2(
+                    screen.left() + 5.0 + (screen.width() - 10.0) * display_fraction as f32,
+                    screen.bottom() - chrome::STATUS_HEIGHT,
+                )
+            }
         });
         eprintln!(
             "APP_SEEK_BEGIN index={} target_s={:.3}",
@@ -192,6 +365,7 @@ impl Trial {
             pointer,
             release_pending: pointer.is_some(),
             latency_count: self.app.seek_latencies.len(),
+            render_times: Vec::new(),
         });
         if let Some(position) = pointer {
             let input = self
@@ -262,7 +436,22 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.index
         );
         if Instant::now() >= self.next_frame_at {
+            if self.index == 12
+                && let Some(drag) = &mut self.drag
+            {
+                drag.before_frame(&mut self.app);
+            }
+            let started = Instant::now();
             self.app.render_frame();
+            let elapsed = started.elapsed();
+            if self.index == 12
+                && let Some(drag) = &mut self.drag
+            {
+                drag.after_frame(&self.app, elapsed);
+            }
+            if let Some(sample) = &mut self.sample {
+                sample.render_times.push(elapsed);
+            }
             if let Some(sample) = &mut self.sample
                 && sample.release_pending
             {
@@ -284,22 +473,26 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.next_frame_at = Instant::now() + Duration::from_nanos(16_666_667);
         }
         self.observe();
-        if self.index == 12 {
+        if self.index == 12 && self.drag.as_ref().is_none_or(drag::Probe::complete) {
             self.complete = true;
             event_loop.exit();
             event_loop.set_control_flow(ControlFlow::Poll);
             return;
         }
-        if self.sample.is_none()
+        if self.index < 12
+            && self.sample.is_none()
             && Instant::now() >= self.next_at
             && self.app.media_duration.is_some()
-            && self
-                .app
-                .session
-                .as_ref()
-                .is_some_and(|session| session.metrics().presented_frame_count > 0)
+            && self.app.session.as_ref().is_some_and(|session| {
+                session.metrics().presented_frame_count > 0 && !session.video_refresh_pending()
+            })
+            && self.app.pending_seek_started.is_none()
         {
-            self.begin();
+            if self.expected_edits.is_none() {
+                self.configure();
+            } else {
+                self.begin();
+            }
         }
         self.app.about_to_wait(event_loop);
         // Native worker/audio events retain production scheduling; the hidden
@@ -368,6 +561,11 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     let mut trial = Trial {
         app,
         source: source.clone(),
+        mode: EditMode::from_environment(),
+        timeline_open: std::env::var_os("TOWAVUE_SEEK_TIMELINE").is_some(),
+        expected_edits: None,
+        configured_at: None,
+        drag: drag::Probe::from_environment(),
         sample: None,
         index: 0,
         next_at: Instant::now(),
@@ -375,6 +573,10 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         deadline: Instant::now() + Duration::from_secs(180),
         complete: false,
     };
+    assert!(
+        trial.drag.is_none() || trial.timeline_open,
+        "drag requires timeline"
+    );
     event_loop
         .run_app(&mut trial)
         .expect("native application trial");

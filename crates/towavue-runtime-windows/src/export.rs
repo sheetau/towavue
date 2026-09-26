@@ -59,6 +59,10 @@ pub use metadata::{
 #[path = "export_audio_tests.rs"]
 mod audio_tests;
 
+#[cfg(test)]
+#[path = "export_localization_tests.rs"]
+mod localization_tests;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ExportOutput {
     #[default]
@@ -254,6 +258,8 @@ pub enum ExportError {
     Start(#[source] std::io::Error),
     #[error("FFmpeg export failed: {0}")]
     Failed(String),
+    #[error("FFmpeg export failed: {0}")]
+    Structured(#[from] crate::ExportFailure),
     #[error("FFmpeg export failed: {}", .0.in_language(towavue_core::localization::Language::English))]
     Message(towavue_core::localization::Text),
     #[error("FFmpeg export failed: {context}: {error}", context = .0.in_language(towavue_core::localization::Language::English), error = .1)]
@@ -822,9 +828,11 @@ fn export_audio_cancellable(
         });
         check_cancelled(cancelled)?;
         result.map_err(|error| {
-            ExportError::Failed(format!(
-                "PNG metadata: animation frame preparation failed: {error}"
-            ))
+            crate::ExportFailure::prepared_image(
+                towavue_core::localization::Text::ExportPngMetadataContext,
+                error,
+            )
+            .into()
         })
     };
     let mut attempt = 0;

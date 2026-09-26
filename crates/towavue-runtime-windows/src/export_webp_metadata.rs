@@ -1,11 +1,16 @@
 use super::*;
 use std::io::{Seek, SeekFrom, Write};
+use towavue_core::localization::Text;
 
 #[path = "export_webp_animation.rs"]
 mod animation;
 
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ImageEditWebpContext, reason).into()
+}
+
 fn invalid(message: &str) -> ExportError {
-    ExportError::Failed(format!("WebP metadata: {message}"))
+    crate::ExportFailure::diagnostic(Text::ImageEditWebpContext, message).into()
 }
 
 pub(super) fn webp_path(path: &Path) -> bool {
@@ -45,42 +50,46 @@ fn walk(
         || !(4..=u32::MAX - 9).contains(&size)
         || size % 2 != 0
     {
-        return Err(invalid("invalid RIFF/WEBP header or length"));
+        return Err(invalid_reason(
+            Text::ExportValidationInvalidRiffWebpHeaderOrLength,
+        ));
     }
     let mut remaining = u64::from(size) - 4;
     let mut count = 0;
     while remaining != 0 {
         check_cancelled(cancelled)?;
         if remaining < 8 {
-            return Err(invalid("invalid chunk boundary or too many chunks"));
+            return Err(invalid_reason(
+                Text::ExportValidationInvalidChunkBoundaryOrTooManyChunks,
+            ));
         }
         let mut chunk = [0; 8];
         input.read_exact(&mut chunk).map_err(ExportError::Output)?;
         // Animation frames have their own bound; keep the existing ancillary-chunk bound.
         count += usize::from(&chunk[..4] != b"ANMF");
         if count > 65536 {
-            return Err(invalid("too many chunks"));
+            return Err(invalid_reason(Text::ExportValidationTooManyChunks));
         }
         let length = u32::from_le_bytes(chunk[4..].try_into().expect("chunk size"));
         remaining = remaining
             .checked_sub(8 + u64::from(length) + u64::from(length % 2))
-            .ok_or_else(|| invalid("chunk exceeds RIFF length"))?;
+            .ok_or_else(|| invalid_reason(Text::ExportValidationChunkExceedsRiffLength))?;
         let mut payload = (&mut input).take(u64::from(length));
         visit(chunk[..4].try_into().expect("FourCC"), length, &mut payload)?;
         copy(&mut payload, &mut std::io::sink(), cancelled)?;
         if payload.limit() != 0 {
-            return Err(invalid("truncated chunk"));
+            return Err(invalid_reason(Text::ExportValidationTruncatedChunk));
         }
         if length % 2 != 0 {
             let mut pad = [0];
             input.read_exact(&mut pad).map_err(ExportError::Output)?;
             if pad != [0] {
-                return Err(invalid("nonzero RIFF padding"));
+                return Err(invalid_reason(Text::ExportValidationNonzeroRiffPadding));
             }
         }
     }
     if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
-        return Err(invalid("trailing data after RIFF"));
+        return Err(invalid_reason(Text::ExportValidationTrailingDataAfterRiff));
     }
     Ok(u64::from(size) + 8)
 }
@@ -123,8 +132,8 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
             match &kind {
                 b"VP8X" => {
                     if index != 0 || size < 10 {
-                        return Err(invalid(
-                            "VP8X must be the first chunk with at least 10 bytes",
+                        return Err(invalid_reason(
+                            Text::ExportValidationVp8xMustBeTheFirstChunkWithAtLeast10Bytes,
                         ));
                     }
                     let mut bytes = [0; 10];
@@ -138,7 +147,9 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
                         || animation.is_some()
                         || extended.as_ref().is_none_or(|bytes| bytes[0] & 2 == 0)
                     {
-                        return Err(invalid("invalid ANIM order or layout"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidAnimOrderOrLayout,
+                        ));
                     }
                     let mut control = [0; 6];
                     input
@@ -152,7 +163,7 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
                 b"ANMF" => {
                     let animation = animation
                         .as_mut()
-                        .ok_or_else(|| invalid("ANMF requires ANIM"))?;
+                        .ok_or_else(|| invalid_reason(Text::ExportValidationAnmfRequiresAnim))?;
                     let canvas = extended.as_ref().expect("ANIM requires VP8X");
                     let frame_alpha = animation.observe(
                         input,
@@ -161,17 +172,23 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
                         cancelled,
                     )?;
                     if frame_alpha && canvas[0] & 16 == 0 {
-                        return Err(invalid("frame alpha requires VP8X alpha flag"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationFrameAlphaRequiresVp8xAlphaFlag,
+                        ));
                     }
                 }
                 b"VP8 " => {
                     if image.is_some() || animation.is_some() || size < 10 {
-                        return Err(invalid("expected one complete image bitstream"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationExpectedOneCompleteImageBitstream,
+                        ));
                     }
                     let mut bytes = [0; 10];
                     input.read_exact(&mut bytes).map_err(ExportError::Output)?;
                     if bytes[0] & 1 != 0 || bytes[3..6] != [0x9d, 1, 0x2a] {
-                        return Err(invalid("invalid VP8 keyframe header"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidVp8KeyframeHeader,
+                        ));
                     }
                     image = Some((
                         u32::from(u16::from_le_bytes([bytes[6], bytes[7]]) & 0x3fff),
@@ -181,13 +198,15 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
                 }
                 b"VP8L" => {
                     if image.is_some() || animation.is_some() || alpha || size < 5 {
-                        return Err(invalid("invalid lossless image layout"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidLosslessImageLayout,
+                        ));
                     }
                     let mut bytes = [0; 5];
                     input.read_exact(&mut bytes).map_err(ExportError::Output)?;
                     let packed = u32::from_le_bytes(bytes[1..].try_into().expect("VP8L header"));
                     if bytes[0] != 0x2f || packed >> 29 != 0 {
-                        return Err(invalid("invalid VP8L header"));
+                        return Err(invalid_reason(Text::ExportValidationInvalidVp8lHeader));
                     }
                     image = Some((
                         (packed & 0x3fff) + 1,
@@ -202,25 +221,31 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
                         || extended.is_none()
                         || size == 0
                     {
-                        return Err(invalid("invalid ALPH order or layout"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidAlphOrderOrLayout,
+                        ));
                     }
                     alpha = true;
                 }
                 b"ICCP" => {
                     if icc || image.is_some() || animation.is_some() {
-                        return Err(invalid("invalid ICCP order or duplication"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidIccpOrderOrDuplication,
+                        ));
                     }
                     icc = true;
                 }
                 b"EXIF" => {
                     if exif {
-                        return Err(invalid("duplicate EXIF chunk"));
+                        return Err(invalid_reason(Text::ExportValidationDuplicateExifChunk));
                     }
                     exif = true;
                 }
                 b"XMP " => {
                     if packet.is_some() || size as usize > xmp::LIMIT {
-                        return Err(invalid("multiple or oversized XMP packets"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationMultipleOrOversizedXmpPackets,
+                        ));
                     }
                     let mut bytes = vec![0; size as usize];
                     input.read_exact(&mut bytes).map_err(ExportError::Output)?;
@@ -235,7 +260,7 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
     )?;
     let (width, height, lossless_alpha) = if let Some(animation) = &animation {
         if animation.delays.is_empty() {
-            return Err(invalid("animation has no frames"));
+            return Err(invalid_reason(Text::ExportValidationAnimationHasNoFrames));
         }
         let canvas = extended.as_ref().expect("ANIM requires VP8X");
         (
@@ -244,14 +269,18 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
             canvas[0] & 16 != 0,
         )
     } else {
-        image.ok_or_else(|| invalid("missing still image bitstream"))?
+        image.ok_or_else(|| invalid_reason(Text::ExportValidationMissingStillImageBitstream))?
     };
     if width == 0 || height == 0 {
-        return Err(invalid("invalid canvas dimensions"));
+        return Err(invalid_reason(
+            Text::ExportValidationInvalidCanvasDimensions,
+        ));
     }
     if let Some(bytes) = extended {
         if u24(&bytes[4..7]) + 1 != width || u24(&bytes[7..10]) + 1 != height {
-            return Err(invalid("canvas and bitstream dimensions differ"));
+            return Err(invalid_reason(
+                Text::ExportValidationCanvasAndBitstreamDimensionsDiffer,
+            ));
         }
         if (bytes[0] & 4 != 0) != packet.is_some()
             || (bytes[0] & 2 != 0) != animation.is_some()
@@ -259,10 +288,14 @@ fn container(input: impl Read, cancelled: &AtomicBool) -> Result<Container, Expo
             || (bytes[0] & 32 != 0) != icc
             || (alpha && bytes[0] & 16 == 0)
         {
-            return Err(invalid("feature flags and chunks disagree"));
+            return Err(invalid_reason(
+                Text::ExportValidationFeatureFlagsAndChunksDisagree,
+            ));
         }
     } else if packet.is_some() || alpha || icc || exif {
-        return Err(invalid("extended chunks require VP8X"));
+        return Err(invalid_reason(
+            Text::ExportValidationExtendedChunksRequireVp8x,
+        ));
     }
     Ok(Container {
         length,
@@ -302,8 +335,8 @@ pub(super) fn read_for_jpeg(
         cancelled,
     )?;
     if info.animation.is_some() {
-        return Err(invalid(
-            "animated WebP cannot export to JPEG without discarding frames",
+        return Err(invalid_reason(
+            Text::ExportValidationAnimatedWebpCannotExportToJpegWithoutDiscardingFrames,
         ));
     }
     Ok(info.packet)
@@ -344,7 +377,9 @@ fn rewrite(
     let add_extended = !info.extended && !packet.is_empty();
     let length = info.length - old_chunk + new_chunk + if add_extended { 18 } else { 0 };
     if length > u64::from(u32::MAX) - 1 {
-        return Err(invalid("metadata would exceed RIFF length limit"));
+        return Err(invalid_reason(
+            Text::ExportValidationMetadataWouldExceedRiffLengthLimit,
+        ));
     }
     output
         .write_all(b"RIFF\0\0\0\0WEBP")
@@ -384,7 +419,9 @@ fn rewrite(
         chunk(output, b"XMP ", packet)?;
     }
     if output.stream_position().map_err(ExportError::Output)? != length {
-        return Err(invalid("rewritten length differs from expected size"));
+        return Err(invalid_reason(
+            Text::ExportValidationRewrittenLengthDiffersFromExpectedSize,
+        ));
     }
     output
         .seek(SeekFrom::Start(4))
@@ -434,7 +471,7 @@ pub(super) fn apply_png_frames(
                 progress,
             )?;
             if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
-                return Err(invalid("extra encoded PNG frames"));
+                return Err(invalid_reason(Text::ExportValidationExtraEncodedPngFrames));
             }
         }
         let info = container(
@@ -442,7 +479,9 @@ pub(super) fn apply_png_frames(
             cancelled,
         )?;
         if info.animation.as_ref() != Some(&animation) {
-            return Err(invalid("converted animation controls differ"));
+            return Err(invalid_reason(
+                Text::ExportValidationConvertedAnimationControlsDiffer,
+            ));
         }
         check_cancelled(cancelled)?;
         fs::rename(&temporary, &staging.output).map_err(ExportError::Output)
@@ -460,8 +499,8 @@ impl WebpMetadata {
         if !(webp_path(&request.source) || jpeg_metadata::jpeg_path(&request.source))
             || !webp_path(&request.target)
         {
-            return Err(invalid(
-                "XMP export requires JPEG or WebP input and WebP output",
+            return Err(invalid_reason(
+                Text::ExportValidationXmpExportRequiresJpegOrWebpInputAndWebpOutput,
             ));
         }
         let (animation, source_packet) = if jpeg_metadata::jpeg_path(&request.source) {
@@ -551,20 +590,24 @@ impl WebpMetadata {
             decoder.set_memory_limit(512 * 1024 * 1024);
             let (width, height) = decoder.dimensions();
             if u64::from(width) * u64::from(height) * 4 > 512 * 1024 * 1024 {
-                return Err(invalid("validation canvas exceeds 512 MiB"));
+                return Err(invalid_reason(
+                    Text::ExportValidationValidationCanvasExceeds512Mib,
+                ));
             }
             if decoder.is_animated() != self.animation.is_some()
                 || self.animation.as_ref().is_some_and(|animation| {
                     animation.delays.len() != decoder.num_frames() as usize
                 })
             {
-                return Err(invalid("decoded animation frame count differs"));
+                return Err(invalid_reason(
+                    Text::ExportValidationDecodedAnimationFrameCountDiffers,
+                ));
             }
             let mut pixels = vec![
                 0;
-                decoder
-                    .output_buffer_size()
-                    .ok_or_else(|| invalid("invalid frame size"))?
+                decoder.output_buffer_size().ok_or_else(|| invalid_reason(
+                    Text::ExportValidationInvalidFrameSize
+                ))?
             ];
             if let Some(animation) = &self.animation {
                 let mut elapsed = Duration::ZERO;
@@ -575,7 +618,9 @@ impl WebpMetadata {
                         .map_err(|error| invalid(&error.to_string()))?
                         != *delay
                     {
-                        return Err(invalid("decoded animation timing differs"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationDecodedAnimationTimingDiffers,
+                        ));
                     }
                     elapsed += Duration::from_millis(u64::from((*delay).max(10)));
                     progress(elapsed);
@@ -605,7 +650,9 @@ impl WebpMetadata {
             cancelled,
         )?;
         if info.animation != self.animation {
-            return Err(invalid("saved animation controls differ"));
+            return Err(invalid_reason(
+                Text::ExportValidationSavedAnimationControlsDiffer,
+            ));
         }
         let temporary = staging.directory.join("metadata.webp");
         {
@@ -625,7 +672,9 @@ impl WebpMetadata {
         )?
         .packet;
         if packet.as_deref().unwrap_or_default() != self.packet {
-            return Err(invalid("staged XMP differs from the prepared packet"));
+            return Err(invalid_reason(
+                Text::ExportValidationStagedXmpDiffersFromThePreparedPacket,
+            ));
         }
         if packet
             .map(|packet| xmp::parse(&packet, cancelled))
@@ -633,7 +682,9 @@ impl WebpMetadata {
             .unwrap_or_default()
             != self.values
         {
-            return Err(invalid("staged XMP did not retain requested values"));
+            return Err(invalid_reason(
+                Text::ExportValidationStagedXmpDidNotRetainRequestedValues,
+            ));
         }
         check_cancelled(cancelled)?;
         fs::rename(&temporary, &staging.output).map_err(ExportError::Output)
@@ -668,8 +719,7 @@ impl SnapshotConversion {
         let plays = u16::from_le_bytes(animation.control[4..].try_into().expect("loop count"));
         if avif::avif_path(target) {
             if animation.delays.contains(&0) {
-                return Err(invalid(
-                    "AVIF requires positive sample durations; use WebP output to retain zero delays",
+                return Err(invalid_reason(Text::ExportValidationAvifRequiresPositiveSampleDurationsUseWebpOutputToRetainZeroDelays,
                 ));
             }
             return Ok(Some(Self {
@@ -695,9 +745,12 @@ impl SnapshotConversion {
                     (divisor, remainder) = (remainder, divisor % remainder);
                 }
                 let numerator = u16::try_from(*delay / divisor).map_err(|_| {
-                    invalid(&format!(
-                        "{delay} ms frame delay cannot be represented exactly in APNG; use WebP output"
-                    ))
+                    crate::ExportFailure::frame_delay(
+                        Text::ImageEditWebpContext,
+                        Some(*delay),
+                        "APNG",
+                        "WebP",
+                    )
                 })?;
                 let denominator = (1000 / divisor) as u16;
                 let [a, b] = numerator.to_be_bytes();
@@ -750,8 +803,7 @@ pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), 
     .animation
     .is_some()
     {
-        return Err(invalid(
-            "animated WebP conversion must preserve frames; use WebP, APNG (.png/.apng), or GIF output",
+        return Err(invalid_reason(Text::ExportValidationAnimatedWebpConversionMustPreserveFramesUseWebpApngPngApngOrGifOutput,
         ));
     }
     Ok(())

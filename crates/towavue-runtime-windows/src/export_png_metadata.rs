@@ -1,5 +1,6 @@
 use super::*;
 use std::io::Write;
+use towavue_core::localization::Text;
 
 #[path = "export_png_animation.rs"]
 mod animation;
@@ -16,8 +17,8 @@ struct TextChunk {
     text: String,
 }
 
-fn invalid(message: &str) -> ExportError {
-    ExportError::Failed(format!("PNG metadata: {message}"))
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ExportPngMetadataContext, reason).into()
 }
 
 fn keyword(field: MetadataField) -> &'static str {
@@ -41,14 +42,15 @@ fn terminated<'a>(data: &mut &'a [u8]) -> Result<&'a [u8], ExportError> {
     let end = data
         .iter()
         .position(|byte| *byte == 0)
-        .ok_or_else(|| invalid("missing text separator"))?;
+        .ok_or_else(|| invalid_reason(Text::ExportValidationMissingTextSeparator))?;
     let value = &data[..end];
     *data = &data[end + 1..];
     Ok(value)
 }
 
 fn utf8(data: &[u8]) -> Result<String, ExportError> {
-    String::from_utf8(data.to_vec()).map_err(|_| invalid("invalid UTF-8 text"))
+    String::from_utf8(data.to_vec())
+        .map_err(|_| invalid_reason(Text::ExportValidationInvalidUtf8Text))
 }
 
 fn latin1(data: &[u8]) -> String {
@@ -70,20 +72,26 @@ fn inflate(data: &[u8], cancelled: &AtomicBool) -> Result<Vec<u8>, ExportError> 
                 &mut buffer,
                 flate2::FlushDecompress::None,
             )
-            .map_err(|_| invalid("invalid compressed text"))?;
+            .map_err(|_| invalid_reason(Text::ExportValidationInvalidCompressedText))?;
         let count = (decoder.total_out() - before_out) as usize;
         if result.len() + count > TEXT_LIMIT {
-            return Err(invalid("expanded text exceeds 1 MiB"));
+            return Err(invalid_reason(
+                Text::ExportValidationExpandedTextExceeds1Mib,
+            ));
         }
         result.extend_from_slice(&buffer[..count]);
         if status == flate2::Status::StreamEnd {
             if decoder.total_in() as usize != data.len() {
-                return Err(invalid("trailing compressed text bytes"));
+                return Err(invalid_reason(
+                    Text::ExportValidationTrailingCompressedTextBytes,
+                ));
             }
             return Ok(result);
         }
         if before_in == decoder.total_in() && count == 0 {
-            return Err(invalid("incomplete compressed text"));
+            return Err(invalid_reason(
+                Text::ExportValidationIncompleteCompressedText,
+            ));
         }
     }
 }
@@ -102,7 +110,7 @@ fn parse_text(
         || key.windows(2).any(|pair| pair == b"  ")
         || !key.iter().all(|byte| matches!(*byte, 32..=126 | 161..=255))
     {
-        return Err(invalid("invalid text keyword"));
+        return Err(invalid_reason(Text::ExportValidationInvalidTextKeyword));
     }
     let key = latin1(key);
     let field = MetadataField::ALL.into_iter().find(|field| {
@@ -112,13 +120,17 @@ fn parse_text(
         b"tEXt" => latin1(rest),
         b"zTXt" => {
             if rest.first() != Some(&0) {
-                return Err(invalid("unsupported text compression method"));
+                return Err(invalid_reason(
+                    Text::ExportValidationUnsupportedTextCompressionMethod,
+                ));
             }
             latin1(&inflate(&rest[1..], cancelled)?)
         }
         b"iTXt" => {
             if rest.len() < 2 || rest[0] > 1 || rest[1] != 0 {
-                return Err(invalid("invalid international text compression"));
+                return Err(invalid_reason(
+                    Text::ExportValidationInvalidInternationalTextCompression,
+                ));
             }
             let compressed = rest[0] == 1;
             rest = &rest[2..];
@@ -127,7 +139,7 @@ fn parse_text(
                 .iter()
                 .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
             {
-                return Err(invalid("invalid text language tag"));
+                return Err(invalid_reason(Text::ExportValidationInvalidTextLanguageTag));
             }
             utf8(terminated(&mut rest)?)?;
             if compressed {
@@ -139,7 +151,7 @@ fn parse_text(
         _ => unreachable!("only PNG text chunks are parsed"),
     };
     if text.contains('\0') {
-        return Err(invalid("text contains NUL"));
+        return Err(invalid_reason(Text::ExportValidationTextContainsNul));
     }
     Ok((field, text))
 }
@@ -175,7 +187,7 @@ fn scan_contents(
         .read_exact(&mut signature)
         .map_err(ExportError::Output)?;
     if &signature != SIGNATURE {
-        return Err(invalid("input is not PNG"));
+        return Err(invalid_reason(Text::ExportValidationInputIsNotPng));
     }
     if let Some((writer, _)) = &mut replacement {
         writer.write_all(SIGNATURE).map_err(ExportError::Output)?;
@@ -203,7 +215,9 @@ fn scan_contents(
             || (!first && &kind == b"IHDR")
             || (&kind == b"IEND" && (length != 0 || !image_seen))
         {
-            return Err(invalid("invalid chunk header or image boundaries"));
+            return Err(invalid_reason(
+                Text::ExportValidationInvalidChunkHeaderOrImageBoundaries,
+            ));
         }
         first = false;
         image_seen |= &kind == b"IDAT";
@@ -213,7 +227,9 @@ fn scan_contents(
             text_count += 1;
             stored += length;
             if text_count > TEXT_COUNT_LIMIT || stored > TEXT_LIMIT {
-                return Err(invalid("stored text exceeds 128 chunks / 1 MiB"));
+                return Err(invalid_reason(
+                    Text::ExportValidationStoredTextExceeds128Chunks1Mib,
+                ));
             }
         }
         if let Some((writer, chunks)) = &mut replacement {
@@ -255,14 +271,16 @@ fn scan_contents(
             .read_exact(&mut checksum)
             .map_err(ExportError::Output)?;
         if crc.finalize() != u32::from_be_bytes(checksum) {
-            return Err(invalid("chunk CRC mismatch"));
+            return Err(invalid_reason(Text::ExportValidationChunkCrcMismatch));
         }
         animation.observe(&kind, &prefix, length)?;
         if is_text {
             let (field, text) = parse_text(kind, &data, cancelled)?;
             expanded += text.len();
             if expanded > TEXT_LIMIT {
-                return Err(invalid("expanded text exceeds 1 MiB total"));
+                return Err(invalid_reason(
+                    Text::ExportValidationExpandedTextExceeds1MibTotal,
+                ));
             }
             if let Some(field) = field {
                 texts.push(TextChunk {
@@ -279,11 +297,13 @@ fn scan_contents(
         }
         if &kind == b"IEND" {
             if reader.read(&mut buffer[..1]).map_err(ExportError::Output)? != 0 {
-                return Err(invalid("trailing bytes after IEND"));
+                return Err(invalid_reason(Text::ExportValidationTrailingBytesAfterIend));
             }
             let animation = animation.finish()?;
             if expected_animation.is_some_and(|expected| animation.as_ref() != Some(expected)) {
-                return Err(invalid("staged animation differs from source controls"));
+                return Err(invalid_reason(
+                    Text::ExportValidationStagedAnimationDiffersFromSourceControls,
+                ));
             }
             return Ok((texts, animation));
         }
@@ -300,8 +320,8 @@ fn read(path: &Path, cancelled: &AtomicBool) -> Result<Vec<TextChunk>, ExportErr
 
 pub(super) fn inspect(path: &Path) -> Result<Vec<MetadataSourceValue>, ExportError> {
     if !png_path(path) {
-        return Err(invalid(
-            "image text inspection currently requires PNG input",
+        return Err(invalid_reason(
+            Text::ExportValidationImageTextInspectionCurrentlyRequiresPngInput,
         ));
     }
     Ok(read(path, &AtomicBool::new(false))?
@@ -338,8 +358,8 @@ impl PngMetadata {
         cancelled: &AtomicBool,
     ) -> Result<Self, ExportError> {
         if !png_path(&request.source) || !png_path(&request.target) {
-            return Err(invalid(
-                "image text export currently requires PNG input and PNG output",
+            return Err(invalid_reason(
+                Text::ExportValidationImageTextExportCurrentlyRequiresPngInputAndPngOutput,
             ));
         }
         let (mut chunks, animation) = scan_contents(
@@ -407,8 +427,8 @@ impl PngMetadata {
         }
         let animation = self.animation.as_ref().expect("animated source");
         if !animation.includes_default {
-            return Err(invalid(
-                "AVIF conversion cannot retain a separate poster; use APNG output",
+            return Err(invalid_reason(
+                Text::ExportValidationAvifConversionCannotRetainASeparatePosterUseApngOutput,
             ));
         }
         let fractions = animation.delays.iter().map(|delay| {
@@ -416,7 +436,7 @@ impl PngMetadata {
             let denominator = u64::from(u16::from_be_bytes([delay[2], delay[3]]));
             let denominator = if denominator == 0 { 100 } else { denominator };
             if numerator == 0 {
-                return Err(invalid("AVIF export requires positive sample durations; use APNG output to retain zero delays"));
+                return Err(invalid_reason(Text::ExportValidationAvifExportRequiresPositiveSampleDurationsUseApngOutputToRetainZeroDelays));
             }
             let divisor = gcd(numerator, denominator);
             Ok((numerator / divisor, denominator / divisor))
@@ -425,8 +445,7 @@ impl PngMetadata {
         for (_, denominator) in &fractions {
             timescale = timescale / gcd(timescale, *denominator) * denominator;
             if timescale > i32::MAX as u64 {
-                return Err(invalid(
-                    "exact frame times exceed the supported AVIF time base; use APNG output",
+                return Err(invalid_reason(Text::ExportValidationExactFrameTimesExceedTheSupportedAvifTimeBaseUseApngOutput,
                 ));
             }
         }
@@ -434,14 +453,18 @@ impl PngMetadata {
             .iter()
             .map(|(num, den)| {
                 u32::try_from(num * (timescale / den)).map_err(|_| {
-                    invalid("exact frame duration exceeds AVIF sample ticks; use APNG output")
+                    invalid_reason(
+                        Text::ExportValidationExactFrameDurationExceedsAvifSampleTicksUseApngOutput,
+                    )
                 })
             })
             .collect::<Result<Vec<_>, ExportError>>()?;
         let duration: u64 = ticks.iter().map(|ticks| u64::from(*ticks)).sum();
         duration
             .checked_mul(u64::from(animation.plays))
-            .ok_or_else(|| invalid("repeated AVIF duration exceeds 64 bits; use APNG output"))?;
+            .ok_or_else(|| {
+                invalid_reason(Text::ExportValidationRepeatedAvifDurationExceeds64BitsUseApngOutput)
+            })?;
         Ok((timescale as u32, ticks))
     }
 
@@ -465,8 +488,8 @@ impl PngMetadata {
     fn gif_controls(&self) -> Result<gif_animation::Animation, ExportError> {
         let animation = self.animation.as_ref().expect("animated source");
         if !animation.includes_default {
-            return Err(invalid(
-                "GIF cannot retain a separate poster; use APNG output",
+            return Err(invalid_reason(
+                Text::ExportValidationGifCannotRetainASeparatePosterUseApngOutput,
             ));
         }
         let delays = animation.delays.iter().map(|delay| {
@@ -474,10 +497,9 @@ impl PngMetadata {
             let denominator = u32::from(u16::from_be_bytes([delay[2], delay[3]]));
             let denominator = if denominator == 0 { 100 } else { denominator };
             if !numerator.is_multiple_of(denominator) {
-                return Err(invalid("GIF frame delays require whole centiseconds; use APNG output to retain exact timing"));
+                return Err(invalid_reason(Text::ExportValidationGifFrameDelaysRequireWholeCentisecondsUseApngOutputToRetainExactTiming));
             }
-            u16::try_from(numerator / denominator).map_err(|_| invalid(
-                "frame delay exceeds GIF's 65535-centisecond limit; use APNG output"
+            u16::try_from(numerator / denominator).map_err(|_| invalid_reason(Text::ExportValidationFrameDelayExceedsGifS65535CentisecondLimitUseApngOutput
             ))
         }).collect::<Result<Vec<_>, ExportError>>()?;
         gif_animation::Animation::from_centiseconds(animation.plays, delays)
@@ -494,25 +516,24 @@ impl PngMetadata {
     fn webp_controls(&self) -> Result<(u16, Vec<u32>), ExportError> {
         let animation = self.animation.as_ref().expect("animated source");
         if !animation.includes_default {
-            return Err(invalid(
-                "WebP cannot retain a separate poster; use APNG output",
+            return Err(invalid_reason(
+                Text::ExportValidationWebpCannotRetainASeparatePosterUseApngOutput,
             ));
         }
-        let plays = u16::try_from(animation.plays)
-            .map_err(|_| invalid("WebP is limited to 65535 finite total plays; use APNG output"))?;
+        let plays = u16::try_from(animation.plays).map_err(|_| {
+            invalid_reason(Text::ExportValidationWebpIsLimitedTo65535FiniteTotalPlaysUseApngOutput)
+        })?;
         let delays = animation.delays.iter().map(|delay| {
             let numerator = u32::from(u16::from_be_bytes([delay[0], delay[1]])) * 1000;
             let denominator = u32::from(u16::from_be_bytes([delay[2], delay[3]]));
             let denominator = if denominator == 0 { 100 } else { denominator };
             if !numerator.is_multiple_of(denominator) {
-                return Err(invalid(
-                    "WebP frame delays require whole milliseconds; use APNG output to retain exact timing",
+                return Err(invalid_reason(Text::ExportValidationWebpFrameDelaysRequireWholeMillisecondsUseApngOutputToRetainExactTiming,
                 ));
             }
             let milliseconds = numerator / denominator;
             if milliseconds > 0xffffff {
-                return Err(invalid(
-                    "frame delay exceeds WebP's 24-bit millisecond limit; use APNG output",
+                return Err(invalid_reason(Text::ExportValidationFrameDelayExceedsWebpS24BitMillisecondLimitUseApngOutput,
                 ));
             }
             Ok(milliseconds)
@@ -556,7 +577,7 @@ impl PngMetadata {
             });
             check_cancelled(cancelled)?;
             result.map_err(|error| {
-                invalid(&format!("animation frame preparation failed: {error}"))
+                crate::ExportFailure::prepared_image(Text::ExportPngMetadataContext, error)
             })?;
             output.flush().map_err(ExportError::Output)?;
         }
@@ -620,8 +641,8 @@ impl PngMetadata {
             cancelled,
         )?;
         if texts != self.chunks || animation != self.animation {
-            return Err(invalid(
-                "staged text or animation did not retain the requested values",
+            return Err(invalid_reason(
+                Text::ExportValidationStagedTextOrAnimationDidNotRetainTheRequestedValues,
             ));
         }
         check_cancelled(cancelled)?;
@@ -637,7 +658,9 @@ pub(super) fn require_static(path: &Path, cancelled: &AtomicBool) -> Result<(), 
         cancelled,
     )?;
     if animation.is_some() {
-        return Err(invalid("animation export requires PNG or APNG output"));
+        return Err(invalid_reason(
+            Text::ExportValidationAnimationExportRequiresPngOrApngOutput,
+        ));
     }
     Ok(())
 }

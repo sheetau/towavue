@@ -1,5 +1,6 @@
 use super::*;
 use std::io::{Seek, SeekFrom};
+use towavue_core::localization::Text;
 
 #[path = "export_avif_single.rs"]
 mod single;
@@ -11,8 +12,16 @@ struct SequenceTiming<'a> {
     packet_durations: Option<&'a [u32]>,
 }
 
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ImageEditAvifContext, reason).into()
+}
+
 fn invalid(error: impl std::fmt::Display) -> ExportError {
-    ExportError::Failed(format!("AVIF export: {error}"))
+    crate::ExportFailure::diagnostic(Text::ImageEditAvifContext, error).into()
+}
+
+fn invalid_image(error: crate::ImageDecodeError) -> ExportError {
+    crate::ExportFailure::image(Text::ImageEditAvifContext, error).into()
 }
 
 fn image_edit_failed(error: crate::ImageEditError) -> ExportError {
@@ -68,10 +77,10 @@ pub(super) fn copy_unedited(
             &|| !cancelled.load(Ordering::Relaxed),
             progress,
         )
-        .map_err(invalid)?;
+        .map_err(invalid_image)?;
         if count != expected {
-            return Err(invalid(
-                "decoded frame count differs from container samples",
+            return Err(invalid_reason(
+                Text::ExportValidationDecodedFrameCountDiffersFromContainerSamples,
             ));
         }
         Ok(())
@@ -140,7 +149,8 @@ impl Animation {
         let mut file = fs::File::open(path).map_err(ExportError::Output)?;
         let length = file.metadata().map_err(ExportError::Output)?.len();
         let root = boxes(&mut file, 0, length, cancelled)?;
-        let ftyp = one(&root, b"ftyp")?.ok_or_else(|| invalid("missing ftyp"))?;
+        let ftyp = one(&root, b"ftyp")?
+            .ok_or_else(|| invalid_reason(Text::ExportValidationMissingFtyp))?;
         let brands = bytes(&mut file, ftyp, 4096)?;
         if brands.len() < 8
             || brands.len() % 4 != 0
@@ -151,7 +161,7 @@ impl Animation {
                 .enumerate()
                 .any(|(i, brand)| i != 1 && matches!(brand, b"avif" | b"avis"))
         {
-            return Err(invalid("not an AVIF container"));
+            return Err(invalid_reason(Text::ExportValidationNotAnAvifContainer));
         }
         let Some(moov) = one(&root, b"moov")? else {
             return Ok(None);
@@ -163,21 +173,25 @@ impl Animation {
             .map(|item| track(&mut file, *item, cancelled))
             .collect::<Result<Vec<_>, _>>()?;
         if tracks.is_empty() || tracks.len() > 2 {
-            return Err(invalid("expected a color track and optional alpha track"));
+            return Err(invalid_reason(
+                Text::ExportValidationExpectedAColorTrackAndOptionalAlphaTrack,
+            ));
         }
         if tracks
             .iter()
             .enumerate()
             .any(|(i, track)| tracks[..i].iter().any(|old| old.id == track.id))
         {
-            return Err(invalid("duplicate track IDs"));
+            return Err(invalid_reason(Text::ExportValidationDuplicateTrackIds));
         }
         let color = tracks
             .iter()
             .find(|track| track.alpha_for.is_none())
-            .ok_or_else(|| invalid("missing color track"))?;
+            .ok_or_else(|| invalid_reason(Text::ExportValidationMissingColorTrack))?;
         if tracks.len() == 2 && !tracks.iter().any(|track| track.alpha_for == Some(color.id)) {
-            return Err(invalid("second track is not linked alpha"));
+            return Err(invalid_reason(
+                Text::ExportValidationSecondTrackIsNotLinkedAlpha,
+            ));
         }
         ffmpeg::init().map_err(invalid)?;
         // AVIF sample durations are unsigned; do not apply MOV's legacy
@@ -198,14 +212,18 @@ impl Animation {
             });
             let stream = matching
                 .next()
-                .ok_or_else(|| invalid("missing timed AVIF track"))?;
+                .ok_or_else(|| invalid_reason(Text::ExportValidationMissingTimedAvifTrack))?;
             if matching.next().is_some() {
-                return Err(invalid("ambiguous timed AVIF track"));
+                return Err(invalid_reason(
+                    Text::ExportValidationAmbiguousTimedAvifTrack,
+                ));
             }
             if stream.parameters().medium() != ffmpeg::media::Type::Video
                 || stream.parameters().id() != ffmpeg::codec::Id::AV1
             {
-                return Err(invalid("AVIF sequence contains a non-AV1 video stream"));
+                return Err(invalid_reason(
+                    Text::ExportValidationAvifSequenceContainsANonAv1VideoStream,
+                ));
             }
             let id = u32::try_from(stream.id()).map_err(invalid)?;
             let matrix = stream
@@ -255,13 +273,19 @@ impl Animation {
                 continue;
             };
             if packet.is_corrupt() || packet.size() == 0 {
-                return Err(invalid("corrupt or empty AVIF sample"));
+                return Err(invalid_reason(
+                    Text::ExportValidationCorruptOrEmptyAvifSample,
+                ));
             }
             if samples.times.len() == 65536 {
-                return Err(invalid("animation exceeds 65536 frames"));
+                return Err(invalid_reason(
+                    Text::ExportValidationAnimationExceeds65536Frames,
+                ));
             }
             samples.times.push((
-                packet.pts().ok_or_else(|| invalid("missing sample PTS"))?,
+                packet
+                    .pts()
+                    .ok_or_else(|| invalid_reason(Text::ExportValidationMissingSamplePts))?,
                 packet.duration(),
             ));
         }
@@ -276,7 +300,9 @@ impl Animation {
                 || samples.times.iter().any(|(_, duration)| *duration <= 0)
                 || samples.times.windows(2).any(|pair| pair[0].0 >= pair[1].0)
             {
-                return Err(invalid("missing or nonpositive sample timing"));
+                return Err(invalid_reason(
+                    Text::ExportValidationMissingOrNonpositiveSampleTiming,
+                ));
             }
         }
         samples.sort_by_key(|sample| sample.id != color.id);
@@ -292,8 +318,7 @@ impl Animation {
                 || i128::from(alpha.times[0].0) * i128::from(samples[0].time_base.denominator())
                     != i128::from(samples[0].times[0].0) * i128::from(alpha.time_base.denominator())
         }) {
-            return Err(invalid(
-                "alpha dimensions, aperture, orientation or sample timing differ from color",
+            return Err(invalid_reason(Text::ExportValidationAlphaDimensionsApertureOrientationOrSampleTimingDifferFromColor,
             ));
         }
         Ok(Some(Self { tracks, samples }))
@@ -337,9 +362,13 @@ impl Animation {
             .map(|(numerator, denominator)| {
                 let scaled = numerator * i128::from(units);
                 if scaled % denominator != 0 || scaled / denominator > i128::from(limit) {
-                    return Err(invalid(format!(
-                        "frame delay cannot be represented exactly in {format}; use AVIF output"
-                    )));
+                    return Err(crate::ExportFailure::frame_delay(
+                        Text::ImageEditAvifContext,
+                        None,
+                        format,
+                        "AVIF",
+                    )
+                    .into());
                 }
                 Ok((scaled / denominator) as u32)
             })
@@ -358,8 +387,7 @@ impl Animation {
                     .ok()
                     .zip(u16::try_from(denominator / divisor).ok());
                 let Some((numerator, denominator)) = fraction else {
-                    return Err(invalid(
-                        "frame delay cannot be represented exactly in APNG; use AVIF output",
+                    return Err(invalid_reason(Text::ExportValidationFrameDelayCannotBeRepresentedExactlyInApngUseAvifOutput,
                     ));
                 };
                 let [a, b] = numerator.to_be_bytes();
@@ -380,7 +408,9 @@ impl Animation {
         } else if webp_metadata::webp_path(target) {
             Some(SnapshotOutput::Webp {
                 plays: u16::try_from(plays).map_err(|_| {
-                    invalid("WebP is limited to 65535 finite total plays; use AVIF output")
+                    invalid_reason(
+                        Text::ExportValidationWebpIsLimitedTo65535FiniteTotalPlaysUseAvifOutput,
+                    )
                 })?,
                 delays: self.integer_delays(1000, 0xffffff, "WebP")?,
             })
@@ -435,7 +465,9 @@ impl Animation {
         if let Some(alpha_id) = self.color().premultiplied_with
             && source_alpha.is_none_or(|sample| sample.id != alpha_id)
         {
-            return Err(invalid("invalid premultiplied alpha reference"));
+            return Err(invalid_reason(
+                Text::ExportValidationInvalidPremultipliedAlphaReference,
+            ));
         }
         let alpha_output = source_alpha.is_some()
             || request
@@ -508,7 +540,9 @@ impl Animation {
                 (reader.info().width, reader.info().height)
             };
             if size != output_size {
-                return Err(invalid("saved frame dimensions differ"));
+                return Err(invalid_reason(
+                    Text::ExportValidationSavedFrameDimensionsDiffer,
+                ));
             }
             return match snapshots {
                 SnapshotOutput::Png(png) => png.apply(staging, cancelled),
@@ -545,7 +579,8 @@ impl Animation {
                 .map_err(ExportError::Output)?;
             let length = file.metadata().map_err(ExportError::Output)?.len();
             let root = boxes(&mut file, 0, length, cancelled)?;
-            let moov = one(&root, b"moov")?.ok_or_else(|| invalid("saved sequence has no moov"))?;
+            let moov = one(&root, b"moov")?
+                .ok_or_else(|| invalid_reason(Text::ExportValidationSavedSequenceHasNoMoov))?;
             for item in boxes(&mut file, moov.start, moov.end, cancelled)?
                 .into_iter()
                 .filter(|item| &item.kind == b"trak")
@@ -560,17 +595,21 @@ impl Animation {
             }
         }
         let output = Self::read(&staging.output, cancelled)?
-            .ok_or_else(|| invalid("encoder flattened animation"))?;
+            .ok_or_else(|| invalid_reason(Text::ExportValidationEncoderFlattenedAnimation))?;
         if output.color().loops != self.color().loops
             || output.samples.len() != if alpha_output { 2 } else { 1 }
             || output.samples[0].size != output_size
         {
-            return Err(invalid("saved loop or alpha controls differ"));
+            return Err(invalid_reason(
+                Text::ExportValidationSavedLoopOrAlphaControlsDiffer,
+            ));
         }
         for (index, actual) in output.samples.iter().enumerate() {
             let expected = self.samples.get(index).unwrap_or(&self.samples[0]);
             if !same_timing(expected, actual) {
-                return Err(invalid("saved frame count or timing differs"));
+                return Err(invalid_reason(
+                    Text::ExportValidationSavedFrameCountOrTimingDiffers,
+                ));
             }
         }
         check_cancelled(cancelled)
@@ -745,7 +784,9 @@ pub(super) fn apply_png_frames(
 ) -> Result<(), ExportError> {
     let source = staging.directory.join("avif-source.png");
     if source.try_exists().map_err(ExportError::Output)? {
-        return Err(invalid("snapshot input already exists"));
+        return Err(invalid_reason(
+            Text::ExportValidationSnapshotInputAlreadyExists,
+        ));
     }
     fs::rename(&staging.output, &source).map_err(ExportError::Output)?;
     let mut size = None;
@@ -757,13 +798,15 @@ pub(super) fn apply_png_frames(
             let (width, height, rgba) = gif_animation::read_png(&mut input)?;
             let dimensions = (u32::from(width), u32::from(height));
             if size.is_some_and(|size| size != dimensions) {
-                return Err(invalid("snapshot dimensions differ"));
+                return Err(invalid_reason(
+                    Text::ExportValidationSnapshotDimensionsDiffer,
+                ));
             }
             size = Some(dimensions);
             alpha |= rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 255);
         }
         if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
-            return Err(invalid("extra PNG snapshots"));
+            return Err(invalid_reason(Text::ExportValidationExtraPngSnapshots));
         }
     }
     let request = ExportRequest {
@@ -792,7 +835,7 @@ pub(super) fn apply_png_frames(
         progress,
     )?;
     let saved = Animation::read(&staging.output, cancelled)?
-        .ok_or_else(|| invalid("saved animation was flattened"))?;
+        .ok_or_else(|| invalid_reason(Text::ExportValidationSavedAnimationWasFlattened))?;
     let mut pts = 0;
     let expected: Vec<_> = delays
         .iter()
@@ -810,7 +853,9 @@ pub(super) fn apply_png_frames(
                 || sample.times != expected
         })
     {
-        return Err(invalid("saved snapshot sequence controls differ"));
+        return Err(invalid_reason(
+            Text::ExportValidationSavedSnapshotSequenceControlsDiffer,
+        ));
     }
     check_cancelled(cancelled)
 }
@@ -830,9 +875,11 @@ pub(super) fn export_still(
         &current,
     );
     check_cancelled(cancelled)?;
-    let decoded = decoded.map_err(invalid)?;
+    let decoded = decoded.map_err(invalid_image)?;
     if decoded.frames.len() != 1 {
-        return Err(invalid("static export must not discard animation frames"));
+        return Err(invalid_reason(
+            Text::ExportValidationStaticExportMustNotDiscardAnimationFrames,
+        ));
     }
     let frame = crate::image_edits::render_frame_cancellable(
         &decoded.frames[0],
@@ -884,12 +931,14 @@ pub(super) fn export_still(
             &current,
         );
         check_cancelled(cancelled)?;
-        let output = output.map_err(invalid)?;
+        let output = output.map_err(invalid_image)?;
         if output.frames.len() != 1
             || output.dimensions() != (frame.width, frame.height)
             || output.frames[0].rgba != frame.rgba
         {
-            return Err(invalid("saved static RGBA pixels differ"));
+            return Err(invalid_reason(
+                Text::ExportValidationSavedStaticRgbaPixelsDiffer,
+            ));
         }
     } else {
         let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;

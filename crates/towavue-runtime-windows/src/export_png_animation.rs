@@ -32,7 +32,7 @@ impl Animation {
                 .read_exact(&mut signature)
                 .map_err(ExportError::Output)?;
             if &signature != SIGNATURE {
-                return Err(invalid("missing encoded PNG frame"));
+                return Err(invalid_reason(Text::ExportValidationMissingEncodedPngFrame));
             }
             let mut first = true;
             let mut image_seen = false;
@@ -50,7 +50,9 @@ impl Animation {
                     || matches!(&kind, b"acTL" | b"fcTL" | b"fdAT")
                     || (&kind == b"IEND" && (length != 0 || !image_seen))
                 {
-                    return Err(invalid("invalid encoded PNG frame structure"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationInvalidEncodedPngFrameStructure,
+                    ));
                 }
                 first = false;
                 if &kind == b"IDAT" && !image_seen {
@@ -68,9 +70,9 @@ impl Animation {
                     }
                     if let Some(delay) = delay {
                         let mut control = sequence.to_be_bytes().to_vec();
-                        sequence = sequence
-                            .checked_add(1)
-                            .ok_or_else(|| invalid("APNG sequence limit"))?;
+                        sequence = sequence.checked_add(1).ok_or_else(|| {
+                            invalid_reason(Text::ExportValidationApngSequenceLimit)
+                        })?;
                         control.extend_from_slice(&canvas[..8]);
                         control.extend_from_slice(&[0; 8]);
                         control.extend_from_slice(delay);
@@ -93,9 +95,9 @@ impl Animation {
                             .map_err(ExportError::Output)?;
                         output_crc.update(b"fdAT");
                         output_crc.update(&sequence.to_be_bytes());
-                        sequence = sequence
-                            .checked_add(1)
-                            .ok_or_else(|| invalid("APNG sequence limit"))?;
+                        sequence = sequence.checked_add(1).ok_or_else(|| {
+                            invalid_reason(Text::ExportValidationApngSequenceLimit)
+                        })?;
                     } else {
                         writer.write_all(&header).map_err(ExportError::Output)?;
                         output_crc.update(&kind);
@@ -115,10 +117,14 @@ impl Animation {
                         if index == 0 {
                             canvas.extend_from_slice(&buffer[..count]);
                         } else if canvas != buffer[..count] {
-                            return Err(invalid("encoded PNG frame formats differ"));
+                            return Err(invalid_reason(
+                                Text::ExportValidationEncodedPngFrameFormatsDiffer,
+                            ));
                         }
                         if buffer[8..13] != [8, 6, 0, 0, 0] {
-                            return Err(invalid("encoded animation must use 8-bit RGBA PNG"));
+                            return Err(invalid_reason(
+                                Text::ExportValidationEncodedAnimationMustUse8BitRgbaPng,
+                            ));
                         }
                     }
                     if copy {
@@ -134,7 +140,7 @@ impl Animation {
                     .read_exact(&mut checksum)
                     .map_err(ExportError::Output)?;
                 if input_crc.finalize() != u32::from_be_bytes(checksum) {
-                    return Err(invalid("encoded PNG CRC mismatch"));
+                    return Err(invalid_reason(Text::ExportValidationEncodedPngCrcMismatch));
                 }
                 if copy {
                     writer
@@ -147,7 +153,9 @@ impl Animation {
             }
         }
         if reader.read(&mut buffer[..1]).map_err(ExportError::Output)? != 0 {
-            return Err(invalid("extra encoded animation frames"));
+            return Err(invalid_reason(
+                Text::ExportValidationExtraEncodedAnimationFrames,
+            ));
         }
         write_chunk(writer, b"IEND", &[]).map_err(ExportError::Output)
     }
@@ -179,11 +187,13 @@ impl Scan {
             b"acTL" => 8,
             b"fcTL" => 26,
             b"fdAT" if length >= 4 => return Ok(4),
-            b"fdAT" => return Err(invalid("short APNG frame data")),
+            b"fdAT" => return Err(invalid_reason(Text::ExportValidationShortApngFrameData)),
             _ => return Ok(0),
         };
         if length != count {
-            return Err(invalid("invalid APNG control length"));
+            return Err(invalid_reason(
+                Text::ExportValidationInvalidApngControlLength,
+            ));
         }
         Ok(count)
     }
@@ -206,8 +216,8 @@ impl Scan {
                     || number(data, 4) > i32::MAX as u32
                     || !(1..=FRAME_LIMIT).contains(&self.expected)
                 {
-                    return Err(invalid(
-                        "APNG requires one pre-image control and 1..=65536 frames",
+                    return Err(invalid_reason(
+                        Text::ExportValidationApngRequiresOnePreImageControlAnd165536Frames,
                     ));
                 }
                 self.animation = Some(Animation {
@@ -217,12 +227,13 @@ impl Scan {
                 });
             }
             b"fcTL" | b"fdAT" => {
-                let animation = self
-                    .animation
-                    .as_mut()
-                    .ok_or_else(|| invalid("APNG frame without animation control"))?;
+                let animation = self.animation.as_mut().ok_or_else(|| {
+                    invalid_reason(Text::ExportValidationApngFrameWithoutAnimationControl)
+                })?;
                 if u64::from(number(data, 0)) != self.sequence || self.sequence > i32::MAX as u64 {
-                    return Err(invalid("invalid APNG sequence number"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationInvalidApngSequenceNumber,
+                    ));
                 }
                 self.sequence += 1;
                 if kind == b"fcTL" {
@@ -240,7 +251,9 @@ impl Scan {
                         || (!self.image_seen
                             && (!first || x != 0 || y != 0 || (width, height) != self.canvas))
                     {
-                        return Err(invalid("invalid APNG frame bounds, data or controls"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidApngFrameBoundsDataOrControls,
+                        ));
                     }
                     if first {
                         animation.includes_default = !self.image_seen;
@@ -254,14 +267,16 @@ impl Scan {
                         || animation.delays.is_empty()
                         || (animation.includes_default && animation.delays.len() == 1)
                     {
-                        return Err(invalid("misplaced APNG frame data"));
+                        return Err(invalid_reason(Text::ExportValidationMisplacedApngFrameData));
                     }
                     self.frame_data |= length > 4;
                 }
             }
             b"IDAT" => {
                 if self.image_closed {
-                    return Err(invalid("nonconsecutive PNG image data"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationNonconsecutivePngImageData,
+                    ));
                 }
                 self.image_seen = true;
                 if self
@@ -283,7 +298,9 @@ impl Scan {
             .as_ref()
             .is_some_and(|animation| animation.delays.len() != self.expected || !self.frame_data)
         {
-            return Err(invalid("APNG frame count or final frame data mismatch"));
+            return Err(invalid_reason(
+                Text::ExportValidationApngFrameCountOrFinalFrameDataMismatch,
+            ));
         }
         Ok(self.animation)
     }

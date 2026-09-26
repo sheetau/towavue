@@ -1,11 +1,12 @@
 use super::*;
 use std::io::Write;
+use towavue_core::localization::Text;
 
 const XMP: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 const EXTENDED: &[u8] = b"http://ns.adobe.com/xmp/extension/\0";
 
-fn invalid(message: &str) -> ExportError {
-    ExportError::Failed(format!("JPEG metadata: {message}"))
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ExportJpegMetadataContext, reason).into()
 }
 
 pub(super) fn jpeg_path(path: &Path) -> bool {
@@ -35,7 +36,7 @@ fn scan(
         .read_exact(&mut signature)
         .map_err(ExportError::Output)?;
     if signature != [0xff, 0xd8] {
-        return Err(invalid("input is not JPEG"));
+        return Err(invalid_reason(Text::ExportValidationInputIsNotJpeg));
     }
     emit(&mut output, &signature)?;
     let mut packet = None;
@@ -48,7 +49,7 @@ fn scan(
         if entropy {
             let available = input.fill_buf().map_err(ExportError::Output)?;
             if available.is_empty() {
-                return Err(invalid("missing end of image"));
+                return Err(invalid_reason(Text::ExportValidationMissingEndOfImage));
             }
             let count = available
                 .iter()
@@ -64,14 +65,14 @@ fn scan(
         let mut byte = [0];
         input.read_exact(&mut byte).map_err(ExportError::Output)?;
         if byte[0] != 0xff {
-            return Err(invalid("expected marker"));
+            return Err(invalid_reason(Text::ExportValidationExpectedMarker));
         }
         let mut marker = vec![0xff];
         loop {
             input.read_exact(&mut byte).map_err(ExportError::Output)?;
             marker.push(byte[0]);
             if marker.len() > 4096 {
-                return Err(invalid("excessive marker padding"));
+                return Err(invalid_reason(Text::ExportValidationExcessiveMarkerPadding));
             }
             if byte[0] != 0xff {
                 break;
@@ -84,7 +85,7 @@ fn scan(
         }
         count += 1;
         if count > 65536 {
-            return Err(invalid("too many marker segments"));
+            return Err(invalid_reason(Text::ExportValidationTooManyMarkerSegments));
         }
         if !inserted && !matches!(code, 0xe0 | 0xe1) {
             if output.is_some() && !replacement.is_empty() {
@@ -100,11 +101,13 @@ fn scan(
         }
         if code == 0xd9 {
             if !image_seen {
-                return Err(invalid("JPEG has no image scan"));
+                return Err(invalid_reason(Text::ExportValidationJpegHasNoImageScan));
             }
             emit(&mut output, &marker)?;
             if input.read(&mut byte).map_err(ExportError::Output)? != 0 {
-                return Err(invalid("trailing data after JPEG image"));
+                return Err(invalid_reason(
+                    Text::ExportValidationTrailingDataAfterJpegImage,
+                ));
             }
             return Ok(packet);
         }
@@ -113,26 +116,34 @@ fn scan(
             continue;
         }
         if code == 0 || matches!(code, 0xd0..=0xd8) {
-            return Err(invalid("unexpected standalone marker"));
+            return Err(invalid_reason(
+                Text::ExportValidationUnexpectedStandaloneMarker,
+            ));
         }
         let mut length = [0; 2];
         input.read_exact(&mut length).map_err(ExportError::Output)?;
         let length_value = u16::from_be_bytes(length) as usize;
         if length_value < 2 {
-            return Err(invalid("invalid segment length"));
+            return Err(invalid_reason(Text::ExportValidationInvalidSegmentLength));
         }
         let mut data = vec![0; length_value - 2];
         input.read_exact(&mut data).map_err(ExportError::Output)?;
         if code == 0xe1 && data.starts_with(EXTENDED) {
-            return Err(invalid("Extended XMP is not supported yet"));
+            return Err(invalid_reason(
+                Text::ExportValidationExtendedXmpIsNotSupportedYet,
+            ));
         }
         let is_xmp = code == 0xe1 && data.starts_with(XMP);
         if is_xmp {
             if packet.is_some() {
-                return Err(invalid("multiple standard XMP packets"));
+                return Err(invalid_reason(
+                    Text::ExportValidationMultipleStandardXmpPackets,
+                ));
             }
             if data.len() - XMP.len() > xmp::LIMIT {
-                return Err(invalid("XMP packet exceeds 65502 bytes"));
+                return Err(invalid_reason(
+                    Text::ExportValidationXmpPacketExceeds65502Bytes,
+                ));
             }
             packet = Some(data[XMP.len()..].to_vec());
         }
@@ -182,8 +193,8 @@ impl JpegMetadata {
         if !(jpeg_path(&request.source) || webp_metadata::webp_path(&request.source))
             || !jpeg_path(&request.target)
         {
-            return Err(invalid(
-                "XMP export requires JPEG or static WebP input and JPEG output",
+            return Err(invalid_reason(
+                Text::ExportValidationXmpExportRequiresJpegOrStaticWebpInputAndJpegOutput,
             ));
         }
         let source_packet = if jpeg_path(&request.source) {
@@ -240,7 +251,9 @@ impl JpegMetadata {
         }
         let packet = read_packet(&temporary, cancelled)?;
         if packet.as_deref().unwrap_or_default() != self.packet {
-            return Err(invalid("staged XMP differs from the prepared packet"));
+            return Err(invalid_reason(
+                Text::ExportValidationStagedXmpDiffersFromThePreparedPacket,
+            ));
         }
         if packet
             .map(|packet| xmp::parse(&packet, cancelled))
@@ -248,7 +261,9 @@ impl JpegMetadata {
             .unwrap_or_default()
             != self.values
         {
-            return Err(invalid("staged XMP did not retain requested text values"));
+            return Err(invalid_reason(
+                Text::ExportValidationStagedXmpDidNotRetainRequestedTextValues,
+            ));
         }
         check_cancelled(cancelled)?;
         fs::rename(&temporary, &staging.output).map_err(ExportError::Output)

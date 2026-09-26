@@ -9,7 +9,9 @@ const LIMIT: usize = 4 * 1024 * 1024;
 
 fn atom(kind: &[u8; 4], payload: &[u8]) -> Result<Vec<u8>, ExportError> {
     if payload.len() > LIMIT {
-        return Err(invalid("sequence movie metadata exceeds limit"));
+        return Err(invalid_reason(
+            Text::ExportValidationSequenceMovieMetadataExceedsLimit,
+        ));
     }
     Ok([
         &((payload.len() + 8) as u32).to_be_bytes()[..],
@@ -35,13 +37,17 @@ pub(super) fn finish(
 ) -> Result<(), ExportError> {
     check_cancelled(cancelled)?;
     if timing.time_base.numerator() != 1 || timing.time_base.denominator() <= 0 {
-        return Err(invalid("invalid sequence time base"));
+        return Err(invalid_reason(
+            Text::ExportValidationInvalidSequenceTimeBase,
+        ));
     }
     let delays = timing
         .packet_durations
-        .ok_or_else(|| invalid("missing sample durations"))?;
+        .ok_or_else(|| invalid_reason(Text::ExportValidationMissingSampleDurations))?;
     if delays.is_empty() || delays.len() > 65536 || delays.contains(&0) {
-        return Err(invalid("AVIF requires 1–65536 positive sample durations"));
+        return Err(invalid_reason(
+            Text::ExportValidationAvifRequires165536PositiveSampleDurations,
+        ));
     }
     let duration: u64 = delays.iter().map(|delay| u64::from(*delay)).sum();
     let movie = Movie {
@@ -53,7 +59,9 @@ pub(super) fn finish(
         } else {
             duration
                 .checked_mul(u64::from(timing.loops))
-                .ok_or_else(|| invalid("repeated sequence duration exceeds 64 bits"))?
+                .ok_or_else(|| {
+                    invalid_reason(Text::ExportValidationRepeatedSequenceDurationExceeds64Bits)
+                })?
         },
         loops: timing.loops,
     };
@@ -64,9 +72,12 @@ pub(super) fn finish(
         .map_err(ExportError::Output)?;
     let length = file.metadata().map_err(ExportError::Output)?.len();
     let root = boxes(&mut file, 0, length, cancelled)?;
-    let moov = one(&root, b"moov")?.ok_or_else(|| invalid("missing sequence movie"))?;
-    let ftyp = one(&root, b"ftyp")?.ok_or_else(|| invalid("missing sequence brands"))?;
-    let mdat = one(&root, b"mdat")?.ok_or_else(|| invalid("missing sequence media"))?;
+    let moov = one(&root, b"moov")?
+        .ok_or_else(|| invalid_reason(Text::ExportValidationMissingSequenceMovie))?;
+    let ftyp = one(&root, b"ftyp")?
+        .ok_or_else(|| invalid_reason(Text::ExportValidationMissingSequenceBrands))?;
+    let mdat = one(&root, b"mdat")?
+        .ok_or_else(|| invalid_reason(Text::ExportValidationMissingSequenceMedia))?;
     if moov.end != length
         || moov.end - moov.header > LIMIT as u64
         || mdat.end > moov.header
@@ -74,11 +85,15 @@ pub(super) fn finish(
             .iter()
             .any(|item| !matches!(&item.kind, b"ftyp" | b"free" | b"mdat" | b"moov"))
     {
-        return Err(invalid("unexpected sequence muxer layout"));
+        return Err(invalid_reason(
+            Text::ExportValidationUnexpectedSequenceMuxerLayout,
+        ));
     }
     let mut brands = bytes(&mut file, ftyp, 4096)?;
     if brands.len() < 24 || brands.len() % 4 != 0 {
-        return Err(invalid("insufficient sequence brand space"));
+        return Err(invalid_reason(
+            Text::ExportValidationInsufficientSequenceBrandSpace,
+        ));
     }
     brands[..8].copy_from_slice(b"avis\0\0\0\0");
     for (index, brand) in brands[8..].as_chunks_mut::<4>().0.iter_mut().enumerate() {
@@ -90,7 +105,9 @@ pub(super) fn finish(
         .filter(|item| item.kind == *b"trak")
         .collect();
     if tracks.len() != if alpha { 2 } else { 1 } {
-        return Err(invalid("unexpected sequence track count"));
+        return Err(invalid_reason(
+            Text::ExportValidationUnexpectedSequenceTrackCount,
+        ));
     }
     let mut data = Vec::new();
     let mut track_index = 0;
@@ -137,7 +154,9 @@ impl Movie<'_> {
             if data.len() < prefix
                 || (item.kind == *b"stsd" && data[..8] != [0, 0, 0, 0, 0, 0, 0, 1])
             {
-                return Err(invalid("invalid sequence sample description"));
+                return Err(invalid_reason(
+                    Text::ExportValidationInvalidSequenceSampleDescription,
+                ));
             }
             data.truncate(prefix);
             for child in boxes(file, item.start + prefix as u64, item.end, cancelled)? {
@@ -156,11 +175,12 @@ impl Movie<'_> {
                     _ => false,
                 };
                 if !allowed {
-                    return Err(invalid(format!(
-                        "unexpected sequence child {} in {}",
-                        String::from_utf8_lossy(&child.kind),
-                        String::from_utf8_lossy(&item.kind)
-                    )));
+                    return Err(crate::ExportFailure::sequence_child(
+                        Text::ImageEditAvifContext,
+                        child.kind,
+                        item.kind,
+                    )
+                    .into());
                 }
                 if child.kind == *b"btrt" {
                     // The placeholder packet duration is not the final bitrate.
@@ -168,7 +188,9 @@ impl Movie<'_> {
                 }
                 if child.kind == *b"fiel" {
                     if bytes(file, child, 2)? != [1, 0] {
-                        return Err(invalid("non-progressive sequence sample"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationNonProgressiveSequenceSample,
+                        ));
                     }
                     continue; // QuickTime field-order extension is unnecessary for AVIF.
                 }
@@ -199,21 +221,29 @@ impl Movie<'_> {
                     let wide = match data.first() {
                         Some(0) => false,
                         Some(1) => true,
-                        _ => return Err(invalid("invalid generated header version")),
+                        _ => {
+                            return Err(invalid_reason(
+                                Text::ExportValidationInvalidGeneratedHeaderVersion,
+                            ));
+                        }
                     };
                     let track_header = item.kind == *b"tkhd";
                     let offset = if wide { 20 } else { 12 };
                     let suffix =
                         offset + if track_header { 8 } else { 4 } + if wide { 8 } else { 4 };
                     if data.len() < suffix {
-                        return Err(invalid("truncated generated header"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationTruncatedGeneratedHeader,
+                        ));
                     }
                     let mut header = data[..4].to_vec();
                     header[0] = 1;
                     header.extend([0; 16]); // creation/modification times are not source metadata
                     if track_header {
                         if data[offset..offset + 4] != ((track + 1) as u32).to_be_bytes() {
-                            return Err(invalid("unexpected generated track ID"));
+                            return Err(invalid_reason(
+                                Text::ExportValidationUnexpectedGeneratedTrackId,
+                            ));
                         }
                         header.extend(&data[offset..offset + 8]);
                     } else {
@@ -232,13 +262,17 @@ impl Movie<'_> {
                 }
                 b"hdlr" => {
                     if data.len() < 12 || data[8..12] != *b"vide" {
-                        return Err(invalid("unexpected generated handler"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationUnexpectedGeneratedHandler,
+                        ));
                     }
                     data[8..12].copy_from_slice(if track == 0 { b"pict" } else { b"auxv" });
                 }
                 b"stts" => {
                     if data.len() < 8 || data[..4] != [0; 4] {
-                        return Err(invalid("invalid generated sample times"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidGeneratedSampleTimes,
+                        ));
                     }
                     let entries =
                         u32::from_be_bytes(data[4..8].try_into().expect("count")) as usize;
@@ -255,7 +289,9 @@ impl Movie<'_> {
                             .sum::<u64>()
                             != self.delays.len() as u64
                     {
-                        return Err(invalid("generated sample time count differs"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationGeneratedSampleTimeCountDiffers,
+                        ));
                     }
                     data = vec![0; 4];
                     data.extend((self.delays.len() as u32).to_be_bytes());
@@ -268,7 +304,9 @@ impl Movie<'_> {
                     if data.len() < 12
                         || data[8..12] != (self.delays.len() as u32).to_be_bytes() =>
                 {
-                    return Err(invalid("generated sample count differs"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationGeneratedSampleCountDiffers,
+                    ));
                 }
                 _ => {}
             }

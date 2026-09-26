@@ -117,6 +117,9 @@ impl ExportError {
             Self::InvalidTimeline => Text::ExportInvalidTimeline.in_language(language).into(),
             Self::Start(error) => formatted::export_start_failed(language, &error.to_string()),
             Self::Failed(error) => formatted::ffmpeg_export_failed(language, error),
+            Self::Structured(error) => {
+                formatted::ffmpeg_export_failed(language, &error.message(language))
+            }
             Self::Message(text) => {
                 formatted::ffmpeg_export_failed(language, text.in_language(language))
             }

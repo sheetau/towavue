@@ -2,6 +2,7 @@ use super::*;
 use quick_xml::events::Event;
 use quick_xml::name::{LocalName, ResolveResult};
 use quick_xml::reader::NsReader;
+use towavue_core::localization::Text;
 
 pub(super) const LIMIT: usize = 65502;
 pub(super) const FIELDS: [MetadataField; 9] = [
@@ -29,8 +30,12 @@ mod typed;
 #[path = "export_xmp_tests.rs"]
 mod tests;
 
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ExportXmpMetadataContext, reason).into()
+}
+
 fn invalid(message: impl std::fmt::Display) -> ExportError {
-    ExportError::Failed(format!("XMP metadata: {message}"))
+    crate::ExportFailure::diagnostic(Text::ExportXmpMetadataContext, message).into()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -72,7 +77,11 @@ fn name((namespace, local): (ResolveResult<'_>, LocalName<'_>)) -> Result<Name, 
             .map_err(invalid)?
             .to_owned(),
         ResolveResult::Unbound => String::new(),
-        ResolveResult::Unknown(_) => return Err(invalid("undeclared namespace prefix")),
+        ResolveResult::Unknown(_) => {
+            return Err(invalid_reason(
+                Text::ExportValidationUndeclaredNamespacePrefix,
+            ));
+        }
     };
     Ok(Name(
         namespace,
@@ -94,15 +103,19 @@ fn valid_text(text: &str) -> bool {
 
 fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
     if packet.len() > LIMIT {
-        return Err(invalid("packet exceeds 65502 bytes"));
+        return Err(invalid_reason(
+            Text::ExportValidationPacketExceeds65502Bytes,
+        ));
     }
     let text = std::str::from_utf8(packet).map_err(invalid)?;
     if !valid_text(text) {
-        return Err(invalid("invalid XML character"));
+        return Err(invalid_reason(Text::ExportValidationInvalidXmlCharacter));
     }
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     if text.starts_with('\u{feff}') {
-        return Err(invalid("multiple UTF-8 byte order marks"));
+        return Err(invalid_reason(
+            Text::ExportValidationMultipleUtf8ByteOrderMarks,
+        ));
     }
     let mut reader = NsReader::from_str(text);
     reader.config_mut().expand_empty_elements = true;
@@ -120,10 +133,12 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
             Event::Start(start) => {
                 count += 1;
                 if count > 4096 || stack.len() >= 32 {
-                    return Err(invalid("XML structure exceeds 4096 elements / 32 levels"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationXmlStructureExceeds4096Elements32Levels,
+                    ));
                 }
                 if stack.is_empty() && root.is_some() {
-                    return Err(invalid("multiple XML roots"));
+                    return Err(invalid_reason(Text::ExportValidationMultipleXmlRoots));
                 }
                 let mut attributes = Vec::new();
                 for attribute in start.attributes() {
@@ -136,21 +151,25 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
                         .map_err(invalid)?
                         .into_owned();
                     if !valid_text(&value) {
-                        return Err(invalid("invalid attribute character"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidAttributeCharacter,
+                        ));
                     }
                     if attribute.key.as_ref() == b"xmlns"
                         || attribute.key.as_ref().starts_with(b"xmlns:")
                     {
                         if attribute.value.as_ref() != value.as_bytes() {
-                            return Err(invalid(
-                                "escaped namespace declarations are not supported",
+                            return Err(invalid_reason(
+                                Text::ExportValidationEscapedNamespaceDeclarationsAreNotSupported,
                             ));
                         }
                         continue;
                     }
                     let key = name(reader.resolver().resolve_attribute(attribute.key))?;
                     if attributes.iter().any(|(other, _)| *other == key) {
-                        return Err(invalid("duplicate expanded attribute name"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationDuplicateExpandedAttributeName,
+                        ));
                     }
                     attributes.push((key, value));
                 }
@@ -163,9 +182,9 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
                 None
             }
             Event::End(_) => {
-                let node = stack
-                    .pop()
-                    .ok_or_else(|| invalid("unexpected closing element"))?;
+                let node = stack.pop().ok_or_else(|| {
+                    invalid_reason(Text::ExportValidationUnexpectedClosingElement)
+                })?;
                 if let Some(parent) = stack.last_mut() {
                     parent.children.push(node);
                 } else {
@@ -184,7 +203,9 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
                 )
             }
             Event::DocType(_) => {
-                return Err(invalid("DTD and external entities are not supported"));
+                return Err(invalid_reason(
+                    Text::ExportValidationDtdAndExternalEntitiesAreNotSupported,
+                ));
             }
             Event::Decl(declaration) => {
                 if declaration.version().map_err(invalid)?.as_ref() != b"1.0"
@@ -195,8 +216,8 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
                         .is_some_and(|encoding| !encoding.eq_ignore_ascii_case(b"utf-8"))
                     || !declaration_allowed
                 {
-                    return Err(invalid(
-                        "only an initial XML 1.0 UTF-8 declaration is supported",
+                    return Err(invalid_reason(
+                        Text::ExportValidationOnlyAnInitialXml10Utf8DeclarationIsSupported,
                     ));
                 }
                 None
@@ -207,19 +228,21 @@ fn tree(packet: &[u8], cancelled: &AtomicBool) -> Result<Node, ExportError> {
         };
         if let Some(content) = content {
             if !valid_text(&content) {
-                return Err(invalid("invalid referenced XML character"));
+                return Err(invalid_reason(
+                    Text::ExportValidationInvalidReferencedXmlCharacter,
+                ));
             }
             if let Some(node) = stack.last_mut() {
                 node.text.push_str(&content);
             } else if !content.trim().is_empty() {
-                return Err(invalid("text outside XML root"));
+                return Err(invalid_reason(Text::ExportValidationTextOutsideXmlRoot));
             }
         }
     }
     if !stack.is_empty() {
-        return Err(invalid("unclosed XML element"));
+        return Err(invalid_reason(Text::ExportValidationUnclosedXmlElement));
     }
-    root.ok_or_else(|| invalid("missing XMP document"))
+    root.ok_or_else(|| invalid_reason(Text::ExportValidationMissingXmpDocument))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -276,7 +299,9 @@ fn qualified_attribute_value(node: &Node) -> Result<Option<&str>, ExportError> {
         if key.is(RDF, "value") {
             value = Some(text.as_str());
         } else if key.0.is_empty() || key.0 == RDF || key.0 == XML {
-            return Err(invalid("unsupported qualified-resource attribute"));
+            return Err(invalid_reason(
+                Text::ExportValidationUnsupportedQualifiedResourceAttribute,
+            ));
         }
     }
     Ok(value)
@@ -292,7 +317,9 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
     };
     if node.attributes.iter().any(|(key, _)| key.is(RDF, "value")) {
         if !node.children.is_empty() || !node.text.trim().is_empty() {
-            return Err(invalid("attribute-valued text must have no nested content"));
+            return Err(invalid_reason(
+                Text::ExportValidationAttributeValuedTextMustHaveNoNestedContent,
+            ));
         }
         if let Some(value) = qualified_attribute_value(node)? {
             return Ok(plain(value));
@@ -310,7 +337,9 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
     };
     if let Some(resource) = resource {
         if !node.text.trim().is_empty() || !resource.text.trim().is_empty() {
-            return Err(invalid("mixed qualified property content"));
+            return Err(invalid_reason(
+                Text::ExportValidationMixedQualifiedPropertyContent,
+            ));
         }
         let mut actual = resource
             .children
@@ -320,47 +349,55 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
             && let Some(value) = qualified_attribute_value(resource)?
         {
             if actual.next().is_some() {
-                return Err(invalid(
-                    "qualified property has both attribute and element values",
+                return Err(invalid_reason(
+                    Text::ExportValidationQualifiedPropertyHasBothAttributeAndElementValues,
                 ));
             }
             return Ok(plain(value));
         }
         let value = actual
             .next()
-            .ok_or_else(|| invalid("qualified property has no rdf:value"))?;
+            .ok_or_else(|| invalid_reason(Text::ExportValidationQualifiedPropertyHasNoRdfValue))?;
         if actual.next().is_some() {
-            return Err(invalid(
-                "qualified property has multiple rdf:value elements",
+            return Err(invalid_reason(
+                Text::ExportValidationQualifiedPropertyHasMultipleRdfValueElements,
             ));
         }
         return values(value, field);
     }
     if !node.attributes.is_empty() {
-        return Err(invalid("unsupported text-property attributes"));
+        return Err(invalid_reason(
+            Text::ExportValidationUnsupportedTextPropertyAttributes,
+        ));
     }
     if node.children.is_empty() {
         return Ok(plain(&node.text));
     }
     if !alt(field) && field != MetadataField::Artist {
-        return Err(invalid("expected a simple Dynamic Media text property"));
+        return Err(invalid_reason(
+            Text::ExportValidationExpectedASimpleDynamicMediaTextProperty,
+        ));
     }
     if !node.text.trim().is_empty() || node.children.len() != 1 {
-        return Err(invalid("mixed or multiple property structures"));
+        return Err(invalid_reason(
+            Text::ExportValidationMixedOrMultiplePropertyStructures,
+        ));
     }
     let array = &node.children[0];
     if !array.name.is(RDF, if alt(field) { "Alt" } else { "Seq" })
         || !array.attributes.is_empty()
         || !array.text.trim().is_empty()
     {
-        return Err(invalid(
-            "expected an Alt language list or ordered creator Seq",
+        return Err(invalid_reason(
+            Text::ExportValidationExpectedAnAltLanguageListOrOrderedCreatorSeq,
         ));
     }
     let mut result: Vec<Value> = Vec::new();
     for item in &array.children {
         if !item.name.is(RDF, "li") || !item.children.is_empty() {
-            return Err(invalid("only plain text list items are supported"));
+            return Err(invalid_reason(
+                Text::ExportValidationOnlyPlainTextListItemsAreSupported,
+            ));
         }
         let language = match item.attributes.as_slice() {
             [] if !alt(field) => None,
@@ -374,7 +411,11 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
             {
                 Some(language.clone())
             }
-            _ => return Err(invalid("missing or unsupported text language/qualifier")),
+            _ => {
+                return Err(invalid_reason(
+                    Text::ExportValidationMissingOrUnsupportedTextLanguageQualifier,
+                ));
+            }
         };
         if let Some(language) = &language
             && result.iter().any(|other| {
@@ -384,7 +425,9 @@ fn values(node: &Node, field: MetadataField) -> Result<Vec<Value>, ExportError> 
                     .is_some_and(|other| other.eq_ignore_ascii_case(language))
             })
         {
-            return Err(invalid("duplicate language alternative"));
+            return Err(invalid_reason(
+                Text::ExportValidationDuplicateLanguageAlternative,
+            ));
         }
         result.push(Value {
             field,
@@ -406,10 +449,10 @@ pub(super) fn parse(packet: &[u8], cancelled: &AtomicBool) -> Result<Vec<Value>,
     {
         &root.children[0]
     } else {
-        return Err(invalid("expected XMP RDF root"));
+        return Err(invalid_reason(Text::ExportValidationExpectedXmpRdfRoot));
     };
     if !rdf.text.trim().is_empty() {
-        return Err(invalid("text in RDF root"));
+        return Err(invalid_reason(Text::ExportValidationTextInRdfRoot));
     }
     // Even rdf:about="" resolves against an inherited base URI. This parser has
     // no document URI with which to prove a nonempty base still names this image.
@@ -419,25 +462,25 @@ pub(super) fn parse(packet: &[u8], cancelled: &AtomicBool) -> Result<Vec<Value>,
             .any(|(key, text)| key.is(XML, "base") && !text.is_empty())
     };
     if changes_base(&root) || changes_base(rdf) || rdf.children.iter().any(changes_base) {
-        return Err(invalid(
-            "nonempty xml:base is unsupported for current-document descriptions",
+        return Err(invalid_reason(
+            Text::ExportValidationNonemptyXmlBaseIsUnsupportedForCurrentDocumentDescriptions,
         ));
     }
     let mut result = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for description in &rdf.children {
         if !description.name.is(RDF, "Description") || !description.text.trim().is_empty() {
-            return Err(invalid("expected RDF Description"));
+            return Err(invalid_reason(Text::ExportValidationExpectedRdfDescription));
         }
         for (key, text) in &description.attributes {
             if key.0 == RDF && (!key.is(RDF, "about") || !text.is_empty()) {
-                return Err(invalid(
-                    "only current-document RDF descriptions are supported",
+                return Err(invalid_reason(
+                    Text::ExportValidationOnlyCurrentDocumentRdfDescriptionsAreSupported,
                 ));
             }
             if let Some(field) = key.field() {
                 if !seen.insert(field) {
-                    return Err(invalid("duplicate text property"));
+                    return Err(invalid_reason(Text::ExportValidationDuplicateTextProperty));
                 }
                 result.push(Value {
                     field,
@@ -449,14 +492,14 @@ pub(super) fn parse(packet: &[u8], cancelled: &AtomicBool) -> Result<Vec<Value>,
         for child in &description.children {
             if let Some(field) = child.name.field() {
                 if !seen.insert(field) {
-                    return Err(invalid("duplicate text property"));
+                    return Err(invalid_reason(Text::ExportValidationDuplicateTextProperty));
                 }
                 result.extend(values(child, field)?);
             }
         }
     }
     if result.len() > 128 {
-        return Err(invalid("more than 128 text values"));
+        return Err(invalid_reason(Text::ExportValidationMoreThan128TextValues));
     }
     result.sort_by_key(|value| value.field);
     Ok(result)
@@ -469,13 +512,16 @@ pub(super) fn apply(
     for field in MetadataField::ALL {
         if let Some(text) = options.get(field) {
             if !FIELDS.contains(&field) {
-                return Err(invalid(format!(
-                    "'{}' is not supported; XMP currently supports Title, Artist, Album, Composer, Genre, Date, Track, Comment and Copyright",
-                    field.label()
-                )));
+                return Err(crate::ExportFailure::unsupported_metadata(
+                    Text::ExportXmpMetadataContext,
+                    field,
+                )
+                .into());
             }
             if !valid_text(text) {
-                return Err(invalid("requested value contains invalid XML characters"));
+                return Err(invalid_reason(
+                    Text::ExportValidationRequestedValueContainsInvalidXmlCharacters,
+                ));
             }
             if !text.is_empty() {
                 typed::validate(field, text)?;
@@ -505,7 +551,9 @@ pub(super) fn encode(values: &[Value]) -> Result<Vec<u8>, ExportError> {
         description(values)
     );
     if result.len() > LIMIT {
-        return Err(invalid("serialized packet exceeds 65502 bytes"));
+        return Err(invalid_reason(
+            Text::ExportValidationSerializedPacketExceeds65502Bytes,
+        ));
     }
     Ok(result.into_bytes())
 }
@@ -758,12 +806,16 @@ fn rewrite(
             _ => {}
         }
         if writer.get_ref().len() > LIMIT {
-            return Err(invalid("rewritten packet exceeds 65502 bytes"));
+            return Err(invalid_reason(
+                Text::ExportValidationRewrittenPacketExceeds65502Bytes,
+            ));
         }
     }
     let output = writer.into_inner();
     if parse(&output, cancelled)? != expected {
-        return Err(invalid("rewritten packet differs from requested values"));
+        return Err(invalid_reason(
+            Text::ExportValidationRewrittenPacketDiffersFromRequestedValues,
+        ));
     }
     if !unchanged_pixels && !retained_property && expected.is_empty() {
         return Ok(Vec::new());

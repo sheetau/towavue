@@ -21,6 +21,8 @@ mod file_operation;
 mod operation_error_messages;
 mod recovery_detail;
 pub use recovery_detail::RecoveryDetail;
+mod export_failure;
+pub use export_failure::ExportFailure;
 mod source_save;
 pub use source_save::{
     PreparedSaveAs, PreparedSourceSave, RetainedSource, SaveAsEvent, SaveAsJob, SaveAsRequest,

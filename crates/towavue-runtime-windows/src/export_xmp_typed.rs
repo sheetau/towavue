@@ -9,13 +9,9 @@ pub(super) fn validate(field: MetadataField, text: &str) -> Result<(), ExportErr
     if valid {
         Ok(())
     } else {
-        Err(invalid(match field {
-            MetadataField::Date => {
-                "Date must be an XMP release date: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DDThh:mm[:ss[.fraction]][Z or +/-hh:mm]"
-            }
-            _ => {
-                "Track must be decimal digits with an optional leading + or - sign, not a track/total fraction"
-            }
+        Err(invalid_reason(match field {
+            MetadataField::Date => Text::ExportValidationXmpDate,
+            _ => Text::ExportValidationXmpTrack,
         }))
     }
 }

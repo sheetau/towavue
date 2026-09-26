@@ -15,20 +15,28 @@ impl Animation {
         cancelled: &AtomicBool,
     ) -> Result<bool, ExportError> {
         if size > 512 * 1024 * 1024 {
-            return Err(invalid("encoded animation frame exceeds 512 MiB"));
+            return Err(invalid_reason(
+                Text::ExportValidationEncodedAnimationFrameExceeds512Mib,
+            ));
         }
         if size < 24 || self.delays.len() == 65536 {
-            return Err(invalid("incomplete ANMF or animation exceeds 65536 frames"));
+            return Err(invalid_reason(
+                Text::ExportValidationIncompleteAnmfOrAnimationExceeds65536Frames,
+            ));
         }
         let mut frame = [0; 16];
         input.read_exact(&mut frame).map_err(ExportError::Output)?;
         if u24(&frame[..3]) * 2 + u24(&frame[6..9]) + 1 > canvas.0
             || u24(&frame[3..6]) * 2 + u24(&frame[9..12]) + 1 > canvas.1
         {
-            return Err(invalid("animation frame exceeds canvas"));
+            return Err(invalid_reason(
+                Text::ExportValidationAnimationFrameExceedsCanvas,
+            ));
         }
         if u64::from(canvas.0) * u64::from(canvas.1) * 4 > 512 * 1024 * 1024 {
-            return Err(invalid("animation canvas exceeds 512 MiB"));
+            return Err(invalid_reason(
+                Text::ExportValidationAnimationCanvasExceeds512Mib,
+            ));
         }
         let alpha = validate_frame(
             input,
@@ -58,23 +66,29 @@ impl Animation {
         let mut decoder = image_webp::WebPDecoder::new(input).map_err(failed)?;
         decoder.set_memory_limit(512 * 1024 * 1024);
         if !decoder.is_animated() || decoder.num_frames() as usize != self.delays.len() {
-            return Err(invalid("decoded animation frame count differs"));
+            return Err(invalid_reason(
+                Text::ExportValidationDecodedAnimationFrameCountDiffers,
+            ));
         }
         let (width, height) = decoder.dimensions();
         let rgba_bytes = u64::from(width) * u64::from(height) * 4;
         if rgba_bytes > 512 * 1024 * 1024 {
-            return Err(invalid("animation canvas exceeds 512 MiB"));
+            return Err(invalid_reason(
+                Text::ExportValidationAnimationCanvasExceeds512Mib,
+            ));
         }
         let mut pixels = vec![
             0;
-            decoder
-                .output_buffer_size()
-                .ok_or_else(|| invalid("invalid frame size"))?
+            decoder.output_buffer_size().ok_or_else(|| invalid_reason(
+                Text::ExportValidationInvalidFrameSize
+            ))?
         ];
         let mut renderer = crate::image_edits::ImageEditRenderer::new(&request.operations);
         let mut next_frame = |delay| {
             if decoder.read_frame(&mut pixels).map_err(failed)? != delay {
-                return Err(invalid("decoded animation timing differs"));
+                return Err(invalid_reason(
+                    Text::ExportValidationDecodedAnimationTimingDiffers,
+                ));
             }
             let rgba = if decoder.has_alpha() {
                 std::mem::take(&mut pixels)
@@ -166,11 +180,15 @@ impl Animation {
             let edited = next_frame(*delay)?;
             let size = (edited.width, edited.height);
             if size.0 > 16384 || size.1 > 16384 {
-                return Err(invalid("WebP frame dimensions exceed 16384"));
+                return Err(invalid_reason(
+                    Text::ExportValidationWebpFrameDimensionsExceed16384,
+                ));
             }
             if let Some(canvas) = canvas {
                 if canvas != size {
-                    return Err(invalid("edited frame dimensions differ"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationEditedFrameDimensionsDiffer,
+                    ));
                 }
             } else {
                 canvas = Some(size);
@@ -194,7 +212,9 @@ impl Animation {
             // The pinned lossless encoder emits one simple VP8L chunk. Embed its padded
             // bitstream unchanged, with full-canvas NO_BLEND/NO_DISPOSE snapshots.
             if encoded.get(12..16) != Some(b"VP8L") {
-                return Err(invalid("expected lossless VP8L frame"));
+                return Err(invalid_reason(
+                    Text::ExportValidationExpectedLosslessVp8lFrame,
+                ));
             }
             let payload = &encoded[12..];
             let length = 16 + payload.len();
@@ -239,31 +259,37 @@ fn validate_frame(
         check_cancelled(cancelled)?;
         count += 1;
         if remaining < 8 || count > 65536 {
-            return Err(invalid("invalid ANMF subchunk boundary"));
+            return Err(invalid_reason(
+                Text::ExportValidationInvalidAnmfSubchunkBoundary,
+            ));
         }
         let mut header = [0; 8];
         input.read_exact(&mut header).map_err(ExportError::Output)?;
         let length = u32::from_le_bytes(header[4..].try_into().expect("subchunk size"));
         let consumed = 8 + u64::from(length) + u64::from(length % 2);
         if consumed > u64::from(remaining) {
-            return Err(invalid("subchunk exceeds ANMF length"));
+            return Err(invalid_reason(
+                Text::ExportValidationSubchunkExceedsAnmfLength,
+            ));
         }
         remaining -= consumed as u32;
         let mut payload = (&mut *input).take(u64::from(length));
         match &header[..4] {
             b"ALPH" => {
                 if alpha || image || length == 0 {
-                    return Err(invalid("invalid frame ALPH order"));
+                    return Err(invalid_reason(Text::ExportValidationInvalidFrameAlphOrder));
                 }
                 alpha = true;
             }
             b"VP8 " | b"VP8L" => {
                 if image {
-                    return Err(invalid("multiple frame bitstreams"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationMultipleFrameBitstreams,
+                    ));
                 }
                 let size = if &header[..4] == b"VP8L" {
                     if alpha || length < 5 {
-                        return Err(invalid("invalid frame VP8L layout"));
+                        return Err(invalid_reason(Text::ExportValidationInvalidFrameVp8lLayout));
                     }
                     let mut bytes = [0; 5];
                     payload
@@ -271,20 +297,24 @@ fn validate_frame(
                         .map_err(ExportError::Output)?;
                     let packed = u32::from_le_bytes(bytes[1..].try_into().expect("VP8L header"));
                     if bytes[0] != 0x2f || packed >> 29 != 0 {
-                        return Err(invalid("invalid frame VP8L header"));
+                        return Err(invalid_reason(Text::ExportValidationInvalidFrameVp8lHeader));
                     }
                     alpha = packed & (1 << 28) != 0;
                     ((packed & 0x3fff) + 1, ((packed >> 14) & 0x3fff) + 1)
                 } else {
                     if length < 10 {
-                        return Err(invalid("incomplete frame VP8 header"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationIncompleteFrameVp8Header,
+                        ));
                     }
                     let mut bytes = [0; 10];
                     payload
                         .read_exact(&mut bytes)
                         .map_err(ExportError::Output)?;
                     if bytes[0] & 1 != 0 || bytes[3..6] != [0x9d, 1, 0x2a] {
-                        return Err(invalid("invalid frame VP8 keyframe"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationInvalidFrameVp8Keyframe,
+                        ));
                     }
                     (
                         u32::from(u16::from_le_bytes([bytes[6], bytes[7]]) & 0x3fff),
@@ -292,7 +322,9 @@ fn validate_frame(
                     )
                 };
                 if size != dimensions {
-                    return Err(invalid("frame and bitstream dimensions differ"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationFrameAndBitstreamDimensionsDiffer,
+                    ));
                 }
                 image = true;
             }
@@ -300,25 +332,27 @@ fn validate_frame(
         }
         copy(&mut payload, &mut std::io::sink(), cancelled)?;
         if payload.limit() != 0 {
-            return Err(invalid("truncated ANMF bitstream"));
+            return Err(invalid_reason(Text::ExportValidationTruncatedAnmfBitstream));
         }
         if length % 2 != 0 {
             let mut pad = [0];
             input.read_exact(&mut pad).map_err(ExportError::Output)?;
             if pad != [0] {
-                return Err(invalid("nonzero ANMF padding"));
+                return Err(invalid_reason(Text::ExportValidationNonzeroAnmfPadding));
             }
         }
     }
     if !image {
-        return Err(invalid("missing frame bitstream"));
+        return Err(invalid_reason(Text::ExportValidationMissingFrameBitstream));
     }
     Ok(alpha)
 }
 
 fn riff_size(length: u64) -> Result<u32, ExportError> {
     if !(12..=u64::from(u32::MAX) - 1).contains(&length) || !length.is_multiple_of(2) {
-        return Err(invalid("animation exceeds RIFF length limit"));
+        return Err(invalid_reason(
+            Text::ExportValidationAnimationExceedsRiffLengthLimit,
+        ));
     }
     Ok((length - 8) as u32)
 }

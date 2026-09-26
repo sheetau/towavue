@@ -1,5 +1,6 @@
 use super::*;
 use std::io::Write;
+use towavue_core::localization::Text;
 
 pub(super) fn gif_path(path: &Path) -> bool {
     path.extension()
@@ -7,8 +8,12 @@ pub(super) fn gif_path(path: &Path) -> bool {
         .is_some_and(|extension| extension.eq_ignore_ascii_case("gif"))
 }
 
+fn invalid_reason(reason: Text) -> ExportError {
+    crate::ExportFailure::reason(Text::ExportGifContext, reason).into()
+}
+
 fn invalid(error: impl std::fmt::Display) -> ExportError {
-    ExportError::Failed(format!("GIF export: {error}"))
+    crate::ExportFailure::diagnostic(Text::ExportGifContext, error).into()
 }
 
 struct Reader<'a> {
@@ -61,14 +66,21 @@ pub(super) struct Animation {
 
 impl Animation {
     pub(super) fn from_milliseconds(plays: u16, delays: &[u32]) -> Result<Self, ExportError> {
-        let delays = delays.iter().map(|delay| {
-            if !delay.is_multiple_of(10) || *delay / 10 > u32::from(u16::MAX) {
-                return Err(invalid(format!(
-                    "{delay} ms frame delay cannot be represented exactly in GIF; use WebP output"
-                )));
-            }
-            Ok((*delay / 10) as u16)
-        }).collect::<Result<Vec<_>, ExportError>>()?;
+        let delays = delays
+            .iter()
+            .map(|delay| {
+                if !delay.is_multiple_of(10) || *delay / 10 > u32::from(u16::MAX) {
+                    return Err(crate::ExportFailure::frame_delay(
+                        Text::ExportGifContext,
+                        Some(*delay),
+                        "GIF",
+                        "WebP",
+                    )
+                    .into());
+                }
+                Ok((*delay / 10) as u16)
+            })
+            .collect::<Result<Vec<_>, ExportError>>()?;
         Self::from_centiseconds(u32::from(plays), delays)
     }
 
@@ -78,7 +90,9 @@ impl Animation {
             gif::Repeat::Infinite
         } else {
             gif::Repeat::Finite(u16::try_from(plays - 1).map_err(|_| {
-                invalid("GIF is limited to 65536 finite total plays; retain the source format")
+                invalid_reason(
+                    Text::ExportValidationGifIsLimitedTo65536FiniteTotalPlaysRetainTheSourceFormat,
+                )
             })?)
         };
         Ok(Self { delays, repeat })
@@ -89,7 +103,7 @@ impl Animation {
             let mut decoder = decoder(path, cancelled)?;
             let (width, height) = (decoder.width(), decoder.height());
             if u64::from(width) * u64::from(height) * 4 > 512 * 1024 * 1024 {
-                return Err(invalid("canvas exceeds 512 MiB"));
+                return Err(invalid_reason(Text::ExportValidationCanvasExceeds512Mib));
             }
             let mut delays = Vec::new();
             // Validate indexed pixels too: FFmpeg can silently tolerate damaged GIF LZW,
@@ -97,17 +111,21 @@ impl Animation {
             while let Some(frame) = decoder.read_next_frame().map_err(invalid)? {
                 check_cancelled(cancelled)?;
                 if delays.len() == 65536 {
-                    return Err(invalid("animation exceeds 65536 frames"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationAnimationExceeds65536Frames,
+                    ));
                 }
                 delays.push(frame.delay);
                 // Reading the exact pixel count can leave the LZW end code in the next
                 // sub-block. Drain it before next_frame_info would skip that remainder.
                 if decoder.fill_buffer(&mut [0]).map_err(invalid)? {
-                    return Err(invalid("frame contains excess indexed pixels"));
+                    return Err(invalid_reason(
+                        Text::ExportValidationFrameContainsExcessIndexedPixels,
+                    ));
                 }
             }
             if delays.is_empty() {
-                return Err(invalid("no image frames"));
+                return Err(invalid_reason(Text::ExportValidationNoImageFrames));
             }
             Ok(Self {
                 delays,
@@ -161,7 +179,9 @@ impl Animation {
             output.flush().map_err(ExportError::Output)?;
             drop(output);
             if Self::read(&staging.output, cancelled)? != *self {
-                return Err(invalid("copied animation controls differ"));
+                return Err(invalid_reason(
+                    Text::ExportValidationCopiedAnimationControlsDiffer,
+                ));
             }
             progress(Duration::from_millis(
                 self.delays
@@ -181,8 +201,7 @@ impl Animation {
             return Ok(None);
         }
         if self.delays.contains(&0) {
-            return Err(invalid(
-                "AVIF export requires positive sample durations; use GIF output to retain zero delays",
+            return Err(invalid_reason(Text::ExportValidationAvifExportRequiresPositiveSampleDurationsUseGifOutputToRetainZeroDelays,
             ));
         }
         Ok(Some(
@@ -220,8 +239,7 @@ impl Animation {
     }
 
     pub(super) fn webp_plays(&self) -> Result<u16, ExportError> {
-        u16::try_from(self.plays()).map_err(|_| invalid(
-            "65536 total plays exceed WebP's 65535-play limit; use GIF or APNG to retain repetition"))
+        u16::try_from(self.plays()).map_err(|_| invalid_reason(Text::ExportValidation65536TotalPlaysExceedWebpS65535PlayLimitUseGifOrApngToRetainRepetition))
     }
 
     pub(super) fn apply_webp(
@@ -271,7 +289,9 @@ impl Animation {
                     drop(pixels);
                     let (w, h, next) = read_png(&mut input)?;
                     if (w, h) != (width, height) {
-                        return Err(invalid("encoded frame dimensions differ"));
+                        return Err(invalid_reason(
+                            Text::ExportValidationEncodedFrameDimensionsDiffer,
+                        ));
                     }
                     pixels = next;
                 }
@@ -282,7 +302,9 @@ impl Animation {
                 encoded.write_frame(&frame).map_err(invalid)?;
             }
             if input.read(&mut [0]).map_err(ExportError::Output)? != 0 {
-                return Err(invalid("encoder added animation frames"));
+                return Err(invalid_reason(
+                    Text::ExportValidationEncoderAddedAnimationFrames,
+                ));
             }
             encoded
                 .into_inner()
@@ -290,7 +312,9 @@ impl Animation {
                 .flush()
                 .map_err(ExportError::Output)?;
             if Self::read(&temporary, cancelled)? != *self {
-                return Err(invalid("saved animation controls did not match source"));
+                return Err(invalid_reason(
+                    Text::ExportValidationSavedAnimationControlsDidNotMatchSource,
+                ));
             }
             check_cancelled(cancelled)?;
             fs::rename(&temporary, &staging.output).map_err(ExportError::Output)
@@ -315,11 +339,13 @@ pub(super) fn read_png(
         || info.bit_depth != png::BitDepth::Eight
         || info.animation_control.is_some()
     {
-        return Err(invalid("expected static RGBA8 PNG snapshot"));
+        return Err(invalid_reason(
+            Text::ExportValidationExpectedStaticRgba8PngSnapshot,
+        ));
     }
     let bytes = usize::from(width) * usize::from(height) * 4;
     if bytes > 512 * 1024 * 1024 {
-        return Err(invalid("canvas exceeds 512 MiB"));
+        return Err(invalid_reason(Text::ExportValidationCanvasExceeds512Mib));
     }
     let mut pixels = vec![0; bytes];
     reader.next_frame(&mut pixels).map_err(invalid)?;

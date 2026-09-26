@@ -45,7 +45,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn deleted_path_prefix(&self) -> &'static str {
         if self.current_source_deleted() {
-            "(deleted) "
+            crate::localization::Text::DeletedPrefix.in_language(self.language())
         } else {
             ""
         }

@@ -6,6 +6,7 @@ mod tests;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn prepare_playback_tab(&mut self, id: TabId) {
+        let language = self.language();
         if self.displayed_tab == Some(id) || self.retained_playback.contains_key(&id) {
             return;
         }
@@ -28,6 +29,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.retained_playback.insert(
             id,
             playback_tab::RetainedPlaybackTab {
+                language: self.language(),
                 prepared_only: true,
                 path: path.clone(),
                 kind,
@@ -76,7 +78,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.retained_playback
                     .get_mut(&id)
                     .expect("prepared tab")
-                    .status = Some((format!("Tab metadata unavailable: {error}"), Instant::now()));
+                    .status = Some((
+                    towavue_core::localization::formatted::tab_metadata_unavailable(
+                        language,
+                        &error.to_string(),
+                    ),
+                    Instant::now(),
+                ));
                 return;
             }
         };
@@ -135,7 +143,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     .set_source_duration(Some(media_time(duration)));
             }
             Err(error) => {
-                saved.status = Some((format!("Tab metadata unavailable: {error}"), Instant::now()))
+                saved.status = Some((
+                    towavue_core::localization::formatted::tab_metadata_unavailable(
+                        saved.language,
+                        &error,
+                    ),
+                    Instant::now(),
+                ))
             }
         }
         self.request_redraw();

@@ -1268,6 +1268,48 @@ fn run_app_trial(root: PathBuf, audio: bool) {
             app.activate_tab(tab);
             assert_eq!(app.current_position(), time(4000));
             assert_eq!(app.time_selection, Some(range(1000, 2000)));
+            let previous_state = app.state;
+            for language in [
+                localization::Language::English,
+                localization::Language::Japanese,
+            ] {
+                localization::set_language(&context, language);
+                app.play_time_selection();
+                assert_eq!(app.state, PlaybackState::Playing);
+                app.activate_tab(other);
+                let saved = app
+                    .retained_playback
+                    .get_mut(&tab)
+                    .expect("retained selection");
+                assert_eq!(saved.language, language);
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while saved.state == PlaybackState::Playing {
+                    saved.poll();
+                    assert!(Instant::now() < deadline, "localized selection EOF");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                assert_eq!(saved.state, PlaybackState::Ended);
+                assert_eq!(saved.position(), time(2000));
+                assert_eq!(
+                    saved.status.as_ref().expect("range ended notice").0,
+                    localization::Text::SelectionEnded.in_language(language)
+                );
+                app.activate_tab(tab);
+                assert_eq!(
+                    app.status_notice(),
+                    Some(
+                        localization::Text::SelectionEnded
+                            .in_language(language)
+                            .into()
+                    )
+                );
+                assert_eq!(app.edits[&tab], history);
+                app.set_time_selection(None);
+                app.set_time_selection(Some(range(1000, 2000)));
+            }
+            localization::set_language(&context, localization::Language::English);
+            app.seek_to(time(4000));
+            app.state = previous_state;
             app.push_edit(EditOperation::Timeline(TimelineEdit::Delete(range(
                 0, 4000,
             ))));

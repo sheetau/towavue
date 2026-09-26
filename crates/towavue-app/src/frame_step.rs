@@ -179,7 +179,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Ok(plan) => plan,
             Err(error) => {
                 self.cancel_frame_steps();
-                self.set_status(error.into());
+                self.set_status(error.in_language(self.language()).into());
                 return;
             }
         };

@@ -6,6 +6,8 @@ use towavue_core::{FolderSnapshot, ImageViewState, MediaKind, MediaTime, Playbac
 use towavue_runtime_windows::{AudioOutputEvent, GraphicsDevice, PlaybackSession};
 
 pub(super) struct RetainedPlaybackTab {
+    // The host captures display language until restart, including window transfer.
+    pub language: towavue_core::localization::Language,
     pub prepared_only: bool,
     pub path: PathBuf,
     pub kind: MediaKind,
@@ -402,7 +404,9 @@ impl RetainedPlaybackTab {
             }
             if self.playback_selection.is_some() {
                 self.status = Some((
-                    "Selection ended · Shift+Space restarts · Escape returns to full range".into(),
+                    towavue_core::localization::Text::SelectionEnded
+                        .in_language(self.language)
+                        .into(),
                     Instant::now(),
                 ));
             }

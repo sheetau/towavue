@@ -45,6 +45,7 @@ impl FolderPosition {
         ui: &mut egui::Ui,
         thumbnail: egui::Rect,
     ) -> Option<preview_transport::Action> {
+        let language = localization::language(ui.ctx());
         let pixel = 1.0 / ui.ctx().pixels_per_point();
         let rect = egui::Rect::from_center_size(
             egui::pos2(
@@ -67,7 +68,7 @@ impl FolderPosition {
             );
             let value = seekbar::directed_value_input(
                 &response,
-                "Preview image position",
+                localization::Text::PreviewImagePosition.in_language(language),
                 (self.index + 1) as f64,
                 1.0..=count as f64,
                 1.0,

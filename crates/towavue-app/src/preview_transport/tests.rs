@@ -436,3 +436,123 @@ fn tab_card_bridge_transport_clicks_and_progress_keep_layout_and_ownership() {
         }
     }
 }
+
+#[test]
+fn localized_preview_controls_keep_geometry_and_dispatch_numeric_and_button_actions() {
+    use crate::localization::{Language, test_ui};
+    use egui::accesskit::{Action as AccessAction, ActionData, ActionRequest, TreeId};
+    for language in [Language::English, Language::Japanese] {
+        for density in [1.0, 1.25, 2.0] {
+            for kind in [MediaKind::Audio, MediaKind::Video] {
+                for playing in [false, true] {
+                    let context = test_ui::japanese_context(density);
+                    localization::set_language(&context, language);
+                    let thumbnail = egui::Rect::from_min_size(
+                        egui::pos2(40.0, 40.0),
+                        egui::vec2(
+                            160.0,
+                            if kind == MediaKind::Audio {
+                                40.0
+                            } else {
+                                108.0
+                            },
+                        ),
+                    );
+                    let size = egui::vec2(420.0, 260.0);
+                    let transport = Transport {
+                        instance: 55,
+                        kind,
+                        state: if playing {
+                            PlaybackState::Playing
+                        } else {
+                            PlaybackState::Paused
+                        },
+                        position: media_time(Duration::from_secs(12)),
+                        duration: Some(media_time(Duration::from_secs(60))),
+                        enabled: true,
+                        previous: true,
+                        next: true,
+                    };
+                    let frame = |events: Vec<egui::Event>| {
+                        let mut actions = Vec::new();
+                        let mut events = events;
+                        events.insert(0, egui::Event::PointerMoved(thumbnail.center()));
+                        let output = context.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    size,
+                                )),
+                                focused: true,
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| actions.extend(transport.show(ui, thumbnail)),
+                        );
+                        (output, actions)
+                    };
+                    for _ in 0..3 {
+                        assert!(frame(vec![]).1.is_empty());
+                    }
+                    let (output, _) = frame(vec![]);
+                    assert_eq!(output.pixels_per_point, density);
+                    let label = if playing { Text::Pause } else { Text::Play };
+                    let nodes = &output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree")
+                        .nodes;
+                    let node = nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label.in_language(language)))
+                        .expect("localized button");
+                    let bounds = node.1.bounds().expect("bounds");
+                    assert!(
+                        bounds.x0 >= f64::from(thumbnail.left())
+                            && bounds.x1 <= f64::from(thumbnail.right())
+                    );
+                    let (output, actions) = frame(vec![test_ui::action(
+                        &output,
+                        label.in_language(language),
+                        None,
+                    )]);
+                    assert_eq!(actions, vec![Action::Command(CommandId::TogglePause)]);
+                    if kind == MediaKind::Audio {
+                        for (label, command) in [
+                            (Text::PreviousTrack, CommandId::PreviousMedia),
+                            (Text::NextTrack, CommandId::NextMedia),
+                        ] {
+                            let (_, actions) = frame(vec![test_ui::action(
+                                &output,
+                                label.in_language(language),
+                                None,
+                            )]);
+                            assert_eq!(actions, vec![Action::Command(command)]);
+                        }
+                    }
+                    let tree = output
+                        .platform_output
+                        .accesskit_update
+                        .as_ref()
+                        .expect("tree");
+                    let target = crate::video_rotation::tests::node(
+                        tree,
+                        Text::PreviewPlaybackPosition.in_language(language),
+                    );
+                    let (_, actions) =
+                        frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                            action: AccessAction::SetValue,
+                            target_tree: TreeId::ROOT,
+                            target_node: target,
+                            data: Some(ActionData::NumericValue(25.5)),
+                        })]);
+                    assert_eq!(
+                        actions,
+                        vec![Action::Seek(media_time(Duration::from_secs_f64(25.5)))]
+                    );
+                }
+            }
+        }
+    }
+}

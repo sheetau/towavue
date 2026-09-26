@@ -106,9 +106,13 @@ pub(super) fn paint(
     let (Some(path), Some((rect, response))) = (path, slot) else {
         return;
     };
+    let language = crate::localization::language(ui.ctx());
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Image);
-        node.set_label(format!("Preview: {}", path.display()));
+        node.set_label(towavue_core::localization::formatted::file_preview(
+            language,
+            &path.display().to_string(),
+        ));
         node.set_bounds(egui::accesskit::Rect::new(
             rect.left().into(),
             rect.top().into(),
@@ -134,7 +138,7 @@ pub(super) fn paint(
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                "No preview",
+                crate::localization::Text::NoPreview.in_language(language),
                 egui::FontId::proportional(12.0),
                 crate::chrome::MUTED,
             );
@@ -493,6 +497,52 @@ mod tests {
         );
         for (path, bytes) in files.iter().zip(original) {
             assert_eq!(std::fs::read(path).expect("unchanged source"), bytes);
+        }
+    }
+
+    #[test]
+    fn japanese_picker_preview_keeps_unicode_path_and_unavailable_geometry() {
+        for density in [1.0, 1.25, 2.0] {
+            for size in [egui::vec2(640.0, 480.0), egui::vec2(240.0, 180.0)] {
+                let context = crate::localization::test_ui::japanese_context(density);
+                let path = PathBuf::from("\u{65e5}\u{672c}\u{8a9e}{original}.png");
+                let render = |failed: bool| {
+                    context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let slot = reserve(ui);
+                            paint(
+                                ui,
+                                Some(&path),
+                                failed.then_some(&Err("decoder detail".into())),
+                                slot,
+                            );
+                        },
+                    )
+                };
+                render(false);
+                let output = render(true);
+                assert_eq!(output.pixels_per_point, density);
+                let label = towavue_core::localization::formatted::file_preview(
+                    crate::localization::Language::Japanese,
+                    &path.display().to_string(),
+                );
+                let node = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(&label))
+                    .expect("localized path");
+                let bounds = node.1.bounds().expect("bounds");
+                assert!(bounds.x1 <= f64::from(size.x) && bounds.y1 <= f64::from(size.y));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,egui::Shape::Text(text) if text.galley.text()==crate::localization::Text::NoPreview.in_language(crate::localization::Language::Japanese) && !text.galley.elided)));
+            }
         }
     }
 }

@@ -1301,3 +1301,55 @@ fn reading_leading_focus_survives_regrouping_background_restore_and_shell_change
         }
     }
 }
+
+#[test]
+fn japanese_folder_position_preserves_numeric_indices_and_control_bounds() {
+    use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::localization::test_ui::japanese_context(density);
+        let card = FolderPosition {
+            instance: 7,
+            count: 10,
+            pages: None,
+            index: 2,
+            revision: 9,
+            reading: None,
+        };
+        let rect = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(160.0, 108.0));
+        let frame = |events| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    events,
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(420.0, 260.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| actions.extend(card.show(ui, rect)),
+            );
+            (output, actions)
+        };
+        let (output, actions) = frame(vec![]);
+        assert!(actions.is_empty());
+        assert_eq!(output.pixels_per_point, density);
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let label =
+            localization::Text::PreviewImagePosition.in_language(localization::Language::Japanese);
+        let target = crate::video_rotation::tests::node(tree, label);
+        let (_, actions) = frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+            action: Action::SetValue,
+            target_tree: TreeId::ROOT,
+            target_node: target,
+            data: Some(ActionData::NumericValue(7.0)),
+        })]);
+        assert_eq!(actions, vec![preview_transport::Action::ImageSeek(6)]);
+        assert_eq!(card.index, 2, "UI output does not mutate folder state");
+    }
+}

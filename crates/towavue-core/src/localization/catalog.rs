@@ -18,6 +18,18 @@ macro_rules! messages {
 }
 
 messages! {
+    GalleryNoMatchingFiles => ("No matching files.", "該当するファイルはありません。"),
+    DeletedPrefix => ("(deleted) ", "（削除済み） "),
+    FilmstripCurrentSuffix => (" (current item)", " （表示中）"),
+    InvalidTimelineHistory => ("Invalid timeline history", "タイムラインの編集履歴が不正です"),
+    PreviewTogglePlayback => ("Toggle preview playback", "プレビューの再生／一時停止"),
+    PreviewPlaybackPosition => ("Preview playback position (seconds)", "プレビューの再生位置（秒）"),
+    PreviewImagePosition => ("Preview image position", "プレビューの画像位置"),
+    PreviousTrack => ("Previous track", "前の曲"),
+    NextTrack => ("Next track", "次の曲"),
+    Play => ("Play", "再生"),
+    RecoverBeforePlayback => ("The original source needs recovery. Reopen the recovered file before playback.", "元ファイルの復旧が必要です。復旧したファイルを開き直してから再生してください。"),
+    RendererUnavailable => ("renderer is unavailable", "描画機能を利用できません"),
     ExportFrameInputChanged => ("The frame input changed before export", "書き出し前にフレームの入力が変更されました"),
     ExportInputChanged => ("The export input changed", "書き出しの入力が変更されました"),
     ExportFrameSnapshotRequired => ("Frame export requires a playback frame snapshot", "フレームの書き出しには再生フレームのスナップショットが必要です"),

@@ -461,25 +461,51 @@ fn deleted_filmstrip_keeps_a_local_held_entry_and_can_navigate_to_real_media() {
             .iter()
             .all(|item| item.path != source)
     );
-    for density in [1.0, 1.25, 2.0] {
-        context.set_pixels_per_point(density);
-        for _ in 0..3 {
-            draw(&mut app, vec![]);
+    for language in [
+        localization::Language::English,
+        localization::Language::Japanese,
+    ] {
+        for density in [1.0, 1.25, 2.0] {
+            localization::test_ui::configure_japanese(&context, density);
+            localization::set_language(&context, language);
+            for _ in 0..3 {
+                draw(&mut app, vec![]);
+            }
+            let (output, actions) = draw(&mut app, vec![]);
+            assert!(actions.is_empty());
+            assert_eq!(output.pixels_per_point, density);
+            let label = format!(
+                "{}source.bmp",
+                localization::Text::DeletedPrefix.in_language(language)
+            );
+            let description = format!(
+                "{}{}",
+                source.display(),
+                localization::Text::FilmstripCurrentSuffix.in_language(language)
+            );
+            assert_eq!(
+                app.deleted_path_prefix(),
+                localization::Text::DeletedPrefix.in_language(language)
+            );
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, node)| node.description() == Some(description.as_str()))
+            );
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some(label.as_str()))
+            );
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("next.bmp"))
+            );
         }
-        let (output, actions) = draw(&mut app, vec![]);
-        assert!(actions.is_empty());
-        let tree = output.platform_output.accesskit_update.expect("tree");
-        assert!(
-            tree.nodes
-                .iter()
-                .any(|(_, node)| node.label() == Some("(deleted) source.bmp"))
-        );
-        assert!(
-            tree.nodes
-                .iter()
-                .any(|(_, node)| node.label() == Some("next.bmp"))
-        );
     }
+    localization::set_language(&context, localization::Language::English);
     let count = app.tabs.tabs().len();
     app.handle_ui_action(UiAction::OpenFilmstripMedia(source.clone(), true));
     app.handle_ui_action(UiAction::OpenFilmstripWindow(source.clone()));

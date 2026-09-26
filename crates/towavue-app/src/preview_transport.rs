@@ -1,4 +1,5 @@
 use crate::*;
+use localization::Text;
 
 #[cfg(test)]
 mod tests;
@@ -23,6 +24,7 @@ pub(super) enum Action {
 
 impl Transport {
     pub fn show(&self, ui: &mut egui::Ui, thumbnail: egui::Rect) -> Option<Action> {
+        let language = localization::language(ui.ctx());
         // Register the background first so seek and previous/next controls keep
         // their own hit regions. Media replacement changes the click owner.
         let surface = ui
@@ -38,7 +40,7 @@ impl Transport {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::Button,
                 surface.enabled(),
-                "Toggle preview playback",
+                Text::PreviewTogglePlayback.in_language(language),
             )
         });
         crate::tab_focus::release_pointer_focus(&surface);
@@ -67,7 +69,7 @@ impl Transport {
                 );
                 let value = seekbar::value_input(
                     &response,
-                    "Preview playback position (seconds)",
+                    Text::PreviewPlaybackPosition.in_language(language),
                     self.position.as_seconds_f64(),
                     0.0..=seconds,
                     KEYBOARD_SEEK_STEP.as_secs_f64(),
@@ -111,7 +113,11 @@ impl Transport {
             if audio
                 && ui
                     .add_enabled_ui(self.previous, |ui| {
-                        chrome::button(ui, chrome::Icon::PreviousTrack, "Previous track")
+                        chrome::button(
+                            ui,
+                            chrome::Icon::PreviousTrack,
+                            Text::PreviousTrack.in_language(language),
+                        )
                     })
                     .inner
                     .clicked()
@@ -128,7 +134,11 @@ impl Transport {
                         } else {
                             chrome::Icon::Play
                         },
-                        if playing { "Pause" } else { "Play" },
+                        if playing {
+                            Text::Pause.in_language(language)
+                        } else {
+                            Text::Play.in_language(language)
+                        },
                     )
                 })
                 .inner
@@ -139,7 +149,11 @@ impl Transport {
             if audio
                 && ui
                     .add_enabled_ui(self.next, |ui| {
-                        chrome::button(ui, chrome::Icon::NextTrack, "Next track")
+                        chrome::button(
+                            ui,
+                            chrome::Icon::NextTrack,
+                            Text::NextTrack.in_language(language),
+                        )
                     })
                     .inner
                     .clicked()

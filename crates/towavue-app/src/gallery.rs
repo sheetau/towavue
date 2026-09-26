@@ -204,7 +204,10 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             *revision = revision.wrapping_add(1);
                         }
                         if filtered.is_empty() && !available.is_empty() {
-                            ui.label("No matching files.");
+                            ui.label(crate::localization::text(
+                                ui.ctx(),
+                                Text::GalleryNoMatchingFiles,
+                            ));
                         }
                         let grid = self.filmstrip.show_recent_with_policy(
                             ui,

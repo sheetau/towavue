@@ -165,7 +165,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.set_time_selection(Some(range));
         }
     }
-    pub(super) fn history_timeline(&self) -> Result<Option<EditTimeline>, &'static str> {
+    pub(super) fn history_timeline(&self) -> Result<Option<EditTimeline>, localization::Text> {
         let history = self.tabs.active().and_then(|tab| self.edits.get(&tab.id));
         let Some(history) = history.filter(|history| {
             history
@@ -177,11 +177,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         let duration = self
             .media_duration
-            .ok_or("Wait for the source duration before editing time")?;
+            .ok_or(localization::Text::WaitForTimelineDuration)?;
         history
             .timeline(media_time(duration))
             .map(Some)
-            .ok_or("Invalid timeline history")
+            .ok_or(localization::Text::InvalidTimelineHistory)
     }
 
     pub(super) fn prepare_timeline_edit(&mut self, operation: EditOperation) -> bool {
@@ -237,7 +237,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let plan = match self.history_timeline() {
             Ok(plan) => plan,
             Err(error) => {
-                self.set_status(error.into());
+                self.set_status(error.in_language(self.language()).into());
                 return;
             }
         };

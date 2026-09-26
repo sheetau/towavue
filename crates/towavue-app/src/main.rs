@@ -1639,7 +1639,12 @@ where
         });
         match recent_result {
             Ok(recent) => self.recent_files = Some(recent),
-            Err(error) => self.set_status(format!("Recent files unavailable: {error}")),
+            Err(error) => self.set_status(
+                towavue_core::localization::formatted::recent_files_unavailable(
+                    self.language(),
+                    &error,
+                ),
+            ),
         }
         let notify = Arc::clone(&self.notify);
         match towavue_runtime_windows::VideoResumeHistory::new(
@@ -1647,7 +1652,12 @@ where
             move |event| notify(AppEvent::VideoResume(event)),
         ) {
             Ok(history) => self.resume_history = Some(history),
-            Err(error) => self.set_status(format!("Video resume unavailable: {error}")),
+            Err(error) => {
+                self.set_status(towavue_core::localization::formatted::video_resume_failed(
+                    self.language(),
+                    &error.to_string(),
+                ))
+            }
         }
         if let Some(path) = self.initial_path.take() {
             if path.is_dir() {
@@ -2041,6 +2051,7 @@ where
         });
         clock.set_paused(self.state != PlaybackState::Playing);
         playback_tab::RetainedPlaybackTab {
+            language: self.language(),
             prepared_only: false,
             path: self.path.clone().expect("displayed path"),
             kind: self.media_kind.expect("displayed playback kind"),
@@ -2340,14 +2351,11 @@ where
         resume: Option<towavue_runtime_windows::VideoResume>,
     ) {
         if !self.document_source_available(self.displayed_tab) {
-            self.fail(
-                "The original source needs recovery. Reopen the recovered file before playback."
-                    .into(),
-            );
+            self.fail_text(localization::Text::RecoverBeforePlayback);
             return;
         }
         let Some(renderer) = self.renderer.as_ref() else {
-            self.fail("renderer is unavailable".to_owned());
+            self.fail_text(localization::Text::RendererUnavailable);
             return;
         };
         let graphics_device = renderer.graphics_device();
@@ -10581,7 +10589,7 @@ where
         let plan = match self.history_timeline() {
             Ok(plan) => plan,
             Err(error) => {
-                self.set_status(error.into());
+                self.set_status(error.in_language(self.language()).into());
                 return None;
             }
         };
@@ -11142,6 +11150,13 @@ where
                 self.fail(other.to_string());
             }
         }
+    }
+
+    fn fail_text(&mut self, key: localization::Text) {
+        self.fail_with_message(
+            key.in_language(localization::Language::English).into(),
+            key.in_language(self.language()).into(),
+        );
     }
 
     fn fail(&mut self, error: String) {

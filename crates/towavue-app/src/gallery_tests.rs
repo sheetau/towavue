@@ -935,83 +935,99 @@ fn gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_in
     };
     use crate::audio_export::tests::frame;
     use egui::accesskit::{Action, ActionData, ActionRequest, TreeId};
-    for density in [1.0, 1.25, 2.0] {
-        let mut app = Application::new(None, |_| {}).expect("app");
-        let context = fonts::test_context();
-        context.enable_accesskit();
-        context.global_style_mut(chrome::style);
-        context.set_pixels_per_point(density);
-        app.ui_context = Some(context);
-        app.recent_paths = ["alpha.png", "日本 Japan.png", "video.mp4"]
-            .map(|name| root.join(name))
-            .into();
-        let size = egui::vec2(960.0, 576.0);
-        frame(&mut app, size, vec![]);
-        let output = frame(&mut app, size, vec![]);
-        let tree = output.platform_output.accesskit_update.expect("tree");
-        let search = crate::video_rotation::tests::node(&tree, "Search Gallery");
-        let hidden = crate::video_rotation::tests::node(&tree, "alpha.png");
-        let set = |text: &str| {
-            egui::Event::AccessKitActionRequest(ActionRequest {
-                action: Action::SetValue,
-                target_tree: TreeId::ROOT,
-                target_node: search,
-                data: Some(ActionData::Value(text.into())),
-            })
-        };
-        let output = frame(
-            &mut app,
-            size,
-            vec![
-                set("jApAn 日本"),
+    for language in [
+        localization::Language::English,
+        localization::Language::Japanese,
+    ] {
+        for density in [1.0, 1.25, 2.0] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = localization::test_ui::japanese_context(density);
+            localization::set_language(&context, language);
+            app.ui_context = Some(context);
+            app.recent_paths = ["alpha.png", "日本 Japan.png", "video.mp4"]
+                .map(|name| root.join(name))
+                .into();
+            let size = egui::vec2(960.0, 576.0);
+            frame(&mut app, size, vec![]);
+            let output = frame(&mut app, size, vec![]);
+            assert_eq!(output.pixels_per_point, density);
+            let tree = output.platform_output.accesskit_update.expect("tree");
+            let search = crate::video_rotation::tests::node(
+                &tree,
+                localization::Text::GallerySearch.in_language(language),
+            );
+            let hidden = crate::video_rotation::tests::node(&tree, "alpha.png");
+            let set = |text: &str| {
                 egui::Event::AccessKitActionRequest(ActionRequest {
-                    action: Action::Click,
+                    action: Action::SetValue,
                     target_tree: TreeId::ROOT,
-                    target_node: hidden,
-                    data: None,
-                }),
-            ],
-        );
-        assert_eq!(app.gallery_search, "jApAn 日本");
-        assert!(
-            app.path.is_none(),
-            "removed card cannot handle a stale click in the query frame"
-        );
-        let tree = output
-            .platform_output
-            .accesskit_update
-            .expect("filtered tree");
-        assert!(
-            tree.nodes
-                .iter()
-                .any(|(_, n)| n.label() == Some("日本 Japan.png"))
-        );
-        assert!(
-            !tree
-                .nodes
-                .iter()
-                .any(|(_, n)| n.label() == Some("alpha.png"))
-        );
-        let no_match = frame(&mut app, size, vec![set("missing-result")]);
-        let text = |output: &egui::FullOutput, value: &str| {
-            output.shapes.iter().any(|shape| {
+                    target_node: search,
+                    data: Some(ActionData::Value(text.into())),
+                })
+            };
+            let output = frame(
+                &mut app,
+                size,
+                vec![
+                    set("jApAn 日本"),
+                    egui::Event::AccessKitActionRequest(ActionRequest {
+                        action: Action::Click,
+                        target_tree: TreeId::ROOT,
+                        target_node: hidden,
+                        data: None,
+                    }),
+                ],
+            );
+            assert_eq!(app.gallery_search, "jApAn 日本");
+            assert!(
+                app.path.is_none(),
+                "removed card cannot handle a stale click in the query frame"
+            );
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .expect("filtered tree");
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some("日本 Japan.png"))
+            );
+            assert!(
+                !tree
+                    .nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some("alpha.png"))
+            );
+            let no_match = frame(&mut app, size, vec![set("missing-result")]);
+            let text = |output: &egui::FullOutput, value: &str| {
+                output.shapes.iter().any(|shape| {
             matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == value)
         })
-        };
-        assert!(text(&no_match, "No matching files."));
-        assert!(!text(
-            &no_match,
-            "Drop media files or a folder here to begin."
-        ));
-        app.pending_guard = Some(GuardedAction::Exit);
-        frame(&mut app, size, vec![set("must not replace")]);
-        assert_eq!(app.gallery_search, "missing-result");
-        app.pending_guard = None;
-        app.recent_paths.clear();
-        app.gallery_listing.invalidate();
-        let empty = frame(&mut app, size, vec![]);
-        assert!(text(&empty, "Drop media files or a folder here to begin."));
-        assert!(!text(&empty, "No matching files."));
+            };
+            assert!(text(
+                &no_match,
+                localization::Text::GalleryNoMatchingFiles.in_language(language)
+            ));
+            assert!(!text(
+                &no_match,
+                localization::Text::GalleryDrop.in_language(language)
+            ));
+            app.pending_guard = Some(GuardedAction::Exit);
+            frame(&mut app, size, vec![set("must not replace")]);
+            assert_eq!(app.gallery_search, "missing-result");
+            app.pending_guard = None;
+            app.recent_paths.clear();
+            app.gallery_listing.invalidate();
+            let empty = frame(&mut app, size, vec![]);
+            assert!(text(
+                &empty,
+                localization::Text::GalleryDrop.in_language(language)
+            ));
+            assert!(!text(
+                &empty,
+                localization::Text::GalleryNoMatchingFiles.in_language(language)
+            ));
+        }
     }
 }
 

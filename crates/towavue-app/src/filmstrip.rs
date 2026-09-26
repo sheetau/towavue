@@ -656,6 +656,7 @@ impl Filmstrip {
         enabled: bool,
         actions: &mut Vec<UiAction>,
     ) {
+        let language = localization::language(context);
         let screen = media_rect.intersect(context.content_rect());
         self.drag.begin(context, snapshot, current, screen, enabled);
         let pointer = context.input(|input| input.pointer.hover_pos());
@@ -990,14 +991,18 @@ impl Filmstrip {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 ui.is_enabled(),
-                                filmstrip_label(&item.path, deleted),
+                                filmstrip_label(&item.path, deleted, language),
                             )
                         });
                         context.accesskit_node_builder(response.id, |node| {
                             node.set_description(format!(
                                 "{}{}",
                                 item.path.display(),
-                                if active { " (current item)" } else { "" }
+                                if active {
+                                    Text::FilmstripCurrentSuffix.in_language(language)
+                                } else {
+                                    ""
+                                }
                             ));
                         });
                         cards.push((index, response));
@@ -1058,7 +1063,7 @@ impl Filmstrip {
                                 egui::StrokeKind::Inside,
                             );
                             let mut label = egui::text::LayoutJob::simple(
-                                filmstrip_label(&item.path, deleted),
+                                filmstrip_label(&item.path, deleted, language),
                                 egui::TextStyle::Body.resolve(ui.style()),
                                 Color32::WHITE,
                                 screen.width().min(192.0),
@@ -1457,9 +1462,13 @@ impl Filmstrip {
     }
 }
 
-fn filmstrip_label(path: &Path, deleted: bool) -> String {
+fn filmstrip_label(path: &Path, deleted: bool, language: localization::Language) -> String {
     if deleted {
-        format!("(deleted) {}", display_name(path))
+        format!(
+            "{}{}",
+            Text::DeletedPrefix.in_language(language),
+            display_name(path)
+        )
     } else {
         display_name(path)
     }

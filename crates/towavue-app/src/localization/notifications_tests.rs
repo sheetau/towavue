@@ -337,3 +337,104 @@ fn japanese_leave_notices_keep_dialogs_edits_and_pending_navigation() {
     assert_eq!(app.tabs.active_id(), Some(tab));
     assert_eq!(app.edits, edits);
 }
+
+#[test]
+fn prepared_tab_and_timeline_failures_keep_captured_language_external_details_and_history() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::notifications_tests::prepared_tab_and_timeline_failures_keep_captured_language_external_details_and_history",
+    ) else {
+        return;
+    };
+    for language in [Language::English, Language::Japanese] {
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.language_settings.display = language;
+        app.language_settings.next = if language == Language::English {
+            Language::Japanese
+        } else {
+            Language::English
+        };
+        let path = root.join("missing-{source}.mp4");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Video);
+        app.prepare_playback_tab(tab);
+        let saved = &app.retained_playback[&tab];
+        assert_eq!(saved.language, language);
+        let instance = saved.instance;
+        let detail = "external \u{65e5}\u{672c}\u{8a9e}{path}\n0x80004005";
+        app.finish_playback_tab_preparation(tab, instance, path.clone(), Err(detail.into()), None);
+        let expected =
+            towavue_core::localization::formatted::tab_metadata_unavailable(language, detail);
+        assert_eq!(
+            app.retained_playback[&tab]
+                .status
+                .as_ref()
+                .expect("notice")
+                .0,
+            expected
+        );
+        app.finish_playback_tab_preparation(
+            tab,
+            instance.wrapping_add(1),
+            path,
+            Err("stale".into()),
+            None,
+        );
+        assert_eq!(
+            app.retained_playback[&tab]
+                .status
+                .as_ref()
+                .expect("notice")
+                .0,
+            expected
+        );
+        app.media_kind = Some(MediaKind::Video);
+        app.edits.entry(tab).or_default().push(
+            EditOperation::Timeline(towavue_core::TimelineEdit::ScaleVolume(
+                towavue_core::TimeRange::new(MediaTime::ZERO, media_time(Duration::from_secs(1)))
+                    .expect("range"),
+                0.5,
+            )),
+            MediaKind::Video,
+        );
+        let history = app.edits.clone();
+        assert_eq!(
+            app.history_timeline(),
+            Err(localization::Text::WaitForTimelineDuration)
+        );
+        app.sync_playback_edits();
+        assert_eq!(
+            app.status_notice(),
+            Some(
+                localization::Text::WaitForTimelineDuration
+                    .in_language(language)
+                    .into()
+            )
+        );
+        app.media_duration = Some(Duration::ZERO);
+        assert_eq!(
+            app.history_timeline(),
+            Err(localization::Text::InvalidTimelineHistory)
+        );
+        app.sync_playback_edits();
+        assert_eq!(
+            app.status_notice(),
+            Some(
+                localization::Text::InvalidTimelineHistory
+                    .in_language(language)
+                    .into()
+            )
+        );
+        for key in [
+            localization::Text::RecoverBeforePlayback,
+            localization::Text::RendererUnavailable,
+        ] {
+            app.fail_text(key);
+            assert_eq!(
+                app.playback_error.as_deref(),
+                Some(key.in_language(language))
+            );
+            assert_eq!(app.state, PlaybackState::Faulted);
+        }
+        assert_eq!(app.edits, history);
+        assert!(app.retained_playback[&tab].session.is_none());
+    }
+}

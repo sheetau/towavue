@@ -97,6 +97,27 @@ pub enum RenderError {
     VideoEditBudget,
 }
 
+impl RenderError {
+    pub fn message(&self, language: towavue_core::localization::Language) -> String {
+        use towavue_core::localization::{Text, formatted};
+        let text = match self {
+            Self::UnsupportedWindow => Text::RenderUnsupportedWindow,
+            Self::WindowHandle => Text::RenderWindowHandle,
+            Self::D3d11(error) => return formatted::render_d3d11(language, &error.to_string()),
+            Self::DeviceRemoved(reason) => {
+                return formatted::render_device_removed(language, reason);
+            }
+            Self::InvalidFrame => Text::RenderInvalidFrame,
+            Self::SurfaceNotSized => Text::RenderSurfaceNotSized,
+            Self::InvalidHardwareFrame => Text::RenderInvalidHardwareFrame,
+            Self::HdrConversionUnsupported => Text::RenderHdrUnsupported,
+            Self::InvalidVideoEdit => Text::RenderInvalidVideoEdit,
+            Self::VideoEditBudget => Text::RenderVideoEditBudget,
+        };
+        text.in_language(language).into()
+    }
+}
+
 /// Stable identifier of the DXGI adapter selected for the shared device.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AdapterLuid {

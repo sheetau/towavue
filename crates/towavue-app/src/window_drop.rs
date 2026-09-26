@@ -247,13 +247,19 @@ impl WindowHost {
         source: WindowKey,
         point: egui::Pos2,
     ) -> Result<winit::dpi::PhysicalPosition<i32>, String> {
-        let app = self.windows.get(&source).ok_or("source window is closed")?;
-        let window = app.window.as_ref().ok_or("source window is not ready")?;
+        let app = self.windows.get(&source).ok_or(
+            localization::Text::TransferSourceClosed.in_language(self.language.settings.display),
+        )?;
+        let window = app.window.as_ref().ok_or(
+            localization::Text::TransferSourceNotReady.in_language(self.language.settings.display),
+        )?;
         let origin = window.inner_position().map_err(|error| error.to_string())?;
         let density = app
             .ui_context
             .as_ref()
-            .ok_or("source UI is not ready")?
+            .ok_or(
+                localization::Text::TransferUiNotReady.in_language(self.language.settings.display),
+            )?
             .pixels_per_point();
         Ok(winit::dpi::PhysicalPosition::new(
             origin.x + (point.x * density).round() as i32,
@@ -298,7 +304,10 @@ impl WindowHost {
             .windows
             .get(&target)
             .and_then(|app| app.incoming_gap(point))
-            .ok_or("drop on an available window")?;
+            .ok_or(
+                localization::Text::TransferAvailableWindow
+                    .in_language(self.language.settings.display),
+            )?;
         self.move_tab(source, target, request, gap)
     }
 

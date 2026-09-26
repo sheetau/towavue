@@ -36,6 +36,12 @@ macro_rules! templates {
 }
 
 templates! {
+    render_d3d11(error: &str) => ("D3D11 failed: {error}", "D3D11の処理に失敗しました: {error}"),
+    render_device_removed(error: &str) => ("the D3D11 device was removed: {error}", "D3D11デバイスを利用できなくなりました: {error}"),
+    graphics_device_recovery_failed(error: &str) => ("D3D11 device recovery failed: {error}", "D3D11デバイスを復旧できません: {error}"),
+    graphics_surface_recovery_failed(error: &str) => ("D3D11 surface recovery failed: {error}", "D3D11の表示領域を復旧できません: {error}"),
+    graphics_pipeline_recovery_failed(error: &str) => ("D3D11 pipeline recovery failed: {error}", "D3D11の再生処理を復旧できません: {error}"),
+    detailed_waveform_failed(error: &str) => ("Detailed waveform unavailable: {error}", "詳細な波形を取得できません: {error}"),
     update_http_status(status: u32) => ("Update server returned HTTP {status}", "更新サーバーがHTTP {status}を返しました"),
     update_helper_exited(status: &str, detail: &str) => ("Update helper exited before readiness ({status}): {detail}", "更新用の補助プロセスが準備完了前に終了しました（{status}）: {detail}"),
     update_unavailable(error: &str) => ("Update unavailable: {error}", "更新を利用できません: {error}"),

@@ -1,6 +1,85 @@
 use super::*;
 
 #[test]
+fn japanese_transfer_failures_leave_original_pixels_and_history_available() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::japanese_transfer_failures_leave_original_pixels_and_history_available",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut source, _) = app();
+        let context = crate::localization::test_ui::japanese_context(density);
+        source.ui_context = Some(context.clone());
+        source.language_settings.next = localization::Language::English;
+        let pixels = decoded(false);
+        let id = install(
+            &mut source,
+            root.join("日本語{original}.png"),
+            pixels.clone(),
+        );
+        source.dispatch(CommandId::FlipHorizontal);
+        let history = source.edits.clone();
+        assert_eq!(
+            source.validate_transfer_window().expect_err("no renderer"),
+            "ウィンドウの描画準備が整うまでお待ちください"
+        );
+        source.about_open = true;
+        assert_eq!(
+            source.validate_transfer_window().expect_err("dialog"),
+            "タブを移動する前にダイアログを閉じてください"
+        );
+        source.about_open = false;
+        source.hosted_graphics = true;
+        source.request_tab_drop(id, egui::pos2(1.0, 1.0), egui::Vec2::ZERO);
+        let expected = "タブを移動できませんでした: ウィンドウの描画準備が整うまでお待ちください";
+        assert_eq!(source.status_notice().as_deref(), Some(expected));
+        assert!(source.pending_tab_drop.is_none());
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    source.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                },
+            );
+        }
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+        let destination = crate::localization::test_ui::japanese_context(density);
+        destination.input_mut(|input| input.max_texture_side = 1);
+        let failure = source
+            .prepare_image_transfer(id, &destination)
+            .err()
+            .expect("destination limit");
+        assert_eq!(
+            failure,
+            "画像サイズがこのGPUの画像サイズ上限（1px）を超えています"
+        );
+        assert!(Arc::ptr_eq(
+            &source.image.as_ref().expect("retained image").decoded,
+            &pixels
+        ));
+        assert_eq!(source.edits, history);
+        assert_eq!(source.tabs.active().map(|tab| tab.id), Some(id));
+        destination.input_mut(|input| input.max_texture_side = 4096);
+        assert!(
+            source
+                .prepare_image_transfer(id, &destination)
+                .expect("retry")
+                .is_some()
+        );
+        assert_eq!(source.edits, history);
+    }
+}
+
+#[test]
 fn untitled_transfer_preserves_pixels_edits_view_and_private_original_until_final_close() {
     let Some(_root) = crate::tests::isolated_test_root(
         "tab_transfer::tests::untitled_transfer_preserves_pixels_edits_view_and_private_original_until_final_close",

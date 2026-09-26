@@ -373,19 +373,26 @@ impl WindowHost {
         gap: usize,
     ) -> Result<TabId, String> {
         if source == destination {
-            return Err("choose another window".into());
+            return Err(localization::Text::TransferOtherWindow
+                .in_language(self.language.settings.display)
+                .into());
         }
         self.windows
             .get(&source)
-            .ok_or("source window is closed")?
+            .ok_or(
+                localization::Text::TransferSourceClosed
+                    .in_language(self.language.settings.display),
+            )?
             .validate_tab_transfer(request)?;
-        let target = self
-            .windows
-            .get(&destination)
-            .ok_or("destination window is closed")?;
+        let target = self.windows.get(&destination).ok_or(
+            localization::Text::TransferDestinationClosed
+                .in_language(self.language.settings.display),
+        )?;
         target.validate_transfer_window()?;
         if gap > target.tabs.len() {
-            return Err("the destination tab strip changed".into());
+            return Err(localization::Text::TransferStripChanged
+                .in_language(self.language.settings.display)
+                .into());
         }
         let stage = self.windows[&source].prepare_image_transfer(
             request.tab,
@@ -415,7 +422,9 @@ impl WindowHost {
     ) -> Result<WindowKey, String> {
         self.detach_tab_with(source, request, visible, |app, device| {
             app.start_on_device(event_loop, Some(device), false)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| {
+                    localization::window_start_error(error.as_ref(), app.language())
+                })?;
             app.position_window_at_drop(client_position, anchor)
         })
     }
@@ -430,7 +439,9 @@ impl WindowHost {
             towavue_runtime_windows::GraphicsDevice,
         ) -> Result<(), String>,
     ) -> Result<WindowKey, String> {
-        let app = self.windows.get(&source).ok_or("source window is closed")?;
+        let app = self.windows.get(&source).ok_or(
+            localization::Text::TransferSourceClosed.in_language(self.language.settings.display),
+        )?;
         app.validate_tab_transfer(request)?;
         let device = app
             .renderer
@@ -590,7 +601,9 @@ impl WindowHost {
             } else {
                 self.open_filmstrip_window_with(source, &request, visible, |app, device| {
                     app.start_on_device(event_loop, Some(device), false)
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| {
+                            localization::window_start_error(error.as_ref(), app.language())
+                        })
                 })
                 .map(|_| ())
             };
@@ -627,16 +640,24 @@ impl WindowHost {
             .windows
             .get(&target)
             .and_then(|app| app.incoming_gap(point))
-            .ok_or("drop on an available window")?;
+            .ok_or(
+                localization::Text::TransferAvailableWindow
+                    .in_language(self.language.settings.display),
+            )?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {
-            return Err(format!("Unsupported media: {}", path.display()));
+            return Err(towavue_core::localization::formatted::unsupported_media(
+                self.language.settings.display,
+                &path.display().to_string(),
+            ));
         }
         let app = self.windows.get_mut(&target).expect("destination");
         let count = app.tabs.tabs().len();
         app.open_external(path, true);
         if app.tabs.tabs().len() == count {
-            return Err("The media could not be opened".into());
+            return Err(localization::Text::TransferMediaOpenFailed
+                .in_language(self.language.settings.display)
+                .into());
         }
         app.tabs
             .reorder(app.tabs.active().expect("new tab").id, gap);
@@ -682,7 +703,10 @@ impl WindowHost {
         let position = self.source_client_position(source, request.point)?;
         let path = canonical_shell_path(&request.path).map_err(|error| error.to_string())?;
         if MediaKind::from_path(&path).is_none() {
-            return Err(format!("Unsupported media: {}", path.display()));
+            return Err(towavue_core::localization::formatted::unsupported_media(
+                self.language.settings.display,
+                &path.display().to_string(),
+            ));
         }
         let device = app
             .renderer
@@ -698,7 +722,11 @@ impl WindowHost {
             app.open_external(path, true);
             if app.path.is_none() {
                 return Err(app.status_message.as_ref().map_or_else(
-                    || "The media could not be opened".into(),
+                    || {
+                        localization::Text::TransferMediaOpenFailed
+                            .in_language(self.language.settings.display)
+                            .into()
+                    },
                     |(text, _)| text.clone(),
                 ));
             }
@@ -757,7 +785,7 @@ impl WindowHost {
         mut create: impl FnMut(
             &WindowApplication,
             Option<towavue_runtime_windows::GraphicsDevice>,
-        ) -> Result<FrameRenderer, String>,
+        ) -> Result<FrameRenderer, localization::GraphicsRecoveryError>,
     ) {
         let requests: BTreeMap<_, _> = self
             .windows

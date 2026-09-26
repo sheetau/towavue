@@ -55,9 +55,8 @@ impl ImagePresentation {
             .iter()
             .any(|frame| frame.width as usize > limit || frame.height as usize > limit)
         {
-            return Err(format!(
-                "Image dimensions exceed this graphics device's {limit}px texture limit"
-            ));
+            return Err(ImagePresentationError::TextureLimit(limit)
+                .message(localization::language(context)));
         }
         let sampling = self.sampling.get();
         Ok(Self {
@@ -83,13 +82,17 @@ impl ImagePresentation {
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn validate_transfer_window(&self) -> Result<(), String> {
         if self.exit_requested || self.modal_input_blocked() {
-            return Err("close the dialog before moving a tab".into());
+            return Err(localization::Text::TransferCloseDialog
+                .in_language(self.language())
+                .into());
         }
         if self.renderer.is_none()
             || self.ui_context.is_none()
             || self.graphics_recovery_request.is_some()
         {
-            return Err("wait for the window's graphics device to become available".into());
+            return Err(localization::Text::TransferWaitGraphics
+                .in_language(self.language())
+                .into());
         }
         Ok(())
     }
@@ -112,13 +115,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .tabs()
             .iter()
             .find(|tab| tab.id == id)
-            .ok_or("the tab is no longer open")?;
+            .ok_or(localization::Text::TransferTabClosed.in_language(self.language()))?;
         if self
             .active_export
             .as_ref()
             .is_some_and(|export| export.tab == id)
         {
-            return Err("wait for this tab's export to finish".into());
+            return Err(localization::Text::TransferWaitExport
+                .in_language(self.language())
+                .into());
         }
         let path = tab.target.current_path();
         let instance = if self.displayed_tab == Some(id) && self.path.as_deref() == path {
@@ -135,7 +140,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.retained_images
                     .get(&id)
                     .filter(|saved| saved.path.as_deref() == path)
-                    .ok_or("the tab's image state is unavailable")?
+                    .ok_or(
+                        localization::Text::TransferImageUnavailable.in_language(self.language()),
+                    )?
                     .instance,
             )
         } else {
@@ -143,7 +150,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.retained_playback
                     .get(&id)
                     .filter(|saved| Some(saved.path.as_path()) == path)
-                    .ok_or("the tab's playback state is unavailable")?
+                    .ok_or(
+                        localization::Text::TransferPlaybackUnavailable
+                            .in_language(self.language()),
+                    )?
                     .instance,
             )
         };
@@ -157,7 +167,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn validate_tab_transfer(&self, request: &DetachRequest) -> Result<(), String> {
         let current = self.tab_detach_request(request.tab)?;
         if current.path != request.path || current.instance != request.instance {
-            return Err("the tab changed before it could be moved".into());
+            return Err(localization::Text::TransferTabChanged
+                .in_language(self.language())
+                .into());
         }
         Ok(())
     }
@@ -204,7 +216,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .iter()
             .map(|(path, preview)| {
                 if preview.pixels.size.iter().any(|side| *side > limit) {
-                    return Err("Loading preview exceeds the destination texture limit".to_owned());
+                    return Err(localization::Text::TransferPreviewLimit
+                        .in_language(self.language())
+                        .to_owned());
                 }
                 let pixels = Arc::clone(&preview.pixels);
                 Ok((

@@ -1,6 +1,8 @@
 //! Per-window display language; command IDs and persisted shortcuts stay stable.
 pub(crate) use towavue_core::localization::{Language, Text};
+mod graphics;
 mod native_prompt;
+pub(crate) use graphics::{GraphicsRecoveryError, window_start_error};
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Settings {

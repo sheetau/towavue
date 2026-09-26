@@ -10749,7 +10749,13 @@ where
         }
     }
 
-    fn fail_graphics_recovery(&mut self, position: MediaTime, state: PlaybackState, error: String) {
+    fn fail_graphics_recovery(
+        &mut self,
+        position: MediaTime,
+        state: PlaybackState,
+        error: localization::GraphicsRecoveryError,
+    ) {
+        let message = error.message(self.language());
         self.cancel_frame_steps();
         let mut clock = PlaybackClock::new(position, self.playback_rate());
         clock.paused_at = Some(clock.wall_anchor);
@@ -10757,9 +10763,9 @@ where
         self.queued_recovery = Some(FallbackPrompt::Recovery {
             position,
             state,
-            error: error.clone(),
+            error: message.clone(),
         });
-        self.fail(error);
+        self.fail_with_message(error.to_string(), message);
     }
 
     fn show_native_fallback(&mut self) {
@@ -11002,11 +11008,11 @@ where
     fn create_graphics_surface(
         &self,
         device: Option<towavue_runtime_windows::GraphicsDevice>,
-    ) -> Result<FrameRenderer, String> {
+    ) -> Result<FrameRenderer, localization::GraphicsRecoveryError> {
         let window = self
             .window
             .as_ref()
-            .ok_or_else(|| "window was unavailable during graphics recovery".to_owned())?;
+            .ok_or(localization::GraphicsRecoveryError::WindowUnavailable)?;
         let mut renderer = match (self.native_caption.as_ref(), device) {
             (Some(caption), Some(device)) => {
                 FrameRenderer::with_native_caption_on_device(caption, device)
@@ -11015,11 +11021,13 @@ where
             (None, Some(device)) => FrameRenderer::with_graphics_device(window, device),
             (None, None) => FrameRenderer::new(window),
         }
-        .map_err(|error| format!("D3D11 device recovery failed: {error}"))?;
+        .map_err(|error| localization::GraphicsRecoveryError::Device(Arc::new(error)))?;
         let size = window.inner_size();
         if let Err(error) = renderer.resize_surface(size.width, size.height) {
             renderer.release_surface();
-            return Err(format!("D3D11 surface recovery failed: {error}"));
+            return Err(localization::GraphicsRecoveryError::Surface(Arc::new(
+                error,
+            )));
         }
         Ok(renderer)
     }
@@ -11075,7 +11083,16 @@ where
                 self.audio_drained = !session.has_audio();
                 self.metrics_recorded = false;
             }
-            Err(error) => self.fail(format!("D3D11 pipeline recovery failed: {error}")),
+            Err(error) => self.fail_with_message(
+                towavue_core::localization::formatted::graphics_pipeline_recovery_failed(
+                    localization::Language::English,
+                    &error.to_string(),
+                ),
+                towavue_core::localization::formatted::graphics_pipeline_recovery_failed(
+                    self.language(),
+                    &error.to_string(),
+                ),
+            ),
         }
         self.refresh_title();
     }
@@ -11225,7 +11242,7 @@ where
             }
             other => {
                 self.session.take();
-                self.fail(other.to_string());
+                self.fail_with_message(other.to_string(), other.message(self.language()));
             }
         }
     }

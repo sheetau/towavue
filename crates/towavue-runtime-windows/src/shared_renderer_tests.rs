@@ -364,3 +364,42 @@ fn shared_window_surfaces_preserve_live_hardware_session() {
         eprintln!("SKIP shared window surfaces: native hardware trial did not complete");
     }
 }
+#[test]
+fn renderer_errors_translate_owned_explanations_and_preserve_native_diagnostics() {
+    use crate::RenderError;
+    use towavue_core::localization::Language;
+    let detail = "native {detail} 日本語 0x80004005";
+    for error in [
+        RenderError::UnsupportedWindow,
+        RenderError::WindowHandle,
+        RenderError::InvalidFrame,
+        RenderError::SurfaceNotSized,
+        RenderError::InvalidHardwareFrame,
+        RenderError::HdrConversionUnsupported,
+        RenderError::InvalidVideoEdit,
+        RenderError::VideoEditBudget,
+        RenderError::DeviceRemoved(detail.into()),
+        RenderError::D3d11(windows::core::Error::from_hresult(windows::core::HRESULT(
+            0x80004005_u32 as i32,
+        ))),
+    ] {
+        let diagnostic = error.to_string();
+        assert_eq!(error.message(Language::English), diagnostic);
+        assert_ne!(error.message(Language::Japanese), diagnostic);
+        match &error {
+            RenderError::DeviceRemoved(reason) => {
+                assert!(error.message(Language::Japanese).ends_with(reason))
+            }
+            RenderError::D3d11(native) => assert!(
+                error
+                    .message(Language::Japanese)
+                    .ends_with(&native.to_string())
+            ),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        RenderError::VideoEditBudget.message(Language::Japanese),
+        "動画編集がGPUの画像サイズ上限、または画像と補間係数の512 MiB上限を超えています"
+    );
+}

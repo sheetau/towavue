@@ -24,6 +24,70 @@ mod tests {
     use towavue_core::TimelineEdit;
 
     #[test]
+    fn japanese_refinement_failure_keeps_stale_results_and_external_details_separate() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "waveform_detail::tests::japanese_refinement_failure_keeps_stale_results_and_external_details_separate",
+        ) else {
+            return;
+        };
+        let detail = "native {detail} 日本語.wav 0x80004005";
+        for density in [1.0, 1.25, 2.0] {
+            let context = localization::test_ui::japanese_context(density);
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.ui_context = Some(context.clone());
+            app.language_settings.next = localization::Language::English;
+            let path = root.join("日本語{original}.wav");
+            app.path = Some(path.clone());
+            app.media_kind = Some(MediaKind::Audio);
+            app.state = PlaybackState::Paused;
+            app.tabs.open_new(path.clone(), MediaKind::Audio);
+            let key = Arc::new(Key {
+                path,
+                plan: EditTimeline::new(media_time(Duration::from_secs(10)), Default::default())
+                    .expect("plan"),
+                rate: 1.0,
+                volume: 1.0,
+                columns: 400,
+            });
+            app.waveform_detail = Detail {
+                key: Some(key.clone()),
+                started: true,
+                ..Default::default()
+            };
+            app.set_status("retained status".into());
+            app.install_detailed_waveform(
+                app.media_generation,
+                Arc::new((*key).clone()),
+                Err(detail.into()),
+            );
+            assert_eq!(app.status_notice().as_deref(), Some("retained status"));
+            assert!(!app.waveform_detail.finished);
+            app.install_detailed_waveform(app.media_generation, key, Err(detail.into()));
+            let expected = format!("詳細な波形を取得できません: {detail}");
+            assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
+            assert!(app.waveform_detail.finished);
+            assert!(app.edits.is_empty());
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1100.0, 600.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                    },
+                );
+            }
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+        }
+    }
+
+    #[test]
     fn gain_preview_scales_the_unclipped_envelope_only_inside_selection() {
         let range = towavue_core::TimeRange::new(
             media_time(Duration::from_millis(2500)),
@@ -756,7 +820,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.waveform_detail.values = Some(values.into());
                 self.waveform_detail.held_gain = None;
             }
-            Err(error) => self.set_status(format!("Detailed waveform unavailable: {error}")),
+            Err(error) => self.set_status(
+                towavue_core::localization::formatted::detailed_waveform_failed(
+                    self.language(),
+                    &error,
+                ),
+            ),
         }
         self.request_redraw();
     }

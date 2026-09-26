@@ -144,7 +144,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     ) -> Result<(), String> {
         let window = self.window.as_ref().expect("started window");
         let area = towavue_runtime_windows::monitor_work_area((position.x, position.y))
-            .ok_or("Could not query destination monitor work area")?;
+            .ok_or(localization::Text::TransferMonitorUnavailable.in_language(self.language()))?;
         // Enter the selected monitor while hidden so its actual DPI and size are
         // available before applying the logical grab offset and final edge clamp.
         window.set_outer_position(clamp_window_position(position, window.outer_size(), area));

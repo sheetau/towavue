@@ -255,10 +255,27 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
         if mode == 1 {
             crate::tab_transfer::tests::bitmap(&target);
             let other = host.add_application(None).expect("peer");
-            attach(&mut host, other, &target);
+            let peer = attach(&mut host, other, &target);
+            let modified = std::fs::metadata(&target)
+                .expect("target metadata")
+                .modified()
+                .expect("target timestamp");
             let mut bytes = std::fs::read(&target).expect("target");
             bytes[54..60].copy_from_slice(&[0, 255, 0, 255, 255, 255]);
             std::fs::write(&target, bytes).expect("newer version than peer");
+            // Same-size writes can share a Windows clock tick. Establish the
+            // stale-peer precondition independently of filesystem clock timing.
+            std::fs::File::options()
+                .write(true)
+                .open(&target)
+                .expect("owned target")
+                .set_modified(modified + Duration::from_secs(1))
+                .expect("distinct target timestamp");
+            assert_ne!(
+                host.windows[&other].source_versions[&peer],
+                Some(FileOperationSource::capture(&target).expect("changed target")),
+                "the fixture must actually have a stale destination peer"
+            );
         }
         chosen(&mut host, owner, id, &source, &target);
         ready(&mut host, owner);
@@ -289,7 +306,11 @@ fn save_as_rejects_late_collisions_stale_peers_and_cancelled_or_changed_owners()
         let before = std::fs::read(&target).ok();
         finish(&mut host, owner);
         let app = &host.windows[&owner];
-        assert!(app.edits[&id].is_dirty());
+        assert!(
+            app.edits[&id].is_dirty(),
+            "mode={mode}, export_error={:?}",
+            app.export_error
+        );
         assert!(!app.source_backings.contains_key(&id));
         assert_eq!(pixels(&source), original);
         assert_eq!(std::fs::read(&target).ok(), before);

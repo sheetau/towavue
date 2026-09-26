@@ -51,7 +51,19 @@ cargo test --workspace --all-targets
 cargo build -p towavue-app --release
 ```
 
-Use unoptimized Debug tests for the large app harness and Release all-target Clippy. If the app test PDB reaches MSVC LNK1140, use the command-line-only override `cargo --config 'profile.test.package.towavue-app.debug=1' test --workspace --all-targets --locked --offline -- --test-threads=1` (plus explicitly documented exclusions). This reduces only app test debug information; it changes neither optimization nor tracked dependency/toolchain settings. Preserve the failed log and matching native failure executable/PDB before rebuilding. Do not substitute a huge Release app test harness or claim Debug timing as product performance.
+CI uses [test-ci.ps1](../scripts/test-ci.ps1) so hosted and local gates share commands. Before pushing CI/fixture fixes or preparing a release, run all three phases from the repository root:
+
+```powershell
+.\scripts\test-ci.ps1 -Phase Rust
+.\scripts\test-ci.ps1 -Phase Materials
+.\scripts\test-ci.ps1 -Phase Installer -NsisArchive '<verified NSIS archive>'
+```
+
+Rust uses the pinned development FFmpeg, a separate `target/ci-cargo` directory, the ordinary line-table test profile, disabled incremental compilation and four test threads. It checks formatting and the vendored renderer/PNG before Clippy and the full workspace suite. Materials and installer checks run independently in CI, so a notice or packaging failure does not wait for the app build. Logs and elapsed times are retained in unique `target/tmp/ci-*` directories; a failed command stops its phase, with no automatic test retry. These controls remain separate from production artifact/signature checks.
+
+CI caches Cargo downloads and development build outputs; compiled cache keys include the hosted image, toolchain/profile, native setup and lockfile inputs. Every test still executes on a cache hit. No media, signing material or release output is cached. Superseded runs on the same ref are cancelled. Changes limited to README, AGENTS, documentation Markdown or `docs/images` skip the heavy workflow; dependency/notice JSON, LICENSE/NOTICE, scripts, source and workflow edits still run every gate. Use CI's **Run workflow** action for a release commit that would otherwise be skipped. Local content/link/diff review is still required for documentation; skipping CI is not a test pass. A release requires a successful full run on its exact source commit.
+
+Use the standard unoptimized test profile for the large app harness. CI runs Debug all-target Clippy; also use Release Clippy when optimized product paths are affected. The tracked test profile already keeps only line tables; the historical app `debug=1` override used in older evidence is unnecessary for ordinary checks. If MSVC LNK1140 recurs, preserve the failed log and matching native executable/PDB and inspect the effective profile before rebuilding. Do not substitute a huge Release app test harness or claim Debug timing as product performance.
 
 Keep automated command, build and test consoles hidden. Launch background PowerShell/build runners with Start-Process -WindowStyle Hidden and redirect output to logs. For direct command runners, set ProcessStartInfo.UseShellExecute=false and CreateNoWindow=true with redirected output; hidden parent windows alone do not suppress every console child. Console test children must use CREATE_NO_WINDOW, including the shared app-isolation helper and native caption subprocess. Use crate::hidden_test_command for runtime console fixtures and crate::tests::hidden_command for app fixture media/helper launches: isolated fixtures have no console for further children to inherit. Ordinary verification must keep owned app windows hidden too; do not enable visible fixture modes unless the owner explicitly requests them.
 

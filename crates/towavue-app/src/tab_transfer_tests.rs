@@ -1718,6 +1718,13 @@ fn loaded_source_version_survives_retention_and_transfer_without_authorizing_new
         .or_default()
         .push(EditOperation::FlipHorizontal, MediaKind::Image);
     let history = source.edits[&id].clone();
+    // install() cancels its real decoder asynchronously before injecting pixels.
+    // Let those readers release the fixture before simulating an external writer.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !source.source_readers_idle() {
+        assert!(Instant::now() < deadline, "fixture readers must finish");
+        std::thread::sleep(Duration::from_millis(1));
+    }
     std::fs::write(&path, b"externally changed file bytes").expect("external change");
     let changed =
         towavue_runtime_windows::FileOperationSource::capture(&path).expect("new disk version");

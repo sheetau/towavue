@@ -3,10 +3,28 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**/*.md'
+      - 'docs/images/**'
   pull_request:
+    paths-ignore:
+      - 'README.md'
+      - 'AGENTS.md'
+      - 'docs/**/*.md'
+      - 'docs/images/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
 
 jobs:
   setup-fixture:
@@ -17,95 +35,69 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Build and test harmless installer fixture
+      - name: Prepare pinned NSIS
         shell: pwsh
         run: |
-          $inputs = Get-Content docs/nsis-inputs.json -Raw | ConvertFrom-Json
+          $inputs = Get-Content docs/nsis-inputs.json -Raw -Encoding UTF8 | ConvertFrom-Json
           New-Item -ItemType Directory -Path target/tmp/installer-tools | Out-Null
           $archive = Join-Path $PWD 'target/tmp/installer-tools/nsis-3.12.zip'
           curl.exe --fail --location --max-time 45 --output $archive $inputs.archive.url
           if ($LASTEXITCODE -ne 0) { throw 'NSIS download failed.' }
-          [pscustomobject]@{bytes=(Get-Item -LiteralPath $archive).Length;sha256=(Get-FileHash -LiteralPath $archive).Hash} | ConvertTo-Json -Compress
-          .\scripts\test-setup-fixture.ps1 -NsisArchive $archive
 
-      - name: Verify native Setup update and recovery with generated payloads
+      - name: Verify installer lifecycle and fault recovery
         shell: pwsh
-        run: .\scripts\test-setup-update-lifecycle.ps1 -NsisArchive target/tmp/installer-tools/nsis-3.12.zip
+        run: .\scripts\test-ci.ps1 -Phase Installer -NsisArchive target/tmp/installer-tools/nsis-3.12.zip
 
-      - name: Verify portable source companion archives
+  materials:
+    name: Notices and prerequisite policy
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
         shell: pwsh
-        run: .\scripts\test-candidate-material-archive.ps1
-
-      - name: Verify prerequisite wrapper with isolated synthetic processes
+        run: rustup toolchain install 1.98.0 --profile minimal
+      - name: Cache Cargo downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'vendor/png/Cargo.lock') }}
+      - name: Verify notices and prerequisite policy
         shell: pwsh
-        run: .\scripts\test-setup-prerequisite.ps1
-
-      - name: Verify scoped per-user registration and native shortcuts
-        shell: pwsh
-        run: .\scripts\test-setup-registration.ps1
-
-      - name: Verify read-only update planning and payload ownership
-        shell: pwsh
-        run: .\scripts\test-setup-update-plan.ps1
-
-      - name: Verify file update rollback with isolated fault injection
-        shell: pwsh
-        run: .\scripts\test-setup-update-transaction.ps1
+        run: .\scripts\test-ci.ps1 -Phase Materials
 
   rust:
     name: Rust checks
     runs-on: windows-2022
     timeout-minutes: 35
-
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Install pinned Rust toolchain
         shell: pwsh
         run: rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt --target x86_64-pc-windows-msvc
-
-      - name: Prepare pinned FFmpeg development files
+      - name: Cache Cargo downloads
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'vendor/png/Cargo.lock') }}
+      - name: Identify hosted build image
+        id: image
         shell: pwsh
-        run: .\scripts\setup-ffmpeg.ps1 -ExportGitHubEnvironment
-
-      - name: Generate M1 codec fixtures
+        run: '"version=$env:ImageVersion" >> $env:GITHUB_OUTPUT'
+      - name: Cache development build outputs
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: target/ci-cargo
+          # Never reuse across native inputs, profile/toolchain or hosted image changes.
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'scripts/setup-ffmpeg.ps1', 'scripts/test-ci.ps1', '.github/workflows/ci.yml') }}-${{ github.sha }}
+          restore-keys: |
+            rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.image.outputs.version }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'rust-toolchain.toml', 'scripts/setup-ffmpeg.ps1', 'scripts/test-ci.ps1', '.github/workflows/ci.yml') }}-
+      - name: Verify formatting, vendored renderers, Clippy and workspace tests
         shell: pwsh
-        run: .\scripts\generate-m1-fixtures.ps1
-
-      - name: Check formatting
-        run: cargo +1.98.0 fmt --all --check
-
-      - name: Run Clippy
-        run: cargo +1.98.0 clippy --workspace --all-targets -- -D warnings
-
-      - name: Run tests
-        run: cargo +1.98.0 test --workspace --all-targets --no-fail-fast -- --nocapture
-
-      - name: Verify per-texture interpolation with offscreen WARP
-        run: cargo +1.98.0 test -p egui-directx11 --lib --locked --offline
-
-      - name: Verify PNG row-hook buffer transitions
-        run: cargo +1.98.0 test --manifest-path vendor/png/Cargo.toml --lib row_filter_tests --features towavue-row-filter --locked
-
-      - name: Verify Rust third-party notices
-        shell: pwsh
-        run: |
-          .\scripts\setup-rust-notices.ps1
-          .\scripts\test-rust-notices.ps1
-
-      - name: Verify Rust runtime notices
-        shell: pwsh
-        run: |
-          .\scripts\prepare-rust-runtime-notices.ps1 -Download
-          .\scripts\test-rust-runtime-notices.ps1
-
-      - name: Verify pinned MSYS2 bootstrap inputs
-        shell: pwsh
-        run: |
-          .\scripts\get-msys2-bootstrap.ps1 -Download
-          .\scripts\test-msys2-bootstrap.ps1
-
-      - name: Verify read-only VC prerequisite policy
-        shell: pwsh
-        run: .\scripts\test-vc-redist-status.ps1
+        run: .\scripts\test-ci.ps1 -Phase Rust

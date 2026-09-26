@@ -7,6 +7,8 @@ const BINS_PER_COLUMN: usize = 1024;
 #[cfg(test)]
 mod contention_tests;
 pub(crate) mod native;
+#[cfg(test)]
+mod reference_tests;
 
 /// Mean absolute stereo envelope of the edited playback samples, one value per
 /// display column. Preserve float amplitudes so height/DPI changes need no raster

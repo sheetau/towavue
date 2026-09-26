@@ -54,7 +54,7 @@ try {
     foreach ($entry in @(Get-TowavueAssociationRecords $install $registry '1.0.1')) {
         Assert-True ((Read-Value $entry) -ceq $entry.value) 'Rollback changed legacy associations.'
     }
-    Invoke-TowavueAssociations Install $install $registry '1.0.3'
+    Invoke-TowavueAssociations Install $install $registry '1.0.2'
     foreach ($entry in $icons) { Assert-True ((Read-Value $entry) -ceq $entry.value) 'Upgrade did not restore media icons.' }
     $key = $base.OpenSubKey($icons[0].path,$true)
     try { $key.SetValue('','Owner icon replacement') } finally { $key.Dispose() }
@@ -63,7 +63,7 @@ try {
     Refuse-Install
     $key = $base.OpenSubKey($icons[0].path,$true)
     try { $key.DeleteValue('') } finally { $key.Dispose() }
-    Invoke-TowavueAssociations Install $install $registry '1.0.3'
+    Invoke-TowavueAssociations Install $install $registry '1.0.2'
     # Simulate interruption after the path binding and one command were written.
     foreach ($record in $records | Select-Object -Skip 2) {
         $key = $base.OpenSubKey($record.path,$true)

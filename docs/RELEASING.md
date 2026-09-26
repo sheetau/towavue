@@ -2,9 +2,9 @@
 
 Production releases target Windows 11 x64. EXE and Setup currently have no Authenticode signature by owner decision; update metadata is independently signed with the retained RSA-4096 key. This guide covers subsequent releases as well as the initial assembly. Use [STATUS](STATUS.md) for published versions, retained inputs and qualification limits. The publisher creates a draft; the owner publishes it.
 
-## Application license from 1.0.3
+## Application license from 1.0.2
 
-Current development selects Apache-2.0 for towavue's own code. Publish these changes with 1.0.3 or later: update the workspace version and its Cargo.lock notice binding during release preparation. The assembler refuses a version/license mismatch. Existing releases and pinned historical material manifests retain their original MIT OR Apache-2.0 terms.
+Current development selects Apache-2.0 for towavue's own code. Publish these changes with 1.0.2 or later: update the workspace version and its Cargo.lock notice binding during release preparation. The assembler refuses a version/license mismatch. Existing releases and pinned historical material manifests retain their original MIT OR Apache-2.0 terms.
 
 The generated application kit contains LICENSE-APACHE and NOTICE; the installed guide links to both. Installer sources include the same current notice and license, plus clearly identified historical license records needed by evaluation inputs. The original MIT text is retained byte-for-byte under third-party/towavue-legacy/, not offered for current changes. Third-party license alternatives, sources and attribution notices remain unchanged.
 
@@ -24,7 +24,7 @@ Run from PowerShell, replacing the local input paths:
   -NativeMaterialsDirectory 'path/to/retained-native-materials' `
   -VcRedist 'path/to/vc_redist.x64.exe' `
   -NsisArchive 'path/to/nsis-3.12.zip' `
-  -OutputDirectory 'target/release-1.0.1-attempt1'
+  -OutputDirectory 'target/release-1.0.2-attempt1'
 ```
 
 The output must be new, with an existing parent. The command builds the Windows x64 Release application offline, snapshots it, regenerates current Rust notices and exact Git source, verifies/copies native materials and the selected 94-file runtime, creates the source companion, compiles production Setup and runs non-installing package checks. It signs the exact Setup's canonical metadata and writes checksums. `RELEASE.json` is written last; its absence means the attempt is incomplete. Failed attempts are retained for diagnosis; use a fresh output name for a retry.
@@ -54,9 +54,9 @@ After the final qualification gates in STATUS are satisfied, run `scripts/publis
 Use `-CheckOnly` to build and perform read-only GitHub preflight without a push, tag or draft change. For an already completed build, use:
 
 ```powershell
-.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.1-attempt1' -CheckOnly
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.2-attempt1' -CheckOnly
 # After qualification, upload the same verified build:
-.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.1-attempt1'
+.\scripts\publish-release.ps1 -PreparedDirectory 'target/release-1.0.2-attempt1'
 ```
 
 The prepared build must match the current clean commit. Retrying that same command verifies the existing draft's source tag, ownership marker, stable channel, exact asset names, sizes and server SHA-256 digests. It uploads only missing assets. Identical uploaded files are kept; different files, unrelated/edited drafts and all published releases are refused. A known empty GitHub `starter` placeholder can be removed and retried only on the matching draft. There is no `--clobber`, forced tag update or published-asset replacement. If code or notes change, create and qualify a new build before attempting another draft; the command does not silently retarget an existing version.

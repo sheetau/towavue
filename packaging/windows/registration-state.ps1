@@ -1,4 +1,4 @@
-function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.3') {
+function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.2') {
     # Test registrations are confined beneath their existing private namespace.
     $prefix = if ($RegistrySubKey -cmatch '^Software\\towavue\\InstallerTests\\[0-9a-f]{32}$') { $RegistrySubKey + '\ShellRegistration\' } elseif ($RegistrySubKey -ceq 'Software\Microsoft\Windows\CurrentVersion\Uninstall\towavue') { '' } else { throw 'Shell registration is outside the owned namespace.' }
     $exe = Join-Path $InstallDirectory 'towavue.exe'
@@ -30,7 +30,7 @@ function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$Regist
             $progid = 'towavue.' + $extension
             $class = 'Software\Classes\' + $progid
             Add-AssociationValue $class '' ($extension.ToUpperInvariant()+' '+$kind.ToLowerInvariant())
-            if ([version]$ProductVersion -ge [version]'1.0.3') {
+            if ([version]$ProductVersion -ge [version]'1.0.2') {
                 Add-AssociationValue ($class+'\DefaultIcon') '' ('"'+$exe+'",-'+$fileIcons[$kind])
             }
             Add-AssociationValue ($class+'\Application') 'ApplicationName' 'towavue'
@@ -52,8 +52,8 @@ function Get-TowavueAssociationRecords([string]$InstallDirectory,[string]$Regist
     return $records.ToArray()
 }
 
-function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.3') {
-    $records = @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey $(if ($Mode -eq 'Remove') { '1.0.3' } else { $ProductVersion }))
+function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[string]$RegistrySubKey,[string]$ProductVersion='1.0.2') {
+    $records = @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey $(if ($Mode -eq 'Remove') { '1.0.2' } else { $ProductVersion }))
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::CurrentUser,[Microsoft.Win32.RegistryView]::Registry64)
     try {
         $binding = $base.OpenSubKey($records[0].path)
@@ -73,9 +73,9 @@ function Invoke-TowavueAssociations([string]$Mode,[string]$InstallDirectory,[str
                 } finally { if ($key) { $key.Dispose() } }
             }
             if ($Mode -eq 'Inspect') { return }
-            if ([version]$ProductVersion -lt [version]'1.0.3' -and $owned) {
+            if ([version]$ProductVersion -lt [version]'1.0.2' -and $owned) {
                 # A rollback to an older executable must retire only our media
-                # icon values, since those PE resources do not exist before 1.0.3.
+                # icon values, since those PE resources do not exist before 1.0.2.
                 foreach ($record in @(Get-TowavueAssociationRecords $InstallDirectory $RegistrySubKey | Where-Object { $_.path.EndsWith('\DefaultIcon') })) {
                     $key = $base.OpenSubKey($record.path,$true)
                     try {

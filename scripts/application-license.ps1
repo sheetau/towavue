@@ -4,7 +4,7 @@ function Get-TowavueLicenseProfile([string]$ReleaseVersion) {
     if ($ReleaseVersion -and $ReleaseVersion -cnotmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\z') {
         throw 'Invalid application license release version.'
     }
-    if ($ReleaseVersion -and [version]$ReleaseVersion -ge [version]'1.0.3') {
+    if ($ReleaseVersion -and [version]$ReleaseVersion -ge [version]'1.0.2') {
         return [pscustomobject]@{id='Apache-2.0';materials=@('LICENSE-APACHE','NOTICE')}
     }
     return [pscustomobject]@{id='MIT OR Apache-2.0';materials=@('LICENSE-MIT','LICENSE-APACHE')}
@@ -22,7 +22,7 @@ function Assert-TowavueReleaseLicense([string]$RepositoryRoot, [string]$ReleaseV
     $declarations = [regex]::Matches($cargo, '(?m)^license\s*=\s*"([^"]+)"\s*$')
     $profile = Get-TowavueLicenseProfile $ReleaseVersion
     if ($declarations.Count -ne 1 -or $declarations[0].Groups[1].Value -cne $profile.id) {
-        throw 'Application license and release version differ. Apache-2.0-only development must ship as 1.0.3 or later.'
+        throw 'Application license and release version differ. Apache-2.0-only development must ship as 1.0.2 or later.'
     }
 }
 

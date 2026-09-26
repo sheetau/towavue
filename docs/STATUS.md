@@ -2,6 +2,12 @@
 
 Last consolidated: 2026-09-27. This is the only current-status and handoff document. Update rows in place; detailed history stays in Git. [Development](DEVELOPMENT.md) provides setup, checks, and historical lookup; [Architecture](ARCHITECTURE.md) provides accepted contracts.
 
+## 1.0.2 draft preparation (2026-09-27)
+
+The owner authorizes finishing version 1.0.2, committing all current changes including the product-preview PNG, pushing main, and creating a GitHub draft only after that exact commit's CI passes. This supersedes the earlier no-push/no-release scope. Publication remains an owner action; do not replace the installed app. Keep automation hidden. The owner corrected the next release number to 1.0.2. Version, Cargo.lock notice binding, Apache-only license threshold and media-icon registration threshold are updated; release notes summarize changes since 1.0.1 and the Apache-2.0/NOTICE transition.
+
+Product evidence: the recent complete media suite passes 1,752 tests (145 opt-ins ignored); the subsequent static-ruler removal passes its 26 affected controls, Release Clippy and formatting. No media behavior changes are planned during release preparation. Rebuild from clean committed source with retained native FFmpeg/materials, existing signing identity and pinned NSIS/VC inputs. Release preflight passes formatting, locked metadata, 35-extension/icon upgrade/rollback controls, release material/signature/publisher fixtures and the updated Apache/NOTICE boundary fixtures (release-102-preflight1). Fresh exact Setup checks and remote CI remain the release gates. Clean-machine/VC-absent, physical UI and audible confirmation are not newly certified.
+
 ## Media follow-up regressions verified (2026-09-27)
 
 Display follow-up (2026-09-27): removed the added static scale labels (including the center infinity label), horizontal grid and explanatory tooltip sentence at the owner's request. Peak waveform calculation, clipping and relative dB gain interaction remain. Removed the obsolete ruler-only test. follow-up-ruler-removal1 passes all 26 remaining time-selection tests, app all-target Release Clippy with warnings denied and rustfmt. This display-only deletion does not require repeating the prior full media suite. Verification is automated/offscreen; no new visible-window check. The owner's product-preview PNG remains untouched.

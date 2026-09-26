@@ -29,20 +29,20 @@ $historical = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/app-mate
 $mit = @($historical.repository_materials | Where-Object name -eq 'LICENSE-MIT')[0]
 Assert-ReleaseFile (Resolve-TowavueLicenseMaterial $repositoryRoot 'LICENSE-MIT') $mit
 Assert-True ((Get-TowavueLicenseProfile '').id -ceq 'MIT OR Apache-2.0') 'Evaluation license changed.'
-Assert-Refused { Get-TowavueLicenseProfile '1.0.3-beta' } 'Invalid application license release version.'
-Assert-TowavueReleaseLicense $repositoryRoot '1.0.3'
-Assert-Refused { Assert-TowavueReleaseLicense $repositoryRoot '1.0.2' } 'Application license and release version differ.'
+Assert-Refused { Get-TowavueLicenseProfile '1.0.2-beta' } 'Invalid application license release version.'
+Assert-TowavueReleaseLicense $repositoryRoot '1.0.2'
+Assert-Refused { Assert-TowavueReleaseLicense $repositoryRoot '1.0.1' } 'Application license and release version differ.'
 
 # Reuse verified notice/runtime bytes and a historical EXE as a material-only
 # fixture. These version labels do not produce or qualify a release executable.
-foreach ($version in @('1.0.2','1.0.3','1.1.0')) {
+foreach ($version in @('1.0.1','1.0.2','1.1.0')) {
     $manifest = Get-Content -LiteralPath (Join-Path $materials 'app-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     $manifest.release_version = $version
     $manifest.candidate = Get-ReleaseRecord $executable 'towavue.exe'
     $manifest.repository_materials = @($manifest.repository_materials | Where-Object { $_.name -notin @('LICENSE-MIT','LICENSE-APACHE','NOTICE') } | ForEach-Object {
         Get-ReleaseRecord (Join-Path $repositoryRoot $_.name) $_.name
     })
-    $expected = if ($version -eq '1.0.2') { 'MIT OR Apache-2.0' } else { 'Apache-2.0' }
+    $expected = if ($version -eq '1.0.1') { 'MIT OR Apache-2.0' } else { 'Apache-2.0' }
     $profile = Get-TowavueLicenseProfile $version
     Assert-True ($profile.id -ceq $expected) 'Wrong license at the release boundary.'
     $manifest.repository_materials += @($profile.materials | ForEach-Object { Get-ReleaseRecord (Resolve-TowavueLicenseMaterial $repositoryRoot $_) $_ })
@@ -58,11 +58,11 @@ foreach ($version in @('1.0.2','1.0.3','1.1.0')) {
     }
     $html = Get-TowavueLicenseLinks $version $links
     Assert-True ($html.Contains('href="LICENSE-APACHE"')) 'Apache link missing.'
-    if ($version -ne '1.0.2') {
+    if ($version -ne '1.0.1') {
         Assert-True ($html.Contains('href="NOTICE"') -and -not $html.Contains('href="LICENSE-MIT"')) 'Current links offer a stale license or omit NOTICE.'
         Assert-True (-not (Test-Path -LiteralPath (Join-Path $arguments.OutputDirectory 'LICENSE-MIT'))) 'Current kit includes historical MIT.'
     }
-    if ($version -eq '1.0.3') {
+    if ($version -eq '1.0.2') {
         $links.Remove('NOTICE')
         Assert-Refused { Get-TowavueLicenseLinks $version $links } 'Missing application license link: NOTICE'
         $original = $manifest | ConvertTo-Json -Depth 12
@@ -89,4 +89,4 @@ foreach ($version in @('1.0.2','1.0.3','1.1.0')) {
         }
     }
 }
-Write-Output "PASS: legacy/evaluation and 1.0.3+ license selection, exact material copies, guide links, missing/corrupt NOTICE and stale MIT refusals. Material-only fixtures, not release qualification. Evidence: $testRoot"
+Write-Output "PASS: legacy/evaluation and 1.0.2+ license selection, exact material copies, guide links, missing/corrupt NOTICE and stale MIT refusals. Material-only fixtures, not release qualification. Evidence: $testRoot"

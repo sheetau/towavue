@@ -226,7 +226,7 @@ fn compare(path: &Path, exact_equality: bool, exact_interiors: bool, numerator: 
     let before = stamp();
     let format = decode::probe_playback_formats(path, None)
         .expect("format")
-        .0
+        .audio_format
         .expect("audio");
     assert_eq!(format.channels, 2);
     let input = ffmpeg_next::format::input(path).expect("duration");

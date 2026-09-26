@@ -2128,32 +2128,33 @@ pub(crate) fn probe_audio_track_format(
         .map(|pipeline| pipeline.output_format))
 }
 
+pub(crate) struct PlaybackFormats {
+    pub audio_format: Option<AudioFormat>,
+    pub source_video_frame_rate: Option<f64>,
+    pub audio_tracks: towavue_core::AudioTrackCatalog,
+    pub subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
+}
+
 /// Reuse the initial playback probe for descriptive video metadata; no second
 /// file open or render-thread probing is required to display source FPS.
 pub(crate) fn probe_playback_formats(
     path: &Path,
     track: Option<AudioTrackId>,
-) -> Result<
-    (
-        Option<AudioFormat>,
-        Option<f64>,
-        towavue_core::AudioTrackCatalog,
-    ),
-    DecodeError,
-> {
+) -> Result<PlaybackFormats, DecodeError> {
     ffmpeg::init()?;
     let input = format::input(path)?;
     let fps = input.streams().best(Type::Video).and_then(|stream| {
         positive_frame_rate(stream.avg_frame_rate()).or_else(|| positive_frame_rate(stream.rate()))
     });
-    Ok((
-        audio_tracks::selected_config(&input, track)?
+    Ok(PlaybackFormats {
+        audio_format: audio_tracks::selected_config(&input, track)?
             .map(create_audio_pipeline_from)
             .transpose()?
             .map(|pipeline| pipeline.output_format),
-        fps,
-        audio_tracks::catalog(&input),
-    ))
+        source_video_frame_rate: fps,
+        audio_tracks: audio_tracks::catalog(&input),
+        subtitle_tracks: crate::subtitles::catalog(&input),
+    })
 }
 
 fn positive_frame_rate(rate: Rational) -> Option<f64> {
@@ -2503,7 +2504,11 @@ mod tests {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let (audio, fps, _) = super::probe_playback_formats(&path, None).expect("probe");
+            let super::PlaybackFormats {
+                audio_format: audio,
+                source_video_frame_rate: fps,
+                ..
+            } = super::probe_playback_formats(&path, None).expect("probe");
             assert!(audio.is_none());
             assert!((fps.expect("video FPS") - expected).abs() < 0.000001);
             let mut session = crate::PlaybackSession::open_paused(

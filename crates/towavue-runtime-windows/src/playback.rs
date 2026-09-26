@@ -149,6 +149,7 @@ pub struct PlaybackSession {
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
     audio_tracks: AudioTrackCatalog,
+    subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
     audio_selection: AudioTrackSelection,
     source_video_frame_rate: Option<f64>,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
@@ -316,8 +317,12 @@ impl PlaybackSession {
             AudioTrackSelection::Track(track) => Some(track),
             AudioTrackSelection::Default | AudioTrackSelection::All => None,
         };
-        let (audio_format, source_video_frame_rate, audio_tracks) =
-            decode::probe_playback_formats(path, selected)?;
+        let decode::PlaybackFormats {
+            audio_format,
+            source_video_frame_rate,
+            audio_tracks,
+            subtitle_tracks,
+        } = decode::probe_playback_formats(path, selected)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
             hardware_frame_count: AtomicU64::new(0),
@@ -333,6 +338,7 @@ impl PlaybackSession {
             notify: Arc::new(notify),
             audio_format,
             audio_tracks,
+            subtitle_tracks,
             audio_selection: selection,
             source_video_frame_rate,
             video_rx: None,
@@ -441,6 +447,10 @@ impl PlaybackSession {
 
     pub fn audio_tracks(&self) -> &AudioTrackCatalog {
         &self.audio_tracks
+    }
+
+    pub fn subtitle_tracks(&self) -> &[towavue_core::SubtitleTrack] {
+        &self.subtitle_tracks
     }
 
     /// The explicit single-track choice, if any. Use audio_selection to distinguish

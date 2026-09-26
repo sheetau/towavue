@@ -14,6 +14,7 @@ mod media;
 mod navigation;
 pub mod release;
 mod rotation_sequence;
+mod subtitles;
 mod tabs;
 mod timeline;
 mod video_resize;
@@ -45,6 +46,7 @@ pub use navigation::{
     SortDirection,
 };
 pub use rotation_sequence::compose_rotations;
+pub use subtitles::{SubtitleCue, SubtitleDelay, SubtitleTimeline, SubtitleTrack, SubtitleTrackId};
 pub use tabs::{Tab, TabId, TabSet, TabTarget};
 pub use timeline::{EditTimeline, TimeRange, TimelineEdit, TimelineSpan};
 pub use video_resize::VideoResize;

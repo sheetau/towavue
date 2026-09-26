@@ -56,6 +56,10 @@ mod input;
 mod latest_task;
 mod launch;
 mod media_input;
+mod subtitles;
+pub use subtitles::{
+    SubtitleBitmap, SubtitleContent, SubtitleDocument, SubtitleError, read_subtitles,
+};
 mod media_tools;
 pub use media_input::MediaInput;
 mod language_preferences;

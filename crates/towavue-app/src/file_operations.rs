@@ -44,13 +44,27 @@ pub(super) struct RelocatedVersions {
     pub current: Option<FileOperationSource>,
 }
 
+pub(super) enum Failure {
+    Operation(towavue_runtime_windows::FileOperationError),
+    Start(std::io::Error),
+}
+
+impl Failure {
+    pub fn message(&self, language: localization::Language) -> String {
+        match self {
+            Self::Operation(error) => error.message(language),
+            Self::Start(error) => towavue_runtime_windows::io_error_message(error, language),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct Completed {
     pub versions: Option<Box<RelocatedVersions>>,
     pub outcome: FileOperationOutcome,
     pub resume: Option<VideoResumeSource>,
     pub recycle: Option<Box<towavue_runtime_windows::FileRecycleReport>>,
-    pub preference_warning: Option<String>,
+    pub preference_warning: Option<Arc<std::io::Error>>,
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
@@ -105,10 +119,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let notify = Arc::clone(&self.notify);
         if let Err(error) =
             towavue_runtime_windows::inspect_file_operation_source(path, move |result| {
-                notify(AppEvent::FileOperationSource(
-                    serial,
-                    result.map_err(|error| error.to_string()),
-                ));
+                notify(AppEvent::FileOperationSource(serial, result));
             })
         {
             self.file_operations.pending = None;
@@ -133,7 +144,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn finish_file_source(
         &mut self,
         serial: u64,
-        result: Result<FileOperationSource, String>,
+        result: Result<FileOperationSource, towavue_runtime_windows::FileOperationError>,
     ) {
         let display_language = self.language();
         if self
@@ -190,7 +201,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             Err(error) => {
                 self.file_operations.pending = None;
-                self.set_status(error);
+                self.set_status(error.message(display_language));
             }
         }
         self.request_redraw();
@@ -444,5 +455,76 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
         self.refresh_title();
         self.request_redraw();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_inspection_failure_uses_receiving_language_and_rejects_stale_results() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "file_operations::tests::source_inspection_failure_uses_receiving_language_and_rejects_stale_results",
+        ) else {
+            return;
+        };
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = send.send(event);
+        })
+        .expect("app");
+        // A reserved basename fails validation before any native file is opened.
+        let path = root.join("NUL.bmp");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.displayed_tab = Some(tab);
+        app.state = PlaybackState::Paused;
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::FlipHorizontal, MediaKind::Image);
+        let edits = app.edits.clone();
+        app.begin_file_relocation(Kind::Rename);
+        let serial = app
+            .file_operations
+            .pending
+            .as_ref()
+            .expect("inspection pending")
+            .serial;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let event = loop {
+            let event = receive
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("inspection callback");
+            if matches!(event, AppEvent::FileOperationSource(..)) {
+                break event;
+            }
+            app.handle_app_event(event);
+        };
+        assert!(
+            matches!(&event, AppEvent::FileOperationSource(id, Err(towavue_runtime_windows::FileOperationError::InvalidName)) if *id == serial)
+        );
+        app.language_settings.display = localization::Language::Japanese;
+        app.handle_app_event(AppEvent::FileOperationSource(
+            serial.wrapping_sub(1),
+            Err(towavue_runtime_windows::FileOperationError::WorkerStopped),
+        ));
+        assert!(app.file_operations.pending.is_some());
+        app.handle_app_event(event);
+        assert_eq!(
+            app.status_notice().as_deref(),
+            Some("フォルダー名やWindowsの予約名を含めず、有効なファイル名を1つ入力してください")
+        );
+        assert!(
+            app.file_operations.pending.is_none()
+                && !app.file_operations.locked
+                && app.pending_dialog.is_none()
+        );
+        assert_eq!(app.path.as_ref(), Some(&path));
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        assert_eq!(app.edits, edits);
+        assert!(!app.exit_requested);
     }
 }

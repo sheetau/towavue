@@ -216,20 +216,32 @@ fn stale_unbacked_inputs_invalid_outputs_and_abandoned_candidates_never_publish(
         (Some(&expected), ExportOutput::AudioOnly),
         (Some(&expected), ExportOutput::VideoFrame),
     ] {
+        let error = match prepare_save_as(
+            MediaInput::new(source.clone()),
+            version,
+            request(&source, &target, MediaKind::Image),
+            ExportOptions {
+                output,
+                ..Default::default()
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+            &|_| {},
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid input accepted"),
+        };
         assert!(
-            prepare_save_as(
-                MediaInput::new(source.clone()),
-                version,
-                request(&source, &target, MediaKind::Image),
-                ExportOptions {
-                    output,
-                    ..Default::default()
-                },
-                &AtomicBool::new(false),
-                &|_| {},
-                &|_| {}
-            )
-            .is_err()
+            matches!(&error, SourceSaveError::Io(io) if io.kind() == io::ErrorKind::InvalidInput)
+        );
+        let reason = if version.is_none() {
+            "読み込んだ元ファイルの状態を確認できません。開き直してから名前を付けて保存してください"
+        } else {
+            "名前を付けて保存には現在のドキュメントとメディア全体の出力が必要です"
+        };
+        assert_eq!(
+            error.message(towavue_core::localization::Language::Japanese),
+            format!("上書き保存に失敗しました: {reason}")
         );
         assert!(!target.exists());
     }

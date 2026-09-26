@@ -89,13 +89,17 @@ impl PreviewError {
     pub fn message(&self, language: Language) -> String {
         match self {
             Self::Cancelled => Text::PreviewCancelled.in_language(language).into(),
-            Self::Io(error) => formatted::preview_cache_failed(language, &error.to_string()),
+            Self::Io(error) => {
+                formatted::preview_cache_failed(language, &crate::io_error_message(error, language))
+            }
             Self::Decode(error) => {
                 formatted::preview_image_decode_failed(language, &error.to_string())
             }
-            Self::Start { program, source } => {
-                formatted::preview_start_failed(language, program, &source.to_string())
-            }
+            Self::Start { program, source } => formatted::preview_start_failed(
+                language,
+                program,
+                &crate::io_error_message(source, language),
+            ),
             Self::Generate(error) => formatted::preview_generate_failed(language, error),
             Self::Message(text) => {
                 formatted::preview_generate_failed(language, text.in_language(language))
@@ -117,7 +121,9 @@ impl ExportError {
             Self::SameAsSource => Text::ExportSameAsSource.in_language(language).into(),
             Self::InvalidTrim => Text::ExportInvalidTrim.in_language(language).into(),
             Self::InvalidTimeline => Text::ExportInvalidTimeline.in_language(language).into(),
-            Self::Start(error) => formatted::export_start_failed(language, &error.to_string()),
+            Self::Start(error) => {
+                formatted::export_start_failed(language, &crate::io_error_message(error, language))
+            }
             Self::Failed(error) => formatted::ffmpeg_export_failed(language, error),
             Self::Structured(error) => {
                 formatted::ffmpeg_export_failed(language, &error.message(language))
@@ -134,7 +140,9 @@ impl ExportError {
                 ),
             ),
             Self::Cancelled => Text::ExportCancelledUnchanged.in_language(language).into(),
-            Self::Output(error) => formatted::export_output_failed(language, &error.to_string()),
+            Self::Output(error) => {
+                formatted::export_output_failed(language, &crate::io_error_message(error, language))
+            }
         }
     }
 }
@@ -142,7 +150,10 @@ impl ExportError {
 impl FileOperationError {
     pub fn message(&self, language: Language) -> String {
         match self {
-            Self::Io(error) => formatted::file_operation_failed(language, &error.to_string()),
+            Self::Io(error) => formatted::file_operation_failed(
+                language,
+                &crate::io_error_message(error, language),
+            ),
             Self::Windows(error) => {
                 formatted::windows_file_operation_failed(language, &error.to_string())
             }

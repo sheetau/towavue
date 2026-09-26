@@ -1,5 +1,5 @@
 use super::*;
-use crate::file_operations::Completed;
+use crate::file_operations::{Completed, Failure};
 use towavue_runtime_windows::{
     FileOperationAction, FileOperationOutcome, FileOperationSource, VideoResumeSource,
 };
@@ -268,12 +268,18 @@ impl WindowHost {
                 let result = result
                     .map(|recycle| {
                         let preference_warning = preference.and_then(|path| {
-                            path.ok_or_else(|| "APPDATA is unavailable".to_owned())
-                                .and_then(|path| {
-                                    crate::file_operations::preferences::save_suppressed(&path)
-                                        .map_err(|error| error.to_string())
-                                })
-                                .err()
+                            path.ok_or_else(|| {
+                                std::io::Error::other(
+                                    towavue_runtime_windows::RecoveryDetail::from(
+                                        localization::Text::DeletePreferenceAppData,
+                                    ),
+                                )
+                            })
+                            .and_then(|path| {
+                                crate::file_operations::preferences::save_suppressed(&path)
+                            })
+                            .err()
+                            .map(Arc::new)
                         });
                         Completed {
                             outcome: FileOperationOutcome::Recycled,
@@ -283,7 +289,7 @@ impl WindowHost {
                             preference_warning,
                         }
                     })
-                    .map_err(|error| error.to_string());
+                    .map_err(Failure::Operation);
                 notify(AppEvent::FileOperationFinished(serial, result));
             };
             if retain_copy {
@@ -317,12 +323,12 @@ impl WindowHost {
                             preference_warning: None,
                         }
                     })
-                    .map_err(|error| error.to_string());
+                    .map_err(Failure::Operation);
                 notify(AppEvent::FileOperationFinished(serial, result));
             })
         };
         if let Err(error) = result {
-            self.finish_host_file_operation(owner, serial, Err(error.to_string()));
+            self.finish_host_file_operation(owner, serial, Err(Failure::Start(error)));
         }
     }
 
@@ -330,7 +336,7 @@ impl WindowHost {
         &mut self,
         owner: WindowKey,
         serial: u64,
-        result: Result<Completed, String>,
+        result: Result<Completed, Failure>,
     ) {
         let display_language = self.language.settings.display;
         if self.file_operation.as_ref().is_none_or(|pending| {
@@ -401,12 +407,15 @@ impl WindowHost {
                             towavue_core::localization::formatted::delete_preference_failed(
                                 display_language,
                                 message,
-                                &error.to_string(),
+                                &towavue_runtime_windows::io_error_message(
+                                    &error,
+                                    display_language,
+                                ),
                             )
                         },
                     ));
                 }
-                Err(error) => app.set_status(error),
+                Err(error) => app.set_status(error.message(display_language)),
             }
             app.request_redraw();
         }

@@ -270,11 +270,8 @@ fn start_recycling(
                 .path
                 .parent()
                 .ok_or(FileOperationError::InvalidName)?;
-            let mut order = crate::FolderOrderProvider::new()
-                .map_err(|error| io::Error::other(error.to_string()))?;
-            let before = order
-                .snapshot(folder)
-                .map_err(|error| io::Error::other(error.to_string()))?;
+            let mut order = crate::FolderOrderProvider::new().map_err(io::Error::other)?;
+            let before = order.snapshot(folder).map_err(io::Error::other)?;
             let retained_source = retain
                 .then(|| crate::RetainedSource::capture(&source))
                 .transpose()?;
@@ -358,7 +355,9 @@ fn perform(
             if !folder.is_dir() {
                 return Err(io::Error::new(
                     io::ErrorKind::NotADirectory,
-                    "destination folder is unavailable",
+                    crate::RecoveryDetail::from(
+                        towavue_core::localization::Text::FileDestinationFolder,
+                    ),
                 )
                 .into());
             }
@@ -448,7 +447,7 @@ fn wide(path: &Path) -> io::Result<Vec<u16>> {
     if result.contains(&0) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "path contains a null character",
+            crate::RecoveryDetail::from(towavue_core::localization::Text::FilePathNull),
         ));
     }
     result.push(0);

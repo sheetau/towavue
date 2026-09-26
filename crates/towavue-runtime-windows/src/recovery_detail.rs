@@ -39,10 +39,7 @@ impl RecoveryDetail {
     }
 
     pub(crate) fn io_message(error: &io::Error, language: Language) -> String {
-        error
-            .get_ref()
-            .and_then(|cause| cause.downcast_ref::<Self>())
-            .map_or_else(|| error.to_string(), |cause| cause.message(language))
+        crate::io_error_message(error, language)
     }
 
     pub(crate) fn with_original(self, directory: PathBuf) -> Self {

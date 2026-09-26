@@ -223,7 +223,9 @@ impl Envelope {
         if per_column == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "too few audio samples for waveform",
+                crate::RecoveryDetail::from(
+                    towavue_core::localization::Text::WaveformTooFewSamples,
+                ),
             ));
         }
         let mut means = Vec::with_capacity(width as usize);

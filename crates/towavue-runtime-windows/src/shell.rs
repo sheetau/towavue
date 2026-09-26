@@ -87,7 +87,9 @@ fn reveal_path(
             unsafe { OleInitialize(None) }.map_err(std::io::Error::other)?;
             let result = (|| {
                 let pidl = parse_path(&guide).ok_or_else(|| {
-                    std::io::Error::other("Windows could not resolve the selected path.")
+                    std::io::Error::other(crate::RecoveryDetail::from(
+                        towavue_core::localization::Text::ShellSelectedPath,
+                    ))
                 })?;
                 // SAFETY: the owned absolute PIDL stays live through the call. A zero item
                 // count selects this file in its parent; it does not execute the file.
@@ -108,15 +110,16 @@ fn license_guide(executable: &Path) -> std::io::Result<PathBuf> {
     let directory = executable
         .parent()
         .filter(|_| executable.is_absolute())
-        .ok_or_else(|| std::io::Error::other("The application directory is unavailable."))?;
+        .ok_or_else(|| {
+            std::io::Error::other(crate::RecoveryDetail::from(
+                towavue_core::localization::Text::ShellApplicationDirectory,
+            ))
+        })?;
     let guide = directory.join("licenses").join("START-HERE.html");
     if !guide.is_file() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!(
-                "Packaged licenses and sources are unavailable. Expected: {}",
-                guide.display()
-            ),
+            crate::io_error_messages::PathReason::MissingLicenseGuide(guide),
         ));
     }
     canonical_shell_path(&guide)
@@ -1186,7 +1189,20 @@ mod tests {
         let guide = application.join("START-HERE.html");
         let missing = license_guide(&executable).expect_err("missing guide");
         assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
-        assert!(missing.to_string().contains(&guide.display().to_string()));
+        assert_eq!(
+            missing.to_string(),
+            format!(
+                "Packaged licenses and sources are unavailable. Expected: {}",
+                guide.display()
+            )
+        );
+        assert_eq!(
+            crate::io_error_message(&missing, towavue_core::localization::Language::Japanese),
+            format!(
+                "同梱のライセンスとソースコードが見つかりません。確認先: {}",
+                guide.display()
+            )
+        );
         fs::create_dir(&guide).expect("directory is not a guide");
         assert!(license_guide(&executable).is_err());
         fs::remove_dir(&guide).expect("remove empty fixture directory");

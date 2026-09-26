@@ -370,9 +370,15 @@ enum AppEvent {
     RestartLanguage(localization::Language),
     FileOperationSource(
         u64,
-        Result<towavue_runtime_windows::FileOperationSource, String>,
+        Result<
+            towavue_runtime_windows::FileOperationSource,
+            towavue_runtime_windows::FileOperationError,
+        >,
     ),
-    FileOperationFinished(u64, Result<file_operations::Completed, String>),
+    FileOperationFinished(
+        u64,
+        Result<file_operations::Completed, file_operations::Failure>,
+    ),
     SourceSave(u64, towavue_runtime_windows::SourceSaveEvent),
     SaveAs(u64, towavue_runtime_windows::SaveAsEvent),
     ImagePasted(
@@ -3383,7 +3389,7 @@ where
                     Ok(_) => localization::Text::LicenseGuideRevealed
                         .in_language(language)
                         .into(),
-                    Err(error) => error.to_string(),
+                    Err(error) => towavue_runtime_windows::io_error_message(&error, language),
                 });
             }
             AppEvent::FileRevealed(result) => self.set_status(match result {
@@ -3393,7 +3399,7 @@ where
                 ),
                 Err(error) => towavue_core::localization::formatted::reveal_failed(
                     language,
-                    &error.to_string(),
+                    &towavue_runtime_windows::io_error_message(&error, language),
                 ),
             }),
             AppEvent::PickerPreviewReady => {

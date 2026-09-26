@@ -822,3 +822,72 @@ fn native_recycle_video_retains_hosted_readers_positions_and_recreates_edits() {
         .run_app(&mut Trial { source })
         .expect("native trial");
 }
+
+#[test]
+#[ignore = "recycles two uniquely owned files to verify failed preference persistence"]
+fn native_recycle_preference_failures_keep_success_and_localize_owned_advice() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::file_operations::recycle_tests::native_recycle_preference_failures_keep_success_and_localize_owned_advice",
+    ) else {
+        return;
+    };
+    for missing_appdata in [true, false] {
+        let media = root.join(if missing_appdata {
+            "missing-appdata"
+        } else {
+            "unknown-preference"
+        });
+        std::fs::create_dir(&media).expect("owned media folder");
+        let source = media.join("only.bmp");
+        crate::tab_transfer::tests::bitmap(&source);
+        let original = std::fs::read(&source).expect("source bytes");
+        let mut host = WindowHost::new(None, None).expect("host");
+        let owner = source_app(&mut host, &source);
+        let preference = media.join("delete-confirmation.conf");
+        let detail = if missing_appdata {
+            host.delete_preference_path = None;
+            "APPDATAを取得できません".to_owned()
+        } else {
+            std::fs::write(&preference, b"unknown future preference")
+                .expect("owned unknown preference");
+            host.delete_preference_path = Some(preference.clone());
+            crate::file_operations::preferences::save_suppressed(&preference)
+                .expect_err("unknown file retained")
+                .to_string()
+        };
+        let serial = pending_confirmation(&mut host, owner);
+        host.finish_delete_confirmation(
+            owner,
+            serial,
+            Ok(DeleteConfirmation {
+                confirmed: true,
+                dont_ask_again: true,
+            }),
+        );
+        // Select the receiving language only after dispatching the real worker.
+        host.language.settings.display = localization::Language::Japanese;
+        for app in host.windows.values_mut() {
+            app.language_settings = host.language.settings;
+        }
+        wait(&mut host);
+        let app = &host.windows[&owner];
+        assert!(!source.exists());
+        assert!(app.current_source_deleted() && !app.file_operations.busy() && !app.exit_requested);
+        assert!(host.delete_confirmation_suppressed);
+        assert_eq!(
+            std::fs::read(app.media_input(&source).path()).expect("retained original"),
+            original
+        );
+        let notice = app.status_notice().expect("success with warning");
+        assert!(
+            notice.contains("ごみ箱") && notice.contains(&detail),
+            "{notice}"
+        );
+        if !missing_appdata {
+            assert_eq!(
+                std::fs::read(&preference).expect("unknown preference retained"),
+                b"unknown future preference"
+            );
+        }
+    }
+}

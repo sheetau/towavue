@@ -106,7 +106,9 @@ impl SourceSaveJob {
                 }))
                 .unwrap_or_else(|_| {
                     Err(SourceSaveError::Io(io::Error::other(
-                        "source-save preparation worker stopped unexpectedly",
+                        crate::RecoveryDetail::from(
+                            towavue_core::localization::Text::SaveWorkerStopped,
+                        ),
                     )))
                 });
                 notify(SourceSaveEvent::Prepared(result));
@@ -138,9 +140,11 @@ struct Files {
 
 impl Files {
     fn new(target: &Path) -> io::Result<Arc<Self>> {
-        let parent = target
-            .parent()
-            .ok_or_else(|| io::Error::other("source folder unavailable"))?;
+        let parent = target.parent().ok_or_else(|| {
+            io::Error::other(crate::RecoveryDetail::from(
+                towavue_core::localization::Text::SaveSourceFolder,
+            ))
+        })?;
         Self::under(target, parent, "save")
     }
 
@@ -417,7 +421,7 @@ fn require_missing(path: &Path) -> io::Result<()> {
         Err(error) => Err(error),
         Ok(_) => Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "the deleted document's path is occupied; use Export as or choose another location",
+            crate::RecoveryDetail::from(towavue_core::localization::Text::SaveDeletedPathOccupied),
         )),
     }
 }

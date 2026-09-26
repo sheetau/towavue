@@ -183,12 +183,27 @@ fn stale_sources_invalid_names_and_unavailable_folders_preserve_files() {
             "{name:?}"
         );
     }
+    let error = perform(
+        &current,
+        FileOperationAction::MoveToFolder(fixture.0.join("missing")),
+    )
+    .expect_err("missing folder");
     assert!(
-        perform(
-            &current,
-            FileOperationAction::MoveToFolder(fixture.0.join("missing"))
-        )
-        .is_err()
+        matches!(&error, FileOperationError::Io(io) if io.kind() == io::ErrorKind::NotADirectory)
+    );
+    assert_eq!(
+        error.to_string(),
+        "file operation failed: destination folder is unavailable"
+    );
+    assert_eq!(
+        error.message(towavue_core::localization::Language::Japanese),
+        "ファイル操作に失敗しました: 保存先のフォルダーを利用できません"
+    );
+    let invalid = wide(Path::new("owned\0.png")).expect_err("NUL path");
+    assert_eq!(invalid.kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(
+        crate::io_error_message(&invalid, towavue_core::localization::Language::Japanese),
+        "パスにヌル文字が含まれています"
     );
     assert_eq!(
         fs::read(&original).expect("owned file-operation fixture"),

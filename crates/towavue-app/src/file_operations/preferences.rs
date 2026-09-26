@@ -26,10 +26,11 @@ pub(crate) fn save_suppressed(path: &Path) -> io::Result<()> {
     if suppressed(path) {
         return Ok(());
     }
-    fs::create_dir_all(
-        path.parent()
-            .ok_or_else(|| io::Error::other("preference folder unavailable"))?,
-    )?;
+    fs::create_dir_all(path.parent().ok_or_else(|| {
+        io::Error::other(towavue_runtime_windows::RecoveryDetail::from(
+            crate::localization::Text::DeletePreferenceFolder,
+        ))
+    })?)?;
     // Do not truncate an unknown file or overwrite an external preference edit.
     let mut file = fs::OpenOptions::new()
         .write(true)

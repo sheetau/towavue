@@ -43,6 +43,23 @@ fn japanese_file_operation_notices_preserve_rename_and_cancelled_delete_ownershi
         host.windows[&owner].status_notice(),
         Some(format!("ファイルを移動しました: {}", target.display()))
     );
+    let occupied = root.join("occupied.bmp");
+    std::fs::write(&occupied, b"other document").expect("occupied destination");
+    choose(&mut host, owner, Kind::Rename, occupied.clone());
+    assert_eq!(
+        host.windows[&owner].status_notice().as_deref(),
+        Some("指定したパスがすでに存在します。別の名前またはフォルダーを選んでください")
+    );
+    choose(&mut host, owner, Kind::Move, root.join("missing-folder"));
+    assert_eq!(
+        host.windows[&owner].status_notice().as_deref(),
+        Some("ファイル操作に失敗しました: 保存先のフォルダーを利用できません")
+    );
+    assert_eq!(
+        std::fs::read(&occupied).expect("other document retained"),
+        b"other document"
+    );
+    assert_eq!(std::fs::read(&target).expect("source retained"), bytes);
     let expected = FileOperationSource::capture(&target).expect("renamed version");
     host.file_operation = Some(Transaction {
         owner,
@@ -124,7 +141,7 @@ fn choose_at(host: &mut WindowHost, owner: WindowKey, kind: Kind, path: PathBuf,
     host.finish_host_file_operation(
         owner,
         serial.wrapping_sub(1),
-        Err("obsolete completion".into()),
+        Err(Failure::Start(std::io::Error::other("obsolete completion"))),
     );
     assert!(
         host.file_operation.is_some(),

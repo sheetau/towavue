@@ -67,7 +67,9 @@ impl SaveAsJob {
                 }))
                 .unwrap_or_else(|_| {
                     Err(SourceSaveError::Io(io::Error::other(
-                        "Save as preparation worker stopped unexpectedly",
+                        crate::RecoveryDetail::from(
+                            towavue_core::localization::Text::SaveAsWorkerStopped,
+                        ),
                     )))
                 });
                 notify(SaveAsEvent::Prepared(result));
@@ -169,7 +171,7 @@ pub fn prepare_save_as(
     if request.source != input.logical_path() || options.output != ExportOutput::Media {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Save as requires the current document input and full-media output",
+            crate::RecoveryDetail::from(towavue_core::localization::Text::SaveAsDocumentInput),
         )
         .into());
     }
@@ -177,7 +179,7 @@ pub fn prepare_save_as(
     if request.target != target.path() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Save as destination changed after selection",
+            crate::RecoveryDetail::from(towavue_core::localization::Text::SaveAsDestinationChanged),
         )
         .into());
     }
@@ -208,7 +210,9 @@ pub fn prepare_save_as(
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "The loaded source version is unavailable; reopen it before Save as",
+                    crate::RecoveryDetail::from(
+                        towavue_core::localization::Text::SaveAsSourceVersion,
+                    ),
                 )
             })?;
         RetainedSource::capture(expected)?

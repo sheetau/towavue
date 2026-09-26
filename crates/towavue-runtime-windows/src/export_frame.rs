@@ -67,7 +67,9 @@ impl Stamp {
         }
         let metadata = file.metadata()?;
         if !metadata.is_file() {
-            return Err(io::Error::other("frame source is not a regular file"));
+            return Err(io::Error::other(crate::RecoveryDetail::from(
+                towavue_core::localization::Text::FrameSourceRegularFile,
+            )));
         }
         Ok(Self {
             volume: identity.VolumeSerialNumber,
@@ -110,9 +112,9 @@ impl SourceLease {
         if Stamp::read(&current)? != self.source.stamp
             || Stamp::read(&self.file)? != self.source.stamp
         {
-            return Err(io::Error::other(
-                "the frame source changed; reopen it before exporting",
-            ));
+            return Err(io::Error::other(crate::RecoveryDetail::from(
+                towavue_core::localization::Text::FrameSourceChanged,
+            )));
         }
         Ok(())
     }

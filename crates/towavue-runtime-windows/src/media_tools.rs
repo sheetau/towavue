@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 
 pub(crate) fn tool_path(name: &str) -> io::Result<PathBuf> {
     let executable = std::env::current_exe()?;
-    let directory = executable
-        .parent()
-        .ok_or_else(|| io::Error::other("application executable has no parent directory"))?;
+    let directory = executable.parent().ok_or_else(|| {
+        io::Error::other(crate::RecoveryDetail::from(
+            towavue_core::localization::Text::HelperApplicationDirectory,
+        ))
+    })?;
     resolve_tool(name, directory, std::env::var_os("FFMPEG_DIR").as_deref())
 }
 
@@ -27,7 +29,7 @@ fn resolve_tool(
     if !executable.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("required media helper is missing: {}", executable.display()),
+            crate::io_error_messages::PathReason::MissingMediaHelper(executable),
         ));
     }
     Ok(executable)
@@ -59,10 +61,14 @@ mod tests {
                 let error =
                     resolve_tool(name, &application, empty).expect_err("no implicit PATH lookup");
                 assert_eq!(error.kind(), io::ErrorKind::NotFound);
-                assert!(
-                    error
-                        .to_string()
-                        .contains(&application.join(name).display().to_string())
+                let path = application.join(name).display().to_string();
+                assert_eq!(
+                    error.to_string(),
+                    format!("required media helper is missing: {path}")
+                );
+                assert_eq!(
+                    crate::io_error_message(&error, towavue_core::localization::Language::Japanese),
+                    format!("必要なメディア補助プログラムが見つかりません: {path}")
                 );
             }
         }

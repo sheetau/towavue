@@ -146,7 +146,7 @@ fn compare(source: &Path, stream: &str, label: &str) {
             "-map",
             stream,
             "-ac",
-            "1",
+            "2",
             "-c:a",
             "pcm_s16le",
             "-f",
@@ -161,7 +161,7 @@ fn compare(source: &Path, stream: &str, label: &str) {
         String::from_utf8_lossy(&output.stderr)
     );
     for (width, height) in [(127, 96), (257, 2048), (640, 96)] {
-        let expected = crate::waveform::read(&mut output.stdout.as_slice(), width, height);
+        let expected = crate::waveform::read_stereo(&mut output.stdout.as_slice(), width, height);
         let actual = decode(source, width, height, &Cancellation::default());
         match (expected, actual) {
             (Ok(expected), Ok(actual)) => assert!(
@@ -169,7 +169,7 @@ fn compare(source: &Path, stream: &str, label: &str) {
                 "{label} {width}x{height}: pixels differ"
             ),
             (Err(_), Err(_)) => assert!(
-                output.stdout.len() / 2 < width as usize,
+                output.stdout.len() / 4 < width as usize,
                 "only too-short sources may fail"
             ),
             (expected, actual) => panic!(

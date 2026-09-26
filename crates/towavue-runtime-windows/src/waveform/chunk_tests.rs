@@ -38,19 +38,18 @@ fn stereo_chunks_match_scalar_bits_at_fractional_boundaries_and_reject_invalid_s
                     assert_eq!(actual.position, reference.position);
                     assert!(
                         actual
-                            .sums
+                            .peaks
                             .iter()
-                            .zip(&reference.sums)
+                            .zip(&reference.peaks)
                             .all(|(a, b)| a.to_bits() == b.to_bits()),
                         "frames={frames}, columns={columns}, volume={volume}, chunk={chunk}"
                     );
                     let actual = actual.finish().expect("complete");
-                    let scale = frames as f64 / f64::from(columns);
                     assert!(
                         actual
                             .iter()
-                            .zip(&reference.sums)
-                            .all(|(a, b)| a.to_bits() == ((b / scale) as f32).to_bits())
+                            .zip(&reference.peaks)
+                            .all(|(a, b)| a.to_bits() == (*b as f32).to_bits())
                     );
                 }
             }

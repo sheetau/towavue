@@ -177,7 +177,7 @@ templates! {
     time_focus(label: &str, time: &str) => ("{label}: {time} · Left/Right adjust", "{label}: {time} · ←／→で調整"),
     value_focus(label: &str, value: f64) => ("{label}: {value:.3} · Left/Right adjust", "{label}: {value:.3} · ←／→で調整"),
     timeline_length(value: &str) => ("Length {value}", "長さ {value}"),
-    timeline_gain(value: f64) => ("Gain {value:.0}%", "倍率 {value:.0}%"),
+    timeline_gain(value: f64) => ("Gain {value:+.1} dB", "ゲイン {value:+.1} dB"),
     preview_unavailable(error: &str) => ("\nPreview unavailable: {error}", "\nプレビューを表示できません: {error}"),
     mute_named_tab(name: &str) => ("Mute tab: {name}", "タブをミュート: {name}"),
     unmute_named_tab(name: &str) => ("Unmute tab: {name}", "タブのミュートを解除: {name}"),

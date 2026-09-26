@@ -6,14 +6,115 @@ pub(super) fn gain_limit(range: TimeRange, plan: Option<&EditTimeline>) -> f32 {
 }
 
 pub(super) fn gain_height(rect: Rect) -> f32 {
-    // Unity stays centered; 75% of either half reaches 200% or silence.
-    // This is 1.5 times the former quarter-height travel per gain unit.
-    // Painting, hit testing and dragging share the same scale.
+    // Unity stays centered; either side reserves 75% of its half for gain travel.
+    // Painting, hit testing and dragging share the same decibel mapping.
     rect.height().max(1.0) * 0.375
 }
 
+const SILENCE_DB: f64 = -60.0;
+
+fn gain_db(gain: f32) -> f64 {
+    if gain <= 0.0 {
+        SILENCE_DB
+    } else {
+        (20.0 * f64::from(gain).log10()).max(SILENCE_DB)
+    }
+}
+
+fn db_gain(db: f64) -> f32 {
+    if db <= SILENCE_DB {
+        0.0
+    } else if db >= gain_db(towavue_core::MAX_VOLUME) {
+        towavue_core::MAX_VOLUME
+    } else {
+        10.0_f64.powf(db / 20.0) as f32
+    }
+}
+
 pub(super) fn gain_y(rect: Rect, gain: f32) -> f32 {
-    rect.center().y + (1.0 - gain) * gain_height(rect)
+    let db = gain_db(gain);
+    let scale = if db >= 0.0 {
+        gain_db(towavue_core::MAX_VOLUME)
+    } else {
+        -SILENCE_DB
+    };
+    rect.center().y - (db / scale) as f32 * gain_height(rect)
+}
+
+pub(super) fn dragged_gain(rect: Rect, original: f32, delta_y: f32) -> f32 {
+    let offset =
+        f64::from((rect.center().y - gain_y(rect, original) - delta_y) / gain_height(rect));
+    db_gain(
+        offset
+            * if offset >= 0.0 {
+                gain_db(towavue_core::MAX_VOLUME)
+            } else {
+                -SILENCE_DB
+            },
+    )
+}
+
+fn gain_label(language: Language, gain: f32) -> String {
+    if gain <= 0.0 {
+        Text::TimelineGainSilence.in_language(language).into()
+    } else {
+        formatted::timeline_gain(language, gain_db(gain))
+    }
+}
+
+fn paint_scale(painter: &egui::Painter, rect: Rect) {
+    // Fixed amplitude ratios keep decibel labels logarithmically spaced without
+    // calculating a logarithm for every waveform sample or display column.
+    let ticks = [
+        ("0", 1.0),
+        ("−6", 0.5011872),
+        ("−12", 0.2511886),
+        ("−18", 0.1258925),
+        ("−24", 0.06309573),
+        ("−30", 0.03162278),
+    ];
+    let font = egui::FontId::proportional(9.0);
+    let color = egui::Color32::from_white_alpha(120);
+    for direction in [-1.0, 1.0] {
+        let mut previous = None;
+        for (label, amplitude) in ticks {
+            let y = rect.center().y + direction * rect.height() * 0.5 * amplitude;
+            if (y - rect.center().y).abs() < 12.0
+                || previous.is_some_and(|previous: f32| (y - previous).abs() < 12.0)
+            {
+                continue;
+            }
+            let align = if amplitude == 1.0 {
+                if direction < 0.0 {
+                    egui::Align2::LEFT_TOP
+                } else {
+                    egui::Align2::LEFT_BOTTOM
+                }
+            } else {
+                egui::Align2::LEFT_CENTER
+            };
+            painter.hline(
+                rect.x_range(),
+                y,
+                (1.0, egui::Color32::from_white_alpha(16)),
+            );
+            painter.text(
+                egui::pos2(rect.left() + 2.0, y),
+                align,
+                label,
+                font.clone(),
+                color,
+            );
+            previous = Some(y);
+        }
+    }
+    painter.text(
+        egui::pos2(rect.left() + 2.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "−∞",
+        font,
+        color,
+    );
 }
 
 pub(crate) fn stretch_limits(
@@ -67,6 +168,7 @@ pub(super) fn paint(
     preview: Option<(TimeRange, f32)>,
     language: Language,
 ) {
+    paint_scale(painter, rect);
     let stroke = (1.0, egui::Color32::from_white_alpha(128));
     if let Some((range, gain)) = preview {
         let x_at = |time: MediaTime| {
@@ -91,7 +193,7 @@ pub(super) fn paint(
         painter.text(
             rect.left_top() + egui::vec2(LABEL_INSET, 10.0),
             egui::Align2::LEFT_CENTER,
-            formatted::timeline_gain(language, f64::from(gain * 100.0)),
+            gain_label(language, gain),
             egui::FontId::proportional(LABEL_SIZE),
             crate::chrome::FOREGROUND,
         );
@@ -132,12 +234,12 @@ pub(super) fn values(
         let name = if stretch {
             Text::SelectedDurationSeconds.in_language(language)
         } else {
-            Text::RelativeVolumePercent.in_language(language)
+            Text::RelativeVolumeDb.in_language(language)
         };
         let value = if stretch {
             range.duration().as_seconds_f64()
         } else {
-            f64::from(gain) * 100.0
+            gain_db(gain)
         };
         let available = enabled
             && response.enabled()
@@ -147,23 +249,16 @@ pub(super) fn values(
         let bounds = if stretch {
             stretch_limits(range, plan)
         } else {
-            0.0..=f64::from(gain_limit(range, plan)) * 100.0
+            SILENCE_DB..=gain_db(gain_limit(range, plan))
         };
-        let next = crate::seekbar::value_input(
-            &control,
-            name,
-            value,
-            bounds,
-            if stretch { 0.1 } else { 5.0 },
-            available,
-        );
+        let next = crate::seekbar::value_input(&control, name, value, bounds, 0.1, available);
         // The gain-line preview already paints its value. Do not overlay the
         // ordinary gain caption, but retain its numeric/accessibility control.
         if (control.has_focus() || selection.is_some()) && (stretch || preview.is_none()) {
             let label = if stretch {
                 formatted::timeline_length(language, &crate::format_time_precise(range.duration()))
             } else {
-                formatted::timeline_gain(language, value)
+                gain_label(language, gain)
             };
             ui.painter().with_clip_rect(rect).text(
                 if stretch {
@@ -189,7 +284,7 @@ pub(super) fn values(
                     crate::media_time(std::time::Duration::from_secs_f64(next)),
                 )
             } else {
-                TimelineEdit::ScaleVolume(range, (next / 100.0) as f32)
+                TimelineEdit::ScaleVolume(range, db_gain(next))
             };
             if result.is_none() && changes_plan(duration, plan, edit) {
                 result = Some(edit);
@@ -210,19 +305,63 @@ mod tests {
     }
 
     #[test]
-    fn gain_travel_uses_three_quarters_of_each_half_and_keeps_unity_centered() {
+    fn gain_travel_uses_decibels_and_keeps_unity_centered() {
         for top in [0.0, 30.0] {
             for height in [80.0, 100.0, 180.0] {
                 let rect = Rect::from_min_size(egui::pos2(20.0, top), egui::vec2(400.0, height));
                 assert_eq!(gain_height(rect), height * 0.375);
                 for (gain, fraction) in [
                     (0.0, 0.875),
-                    (0.5, 0.6875),
+                    (0.031622775, 0.6875),
                     (1.0, 0.5),
-                    (1.5, 0.3125),
+                    (std::f32::consts::SQRT_2, 0.3125),
                     (2.0, 0.125),
                 ] {
-                    assert_eq!(gain_y(rect, gain), top + height * fraction);
+                    assert!((gain_y(rect, gain) - (top + height * fraction)).abs() < 0.0001);
+                }
+                assert_eq!(dragged_gain(rect, 1.0, gain_height(rect)), 0.0);
+                assert_eq!(dragged_gain(rect, 1.0, -gain_height(rect)), 2.0);
+                assert_eq!(db_gain(20.0 * 0.5_f64.log10()), 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn decibel_ruler_keeps_full_scale_edges_and_infinite_center_inside_compact_tracks() {
+        for density in [1.0, 1.25, 2.0] {
+            for height in [80.0, 160.0, 300.0] {
+                let context = crate::localization::test_ui::japanese_context(density);
+                let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
+                let output =
+                    context.run_ui(Default::default(), |ui| paint_scale(ui.painter(), rect));
+                let texts: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) => Some(text),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    texts
+                        .iter()
+                        .filter(|text| text.galley.text() == "0")
+                        .count(),
+                    2
+                );
+                assert_eq!(
+                    texts
+                        .iter()
+                        .filter(|text| text.galley.text() == "−∞")
+                        .count(),
+                    1
+                );
+                for text in texts {
+                    let bounds = Rect::from_min_size(text.pos, text.galley.size());
+                    assert!(
+                        rect.expand(1.0).contains_rect(bounds),
+                        "bounded dB ruler: {bounds:?}"
+                    );
                 }
             }
         }
@@ -297,17 +436,17 @@ mod tests {
                     };
                     for events in [
                         vec![
-                            event(Action::SetValue, Some(105.0)),
+                            event(Action::SetValue, Some(0.1)),
                             event(Action::Decrement, None),
                         ],
                         vec![
-                            event(Action::SetValue, Some(95.0)),
+                            event(Action::SetValue, Some(-0.1)),
                             event(Action::Increment, None),
                         ],
-                        vec![event(Action::SetValue, Some(100.0))],
+                        vec![event(Action::SetValue, Some(0.0))],
                         vec![
-                            event(Action::SetValue, Some(80.0)),
-                            event(Action::SetValue, Some(100.0)),
+                            event(Action::SetValue, Some(-2.0)),
+                            event(Action::SetValue, Some(0.0)),
                         ],
                     ] {
                         let mut edits = Vec::new();
@@ -345,7 +484,7 @@ mod tests {
                         );
                         assert!(
                             edits.is_empty(),
-                            "returning to 100% preserves existing gain differences"
+                            "returning to 0 dB preserves existing gain differences"
                         );
                         if discard {
                             assert!(passes > 1);
@@ -402,7 +541,7 @@ mod tests {
         let id = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Relative volume (%)"))
+            .find(|(_, node)| node.label() == Some("Relative gain (dB)"))
             .expect("volume")
             .0;
         assert_eq!(
@@ -412,7 +551,7 @@ mod tests {
                 .expect("volume")
                 .1
                 .max_numeric_value(),
-            Some(200.0)
+            Some(gain_db(2.0))
         );
         let event = |value| {
             egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
@@ -422,9 +561,9 @@ mod tests {
                 data: Some(egui::accesskit::ActionData::NumericValue(value)),
             })
         };
-        assert_eq!(draw(vec![event(100.0)], false, false).1, None);
-        assert_eq!(draw(vec![event(100.0)], true, false).1, None);
-        for value in [200.0, 300.0, 400.0] {
+        assert_eq!(draw(vec![event(0.0)], false, false).1, None);
+        assert_eq!(draw(vec![event(0.0)], true, false).1, None);
+        for value in [gain_db(2.0), 12.0, 24.0] {
             assert_eq!(
                 draw(vec![event(value)], true, false).1,
                 Some(TimelineEdit::ScaleVolume(range(0, 10), 2.0))

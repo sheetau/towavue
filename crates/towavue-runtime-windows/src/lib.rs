@@ -4,6 +4,7 @@ mod drag_badge;
 pub use drag_badge::DragBadge;
 
 mod audio;
+mod audio_timestamps;
 mod avif_container;
 mod avif_failure;
 pub use avif_failure::AvifFailure;

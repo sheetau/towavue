@@ -1,4 +1,4 @@
-//! Selected audio stream directly to the bounded mono-s16 source envelope.
+//! Selected audio stream directly to the bounded stereo-s16 peak envelope.
 
 use super::Envelope;
 use crate::decode::discard_other_streams;
@@ -71,7 +71,7 @@ fn decode_cancellable(
                                 channel_layout: decoded.channel_layout(),
                                 rate: decoded.rate(),
                             };
-                            let levels = mono_mix_levels(&decoded)?;
+                            let levels = downmix_levels(&decoded)?;
                             if resampler
                                 .as_ref()
                                 .is_none_or(|current| *current.input() != definition)
@@ -95,7 +95,7 @@ fn decode_cancellable(
                                     definition.channel_layout,
                                     definition.rate,
                                     sample,
-                                    ChannelLayout::MONO,
+                                    ChannelLayout::STEREO,
                                     rate,
                                     options,
                                 )?);
@@ -109,10 +109,10 @@ fn decode_cancellable(
                             .div_ceil(u64::from(current.input().rate))
                                 + current.delay().map_or(0, |delay| delay.output as u64);
                             let mut converted =
-                                frame::Audio::new(sample, count as usize, ChannelLayout::MONO);
+                                frame::Audio::new(sample, count as usize, ChannelLayout::STEREO);
                             current.run(&decoded, &mut converted)?;
                             if converted.samples() != 0 {
-                                envelope.push(&converted.data(0)[..converted.samples() * 2]);
+                                envelope.push_stereo(&converted.data(0)[..converted.samples() * 4]);
                             }
                         }
                         Err(Error::Eof)
@@ -145,13 +145,13 @@ fn decode_cancellable(
             };
             check()?;
             let mut converted =
-                frame::Audio::new(sample, delay.output as usize, ChannelLayout::MONO);
+                frame::Audio::new(sample, delay.output as usize, ChannelLayout::STEREO);
             converted.set_rate(current.output().rate);
             let remaining = current.flush(&mut converted)?;
             if converted.samples() == 0 {
                 break;
             }
-            envelope.push(&converted.data(0)[..converted.samples() * 2]);
+            envelope.push_stereo(&converted.data(0)[..converted.samples() * 4]);
             if remaining.is_none() {
                 break;
             }
@@ -166,13 +166,13 @@ fn decode_cancellable(
         .map_err(|error| PreviewError::Generate(error.to_string()))
 }
 
-fn mono_mix_levels(decoded: &frame::Audio) -> Result<Option<[f64; 3]>, Error> {
+fn downmix_levels(decoded: &frame::Audio) -> Result<Option<[f64; 3]>, Error> {
     let Some(data) = decoded.side_data(frame::side_data::Type::DownMixInfo) else {
         return Ok(None);
     };
     // These are native-ABI doubles in decoder-owned AVDownmixInfo, not file-endian
     // bytes. Read fields by their bound ABI offsets without casting borrowed data.
-    // Mono uses the regular levels, not the stereo-only Lt/Rt matrix coefficients.
+    // Use regular stereo downmix levels, without selecting an Lt/Rt matrix.
     let offsets = [
         std::mem::offset_of!(ffmpeg_next::ffi::AVDownmixInfo, center_mix_level),
         std::mem::offset_of!(ffmpeg_next::ffi::AVDownmixInfo, surround_mix_level),

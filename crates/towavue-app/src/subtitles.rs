@@ -443,14 +443,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         if let Some(position) = position {
             let mut viewport = ui.max_rect().intersect(ui.clip_rect());
-            if self.fullscreen {
-                // Keep a stable baseline while the bottom transport bar appears
-                // or disappears, including the seek strip above the status row.
-                viewport.max.y = viewport
-                    .max
-                    .y
-                    .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
-            }
+            // Use the same bottom clearance in windowed and fullscreen views.
+            // The normal status row is shorter than the fullscreen transport
+            // band; anchoring only to the media panel would move captions down.
+            // A visible timeline may still require a higher content boundary.
+            viewport.max.y = viewport
+                .max
+                .y
+                .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
             self.subtitles
                 .paint
                 .show(ui, viewport, &document, position, delay);

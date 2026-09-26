@@ -57,9 +57,9 @@ fn japanese_timeline_numeric_controls_keep_ids_units_and_edit_routing() {
                 8.0,
             ),
             (
-                "相対音量（%）",
+                "相対ゲイン（dB）",
                 id.with(("timeline-adjustment-value", false)),
-                100.0,
+                0.0,
             ),
             (
                 "選択範囲の長さ（秒）",
@@ -108,7 +108,11 @@ fn japanese_timeline_numeric_controls_keep_ids_units_and_edit_routing() {
             assert!(result.seek.is_none() && result.edit.is_none());
         }
         for (stretch, value, expected) in [
-            (false, 125.0, TimelineEdit::ScaleVolume(range, 1.25)),
+            (
+                false,
+                20.0 * 1.25_f64.log10(),
+                TimelineEdit::ScaleVolume(range, 1.25),
+            ),
             (true, 5.0, TimelineEdit::Stretch(range, time(5))),
         ] {
             let result = frame(vec![event(
@@ -240,7 +244,7 @@ fn caption_layout(language: Language) {
                 if language == Language::English {
                     "Gain "
                 } else {
-                    "倍率 "
+                    "ゲイン "
                 },
             );
             let length = text_bounds(

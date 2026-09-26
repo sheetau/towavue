@@ -70,8 +70,12 @@ fn probe_selected(
                     stream: (stream.index(), ffmpeg::Rational(1, decoder.rate() as i32)),
                     channels: decoder.channels(),
                     sample_format: decoder.format().name().to_owned(),
-                    tolerance: (f64::from(stream.time_base()) - 1.0 / f64::from(decoder.rate()))
-                        .max(0.0),
+                    tolerance: (if crate::audio_timestamps::quantized_aac(&stream) {
+                        0.001
+                    } else {
+                        f64::from(stream.time_base())
+                    } - 1.0 / f64::from(decoder.rate()))
+                    .max(0.0),
                     disposition: stream.disposition().bits(),
                     filters: Vec::new(),
                     output_samples: None,

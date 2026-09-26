@@ -262,7 +262,7 @@ pub(super) fn show(
         if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
             let edit = match mode {
                 Gesture::Gain(range, original) => {
-                    let gain = (original - (pointer.y - origin.y) / adjustment::gain_height(rect))
+                    let gain = adjustment::dragged_gain(rect, original, pointer.y - origin.y)
                         .clamp(0.0, adjustment::gain_limit(range, plan));
                     gain_preview = Some((range, gain));
                     TimelineEdit::ScaleVolume(range, gain)
@@ -664,8 +664,8 @@ mod tests {
                 ),
                 (
                     identity.with(("timeline-adjustment-value", false)),
-                    "Relative volume (%)",
-                    100.0,
+                    "Relative gain (dB)",
+                    0.0,
                 ),
                 (
                     identity.with(("timeline-adjustment-value", true)),
@@ -1468,11 +1468,11 @@ mod tests {
                             let node = tree
                                 .nodes
                                 .iter()
-                                .find(|(_, node)| node.label() == Some("Relative volume (%)"))
+                                .find(|(_, node)| node.label() == Some("Relative gain (dB)"))
                                 .expect("gain control");
                             assert_eq!(
                                 node.1.numeric_value(),
-                                Some(100.0),
+                                Some(0.0),
                                 "release resets the relative control"
                             );
                         }
@@ -1496,31 +1496,40 @@ mod tests {
                         egui::Event::PointerMoved(end),
                         button(end, false),
                     ];
-                    let (edits, previews) = if batched {
-                        frame(events)
-                    } else {
-                        assert!(frame(vec![events[0].clone()]).0.is_empty());
-                        let (edits, previews) = frame(vec![events[1].clone()]);
-                        assert!(edits.is_empty());
-                        assert!(!previews.is_empty());
-                        assert!(
-                            previews
-                                .iter()
-                                .all(|preview| *preview == (affected, gain + 0.5))
-                        );
-                        frame(vec![events[2].clone()])
-                    };
-                    assert_eq!(edits, vec![TimelineEdit::ScaleVolume(affected, gain + 0.5)]);
+                    let (edits, previews) =
+                        if batched {
+                            frame(events)
+                        } else {
+                            assert!(frame(vec![events[0].clone()]).0.is_empty());
+                            let (edits, previews) = frame(vec![events[1].clone()]);
+                            assert!(edits.is_empty());
+                            assert!(!previews.is_empty());
+                            assert!(
+                                previews.iter().all(|preview| *preview
+                                    == (affected, gain * std::f32::consts::SQRT_2))
+                            );
+                            frame(vec![events[2].clone()])
+                        };
+                    assert_eq!(
+                        edits,
+                        vec![TimelineEdit::ScaleVolume(
+                            affected,
+                            gain * std::f32::consts::SQRT_2
+                        )]
+                    );
                     assert!(!previews.is_empty());
                     assert!(
                         previews
                             .iter()
-                            .all(|preview| *preview == (affected, gain + 0.5))
+                            .all(|preview| *preview == (affected, gain * std::f32::consts::SQRT_2))
                     );
                     assert!(frame(vec![]).0.is_empty());
                     assert_eq!(history.timeline(time(10.0)), Some(before.clone()));
                     let mut expected = before.clone();
-                    assert!(expected.apply(TimelineEdit::ScaleVolume(affected, gain + 0.5)));
+                    assert!(expected.apply(TimelineEdit::ScaleVolume(
+                        affected,
+                        gain * std::f32::consts::SQRT_2
+                    )));
                     assert!(history.push(EditOperation::Timeline(edits[0]), MediaKind::Audio));
                     assert_eq!(history.timeline(time(10.0)), Some(expected.clone()));
                     assert!(history.undo());
@@ -1539,8 +1548,8 @@ mod tests {
             for (selection, stretch, gain, travel) in [
                 (None, false, 0.0, 37.5),
                 (selected, false, 0.0, 37.5),
-                (None, false, 0.5, 18.75),
-                (selected, false, 1.5, -18.75),
+                (None, false, 0.031_622_775, 18.75),
+                (selected, false, std::f32::consts::SQRT_2, -18.75),
                 (None, false, 2.0, -37.5),
                 (selected, false, 2.0, -37.5),
                 (None, false, 0.0, 80.0),
@@ -2115,7 +2124,10 @@ mod tests {
         }
         let selected = app.time_selection;
         assert!(app.edits.is_empty());
-        let (_, actions) = draw(&mut app, vec![event("Relative volume (%)", 50.0)]);
+        let (_, actions) = draw(
+            &mut app,
+            vec![event("Relative gain (dB)", 20.0 * 0.5_f64.log10())],
+        );
         assert!(
             matches!(actions.as_slice(), [UiAction::TimeAdjustment(_, _, _, TimelineEdit::ScaleVolume(_, gain))] if *gain == 0.5)
         );

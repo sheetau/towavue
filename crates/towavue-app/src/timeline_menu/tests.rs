@@ -105,7 +105,7 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                 for label in [
                     Text::SelectionStartSeconds.in_language(language),
                     Text::SelectionEndSeconds.in_language(language),
-                    Text::RelativeVolumePercent.in_language(language),
+                    Text::RelativeVolumeDb.in_language(language),
                     Text::SelectedDurationSeconds.in_language(language),
                 ] {
                     let bounds = tree

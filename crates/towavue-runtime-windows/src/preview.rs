@@ -363,7 +363,7 @@ impl PreviewCache {
         let variant = match kind {
             MediaKind::Image => IMAGE_PREVIEW_VARIANT,
             MediaKind::Video => "filmstrip-video-v5",
-            MediaKind::Audio => "waveform-v3-240-160",
+            MediaKind::Audio => "waveform-v4-peak-240-160",
         };
         let key = cache_key(source, variant)?;
         let duration_key = (kind != MediaKind::Image)
@@ -556,7 +556,7 @@ impl PreviewCache {
             ));
         }
         let variant = format!(
-            "video-waveform-v1-{}-{width}-{height}",
+            "video-waveform-v2-peak-{}-{width}-{height}",
             track.map_or_else(|| "default".into(), |track| track.index().to_string())
         );
         let key = cache_key(source, &variant)?;
@@ -604,7 +604,7 @@ impl PreviewCache {
         if width == 0 || height == 0 {
             return Err(PreviewError::Generate("invalid waveform dimensions".into()));
         }
-        let key = cache_key(source, &format!("waveform-v3-{width}-{height}"))?;
+        let key = cache_key(source, &format!("waveform-v4-peak-{width}-{height}"))?;
         self.load_or_generate_ready(key, || ready_preview_png(generate()?))
     }
 
@@ -638,7 +638,7 @@ impl PreviewCache {
                     "-map",
                     &format!("0:{stream}"),
                     "-ac",
-                    "1",
+                    "2",
                     "-c:a",
                     "pcm_s16le",
                     "-f",
@@ -648,7 +648,7 @@ impl PreviewCache {
             );
             let cancellation = self.cancellation.clone().unwrap_or_default();
             let result = cancellation.read_output(command, move |reader| {
-                Ok(crate::waveform::read(reader, width, height))
+                Ok(crate::waveform::read_stereo(reader, width, height))
             });
             self.check_cancelled()?;
             let (status, image, diagnostics) = result.map_err(|source| PreviewError::Start {
@@ -2050,7 +2050,7 @@ mod tests {
             .expect("audio fixture");
             assert!(status.success());
             let filter =
-                format!("aformat=channel_layouts=mono,showwavespic=s={width}x96:colors=white");
+                format!("pan=mono|c0=c0,showwavespic=s={width}x96:colors=white:filter=peak");
             let reference = run_ffmpeg(
                 &[
                     "-i".into(),

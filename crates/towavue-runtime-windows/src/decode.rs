@@ -218,6 +218,7 @@ pub(crate) enum AudioSeekPolicy {
 }
 
 struct StreamConfig {
+    quantized_audio_timestamps: bool,
     index: usize,
     time_base: Rational,
     parameters: codec::Parameters,
@@ -229,7 +230,8 @@ impl StreamConfig {
         // SAFETY: Parameters retains this allocation; this read neither mutates
         // native state nor lets its pointer escape the owning configuration.
         let rate = unsafe { (*self.parameters.as_ptr()).sample_rate };
-        rate > 0
+        !self.quantized_audio_timestamps
+            && rate > 0
             && i64::from(self.time_base.numerator()) * i64::from(rate)
                 <= i64::from(self.time_base.denominator())
     }
@@ -444,6 +446,7 @@ enum PrerollSamples {
 }
 
 struct AudioPipeline {
+    quantized_timestamps: bool,
     stream_index: usize,
     time_base: Rational,
     decoder: codec::decoder::Audio,
@@ -489,6 +492,11 @@ impl AudioPipeline {
                 let low =
                     (samples as i64).rescale_with(sample_base, self.time_base, Rounding::Down);
                 let high = (samples as i64).rescale_with(sample_base, self.time_base, Rounding::Up);
+                let rounding = if self.quantized_timestamps {
+                    1_i64.rescale_with(Rational(1, 1000), self.time_base, Rounding::Up)
+                } else {
+                    0
+                };
                 if self.decoder.frame_size() as usize != samples
                     || self.decoder.profile() != codec::Profile::AAC(codec::profile::AAC::Low)
                     || packet.size() == 0
@@ -497,7 +505,8 @@ impl AudioPipeline {
                         .and_then(|data| data.first())
                         .is_some_and(|byte| matches!(byte >> 5, 0 | 1 | 3))
                     || packet.duration() <= 0
-                    || !(low..=high).contains(&packet.duration())
+                    || !(low.saturating_sub(rounding)..=high.saturating_add(rounding))
+                        .contains(&packet.duration())
                 {
                     self.sample_preroll = None;
                     return Ok(false);
@@ -543,6 +552,21 @@ impl AudioPipeline {
 
     fn sample_presentation_time(&mut self, timestamp: Option<i64>, samples: usize) -> MediaTime {
         let sample_base = Rational(1, self.output_format.sample_rate as i32);
+        if self.quantized_timestamps
+            && self.next_sample != ffmpeg::ffi::AV_NOPTS_VALUE
+            && let Some(timestamp) = timestamp
+        {
+            let measured = timestamp.rescale(self.time_base, sample_base);
+            let tolerance = i64::from(self.output_format.sample_rate.div_ceil(1000));
+            if measured.abs_diff(self.next_sample) <= tolerance as u64 {
+                // The index proves a rounded timestamp grid, not missing PCM.
+                // Keep contiguous decoded samples; larger actual gaps still use
+                // the ordinary timestamp path below. Preserve the initial phase.
+                let sample = self.next_sample;
+                self.next_sample = sample.saturating_add(samples as i64);
+                return timestamp_to_media_time(Some(sample), sample_base);
+            }
+        }
         let sample = if let Some(timestamp) = timestamp {
             if self.next_sample != ffmpeg::ffi::AV_NOPTS_VALUE
                 && timestamp
@@ -2328,6 +2352,7 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         sample_rate,
     )?;
     Ok(AudioPipeline {
+        quantized_timestamps: config.quantized_audio_timestamps,
         stream_index: config.index,
         time_base: config.time_base,
         decoder,
@@ -2346,6 +2371,7 @@ fn best_stream_config(input: &format::context::Input, media_type: Type) -> Optio
 
 fn stream_config(stream: ffmpeg::Stream<'_>) -> StreamConfig {
     StreamConfig {
+        quantized_audio_timestamps: crate::audio_timestamps::quantized_aac(&stream),
         index: stream.index(),
         time_base: stream.time_base(),
         parameters: stream.parameters(),

@@ -346,6 +346,7 @@ fn fullscreen_captions_stay_above_controls_without_moving_on_hover() {
     for density in [1.0, 1.25, 2.0] {
         app.ui_context = Some(crate::localization::test_ui::japanese_context(density));
         for size in [egui::vec2(800.0, 500.0), egui::vec2(360.0, 200.0)] {
+            app.fullscreen = true;
             let mut previous = None;
             for hover in [false, true, false] {
                 let pointer = egui::pos2(size.x * 0.5, if hover { size.y - 5.0 } else { 50.0 });
@@ -362,6 +363,15 @@ fn fullscreen_captions_stay_above_controls_without_moving_on_hover() {
                 }
                 previous = Some(bounds);
             }
+            app.fullscreen = false;
+            frame(&mut app, size, egui::pos2(10.0, 100.0));
+            let output = frame(&mut app, size, egui::pos2(10.0, 100.0));
+            let normal = caption_bounds(&output, "Main subtitle").expect("windowed caption");
+            let fullscreen = previous.expect("fullscreen caption");
+            assert!(
+                (normal.bottom() - fullscreen.bottom()).abs() <= 1.0,
+                "windowed and fullscreen captions need the same bottom clearance: {normal:?} / {fullscreen:?}"
+            );
         }
     }
 }

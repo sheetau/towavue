@@ -1625,7 +1625,7 @@ fn cached_filmstrip_uses_memory_only_and_preserves_duration_and_source_identity(
     for (kind, variant) in [
         (MediaKind::Image, IMAGE_PREVIEW_VARIANT),
         (MediaKind::Video, "filmstrip-video-v5"),
-        (MediaKind::Audio, "waveform-v3-240-160"),
+        (MediaKind::Audio, "waveform-v4-peak-240-160"),
     ] {
         let source = cache.root.join(format!("{kind:?}"));
         fs::write(&source, b"not decodable media").expect("source identity only");

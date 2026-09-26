@@ -10,7 +10,7 @@ pub(crate) mod native;
 #[cfg(test)]
 mod reference_tests;
 
-/// Mean absolute stereo envelope of the edited playback samples, one value per
+/// Peak absolute stereo envelope of the edited playback samples, one value per
 /// display column. Preserve float amplitudes so height/DPI changes need no raster
 /// enlargement. The louder channel supplies each frame; antiphase cannot cancel.
 pub fn timeline_waveform(
@@ -107,7 +107,7 @@ pub fn timeline_audio_track_waveform(
 }
 
 struct DisplayEnvelope {
-    sums: Vec<f64>,
+    peaks: Vec<f64>,
     frames: u64,
     position: u64,
     column: usize,
@@ -124,9 +124,9 @@ impl DisplayEnvelope {
         };
         let mut frames = pcm.as_chunks::<8>().0;
         while !frames.is_empty() {
-            // Whole samples inside one column need only ordered accumulation.
+            // Whole samples inside one column need only a peak reduction.
             // Fractional boundaries and excess samples retain the scalar path.
-            let count = if self.column < self.sums.len() {
+            let count = if self.column < self.peaks.len() {
                 (self.column_end as u64)
                     .saturating_sub(self.position)
                     .min(frames.len() as u64) as usize
@@ -140,14 +140,14 @@ impl DisplayEnvelope {
                 self.push(value);
                 frames = &frames[1..];
             } else {
-                let mut sum = self.sums[self.column];
+                let mut peak = self.peaks[self.column];
                 for frame in &frames[..count] {
                     let Some(value) = amplitude(frame) else {
                         return false;
                     };
-                    sum += value;
+                    peak = peak.max(value);
                 }
-                self.sums[self.column] = sum;
+                self.peaks[self.column] = peak;
                 self.position += count as u64;
                 frames = &frames[count..];
             }
@@ -157,7 +157,7 @@ impl DisplayEnvelope {
 
     fn new(columns: u32, frames: u64) -> Self {
         Self {
-            sums: vec![0.0; columns as usize],
+            peaks: vec![0.0; columns as usize],
             frames,
             position: 0,
             column: 0,
@@ -166,20 +166,22 @@ impl DisplayEnvelope {
     }
 
     fn push(&mut self, amplitude: f64) {
-        // Integrate in sample coordinates; calculate boundaries only when crossing
+        // Reduce peaks in sample coordinates; calculate boundaries only when crossing
         // a display column, including multiple columns within one short-media sample.
         let mut start = self.position as f64;
         let end = (self.position + 1) as f64;
-        while self.column < self.sums.len() {
+        while self.column < self.peaks.len() {
             if end <= self.column_end {
-                self.sums[self.column] += amplitude * (end - start);
+                self.peaks[self.column] = self.peaks[self.column].max(amplitude);
                 break;
             }
-            self.sums[self.column] += amplitude * (self.column_end - start);
+            if self.column_end > start {
+                self.peaks[self.column] = self.peaks[self.column].max(amplitude);
+            }
             start = self.column_end;
             self.column += 1;
             self.column_end =
-                (self.column + 1) as f64 * self.frames as f64 / self.sums.len() as f64;
+                (self.column + 1) as f64 * self.frames as f64 / self.peaks.len() as f64;
         }
         self.position += 1;
     }
@@ -190,20 +192,15 @@ impl DisplayEnvelope {
                 towavue_core::localization::Text::WaveformSampleCountMismatch,
             ));
         }
-        let samples_per_column = self.frames as f64 / self.sums.len() as f64;
-        Ok(self
-            .sums
-            .into_iter()
-            .map(|sum| (sum / samples_per_column) as f32)
-            .collect())
+        Ok(self.peaks.into_iter().map(|peak| peak as f32).collect())
     }
 }
 
 struct Envelope {
     // Completed bins have equal sample counts; only the pending tail may be shorter.
-    sums: Vec<u64>,
+    peaks: Vec<u64>,
     bin_samples: u64,
-    pending_sum: u64,
+    pending_peak: u64,
     pending_samples: u64,
     total_samples: u64,
     limit: usize,
@@ -213,44 +210,59 @@ impl Envelope {
     fn new(width: u32) -> Self {
         let limit = width as usize * BINS_PER_COLUMN;
         Self {
-            sums: Vec::with_capacity(limit),
+            peaks: Vec::with_capacity(limit),
             bin_samples: 1,
-            pending_sum: 0,
+            pending_peak: 0,
             pending_samples: 0,
             total_samples: 0,
             limit,
         }
     }
 
+    #[cfg(any(test, feature = "waveform-verification"))]
     fn push(&mut self, mut pcm: &[u8]) {
+        self.push_channels(&mut pcm, 1);
+    }
+
+    fn push_stereo(&mut self, mut pcm: &[u8]) {
+        self.push_channels(&mut pcm, 2);
+    }
+
+    fn push_channels(&mut self, pcm: &mut &[u8], channels: usize) {
         while !pcm.is_empty() {
-            let count = (self.bin_samples - self.pending_samples).min((pcm.len() / 2) as u64);
-            let bytes = count as usize * 2;
-            self.pending_sum += pcm[..bytes]
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|sample| u64::from(i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs()))
-                .sum::<u64>();
+            let count =
+                (self.bin_samples - self.pending_samples).min((pcm.len() / (2 * channels)) as u64);
+            let bytes = count as usize * 2 * channels;
+            self.pending_peak = self.pending_peak.max(
+                pcm[..bytes]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|sample| {
+                        u64::from(i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs())
+                    })
+                    .max()
+                    .unwrap_or(0),
+            );
             self.pending_samples += count;
             self.total_samples += count;
-            pcm = &pcm[bytes..];
+            *pcm = &pcm[bytes..];
             if self.pending_samples == self.bin_samples {
-                self.sums.push(self.pending_sum);
-                self.pending_sum = 0;
+                self.peaks.push(self.pending_peak);
+                self.pending_peak = 0;
                 self.pending_samples = 0;
-                if self.sums.len() == self.limit {
+                if self.peaks.len() == self.limit {
                     for index in 0..self.limit / 2 {
-                        self.sums[index] = self.sums[index * 2] + self.sums[index * 2 + 1];
+                        self.peaks[index] = self.peaks[index * 2].max(self.peaks[index * 2 + 1]);
                     }
-                    self.sums.truncate(self.limit / 2);
+                    self.peaks.truncate(self.limit / 2);
                     self.bin_samples *= 2;
                 }
             }
         }
     }
 
-    fn means(&self, width: u32) -> io::Result<Vec<u16>> {
+    fn column_peaks(&self, width: u32) -> io::Result<Vec<u16>> {
         let per_column = self.total_samples / u64::from(width);
         if per_column == 0 {
             return Err(io::Error::new(
@@ -260,7 +272,7 @@ impl Envelope {
                 ),
             ));
         }
-        let mut means = Vec::with_capacity(width as usize);
+        let mut peaks = Vec::with_capacity(width as usize);
         for column in 0..u64::from(width) {
             let start = column * per_column;
             let end = if column + 1 == u64::from(width) {
@@ -269,26 +281,45 @@ impl Envelope {
                 start + per_column
             };
             let mut position = start;
-            let mut sum = 0.0;
+            let mut peak = 0;
             while position < end {
                 let index = (position / self.bin_samples) as usize;
-                let (bin_sum, count) = self
-                    .sums
+                let (bin_peak, count) = self
+                    .peaks
                     .get(index)
-                    .map(|sum| (*sum, self.bin_samples))
-                    .unwrap_or((self.pending_sum, self.pending_samples));
+                    .map(|peak| (*peak, self.bin_samples))
+                    .unwrap_or((self.pending_peak, self.pending_samples));
                 let overlap = end.min(index as u64 * self.bin_samples + count) - position;
-                sum += bin_sum as f64 * overlap as f64 / count as f64;
+                peak = peak.max(bin_peak);
                 position += overlap;
             }
-            means.push((sum / (end - start) as f64).floor() as u16);
+            peaks.push(peak as u16);
         }
-        Ok(means)
+        Ok(peaks)
     }
 }
 
-#[cfg(any(test, feature = "waveform-verification"))]
+#[cfg(test)]
 pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result<image::RgbaImage> {
+    read_channels(reader, width, height, 1)
+}
+
+#[cfg(any(test, feature = "waveform-verification"))]
+pub(crate) fn read_stereo(
+    reader: &mut dyn Read,
+    width: u32,
+    height: u32,
+) -> io::Result<image::RgbaImage> {
+    read_channels(reader, width, height, 2)
+}
+
+#[cfg(any(test, feature = "waveform-verification"))]
+fn read_channels(
+    reader: &mut dyn Read,
+    width: u32,
+    height: u32,
+    channels: usize,
+) -> io::Result<image::RgbaImage> {
     let mut envelope = Envelope::new(width);
     let mut buffer = [0; 65_536];
     let mut carried = 0;
@@ -301,10 +332,16 @@ pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result
             break;
         }
         let total = carried + count;
-        envelope.push(&buffer[..total / 2 * 2]);
-        carried = total % 2;
+        let stride = channels * 2;
+        let consumed = total / stride * stride;
+        if channels == 2 {
+            envelope.push_stereo(&buffer[..consumed]);
+        } else {
+            envelope.push(&buffer[..consumed]);
+        }
+        carried = total % stride;
         if carried != 0 {
-            buffer[0] = buffer[total - 1];
+            buffer.copy_within(consumed..total, 0);
         }
     }
     rasterize(&envelope, width, height)
@@ -312,9 +349,9 @@ pub(crate) fn read(reader: &mut dyn Read, width: u32, height: u32) -> io::Result
 
 fn rasterize(envelope: &Envelope, width: u32, height: u32) -> io::Result<image::RgbaImage> {
     let mut image = image::RgbaImage::new(width, height);
-    for (x, mean) in envelope.means(width)?.into_iter().enumerate() {
+    for (x, peak) in envelope.column_peaks(width)?.into_iter().enumerate() {
         let bar =
-            ((u64::from(mean) * u64::from(height) + 16_383) / 32_767).min(u64::from(height)) as u32;
+            ((u64::from(peak) * u64::from(height) + 16_383) / 32_767).min(u64::from(height)) as u32;
         for y in (height - bar) / 2..(height - bar) / 2 + bar {
             image.put_pixel(x as u32, y, image::Rgba([255; 4]));
         }
@@ -334,21 +371,40 @@ mod tests {
             .map(|column| {
                 let start = f64::from(column) * samples.len() as f64 / f64::from(width);
                 let end = f64::from(column + 1) * samples.len() as f64 / f64::from(width);
-                (samples[start.floor() as usize..(end.ceil() as usize).min(samples.len())]
+                samples[start.floor() as usize..(end.ceil() as usize).min(samples.len())]
                     .iter()
-                    .enumerate()
-                    .map(|(offset, sample)| {
-                        let frame = start.floor() + offset as f64;
-                        sample * (end.min(frame + 1.0) - start.max(frame))
-                    })
-                    .sum::<f64>()
-                    / (end - start)) as f32
+                    .copied()
+                    .fold(0.0_f64, f64::max) as f32
             })
             .collect()
     }
 
     #[test]
-    fn display_envelope_integrates_short_and_fractional_columns_without_raster_quantization() {
+    fn stereo_peaks_keep_isolated_transients_and_values_above_full_scale() {
+        let pcm = [(0.0_f32, 0.0_f32), (1.5, -1.5), (0.0, 0.0), (0.0, -0.25)]
+            .into_iter()
+            .flat_map(|(left, right)| [left, right])
+            .flat_map(f32::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut detail = DisplayEnvelope::new(2, 4);
+        assert!(detail.push_stereo(&pcm, 1.0));
+        assert_eq!(detail.finish().expect("peak detail"), [1.5, 0.25]);
+        let pcm = [(0_i16, 0_i16), (i16::MAX, -i16::MAX), (0, 0), (0, -8192)]
+            .into_iter()
+            .flat_map(|(left, right)| [left, right])
+            .flat_map(i16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut source = Envelope::new(2);
+        source.push_stereo(&pcm);
+        assert_eq!(source.column_peaks(2).expect("peak source"), [32767, 8192]);
+        let pixels = rasterize(&source, 2, 80).expect("peak raster");
+        assert!(
+            (0..80).all(|y| pixels.get_pixel(0, y)[3] == 255),
+            "a full-scale transient reaches both edges"
+        );
+    }
+    #[test]
+    fn display_envelope_preserves_peaks_in_short_and_fractional_columns() {
         for frames in [1, 2, 7, 500, 48_001, 1_000_003] {
             let samples = (0..frames)
                 .map(|frame| (frame % 31 + 1) as f64 / 137.0)
@@ -389,20 +445,21 @@ mod tests {
                     let samples = std::hint::black_box(&samples);
                     let start = std::time::Instant::now();
                     let actual: Vec<f32> = if legacy {
-                        // Previous per-sample display-coordinate integration.
-                        let mut sums = vec![0.0; width as usize];
+                        // Scalar display-coordinate peak reference.
+                        let mut peaks = vec![0.0_f64; width as usize];
                         for (position, amplitude) in samples.iter().enumerate() {
                             let start = position as f64 * f64::from(width) / samples.len() as f64;
                             let end =
                                 (position + 1) as f64 * f64::from(width) / samples.len() as f64;
                             let mut column = start.floor() as usize;
-                            while column < sums.len() && (column as f64) < end {
-                                sums[column] += amplitude
-                                    * (end.min((column + 1) as f64) - start.max(column as f64));
+                            while column < peaks.len() && (column as f64) < end {
+                                if end.min((column + 1) as f64) > start.max(column as f64) {
+                                    peaks[column] = peaks[column].max(*amplitude);
+                                }
                                 column += 1;
                             }
                         }
-                        sums.into_iter().map(|sum| sum as f32).collect()
+                        peaks.into_iter().map(|peak| peak as f32).collect()
                     } else {
                         let mut envelope = DisplayEnvelope::new(width, samples.len() as u64);
                         for sample in samples {
@@ -637,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn envelope_stays_bounded_and_preserves_average_amplitude() {
+    fn envelope_stays_bounded_and_preserves_peak_amplitude() {
         let width = 8;
         for length in [257, 8192, 8193, 1_000_003] {
             for pattern in 0..4 {
@@ -662,32 +719,32 @@ mod tests {
                         .flat_map(|sample| sample.to_le_bytes())
                         .collect::<Vec<_>>();
                     envelope.push(&pcm);
-                    assert!(envelope.sums.len() <= width as usize * BINS_PER_COLUMN);
-                    assert_eq!(envelope.sums.capacity(), width as usize * BINS_PER_COLUMN);
+                    assert!(envelope.peaks.len() <= width as usize * BINS_PER_COLUMN);
+                    assert_eq!(envelope.peaks.capacity(), width as usize * BINS_PER_COLUMN);
                 }
-                let means = envelope.means(width).expect("means");
+                let peaks = envelope.column_peaks(width).expect("peaks");
                 let per_column = length / width as usize;
-                for (column, mean) in means.into_iter().enumerate() {
+                for (column, peak) in peaks.into_iter().enumerate() {
                     let start = column * per_column;
                     let end = if column + 1 == width as usize {
                         length
                     } else {
                         start + per_column
                     };
-                    let exact = (samples[start..end]
+                    let exact = samples[start..end]
                         .iter()
                         .map(|sample| u64::from(sample.unsigned_abs()))
-                        .sum::<u64>()
-                        / (end - start) as u64) as u16;
+                        .max()
+                        .expect("nonempty column") as u16;
                     if envelope.bin_samples == 1 {
-                        assert_eq!(mean, exact);
+                        assert_eq!(peak, exact);
                     }
                     assert!(
-                        mean.abs_diff(exact) <= 129,
-                        "length {length}, pattern {pattern}, column {column}: {mean} != {exact}"
+                        peak.abs_diff(exact) <= 129,
+                        "length {length}, pattern {pattern}, column {column}: {peak} != {exact}"
                     );
                     let bar = |value: u16| (u64::from(value) * 160 + 16_383) / 32_767;
-                    assert!(bar(mean).abs_diff(bar(exact)) <= 1);
+                    assert!(bar(peak).abs_diff(bar(exact)) <= 1);
                 }
             }
         }

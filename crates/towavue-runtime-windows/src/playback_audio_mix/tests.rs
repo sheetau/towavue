@@ -17,6 +17,464 @@ fn samples(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+fn generate_quantized_aac(ffmpeg: &Path, source: &Path, gap: bool) {
+    // OBS-style millisecond quantization can survive in MP4's 1/48000 time base.
+    // These packets alternate 1008/1056 ticks while each AAC frame has 1024 samples.
+    let generated = crate::hidden_test_command(ffmpeg)
+        .args([
+            "-v",
+            "error",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=size=32x24:rate=10:duration=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "aevalsrc=0.15*sin(2*PI*997*t)|0.15*cos(2*PI*701*t):s=48000:d=4",
+            "-filter_complex",
+            if gap {
+                r"[1:a]asetnsamples=n=1024:p=0,asetpts=round(PTS*TB*1000)/1000/TB+gte(N\,24576)*0.1/TB,asplit[a][b]"
+            } else {
+                "[1:a]asetnsamples=n=1024:p=0,asetpts=round(PTS*TB*1000)/1000/TB,asplit[a][b]"
+            },
+            "-map",
+            "0:v",
+            "-map",
+            "[a]",
+            "-map",
+            "[b]",
+            "-c:v",
+            "mpeg4",
+            "-q:v",
+            "5",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+        ])
+        .arg(source)
+        .output()
+        .expect("generate quantized AAC");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+}
+
+#[test]
+fn quantized_aac_timestamps_do_not_insert_silence_into_mix_edits_or_exports() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("towavue-aac-jitter-{unique}"));
+    fs::create_dir(&root).expect("owned fixture");
+    let source = root.join("quantized.mp4");
+    let ffmpeg = crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg");
+    generate_quantized_aac(&ffmpeg, &source, false);
+    let read = |path: &Path, stream: &str| {
+        let result = crate::hidden_test_command(&ffmpeg)
+            .args(["-v", "error", "-i"])
+            .arg(path)
+            .args(["-map", stream, "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"])
+            .output()
+            .expect("independent PCM decode");
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        samples(&result.stdout)
+    };
+    let first = read(&source, "0:a:0");
+    let second = read(&source, "0:a:1");
+    let format = AudioFormat {
+        sample_rate: 48000,
+        channels: 2,
+    };
+    let tracks = [AudioTrackId::from_index(1), AudioTrackId::from_index(2)];
+    let mut failures = Vec::new();
+    let mut check = |label: &str, actual: Vec<f32>, expected: Vec<f32>| {
+        // Stay away from encoder padding and the final partial AAC frame.
+        let count = 2 * 48000 * 2;
+        assert!(
+            actual.len() >= count && expected.len() >= count,
+            "{label}: missing PCM"
+        );
+        let mismatches = actual[..count]
+            .iter()
+            .zip(&expected[..count])
+            .filter(|(a, b)| (*a - *b).abs() > 0.00005)
+            .count();
+        if mismatches != 0 {
+            failures.push(format!(
+                "{label}: {mismatches}/{count} discontinuous samples"
+            ));
+        }
+    };
+    let mut mixed = Vec::new();
+    decode(
+        &source,
+        &tracks,
+        MediaTime::ZERO,
+        Some(time(4000)),
+        format,
+        AudioSeekPolicy::Exact,
+        &|| false,
+        |chunk| {
+            mixed.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("mixed preview");
+    check(
+        "All preview",
+        samples(&mixed),
+        first.iter().zip(&second).map(|(a, b)| a + b).collect(),
+    );
+    let operations = vec![EditOperation::Timeline(TimelineEdit::SetVolume(
+        TimeRange::new(time(0), time(4000)).expect("gain range"),
+        0.5,
+    ))];
+    let plan = EditTimeline::from_operations(time(4000), &operations).expect("gain plan");
+    let mut edited = Vec::new();
+    crate::playback::timeline::decode_audio_source(
+        &source,
+        crate::playback::timeline::AudioSource::Track(Some(tracks[0])),
+        &plan,
+        MediaTime::ZERO,
+        None,
+        1.0,
+        format,
+        AudioSeekPolicy::Exact,
+        &AtomicBool::new(false),
+        |chunk| {
+            edited.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("edited preview");
+    check(
+        "single-track gain preview",
+        samples(&edited),
+        first.iter().map(|v| v * 0.5).collect(),
+    );
+    let target = root.join("edited.avi");
+    crate::export_media(&crate::ExportRequest {
+        source: source.clone(),
+        target: target.clone(),
+        kind: towavue_core::MediaKind::Video,
+        operations,
+        hardware_encode: false,
+    })
+    .expect("edited export");
+    check(
+        "saved gain track",
+        read(&target, "0:a:0"),
+        first.iter().map(|v| v * 0.5).collect(),
+    );
+    let mut sought = Vec::new();
+    decode(
+        &source,
+        &tracks,
+        time(1000),
+        Some(time(4000)),
+        format,
+        AudioSeekPolicy::Exact,
+        &|| false,
+        |chunk| {
+            sought.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("exact mixed seek");
+    check(
+        "All after exact seek",
+        samples(&sought),
+        first[96000..]
+            .iter()
+            .zip(&second[96000..])
+            .map(|(a, b)| a + b)
+            .collect(),
+    );
+    let operations = vec![
+        EditOperation::SetTrimStart(time(500)),
+        EditOperation::Timeline(TimelineEdit::SetVolume(
+            TimeRange::new(time(0), time(3500)).expect("trimmed gain"),
+            0.5,
+        )),
+    ];
+    let plan = EditTimeline::from_operations(time(4000), &operations).expect("trimmed plan");
+    let mut trimmed = Vec::new();
+    crate::playback::timeline::decode_audio_source(
+        &source,
+        crate::playback::timeline::AudioSource::Track(Some(tracks[0])),
+        &plan,
+        MediaTime::ZERO,
+        None,
+        1.0,
+        format,
+        AudioSeekPolicy::Exact,
+        &AtomicBool::new(false),
+        |chunk| {
+            trimmed.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("trimmed preview");
+    check(
+        "trimmed gain preview",
+        samples(&trimmed),
+        first[48000..].iter().map(|v| v * 0.5).collect(),
+    );
+    let target = root.join("trimmed.avi");
+    crate::export_media(&crate::ExportRequest {
+        source: source.clone(),
+        target: target.clone(),
+        kind: towavue_core::MediaKind::Video,
+        operations,
+        hardware_encode: false,
+    })
+    .expect("trimmed export");
+    check(
+        "saved trim and gain",
+        read(&target, "0:a:0"),
+        first[48000..].iter().map(|v| v * 0.5).collect(),
+    );
+    assert!(
+        failures.is_empty(),
+        "{}; fixture retained at {}",
+        failures.join("; "),
+        root.display()
+    );
+    fs::remove_dir_all(root).expect("remove owned fixture");
+}
+
+#[test]
+fn quantized_aac_keeps_real_gaps_during_preview_seek_and_export() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("towavue-aac-real-gap-{unique}"));
+    fs::create_dir(&root).expect("owned fixture");
+    let source = root.join("gap.mp4");
+    let ffmpeg = crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg");
+    generate_quantized_aac(&ffmpeg, &source, true);
+    let input = ffmpeg_next::format::input(&source).expect("input");
+    for stream in input
+        .streams()
+        .filter(|s| s.parameters().medium() == ffmpeg_next::media::Type::Audio)
+    {
+        assert!(
+            crate::audio_timestamps::quantized_aac(&stream),
+            "fixture must exercise the rounded path, including its real gap"
+        );
+    }
+    drop(input);
+    let tracks = [AudioTrackId::from_index(1), AudioTrackId::from_index(2)];
+    let format = AudioFormat {
+        sample_rate: 48000,
+        channels: 2,
+    };
+    let read = |start| {
+        let mut pcm = Vec::new();
+        decode(
+            &source,
+            &tracks,
+            start,
+            Some(time(2000)),
+            format,
+            AudioSeekPolicy::Exact,
+            &|| false,
+            |chunk| {
+                pcm.extend(chunk.bytes);
+                true
+            },
+        )
+        .expect("mixed decode");
+        samples(&pcm)
+    };
+    let assert_gap = |pcm: &[f32]| {
+        let peak = |start: usize, end: usize| {
+            pcm[start * 96..end * 96]
+                .iter()
+                .map(|v| v.abs())
+                .fold(0.0_f32, f32::max)
+        };
+        assert!(peak(300, 400) > 0.05, "signal before gap");
+        assert!(peak(550, 580) < 0.000001, "real gap must stay silent");
+        assert!(peak(800, 900) > 0.05, "signal after gap");
+    };
+    let sequential = read(MediaTime::ZERO);
+    assert_gap(&sequential);
+    let sought = read(time(800));
+    assert!(sought.len() >= 48000);
+    assert!(
+        sought[..48000]
+            .iter()
+            .zip(&sequential[800 * 96..])
+            .all(|(a, b)| (a - b).abs() < 0.00005),
+        "exact seek must retain the gap's offset"
+    );
+    let target = root.join("gap.avi");
+    crate::export_media(&crate::ExportRequest {
+        source,
+        target: target.clone(),
+        kind: towavue_core::MediaKind::Video,
+        operations: vec![EditOperation::SetVolume(0.5)],
+        hardware_encode: false,
+    })
+    .expect("gap export");
+    let exported = crate::hidden_test_command(&ffmpeg)
+        .args(["-v", "error", "-i"])
+        .arg(&target)
+        .args([
+            "-map",
+            "0:a:0",
+            "-c:a",
+            "pcm_f32le",
+            "-f",
+            "f32le",
+            "pipe:1",
+        ])
+        .output()
+        .expect("export readback");
+    assert!(exported.status.success());
+    assert_gap(&samples(&exported.stdout));
+    fs::remove_dir_all(root).expect("remove owned fixture");
+}
+#[test]
+#[ignore = "read-only owner-authorized two-track source; set reference path and start milliseconds"]
+fn reference_track_mix_and_gain_preserve_the_independent_pcm_sequence() {
+    let path = PathBuf::from(
+        std::env::var_os("TOWAVUE_AUDIO_TRACK_REFERENCE").expect("authorized source"),
+    );
+    let start: i64 = std::env::var("TOWAVUE_AUDIO_REFERENCE_START_MS")
+        .expect("start milliseconds")
+        .parse()
+        .expect("integer start");
+    let before = fs::metadata(&path).expect("source metadata");
+    let input = ffmpeg_next::format::input(&path).expect("input");
+    let tracks: Vec<_> = input
+        .streams()
+        .filter(|s| s.parameters().medium() == ffmpeg_next::media::Type::Audio)
+        .map(|stream| {
+            eprintln!(
+                "track {}: quantized={}",
+                stream.index(),
+                crate::audio_timestamps::quantized_aac(&stream)
+            );
+            AudioTrackId::from_index(stream.index())
+        })
+        .collect();
+    assert_eq!(tracks.len(), 2, "reference control expects two tracks");
+    drop(input);
+    let format = decode::probe_audio_track_format(&path, Some(tracks[0]))
+        .expect("probe")
+        .expect("audio");
+    let mut independent = Vec::new();
+    for track in &tracks {
+        let mut bytes = Vec::new();
+        decode::decode_audio_track_cancellable(
+            &path,
+            Some(*track),
+            time(start),
+            Some(time(start + 4000)),
+            &|| false,
+            |output| {
+                if let decode::ParallelSoftwareDecodeOutput::Item(decode::DecodeOutput::Audio(
+                    chunk,
+                )) = output
+                {
+                    bytes.extend(chunk.bytes);
+                }
+                true
+            },
+        )
+        .expect("selected PCM");
+        independent.push(samples(&bytes));
+    }
+    let mut mixed = Vec::new();
+    decode(
+        &path,
+        &tracks,
+        time(start),
+        Some(time(start + 4000)),
+        format,
+        AudioSeekPolicy::Exact,
+        &|| false,
+        |chunk| {
+            mixed.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("All PCM");
+    let mixed = samples(&mixed);
+    let mut gain = Vec::new();
+    let plan = EditTimeline::from_operations(
+        time(start + 4000),
+        &[
+            EditOperation::SetTrimStart(time(start)),
+            EditOperation::Timeline(TimelineEdit::SetVolume(
+                TimeRange::new(time(0), time(4000)).expect("range"),
+                0.5,
+            )),
+        ],
+    )
+    .expect("trim/gain plan");
+    crate::playback::timeline::decode_audio_source(
+        &path,
+        crate::playback::timeline::AudioSource::Track(Some(tracks[0])),
+        &plan,
+        MediaTime::ZERO,
+        None,
+        1.0,
+        format,
+        AudioSeekPolicy::Exact,
+        &AtomicBool::new(false),
+        |chunk| {
+            gain.extend(chunk.bytes);
+            true
+        },
+    )
+    .expect("trim/gain PCM");
+    let gain = samples(&gain);
+    let count = format.sample_rate as usize * 2 * 4;
+    for sequence in [&independent[0], &independent[1], &mixed, &gain] {
+        assert_eq!(sequence.len(), count, "four complete seconds");
+    }
+    let mut mix_error = 0.0_f32;
+    let mut gain_error = 0.0_f32;
+    let mut signal = 0.0_f32;
+    for index in 0..count {
+        signal = signal
+            .max(independent[0][index].abs())
+            .max(independent[1][index].abs());
+        mix_error =
+            mix_error.max((mixed[index] - independent[0][index] - independent[1][index]).abs());
+        gain_error = gain_error.max((gain[index] - independent[0][index] * 0.5).abs());
+    }
+    eprintln!(
+        "frames={}, signal_peak={signal}, mix_error={mix_error}, gain_error={gain_error}",
+        count / 2
+    );
+    assert!(signal > 0.0001, "audible reference segment");
+    assert!(
+        mix_error < 0.000001 && gain_error < 0.000001,
+        "no PCM displacement or inserted silence"
+    );
+    let after = fs::metadata(&path).expect("unchanged source");
+    assert_eq!(before.len(), after.len());
+    assert_eq!(
+        before.modified().expect("before time"),
+        after.modified().expect("after time")
+    );
+}
+
 #[test]
 fn all_tracks_match_independent_mix_and_keep_offsets_tails_edits_and_cancellation() {
     let unique = SystemTime::now()

@@ -91,7 +91,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                     );
                     assert!(actions.is_empty());
                     assert_eq!(output.pixels_per_point, density);
-                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == crate::chrome::HOVER)).count();
+                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_rgba_premultiplied(26, 26, 26, 153))).count();
                     assert_eq!(backgrounds, 2, "only video/audio durations receive badges");
                     for (index, seconds) in [65, 3601].into_iter().enumerate() {
                         let label = format_time(media_time(Duration::from_secs(seconds)));
@@ -110,7 +110,10 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         else {
                             panic!("backdrop before duration text");
                         };
-                        assert_eq!(background.fill, crate::chrome::HOVER);
+                        assert_eq!(
+                            background.fill,
+                            Color32::from_rgba_premultiplied(26, 26, 26, 153)
+                        );
                         assert_eq!(
                             background.rect,
                             Rect::from_min_size(text.pos, text.galley.size())

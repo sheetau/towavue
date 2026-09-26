@@ -50,6 +50,7 @@ struct CaptionState {
     resize_frame: Cell<bool>,
     time_settings_changed: Cell<bool>,
     drag: Cell<Option<egui::Rect>>,
+    top_resize_height: Cell<f32>,
     dpi: Cell<u32>,
     fullscreen_dpi_bounds: Cell<Option<RECT>>,
     #[cfg(test)]
@@ -183,6 +184,7 @@ impl NativeCaption {
             resize_frame: Cell::new(false),
             time_settings_changed: Cell::new(false),
             drag: Cell::new(None),
+            top_resize_height: Cell::new(1.0),
             // SAFETY: live, same-thread window checked above; scalar query only.
             dpi: Cell::new(unsafe { GetDpiForWindow(handle) }),
             fullscreen_dpi_bounds: Cell::new(None),
@@ -265,6 +267,16 @@ impl NativeCaption {
     /// Physical client coordinates; no native handle or callback escapes the runtime.
     pub fn set_drag_region(&self, region: Option<egui::Rect>) {
         self.state.drag.set(region);
+    }
+
+    /// Bottom of the empty top gutter, in physical client coordinates. Only
+    /// normal-window hit testing uses it; native controls keep priority.
+    pub fn set_top_resize_height(&self, height: f32) {
+        self.state.top_resize_height.set(if height.is_finite() {
+            height.max(1.0)
+        } else {
+            1.0
+        });
     }
 
     /// Change the custom frame and the window's borderless fullscreen state together.
@@ -715,7 +727,8 @@ unsafe extern "system" fn caption_proc(
                             + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
                         let mut client = RECT::default();
                         if GetClientRect(handle, &mut client).is_ok()
-                            && let Some(edge) = top_resize_hit(point, client, border)
+                            && let Some(edge) =
+                                top_resize_hit(point, client, border, state.top_resize_height.get())
                         {
                             return LRESULT(edge as isize);
                         }
@@ -837,11 +850,11 @@ impl CaptionSurface {
     }
 }
 
-fn top_resize_hit(point: POINT, rect: RECT, border: i32) -> Option<u32> {
+fn top_resize_hit(point: POINT, rect: RECT, border: i32, height: f32) -> Option<u32> {
     // Only the top frame was extended into the client. The native procedure
     // already owns the other three edges; do not steal their inner UI pixels.
-    // This is a physical-pixel boundary, independent of display scaling.
-    if point.y != rect.top {
+    // Stop before the first tab pixel. The UI supplies its actual gutter bottom.
+    if point.y < rect.top || point.y as f32 >= rect.top as f32 + height {
         return None;
     }
     let left = point.x < rect.left + border;
@@ -915,7 +928,8 @@ mod tests {
                             y: y * scale
                         },
                         rect,
-                        8 * scale
+                        8 * scale,
+                        1.0
                     ),
                     Some(hit)
                 );
@@ -942,7 +956,8 @@ mod tests {
                             y: y * scale
                         },
                         rect,
-                        8 * scale
+                        8 * scale,
+                        1.0
                     ),
                     None
                 );
@@ -954,12 +969,87 @@ mod tests {
                         y: 1
                     },
                     rect,
-                    8 * scale
+                    8 * scale,
+                    1.0
                 ),
                 None,
                 "the second physical row remains interactive at every density"
             );
+            for height in [4.0_f32, 4.75, 7.0] {
+                for y in -1..=height.ceil() as i32 {
+                    for (x, edge) in [
+                        (1, HTTOPLEFT),
+                        (959 * scale, HTTOPRIGHT),
+                        (300 * scale, HTTOP),
+                    ] {
+                        assert_eq!(
+                            top_resize_hit(POINT { x, y }, rect, 8 * scale, height),
+                            (y >= 0 && (y as f32) < height).then_some(edge),
+                            "expanded gutter height={height}, x={x}, y={y}"
+                        );
+                    }
+                }
+            }
         }
+    }
+
+    fn verify_top_gutter_hits(caption: &NativeCaption) {
+        let hit = |x: i32, y: i32| {
+            // SAFETY: the test owns this same-thread HWND. Only a scalar hit
+            // query is delivered; no drag, click or native size loop is started.
+            unsafe {
+                let mut point = POINT { x, y };
+                assert!(ClientToScreen(caption.handle, &mut point).as_bool());
+                let packed = (point.x as u32 & 0xffff) | ((point.y as u32 & 0xffff) << 16);
+                SendMessageW(
+                    caption.handle,
+                    WM_NCHITTEST,
+                    None,
+                    Some(LPARAM(packed as isize)),
+                )
+                .0
+            }
+        };
+        let buttons = caption.accessible_buttons(Language::English);
+        let bounds = caption.controls_bounds();
+        let original_hits: Vec<_> = buttons
+            .iter()
+            .map(|button| {
+                let center = button.bounds.center();
+                hit(center.x as i32, center.y as i32)
+            })
+            .collect();
+        assert_eq!(hit(100, 0), HTTOP as isize);
+        assert_eq!(hit(100, 1), HTCLIENT as isize);
+        for density in [1.0, 1.25, 2.0, 3.0] {
+            let bottom = 1.0_f32 + 3.0 * density;
+            caption.set_top_resize_height(bottom);
+            for y in 0..bottom.ceil() as i32 {
+                assert_eq!(
+                    hit(100, y),
+                    HTTOP as isize,
+                    "gutter density={density}, y={y}"
+                );
+            }
+            for y in [bottom.ceil() as i32, 16, 32, 100] {
+                assert_eq!(
+                    hit(100, y),
+                    HTCLIENT as isize,
+                    "tab/client density={density}, y={y}"
+                );
+            }
+            let current = caption.accessible_buttons(Language::English);
+            assert_eq!(caption.controls_bounds(), bounds);
+            for ((before, after), expected) in buttons.iter().zip(current).zip(&original_hits) {
+                assert_eq!(after.bounds, before.bounds);
+                assert_eq!(after.action, before.action);
+                assert_eq!(after.enabled, before.enabled);
+                let center = after.bounds.center();
+                assert_eq!(hit(center.x as i32, center.y as i32), *expected);
+            }
+        }
+        caption.set_top_resize_height(1.0);
+        assert_eq!(hit(100, 1), HTCLIENT as isize);
     }
 
     #[test]
@@ -1007,6 +1097,7 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                verify_top_gutter_hits(&caption);
                 assert!(!caption.take_time_settings_changed());
                 let visible_time_trial =
                     std::env::var_os("TOWAVUE_TIME_SETTINGS_VISIBLE").is_some();

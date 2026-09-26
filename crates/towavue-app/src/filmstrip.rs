@@ -1485,7 +1485,7 @@ fn draw_preview_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_siz
     let size = galley.size() + 2.0 * padding;
     let background = Rect::from_min_size(rect.right_bottom() - inset - size, size);
     let painter = ui.painter_at(rect);
-    painter.rect_filled(background, 2.0, crate::chrome::HOVER);
+    painter.rect_filled(background, 2.0, crate::chrome::HOVER.gamma_multiply(0.6));
     painter.galley(background.min + padding, galley, Color32::WHITE);
 }
 

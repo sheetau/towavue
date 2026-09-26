@@ -5415,6 +5415,13 @@ where
             root.max_rect().top(),
             density,
         );
+        if let Some(caption) = &self.native_caption {
+            // Exclude the maximized invisible inset so restoration cannot leave
+            // an oversized resize band before the first normal-window redraw.
+            caption.set_top_resize_height(
+                (root.max_rect().top() + layout.top_padding - layout.drag_top) * density,
+            );
+        }
         let controls_width = native.map_or(154.0, |bounds| bounds.width() / density);
         let panel = egui::Panel::top("tabs")
             .exact_size(layout.height)

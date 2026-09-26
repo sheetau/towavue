@@ -32,58 +32,79 @@ mod tests {
         };
         let detail = "native {detail} 日本語.wav 0x80004005";
         for density in [1.0, 1.25, 2.0] {
-            let context = localization::test_ui::japanese_context(density);
-            let mut app = Application::new(None, |_| {}).expect("app");
-            app.ui_context = Some(context.clone());
-            app.language_settings.next = localization::Language::English;
-            let path = root.join("日本語{original}.wav");
-            app.path = Some(path.clone());
-            app.media_kind = Some(MediaKind::Audio);
-            app.state = PlaybackState::Paused;
-            app.tabs.open_new(path.clone(), MediaKind::Audio);
-            let key = Arc::new(Key {
-                path,
-                plan: EditTimeline::new(media_time(Duration::from_secs(10)), Default::default())
+            for owned in [false, true] {
+                let failure = || {
+                    if owned {
+                        towavue_runtime_windows::PreviewError::Message(
+                            localization::Text::WaveformInvalidInput,
+                        )
+                    } else {
+                        towavue_runtime_windows::PreviewError::Generate(detail.into())
+                    }
+                };
+                let context = localization::test_ui::japanese_context(density);
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.ui_context = Some(context.clone());
+                app.language_settings.next = localization::Language::English;
+                let path = root.join("日本語{original}.wav");
+                app.path = Some(path.clone());
+                app.media_kind = Some(MediaKind::Audio);
+                app.state = PlaybackState::Paused;
+                app.tabs.open_new(path.clone(), MediaKind::Audio);
+                let key = Arc::new(Key {
+                    path,
+                    plan: EditTimeline::new(
+                        media_time(Duration::from_secs(10)),
+                        Default::default(),
+                    )
                     .expect("plan"),
-                rate: 1.0,
-                volume: 1.0,
-                columns: 400,
-            });
-            app.waveform_detail = Detail {
-                key: Some(key.clone()),
-                started: true,
-                ..Default::default()
-            };
-            app.set_status("retained status".into());
-            app.install_detailed_waveform(
-                app.media_generation,
-                Arc::new((*key).clone()),
-                Err(detail.into()),
-            );
-            assert_eq!(app.status_notice().as_deref(), Some("retained status"));
-            assert!(!app.waveform_detail.finished);
-            app.install_detailed_waveform(app.media_generation, key, Err(detail.into()));
-            let expected = format!("詳細な波形を取得できません: {detail}");
-            assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
-            assert!(app.waveform_detail.finished);
-            assert!(app.edits.is_empty());
-            let mut output = egui::FullOutput::default();
-            for _ in 0..3 {
-                output = context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1100.0, 600.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
-                    },
+                    rate: 1.0,
+                    volume: 1.0,
+                    columns: 400,
+                });
+                app.waveform_detail = Detail {
+                    key: Some(key.clone()),
+                    started: true,
+                    ..Default::default()
+                };
+                app.set_status("retained status".into());
+                app.install_detailed_waveform(
+                    app.media_generation,
+                    Arc::new((*key).clone()),
+                    Err(failure()),
                 );
-            }
-            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                assert_eq!(app.status_notice().as_deref(), Some("retained status"));
+                assert!(!app.waveform_detail.finished);
+                app.install_detailed_waveform(app.media_generation, key, Err(failure()));
+                let reason = if owned {
+                    "タイムライン波形のサイズ、音量、または速度が不正です"
+                } else {
+                    detail
+                };
+                let expected = format!(
+                    "詳細な波形を取得できません: FFmpegのプレビュー生成に失敗しました: {reason}"
+                );
+                assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
+                assert!(app.waveform_detail.finished);
+                assert!(app.edits.is_empty());
+                let mut output = egui::FullOutput::default();
+                for _ in 0..3 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1100.0, 600.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                        },
+                    );
+                }
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+            }
         }
     }
 
@@ -281,7 +302,9 @@ mod tests {
                 app.install_detailed_waveform(
                     generation,
                     key.clone(),
-                    Err("obsolete failure".into()),
+                    Err(towavue_runtime_windows::PreviewError::Generate(
+                        "obsolete failure".into(),
+                    )),
                 );
                 assert!(
                     app.waveform_detail.is_pending(),
@@ -421,7 +444,9 @@ mod tests {
             app.install_detailed_waveform(
                 generation,
                 failed_key,
-                Err("injected refinement failure".into()),
+                Err(towavue_runtime_windows::PreviewError::Generate(
+                    "injected refinement failure".into(),
+                )),
             );
             assert!(
                 !app.waveform_detail.is_pending(),
@@ -785,8 +810,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         key.volume,
                         key.columns,
                         &cancellation,
-                    )
-                    .map_err(|error| error.to_string());
+                    );
                     notify(AppEvent::DetailedWaveform(generation, key, result));
                 });
             } else {
@@ -801,7 +825,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         &mut self,
         generation: u64,
         key: Arc<Key>,
-        result: Result<Vec<f32>, String>,
+        result: Result<Vec<f32>, towavue_runtime_windows::PreviewError>,
     ) {
         if generation != self.media_generation
             || self.path.as_ref() != Some(&key.path)
@@ -820,12 +844,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 self.waveform_detail.values = Some(values.into());
                 self.waveform_detail.held_gain = None;
             }
-            Err(error) => self.set_status(
-                towavue_core::localization::formatted::detailed_waveform_failed(
-                    self.language(),
-                    &error,
-                ),
-            ),
+            Err(error) => {
+                let language = self.language();
+                self.set_status(
+                    towavue_core::localization::formatted::detailed_waveform_failed(
+                        language,
+                        &error.message(language),
+                    ),
+                );
+            }
         }
         self.request_redraw();
     }

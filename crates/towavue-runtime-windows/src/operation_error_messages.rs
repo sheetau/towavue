@@ -1,7 +1,7 @@
 //! Localized operation errors; Display remains the stable English diagnostic.
 use crate::{
     AudioOutputError, DecodeError, ExportError, FileOperationError, ImageDecodeError,
-    PlaybackError, SourceSaveError,
+    PlaybackError, PreviewError, SourceSaveError,
 };
 use towavue_core::localization::{Language, Text, formatted};
 
@@ -83,6 +83,32 @@ impl ImageDecodeError {
     }
 }
 
+impl PreviewError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::Cancelled => Text::PreviewCancelled.in_language(language).into(),
+            Self::Io(error) => formatted::preview_cache_failed(language, &error.to_string()),
+            Self::Decode(error) => {
+                formatted::preview_image_decode_failed(language, &error.to_string())
+            }
+            Self::Start { program, source } => {
+                formatted::preview_start_failed(language, program, &source.to_string())
+            }
+            Self::Generate(error) => formatted::preview_generate_failed(language, error),
+            Self::Message(text) => {
+                formatted::preview_generate_failed(language, text.in_language(language))
+            }
+            Self::NoFrame => Text::PreviewNoFrame.in_language(language).into(),
+            Self::Seek(error) => {
+                formatted::preview_input_failed(language, &error.message(language))
+            }
+            Self::InvalidDuration => Text::PreviewInvalidDuration.in_language(language).into(),
+            Self::NoLocalAppData => Text::PreviewNoLocalAppData.in_language(language).into(),
+            Self::WarmingDeferred => Text::PreviewWarmingDeferred.in_language(language).into(),
+        }
+    }
+}
+
 impl ExportError {
     pub fn message(&self, language: Language) -> String {
         match self {
@@ -94,6 +120,14 @@ impl ExportError {
             Self::Message(text) => {
                 formatted::ffmpeg_export_failed(language, text.in_language(language))
             }
+            Self::ImageEdit(context, error) => formatted::ffmpeg_export_failed(
+                language,
+                &format!(
+                    "{}: {}",
+                    context.in_language(language),
+                    error.message(language)
+                ),
+            ),
             Self::Cancelled => Text::ExportCancelledUnchanged.in_language(language).into(),
             Self::Output(error) => formatted::export_output_failed(language, &error.to_string()),
         }
@@ -143,6 +177,91 @@ impl SourceSaveError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_errors_localize_owned_waveform_reasons_and_retain_native_causes() {
+        use std::error::Error;
+        let detail = "native {detail}\n日本語.wav = 32";
+        let io = || std::io::Error::new(std::io::ErrorKind::PermissionDenied, detail);
+        for error in [
+            PreviewError::Cancelled,
+            PreviewError::Io(io()),
+            PreviewError::Decode(image::ImageError::IoError(io())),
+            PreviewError::Start {
+                program: "ffprobe",
+                source: io(),
+            },
+            PreviewError::Generate(detail.into()),
+            PreviewError::NoFrame,
+            PreviewError::Seek(DecodeError::ConsumerClosed),
+            PreviewError::InvalidDuration,
+            PreviewError::NoLocalAppData,
+            PreviewError::WarmingDeferred,
+        ] {
+            let english = error.to_string();
+            assert_eq!(error.message(Language::English), english);
+            let japanese = error.message(Language::Japanese);
+            assert_ne!(japanese, english);
+            if english.contains(detail) {
+                assert!(japanese.contains(detail));
+            }
+            if let PreviewError::Io(_) | PreviewError::Start { .. } = &error {
+                let cause = error
+                    .source()
+                    .expect("native cause")
+                    .downcast_ref::<std::io::Error>()
+                    .expect("original I/O type");
+                assert_eq!(cause.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+        }
+        for (text, reason) in [
+            (
+                Text::WaveformInvalidInput,
+                "invalid timeline waveform dimensions or gain/rate",
+            ),
+            (Text::WaveformNoAudio, "no audio stream for waveform"),
+            (
+                Text::WaveformNonFinite,
+                "non-finite timeline waveform samples",
+            ),
+            (
+                Text::WaveformSampleCountMismatch,
+                "timeline waveform sample count mismatch",
+            ),
+        ] {
+            let error = PreviewError::Message(text);
+            assert_eq!(
+                error.to_string(),
+                format!("FFmpeg preview generation failed: {reason}")
+            );
+            assert_eq!(error.message(Language::English), error.to_string());
+            assert_eq!(
+                error.message(Language::Japanese),
+                format!(
+                    "FFmpegのプレビュー生成に失敗しました: {}",
+                    text.in_language(Language::Japanese)
+                )
+            );
+        }
+        let plan = towavue_core::EditTimeline::new(
+            towavue_core::MediaTime::from_nanoseconds(1_000_000_000),
+            Default::default(),
+        )
+        .expect("plan");
+        let error = crate::timeline_waveform(
+            std::path::Path::new("not-opened.wav"),
+            &plan,
+            1.0,
+            1.0,
+            0,
+            &crate::Cancellation::default(),
+        )
+        .expect_err("invalid columns before opening input");
+        assert!(matches!(
+            error,
+            PreviewError::Message(Text::WaveformInvalidInput)
+        ));
+    }
 
     #[test]
     fn decode_errors_keep_english_diagnostics_and_localize_nested_image_failures() {

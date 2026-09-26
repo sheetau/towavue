@@ -94,7 +94,12 @@ impl Animation {
             };
             let edited = renderer
                 .render(&source, &|| cancelled.load(Ordering::Relaxed))
-                .map_err(failed)?;
+                .map_err(|error| {
+                    ExportError::ImageEdit(
+                        towavue_core::localization::Text::ImageEditWebpContext,
+                        error,
+                    )
+                })?;
             if decoder.has_alpha() {
                 pixels = source.rgba;
             } else {

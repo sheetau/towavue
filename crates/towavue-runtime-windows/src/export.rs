@@ -256,6 +256,11 @@ pub enum ExportError {
     Failed(String),
     #[error("FFmpeg export failed: {}", .0.in_language(towavue_core::localization::Language::English))]
     Message(towavue_core::localization::Text),
+    #[error("FFmpeg export failed: {context}: {error}", context = .0.in_language(towavue_core::localization::Language::English), error = .1)]
+    ImageEdit(
+        towavue_core::localization::Text,
+        #[source] crate::ImageEditError,
+    ),
     #[error("export cancelled; existing files were not changed")]
     Cancelled,
     #[error("could not prepare or publish export: {0}")]

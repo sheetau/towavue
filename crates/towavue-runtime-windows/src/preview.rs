@@ -156,6 +156,8 @@ pub enum PreviewError {
     },
     #[error("FFmpeg preview generation failed: {0}")]
     Generate(String),
+    #[error("FFmpeg preview generation failed: {}", .0.in_language(towavue_core::localization::Language::English))]
+    Message(towavue_core::localization::Text),
     #[error("no video frame at the requested preview position")]
     NoFrame,
     #[error("preview input preparation failed: {0}")]

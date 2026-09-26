@@ -1,7 +1,7 @@
 use ffmpeg_next::{filter, format::Pixel, frame};
-use towavue_core::EditOperation;
+use towavue_core::{EditOperation, localization::Text};
 
-use crate::{Cancellation, DecodedImage, DecodedImageFrame};
+use crate::{Cancellation, DecodedImage, DecodedImageFrame, ImageEditError};
 
 mod pixel_view;
 
@@ -16,20 +16,20 @@ pub fn compare_image_edits(
     current: &[EditOperation],
     saved: &[EditOperation],
     cancel: &Cancellation,
-) -> Result<bool, String> {
+) -> Result<bool, ImageEditError> {
     if current.iter().chain(saved).any(|operation| {
         matches!(
             operation,
             EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
         )
     }) {
-        return Err("Video raster edits cannot be compared as image frames".into());
+        return Err(Text::ImageEditCompareVideo.into());
     }
     let mut current_renderer = ImageEditRenderer::new(current);
     let mut saved_renderer = ImageEditRenderer::new(saved);
     for frame in &source.frames {
         if cancel.is_cancelled() {
-            return Err("Image comparison cancelled".into());
+            return Err(Text::ImageComparisonCancelled.into());
         }
         let size = (frame.width, frame.height);
         if output_size(size, current)? != output_size(size, saved)? {
@@ -64,14 +64,14 @@ pub fn compare_rendered_image_edits(
     current: &DecodedImage,
     saved: &[EditOperation],
     cancel: &Cancellation,
-) -> Result<bool, String> {
+) -> Result<bool, ImageEditError> {
     if saved.iter().any(|operation| {
         matches!(
             operation,
             EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
         )
     }) {
-        return Err("Video raster edits cannot be compared as image frames".into());
+        return Err(Text::ImageEditCompareVideo.into());
     }
     if source.frames.is_empty() || source.frames.len() != current.frames.len() {
         return Ok(false);
@@ -79,7 +79,7 @@ pub fn compare_rendered_image_edits(
     let mut saved_renderer = ImageEditRenderer::new(saved);
     for (source, current) in source.frames.iter().zip(&current.frames) {
         if cancel.is_cancelled() {
-            return Err("Image comparison cancelled".into());
+            return Err(Text::ImageComparisonCancelled.into());
         }
         if output_size((source.width, source.height), saved)? != (current.width, current.height) {
             return Ok(false);
@@ -106,7 +106,7 @@ fn equal_frames(
     current: &DecodedImageFrame,
     saved: &DecodedImageFrame,
     cancel: &Cancellation,
-) -> Result<bool, String> {
+) -> Result<bool, ImageEditError> {
     if current.width != saved.width
         || current.height != saved.height
         || current.delay != saved.delay
@@ -116,7 +116,7 @@ fn equal_frames(
     }
     for (current, saved) in current.rgba.chunks(65536).zip(saved.rgba.chunks(65536)) {
         if cancel.is_cancelled() {
-            return Err("Image comparison cancelled".into());
+            return Err(Text::ImageComparisonCancelled.into());
         }
         if current != saved {
             return Ok(false);
@@ -129,33 +129,33 @@ pub fn render_image_edits(
     source: &DecodedImage,
     operations: &[EditOperation],
     cancel: &Cancellation,
-) -> Result<DecodedImage, String> {
+) -> Result<DecodedImage, ImageEditError> {
     if operations.iter().any(|operation| {
         matches!(
             operation,
             EditOperation::RotateVideo(_) | EditOperation::ResizeVideo(_)
         )
     }) {
-        return Err("Video raster edits cannot be applied to image frames".into());
+        return Err(Text::ImageEditApplyVideo.into());
     }
     // No partial animation is published. Reject an impossible retained result
     // before allocating pixels or running filters for any earlier frame.
     let mut retained = 0_u64;
     for frame in &source.frames {
         if cancel.is_cancelled() {
-            return Err("Image edit cancelled".into());
+            return Err(Text::ImageEditCancelled.into());
         }
         let size = output_size((frame.width, frame.height), operations)?;
         retained += u64::from(size.0) * u64::from(size.1) * 4;
         if retained > 512 * 1024 * 1024 {
-            return Err("Resampled image exceeds 512 MiB".into());
+            return Err(Text::ImageResampleBudget.into());
         }
     }
     let mut frames = Vec::with_capacity(source.frames.len());
     let mut renderer = ImageEditRenderer::new(operations);
     for frame in &source.frames {
         if cancel.is_cancelled() {
-            return Err("Image edit cancelled".into());
+            return Err(Text::ImageEditCancelled.into());
         }
         frames.push(renderer.render(frame, &|| cancel.is_cancelled())?);
     }
@@ -169,16 +169,16 @@ pub fn render_image_edits(
 pub(crate) fn output_size(
     mut size: (u32, u32),
     operations: &[EditOperation],
-) -> Result<(u32, u32), String> {
+) -> Result<(u32, u32), ImageEditError> {
     if size.0 == 0 || size.1 == 0 || u64::from(size.0) * u64::from(size.1) > 128 * 1024 * 1024 {
-        return Err("Invalid source image dimensions".into());
+        return Err(Text::ImageEditInvalidDimensions.into());
     }
     for operation in operations {
         match *operation {
             EditOperation::Resize(resize) => size = resize.size(),
             EditOperation::RotateImage(rotation) => {
                 if rotation.source_size() != size {
-                    return Err("Image rotation input dimensions changed".into());
+                    return Err(Text::ImageEditRotationSizeChanged.into());
                 }
                 size = rotation.size();
             }
@@ -197,14 +197,14 @@ pub(crate) fn output_size(
                         .checked_add(crop.height)
                         .is_none_or(|bottom| bottom > size.1)
                 {
-                    return Err("Invalid image crop".into());
+                    return Err(Text::ImageEditInvalidCrop.into());
                 }
                 size = (crop.width, crop.height);
             }
             _ => {}
         }
         if size.0 == 0 || size.1 == 0 || u64::from(size.0) * u64::from(size.1) > 128 * 1024 * 1024 {
-            return Err("Resampled image exceeds 512 MiB".into());
+            return Err(Text::ImageResampleBudget.into());
         }
     }
     Ok(size)
@@ -215,7 +215,7 @@ fn render_frame(
     source: &DecodedImageFrame,
     operations: &[EditOperation],
     cancel: &Cancellation,
-) -> Result<DecodedImageFrame, String> {
+) -> Result<DecodedImageFrame, ImageEditError> {
     render_frame_cancellable(source, operations, &|| cancel.is_cancelled())
 }
 
@@ -223,7 +223,7 @@ pub(crate) fn render_frame_cancellable(
     source: &DecodedImageFrame,
     operations: &[EditOperation],
     cancelled: &impl Fn() -> bool,
-) -> Result<DecodedImageFrame, String> {
+) -> Result<DecodedImageFrame, ImageEditError> {
     ImageEditRenderer::new(operations).render(source, cancelled)
 }
 
@@ -246,11 +246,11 @@ impl<'a> ImageEditRenderer<'a> {
         &mut self,
         source: &DecodedImageFrame,
         cancelled: &impl Fn() -> bool,
-    ) -> Result<DecodedImageFrame, String> {
+    ) -> Result<DecodedImageFrame, ImageEditError> {
         let size = (source.width, source.height);
         output_size(size, self.operations)?;
         if cancelled() {
-            return Err("Image edit cancelled".into());
+            return Err(Text::ImageEditCancelled.into());
         }
         #[cfg(test)]
         RENDER_CALLS.set(RENDER_CALLS.get() + 1);
@@ -259,13 +259,13 @@ impl<'a> ImageEditRenderer<'a> {
             || u64::from(source.width) * u64::from(source.height) > 128 * 1024 * 1024
             || source.rgba.len() as u64 != u64::from(source.width) * u64::from(source.height) * 4
         {
-            return Err("Invalid source image pixels".into());
+            return Err(Text::ImageEditInvalidPixels.into());
         }
         if self.operations.is_empty() {
             let mut rgba = Vec::with_capacity(source.rgba.len());
             for bytes in source.rgba.chunks(65536) {
                 if cancelled() {
-                    return Err("Image edit cancelled".into());
+                    return Err(Text::ImageEditCancelled.into());
                 }
                 rgba.extend_from_slice(bytes);
             }
@@ -277,7 +277,7 @@ impl<'a> ImageEditRenderer<'a> {
             });
         }
         self.render_filtered(source, cancelled)
-            .map_err(|error| format!("Could not resample image: {error}"))
+            .map_err(ImageEditError::from)
     }
 
     fn render_filtered(
@@ -392,7 +392,7 @@ mod tests {
         GRAPH_BUILDS.set(0);
         let error =
             render_image_edits(&source, &[], &Cancellation::default()).expect_err("total budget");
-        assert!(error.contains("512 MiB"), "{error}");
+        assert!(error.to_string().contains("512 MiB"), "{error}");
         assert_eq!(
             RENDER_CALLS.get(),
             0,
@@ -411,6 +411,7 @@ mod tests {
         assert!(
             render_image_edits(&resized, &operations, &Cancellation::default())
                 .expect_err("combined resized canvases exceed budget")
+                .to_string()
                 .contains("512 MiB")
         );
         assert_eq!(RENDER_CALLS.get(), 0);

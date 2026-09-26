@@ -429,7 +429,10 @@ enum AppEvent {
     VideoResume(towavue_runtime_windows::VideoResumeEvent),
     FileSearchReady,
     ImageCopied(Result<(u32, u32), String>),
-    ImageEdited(u64, Result<Arc<DecodedImage>, String>),
+    ImageEdited(
+        u64,
+        Result<Arc<DecodedImage>, towavue_runtime_windows::ImageEditError>,
+    ),
     ImageContentCompared(
         u64,
         u64,
@@ -446,7 +449,11 @@ enum AppEvent {
         u64,
         Result<towavue_runtime_windows::PreviewImage, String>,
     ),
-    DetailedWaveform(u64, Arc<waveform_detail::Key>, Result<Vec<f32>, String>),
+    DetailedWaveform(
+        u64,
+        Arc<waveform_detail::Key>,
+        Result<Vec<f32>, towavue_runtime_windows::PreviewError>,
+    ),
     Thumbnail(
         PathBuf,
         u64,
@@ -8733,13 +8740,20 @@ where
         });
     }
 
-    fn finish_image_edits(&mut self, generation: u64, result: Result<Arc<DecodedImage>, String>) {
+    fn finish_image_edits(
+        &mut self,
+        generation: u64,
+        result: Result<Arc<DecodedImage>, towavue_runtime_windows::ImageEditError>,
+    ) {
         let language = self.language();
         if generation != self.image_edit_generation || !self.image_edit_pending {
             return;
         }
         self.image_edit_pending = false;
-        match result.and_then(|decoded| self.install_edited_image(decoded)) {
+        match result
+            .map_err(|error| error.message(language))
+            .and_then(|decoded| self.install_edited_image(decoded))
+        {
             Ok(()) => {
                 self.image_materialized = true;
                 self.set_status(
@@ -26072,6 +26086,64 @@ mod tests {
         app.load_path(PathBuf::from("missing-other.png"), MediaKind::Image);
         app.finish_image_edits(stale_generation, Err("previous path result".into()));
         assert!(app.image_error.is_none() && app.image_edit_source.is_none());
+    }
+
+    #[test]
+    fn japanese_image_edit_failures_are_localized_after_generation_validation() {
+        let Some(root) = isolated_test_root(
+            "tests::japanese_image_edit_failures_are_localized_after_generation_validation",
+        ) else {
+            return;
+        };
+        for density in [1.0, 1.25, 2.0] {
+            for error in [
+                towavue_runtime_windows::ImageEditError::from(
+                    localization::Text::ImageResampleBudget,
+                ),
+                towavue_runtime_windows::ImageEditError::from("native {detail} 日本語.png = 32"),
+            ] {
+                let context = localization::test_ui::japanese_context(density);
+                let mut app = Application::new(None, |_| {}).expect("app");
+                let path = root.join("日本語{image}.png");
+                app.tabs.open_new(path.clone(), MediaKind::Image);
+                app.path = Some(path);
+                app.media_kind = Some(MediaKind::Image);
+                app.ui_context = Some(context.clone());
+                app.language_settings.next = localization::Language::English;
+                app.image_edit_pending = true;
+                let generation = app.image_edit_generation;
+                app.set_status("retained status".into());
+                app.finish_image_edits(generation.wrapping_add(1), Err(error.clone()));
+                assert!(app.image_edit_pending && app.image_error.is_none());
+                assert_eq!(app.status_notice().as_deref(), Some("retained status"));
+                let reason = error.message(localization::Language::Japanese);
+                let expected = towavue_core::localization::formatted::image_resample_failed(
+                    localization::Language::Japanese,
+                    &reason,
+                );
+                app.finish_image_edits(generation, Err(error));
+                assert!(!app.image_edit_pending && !app.image_materialized);
+                assert_eq!(app.image_error.as_deref(), Some(reason.as_str()));
+                assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
+                assert!(app.edits.is_empty());
+                let mut output = egui::FullOutput::default();
+                for _ in 0..3 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1600.0, 700.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                        },
+                    );
+                }
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+            }
+        }
     }
 
     #[test]

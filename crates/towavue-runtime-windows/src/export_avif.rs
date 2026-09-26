@@ -15,6 +15,13 @@ fn invalid(error: impl std::fmt::Display) -> ExportError {
     ExportError::Failed(format!("AVIF export: {error}"))
 }
 
+fn image_edit_failed(error: crate::ImageEditError) -> ExportError {
+    ExportError::ImageEdit(
+        towavue_core::localization::Text::ImageEditAvifContext,
+        error,
+    )
+}
+
 pub(super) fn avif_path(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
@@ -213,7 +220,7 @@ impl Animation {
                 .and_then(|context| context.decoder().video())
                 .map_err(invalid)?;
             let size = (decoder.width(), decoder.height());
-            crate::image_edits::output_size(size, &[]).map_err(invalid)?;
+            crate::image_edits::output_size(size, &[]).map_err(image_edit_failed)?;
             let aperture = stream
                 .side_data()
                 .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::FRAME_CROPPING)
@@ -423,8 +430,8 @@ impl Animation {
         if orientation.swaps_axes() {
             source_size = (source_size.1, source_size.0);
         }
-        let output_size =
-            crate::image_edits::output_size(source_size, &request.operations).map_err(invalid)?;
+        let output_size = crate::image_edits::output_size(source_size, &request.operations)
+            .map_err(image_edit_failed)?;
         if let Some(alpha_id) = self.color().premultiplied_with
             && source_alpha.is_none_or(|sample| sample.id != alpha_id)
         {
@@ -833,7 +840,7 @@ pub(super) fn export_still(
         &|| !current(),
     );
     check_cancelled(cancelled)?;
-    let frame = frame.map_err(invalid)?;
+    let frame = frame.map_err(image_edit_failed)?;
     drop(decoded);
     // Reuse the same decoded and edited RGBA pixels as display, including associated alpha.
     // This owned PNG is also the input for alpha-capable static format conversion.

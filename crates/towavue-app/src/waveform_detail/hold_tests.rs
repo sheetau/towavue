@@ -180,7 +180,9 @@ fn released_gain_keeps_detailed_paint_through_refinement_and_repeated_edits() {
             app.install_detailed_waveform(
                 app.media_generation,
                 key,
-                Err("controlled refinement failure".into()),
+                Err(towavue_runtime_windows::PreviewError::Generate(
+                    "controlled refinement failure".into(),
+                )),
             );
             assert_eq!(
                 app.detailed_waveform(&context, rect, None)

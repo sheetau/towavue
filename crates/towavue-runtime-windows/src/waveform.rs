@@ -29,15 +29,16 @@ pub fn timeline_waveform(
         || !volume.is_finite()
         || !(0.0..=towavue_core::MAX_VOLUME).contains(&volume)
     {
-        return Err(PreviewError::Generate(
-            "invalid timeline waveform dimensions or gain/rate".into(),
+        return Err(PreviewError::Message(
+            towavue_core::localization::Text::WaveformInvalidInput,
         ));
     }
     if plan.spans().is_empty() {
         return Ok(vec![0.0; columns as usize]);
     }
-    let format = decode::probe_audio_format(source)?
-        .ok_or_else(|| PreviewError::Generate("no audio stream for waveform".into()))?;
+    let format = decode::probe_audio_format(source)?.ok_or(PreviewError::Message(
+        towavue_core::localization::Text::WaveformNoAudio,
+    ))?;
     let frames = crate::tempo::output_sample_boundary(
         plan.duration().as_nanoseconds(),
         format.sample_rate,
@@ -65,8 +66,8 @@ pub fn timeline_waveform(
         return Err(PreviewError::Cancelled);
     }
     if invalid {
-        return Err(PreviewError::Generate(
-            "non-finite timeline waveform samples".into(),
+        return Err(PreviewError::Message(
+            towavue_core::localization::Text::WaveformNonFinite,
         ));
     }
     result?;
@@ -153,8 +154,8 @@ impl DisplayEnvelope {
 
     fn finish(self) -> Result<Vec<f32>, crate::PreviewError> {
         if self.frames == 0 || self.position != self.frames {
-            return Err(crate::PreviewError::Generate(
-                "timeline waveform sample count mismatch".into(),
+            return Err(crate::PreviewError::Message(
+                towavue_core::localization::Text::WaveformSampleCountMismatch,
             ));
         }
         let samples_per_column = self.frames as f64 / self.sums.len() as f64;

@@ -1,4 +1,4 @@
-use super::{Cancellation, DecodedImageFrame, EditOperation};
+use super::{Cancellation, DecodedImageFrame, EditOperation, ImageEditError, Text};
 
 struct View<'a> {
     frame: &'a DecodedImageFrame,
@@ -75,7 +75,7 @@ pub(super) fn compare(
     saved: &DecodedImageFrame,
     saved_operations: &[EditOperation],
     cancel: &Cancellation,
-) -> Option<Result<bool, String>> {
+) -> Option<Result<bool, ImageEditError>> {
     let mut current = View::new(current, current_operations)?;
     let mut saved = View::new(saved, saved_operations)?;
     // Equality does not depend on traversal order. Scan transposed views along source rows.
@@ -97,7 +97,7 @@ pub(super) fn compare(
         for top in (0..current.height).step_by(rows) {
             for start in (0..current.width).step_by(columns) {
                 if cancel.is_cancelled() {
-                    return Err("Image comparison cancelled".into());
+                    return Err(Text::ImageComparisonCancelled.into());
                 }
                 let end = (start + columns as u32).min(current.width);
                 for y in top..(top + rows as u32).min(current.height) {

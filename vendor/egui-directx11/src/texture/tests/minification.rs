@@ -598,6 +598,8 @@ fn repeated_mixed_ui_draws_keep_minification_stable() -> Result<()> {
         let Some(mut surface) = Surface::new(driver, [800, 600])? else {
             continue;
         };
+        // Set the fixture's texture limit before its first egui frame.
+        surface.context.input_mut(|input| input.max_texture_side = 4096);
         let options =
             egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
         let mut texture = surface.context.load_texture(

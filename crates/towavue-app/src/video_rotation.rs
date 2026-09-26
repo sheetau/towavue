@@ -181,7 +181,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             operations,
             max_side,
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.message(self.language()))
     }
 
     pub(super) fn open_video_rotation(&mut self) {

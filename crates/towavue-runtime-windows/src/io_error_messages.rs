@@ -1,6 +1,6 @@
 //! Translate owned I/O causes without changing their kind, source or diagnostic text.
 use std::{io, path::PathBuf};
-use towavue_core::localization::{Language, Text, formatted};
+use towavue_core::localization::{Language, formatted};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum PathReason {
@@ -23,12 +23,7 @@ pub fn io_error_message(error: &io::Error, language: Language) -> String {
         return reason.message(language);
     }
     if let Some(reason) = cause.downcast_ref::<crate::shell::FolderOrderError>() {
-        return match reason {
-            crate::shell::FolderOrderError::WorkerStopped => Text::ShellWorkerStopped,
-            crate::shell::FolderOrderError::ResponseLost => Text::ShellResponseLost,
-        }
-        .in_language(language)
-        .into();
+        return reason.message(language);
     }
     if let Some(reason) = cause.downcast_ref::<PathReason>() {
         return match reason {
@@ -50,6 +45,7 @@ pub fn io_error_message(error: &io::Error, language: Language) -> String {
 mod tests {
     use super::*;
     use std::error::Error;
+    use towavue_core::localization::Text;
 
     #[test]
     fn owned_io_preserves_nested_kinds_paths_and_literal_native_details() {

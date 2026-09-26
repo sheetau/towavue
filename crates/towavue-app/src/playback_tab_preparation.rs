@@ -98,9 +98,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let source = (kind == MediaKind::Video)
                 .then(|| VideoResumeSource::capture(&path).ok())
                 .flatten();
-            let duration = cache
-                .duration(input.path())
-                .map_err(|error| error.to_string());
+            let duration = cache.duration(input.path());
             notify(AppEvent::PreparedPlayback(
                 id, instance, path, duration, source,
             ));
@@ -114,7 +112,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         id: TabId,
         instance: u64,
         path: PathBuf,
-        duration: Result<Duration, String>,
+        duration: Result<Duration, towavue_runtime_windows::PreviewError>,
         source: Option<VideoResumeSource>,
     ) {
         self.duration_workers.remove(&instance);
@@ -146,7 +144,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 saved.status = Some((
                     towavue_core::localization::formatted::tab_metadata_unavailable(
                         saved.language,
-                        &error,
+                        &error.message(saved.language),
                     ),
                     Instant::now(),
                 ))

@@ -573,9 +573,19 @@ fn prepared_tab_and_timeline_failures_keep_captured_language_external_details_an
         assert_eq!(saved.language, language);
         let instance = saved.instance;
         let detail = "external \u{65e5}\u{672c}\u{8a9e}{path}\n0x80004005";
-        app.finish_playback_tab_preparation(tab, instance, path.clone(), Err(detail.into()), None);
-        let expected =
-            towavue_core::localization::formatted::tab_metadata_unavailable(language, detail);
+        app.finish_playback_tab_preparation(
+            tab,
+            instance,
+            path.clone(),
+            Err(towavue_runtime_windows::PreviewError::Generate(
+                detail.into(),
+            )),
+            None,
+        );
+        let expected = towavue_core::localization::formatted::tab_metadata_unavailable(
+            language,
+            &towavue_core::localization::formatted::preview_generate_failed(language, detail),
+        );
         assert_eq!(
             app.retained_playback[&tab]
                 .status
@@ -588,7 +598,7 @@ fn prepared_tab_and_timeline_failures_keep_captured_language_external_details_an
             tab,
             instance.wrapping_add(1),
             path,
-            Err("stale".into()),
+            Err(towavue_runtime_windows::PreviewError::InvalidDuration),
             None,
         );
         assert_eq!(

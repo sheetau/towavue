@@ -149,6 +149,21 @@ mod tests {
             eprintln!("SKIP Japanese glyph coverage: no Japanese Windows font is installed");
             return;
         }
+        // Include every non-ASCII character used by static and formatted UI text.
+        // This stays tied to the catalogs as translations grow, without exposing
+        // a production-only enumeration API merely for font verification.
+        let characters: std::collections::BTreeSet<_> = concat!(
+            include_str!("../../towavue-core/src/localization/catalog.rs"),
+            include_str!("../../towavue-core/src/localization/formatted.rs"),
+        )
+        .chars()
+        .filter(|chr| !chr.is_ascii() && !chr.is_whitespace())
+        .collect();
+        assert!(!characters.is_empty());
+        eprintln!(
+            "Japanese catalog glyph coverage: {} unique characters in both text families",
+            characters.len()
+        );
         let _ = context.run_ui(Default::default(), |ui| {
             ui.fonts_mut(|fonts| {
                 for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
@@ -161,7 +176,7 @@ mod tests {
                     let replacement = missing.rows[0].glyphs[0].uv_rect;
                     // egui's has_glyph compares face identity, so it rejects real glyphs
                     // when the same fallback face also supplies the replacement glyph.
-                    for chr in "日本語画像ひらがなカタカナ".chars() {
+                    for chr in &characters {
                         let galley = fonts.layout_no_wrap(
                             chr.to_string(),
                             font.clone(),

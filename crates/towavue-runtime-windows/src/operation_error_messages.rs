@@ -5,6 +5,32 @@ use crate::{
 };
 use towavue_core::localization::{Language, Text, formatted};
 
+impl crate::FolderOrderError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::WorkerStopped => Text::ShellWorkerStopped,
+            Self::ResponseLost => Text::ShellResponseLost,
+        }
+        .in_language(language)
+        .into()
+    }
+}
+
+impl crate::FolderWatchError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::Windows(error) => {
+                formatted::folder_watch_windows_failed(language, &error.to_string())
+            }
+            Self::Thread(error) => formatted::folder_watch_thread_failed(
+                language,
+                &crate::io_error_message(error, language),
+            ),
+            Self::Startup => Text::FolderWatchStartup.in_language(language).into(),
+        }
+    }
+}
+
 impl AudioOutputError {
     pub fn message(&self, language: Language) -> String {
         match self {
@@ -196,6 +222,35 @@ impl SourceSaveError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_monitor_failures_preserve_native_sources_and_english_diagnostics() {
+        use std::error::Error;
+        let detail = "native {folder} 日本語 0x80004005";
+        let native =
+            windows::core::Error::new(windows::core::HRESULT(0x80004005u32 as i32), detail);
+        for error in [
+            crate::FolderWatchError::Windows(native),
+            crate::FolderWatchError::Thread(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                detail,
+            )),
+            crate::FolderWatchError::Startup,
+        ] {
+            assert_eq!(error.message(Language::English), error.to_string());
+            assert_ne!(error.message(Language::Japanese), error.to_string());
+            if let Some(cause) = error.source() {
+                assert!(
+                    error
+                        .message(Language::Japanese)
+                        .contains(&cause.to_string())
+                );
+            }
+            if let crate::FolderWatchError::Thread(cause) = error {
+                assert_eq!(cause.kind(), std::io::ErrorKind::PermissionDenied);
+            }
+        }
+    }
 
     #[test]
     fn preview_errors_localize_owned_waveform_reasons_and_retain_native_causes() {

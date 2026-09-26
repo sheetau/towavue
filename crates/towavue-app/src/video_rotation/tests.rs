@@ -261,6 +261,23 @@ fn repeated_rotations<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applica
         .validate_video_operations(&[])
         .expect("rotation test fixture");
     let transport = (app.current_position(), app.generation);
+    let context = app.ui_context.as_ref().expect("context").clone();
+    let original_language = app.language();
+    let history = app.edits.clone();
+    let wrong_source = EditOperation::RotateVideo(
+        VideoRotation::new(50, (geometry.0 + 2, geometry.1), geometry.2).expect("different source"),
+    );
+    for language in [Language::English, Language::Japanese] {
+        localization::set_language(&context, language);
+        assert_eq!(
+            app.validate_video_operations(std::slice::from_ref(&wrong_source))
+                .expect_err("source mismatch"),
+            Text::RenderInvalidVideoEdit.in_language(language)
+        );
+        assert_eq!(app.edits, history);
+        assert_eq!((app.current_position(), app.generation), transport);
+    }
+    localization::set_language(&context, original_language);
     for step in 1..=73 {
         app.step_video_rotation(true);
         let total = ((step * 50 + 1800) % 3600 - 1800) as i16;

@@ -36,6 +36,7 @@ messages! {
     HelperApplicationDirectory => ("application executable has no parent directory", "アプリの実行ファイルに親フォルダーがありません"),
     WaveformTooFewSamples => ("too few audio samples for waveform", "波形を生成するための音声サンプルが足りません"),
     DeletePreferenceFolder => ("preference folder unavailable", "削除確認設定の保存先フォルダーを利用できません"),
+    FolderWatchStartup => ("folder monitoring stopped before its first request was ready", "最初の監視要求が準備できる前にフォルダー監視が停止しました"),
     AppDataUnavailable => ("APPDATA is unavailable", "APPDATAを取得できません"),
     ShellWorkerStopped => ("the Shell worker stopped", "エクスプローラー連携の処理が停止しました"),
     ShellResponseLost => ("the Shell worker did not return a snapshot", "エクスプローラー連携の処理からフォルダー情報を取得できませんでした"),

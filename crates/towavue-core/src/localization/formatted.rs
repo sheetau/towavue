@@ -36,6 +36,8 @@ macro_rules! templates {
 }
 
 templates! {
+    folder_watch_windows_failed(detail: &str) => ("Windows folder monitoring failed: {detail}", "Windowsのフォルダー監視に失敗しました: {detail}"),
+    folder_watch_thread_failed(detail: &str) => ("folder monitoring thread could not start: {detail}", "フォルダー監視の処理を開始できませんでした: {detail}"),
     missing_media_helper(path: &str) => ("required media helper is missing: {path}", "必要なメディア補助プログラムが見つかりません: {path}"),
     missing_license_guide(path: &str) => ("Packaged licenses and sources are unavailable. Expected: {path}", "同梱のライセンスとソースコードが見つかりません。確認先: {path}"),
     frame_image_unexpected(actual_width: u32, actual_height: u32, actual_format: &str, expected_width: u32, expected_height: u32, expected_format: &str) => ("unexpected edited frame: {actual_width}x{actual_height} {actual_format}, expected {expected_width}x{expected_height} {expected_format}", "編集後のフレームが一致しません。実際の値: {actual_width}x{actual_height} {actual_format}、必要な値: {expected_width}x{expected_height} {expected_format}"),

@@ -57,6 +57,8 @@ pub(crate) fn window_start_error(
     } else if let Some(error) = error.downcast_ref::<towavue_runtime_windows::update::UpdateError>()
     {
         error.message(language)
+    } else if let Some(error) = error.downcast_ref::<towavue_runtime_windows::FolderOrderError>() {
+        error.message(language)
     } else if let Some(error) = error.downcast_ref::<std::io::Error>() {
         towavue_runtime_windows::io_error_message(error, language)
     } else {

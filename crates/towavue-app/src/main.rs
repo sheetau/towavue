@@ -422,7 +422,7 @@ enum AppEvent {
         TabId,
         u64,
         PathBuf,
-        Result<Duration, String>,
+        Result<Duration, towavue_runtime_windows::PreviewError>,
         Option<towavue_runtime_windows::VideoResumeSource>,
     ),
     FilmstripReady,
@@ -458,11 +458,15 @@ enum AppEvent {
     ),
     Export(ExportEvent),
     Playback(u64, PlaybackEvent),
-    Duration(PathBuf, u64, Result<Duration, String>),
+    Duration(
+        PathBuf,
+        u64,
+        Result<Duration, towavue_runtime_windows::PreviewError>,
+    ),
     Waveform(
         PathBuf,
         u64,
-        Result<towavue_runtime_windows::PreviewImage, String>,
+        Result<towavue_runtime_windows::PreviewImage, towavue_runtime_windows::PreviewError>,
     ),
     DetailedWaveform(
         u64,
@@ -2471,9 +2475,7 @@ where
         let input = self.media_input(&path);
         self.waveform_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
-            let result = cache
-                .waveform(input.path(), 640, 96)
-                .map_err(|error| error.to_string());
+            let result = cache.waveform(input.path(), 640, 96);
             notify(AppEvent::Waveform(path, generation, result));
         });
     }
@@ -2559,9 +2561,7 @@ where
         let input = self.media_input_for_instance(&path, generation);
         self.duration_workers[&generation].submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
-            let result = cache
-                .duration(input.path())
-                .map_err(|error| error.to_string());
+            let result = cache.duration(input.path());
             notify(AppEvent::Duration(path, generation, result));
         });
     }
@@ -3276,7 +3276,7 @@ where
         self.folder_watcher = None;
         match FolderWatcher::new(folder) {
             Ok(watcher) => self.folder_watcher = Some((folder.to_owned(), watcher)),
-            Err(error) => self.set_status(error.to_string()),
+            Err(error) => self.set_status(error.message(self.language())),
         }
     }
 
@@ -3532,7 +3532,7 @@ where
                             self.set_status(
                                 towavue_core::localization::formatted::duration_failed(
                                     language,
-                                    &error.to_string(),
+                                    &error.message(language),
                                 ),
                             );
                         }
@@ -3553,7 +3553,7 @@ where
                             saved.status = Some((
                                 towavue_core::localization::formatted::duration_failed(
                                     language,
-                                    &error.to_string(),
+                                    &error.message(language),
                                 ),
                                 Instant::now(),
                             ))
@@ -3597,7 +3597,7 @@ where
                     Err(error) => {
                         self.set_status(towavue_core::localization::formatted::waveform_failed(
                             language,
-                            &error.to_string(),
+                            &error.message(language),
                         ))
                     }
                 }
@@ -17917,7 +17917,9 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 source.clone(),
                 app.media_generation.wrapping_add(1),
-                Err("stale result".into()),
+                Err(towavue_runtime_windows::PreviewError::Generate(
+                    "stale result".into(),
+                )),
             ));
             assert!(app.waveform_loading);
             assert!(app.status_message.is_none());
@@ -17941,13 +17943,15 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 source,
                 app.media_generation,
-                Err("fixture has no audio".into()),
+                Err(towavue_runtime_windows::PreviewError::Generate(
+                    "fixture has no audio".into(),
+                )),
             ));
             assert!(!app.waveform_loading);
             let texts = draw(&mut app, 960.0, 1.0);
             assert!(
                 texts.iter().any(|(pos, text)| pos.y > 540.0
-                    && text == "Waveform unavailable: fixture has no audio")
+                    && text == "Waveform unavailable: FFmpeg preview generation failed: fixture has no audio")
             );
             assert!(
                 !texts
@@ -27666,7 +27670,9 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 path.clone(),
                 app.media_generation,
-                Err("late waveform".into()),
+                Err(towavue_runtime_windows::PreviewError::Generate(
+                    "late waveform".into(),
+                )),
             ));
             app.handle_app_event(AppEvent::Thumbnail(
                 path,
@@ -27752,12 +27758,22 @@ mod tests {
             height: 1,
             rgba: vec![255; 4].into(),
         };
-        for result in [Ok(Duration::from_secs(99)), Err("old duration".into())] {
+        for result in [
+            Ok(Duration::from_secs(99)),
+            Err(towavue_runtime_windows::PreviewError::Generate(
+                "old duration".into(),
+            )),
+        ] {
             app.handle_app_event(AppEvent::Duration(path.clone(), old, result));
             assert!(app.media_duration.is_none());
             assert!(app.status_message.is_none());
         }
-        for result in [Ok(preview.clone()), Err("old waveform".into())] {
+        for result in [
+            Ok(preview.clone()),
+            Err(towavue_runtime_windows::PreviewError::Generate(
+                "old waveform".into(),
+            )),
+        ] {
             app.handle_app_event(AppEvent::Waveform(path.clone(), old, result));
             assert!(app.waveform.is_none());
             assert!(app.waveform_loading);

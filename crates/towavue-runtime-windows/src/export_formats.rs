@@ -390,7 +390,7 @@ fn image_alpha(path: &Path) -> Result<bool, ExportError> {
         .with_guessed_format()
         .map_err(ExportError::Output)?;
     let decoder = reader.into_decoder().map_err(|error| {
-        ExportError::Failed(format!("Could not inspect image transparency: {error}"))
+        crate::ExportFailure::diagnostic(Text::ExportTransparencyContext, error)
     })?;
     Ok(decoder.color_type().has_alpha())
 }

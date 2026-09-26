@@ -166,7 +166,7 @@ pub(super) fn export_cancellable(
         if matches!(error, crate::DecodeError::ConsumerClosed) {
             ExportError::Cancelled
         } else {
-            ExportError::Failed(error.to_string())
+            crate::ExportFailure::decode(None, error).into()
         }
     })?;
     check_cancelled(cancelled)?;

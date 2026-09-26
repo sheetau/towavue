@@ -36,6 +36,11 @@ macro_rules! templates {
 }
 
 templates! {
+    export_jpeg_validation(status: &str, detail: &str) => ("JPEG decode validation failed ({status}): {detail}", "JPEGのデコード検証に失敗しました（{status}）: {detail}"),
+    export_process_exit(status: &str) => ("process exited with {status}", "処理が終了しました: {status}"),
+    export_metadata_not_retained(field: &str) => ("Output format did not retain the requested '{field}' metadata; existing target unchanged", "出力形式で指定した「{field}」メタデータを保持できませんでした。既存の保存先は変更していません"),
+    export_geometry_changed(operation: &str, expected_size: (u32, u32), expected_aspect: f32, size: (u32, u32), aspect: f32) => ("{operation} input changed: expected {expected_size:?} SAR {expected_aspect}, found {size:?} SAR {aspect}", "{operation}の入力が変わりました。必要な値: {expected_size:?} SAR {expected_aspect}、実際の値: {size:?} SAR {aspect}"),
+    export_loudness_refused(target_integrated: f64, tolerance: f64, target_peak: f64, attempts: usize, measured_integrated: f64, measured_peak: f64) => ("Encoded audio did not meet {target_integrated:.1} LUFS (+/-{tolerance:.1} LU) / maximum {target_peak:.1} dBTP after {attempts} attempts: measured {measured_integrated:.2} LUFS / {measured_peak:.2} dBTP; nothing was published", "エンコード後の音声が{attempts}回の試行で{target_integrated:.1} LUFS（±{tolerance:.1} LU）／最大{target_peak:.1} dBTPを満たしませんでした。測定値: {measured_integrated:.2} LUFS／{measured_peak:.2} dBTP。ファイルは保存していません"),
     export_animation_preparation(error: &str) => ("animation frame preparation failed: {error}", "アニメーションフレームの準備に失敗しました: {error}"),
     export_millisecond_delay(delay: u32, format: &str, alternative: &str) => ("{delay} ms frame delay cannot be represented exactly in {format}; use {alternative} output", "{delay} msのフレーム遅延を{format}で正確に表現できません。{alternative}出力を使用してください"),
     export_exact_delay(format: &str, alternative: &str) => ("frame delay cannot be represented exactly in {format}; use {alternative} output", "フレーム遅延を{format}で正確に表現できません。{alternative}出力を使用してください"),

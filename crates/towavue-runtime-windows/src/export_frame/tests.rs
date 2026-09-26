@@ -333,11 +333,19 @@ fn duplicate_frame_times_across_keyframes_and_at_eof_never_replace_targets() {
                         let result = rx
                             .recv_timeout(Duration::from_secs(10))
                             .expect("terminal export event");
-                        assert!(
-                            matches!(result, ExportEvent::Finished(Err(ExportError::Failed(ref error))) if error.contains("ambiguous duplicate")),
-                            "gop={gop} origin={origin} time={:?}: {result:?}",
-                            snapshot.time
-                        );
+                        let ExportEvent::Finished(Err(ExportError::Structured(ref error))) = result
+                        else {
+                            panic!(
+                                "gop={gop} origin={origin} time={:?}: {result:?}",
+                                snapshot.time
+                            );
+                        };
+                        assert!(matches!(
+                            std::error::Error::source(error)
+                                .and_then(|cause| cause.downcast_ref::<crate::DecodeError>()),
+                            Some(crate::DecodeError::FrameImage(message))
+                                if message.contains("ambiguous duplicate")
+                        ));
                         drop(job);
                         assert!(rx.try_recv().is_err(), "one terminal event");
                         if let Some(before) = before {

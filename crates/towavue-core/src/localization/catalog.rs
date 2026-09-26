@@ -18,6 +18,22 @@ macro_rules! messages {
 }
 
 messages! {
+    ExportPngValidationContext => ("PNG decode validation", "PNGのデコード検証"),
+    ExportTrimProbeContext => ("trim output contains no readable media", "トリミング後の出力からメディアを読み取れません"),
+    ExportStreamProbeContext => ("could not inspect export streams", "書き出し対象のストリームを確認できませんでした"),
+    ExportTransparencyContext => ("Could not inspect image transparency", "画像の透明度を確認できませんでした"),
+    ExportMetadataVerificationContext => ("Could not verify exported metadata", "書き出したメタデータを検証できませんでした"),
+    ExportPrecisionContext => ("could not inspect video precision", "動画の画素精度を確認できませんでした"),
+    ExportHighDepthOrientationContext => ("Unsupported high-depth video orientation", "高ビット深度の動画の向きに対応していません"),
+    ExportAudioAnalysisContext => ("Audio analysis failed", "音声の解析に失敗しました"),
+    ExportAudioStatisticContext => ("Audio normalization analysis is incomplete or ambiguous", "音声のノーマライズ解析結果が不完全か、一意に特定できません"),
+    ExportRotationMissingVideo => ("Video rotation requires a video stream", "動画の回転には映像ストリームが必要です"),
+    ExportRotationInvalidCrop => ("Invalid crop before video rotation", "動画の回転前の切り抜き範囲が不正です"),
+    ExportRotationNonVideoOperation => ("Non-video operation in video rotation history", "動画の回転履歴に動画以外の編集操作があります"),
+    ExportResizeOperation => ("Video resize", "動画のサイズ変更"),
+    ExportRotationOperation => ("Video rotation", "動画の回転"),
+    ExportTrimAudioEmpty => ("trim contains no Audio frames; choose a wider range", "トリミング範囲に音声フレームがありません。範囲を広げてください"),
+    ExportTrimVideoEmpty => ("trim contains no Video frames; choose a wider range", "トリミング範囲に映像フレームがありません。範囲を広げてください"),
     AvifValidationAlphaCleanApertureDiffersFromColor => ("alpha clean aperture differs from color", "アルファの表示領域がカラーと一致しません"),
     AvifValidationAlphaGeometryOrTimingDiffersFromColor => ("alpha geometry or timing differs from color", "アルファの形状または時刻情報がカラーと一致しません"),
     AvifValidationAlphaOrientationDiffersFromColor => ("alpha orientation differs from color", "アルファの向きがカラーと一致しません"),

@@ -214,7 +214,7 @@ impl MetadataExportOptions {
         }
         ffmpeg::init().map_err(|error| ExportError::Failed(error.to_string()))?;
         let input = ffmpeg::format::input(path).map_err(|error| {
-            ExportError::Failed(format!("Could not verify exported metadata: {error}"))
+            crate::ExportFailure::diagnostic(Text::ExportMetadataVerificationContext, error)
         })?;
         for (field, expected) in &self.fields {
             let mut values = Vec::new();
@@ -236,10 +236,7 @@ impl MetadataExportOptions {
                 !values.is_empty() && values.iter().all(|value| value == expected)
             };
             if !valid {
-                return Err(ExportError::Failed(format!(
-                    "Output format did not retain the requested '{}' metadata; existing target unchanged",
-                    field.key(),
-                )));
+                return Err(crate::ExportFailure::metadata_not_retained(*field).into());
             }
         }
         Ok(())

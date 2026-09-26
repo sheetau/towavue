@@ -5,12 +5,35 @@ use towavue_core::localization::{Language, Text, formatted};
 
 #[derive(Debug)]
 pub struct ExportFailure {
-    context: Text,
+    context: Option<Text>,
     reason: Reason,
 }
 
 #[derive(Debug)]
 enum Reason {
+    Decode(Box<crate::DecodeError>),
+    JpegValidation {
+        status: String,
+        detail: String,
+    },
+    ProcessExit(String),
+    EmptyTrim {
+        video: bool,
+    },
+    MetadataNotRetained(MetadataField),
+    Geometry {
+        operation: Text,
+        expected_size: (u32, u32),
+        expected_aspect: f32,
+        size: (u32, u32),
+        aspect: f32,
+    },
+    Loudness {
+        target: (f64, f64),
+        measured: (f64, f64),
+        tolerance: f64,
+        attempts: usize,
+    },
     Text(Text),
     Diagnostic(String),
     Avif(crate::AvifFailure),
@@ -29,37 +52,100 @@ enum Reason {
 }
 
 impl ExportFailure {
-    pub(crate) fn reason(context: Text, reason: Text) -> Self {
+    fn standalone(reason: Reason) -> Self {
+        Self {
+            context: None,
+            reason,
+        }
+    }
+
+    pub(crate) fn decode(context: Option<Text>, error: crate::DecodeError) -> Self {
         Self {
             context,
+            reason: Reason::Decode(Box::new(error)),
+        }
+    }
+
+    pub(crate) fn jpeg_validation(status: impl fmt::Display, detail: &str) -> Self {
+        Self::standalone(Reason::JpegValidation {
+            status: status.to_string(),
+            detail: detail.into(),
+        })
+    }
+
+    pub(crate) fn process_exit(status: impl fmt::Display) -> Self {
+        Self::standalone(Reason::ProcessExit(status.to_string()))
+    }
+
+    pub(crate) fn empty_trim(video: bool) -> Self {
+        Self::standalone(Reason::EmptyTrim { video })
+    }
+
+    pub(crate) fn metadata_not_retained(field: MetadataField) -> Self {
+        Self::standalone(Reason::MetadataNotRetained(field))
+    }
+
+    pub(crate) fn geometry(
+        operation: Text,
+        expected_size: (u32, u32),
+        expected_aspect: f32,
+        size: (u32, u32),
+        aspect: f32,
+    ) -> Self {
+        Self::standalone(Reason::Geometry {
+            operation,
+            expected_size,
+            expected_aspect,
+            size,
+            aspect,
+        })
+    }
+
+    pub(crate) fn loudness(
+        target: (f64, f64),
+        measured: (f64, f64),
+        tolerance: f64,
+        attempts: usize,
+    ) -> Self {
+        Self::standalone(Reason::Loudness {
+            target,
+            measured,
+            tolerance,
+            attempts,
+        })
+    }
+
+    pub(crate) fn reason(context: Text, reason: Text) -> Self {
+        Self {
+            context: Some(context),
             reason: Reason::Text(reason),
         }
     }
 
     pub(crate) fn diagnostic(context: Text, error: impl fmt::Display) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::Diagnostic(error.to_string()),
         }
     }
 
     pub(crate) fn avif(context: Text, error: crate::AvifFailure) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::Avif(error),
         }
     }
 
     pub(crate) fn image(context: Text, error: ImageDecodeError) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::Image(Box::new(error)),
         }
     }
 
     pub(crate) fn prepared_image(context: Text, error: ImageDecodeError) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::PreparedImage(Box::new(error)),
         }
     }
@@ -71,7 +157,7 @@ impl ExportFailure {
         alternative: &'static str,
     ) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::FrameDelay {
                 milliseconds,
                 format: format.into(),
@@ -82,20 +168,61 @@ impl ExportFailure {
 
     pub(crate) fn unsupported_metadata(context: Text, field: MetadataField) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::UnsupportedMetadata(field),
         }
     }
 
     pub(crate) fn sequence_child(context: Text, child: [u8; 4], parent: [u8; 4]) -> Self {
         Self {
-            context,
+            context: Some(context),
             reason: Reason::SequenceChild { child, parent },
         }
     }
 
     pub fn message(&self, language: Language) -> String {
         let reason = match &self.reason {
+            Reason::Decode(error) => error.message(language),
+            Reason::JpegValidation { status, detail } => {
+                formatted::export_jpeg_validation(language, status, detail)
+            }
+            Reason::ProcessExit(status) => formatted::export_process_exit(language, status),
+            Reason::EmptyTrim { video: true } => {
+                Text::ExportTrimVideoEmpty.in_language(language).into()
+            }
+            Reason::EmptyTrim { video: false } => {
+                Text::ExportTrimAudioEmpty.in_language(language).into()
+            }
+            Reason::MetadataNotRetained(field) => formatted::export_metadata_not_retained(
+                language,
+                if language == Language::English {
+                    field.key()
+                } else {
+                    field.label_in(language)
+                },
+            ),
+            Reason::Geometry {
+                operation,
+                expected_size,
+                expected_aspect,
+                size,
+                aspect,
+            } => formatted::export_geometry_changed(
+                language,
+                operation.in_language(language),
+                *expected_size,
+                *expected_aspect,
+                *size,
+                *aspect,
+            ),
+            Reason::Loudness {
+                target,
+                measured,
+                tolerance,
+                attempts,
+            } => formatted::export_loudness_refused(
+                language, target.0, *tolerance, target.1, *attempts, measured.0, measured.1,
+            ),
             Reason::Text(text) => text.in_language(language).into(),
             Reason::Diagnostic(detail) => detail.clone(),
             Reason::Avif(error) => error.message(language),
@@ -122,7 +249,10 @@ impl ExportFailure {
                 &String::from_utf8_lossy(parent),
             ),
         };
-        format!("{}: {reason}", self.context.in_language(language))
+        match self.context {
+            Some(context) => format!("{}: {reason}", context.in_language(language)),
+            None => reason,
+        }
     }
 }
 
@@ -137,6 +267,7 @@ impl Error for ExportFailure {
         match &self.reason {
             Reason::Image(error) | Reason::PreparedImage(error) => Some(error.as_ref()),
             Reason::Avif(error) => Some(error),
+            Reason::Decode(error) => Some(error.as_ref()),
             _ => None,
         }
     }
@@ -236,5 +367,93 @@ mod tests {
             failure.message(Language::Japanese),
             format!("XMPメタデータ: {literal}")
         );
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+
+    #[test]
+    fn root_export_validation_keeps_numeric_refusals_and_literal_native_details() {
+        for (error, english, japanese) in [
+            (
+                ExportFailure::jpeg_validation("exit code: 7", "codec {detail}: Ω"),
+                "JPEG decode validation failed (exit code: 7): codec {detail}: Ω",
+                "JPEGのデコード検証に失敗しました（exit code: 7）: codec {detail}: Ω",
+            ),
+            (
+                ExportFailure::process_exit("exit code: 7"),
+                "process exited with exit code: 7",
+                "処理が終了しました: exit code: 7",
+            ),
+            (
+                ExportFailure::empty_trim(false),
+                "trim contains no Audio frames; choose a wider range",
+                "トリミング範囲に音声フレームがありません。範囲を広げてください",
+            ),
+            (
+                ExportFailure::empty_trim(true),
+                "trim contains no Video frames; choose a wider range",
+                "トリミング範囲に映像フレームがありません。範囲を広げてください",
+            ),
+            (
+                ExportFailure::metadata_not_retained(MetadataField::AlbumArtist),
+                "Output format did not retain the requested 'album_artist' metadata; existing target unchanged",
+                "出力形式で指定した「アルバムアーティスト」メタデータを保持できませんでした。既存の保存先は変更していません",
+            ),
+            (
+                ExportFailure::geometry(
+                    Text::ExportRotationOperation,
+                    (64, 48),
+                    1.0,
+                    (32, 48),
+                    2.0,
+                ),
+                "Video rotation input changed: expected (64, 48) SAR 1, found (32, 48) SAR 2",
+                "動画の回転の入力が変わりました。必要な値: (64, 48) SAR 1、実際の値: (32, 48) SAR 2",
+            ),
+            (
+                ExportFailure::loudness((-14.0, -1.0), (-13.7, -0.8), 0.1, 4),
+                "Encoded audio did not meet -14.0 LUFS (+/-0.1 LU) / maximum -1.0 dBTP after 4 attempts: measured -13.70 LUFS / -0.80 dBTP; nothing was published",
+                "エンコード後の音声が4回の試行で-14.0 LUFS（±0.1 LU）／最大-1.0 dBTPを満たしませんでした。測定値: -13.70 LUFS／-0.80 dBTP。ファイルは保存していません",
+            ),
+        ] {
+            assert_eq!(error.to_string(), english);
+            assert_eq!(error.message(Language::Japanese), japanese);
+            let export = crate::ExportError::from(error);
+            assert!(export.message(Language::Japanese).contains(japanese));
+        }
+    }
+
+    #[test]
+    fn export_frame_and_orientation_failures_keep_decoder_causes_until_display() {
+        let error = crate::VideoOrientation::from_bytes(Some(&[0; 3]))
+            .expect_err("truncated display matrix is rejected");
+        let diagnostic = error.to_string();
+        let japanese = error.message(Language::Japanese);
+        let failure = ExportFailure::decode(Some(Text::ExportHighDepthOrientationContext), error);
+        assert_eq!(
+            failure.to_string(),
+            format!("Unsupported high-depth video orientation: {diagnostic}")
+        );
+        assert!(failure.message(Language::Japanese).contains(&japanese));
+        assert!(matches!(
+            failure
+                .source()
+                .and_then(|cause| cause.downcast_ref::<crate::DecodeError>()),
+            Some(crate::DecodeError::UnsupportedOrientation)
+        ));
+
+        let error = crate::DecodeError::Ffmpeg(ffmpeg_next::Error::InvalidData);
+        let diagnostic = error.to_string();
+        let failure = ExportFailure::decode(None, error);
+        assert_eq!(failure.to_string(), diagnostic);
+        assert!(matches!(
+            failure
+                .source()
+                .and_then(|cause| cause.downcast_ref::<crate::DecodeError>()),
+            Some(crate::DecodeError::Ffmpeg(ffmpeg_next::Error::InvalidData))
+        ));
     }
 }

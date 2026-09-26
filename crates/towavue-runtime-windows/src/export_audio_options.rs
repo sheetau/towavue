@@ -189,10 +189,11 @@ pub(super) fn analysis_log(
     let result = run_ffmpeg(executable, arguments, cancelled, progress)?;
     check_cancelled(cancelled)?;
     if !result.status.success() {
-        return Err(ExportError::Failed(format!(
-            "Audio analysis failed: {}",
-            String::from_utf8_lossy(&result.stderr).trim()
-        )));
+        return Err(crate::ExportFailure::diagnostic(
+            Text::ExportAudioAnalysisContext,
+            String::from_utf8_lossy(&result.stderr).trim(),
+        )
+        .into());
     }
     Ok(String::from_utf8_lossy(&result.stderr).into_owned())
 }
@@ -209,9 +210,9 @@ fn gain_from_statistics(log: &str) -> Result<f64, ExportError> {
             .next()
             .and_then(|value| value.trim().parse::<f64>().ok());
         if matches.next().is_some() || number.is_none() {
-            return Err(ExportError::Failed(format!(
-                "Audio normalization analysis is incomplete or ambiguous: {name}"
-            )));
+            return Err(
+                crate::ExportFailure::diagnostic(Text::ExportAudioStatisticContext, name).into(),
+            );
         }
         Ok(number.expect("validated statistic"))
     };

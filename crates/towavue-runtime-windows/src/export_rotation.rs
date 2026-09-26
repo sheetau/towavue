@@ -12,21 +12,22 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
     }) {
         return Ok(());
     }
-    let validate = || -> Result<(), String> {
-        let input = ffmpeg::format::input(&request.source).map_err(|error| error.to_string())?;
+    let validate = || -> Result<(), ExportError> {
+        let input = ffmpeg::format::input(&request.source)
+            .map_err(|error| ExportError::Failed(error.to_string()))?;
         let stream = input
             .streams()
             .best(ffmpeg::media::Type::Video)
-            .ok_or("Video rotation requires a video stream")?;
+            .ok_or(ExportError::Message(Text::ExportRotationMissingVideo))?;
         let matrix = stream
             .side_data()
             .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix);
         let orientation =
             crate::VideoOrientation::from_bytes(matrix.as_ref().map(|data| data.data()))
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| crate::ExportFailure::decode(None, error))?;
         let decoder = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .and_then(|context| context.decoder().video())
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| ExportError::Failed(error.to_string()))?;
         let mut size = (decoder.width(), decoder.height());
         // The owned input and its borrowed stream stay alive on this export worker.
         // FFmpeg only reads their SAR fields; null frame selects the codec-parameter fallback.
@@ -52,11 +53,14 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
                     if size != resize.source_size()
                         || (aspect - resize.source_pixel_aspect()).abs() > aspect.abs() * 0.00001
                     {
-                        return Err(format!(
-                            "Video resize input changed: expected {:?} SAR {}, found {size:?} SAR {aspect}",
+                        return Err(crate::ExportFailure::geometry(
+                            Text::ExportResizeOperation,
                             resize.source_size(),
-                            resize.source_pixel_aspect()
-                        ));
+                            resize.source_pixel_aspect(),
+                            size,
+                            aspect,
+                        )
+                        .into());
                     }
                     size = resize.size();
                     aspect = 1.0;
@@ -65,11 +69,14 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
                     if size != rotation.source_size()
                         || (aspect - rotation.source_pixel_aspect()).abs() > aspect.abs() * 0.00001
                     {
-                        return Err(format!(
-                            "Video rotation input changed: expected {:?} SAR {}, found {size:?} SAR {aspect}",
+                        return Err(crate::ExportFailure::geometry(
+                            Text::ExportRotationOperation,
                             rotation.source_size(),
-                            rotation.source_pixel_aspect()
-                        ));
+                            rotation.source_pixel_aspect(),
+                            size,
+                            aspect,
+                        )
+                        .into());
                     }
                     size = rotation.size();
                     aspect = 1.0;
@@ -80,7 +87,7 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
                         || crop.x.checked_add(crop.width).is_none_or(|x| x > size.0)
                         || crop.y.checked_add(crop.height).is_none_or(|y| y > size.1)
                     {
-                        return Err("Invalid crop before video rotation".into());
+                        return Err(ExportError::Message(Text::ExportRotationInvalidCrop));
                     }
                     size = (crop.width, crop.height);
                 }
@@ -89,14 +96,14 @@ pub(super) fn validate(request: &ExportRequest) -> Result<(), ExportError> {
                     aspect = 1.0 / aspect;
                 }
                 operation if !operation.applies_to(MediaKind::Video) => {
-                    return Err("Non-video operation in video rotation history".into());
+                    return Err(ExportError::Message(Text::ExportRotationNonVideoOperation));
                 }
                 _ => {}
             }
         }
         Ok(())
     };
-    validate().map_err(ExportError::Failed)
+    validate()
 }
 
 #[cfg(test)]
@@ -355,7 +362,17 @@ mod tests {
                     operations: vec![EditOperation::RotateVideo(bad)],
                     ..request.clone()
                 };
-                assert!(matches!(export_media(&bad), Err(ExportError::Failed(_))));
+                let error = export_media(&bad).expect_err("mismatched source geometry is rejected");
+                assert!(matches!(&error, ExportError::Structured(_)));
+                assert!(error.to_string().contains("Video rotation input changed:"));
+                assert!(
+                    error
+                        .message(towavue_core::localization::Language::Japanese)
+                        .contains(
+                            towavue_core::localization::Text::ExportRotationOperation
+                                .in_language(towavue_core::localization::Language::Japanese)
+                        )
+                );
                 assert_eq!(fs::read(&target).expect("existing target"), saved);
             }
             for kind in [MediaKind::Image, MediaKind::Audio] {

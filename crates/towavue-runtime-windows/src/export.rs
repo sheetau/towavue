@@ -655,11 +655,11 @@ fn export_audio_cancellable(
         let stamp = source_stamp.as_ref().expect("JPEG source stamp");
         stamp.verify(&request.source)?;
         if !output.status.success() {
-            return Err(ExportError::Failed(format!(
-                "JPEG decode validation failed ({}): {}",
+            return Err(crate::ExportFailure::jpeg_validation(
                 output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )));
+                String::from_utf8_lossy(&output.stderr).trim(),
+            )
+            .into());
         }
         metadata.apply_from(&request.source, &staging, cancelled)?;
         stamp.verify(&request.source)?;
@@ -681,8 +681,9 @@ fn export_audio_cancellable(
         check_cancelled(cancelled)?;
         let stamp = source_stamp.as_ref().expect("PNG source stamp");
         stamp.verify(&request.source)?;
-        validation
-            .map_err(|error| ExportError::Failed(format!("PNG decode validation: {error}")))?;
+        validation.map_err(|error| {
+            crate::ExportFailure::image(Text::ExportPngValidationContext, error)
+        })?;
         metadata.apply_from(&request.source, &staging, cancelled)?;
         stamp.verify(&request.source)?;
         staging.publish(&request.target, cancelled, trimmed_kind)?;
@@ -867,11 +868,11 @@ fn export_audio_cancellable(
             )?;
             if !output.status.success() {
                 let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-                return Err(ExportError::Failed(if message.is_empty() {
-                    format!("process exited with {}", output.status)
+                return Err(if message.is_empty() {
+                    crate::ExportFailure::process_exit(output.status).into()
                 } else {
-                    message
-                }));
+                    ExportError::Failed(message)
+                });
             }
         }
         if let Some(stamp) = &source_stamp {
@@ -999,7 +1000,7 @@ impl StagedExport {
         check_cancelled(cancelled)?;
         if let Some(kind) = trimmed_kind {
             let mut input = ffmpeg::format::input(&self.output).map_err(|error| {
-                ExportError::Failed(format!("trim output contains no readable media: {error}"))
+                crate::ExportFailure::diagnostic(Text::ExportTrimProbeContext, error)
             })?;
             let expected = if kind == MediaKind::Audio {
                 ffmpeg::media::Type::Audio
@@ -1015,9 +1016,7 @@ impl StagedExport {
                 }
             }
             if !found {
-                return Err(ExportError::Failed(format!(
-                    "trim contains no {expected:?} frames; choose a wider range"
-                )));
+                return Err(crate::ExportFailure::empty_trim(kind != MediaKind::Audio).into());
             }
         }
         let output = fs::OpenOptions::new()
@@ -1307,7 +1306,7 @@ impl ExportStreams {
             })
         };
         probe().map_err(|error| {
-            ExportError::Failed(format!("could not inspect export streams: {error}"))
+            crate::ExportFailure::diagnostic(Text::ExportStreamProbeContext, error).into()
         })
     }
 }

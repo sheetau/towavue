@@ -137,7 +137,7 @@ impl HighDepth {
             ))
         };
         let (source, mut size, colors, source_chroma, matrix) = inspect().map_err(|error| {
-            ExportError::Failed(format!("could not inspect video precision: {error}"))
+            crate::ExportFailure::diagnostic(Text::ExportPrecisionContext, error)
         })?;
         // SAFETY: descriptors are immutable FFmpeg storage. No native pointer
         // escapes this call; the plan copies only format/depth/color values.
@@ -180,7 +180,7 @@ impl HighDepth {
             });
         let orientation = if chroma.is_some() {
             crate::VideoOrientation::from_bytes(matrix.as_deref()).map_err(|error| {
-                ExportError::Failed(format!("Unsupported high-depth video orientation: {error}"))
+                crate::ExportFailure::decode(Some(Text::ExportHighDepthOrientationContext), error)
             })?
         } else {
             crate::VideoOrientation::default()

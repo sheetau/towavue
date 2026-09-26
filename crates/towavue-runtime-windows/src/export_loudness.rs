@@ -117,13 +117,13 @@ impl Plan {
             return Ok(true);
         }
         if attempt + 1 >= MAX_ATTEMPTS {
-            return Err(ExportError::Failed(format!(
-                "Encoded audio did not meet {:.1} LUFS (+/-{LOUDNESS_TOLERANCE:.1} LU) / maximum {:.1} dBTP after {MAX_ATTEMPTS} attempts: measured {:.2} LUFS / {:.2} dBTP; nothing was published",
-                self.target.integrated(),
-                self.target.true_peak(),
-                output.integrated,
-                output.true_peak,
-            )));
+            return Err(crate::ExportFailure::loudness(
+                (self.target.integrated(), self.target.true_peak()),
+                (output.integrated, output.true_peak),
+                LOUDNESS_TOLERANCE,
+                MAX_ATTEMPTS,
+            )
+            .into());
         }
         self.correction += error;
         if peak_excess > 0.0 {

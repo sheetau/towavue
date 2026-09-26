@@ -582,7 +582,6 @@ impl PlaybackSession {
         }
         if let Some(audio) = self.audio.as_ref().map(AudioOutput::sender) {
             let timeline = self.timeline.clone();
-            let precise_audio = self.range != PlaybackRange::default() || self.rate != 1.0;
             let rate = self.rate;
             let format = self.audio_format.expect("started audio output");
             let path = self.path.clone();
@@ -597,7 +596,7 @@ impl PlaybackSession {
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if let Some(plan) = timeline {
-                            timeline::decode_audio(
+                            timeline::decode_listening_audio(
                                 &path,
                                 &plan,
                                 target,
@@ -611,7 +610,7 @@ impl PlaybackSession {
                                 .finish()
                                 .map_err(|_| decode::DecodeError::ConsumerClosed)
                         } else {
-                            run_audio_decode(&path, &audio, target, end, precise_audio, &cancelled)
+                            run_audio_decode(&path, &audio, target, end, rate, &cancelled)
                         }
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
@@ -1054,7 +1053,7 @@ fn run_audio_decode(
     audio: &AudioOutputSender,
     target: MediaTime,
     end: Option<MediaTime>,
-    precise: bool,
+    rate: f32,
     cancelled: &AtomicBool,
 ) -> Result<(), decode::DecodeError> {
     let cancelled = || cancelled.load(Ordering::Relaxed);
@@ -1063,7 +1062,9 @@ fn run_audio_decode(
         ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
         _ => unreachable!("audio-only decoder emitted video"),
     };
-    if precise {
+    if rate == 1.0 {
+        decode::decode_playback_audio_cancellable(path, target, end, &cancelled, emit)
+    } else {
         decode::decode_file_parallel_cancellable(
             path,
             target,
@@ -1072,8 +1073,6 @@ fn run_audio_decode(
             &cancelled,
             emit,
         )
-    } else {
-        decode::decode_playback_audio_cancellable(path, target, end, &cancelled, emit)
     }
     .map(|_| ())
 }
@@ -1200,6 +1199,10 @@ fn send_video_frame(
 #[cfg(test)]
 #[path = "playback_timeline_tests.rs"]
 mod timeline_tests;
+
+#[cfg(test)]
+#[path = "playback_timeline_audio_seek_tests.rs"]
+mod timeline_audio_seek_tests;
 
 #[cfg(test)]
 mod tests {

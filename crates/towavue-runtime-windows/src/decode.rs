@@ -36,7 +36,7 @@ pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
 pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
 #[cfg(test)]
-mod audio_seek_comparison;
+pub(crate) mod audio_seek_comparison;
 #[cfg(test)]
 mod audio_seek_tests;
 #[cfg(test)]
@@ -206,7 +206,7 @@ enum ParallelVideoPipeline {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
-enum AudioSeekPolicy {
+pub(crate) enum AudioSeekPolicy {
     Exact,
     Playback,
 }
@@ -273,9 +273,9 @@ impl StreamConfig {
         policy: AudioSeekPolicy,
     ) -> Option<(MediaTime, PrerollSamples)> {
         let exact = self.sample_preroll(target);
-        // Ordinary listening can accept sub-millisecond container rounding.
-        // Keep coarse/unknown time bases, other codecs and every edit/export
-        // consumer on the exact sample axis. The ordinary compressed seek still
+        // Listening can accept sub-millisecond container rounding. Keep
+        // coarse/unknown time bases, other codecs and exact consumers on the
+        // precise sample axis. The ordinary compressed seek still
         // warms the decoder for 250 ms; it must not seed exact checkpoints.
         if policy == AudioSeekPolicy::Playback
             && matches!(exact, Some((_, PrerollSamples::AacLc(_))))
@@ -724,8 +724,8 @@ pub(crate) fn decode_file_parallel_cancellable(
     input.decode_software(minimum_time, maximum_time, stream, cancelled, emit)
 }
 
-/// Ordinary unedited listening only. Editing/export consumers keep the exact
-/// entry points; this policy never reaches retained-interval decoding.
+/// Unit-rate listening only. Waveform/export consumers keep the exact
+/// entry points; tempo-changing playback also keeps exact decoding.
 pub(crate) fn decode_playback_audio_cancellable(
     path: &Path,
     minimum_time: MediaTime,
@@ -748,6 +748,26 @@ pub(crate) fn decode_audio_intervals_cancellable(
     maximum_time: MediaTime,
     intervals: &[TimeRange],
     cancelled: &(dyn Fn() -> bool + Sync),
+    emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_audio_intervals_with_policy(
+        path,
+        minimum_time,
+        maximum_time,
+        intervals,
+        AudioSeekPolicy::Exact,
+        cancelled,
+        emit,
+    )
+}
+
+pub(crate) fn decode_audio_intervals_with_policy(
+    path: &Path,
+    minimum_time: MediaTime,
+    maximum_time: MediaTime,
+    intervals: &[TimeRange],
+    policy: AudioSeekPolicy,
+    cancelled: &(dyn Fn() -> bool + Sync),
     mut emit: impl FnMut(AudioChunk) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
     ParallelInput::open(path, cancelled)?.decode(
@@ -756,7 +776,7 @@ pub(crate) fn decode_audio_intervals_cancellable(
         Some(maximum_time),
         Some(DecodeStream::Audio),
         intervals,
-        AudioSeekPolicy::Exact,
+        policy,
         cancelled,
         |output| match output {
             ParallelDecodeOutput::Audio(chunk) => emit(chunk),

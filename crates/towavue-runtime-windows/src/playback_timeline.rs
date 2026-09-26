@@ -79,12 +79,73 @@ pub(crate) fn decode_audio(
     master_rate: f32,
     format: AudioFormat,
     cancelled: &AtomicBool,
+    emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<(), DecodeError> {
+    decode_audio_with_policy(
+        path,
+        plan,
+        target,
+        end,
+        master_rate,
+        format,
+        decode::AudioSeekPolicy::Exact,
+        cancelled,
+        emit,
+    )
+}
+
+/// Listening only; waveform and export consumers retain `decode_audio`.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn decode_listening_audio(
+    path: &Path,
+    plan: &EditTimeline,
+    target: MediaTime,
+    end: Option<MediaTime>,
+    master_rate: f32,
+    format: AudioFormat,
+    cancelled: &AtomicBool,
+    emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<(), DecodeError> {
+    decode_audio_with_policy(
+        path,
+        plan,
+        target,
+        end,
+        master_rate,
+        format,
+        decode::AudioSeekPolicy::Playback,
+        cancelled,
+        emit,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decode_audio_with_policy(
+    path: &Path,
+    plan: &EditTimeline,
+    target: MediaTime,
+    end: Option<MediaTime>,
+    master_rate: f32,
+    format: AudioFormat,
+    policy: decode::AudioSeekPolicy,
+    cancelled: &AtomicBool,
     mut emit: impl FnMut(AudioChunk) -> bool,
 ) -> Result<(), DecodeError> {
     let cancelled = || cancelled.load(Ordering::Relaxed);
     let segments = segments(plan, target, false, end);
     let Some(first) = segments.first() else {
         return Ok(());
+    };
+    // A small sample-phase difference can change tempo overlap choices. Keep
+    // retimed playback exact; the listening shortcut only affects unit-rate spans.
+    let policy = if master_rate == 1.0
+        && segments
+            .iter()
+            .all(|segment| segment.duration == segment.source.duration())
+    {
+        policy
+    } else {
+        decode::AudioSeekPolicy::Exact
     };
     let source_start = first.source_target(target);
     // A selection bounds output, not tempo input: flushing at its end changes the PCM.
@@ -187,27 +248,39 @@ pub(crate) fn decode_audio(
     let mut completed = false;
     // Keep one continuous sample axis. Independent PCM/FLAC packets in deleted gaps
     // can be counted without decoding; other codecs retain sequential decoding.
-    let result = decode::decode_audio_intervals_cancellable(
-        path,
-        source_start,
-        source_end,
-        &intervals,
-        &cancelled,
-        |chunk| {
-            match process(Some(chunk)) {
-                Ok(true) => {
-                    completed = true;
-                    return false;
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    failure = Some(error);
-                    return false;
-                }
+    let receive = |chunk| {
+        match process(Some(chunk)) {
+            Ok(true) => {
+                completed = true;
+                return false;
             }
-            true
-        },
-    );
+            Ok(false) => {}
+            Err(error) => {
+                failure = Some(error);
+                return false;
+            }
+        }
+        true
+    };
+    let result = match policy {
+        decode::AudioSeekPolicy::Exact => decode::decode_audio_intervals_cancellable(
+            path,
+            source_start,
+            source_end,
+            &intervals,
+            &cancelled,
+            receive,
+        ),
+        decode::AudioSeekPolicy::Playback => decode::decode_audio_intervals_with_policy(
+            path,
+            source_start,
+            source_end,
+            &intervals,
+            policy,
+            &cancelled,
+            receive,
+        ),
+    };
     if let Some(error) = failure {
         return Err(error);
     }

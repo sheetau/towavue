@@ -72,7 +72,7 @@ fn read(path: &Path, target: MediaTime, approximate: bool) -> Samples {
     }
 }
 
-pub(super) fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) -> (f64, f64) {
+pub(crate) fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) -> (f64, f64) {
     let fast = &fast[offset.max(0) as usize * 2..];
     let exact = &exact[(-offset).max(0) as usize * 2..];
     let mut squared = 0.0;
@@ -88,7 +88,7 @@ pub(super) fn error_at(fast: &[f32], exact: &[f32], offset: i32, stride: usize) 
     ((squared / count as f64).sqrt(), peak)
 }
 
-pub(super) fn alignment(fast: &[f32], exact: &[f32], bound: i32) -> i32 {
+pub(crate) fn alignment(fast: &[f32], exact: &[f32], bound: i32) -> i32 {
     (-bound..=bound)
         .min_by(|a, b| {
             error_at(fast, exact, *a, 16)

@@ -226,7 +226,7 @@ fn mjpeg_frame_png_bakes_all_exif_orientations_and_updates_edited_dimensions() {
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFMPEG_DIR")).join("bin/ffmpeg.exe");
     let video = root.join("orientations.mkv");
-    let result = Command::new(ffmpeg)
+    let result = crate::hidden_test_command(ffmpeg)
         .args([
             "-v",
             "error",

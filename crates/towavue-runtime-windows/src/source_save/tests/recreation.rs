@@ -124,7 +124,7 @@ fn deleted_audio_and_video_recreate_edits_and_video_restarts_from_retained_bytes
         ),
     ] {
         let path = fixture.0.join(name);
-        let output = std::process::Command::new(
+        let output = crate::hidden_test_command(
             crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"),
         )
         .args(["-v", "error", "-f", "lavfi", "-i", input])

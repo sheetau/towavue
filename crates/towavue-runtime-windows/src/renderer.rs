@@ -1,7 +1,6 @@
 use std::mem::ManuallyDrop;
 
-#[cfg(feature = "presentation-verification")]
-pub(crate) mod preroll_probe;
+pub(crate) mod preroll_pacing;
 
 #[cfg(feature = "render-verification")]
 mod verification;

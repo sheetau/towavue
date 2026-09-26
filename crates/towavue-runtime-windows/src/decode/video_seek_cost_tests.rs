@@ -1,4 +1,5 @@
 use super::*;
+use std::os::windows::process::CommandExt;
 use std::time::Instant;
 
 // Only the session opt-in changes the global default to reach playback threads.
@@ -42,6 +43,7 @@ fn fixture(root: &Path, size: &str, gop: u32) -> std::path::PathBuf {
         std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
             .join("bin/ffmpeg.exe");
     let generated = std::process::Command::new(executable)
+        .creation_flags(0x0800_0000)
         .args([
             "-v",
             "error",
@@ -852,6 +854,7 @@ fn preroll_conversion_reports_first_frame_cost() {
     for gop in [30, 180] {
         let path = root.join(format!("gop-{gop}.mp4"));
         let generated = std::process::Command::new(&executable)
+            .creation_flags(0x0800_0000)
             .args([
                 "-v",
                 "error",

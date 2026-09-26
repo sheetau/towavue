@@ -1873,7 +1873,7 @@ mod tests {
         let source = directory.join("source.mkv");
         let executable = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
             .join("bin/ffmpeg.exe");
-        let generated = Command::new(executable)
+        let generated = crate::hidden_test_command(executable)
             .args([
                 "-v",
                 "error",
@@ -2002,7 +2002,7 @@ mod tests {
         let executable =
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg directory"))
                 .join("bin/ffmpeg.exe");
-        let generated = Command::new(&executable).args([
+        let generated = crate::hidden_test_command(&executable).args([
             "-v", "error", "-f", "lavfi", "-i",
             "nullsrc=size=160x96:rate=30:duration=2,geq=r='mod(N*37,256)':g='mod(N*67,256)':b='mod(N*97,256)'",
             "-f", "lavfi", "-i", "sine=sample_rate=48000:duration=2", "-c:v", "ffv1", "-c:a", "pcm_s16le",
@@ -2127,7 +2127,7 @@ mod tests {
             );
         }
         let shifted = directory.join("shifted.mkv");
-        let remux = Command::new(&executable)
+        let remux = crate::hidden_test_command(&executable)
             .args(["-v", "error", "-i"])
             .arg(&source)
             .args(["-map", "0", "-c", "copy", "-output_ts_offset", "5"])

@@ -20,21 +20,23 @@ impl Fixture {
         fs::create_dir(&root).expect("owned fixture directory");
         let source = root.join("source.mkv");
         assert!(
-            Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
-                .args([
-                    "-v",
-                    "error",
-                    "-f",
-                    "lavfi",
-                    "-i",
-                    "testsrc=size=32x24:rate=2:duration=1",
-                    "-c:v",
-                    "ffv1"
-                ])
-                .arg(&source)
-                .status()
-                .expect("fixture encoder")
-                .success()
+            crate::hidden_test_command(
+                crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg")
+            )
+            .args([
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=32x24:rate=2:duration=1",
+                "-c:v",
+                "ffv1"
+            ])
+            .arg(&source)
+            .status()
+            .expect("fixture encoder")
+            .success()
         );
         Self { root, source }
     }
@@ -258,29 +260,30 @@ fn duplicate_frame_times_across_keyframes_and_at_eof_never_replace_targets() {
                     duplicate_count - 1,
                     21 - duplicate_count
                 );
-                let output =
-                    Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
-                        .creation_flags(0x0800_0000)
-                        .args([
-                            "-v",
-                            "error",
-                            "-y",
-                            "-f",
-                            "lavfi",
-                            "-i",
-                            "testsrc=size=32x24:rate=8:duration=3",
-                            "-vf",
-                            &filter,
-                            "-fps_mode",
-                            "passthrough",
-                            "-c:v",
-                            "ffv1",
-                            "-g",
-                            &gop.to_string(),
-                        ])
-                        .arg(&fixture.source)
-                        .output()
-                        .expect("duplicate PTS fixture");
+                let output = crate::hidden_test_command(
+                    crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"),
+                )
+                .creation_flags(0x0800_0000)
+                .args([
+                    "-v",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc=size=32x24:rate=8:duration=3",
+                    "-vf",
+                    &filter,
+                    "-fps_mode",
+                    "passthrough",
+                    "-c:v",
+                    "ffv1",
+                    "-g",
+                    &gop.to_string(),
+                ])
+                .arg(&fixture.source)
+                .output()
+                .expect("duplicate PTS fixture");
                 assert!(
                     output.status.success(),
                     "{}",
@@ -398,23 +401,25 @@ fn cancellation_after_the_last_pre_encode_check_discards_png_and_preserves_targe
     use std::{cell::RefCell, rc::Rc};
     for pixel in ["yuv420p", "yuv420p10le"] {
         let fixture = Fixture::new();
-        let encoded = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
-            .args([
-                "-v",
-                "error",
-                "-y",
-                "-f",
-                "lavfi",
-                "-i",
-                "testsrc2=size=32x24:rate=2:duration=1",
-                "-pix_fmt",
-                pixel,
-                "-c:v",
-                "ffv1",
-            ])
-            .arg(&fixture.source)
-            .output()
-            .expect("depth fixture");
+        let encoded = crate::hidden_test_command(
+            crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"),
+        )
+        .args([
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=32x24:rate=2:duration=1",
+            "-pix_fmt",
+            pixel,
+            "-c:v",
+            "ffv1",
+        ])
+        .arg(&fixture.source)
+        .output()
+        .expect("depth fixture");
         assert!(
             encoded.status.success(),
             "{}",

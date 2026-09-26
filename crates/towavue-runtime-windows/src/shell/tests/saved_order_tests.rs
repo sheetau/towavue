@@ -545,7 +545,7 @@ fn multiple_explorer_windows_cannot_supply_stale_file_order() {
             assert!(fixture_views(&pidl).is_empty(), "unique fixture has no existing windows");
             let mut launchers = Vec::new();
             for count in 1..=2 {
-                launchers.push(Command::new("explorer.exe").arg(format!("/n,{}", folder.display())).spawn().expect("owned Explorer window"));
+                launchers.push(crate::hidden_test_command("explorer.exe").arg(format!("/n,{}", folder.display())).spawn().expect("owned Explorer window"));
                 let deadline = Instant::now() + Duration::from_secs(15);
                 while fixture_views(&pidl).len() < count {
                     pump_messages();

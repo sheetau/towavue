@@ -90,7 +90,7 @@ fn measure_retained_surface(name: &str) {
         .join("../../tests/generated/m1")
         .join(name);
     let mut generate =
-        std::process::Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"));
+        crate::hidden_test_command(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"));
     generate.args(["-v", "error"]);
     if name == "generated-p010" {
         generate.args([

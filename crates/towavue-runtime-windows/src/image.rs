@@ -713,7 +713,7 @@ mod tests {
             ("avif", "libaom-av1"),
         ] {
             let path = temporary_path(extension);
-            let output = std::process::Command::new(&ffmpeg)
+            let output = crate::hidden_test_command(&ffmpeg)
                 .args([
                     "-v",
                     "error",
@@ -812,7 +812,7 @@ mod tests {
                 .join("bin/ffmpeg.exe");
         for loops in ["0", "1", "3"] {
             let path = temporary_path("avif");
-            let output = std::process::Command::new(&ffmpeg)
+            let output = crate::hidden_test_command(&ffmpeg)
                 .creation_flags(0x08000000)
                 .args([
                     "-v",
@@ -914,7 +914,7 @@ mod tests {
         ] {
             for plays in [0, 1, 3] {
                 let path = temporary_path(extension);
-                let output = std::process::Command::new(&ffmpeg)
+                let output = crate::hidden_test_command(&ffmpeg)
                     .creation_flags(0x08000000)
                     .args([
                         "-v",

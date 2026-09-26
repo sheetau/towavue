@@ -13,7 +13,7 @@ fn decoded_gray_video_preserves_samples_through_crop_flip_and_png_publication_by
     fs::create_dir(&root).expect("owned fixture");
     let source = root.join("source.mkv");
     let ffmpeg = crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg");
-    let result = Command::new(ffmpeg).args([
+    let result = crate::hidden_test_command(ffmpeg).args([
         "-v", "error", "-f", "lavfi", "-i",
         "nullsrc=size=16x8:rate=2:duration=1,format=gray16le,geq=lum=X*4096+Y*128+N,setparams=range=full",
         "-c:v", "ffv1",

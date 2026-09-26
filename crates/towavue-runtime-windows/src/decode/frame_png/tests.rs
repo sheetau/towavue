@@ -7,7 +7,7 @@ mod grayscale;
 mod high_depth;
 mod interlaced;
 mod webm_alpha;
-use std::{fs, io::Cursor, process::Command};
+use std::{fs, io::Cursor};
 
 mod edits;
 
@@ -238,7 +238,7 @@ fn high_depth_source_png_matches_explicit_color_conversion_without_touching_sour
     let ffmpeg =
         std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("frame PNG fixture"))
             .join("bin/ffmpeg.exe");
-    assert!(Command::new(&ffmpeg).args(["-v","error","-f","lavfi","-i",
+    assert!(crate::hidden_test_command(&ffmpeg).args(["-v","error","-f","lavfi","-i",
         "nullsrc=size=32x16:rate=2:duration=2,format=yuv444p10le,geq=lum=64+X*25+N:cb=400+Y*7:cr=600-Y*5,setparams=color_primaries=bt2020:color_trc=smpte2084:colorspace=bt2020nc:range=limited",
         "-c:v","ffv1"]).arg(&path).status().expect("frame PNG fixture").success());
     let original = fs::read(&path).expect("frame PNG fixture");
@@ -253,7 +253,7 @@ fn high_depth_source_png_matches_explicit_color_conversion_without_touching_sour
         assert_eq!(info.bit_depth, png::BitDepth::Sixteen);
         assert_eq!((info.width, info.height), (32, 16));
         assert_eq!(chunks(&encoded, b"cICP"), vec![vec![9, 16, 0, 1]]);
-        let reference = Command::new(&ffmpeg).args(["-v","error","-i"]).arg(&path)
+        let reference = crate::hidden_test_command(&ffmpeg).args(["-v","error","-i"]).arg(&path)
             .args(["-vf", &format!("select=eq(n\\,{n}),scale=flags=bilinear+accurate_rnd+full_chroma_int:in_color_matrix=bt2020:in_range=limited:out_range=full"),
                 "-frames:v","1","-pix_fmt","rgb48be","-f","rawvideo","-"]).output().expect("frame PNG fixture");
         assert!(
@@ -328,7 +328,7 @@ fn native_frame_png_selects_vfr_b_frames_transport_origins_and_rejects_duplicate
     for (extension, codec) in [("mp4", "mpeg4"), ("ts", "mpeg2video")] {
         let path = root.join(format!("source.{extension}"));
         assert!(
-            Command::new(&ffmpeg)
+            crate::hidden_test_command(&ffmpeg)
                 .args([
                     "-v",
                     "error",
@@ -381,7 +381,7 @@ fn native_frame_png_selects_vfr_b_frames_transport_origins_and_rejects_duplicate
             // declared by these MPEG4/MPEG2 decoders. The CLI's automatic scale
             // path currently uses centered chroma even when ffprobe reports left,
             // so it must not define the expected source-color geometry implicitly.
-            let reference = Command::new(&ffmpeg).args(["-v","error","-i"]).arg(&path)
+            let reference = crate::hidden_test_command(&ffmpeg).args(["-v","error","-i"]).arg(&path)
                 .args(["-vf", &format!("select=eq(n\\,{index}),scale=flags=bilinear+accurate_rnd+full_chroma_int:in_color_matrix=bt601:in_range=limited:out_range=full:in_h_chr_pos=0:in_v_chr_pos=128"),
                     "-frames:v","1","-pix_fmt","rgb24","-f","rawvideo","-"]).output().expect("frame PNG fixture");
             assert!(reference.status.success());
@@ -405,7 +405,7 @@ fn native_frame_png_selects_vfr_b_frames_transport_origins_and_rejects_duplicate
     }
     let path = root.join("duplicate.mkv");
     assert!(
-        Command::new(&ffmpeg)
+        crate::hidden_test_command(&ffmpeg)
             .args([
                 "-v",
                 "error",

@@ -1258,7 +1258,7 @@ mod tests {
         ));
         std::fs::create_dir(&root).expect("exclusive fixture");
         let path = root.join("source.mp4");
-        let output = std::process::Command::new(
+        let output = crate::hidden_test_command(
             crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
         )
         .args([
@@ -1351,7 +1351,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let path = std::env::temp_dir().join(format!("towavue-video-visibility-{unique}.mp4"));
-        let output = std::process::Command::new(
+        let output = crate::hidden_test_command(
             crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
         )
         .args(["-v", "error", "-i"])
@@ -1612,7 +1612,7 @@ mod tests {
             .expect("clock")
             .as_nanos();
         let path = std::env::temp_dir().join(format!("towavue-paused-recovery-{unique}.mp4"));
-        let output = std::process::Command::new(
+        let output = crate::hidden_test_command(
             crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"),
         )
         .args(["-v", "error", "-i"])

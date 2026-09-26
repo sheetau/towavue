@@ -448,7 +448,7 @@ fn audio_video_and_repeated_edits_keep_the_first_original_and_publish_readable_d
         ),
     ] {
         let source = fixture.0.join(name);
-        let output = std::process::Command::new(&executable)
+        let output = crate::hidden_test_command(&executable)
             .args(["-v", "error", "-f", "lavfi", "-i", input])
             .args(encoding)
             .arg(&source)
@@ -489,7 +489,7 @@ fn audio_video_and_repeated_edits_keep_the_first_original_and_publish_readable_d
             fs::read(&source).expect("original file unchanged"),
             original_bytes
         );
-        let output = std::process::Command::new(&executable)
+        let output = crate::hidden_test_command(&executable)
             .args(["-v", "error", "-i"])
             .arg(&target)
             .args(["-f", "null", "-"])

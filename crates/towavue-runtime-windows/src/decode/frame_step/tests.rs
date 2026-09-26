@@ -215,7 +215,7 @@ fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
         .join("bin/ffmpeg.exe");
     for (extension, codec) in [("mp4", "mpeg4"), ("mkv", "ffv1"), ("ts", "mpeg2video")] {
         let path = root.join(format!("{codec}.{extension}"));
-        let mut command = std::process::Command::new(&ffmpeg);
+        let mut command = crate::hidden_test_command(&ffmpeg);
         command.args([
             "-v",
             "error",
@@ -241,7 +241,7 @@ fn adjacent_pts_match_full_decode_for_vfr_b_frames_and_transport_origins() {
             assert!(input_origin(&input) > 0, "fixture has a nonzero start PTS");
         }
         if extension != "mkv" {
-            let probe = std::process::Command::new(ffmpeg.with_file_name("ffprobe.exe"))
+            let probe = crate::hidden_test_command(ffmpeg.with_file_name("ffprobe.exe"))
                 .args([
                     "-v",
                     "error",
@@ -342,7 +342,7 @@ fn frame_query_uses_the_selected_stream_and_handles_empty_edits() {
     let ffmpeg = std::path::PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
         .join("bin/ffmpeg.exe");
     assert!(
-        std::process::Command::new(ffmpeg)
+        crate::hidden_test_command(ffmpeg)
             .args([
                 "-v",
                 "error",

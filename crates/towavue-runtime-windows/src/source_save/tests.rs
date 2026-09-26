@@ -374,7 +374,7 @@ fn audio_and_video_saves_keep_original_bytes_and_publish_readable_edited_media()
         ),
     ] {
         let path = fixture.0.join(name);
-        let output = std::process::Command::new(&executable)
+        let output = crate::hidden_test_command(&executable)
             .args(["-v", "error", "-f", "lavfi", "-i", input])
             .args(encoding)
             .arg(&path)
@@ -654,7 +654,7 @@ fn retained_input_exports_original_edits_and_protects_the_logical_source() {
 fn retained_input_video_session_restarts_from_the_original_and_owns_its_lifetime() {
     let fixture = Fixture::new();
     let path = fixture.0.join("video.mp4");
-    let output = std::process::Command::new(
+    let output = crate::hidden_test_command(
         crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"),
     )
     .args([

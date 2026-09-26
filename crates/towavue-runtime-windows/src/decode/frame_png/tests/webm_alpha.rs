@@ -23,7 +23,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
     fs::write(&raw, &samples).expect("raw fixture");
     for codec in ["libvpx", "libvpx-vp9"] {
         let path = root.join(format!("{codec}.webm"));
-        let mut encode = Command::new(&ffmpeg);
+        let mut encode = crate::hidden_test_command(&ffmpeg);
         encode
             .args([
                 "-v",
@@ -68,7 +68,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
         for index in [0, 2, 5] {
             // Sequential alpha-capable native decode is independent of the
             // application's decoder choice and source-PTS seek path.
-            let reference = Command::new(&ffmpeg)
+            let reference = crate::hidden_test_command(&ffmpeg)
                 .args(["-v", "error", "-c:v", codec, "-i"]).arg(&path)
                 .args([
                     "-vf", &format!("select=eq(n\\,{index}),scale=flags=bilinear+accurate_rnd+full_chroma_int:in_color_matrix=bt601:in_range=limited:out_range=full"),
@@ -156,7 +156,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
             }
         }
         let opaque = root.join(format!("{codec}-opaque.webm"));
-        let result = Command::new(&ffmpeg)
+        let result = crate::hidden_test_command(&ffmpeg)
             .args(["-v", "error", "-i"])
             .arg(&path)
             .args([
@@ -191,7 +191,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
             } else {
                 [&path, &opaque]
             };
-            let result = Command::new(&ffmpeg)
+            let result = crate::hidden_test_command(&ffmpeg)
                 .args(["-v", "error", "-i"])
                 .arg(inputs[0])
                 .arg("-i")
@@ -241,7 +241,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
         }
 
         let missing_alpha = root.join(format!("{codec}-missing-alpha.webm"));
-        let result = Command::new(&ffmpeg)
+        let result = crate::hidden_test_command(&ffmpeg)
             .args(["-v", "error", "-i"])
             .arg(&opaque)
             .args(["-c", "copy", "-metadata:s:v:0", "alpha_mode=1"])

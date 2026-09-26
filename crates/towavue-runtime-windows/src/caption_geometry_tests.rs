@@ -140,7 +140,7 @@ fn compare_native_reference_geometry_and_fullscreen_restore() {
     const NAME: &str =
         "caption::geometry_tests::compare_native_reference_geometry_and_fullscreen_restore";
     if std::env::var_os("TOWAVUE_CAPTION_REFERENCE_CHILD").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = crate::hidden_test_command(std::env::current_exe().expect("test executable"))
             .args(["--exact", NAME, "--include-ignored", "--nocapture"])
             .env("TOWAVUE_CAPTION_REFERENCE_CHILD", "1")
             .output()

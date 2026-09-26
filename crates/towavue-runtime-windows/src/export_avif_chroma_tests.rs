@@ -44,21 +44,22 @@ fn avif_declared_chroma_positions_survive_display_preview_and_edited_png() {
                     ],
                     &source,
                 );
-                let probe =
-                    Command::new(crate::media_tools::tool_path("ffprobe.exe").expect("ffprobe"))
-                        .args([
-                            "-v",
-                            "error",
-                            "-select_streams",
-                            if frames == 1 { "0" } else { "1" },
-                            "-show_entries",
-                            "frame=chroma_location",
-                            "-of",
-                            "csv=p=0",
-                        ])
-                        .arg(&source)
-                        .output()
-                        .expect("source chroma metadata");
+                let probe = crate::hidden_test_command(
+                    crate::media_tools::tool_path("ffprobe.exe").expect("ffprobe"),
+                )
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    if frames == 1 { "0" } else { "1" },
+                    "-show_entries",
+                    "frame=chroma_location",
+                    "-of",
+                    "csv=p=0",
+                ])
+                .arg(&source)
+                .output()
+                .expect("source chroma metadata");
                 assert!(probe.status.success());
                 let metadata = String::from_utf8(probe.stdout).expect("chroma locations");
                 assert_eq!(metadata.lines().collect::<Vec<_>>(), vec![location; frames]);

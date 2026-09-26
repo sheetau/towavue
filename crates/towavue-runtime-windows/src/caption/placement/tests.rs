@@ -10,7 +10,7 @@ fn native_window_placement_preserves_normal_bounds_and_clamps_restore() {
     const NAME: &str = "caption::placement::tests::native_window_placement_preserves_normal_bounds_and_clamps_restore";
     if std::env::var_os("TOWAVUE_PLACEMENT_CHILD").is_none() {
         let output =
-            std::process::Command::new(std::env::current_exe().expect("owned placement fixture"))
+            crate::hidden_test_command(std::env::current_exe().expect("owned placement fixture"))
                 .args(["--exact", NAME, "--include-ignored", "--nocapture"])
                 .env("TOWAVUE_PLACEMENT_CHILD", "1")
                 .output()

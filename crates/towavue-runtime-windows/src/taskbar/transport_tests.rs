@@ -75,7 +75,7 @@ fn button_ids_tooltips_visibility_and_enabled_flags_follow_transport() {
 #[ignore = "briefly shows an owned blank window; requires Explorer thumbnail toolbar support"]
 fn visible_taskbar_registers_once_and_routes_only_current_enabled_buttons() {
     if std::env::var_os("TOWAVUE_TASKBAR_TRANSPORT_CHILD").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = crate::hidden_test_command(std::env::current_exe().expect("test executable"))
             .args(["--exact", "taskbar::transport_tests::visible_taskbar_registers_once_and_routes_only_current_enabled_buttons", "--ignored", "--nocapture"])
             .env("TOWAVUE_TASKBAR_TRANSPORT_CHILD", "1").output().expect("isolated trial");
         assert!(

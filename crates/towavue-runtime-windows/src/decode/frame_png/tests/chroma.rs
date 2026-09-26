@@ -68,7 +68,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
             let output_pixel = if depth == 8 { "rgb24" } else { "gbrp16be" };
             // Explicit independent coordinates ensure a conversion that silently
             // ignores metadata cannot also define the expected pixels.
-            let reference = Command::new(&ffmpeg)
+            let reference = crate::hidden_test_command(&ffmpeg)
                 .args(["-v", "error", "-f", "rawvideo", "-pixel_format", name,
                     "-video_size", "16x8", "-i"])
                 .arg(&input)
@@ -120,7 +120,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
             }
             if depth == 10 && matches!(location, AVCHROMA_LOC_LEFT | AVCHROMA_LOC_TOPLEFT) {
                 let video = root.join(format!("{name}-{}.mkv", location as i32));
-                let encoded = Command::new(&ffmpeg)
+                let encoded = crate::hidden_test_command(&ffmpeg)
                     .args([
                         "-v",
                         "error",
@@ -174,7 +174,7 @@ fn frame_png_uses_declared_chroma_positions_before_raster_edits() {
                 drop(input_video);
                 // Tag the raw input as well as the encoded output: otherwise
                 // FFmpeg may resample chroma while changing the output tags.
-                let decoded = Command::new(&ffmpeg)
+                let decoded = crate::hidden_test_command(&ffmpeg)
                     .args(["-v", "error", "-i"])
                     .arg(&video)
                     .args([

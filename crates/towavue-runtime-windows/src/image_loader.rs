@@ -2348,7 +2348,7 @@ mod tests {
             ("avif", "libaom-av1"),
         ] {
             let path = root.join(format!("source.{extension}"));
-            let output = std::process::Command::new(&ffmpeg)
+            let output = crate::hidden_test_command(&ffmpeg)
                 .args([
                     "-v",
                     "error",

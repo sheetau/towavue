@@ -107,7 +107,7 @@ fn draw(renderer: &mut FrameRenderer, session: &mut PlaybackSession) -> Vec<u8> 
 fn window_surfaces_do_not_stretch_old_ui_during_resize() {
     // winit permits only one event loop per process, even after it exits.
     if std::env::var_os("TOWAVUE_RESIZE_TEST_CHILD").is_none() {
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = crate::hidden_test_command(std::env::current_exe().expect("test executable"))
             .args([
                 "--exact",
                 "renderer::shared_renderer_tests::window_surfaces_do_not_stretch_old_ui_during_resize",
@@ -326,7 +326,7 @@ fn shared_window_surfaces_preserve_live_hardware_session() {
         .as_nanos();
     let path = std::env::temp_dir().join(format!("towavue-shared-windows-{unique}.mp4"));
     let output =
-        std::process::Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
+        crate::hidden_test_command(crate::media_tools::tool_path("ffmpeg.exe").expect("FFmpeg"))
             .args([
                 "-v",
                 "error",

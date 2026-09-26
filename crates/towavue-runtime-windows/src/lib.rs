@@ -179,3 +179,13 @@ pub fn decode_file(
 ) -> Result<DecodeSummary, DecodeError> {
     decode::decode_file(path, emit)
 }
+
+/// Console fixtures have no visible parent console to inherit. Suppress their
+/// own consoles as well; GUI fixture visibility remains the individual test's job.
+#[cfg(test)]
+pub(crate) fn hidden_test_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(0x0800_0000);
+    command
+}

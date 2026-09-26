@@ -484,7 +484,7 @@ mod tests {
                 "taskbar::tests::taskbar_subclass_owns_notifications_and_resets_after_shell_recreation"
             };
             let output =
-                std::process::Command::new(std::env::current_exe().expect("test executable"))
+                crate::hidden_test_command(std::env::current_exe().expect("test executable"))
                     .args(["--exact", test, "--include-ignored", "--nocapture"])
                     .env("TOWAVUE_TASKBAR_TEST_CHILD", "1")
                     .output()

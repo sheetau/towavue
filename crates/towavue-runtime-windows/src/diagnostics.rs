@@ -281,7 +281,7 @@ mod tests {
                 .expect("diagnostic fixture operation")
                 .as_nanos()
         ));
-        let output = std::process::Command::new(
+        let output = crate::hidden_test_command(
             std::env::current_exe().expect("diagnostic fixture operation"),
         )
         .args([

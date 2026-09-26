@@ -40,6 +40,8 @@ pub(crate) mod audio_seek_comparison;
 #[cfg(test)]
 mod audio_seek_tests;
 #[cfg(test)]
+mod preroll_pacing_tests;
+#[cfg(test)]
 mod seek_contention_tests;
 #[cfg(test)]
 mod video_seek_cost_tests;
@@ -1163,7 +1165,6 @@ fn run_parallel_workers(
                         video_packet_rx,
                         &video_output_tx,
                         preroll_before,
-                        #[cfg(feature = "presentation-verification")]
                         cancelled,
                     ) {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
@@ -1408,7 +1409,7 @@ fn run_parallel_video_worker(
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
     preroll_before: Option<MediaTime>,
-    #[cfg(feature = "presentation-verification")] cancelled: &dyn Fn() -> bool,
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<(), DecodeError> {
     #[cfg(feature = "presentation-verification")]
     let trace_id = if matches!(&config, ParallelVideoConfig::Hardware(..)) && crate::burst_enabled()
@@ -1435,20 +1436,14 @@ fn run_parallel_video_worker(
     };
     #[cfg(feature = "presentation-verification")]
     trace(0, 0);
-    #[cfg(feature = "presentation-verification")]
-    let batch_size = std::env::var("TOWAVUE_PREROLL_BATCH")
-        .ok()
-        .map(|value| value.parse::<u64>().expect("preroll batch integer"))
-        .unwrap_or(0);
-    #[cfg(feature = "presentation-verification")]
-    let pacing = match &config {
+    let batch_size = crate::renderer::preroll_pacing::batch_size();
+    let mut pacing = match &config {
         ParallelVideoConfig::Hardware(_, device) if batch_size > 0 && preroll_before.is_some() => {
-            Some(crate::renderer::preroll_probe::PrerollProbe::new(device))
+            crate::renderer::preroll_pacing::PrerollPacing::new(device)
         }
         _ => None,
     };
-    #[cfg(feature = "presentation-verification")]
-    let mut target_reached = false;
+    let mut paced_packets = 0_u64;
     let mut pipeline = match config {
         ParallelVideoConfig::Software(config) => {
             ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
@@ -1483,10 +1478,13 @@ fn run_parallel_video_worker(
                 let received = pipeline.receive(
                     &mut |output_frame| match output_frame {
                         RuntimeDecodeOutput::Video(frame) => {
-                            #[cfg(feature = "presentation-verification")]
+                            // Steady playback no longer needs preroll pacing. Keep the
+                            // selected frame and all downstream timestamp/EOF rules intact.
+                            if pacing.is_some()
+                                && preroll_before
+                                    .is_none_or(|target| frame.presentation_time >= target)
                             {
-                                target_reached |= preroll_before
-                                    .is_none_or(|target| frame.presentation_time >= target);
+                                pacing = None;
                             }
                             output
                                 .send(ParallelDecodeOutput::HardwareVideo(frame))
@@ -1501,16 +1499,27 @@ fn run_parallel_video_worker(
                     packet_index += 1;
                 }
                 received?;
-                #[cfg(feature = "presentation-verification")]
-                if !target_reached
-                    && let Some(pacing) = &pacing
-                    && packet_index.is_multiple_of(batch_size)
-                {
-                    trace(5, packet_index - 1);
-                    let completed = pacing.wait(cancelled);
-                    trace(6, packet_index - 1);
-                    if !completed {
-                        return Ok(());
+                if let Some(completion) = &pacing {
+                    paced_packets += 1;
+                    if paced_packets.is_multiple_of(batch_size) {
+                        #[cfg(feature = "presentation-verification")]
+                        trace(5, packet_index - 1);
+                        let result = completion.wait(cancelled);
+                        #[cfg(feature = "presentation-verification")]
+                        trace(6, packet_index - 1);
+                        match result {
+                            crate::renderer::preroll_pacing::Completion::Ready => {}
+                            crate::renderer::preroll_pacing::Completion::Cancelled => {
+                                return Err(DecodeError::ConsumerClosed);
+                            }
+                            crate::renderer::preroll_pacing::Completion::Unavailable => {
+                                // Pacing is optional. Never reuse an unfinished/failed query;
+                                // continue exact decoding with ordinary error/recovery handling.
+                                pacing = None;
+                                #[cfg(feature = "presentation-verification")]
+                                trace(7, packet_index - 1);
+                            }
+                        }
                     }
                 }
             }
@@ -2336,7 +2345,7 @@ mod tests {
         for (index, rate, expected) in [(0, "25", 25.0), (1, "30000/1001", 30000.0 / 1001.0)] {
             let path =
                 std::env::temp_dir().join(format!("towavue-source-fps-{unique}-{index}.nut"));
-            let output = std::process::Command::new(&executable)
+            let output = crate::hidden_test_command(&executable)
                 .args([
                     "-v",
                     "error",
@@ -2505,7 +2514,7 @@ mod tests {
         ] {
             let path =
                 std::env::temp_dir().join(format!("towavue-ts-seek-{unique}-{codec}-{gop}.ts"));
-            let generated = std::process::Command::new(&executable)
+            let generated = crate::hidden_test_command(&executable)
                 .args([
                     "-v",
                     "error",
@@ -2841,7 +2850,7 @@ mod tests {
             let path = std::env::temp_dir().join(format!(
                 "towavue-trim-{unique}-{video_seconds}-{audio_seconds}.nut"
             ));
-            let generated = std::process::Command::new(&executable)
+            let generated = crate::hidden_test_command(&executable)
                 .args([
                     "-v",
                     "error",
@@ -3257,7 +3266,7 @@ mod tests {
                 let path = std::env::temp_dir().join(format!(
                     "towavue-terminal-{unique}-{video_seconds}-{audio_seconds}.{extension}"
                 ));
-                let generated = std::process::Command::new(&ffmpeg)
+                let generated = crate::hidden_test_command(&ffmpeg)
                     .args(["-v", "error", "-f", "lavfi", "-i"])
                     .arg(format!(
                         "testsrc2=size=160x96:rate=10:duration={video_seconds}"

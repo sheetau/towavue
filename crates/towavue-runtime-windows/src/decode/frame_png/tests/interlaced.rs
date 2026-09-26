@@ -75,7 +75,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                 "topleft",
             ),
         ] {
-            let reference = Command::new(&helper)
+            let reference = crate::hidden_test_command(&helper)
             .args(["-v", "error", "-f", "rawvideo", "-pixel_format", name,
                 "-video_size", "32x16", "-i"])
             .arg(&input)
@@ -165,7 +165,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                 // FFV1 preserves these source planes while the container/decoder
                 // supplies the field flags used by the public PNG extraction path.
                 let video = root.join(format!("{name}.mkv"));
-                let encoded = Command::new(&helper)
+                let encoded = crate::hidden_test_command(&helper)
                     .args([
                         "-v",
                         "error",
@@ -208,7 +208,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                     "{}",
                     String::from_utf8_lossy(&encoded.stderr)
                 );
-                let decoded = Command::new(&helper)
+                let decoded = crate::hidden_test_command(&helper)
                     .args(["-v", "error", "-i"])
                     .arg(&video)
                     .args([
@@ -227,7 +227,7 @@ fn interlaced_frame_png_preserves_field_colors_before_edits() {
                     decoded.stdout, raw,
                     "fixture must not resample source planes"
                 );
-                let probe = Command::new(helper.with_file_name("ffprobe.exe"))
+                let probe = crate::hidden_test_command(helper.with_file_name("ffprobe.exe"))
                     .args([
                         "-v",
                         "error",

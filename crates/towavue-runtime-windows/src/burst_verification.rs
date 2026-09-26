@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const BURST_CAPACITY: usize = 65_536;
+pub const BURST_CAPACITY: usize = 262_144;
 
 /// UI records use media generation, loader records use mailbox generation.
 #[derive(Clone, Copy)]

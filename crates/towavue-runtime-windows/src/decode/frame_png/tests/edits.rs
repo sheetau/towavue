@@ -160,7 +160,7 @@ fn high_depth_resize_matches_explicit_full_precision_native_filters() {
                     ""
                 }
             );
-            let mut child = Command::new(&exe)
+            let mut child = crate::hidden_test_command(&exe)
                 .args([
                     "-v",
                     "error",

@@ -62,61 +62,6 @@ fn gain_label(language: Language, gain: f32) -> String {
     }
 }
 
-fn paint_scale(painter: &egui::Painter, rect: Rect) {
-    // Fixed amplitude ratios keep decibel labels logarithmically spaced without
-    // calculating a logarithm for every waveform sample or display column.
-    let ticks = [
-        ("0", 1.0),
-        ("−6", 0.5011872),
-        ("−12", 0.2511886),
-        ("−18", 0.1258925),
-        ("−24", 0.06309573),
-        ("−30", 0.03162278),
-    ];
-    let font = egui::FontId::proportional(9.0);
-    let color = egui::Color32::from_white_alpha(120);
-    for direction in [-1.0, 1.0] {
-        let mut previous = None;
-        for (label, amplitude) in ticks {
-            let y = rect.center().y + direction * rect.height() * 0.5 * amplitude;
-            if (y - rect.center().y).abs() < 12.0
-                || previous.is_some_and(|previous: f32| (y - previous).abs() < 12.0)
-            {
-                continue;
-            }
-            let align = if amplitude == 1.0 {
-                if direction < 0.0 {
-                    egui::Align2::LEFT_TOP
-                } else {
-                    egui::Align2::LEFT_BOTTOM
-                }
-            } else {
-                egui::Align2::LEFT_CENTER
-            };
-            painter.hline(
-                rect.x_range(),
-                y,
-                (1.0, egui::Color32::from_white_alpha(16)),
-            );
-            painter.text(
-                egui::pos2(rect.left() + 2.0, y),
-                align,
-                label,
-                font.clone(),
-                color,
-            );
-            previous = Some(y);
-        }
-    }
-    painter.text(
-        egui::pos2(rect.left() + 2.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        "−∞",
-        font,
-        color,
-    );
-}
-
 pub(crate) fn stretch_limits(
     range: TimeRange,
     plan: Option<&EditTimeline>,
@@ -168,7 +113,6 @@ pub(super) fn paint(
     preview: Option<(TimeRange, f32)>,
     language: Language,
 ) {
-    paint_scale(painter, rect);
     let stroke = (1.0, egui::Color32::from_white_alpha(128));
     if let Some((range, gain)) = preview {
         let x_at = |time: MediaTime| {
@@ -322,47 +266,6 @@ mod tests {
                 assert_eq!(dragged_gain(rect, 1.0, gain_height(rect)), 0.0);
                 assert_eq!(dragged_gain(rect, 1.0, -gain_height(rect)), 2.0);
                 assert_eq!(db_gain(20.0 * 0.5_f64.log10()), 0.5);
-            }
-        }
-    }
-
-    #[test]
-    fn decibel_ruler_keeps_full_scale_edges_and_infinite_center_inside_compact_tracks() {
-        for density in [1.0, 1.25, 2.0] {
-            for height in [80.0, 160.0, 300.0] {
-                let context = crate::localization::test_ui::japanese_context(density);
-                let rect = Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(300.0, height));
-                let output =
-                    context.run_ui(Default::default(), |ui| paint_scale(ui.painter(), rect));
-                let texts: Vec<_> = output
-                    .shapes
-                    .iter()
-                    .filter_map(|shape| match &shape.shape {
-                        egui::Shape::Text(text) => Some(text),
-                        _ => None,
-                    })
-                    .collect();
-                assert_eq!(
-                    texts
-                        .iter()
-                        .filter(|text| text.galley.text() == "0")
-                        .count(),
-                    2
-                );
-                assert_eq!(
-                    texts
-                        .iter()
-                        .filter(|text| text.galley.text() == "−∞")
-                        .count(),
-                    1
-                );
-                for text in texts {
-                    let bounds = Rect::from_min_size(text.pos, text.galley.size());
-                    assert!(
-                        rect.expand(1.0).contains_rect(bounds),
-                        "bounded dB ruler: {bounds:?}"
-                    );
-                }
             }
         }
     }

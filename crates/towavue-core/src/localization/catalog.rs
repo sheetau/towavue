@@ -839,7 +839,7 @@ messages! {
     TimelinePositionHelp => ("Playback position · drag the playhead to seek", "再生位置 · 再生ヘッドをドラッグして移動"),
     TimelineStartHelp => ("Selection start · drag to adjust", "選択範囲の開始位置 · ドラッグで調整"),
     TimelineEndHelp => ("Selection end · drag to adjust", "選択範囲の終了位置 · ドラッグで調整"),
-    TimelineGainHelp => ("Relative gain in dB · drag to adjust the selection or whole track; drag to the bottom to silence. The waveform ruler shows peak amplitude in dBFS, with 0 at full scale.", "相対ゲイン（dB）· ドラッグで選択範囲またはトラック全体の音量を調整。一番下まで下げると無音化。波形の目盛りはピーク振幅のdBFS値で、上下端の0が最大振幅です。"),
+    TimelineGainHelp => ("Relative gain in dB · drag to adjust the selection or whole track; drag to the bottom to silence", "相対ゲイン（dB）· ドラッグで選択範囲またはトラック全体の音量を調整。一番下まで下げると無音化"),
     TimelineSelectionHelp => ("Time selection · drag to replace · Alt+drag to stretch", "時間範囲の選択 · ドラッグで選び直す · Alt+ドラッグで伸縮"),
     PlaybackPositionSeconds => ("Playback position (seconds)", "再生位置（秒）"),
     SelectionStartSeconds => ("Time selection start (seconds)", "選択範囲の開始位置（秒）"),

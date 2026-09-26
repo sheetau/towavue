@@ -371,6 +371,13 @@ pub(crate) mod tests {
             let size = egui::vec2(640.0, 600.0);
             let mut dialog = ResizeDialog::new((640, 480), 1);
             let output = ui::settle(&context, size, |context| dialog.show(context));
+            let area = context
+                .memory(|memory| memory.area_rect("resize-image"))
+                .expect("dialog");
+            assert!(
+                area.width() < 340.0,
+                "compact content must not reserve 400 points: {area:?}"
+            );
             let width = assert_unit_input(
                 &output,
                 Text::WidthInPixels.in_language(Language::Japanese),

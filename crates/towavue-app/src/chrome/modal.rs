@@ -4,7 +4,7 @@ use crate::scroll_style::ScrollAreaStyle;
 
 const MARGIN: f32 = 8.0;
 const FRAME_SPACE: f32 = 18.0;
-const CONTENT_WIDTH: f32 = 400.0;
+const MAX_CONTENT_WIDTH: f32 = 400.0;
 
 pub fn set_modal_bounds(context: &Context, bounds: Rect) {
     let pass = context.cumulative_pass_nr();
@@ -59,7 +59,9 @@ pub fn modal_body<R>(
     content: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let bounds = bounds(ui.ctx());
-    ui.set_width(CONTENT_WIDTH.min((bounds.width() - FRAME_SPACE).max(1.0)));
+    // Reset the Area's remembered maximum to permit growth, without reserving
+    // empty width. The body and footer determine the minimum on every pass.
+    ui.set_max_width(MAX_CONTENT_WIDTH.min((bounds.width() - FRAME_SPACE).max(1.0)));
     // Area remembers its previous content size; reset the maximum so a body can
     // grow beyond that size before the scroll area computes its available space.
     ui.set_max_height((bounds.height() - FRAME_SPACE).max(1.0));
@@ -107,7 +109,7 @@ pub fn modal_body<R>(
     ui.visuals_mut().clip_rect_margin = 0.0;
     let body = egui::ScrollArea::vertical()
         .id_salt("modal-body")
-        .auto_shrink([false, true])
+        .auto_shrink([true, true])
         .max_height(height)
         .min_scrolled_height(1.0)
         .show_styled(ui, content);
@@ -118,6 +120,87 @@ pub fn modal_body<R>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modal_width_follows_content_and_shrinks_after_larger_content() {
+        for density in [1.0, 1.25, 2.0] {
+            for preview in [false, true] {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
+                context.set_pixels_per_point(density);
+                for viewport_width in [960.0, 420.0] {
+                    let viewport =
+                        Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(viewport_width, 260.0));
+                    let media = Rect::from_min_max(
+                        egui::pos2(0.0, 32.0),
+                        egui::pos2(viewport_width, 230.0),
+                    );
+                    for width in [260.0, 140.0, 300.0, 140.0] {
+                        let mut outer = Rect::NOTHING;
+                        let mut content = Rect::NOTHING;
+                        let mut clip = Rect::NOTHING;
+                        let mut buttons = Vec::new();
+                        for _ in 0..4 {
+                            buttons.clear();
+                            let _ =
+                                context.run_ui(
+                                    egui::RawInput {
+                                        screen_rect: Some(viewport),
+                                        ..Default::default()
+                                    },
+                                    |ui| {
+                                        set_modal_bounds(ui.ctx(), media);
+                                        outer = modal(
+                                            ui.ctx(),
+                                            "intrinsic-modal-width".into(),
+                                            preview,
+                                        )
+                                        .show(ui.ctx(), |ui| {
+                                            modal_body(ui, "Size", &["Apply", "Cancel"], |ui| {
+                                                content = ui
+                                                    .allocate_exact_size(
+                                                        egui::vec2(width, 50.0),
+                                                        egui::Sense::hover(),
+                                                    )
+                                                    .0;
+                                                clip = ui.clip_rect();
+                                            });
+                                            ui.horizontal_wrapped(|ui| {
+                                                crate::chrome::flat_buttons(ui);
+                                                buttons.push(ui.button("Apply").rect);
+                                                buttons.push(ui.button("Cancel").rect);
+                                            });
+                                        })
+                                        .response
+                                        .rect;
+                                    },
+                                );
+                        }
+                        assert!(
+                            (outer.width() - width - FRAME_SPACE).abs() <= 1.0 / density,
+                            "content determines width at density={density}, preview={preview}: {width}, {outer:?}"
+                        );
+                        assert!(media.contains_rect(outer), "dialog stays inside media");
+                        assert!(outer.contains_rect(content));
+                        assert!(
+                            clip.contains_rect(content),
+                            "settled content is fully visible: density={density}, preview={preview}, width={width}, viewport={viewport_width}, clip={clip:?}, content={content:?}"
+                        );
+                        assert!(buttons.iter().all(|button| outer.contains_rect(*button)
+                            && button.top() >= content.bottom()));
+                        if preview {
+                            assert!(
+                                (media.right() - MARGIN - outer.right()).abs() <= 1.0 / density
+                            );
+                            assert!(
+                                (media.bottom() - MARGIN - outer.bottom()).abs() <= 1.0 / density
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn modal_header_and_actions_stay_fixed_while_body_uses_the_media_height() {
@@ -210,10 +293,16 @@ mod tests {
                     assert!(title.is_positive(), "settled modal paints its title");
                     let expected_width = 418.0_f32.min(media.width() - 16.0);
                     assert!(
-                        (before.0.width() - expected_width).abs() <= 1.0 / density,
-                        "common outer width: {:?}",
+                        before.0.width() <= expected_width + 1.0 / density,
+                        "content stays within its wrapping limit: {:?}",
                         before.0
                     );
+                    if size.x > 400.0 {
+                        assert!(
+                            before.0.width() < 360.0,
+                            "short rows do not reserve 400 points"
+                        );
+                    }
                     assert!(
                         media.contains_rect(before.0),
                         "{density} {size:?}: {:?}",

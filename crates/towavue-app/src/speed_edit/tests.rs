@@ -231,6 +231,10 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                     .memory(|memory| memory.area_rect("speed-duration"))
                     .expect("area");
                 assert!(bounds.contains_rect(area), "{area:?} in {bounds:?}");
+                assert!(
+                    area.width() < 340.0,
+                    "compact speed fields: {language:?}, {density}, {area:?}"
+                );
                 assert!((area.right() - (bounds.right() - 8.0)).abs() < 1.1);
                 assert!((area.bottom() - (bounds.bottom() - 8.0)).abs() < 1.1);
                 let tree = output

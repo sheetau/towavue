@@ -17,6 +17,13 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
         let mut dialog = app.capture_rotation().expect("image rotation");
         let size = egui::vec2(640.0, 600.0);
         let output = ui::settle(&context, size, |context| dialog.show(context));
+        let area = context
+            .memory(|memory| memory.area_rect("free-rotate-image"))
+            .expect("dialog");
+        assert!(
+            area.width() < 340.0,
+            "compact content must not reserve 400 points: {area:?}"
+        );
         let input = resize::tests::assert_unit_input(
             &output,
             Text::RotationAngleInput.in_language(crate::localization::Language::Japanese),

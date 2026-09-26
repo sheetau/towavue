@@ -18,6 +18,8 @@ macro_rules! messages {
 }
 
 messages! {
+    UpdateEventProxyMissing => ("Missing update event proxy", "更新通知の送信先を利用できません"),
+    PlaybackVolumePreferenceInvalid => ("Invalid playback volume preference", "再生音量の設定が不正です"),
     SaveWorkerStopped => ("source-save preparation worker stopped unexpectedly", "上書き保存の準備処理が予期せず停止しました"),
     SaveSourceFolder => ("source folder unavailable", "元ファイルのフォルダーを利用できません"),
     SaveDeletedPathOccupied => ("the deleted document's path is occupied; use Export as or choose another location", "削除したファイルのパスに別のファイルがあります。書き出すか、別の保存先を選んでください"),
@@ -34,7 +36,7 @@ messages! {
     HelperApplicationDirectory => ("application executable has no parent directory", "アプリの実行ファイルに親フォルダーがありません"),
     WaveformTooFewSamples => ("too few audio samples for waveform", "波形を生成するための音声サンプルが足りません"),
     DeletePreferenceFolder => ("preference folder unavailable", "削除確認設定の保存先フォルダーを利用できません"),
-    DeletePreferenceAppData => ("APPDATA is unavailable", "APPDATAを取得できません"),
+    AppDataUnavailable => ("APPDATA is unavailable", "APPDATAを取得できません"),
     ShellWorkerStopped => ("the Shell worker stopped", "エクスプローラー連携の処理が停止しました"),
     ShellResponseLost => ("the Shell worker did not return a snapshot", "エクスプローラー連携の処理からフォルダー情報を取得できませんでした"),
     RecentHistorySize => ("Recent files list exceeds its size limit.", "最近使ったファイルの一覧がサイズ上限を超えています。"),

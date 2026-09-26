@@ -178,3 +178,40 @@ fn japanese_configuration_errors_keep_exact_lines_files_and_english_diagnostics(
     let external = Error::External("external 日本語 {error}\ncode=32".into());
     assert_eq!(external.message(Language::Japanese), external.to_string());
 }
+
+#[test]
+fn configuration_paths_keep_owned_causes_through_boxed_window_failures() {
+    for name in ["grid.conf", "shortcuts.conf"] {
+        let error = path(None, name).expect_err("missing environment root");
+        assert_eq!(error.to_string(), "APPDATA is unavailable");
+        let boxed: Box<dyn std::error::Error> = error.into();
+        assert_eq!(
+            crate::localization::window_start_error(boxed.as_ref(), Language::Japanese),
+            "APPDATAを取得できません"
+        );
+        assert_eq!(
+            crate::localization::window_start_error(boxed.as_ref(), Language::English),
+            "APPDATA is unavailable"
+        );
+        let root = PathBuf::from("C:/owned/日本語 {settings}");
+        assert_eq!(
+            path(Some(root.clone().into_os_string()), name).expect("explicit root"),
+            root.join("towavue").join(name)
+        );
+    }
+    let native = std::io::Error::other("APPDATA is unavailable");
+    assert_eq!(
+        crate::localization::window_start_error(&native, Language::Japanese),
+        "APPDATA is unavailable"
+    );
+    let caption = towavue_runtime_windows::NativeUiError::Message(Text::NativeCaptionInstallFailed);
+    assert_eq!(
+        crate::localization::window_start_error(&caption, Language::Japanese),
+        "ネイティブタイトルバーを設定できませんでした"
+    );
+    let preview = towavue_runtime_windows::PreviewError::NoLocalAppData;
+    assert_eq!(
+        crate::localization::window_start_error(&preview, Language::Japanese),
+        "LOCALAPPDATAを取得できません"
+    );
+}

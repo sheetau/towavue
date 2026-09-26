@@ -56,6 +56,11 @@ impl From<std::io::Error> for Error {
     }
 }
 
+pub(super) fn path(root: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf, Error> {
+    let root = root.ok_or(Error::Text(Text::AppDataUnavailable))?;
+    Ok(PathBuf::from(root).join("towavue").join(name))
+}
+
 pub struct Warning {
     entries: Vec<(PathBuf, Error)>,
 }

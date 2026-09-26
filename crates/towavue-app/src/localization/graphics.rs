@@ -45,14 +45,23 @@ impl From<&str> for GraphicsRecoveryError {
 }
 
 /// Boxed startup failures also reach the drag-to-new-window status notice.
-/// Native/third-party details remain literal; owned rendering causes translate.
+/// Native/third-party details remain literal; recognized owned causes translate.
 pub(crate) fn window_start_error(
     error: &(dyn std::error::Error + 'static),
     language: Language,
 ) -> String {
-    error
-        .downcast_ref::<RenderError>()
-        .map_or_else(|| error.to_string(), |error| error.message(language))
+    if let Some(error) = error.downcast_ref::<crate::configuration::Error>() {
+        error.message(language)
+    } else if let Some(error) = error.downcast_ref::<towavue_runtime_windows::PreviewError>() {
+        error.message(language)
+    } else if let Some(error) = error.downcast_ref::<towavue_runtime_windows::update::UpdateError>()
+    {
+        error.message(language)
+    } else if let Some(error) = error.downcast_ref::<std::io::Error>() {
+        towavue_runtime_windows::io_error_message(error, language)
+    } else {
+        towavue_runtime_windows::native_ui_error_message(error, language)
+    }
 }
 
 #[cfg(test)]

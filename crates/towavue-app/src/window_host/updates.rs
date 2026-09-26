@@ -56,7 +56,12 @@ impl WindowHost {
         initial_path: Option<PathBuf>,
         fresh_primary: bool,
     ) -> Result<(), Box<dyn Error>> {
-        let proxy = self.proxy.clone().ok_or("Missing update event proxy")?;
+        let proxy = self
+            .proxy
+            .clone()
+            .ok_or(towavue_runtime_windows::NativeUiError::Message(
+                Text::UpdateEventProxyMissing,
+            ))?;
         let version: ReleaseVersion = env!("CARGO_PKG_VERSION").parse()?;
         self.updates.worker_epoch = self
             .updates
@@ -549,7 +554,10 @@ impl WindowHost {
             if let Err(error) = self.start_update_worker(None, false) {
                 self.update_status(towavue_core::localization::formatted::update_unavailable(
                     self.language.settings.display,
-                    &error.to_string(),
+                    &localization::window_start_error(
+                        error.as_ref(),
+                        self.language.settings.display,
+                    ),
                 ));
             }
         }

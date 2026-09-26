@@ -34,7 +34,7 @@ pub struct PlaybackVolumePreferences {
 }
 
 impl PlaybackVolumePreferences {
-    pub fn open(path: PathBuf, failed: impl Fn(String) + Send + 'static) -> io::Result<Self> {
+    pub fn open(path: PathBuf, failed: impl Fn(io::Error) + Send + 'static) -> io::Result<Self> {
         let record = read(&path)?;
         let initial = record.map_or((0.5, 0.5), |record| (record.level, record.unmuted));
         let shared = Arc::new((
@@ -75,7 +75,7 @@ impl PlaybackVolumePreferences {
                     };
                     drop(mailbox);
                     if let Err(error) = write(&path, record) {
-                        failed(error.to_string());
+                        failed(error);
                     }
                 }
             })?;
@@ -123,7 +123,9 @@ impl Drop for PlaybackVolumePreferences {
 fn invalid() -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidData,
-        "Invalid playback volume preference",
+        crate::RecoveryDetail::from(
+            towavue_core::localization::Text::PlaybackVolumePreferenceInvalid,
+        ),
     )
 }
 

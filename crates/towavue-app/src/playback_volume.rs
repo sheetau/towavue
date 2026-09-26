@@ -62,7 +62,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             self.set_status(
                 towavue_core::localization::formatted::playback_volume_save_failed(
                     display_language,
-                    &error.to_string(),
+                    &towavue_runtime_windows::io_error_message(&error, display_language),
                 ),
             );
         }

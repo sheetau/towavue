@@ -980,3 +980,53 @@ fn keyboard_shortcut_updates_reach_all_hosted_windows_and_cancel_old_prefixes() 
         assert!(app.entered_shortcut.is_empty() && app.prefix_started.is_none());
     }
 }
+
+#[test]
+fn playback_volume_worker_failure_uses_receiving_language_and_retains_unknown_preference() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::tests::playback_volume_worker_failure_uses_receiving_language_and_retains_unknown_preference",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("survivor");
+    let app = host.windows.get_mut(&second).expect("app");
+    let source = root.join("unopened.wav");
+    let tab = app.tabs.open_new(source.clone(), MediaKind::Audio);
+    app.path = Some(source);
+    app.media_kind = Some(MediaKind::Audio);
+    let volume = app.playback_volume_for(tab);
+    let path = root.join("owned-volume.conf");
+    let (send, receive) = std::sync::mpsc::channel();
+    let preferences =
+        towavue_runtime_windows::PlaybackVolumePreferences::open(path.clone(), move |error| {
+            let _ = send.send(error);
+        })
+        .expect("worker");
+    std::fs::write(&path, b"unknown future volume").expect("external replacement");
+    preferences.remember(0.8, 0.8).expect("queued setting");
+    drop(preferences);
+    let error = receive
+        .recv_timeout(Duration::from_secs(5))
+        .expect("worker failure");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+    host.windows
+        .get_mut(&first)
+        .expect("closed owner")
+        .exit_requested = true;
+    host.language.settings.display = localization::Language::Japanese;
+    host.route(Event::PlaybackVolumePreferenceFailed(error));
+    let app = &host.windows[&second];
+    assert_eq!(
+        app.status_notice().as_deref(),
+        Some("再生音量を保存できませんでした: 再生音量の設定が不正です")
+    );
+    assert_eq!(app.playback_volume_for(tab), volume);
+    assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(!app.exit_requested);
+    assert_eq!(
+        std::fs::read(&path).expect("unknown file retained"),
+        b"unknown future volume"
+    );
+}

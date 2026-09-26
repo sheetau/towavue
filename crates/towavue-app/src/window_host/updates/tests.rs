@@ -1083,3 +1083,42 @@ fn language_restart_save_as_cancel_and_late_save_preserve_windows() {
     assert!(!host.windows[&first].edits[&id].is_dirty());
     assert!(host.windows.values().all(|app| app.exit_requested));
 }
+
+#[test]
+fn update_worker_restart_refusal_uses_host_language_without_changing_edits() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::update_worker_restart_refusal_uses_host_language_without_changing_edits",
+    ) else {
+        return;
+    };
+    let source = root.join("owned.bmp");
+    crate::tab_transfer::tests::bitmap(&source);
+    let bytes = std::fs::read(&source).expect("source bytes");
+    let (mut host, first, second) = host();
+    attach(&mut host, second, &source, true);
+    let edits = host.windows[&second].edits.clone();
+    for (language, expected) in [
+        (
+            localization::Language::Japanese,
+            "更新を利用できません: 更新通知の送信先を利用できません",
+        ),
+        (
+            localization::Language::English,
+            "Update unavailable: Missing update event proxy",
+        ),
+    ] {
+        host.language.settings.display = language;
+        host.updates.shutdown_requested = true;
+        let _ = host.update_wait();
+        assert!(host.updates.service.is_none() && host.updates.attempt.is_none());
+        for key in [first, second] {
+            assert_eq!(
+                host.windows[&key].status_notice().as_deref(),
+                Some(expected)
+            );
+            assert!(!host.windows[&key].exit_requested);
+        }
+        assert_eq!(host.windows[&second].edits, edits);
+        assert_eq!(std::fs::read(&source).expect("source retained"), bytes);
+    }
+}

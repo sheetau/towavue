@@ -265,10 +265,15 @@ fn exercise_ready_launch(host: &mut WindowHost, event_loop: &ActiveEventLoop, ro
         }
         let source = canonical_shell_path(&source).expect("launch identity");
         let child = host
-            .open_launched_window_with(Some(source.clone()), false, |app, device| {
-                app.start_on_device(event_loop, device, false)
-                    .map_err(|error| error.to_string())
-            })
+            .open_launched_window_with(
+                Some(source.clone()),
+                false,
+                localization::Language::English,
+                |app, device| {
+                    app.start_on_device(event_loop, device, false)
+                        .map_err(|error| error.to_string())
+                },
+            )
             .expect("hidden image child");
         let app = host.windows.get_mut(&child).expect("image child");
         let context = app.ui_context.clone().expect("context");
@@ -492,10 +497,15 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     std::fs::write(&unsupported, b"not media").expect("unsupported fixture");
     for target in [empty, unsupported] {
         let keys: Vec<_> = host.windows.keys().copied().collect();
-        host.open_launched_window_with(Some(target), false, |app, device| {
-            app.start_on_device(event_loop, device, false)
-                .map_err(|error| error.to_string())
-        })
+        host.open_launched_window_with(
+            Some(target),
+            false,
+            localization::Language::English,
+            |app, device| {
+                app.start_on_device(event_loop, device, false)
+                    .map_err(|error| error.to_string())
+            },
+        )
         .expect("empty launch");
         let child = *host
             .windows
@@ -519,15 +529,22 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     }
     let count = host.windows.len();
     assert!(
-        host.open_launched_window_with(None, false, |_, _| Err("injected startup failure".into()))
-            .is_err()
+        host.open_launched_window_with(None, false, localization::Language::English, |_, _| Err(
+            "injected startup failure".into()
+        ))
+        .is_err()
     );
     assert!(
-        host.open_launched_window_with(None, false, |app, device| {
-            app.start_on_device(event_loop, device, false)
-                .expect("hidden stage");
-            Err("injected post-start failure".into())
-        })
+        host.open_launched_window_with(
+            None,
+            false,
+            localization::Language::English,
+            |app, device| {
+                app.start_on_device(event_loop, device, false)
+                    .expect("hidden stage");
+                Err("injected post-start failure".into())
+            }
+        )
         .is_err()
     );
     assert_eq!(host.windows.len(), count);

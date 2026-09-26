@@ -54,7 +54,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
     Update(u64, towavue_runtime_windows::update::UpdateEvent),
-    PlaybackVolumePreferenceFailed(String),
+    PlaybackVolumePreferenceFailed(std::io::Error),
     LanguageSaved(Result<localization::Language, towavue_runtime_windows::LanguagePreferenceError>),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
@@ -253,15 +253,17 @@ impl WindowHost {
             })
             .collect();
         for (source, path) in local {
-            let result = self.open_launched_window_with(Some(path), visible, |app, device| {
-                app.start_on_device(event_loop, device, false)
-                    .map_err(|error| {
-                        towavue_runtime_windows::native_ui_error_message(
-                            error.as_ref(),
-                            display_language,
-                        )
-                    })
-            });
+            let result = self.open_launched_window_with(
+                Some(path),
+                visible,
+                display_language,
+                |app, device| {
+                    app.start_on_device(event_loop, device, false)
+                        .map_err(|error| {
+                            localization::window_start_error(error.as_ref(), display_language)
+                        })
+                },
+            );
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)
             {
@@ -278,10 +280,15 @@ impl WindowHost {
             {
                 self.open_launched_tab(request.path.clone(), visible)
             } else {
-                self.open_launched_window_with(request.path.clone(), visible, |app, device| {
-                    app.start_on_device(event_loop, device, false)
-                        .map_err(|error| error.to_string())
-                })
+                self.open_launched_window_with(
+                    request.path.clone(),
+                    visible,
+                    localization::Language::English,
+                    |app, device| {
+                        app.start_on_device(event_loop, device, false)
+                            .map_err(|error| error.to_string())
+                    },
+                )
             };
             if let Err(error) = &result {
                 towavue_runtime_windows::diagnostic!(
@@ -330,6 +337,7 @@ impl WindowHost {
         &mut self,
         path: Option<PathBuf>,
         visible: bool,
+        error_language: localization::Language,
         start: impl FnOnce(
             &mut WindowApplication,
             Option<towavue_runtime_windows::GraphicsDevice>,
@@ -341,7 +349,7 @@ impl WindowHost {
             .find_map(|app| app.renderer.as_ref().map(FrameRenderer::graphics_device));
         let key = self
             .add_application(path)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| localization::window_start_error(error.as_ref(), error_language))?;
         let app = self.windows.get_mut(&key).expect("new window");
         if let Err(error) = start(app, device) {
             let mut app = self.windows.remove(&key).expect("new window");
@@ -453,9 +461,9 @@ impl WindowHost {
             .as_ref()
             .expect("validated renderer")
             .graphics_device();
-        let destination = self
-            .add_transfer_application()
-            .map_err(|error| error.to_string())?;
+        let destination = self.add_transfer_application().map_err(|error| {
+            localization::window_start_error(error.as_ref(), self.language.settings.display)
+        })?;
         // Keep the empty HWND hidden until both startup and transfer succeed.
         let started = start(
             self.windows.get_mut(&destination).expect("new window"),
@@ -511,7 +519,7 @@ impl WindowHost {
                     app.set_status(
                         towavue_core::localization::formatted::playback_volume_save_failed(
                             display_language,
-                            &error.to_string(),
+                            &towavue_runtime_windows::io_error_message(&error, display_language),
                         ),
                     );
                     app.request_redraw();
@@ -718,9 +726,9 @@ impl WindowHost {
             .as_ref()
             .expect("validated renderer")
             .graphics_device();
-        let destination = self
-            .add_transfer_application()
-            .map_err(|error| error.to_string())?;
+        let destination = self.add_transfer_application().map_err(|error| {
+            localization::window_start_error(error.as_ref(), self.language.settings.display)
+        })?;
         let app = self.windows.get_mut(&destination).expect("new window");
         let opened = start(app, device).and_then(|()| {
             app.position_window_at_drop(position, request.anchor)?;

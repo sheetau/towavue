@@ -55,7 +55,7 @@ impl GridLayouts {
 }
 
 pub fn load() -> Result<(GridLayouts, PathBuf), Error> {
-    let path = config_path().map_err(Error::External)?;
+    let path = config_path()?;
     load_from(&path).map(|layouts| (layouts, path))
 }
 
@@ -76,9 +76,8 @@ pub fn load_from(path: &Path) -> Result<GridLayouts, Error> {
     parse(&text, defaults)
 }
 
-pub fn config_path() -> Result<PathBuf, String> {
-    let app_data = std::env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
-    Ok(PathBuf::from(app_data).join("towavue").join("grid.conf"))
+pub fn config_path() -> Result<PathBuf, Error> {
+    crate::configuration::path(std::env::var_os("APPDATA"), "grid.conf")
 }
 
 pub fn defaults() -> GridLayouts {

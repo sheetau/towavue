@@ -23,7 +23,7 @@ const RECENT_FOLDER_BINDING_HEADER: &str = "# towavue shortcuts v7";
 const FULLSCREEN_BINDING_HEADER: &str = "# towavue shortcuts v5";
 
 pub fn load() -> Result<(ShortcutBindings, PathBuf), Error> {
-    let path = config_path().map_err(Error::External)?;
+    let path = config_path()?;
     load_from(&path).map(|bindings| (bindings, path))
 }
 
@@ -46,11 +46,8 @@ pub fn load_from(path: &Path) -> Result<ShortcutBindings, Error> {
     parse(&text, defaults)
 }
 
-pub fn config_path() -> Result<PathBuf, String> {
-    let app_data = std::env::var_os("APPDATA").ok_or("APPDATA is unavailable")?;
-    Ok(PathBuf::from(app_data)
-        .join("towavue")
-        .join("shortcuts.conf"))
+pub fn config_path() -> Result<PathBuf, Error> {
+    crate::configuration::path(std::env::var_os("APPDATA"), "shortcuts.conf")
 }
 
 pub fn defaults() -> ShortcutBindings {

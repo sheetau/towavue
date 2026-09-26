@@ -82,11 +82,14 @@ fn preferences_reject_invalid_levels_and_preserve_unknown_or_changed_records() {
     fs::write(fixture.path(), b"future preference version").expect("external change");
     store.remember(0.8, 0.8).expect("enqueue");
     drop(store);
-    assert!(
-        !receive
-            .recv_timeout(Duration::from_secs(5))
-            .expect("reported failure")
-            .is_empty()
+    let error = receive
+        .recv_timeout(Duration::from_secs(5))
+        .expect("reported failure");
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(error.to_string(), "Invalid playback volume preference");
+    assert_eq!(
+        crate::io_error_message(&error, towavue_core::localization::Language::Japanese),
+        "再生音量の設定が不正です"
     );
     assert_eq!(
         fs::read(fixture.path()).expect("preserved"),

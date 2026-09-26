@@ -271,7 +271,7 @@ impl WindowHost {
                             path.ok_or_else(|| {
                                 std::io::Error::other(
                                     towavue_runtime_windows::RecoveryDetail::from(
-                                        localization::Text::DeletePreferenceAppData,
+                                        localization::Text::AppDataUnavailable,
                                     ),
                                 )
                             })

@@ -1692,14 +1692,14 @@ where
                 path.with_file_name("recent-files.txt"),
                 move || notify(AppEvent::RecentFilesReady),
             )
-            .map_err(|error| error.to_string())
+            .map_err(configuration::Error::from)
         });
         match recent_result {
             Ok(recent) => self.recent_files = Some(recent),
             Err(error) => self.set_status(
                 towavue_core::localization::formatted::recent_files_unavailable(
                     self.language(),
-                    &error,
+                    &error.message(self.language()),
                 ),
             ),
         }

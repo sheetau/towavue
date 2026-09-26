@@ -149,7 +149,7 @@ impl FileOperationError {
             Self::WorkerStopped => Text::FileWorkerStopped.in_language(language).into(),
             Self::RecoveryRequired { message, directory } => formatted::file_deletion_recovery(
                 language,
-                message,
+                &message.message(language),
                 &directory.display().to_string(),
             ),
         }
@@ -159,14 +159,17 @@ impl FileOperationError {
 impl SourceSaveError {
     pub fn message(&self, language: Language) -> String {
         match self {
-            Self::Io(error) => formatted::source_save_failed(language, &error.to_string()),
+            Self::Io(error) => formatted::source_save_failed(
+                language,
+                &crate::RecoveryDetail::io_message(error, language),
+            ),
             Self::Source(error) => error.message(language),
             Self::Export(error) => error.message(language),
             Self::InvalidRequest => Text::SourceSaveInvalidRequest.in_language(language).into(),
             Self::RecoveryRequired { message, directory } => {
                 formatted::source_replacement_recovery(
                     language,
-                    message,
+                    &message.message(language),
                     &directory.display().to_string(),
                 )
             }

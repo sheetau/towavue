@@ -36,6 +36,7 @@ macro_rules! templates {
 }
 
 templates! {
+    recovery_original_retained(error: &str, directory: &str) => ("{error}; document original retained in {directory}", "{error}。元のドキュメントを{directory}に保持しています"),
     audio_tempo_failed(error: &str) => ("audio tempo processing failed: {error}", "音声の速度処理に失敗しました: {error}"),
     audio_unsupported_format(rate: u32, channels: u16) => ("unsupported audio format: {rate} Hz, {channels} channels", "未対応の音声形式です: {rate} Hz、{channels}チャンネル"),
     audio_wasapi_failed(error: &str) => ("WASAPI output failed: {error}", "WASAPI音声出力に失敗しました: {error}"),

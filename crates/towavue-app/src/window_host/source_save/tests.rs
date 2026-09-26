@@ -379,11 +379,21 @@ fn source_save_ambiguous_publication_keeps_edits_and_rejects_untrusted_input() {
     ) else {
         return;
     };
-    for language in [
+    for (language, owned) in [
         localization::Language::English,
         localization::Language::Japanese,
-    ] {
-        let path = root.join(format!("{language:?}.bmp"));
+    ]
+    .into_iter()
+    .flat_map(|language| [false, true].map(move |owned| (language, owned)))
+    {
+        let failure = || -> towavue_runtime_windows::RecoveryDetail {
+            if owned {
+                towavue_runtime_windows::FileOperationError::SourceChanged.into()
+            } else {
+                "controlled ambiguous replacement".into()
+            }
+        };
+        let path = root.join(format!("{language:?}-{owned}.bmp"));
         crate::tab_transfer::tests::bitmap(&path);
         let original = std::fs::read(&path).expect("original source bytes");
         let (mut host, owner, id) = setup(&path);
@@ -414,7 +424,7 @@ fn source_save_ambiguous_publication_keeps_edits_and_rejects_untrusted_input() {
             owner,
             serial,
             Err(towavue_runtime_windows::SourceSaveError::RecoveryRequired {
-                message: "controlled ambiguous replacement".into(),
+                message: failure(),
                 directory: root.clone(),
             }
             .into()),
@@ -424,7 +434,7 @@ fn source_save_ambiguous_publication_keeps_edits_and_rejects_untrusted_input() {
             app.export_error
                 .as_ref()
                 .expect("recovery details")
-                .contains("controlled ambiguous replacement")
+                .contains(&failure().message(language))
         );
         assert!(app.edits[&id].is_dirty());
         assert!(!app.edits[&id].source_available());
@@ -435,7 +445,7 @@ fn source_save_ambiguous_publication_keeps_edits_and_rejects_untrusted_input() {
         );
         assert!(!app.file_operations.locked && !app.source_save.frozen);
         let expected = towavue_runtime_windows::SourceSaveError::RecoveryRequired {
-            message: "controlled ambiguous replacement".into(),
+            message: failure(),
             directory: root.clone(),
         }
         .message(language);

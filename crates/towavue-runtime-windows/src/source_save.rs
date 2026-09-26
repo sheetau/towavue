@@ -41,7 +41,11 @@ pub enum SourceSaveError {
     #[error("source save requires the original target path and full-media output")]
     InvalidRequest,
     #[error("source replacement needs recovery: {message}; preserved files: {directory}")]
-    RecoveryRequired { message: String, directory: PathBuf },
+    RecoveryRequired {
+        #[source]
+        message: crate::RecoveryDetail,
+        directory: PathBuf,
+    },
 }
 
 pub enum SourceSaveEvent {
@@ -438,7 +442,8 @@ pub fn commit_source_save(
                     .unwrap_or_else(|_| {
                         files.preserve.store(true, Ordering::Relaxed);
                         Err(SourceSaveError::RecoveryRequired {
-                            message: "publication worker stopped unexpectedly".into(),
+                            message: towavue_core::localization::Text::PublicationWorkerStopped
+                                .into(),
                             directory: files.directory.clone(),
                         })
                     });
@@ -489,7 +494,7 @@ fn commit_recreation(prepared: PreparedSourceSave) -> Result<SavedSource, Source
             // Preserve the immutable original even if the caller drops its owner.
             original.0._files.preserve.store(true, Ordering::Relaxed);
             Err(SourceSaveError::RecoveryRequired {
-                message: error.to_string(),
+                message: error.into(),
                 directory: original.0._files.directory.clone(),
             })
         }
@@ -545,7 +550,7 @@ fn finish_publication(
             return Err(SourceSaveError::Io(error));
         }
         return Err(SourceSaveError::RecoveryRequired {
-            message: error.to_string(),
+            message: error.into(),
             directory: prepared.files.directory.clone(),
         });
     }
@@ -558,7 +563,9 @@ fn finish_publication(
                 .matches_file_at(&prepared.files.original)?
         {
             return Err(SourceSaveError::Io(io::Error::other(
-                "replacement identities changed",
+                crate::RecoveryDetail::from(
+                    towavue_core::localization::Text::ReplacementIdentitiesChanged,
+                ),
             )));
         }
         let source = FileOperationSource::capture(&prepared.files.original)?;
@@ -584,7 +591,7 @@ fn finish_publication(
             })
         }
         Err(error) => Err(SourceSaveError::RecoveryRequired {
-            message: error.to_string(),
+            message: error.into(),
             directory: prepared.files.directory.clone(),
         }),
     }

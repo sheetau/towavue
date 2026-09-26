@@ -18,6 +18,9 @@ macro_rules! messages {
 }
 
 messages! {
+    PublicationWorkerStopped => ("publication worker stopped unexpectedly", "保存結果を反映する処理が予期せず停止しました"),
+    SaveAsPublicationStopped => ("Save as publication stopped unexpectedly", "名前を付けて保存する処理が予期せず停止しました"),
+    ReplacementIdentitiesChanged => ("replacement identities changed", "置き換えたファイルの識別情報が変わりました"),
     HelperPathType => ("Update path is a link or has the wrong file type.", "更新用のパスがリンクか、種類の異なるファイルです。"),
     HelperLocalPath => ("A normalized local absolute path is required.", "正規化されたローカルの絶対パスが必要です。"),
     HelperMetadataLimit => ("Update metadata exceeds its limit.", "更新情報のサイズが上限を超えています。"),

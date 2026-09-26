@@ -54,7 +54,11 @@ pub enum FileOperationError {
     #[error(
         "file deletion failed and the original source cannot be verified: {message}; retained file directory: {directory}"
     )]
-    RecoveryRequired { message: String, directory: PathBuf },
+    RecoveryRequired {
+        #[source]
+        message: crate::RecoveryDetail,
+        directory: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -303,7 +307,7 @@ pub(crate) fn finish_retained_recycle(
     match result {
         Err(error) if retained.is_some() && source.verify().is_err() => {
             Err(FileOperationError::RecoveryRequired {
-                message: error.to_string(),
+                message: error.into(),
                 directory: retained.expect("retained input").preserve_for_recovery(),
             })
         }

@@ -265,7 +265,7 @@ pub fn commit_save_as(
             .unwrap_or_else(|_| {
                 files.preserve.store(true, Ordering::Relaxed);
                 Err(SourceSaveError::RecoveryRequired {
-                    message: "Save as publication stopped unexpectedly".into(),
+                    message: towavue_core::localization::Text::SaveAsPublicationStopped.into(),
                     directory: files.directory.clone(),
                 })
             });
@@ -280,17 +280,16 @@ pub fn commit_save_as(
 
 fn retain_recovery_original(
     original: &RetainedSource,
-    mut result: Result<SavedAsSource, SourceSaveError>,
+    result: Result<SavedAsSource, SourceSaveError>,
 ) -> Result<SavedAsSource, SourceSaveError> {
-    if let Err(SourceSaveError::RecoveryRequired { message, .. }) = &mut result {
+    if let Err(SourceSaveError::RecoveryRequired { message, directory }) = result {
         // A destination backup contains another document's bytes. Preserve this
         // document's original too, including native partial failures, not just
         // worker panics. Untitled inputs may have no other persistent copy.
-        let directory = original.preserve_for_recovery();
-        *message = format!(
-            "{message}; document original retained in {}",
-            directory.display()
-        );
+        return Err(SourceSaveError::RecoveryRequired {
+            message: message.with_original(original.preserve_for_recovery()),
+            directory,
+        });
     }
     result
 }
@@ -324,7 +323,7 @@ fn commit_as(prepared: PreparedSaveAs) -> Result<SavedAsSource, SourceSaveError>
                 candidate
                     .after_move(&path)
                     .map_err(|error| SourceSaveError::RecoveryRequired {
-                        message: error.to_string(),
+                        message: error.into(),
                         directory: original.preserve_for_recovery(),
                     })?;
             Ok(SavedAsSource {

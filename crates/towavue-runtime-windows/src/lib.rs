@@ -19,6 +19,8 @@ mod export;
 mod file_details;
 mod file_operation;
 mod operation_error_messages;
+mod recovery_detail;
+pub use recovery_detail::RecoveryDetail;
 mod source_save;
 pub use source_save::{
     PreparedSaveAs, PreparedSourceSave, RetainedSource, SaveAsEvent, SaveAsJob, SaveAsRequest,

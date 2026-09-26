@@ -580,7 +580,16 @@ fn recovery_retains_the_document_original_as_well_as_the_destination_artifacts()
         panic!("uncertain publication remains an error");
     };
     assert_eq!(reported, destination_recovery);
-    assert!(message.contains(&directory.display().to_string()));
+    assert!(
+        message
+            .to_string()
+            .contains(&directory.display().to_string())
+    );
+    let japanese = message.message(towavue_core::localization::Language::Japanese);
+    assert!(japanese.contains("injected partial replacement"));
+    assert!(japanese.contains(&directory.display().to_string()));
+    assert!(japanese.contains("元のドキュメントを"));
+    assert!(!japanese.contains("document original retained"));
     drop(original);
     assert_eq!(
         fs::read(&path).expect("document recovery survives last owner"),

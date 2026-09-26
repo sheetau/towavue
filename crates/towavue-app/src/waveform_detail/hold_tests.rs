@@ -215,6 +215,7 @@ fn gain_handoff_requires_the_exact_committed_preview_and_matching_source_geometr
         EditTimeline::new(media_time(Duration::from_secs(10)), Default::default()).expect("plan");
     let key = Key {
         path: "source.wav".into(),
+        track: None,
         plan,
         rate: 1.0,
         volume: 1.0,
@@ -233,7 +234,7 @@ fn gain_handoff_requires_the_exact_committed_preview_and_matching_source_geometr
             .apply(TimelineEdit::ScaleVolume(preview.0, preview.1))
     );
     assert!(detail.hold_committed_gain(&next).is_some());
-    for change in 0..6 {
+    for change in 0..7 {
         let mut changed = next.clone();
         match change {
             0 => changed.path = "other.wav".into(),
@@ -241,6 +242,7 @@ fn gain_handoff_requires_the_exact_committed_preview_and_matching_source_geometr
             2 => changed.rate = 2.0,
             3 => changed.volume = 0.5,
             4 => changed.plan = key.plan.clone(), // Cancellation/Undo.
+            5 => changed.track = Some(towavue_core::AudioTrackId::from_index(2)),
             _ => {
                 changed.plan.apply(TimelineEdit::Delete(range(0, 1000)));
             }

@@ -4,6 +4,7 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 
 use CommandId::*;
 
+mod audio_tracks;
 mod choices;
 #[cfg(test)]
 mod image_choices_tests;
@@ -49,6 +50,9 @@ pub(crate) struct MenuData<'a> {
     pub choices: Choices,
     pub language: crate::localization::Settings,
     pub language_action: Option<crate::localization::Language>,
+    pub audio_tracks: Option<&'a towavue_core::AudioTrackCatalog>,
+    pub audio_selection: towavue_core::AudioTrackSelection,
+    pub audio_action: Option<towavue_core::AudioTrackSelection>,
 }
 
 /// Project folder history at delivery, without filesystem work or new persisted
@@ -144,7 +148,12 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             &[RateDown, RateUp, ResetRate],
             &[PreviousVideoFrame, NextVideoFrame],
             &[StepAudioBackward, StepAudioForward],
-            &[CycleAudioRepeat, ToggleVideoRepeat, ToggleAudioShuffle],
+            &[
+                CycleAudioRepeat,
+                ToggleVideoRepeat,
+                ToggleAudioShuffle,
+                CycleAudioTrack,
+            ],
             &[
                 PreviousMedia,
                 NextMedia,
@@ -363,6 +372,21 @@ fn show_items(
                     crate::chrome::separator(ui);
                 }
                 for id in *group {
+                    if *id == CycleAudioTrack {
+                        if context.media_kind == Some(towavue_core::MediaKind::Video) {
+                            let (response, command) = audio_tracks::submenu(
+                                ui, context, shortcuts, requested, recent, ancestor,
+                            );
+                            if response.enabled() {
+                                items.push(response.id);
+                            }
+                            if response.gained_focus() {
+                                response.scroll_to_me(None);
+                            }
+                            chosen = chosen.or(command);
+                        }
+                        continue;
+                    }
                     if *id == ExportQualityHigh
                         && context.media_kind != Some(towavue_core::MediaKind::Video)
                     {

@@ -35,3 +35,62 @@ pub enum AudioTrackSelection {
     Track(AudioTrackId),
     All,
 }
+
+impl AudioTrackCatalog {
+    /// Cycle concrete tracks in source order; All starts at the first track.
+    pub fn next_track(&self, selection: AudioTrackSelection) -> Option<AudioTrackId> {
+        if self.tracks.is_empty() {
+            return None;
+        }
+        let current = match selection {
+            AudioTrackSelection::Default => self.preferred,
+            AudioTrackSelection::Track(track) => Some(track),
+            AudioTrackSelection::All => None,
+        };
+        let next = current
+            .and_then(|id| self.tracks.iter().position(|track| track.id == id))
+            .map_or(0, |index| (index + 1) % self.tracks.len());
+        Some(self.tracks[next].id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cycling_uses_source_order_preferred_track_and_wraps_without_all() {
+        let ids = [2, 5, 8].map(AudioTrackId::from_index);
+        let mut catalog = AudioTrackCatalog {
+            tracks: ids
+                .iter()
+                .map(|id| AudioTrack {
+                    id: *id,
+                    title: None,
+                    language: None,
+                })
+                .collect(),
+            preferred: Some(ids[1]),
+        };
+        assert_eq!(
+            catalog.next_track(AudioTrackSelection::Default),
+            Some(ids[2])
+        );
+        assert_eq!(catalog.next_track(AudioTrackSelection::All), Some(ids[0]));
+        assert_eq!(
+            catalog.next_track(AudioTrackSelection::Track(ids[2])),
+            Some(ids[0])
+        );
+        assert_eq!(
+            catalog.next_track(AudioTrackSelection::Track(ids[0])),
+            Some(ids[1])
+        );
+        assert_eq!(
+            catalog.next_track(AudioTrackSelection::Track(AudioTrackId::from_index(77))),
+            Some(ids[0])
+        );
+        catalog.tracks.clear();
+        assert_eq!(catalog.next_track(AudioTrackSelection::Default), None);
+        assert_eq!(catalog.next_track(AudioTrackSelection::All), None);
+    }
+}

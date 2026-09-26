@@ -232,6 +232,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let target = saved.current_source().path();
         let tab = self.tabs.get_mut(id).expect("retained Save as tab");
         tab.target.set_current_path(target.to_owned(), request.kind);
+        if let Some(choice) = self.audio_preview_choices.get_mut(&id) {
+            choice.relocate(source, target);
+        }
         self.source_backings.insert(id, saved.retained_source());
         self.source_versions
             .insert(id, Some(saved.current_source().clone()));

@@ -9,6 +9,7 @@ pub(super) fn color() -> Color32 {
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct Key {
     path: PathBuf,
+    track: Option<towavue_core::AudioTrackId>,
     plan: EditTimeline,
     rate: f32,
     volume: f32,
@@ -53,6 +54,7 @@ mod tests {
                 app.tabs.open_new(path.clone(), MediaKind::Audio);
                 let key = Arc::new(Key {
                     path,
+                    track: None,
                     plan: EditTimeline::new(
                         media_time(Duration::from_secs(10)),
                         Default::default(),
@@ -120,6 +122,7 @@ mod tests {
         let detail = Detail {
             key: Some(Arc::new(Key {
                 path: "fixture.wav".into(),
+                track: None,
                 plan,
                 rate: 1.0,
                 volume: 1.0,
@@ -599,6 +602,7 @@ impl Detail {
         let previous = self.key.as_ref()?;
         let (range, factor) = self.last_gain_preview?;
         if previous.path != next.path
+            || previous.track != next.track
             || previous.rate != next.rate
             || previous.volume != next.volume
             || previous.columns != next.columns
@@ -788,8 +792,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let columns = (rect.width() * context.pixels_per_point())
             .round()
             .clamp(1.0, 8192.0) as u32;
+        let track = self.waveform_audio_track();
         let matches = self.waveform_detail.key.as_ref().is_some_and(|key| {
             key.path == *path
+                && key.track == track
                 && key.plan == *plan
                 && key.rate == state.rate
                 && key.volume == state.volume
@@ -801,6 +807,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             let key = Arc::new(Key {
                 path: path.clone(),
+                track,
                 plan: plan.clone(),
                 rate: state.rate,
                 volume: state.volume,
@@ -835,8 +842,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 detail.started = true;
                 detail.finished = false;
                 self.waveform_worker.submit(move |cancellation| {
-                    let result = towavue_runtime_windows::timeline_waveform(
+                    let result = towavue_runtime_windows::timeline_audio_track_waveform(
                         input.path(),
+                        key.track,
                         &key.plan,
                         key.rate,
                         key.volume,
@@ -861,6 +869,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     ) {
         if generation != self.media_generation
             || self.path.as_ref() != Some(&key.path)
+            || self.waveform_audio_track() != key.track
             || !self
                 .waveform_detail
                 .key

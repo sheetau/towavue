@@ -297,6 +297,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             );
             let changed = self.tabs.relocate_file(source, target);
             for id in &changed {
+                if let Some(choice) = self.audio_preview_choices.get_mut(id) {
+                    choice.relocate(source, target);
+                }
                 if let Some(version) = self.source_versions.get_mut(id) {
                     // Moving a newer externally replaced file must not rebase old
                     // edits. Only a matching loaded version adopts the moved stamp.

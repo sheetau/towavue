@@ -118,6 +118,7 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::FreeRotateImage, "Ctrl+Shift+R"),
         (CommandId::FreeRotateVideo, "Ctrl+Shift+R"),
         (CommandId::CycleAudioRepeat, "Ctrl+R"),
+        (CommandId::CycleAudioTrack, "Alt+A"),
         (CommandId::ToggleVideoRepeat, "Ctrl+Alt+R"),
         (CommandId::RotateClockwise, "R"),
         (CommandId::RotateCounterclockwise, "L"),
@@ -470,7 +471,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 || definition.id.as_str().starts_with("select_aspect_")
                 || matches!(
                     definition.id,
-                    CommandId::PasteImage
+                    CommandId::CycleAudioTrack
+                        | CommandId::PasteImage
                         | CommandId::FreeRotateImage
                         | CommandId::FreeRotateVideo
                         | CommandId::RotateFineClockwise
@@ -2605,6 +2607,56 @@ mod reading_tests;
 mod percentage_tests {
     use super::*;
     use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+
+    #[test]
+    fn audio_track_default_is_video_only_and_preserves_existing_bindings() {
+        for kind in [MediaKind::Video, MediaKind::Audio, MediaKind::Image] {
+            for blocked in [false, true] {
+                let context = CommandContext {
+                    media_kind: Some(kind),
+                    playback_blocked: blocked,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    defaults().resolve(&["Alt+A".parse().expect("key")], context),
+                    if kind == MediaKind::Video && !blocked {
+                        ShortcutMatch::Command(CommandId::CycleAudioTrack)
+                    } else {
+                        ShortcutMatch::None
+                    }
+                );
+            }
+        }
+        for declaration in [
+            "toggle_mute = Alt+A",
+            "toggle_mute = Alt+A M",
+            "cycle_audio_track =",
+            "cycle_audio_track = Ctrl+Alt+A",
+        ] {
+            let parsed = parse(
+                &format!("{CURRENT_BINDING_HEADER}\n{declaration}\n"),
+                defaults(),
+            )
+            .expect("custom config");
+            assert!(
+                parsed
+                    .all(CommandId::CycleAudioTrack)
+                    .iter()
+                    .all(|binding| binding.to_string() != "Alt+A")
+            );
+        }
+        assert_eq!(
+            parse(
+                &format!("{CURRENT_BINDING_HEADER}\ncycle_audio_track = Alt+A\n"),
+                defaults()
+            )
+            .expect("explicit binding")
+            .get(CommandId::CycleAudioTrack)
+            .expect("retained")
+            .to_string(),
+            "Alt+A"
+        );
+    }
 
     #[test]
     fn video_percentage_keys_are_contextual_and_preserve_custom_bindings_and_prefixes() {

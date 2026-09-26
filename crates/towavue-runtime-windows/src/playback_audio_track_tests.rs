@@ -61,6 +61,66 @@ fn selected_audio_preserves_delays_edits_waveforms_and_session_restarts() {
         String::from_utf8_lossy(&output.stderr)
     );
     let original = fs::read(&path).expect("original");
+    let cache = crate::PreviewCache::new(root.join("preview-cache")).expect("cache");
+    let duration = cache
+        .duration(&path)
+        .expect("source duration")
+        .as_secs_f64();
+    let mut overviews = Vec::new();
+    for (index, amplitude, start, end) in [(1, 0.125_f64, 0.0, 2.5), (2, 0.5, 0.5, 2.0)] {
+        let track = Some(AudioTrackId::from_index(index));
+        let image = cache
+            .video_waveform(&path, track, 120, 96)
+            .expect("selected source overview");
+        for x in 0..120usize {
+            let a = x as f64 * duration / 120.0;
+            let b = (x + 1) as f64 * duration / 120.0;
+            if (a - start).abs() < 0.05
+                || (b - start).abs() < 0.05
+                || (a - end).abs() < 0.05
+                || (b - end).abs() < 0.05
+            {
+                continue;
+            }
+            let expected = if a >= start && b <= end {
+                (amplitude * 96.0).round() as usize
+            } else {
+                0
+            };
+            let actual = (0..96usize)
+                .filter(|y| image.rgba[(y * 120 + x) * 4 + 3] != 0)
+                .count();
+            assert_eq!(actual, expected, "track={index}, column={x}");
+        }
+        assert_eq!(
+            cache
+                .video_waveform(&path, track, 120, 96)
+                .expect("warm overview")
+                .rgba,
+            image.rgba
+        );
+        overviews.push(image.rgba);
+    }
+    assert_ne!(
+        overviews[0], overviews[1],
+        "track identities must not share a cache result"
+    );
+    assert!(
+        cache
+            .video_waveform(&path, Some(AudioTrackId::from_index(99)), 120, 96)
+            .is_err()
+    );
+    let cancelled = crate::Cancellation::default();
+    cancelled.cancel();
+    assert!(matches!(
+        cache.cancellable(cancelled).video_waveform(
+            &path,
+            Some(AudioTrackId::from_index(1)),
+            120,
+            96
+        ),
+        Err(crate::PreviewError::Cancelled)
+    ));
     let plan = EditTimeline::from_operations(
         time(3000),
         &[

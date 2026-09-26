@@ -540,6 +540,59 @@ impl PreviewCache {
         })
     }
 
+    /// Source-time overview for video track selection, including leading silence
+    /// and an audio tail shorter than the video. Track identity owns its cache key.
+    pub fn video_waveform(
+        &self,
+        source: &Path,
+        track: Option<towavue_core::AudioTrackId>,
+        width: u32,
+        height: u32,
+    ) -> Result<PreviewImage, PreviewError> {
+        self.check_cancelled()?;
+        if !(1..=8192).contains(&width) || !(1..=1024).contains(&height) {
+            return Err(PreviewError::Message(
+                towavue_core::localization::Text::WaveformInvalidInput,
+            ));
+        }
+        let variant = format!(
+            "video-waveform-v1-{}-{width}-{height}",
+            track.map_or_else(|| "default".into(), |track| track.index().to_string())
+        );
+        let key = cache_key(source, &variant)?;
+        self.load_or_generate_ready(key.clone(), || {
+            let duration = self.duration(source)?;
+            let duration = towavue_core::MediaTime::from_nanoseconds(
+                i64::try_from(duration.as_nanos()).map_err(|_| PreviewError::InvalidDuration)?,
+            );
+            let plan = towavue_core::EditTimeline::new(duration, Default::default())
+                .ok_or(PreviewError::InvalidDuration)?;
+            let values = crate::timeline_audio_track_waveform(
+                source,
+                track,
+                &plan,
+                1.0,
+                1.0,
+                width,
+                &self.cancellation.clone().unwrap_or_default(),
+            )?;
+            self.check_cancelled()?;
+            if cache_key(source, &variant)? != key {
+                return Err(PreviewError::Generate(
+                    "Source changed during preview generation".into(),
+                ));
+            }
+            let mut image = image::RgbaImage::new(width, height);
+            for (x, value) in values.into_iter().enumerate() {
+                let bar = (value.clamp(0.0, 1.0) * height as f32).round() as u32;
+                for y in (height - bar) / 2..(height - bar) / 2 + bar {
+                    image.put_pixel(x as u32, y, image::Rgba([255; 4]));
+                }
+            }
+            ready_preview_png(image)
+        })
+    }
+
     fn waveform_using(
         &self,
         source: &Path,

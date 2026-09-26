@@ -49,6 +49,7 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::TogglePause => Text::CommandTogglePause,
         CommandId::PlayTimeSelection => Text::CommandPlayTimeSelection,
         CommandId::CycleAudioRepeat => Text::CommandCycleAudioRepeat,
+        CommandId::CycleAudioTrack => Text::CommandCycleAudioTrack,
         CommandId::ToggleVideoRepeat => Text::CommandToggleVideoRepeat,
         CommandId::ToggleAudioShuffle => Text::CommandToggleAudioShuffle,
         CommandId::SeekBackward => Text::CommandSeekBackward,

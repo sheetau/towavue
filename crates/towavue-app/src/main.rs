@@ -11,6 +11,7 @@ mod audio_export;
 #[cfg(test)]
 mod audio_export_tests;
 mod audio_playback;
+mod audio_preview;
 #[cfg(test)]
 mod audio_view_tests;
 mod chrome;
@@ -314,6 +315,7 @@ impl PlaybackClock {
 #[derive(Clone, PartialEq)]
 enum UiAction {
     Language(localization::Language),
+    AudioTrack(Option<TabId>, u64, towavue_core::AudioTrackSelection),
     KeybindingChange(TabId, keyboard_settings::Change),
     ConfigureKeybinding(CommandId),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
@@ -466,6 +468,7 @@ enum AppEvent {
     Waveform(
         PathBuf,
         u64,
+        (u64, Option<towavue_core::AudioTrackId>),
         Result<towavue_runtime_windows::PreviewImage, towavue_runtime_windows::PreviewError>,
     ),
     DetailedWaveform(
@@ -1086,6 +1089,7 @@ struct Application<N> {
     audio_queues: BTreeMap<TabId, audio_playback::AudioTab>,
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     preview_rates: BTreeMap<TabId, f32>,
+    audio_preview_choices: BTreeMap<TabId, audio_preview::Choice>,
     language_settings: localization::Settings,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
@@ -1217,6 +1221,7 @@ struct Application<N> {
     media_sequence: u64,
     failed_thumbnails: BTreeSet<u64>,
     waveform_loading: bool,
+    waveform_request: u64,
     thumbnail_loading: Option<u64>,
     thumbnail_request: u64,
     session: Option<PlaybackSession>,
@@ -1386,6 +1391,7 @@ where
             audio_queues: BTreeMap::new(),
             playback_volumes: BTreeMap::new(),
             preview_rates: BTreeMap::new(),
+            audio_preview_choices: BTreeMap::new(),
             language_settings: localization::Settings::default(),
             last_playback_volume: Arc::default(),
             playback_volume_preferences: None,
@@ -1521,6 +1527,7 @@ where
             media_sequence: 0,
             failed_thumbnails: BTreeSet::new(),
             waveform_loading: false,
+            waveform_request: 0,
             thumbnail_loading: None,
             thumbnail_request: 0,
             session: None,
@@ -2423,13 +2430,14 @@ where
         let notify = Arc::clone(&self.notify);
         let media_generation = self.media_generation;
         self.playback_origin = self.window_key.map(|key| (key, media_generation));
-        match PlaybackSession::open_input(
+        match PlaybackSession::open_input_with_audio(
             self.media_input(&path),
             graphics_device,
             self.edit_state().volume * self.playback_volume(),
             self.preview_rate(),
             self.edit_state().playback_range(),
             false,
+            self.audio_selection_for(self.displayed_tab, &path),
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
             Ok(session) => {
@@ -2471,12 +2479,19 @@ where
         let notify = Arc::clone(&self.notify);
         let generation = self.media_generation;
         self.waveform_loading = true;
+        self.waveform_request = self.waveform_request.wrapping_add(1);
+        let request = (self.waveform_request, self.waveform_audio_track());
+        let video = self.media_kind == Some(MediaKind::Video);
         self.waveform_detail.restart_pending();
         let input = self.media_input(&path);
         self.waveform_worker.submit(move |cancellation| {
             let cache = cache.cancellable(cancellation);
-            let result = cache.waveform(input.path(), 640, 96);
-            notify(AppEvent::Waveform(path, generation, result));
+            let result = if video {
+                cache.video_waveform(input.path(), request.1, 640, 96)
+            } else {
+                cache.waveform(input.path(), 640, 96)
+            };
+            notify(AppEvent::Waveform(path, generation, request, result));
         });
     }
 
@@ -3578,8 +3593,10 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Waveform(path, generation, result)
-                if self.path.as_ref() == Some(&path) && generation == self.media_generation =>
+            AppEvent::Waveform(path, generation, request, result)
+                if self.path.as_ref() == Some(&path)
+                    && generation == self.media_generation
+                    && request == (self.waveform_request, self.waveform_audio_track()) =>
             {
                 self.waveform_loading = false;
                 match result {
@@ -3634,7 +3651,7 @@ where
                     self.request_redraw();
                 }
             }
-            AppEvent::Waveform(_, _, _) | AppEvent::Thumbnail(_, _, _, _, _) => {}
+            AppEvent::Waveform(_, _, _, _) | AppEvent::Thumbnail(_, _, _, _, _) => {}
         }
     }
 
@@ -5531,6 +5548,9 @@ where
                         action: None,
                         language: self.language_settings,
                         language_action: None,
+                        audio_tracks: self.session.as_ref().map(PlaybackSession::audio_tracks),
+                        audio_selection: self.audio_selection(),
+                        audio_action: None,
                         choices: menu::Choices {
                             video_quality: self.video_export_quality(),
                             volume_step: self.volume_step_percent,
@@ -5553,6 +5573,13 @@ where
                         !self.modal_input_blocked(),
                         &mut recent,
                     );
+                    if let Some(selection) = recent.audio_action {
+                        actions.push(UiAction::AudioTrack(
+                            self.displayed_tab,
+                            self.media_generation,
+                            selection,
+                        ));
+                    }
                     if let Some(language) = recent.language_action {
                         actions.push(UiAction::Language(language));
                     }
@@ -7692,6 +7719,11 @@ where
                 self.scrub_image(path, generation, owner);
             }
             UiAction::Language(language) => (self.notify)(AppEvent::Language(language)),
+            UiAction::AudioTrack(tab, generation, selection) => {
+                if tab == self.displayed_tab && generation == self.media_generation {
+                    self.select_audio_track(selection);
+                }
+            }
             UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::ThumbnailMenu(intent) => self.handle_thumbnail_menu(intent),
             UiAction::TimelineMenu(intent) => self.handle_timeline_menu(intent),
@@ -8010,6 +8042,7 @@ where
             CommandId::PreviousSameKind => self.navigate(false, true),
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
+            CommandId::CycleAudioTrack => self.cycle_audio_track(),
             CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
             CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
             CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
@@ -10128,6 +10161,7 @@ where
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
         self.preview_rates.remove(&id);
+        self.audio_preview_choices.remove(&id);
         if remember
             && !deleted
             && let Some(path) = removed.target.current_path()
@@ -17931,6 +17965,7 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 source.clone(),
                 app.media_generation.wrapping_add(1),
+                (app.waveform_request, app.waveform_audio_track()),
                 Err(towavue_runtime_windows::PreviewError::Generate(
                     "stale result".into(),
                 )),
@@ -17942,6 +17977,7 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 source.clone(),
                 app.media_generation,
+                (app.waveform_request, app.waveform_audio_track()),
                 Ok(towavue_runtime_windows::PreviewImage {
                     width: 2,
                     height: 1,
@@ -17957,6 +17993,7 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 source,
                 app.media_generation,
+                (app.waveform_request, app.waveform_audio_track()),
                 Err(towavue_runtime_windows::PreviewError::Generate(
                     "fixture has no audio".into(),
                 )),
@@ -27684,6 +27721,7 @@ mod tests {
             app.handle_app_event(AppEvent::Waveform(
                 path.clone(),
                 app.media_generation,
+                (app.waveform_request, app.waveform_audio_track()),
                 Err(towavue_runtime_windows::PreviewError::Generate(
                     "late waveform".into(),
                 )),
@@ -27788,7 +27826,12 @@ mod tests {
                 "old waveform".into(),
             )),
         ] {
-            app.handle_app_event(AppEvent::Waveform(path.clone(), old, result));
+            app.handle_app_event(AppEvent::Waveform(
+                path.clone(),
+                old,
+                (app.waveform_request, app.waveform_audio_track()),
+                result,
+            ));
             assert!(app.waveform.is_none());
             assert!(app.waveform_loading);
             assert!(app.status_message.is_none());
@@ -27798,7 +27841,12 @@ mod tests {
             app.media_generation,
             Ok(Duration::from_secs(2)),
         ));
-        app.handle_app_event(AppEvent::Waveform(path, app.media_generation, Ok(preview)));
+        app.handle_app_event(AppEvent::Waveform(
+            path,
+            app.media_generation,
+            (app.waveform_request, app.waveform_audio_track()),
+            Ok(preview),
+        ));
         assert_eq!(app.media_duration, Some(Duration::from_secs(2)));
         assert!(app.waveform.is_some());
         assert!(!app.waveform_loading);

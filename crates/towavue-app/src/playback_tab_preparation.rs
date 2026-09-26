@@ -180,13 +180,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let volume = self.playback_volume_for(id) * edit.volume;
         let notify = Arc::clone(&self.notify);
         let input = self.media_input_for(Some(id), &path);
-        let result = PlaybackSession::open_input(
+        let result = PlaybackSession::open_input_with_audio(
             input,
             device,
             volume,
             self.preview_rate_for(id),
             edit.playback_range(),
             true,
+            self.audio_selection_for(Some(id), &path),
             move |event| notify(AppEvent::Playback(instance, event)),
         );
         let saved = self

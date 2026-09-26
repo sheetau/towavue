@@ -40,7 +40,7 @@ fn preview_workers_keep_typed_causes_until_receiving_window_and_reject_stale_fai
                     &format!("プレビューキャッシュの読み書きに失敗しました: {error}"),
                 )
             }
-            AppEvent::Waveform(_, _, Err(PreviewError::Io(error))) => {
+            AppEvent::Waveform(_, _, _, Err(PreviewError::Io(error))) => {
                 delivered.1 = true;
                 assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
                 formatted::waveform_failed(
@@ -63,6 +63,7 @@ fn preview_workers_keep_typed_causes_until_receiving_window_and_reject_stale_fai
     app.handle_app_event(AppEvent::Waveform(
         path.clone(),
         generation.wrapping_add(1),
+        (app.waveform_request, app.waveform_audio_track()),
         Err(PreviewError::Message(Text::WaveformNoAudio)),
     ));
     assert_eq!(app.status_notice(), notice);
@@ -84,6 +85,7 @@ fn preview_workers_keep_typed_causes_until_receiving_window_and_reject_stale_fai
     app.handle_app_event(AppEvent::Waveform(
         path,
         generation,
+        (app.waveform_request, app.waveform_audio_track()),
         Err(PreviewError::Message(Text::WaveformNoAudio)),
     ));
     assert_eq!(

@@ -85,6 +85,8 @@ templates! {
     file_preview(path: &str) => ("Preview: {path}", "プレビュー: {path}"),
     tab_metadata_unavailable(error: &str) => ("Tab metadata unavailable: {error}", "タブのメタデータを取得できません: {error}"),
     recent_files_unavailable(error: &str) => ("Recent files unavailable: {error}", "最近使ったファイルを取得できません: {error}"),
+    command_history_unavailable(error: &str) => ("Command history unavailable: {error}", "コマンド履歴を取得できません: {error}"),
+    file_search_folder_failed(error: &str) => ("Cannot search this folder: {error}", "このフォルダーを検索できません: {error}"),
     export_start_failed(error: &str) => ("could not start FFmpeg export: {error}", "FFmpegの書き出しを開始できませんでした: {error}"),
     ffmpeg_export_failed(error: &str) => ("FFmpeg export failed: {error}", "FFmpegの書き出しに失敗しました: {error}"),
     export_output_failed(error: &str) => ("could not prepare or publish export: {error}", "書き出しの準備または保存先への書き込みに失敗しました: {error}"),

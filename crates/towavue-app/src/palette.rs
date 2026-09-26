@@ -437,8 +437,9 @@ impl CommandPalette {
         if !self.folders {
             if let Some(result) = search {
                 if let Some(error) = &result.error {
+                    let error = error.message(language);
                     ui.add(
-                        egui::Label::new(egui::RichText::new(error).weak())
+                        egui::Label::new(egui::RichText::new(&error).weak())
                             .truncate()
                             .show_tooltip_when_elided(false),
                     )
@@ -1196,8 +1197,9 @@ mod tests {
                 .0,
                 &selected,
             );
-            result.error =
-                Some("Cannot search this folder: ".to_owned() + &"long diagnostic ".repeat(40));
+            result.error = Some(
+                ("Cannot search this folder: ".to_owned() + &"long diagnostic ".repeat(40)).into(),
+            );
             for _ in 0..3 {
                 open_frame_at(
                     &context,
@@ -1218,6 +1220,54 @@ mod tests {
                 .0,
                 &selected,
             );
+        }
+    }
+
+    #[test]
+    fn file_search_refusal_is_localized_at_paint_time_without_changing_results() {
+        use towavue_runtime_windows::{FileSearchFailure, FileSearchRequest, FileSearchResult};
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            let mut palette = CommandPalette::default();
+            palette.open_files(false);
+            palette.query = "image".into();
+            let result = FileSearchResult {
+                request: FileSearchRequest {
+                    root: PathBuf::from("C:/owned"),
+                    query: "image".into(),
+                },
+                paths: vec![],
+                matches: 0,
+                skipped: 0,
+                error: Some(FileSearchFailure::InvalidRequest),
+            };
+            let sources = OpenSources {
+                search: Some(&result),
+                ..Default::default()
+            };
+            for (language, expected) in [
+                (
+                    crate::localization::Language::Japanese,
+                    "検索にはフォルダーの絶対パスと空でない検索語が必要です",
+                ),
+                (
+                    crate::localization::Language::English,
+                    "Search requires an absolute folder and a nonempty query",
+                ),
+            ] {
+                crate::localization::set_language(&context, language);
+                let layout = (egui::vec2(320.0, 240.0), 30.0, density);
+                for _ in 0..3 {
+                    open_frame_at(&context, &mut palette, sources, vec![], layout);
+                }
+                let output = open_frame_at(&context, &mut palette, sources, vec![], layout).0;
+                let (text, clip) = picker_text(&output, expected).expect("localized error label");
+                assert!(clip.intersects(text.visual_bounding_rect()));
+                assert!(result.paths.is_empty());
+                assert_eq!(result.matches, 0);
+                assert_eq!(palette.query, "image");
+            }
         }
     }
 

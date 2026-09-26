@@ -3439,7 +3439,7 @@ where
                         }
                     }
                     if let Some(error) = update.error {
-                        self.set_status(error);
+                        self.set_status(error.message(language));
                     }
                     self.request_redraw();
                 }

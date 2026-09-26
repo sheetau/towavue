@@ -1,4 +1,8 @@
 //! A bounded host-owned writer for an explicit next-launch language choice.
+mod error;
+pub use error::LanguagePreferenceError;
+use towavue_core::localization::Text;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -19,7 +23,7 @@ impl LanguagePreferences {
     /// replace an unreadable or unknown preference with that fallback.
     pub fn open(
         path: PathBuf,
-        completed: impl Fn(Result<Language, String>) + Send + 'static,
+        completed: impl Fn(Result<Language, LanguagePreferenceError>) + Send + 'static,
     ) -> io::Result<Self> {
         let initial = read(&path)?.unwrap_or_default();
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -30,7 +34,7 @@ impl LanguagePreferences {
                     completed(
                         write(&path, language)
                             .map(|()| language)
-                            .map_err(|e| e.to_string()),
+                            .map_err(LanguagePreferenceError::from),
                     );
                 }
             })?;
@@ -55,7 +59,7 @@ impl LanguagePreferences {
             .map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::WouldBlock,
-                    "Language preference writer is busy",
+                    LanguagePreferenceError::Message(Text::LanguagePreferenceBusy),
                 )
             })
     }
@@ -73,7 +77,10 @@ impl Drop for LanguagePreferences {
 }
 
 fn invalid() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "Invalid language preference")
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        LanguagePreferenceError::Message(Text::LanguagePreferenceInvalid),
+    )
 }
 
 fn read(path: &Path) -> io::Result<Option<Language>> {

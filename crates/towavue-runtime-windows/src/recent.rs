@@ -6,6 +6,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod error;
+pub use error::RecentFailure;
+use error::invalid_reason;
+use towavue_core::localization::Text;
+
 mod commands;
 mod pending;
 #[cfg(test)]
@@ -59,7 +64,7 @@ pub struct RecentUpdate {
     pub hidden_folders: Vec<PathBuf>,
     /// Gallery-only omissions. Persisted history and resume positions are untouched.
     pub missing_files: Vec<PathBuf>,
-    pub error: Option<String>,
+    pub error: Option<RecentFailure>,
 }
 
 #[derive(Default)]
@@ -113,7 +118,7 @@ impl RecentFiles {
                         .map(|entry: &RecentEntry| &entry.path)
                         .collect();
                     missing_files.retain(|path| !clear && !opened.contains(path));
-                    let mut error = if load_files || clear || !pending.is_empty() {
+                    let file_error = if load_files || clear || !pending.is_empty() {
                         match update_pending(&path, &pending, clear) {
                             Ok(loaded) => {
                                 paths = loaded.entries;
@@ -129,13 +134,14 @@ impl RecentFiles {
                                     hidden_folders.clear();
                                 }
                                 apply_pending(&mut paths, &mut hidden_folders, &pending);
-                                Some(format!("Recent files unavailable: {error}"))
+                                Some(error)
                             }
                         }
                     } else {
                         None
                     };
                     let mut commands_available = true;
+                    let mut command_failure = None;
                     if load_commands || !command_pending.is_empty() {
                         match commands::update(&command_path, &command_pending) {
                             Ok(loaded) => {
@@ -145,14 +151,11 @@ impl RecentFiles {
                             }
                             Err(command_error) => {
                                 commands_available = false;
-                                let message =
-                                    format!("Command history unavailable: {command_error}");
-                                error = Some(error.map_or(message.clone(), |error| {
-                                    format!("{error}; {message}")
-                                }));
+                                command_failure = Some(command_error);
                             }
                         }
                     }
+                    let error = RecentFailure::new(file_error, command_failure);
                     let retained: HashSet<_> = paths.iter().map(|entry| &entry.path).collect();
                     missing_files.retain(|path| retained.contains(path));
                     let publish = |missing_files: &[PathBuf]| {
@@ -414,9 +417,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
     let mut text = String::new();
     file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
     if text.len() as u64 > MAX_BYTES {
-        return Err(std::io::Error::other(
-            "Recent files list exceeds its size limit.",
-        ));
+        return Err(invalid_reason(Text::RecentHistorySize));
     }
     let mut lines = text.lines();
     let header = lines.next();
@@ -424,9 +425,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
         header,
         Some(HEADER | KIND_HEADER | TIMESTAMP_HEADER | LEGACY_HEADER)
     ) {
-        return Err(std::io::Error::other(
-            "Unrecognized recent files format; existing file was retained.",
-        ));
+        return Err(invalid_reason(Text::RecentHistoryFormat));
     }
     let mut paths = Vec::new();
     let mut hidden_folders = Vec::new();
@@ -440,9 +439,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
         {
             let folder = PathBuf::from(value);
             if !folder.is_absolute() || value.contains('\0') || hidden_folders.len() >= FILE_LIMIT {
-                return Err(std::io::Error::other(
-                    "Invalid removed folder entry; existing file was retained.",
-                ));
+                return Err(invalid_reason(Text::RecentRemovedFolder));
             }
             if hidden_seen.insert(folder.clone()) {
                 hidden_folders.push(folder);
@@ -454,9 +451,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
                 Some(("F", rest)) => (RecentKind::File, rest),
                 Some(("D", rest)) => (RecentKind::Folder, rest),
                 _ => {
-                    return Err(std::io::Error::other(
-                        "Invalid recent entry kind; existing file was retained.",
-                    ));
+                    return Err(invalid_reason(Text::RecentEntryKind));
                 }
             }
         } else {
@@ -465,9 +460,9 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
         let (opened_at, value) = if header == Some(LEGACY_HEADER) {
             (None, line)
         } else {
-            let (stamp, value) = line.split_once('\t').ok_or_else(|| {
-                std::io::Error::other("Invalid recent timestamp entry; existing file was retained.")
-            })?;
+            let (stamp, value) = line
+                .split_once('\t')
+                .ok_or_else(|| invalid_reason(Text::RecentTimestampEntry))?;
             let stamp = if stamp == "-" {
                 None
             } else {
@@ -476,11 +471,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
                         .parse::<u64>()
                         .ok()
                         .filter(|value| *value <= 253_402_300_799_999)
-                        .ok_or_else(|| {
-                            std::io::Error::other(
-                                "Invalid recent timestamp; existing file was retained.",
-                            )
-                        })?,
+                        .ok_or_else(|| invalid_reason(Text::RecentTimestamp))?,
                 )
             };
             (stamp, value)
@@ -491,9 +482,7 @@ fn read_history(path: &Path) -> std::io::Result<StoredHistory> {
             RecentKind::Folder => &mut folders,
         };
         if !path.is_absolute() || line.contains('\0') || *count == entry_limit(kind) {
-            return Err(std::io::Error::other(
-                "Invalid recent files entry; existing file was retained.",
-            ));
+            return Err(invalid_reason(Text::RecentEntry));
         }
         if seen.insert(path.clone()) {
             *count += 1;
@@ -562,7 +551,7 @@ fn apply_pending(
 fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Result<StoredHistory> {
     let parent = path
         .parent()
-        .ok_or_else(|| std::io::Error::other("Recent files path has no parent."))?;
+        .ok_or_else(|| invalid_reason(Text::RecentHistoryParent))?;
     fs::create_dir_all(parent)?;
     let lock = OpenOptions::new()
         .read(true)
@@ -587,18 +576,14 @@ fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Resul
             .opened_at
             .is_some_and(|stamp| stamp > 253_402_300_799_999)
         {
-            return Err(std::io::Error::other(
-                "Recent timestamp is out of range; existing file was retained.",
-            ));
+            return Err(invalid_reason(Text::RecentTimestampRange));
         }
         let value = item
             .path
             .to_str()
             .filter(|value| !value.contains(['\n', '\r', '\0']))
             .filter(|_| item.path.is_absolute())
-            .ok_or_else(|| {
-                std::io::Error::other("Recent path cannot be represented in the history file.")
-            })?;
+            .ok_or_else(|| invalid_reason(Text::RecentPathEncoding))?;
         text.push_str(match item.kind {
             RecentKind::File => "F\t",
             RecentKind::Folder => "D\t",
@@ -617,17 +602,13 @@ fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Resul
             .to_str()
             .filter(|value| !value.contains(['\n', '\r', '\0']))
             .filter(|_| folder.is_absolute())
-            .ok_or_else(|| {
-                std::io::Error::other("Removed folder cannot be represented in history.")
-            })?;
+            .ok_or_else(|| invalid_reason(Text::RecentRemovedFolderEncoding))?;
         text.push_str("H\t");
         text.push_str(value);
         text.push('\n');
     }
     if text.len() as u64 > MAX_BYTES {
-        return Err(std::io::Error::other(
-            "Recent files list exceeds its size limit.",
-        ));
+        return Err(invalid_reason(Text::RecentHistorySize));
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -654,6 +635,60 @@ fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_worker_preserves_both_invalid_histories_and_localizes_shared_failures() {
+        use std::error::Error;
+        use towavue_core::localization::Language;
+        let path = fixture("localized-failures");
+        let commands = path.with_file_name("command-history.txt");
+        fs::write(&path, b"unknown files").expect("files fixture");
+        fs::write(&commands, b"unknown commands").expect("commands fixture");
+        let media = path.with_file_name("source.png");
+        fs::write(&media, b"untouched media").expect("owned source");
+        let (send, receive) = std::sync::mpsc::channel();
+        let recent = RecentFiles::new(path.clone(), move || {
+            let _ = send.send(());
+        })
+        .expect("worker");
+        receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("initial failure");
+        let update = recent.take_completed().expect("published failures");
+        assert!(update.commands.is_none() && update.entries.is_empty());
+        let failure = update.error.expect("both stores failed");
+        assert_eq!(
+            failure.to_string(),
+            "Recent files unavailable: Unrecognized recent files format; existing file was retained.; Command history unavailable: Unrecognized command history format; existing file was retained."
+        );
+        let japanese = "最近使ったファイルを取得できません: 最近使ったファイルの履歴形式が不明です。既存のファイルは保持しました。; コマンド履歴を取得できません: コマンド履歴の形式が不明です。既存のファイルは保持しました。";
+        assert_eq!(failure.message(Language::Japanese), japanese);
+        assert_eq!(failure.clone().message(Language::Japanese), japanese);
+        assert_eq!(
+            failure
+                .source()
+                .expect("original I/O")
+                .downcast_ref::<std::io::Error>()
+                .expect("I/O type")
+                .kind(),
+            std::io::ErrorKind::Other
+        );
+        recent.record(media.clone());
+        recent.record_command(towavue_core::CommandId::OpenFile);
+        drop(recent);
+        assert_eq!(fs::read(&path).expect("files retained"), b"unknown files");
+        assert_eq!(
+            fs::read(&commands).expect("commands retained"),
+            b"unknown commands"
+        );
+        assert_eq!(
+            fs::read(&media).expect("source retained"),
+            b"untouched media"
+        );
+        fs::remove_file(commands).expect("owned command fixture");
+        fs::remove_file(media).expect("owned source fixture");
+        clean(&path);
+    }
 
     fn update(path: &Path, pending: &[RecentEntry]) -> std::io::Result<Vec<RecentEntry>> {
         super::update(path, pending, false)

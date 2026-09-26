@@ -122,11 +122,18 @@ fn language_save_failure_preserves_selection_and_closed_owner_notice_moves_to_a_
     );
     std::fs::write(&path, "future version").expect("foreign setting");
     host.select_language(first, Language::Japanese);
-    host.route(Event::LanguageSaved(
-        receive
-            .recv_timeout(Duration::from_secs(5))
-            .expect("failure"),
-    ));
+    let failure = receive
+        .recv_timeout(Duration::from_secs(5))
+        .expect("failure");
+    host.language.settings.display = Language::Japanese;
+    host.broadcast_language_settings();
+    host.route(Event::LanguageSaved(failure));
+    assert_eq!(
+        host.windows[&first].status_notice().as_deref(),
+        Some("表示言語を保存できませんでした: 表示言語の設定が不正です")
+    );
+    host.language.settings.display = Language::English;
+    host.broadcast_language_settings();
     assert_eq!(host.language.settings.next, Language::English);
     assert!(!host.language.settings.saving);
     assert!(host.language.notice.is_none());

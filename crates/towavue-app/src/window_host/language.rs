@@ -1,6 +1,6 @@
 use super::*;
 use crate::localization::{Language, Settings, Text};
-use towavue_runtime_windows::LanguagePreferences;
+use towavue_runtime_windows::{LanguagePreferenceError, LanguagePreferences};
 
 #[derive(Default)]
 pub(super) struct State {
@@ -61,7 +61,7 @@ impl WindowHost {
             let app = self.windows.get_mut(&origin).expect("language owner");
             app.set_status(towavue_core::localization::formatted::language_save_failed(
                 app.language(),
-                &error.to_string(),
+                &LanguagePreferenceError::io_message(&error, app.language()),
             ));
             return;
         }
@@ -80,7 +80,10 @@ impl WindowHost {
         }
     }
 
-    pub(super) fn finish_language_save(&mut self, result: Result<Language, String>) {
+    pub(super) fn finish_language_save(
+        &mut self,
+        result: Result<Language, LanguagePreferenceError>,
+    ) {
         let Some(origin) = self.language.origin.take() else {
             return;
         };
@@ -98,9 +101,10 @@ impl WindowHost {
                 self.language.notice = Some((origin, message.clone()));
                 message
             }
-            Err(error) => {
-                towavue_core::localization::formatted::language_save_failed(display, &error)
-            }
+            Err(error) => towavue_core::localization::formatted::language_save_failed(
+                display,
+                &error.message(display),
+            ),
         };
         self.broadcast_language_settings();
         let target = self

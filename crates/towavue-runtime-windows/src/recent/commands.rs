@@ -1,7 +1,8 @@
+use super::invalid_reason;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use towavue_core::CommandId;
+use towavue_core::{CommandId, localization::Text};
 
 pub const LIMIT: usize = 50;
 const HEADER: &str = "towavue command history v1";
@@ -23,7 +24,7 @@ pub(super) fn update(
 ) -> std::io::Result<Vec<CommandId>> {
     fs::create_dir_all(
         path.parent()
-            .ok_or_else(|| std::io::Error::other("Command history path has no parent."))?,
+            .ok_or_else(|| invalid_reason(Text::CommandHistoryParent))?,
     )?;
     let lock = OpenOptions::new()
         .read(true)
@@ -38,15 +39,11 @@ pub(super) fn update(
             let mut text = String::new();
             file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
             if text.len() as u64 > MAX_BYTES {
-                return Err(std::io::Error::other(
-                    "Command history exceeds its size limit.",
-                ));
+                return Err(invalid_reason(Text::CommandHistorySize));
             }
             let mut lines = text.lines();
             if lines.next() != Some(HEADER) {
-                return Err(std::io::Error::other(
-                    "Unrecognized command history format; existing file was retained.",
-                ));
+                return Err(invalid_reason(Text::CommandHistoryFormat));
             }
             // Unknown command identifiers may belong to a newer version; ignore them
             // without rewriting the file merely because this window opened.
@@ -250,11 +247,9 @@ mod tests {
                 .expect("delivery");
             if let Some(result) = recent.take_completed() {
                 assert!(result.commands.is_none());
-                assert!(
-                    result
-                        .error
-                        .is_some_and(|error| error.contains("Command history unavailable"))
-                );
+                assert!(result.error.is_some_and(|error| {
+                    error.to_string().contains("Command history unavailable")
+                }));
                 if !result.entries.is_empty() {
                     break;
                 }

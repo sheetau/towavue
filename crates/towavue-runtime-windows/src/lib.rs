@@ -59,7 +59,7 @@ mod orientation;
 mod pinned_cursor;
 mod playback;
 mod playback_failure;
-pub use language_preferences::LanguagePreferences;
+pub use language_preferences::{LanguagePreferenceError, LanguagePreferences};
 pub use playback_failure::PlaybackFailure;
 mod playback_preferences;
 pub use playback_preferences::PlaybackVolumePreferences;
@@ -88,7 +88,9 @@ pub use taskbar::{
     NativeTaskbar, TaskbarAction, TaskbarEvent, TaskbarIcons, TaskbarProgress, TaskbarTransport,
 };
 
-pub use recent::{COMMAND_HISTORY_LIMIT, RecentEntry, RecentFiles, RecentKind, RecentUpdate};
+pub use recent::{
+    COMMAND_HISTORY_LIMIT, RecentEntry, RecentFailure, RecentFiles, RecentKind, RecentUpdate,
+};
 mod tempo;
 mod watch;
 mod waveform;
@@ -126,7 +128,9 @@ pub use file_operation::{
     FileRecycleReport, inspect_file_operation_source, start_file_operation, start_file_recycling,
     start_file_recycling_retaining_source,
 };
-pub use file_search::{FILE_SEARCH_LIMIT, FileSearch, FileSearchRequest, FileSearchResult};
+pub use file_search::{
+    FILE_SEARCH_LIMIT, FileSearch, FileSearchFailure, FileSearchRequest, FileSearchResult,
+};
 pub use fonts::{UiFontFallback, japanese_ui_font, ui_font_fallbacks, ui_symbol_font};
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};

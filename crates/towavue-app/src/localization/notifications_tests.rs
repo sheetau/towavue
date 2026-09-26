@@ -2,6 +2,66 @@ use super::Language;
 use crate::*;
 
 #[test]
+fn recent_history_failures_use_the_receiving_window_language_and_keep_media() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::notifications_tests::recent_history_failures_use_the_receiving_window_language_and_keep_media",
+    ) else {
+        return;
+    };
+    let history = root.join("owned-recent.txt");
+    let commands = root.join("command-history.txt");
+    std::fs::write(&history, b"unknown files").expect("files fixture");
+    std::fs::write(&commands, b"unknown commands").expect("commands fixture");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let path = root.join("unopened-source.png");
+    let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+    app.path = Some(path.clone());
+    app.media_kind = Some(MediaKind::Image);
+    app.edits
+        .entry(tab)
+        .or_default()
+        .push(EditOperation::FlipHorizontal, MediaKind::Image);
+    let edits = app.edits.clone();
+    let (send, receive) = std::sync::mpsc::channel();
+    app.recent_files = Some(
+        towavue_runtime_windows::RecentFiles::new(history.clone(), move || {
+            let _ = send.send(());
+        })
+        .expect("worker"),
+    );
+    for (language, expected) in [
+        (
+            Language::Japanese,
+            "最近使ったファイルを取得できません: 最近使ったファイルの履歴形式が不明です。既存のファイルは保持しました。; コマンド履歴を取得できません: コマンド履歴の形式が不明です。既存のファイルは保持しました。",
+        ),
+        (
+            Language::English,
+            "Recent files unavailable: Unrecognized recent files format; existing file was retained.; Command history unavailable: Unrecognized command history format; existing file was retained.",
+        ),
+    ] {
+        receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("history completion");
+        app.language_settings.display = language;
+        app.handle_app_event(AppEvent::RecentFilesReady);
+        assert_eq!(app.status_notice().as_deref(), Some(expected));
+        assert_eq!(app.path.as_ref(), Some(&path));
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        assert_eq!(app.edits, edits);
+        app.recent_files.as_ref().expect("worker").refresh();
+    }
+    drop(app);
+    assert_eq!(
+        std::fs::read(history).expect("files retained"),
+        b"unknown files"
+    );
+    assert_eq!(
+        std::fs::read(commands).expect("commands retained"),
+        b"unknown commands"
+    );
+}
+
+#[test]
 fn japanese_image_failures_preserve_owners_reading_pages_and_external_details() {
     use towavue_runtime_windows::{DecodeError, DecodedImageFrame, ImageDecodeError, LoadedImages};
     let Some(root) = crate::tests::isolated_test_root(

@@ -55,7 +55,7 @@ pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
     Update(u64, towavue_runtime_windows::update::UpdateEvent),
     PlaybackVolumePreferenceFailed(String),
-    LanguageSaved(Result<localization::Language, String>),
+    LanguageSaved(Result<localization::Language, towavue_runtime_windows::LanguagePreferenceError>),
     Window(WindowKey, AppEvent),
     Accessibility(accesskit_winit::Event),
 }

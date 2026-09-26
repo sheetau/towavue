@@ -1,3 +1,6 @@
+mod error;
+pub use error::FileSearchFailure;
+
 use std::collections::BinaryHeap;
 use std::fs;
 use std::os::windows::fs::MetadataExt;
@@ -25,7 +28,7 @@ pub struct FileSearchResult {
     pub matches: u64,
     /// Unreadable entries, reparse points, and directories beyond the depth bound.
     pub skipped: u64,
-    pub error: Option<String>,
+    pub error: Option<FileSearchFailure>,
 }
 
 #[derive(Default)]
@@ -119,13 +122,13 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
         return None;
     }
     if !result.request.root.is_absolute() || result.request.query.trim().is_empty() {
-        result.error = Some("Search requires an absolute folder and a nonempty query".into());
+        result.error = Some(FileSearchFailure::InvalidRequest);
         return Some(result);
     }
     let root = match fs::read_dir(&result.request.root) {
         Ok(root) => root,
         Err(error) => {
-            result.error = Some(format!("Cannot search this folder: {error}"));
+            result.error = Some(FileSearchFailure::Folder(error));
             return (!cancellation.is_cancelled()).then_some(result);
         }
     };
@@ -397,7 +400,35 @@ mod tests {
         worker.update(Some(missing));
         rx.recv_timeout(Duration::from_secs(5))
             .expect("missing folder completion");
-        assert!(worker.result().expect("error result").error.is_some());
+        let result = worker.result().expect("error result");
+        let error = result.error.as_ref().expect("folder failure");
+        let FileSearchFailure::Folder(native) = error else {
+            panic!("typed I/O failure")
+        };
+        assert_eq!(native.kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(
+            error.to_string(),
+            format!("Cannot search this folder: {native}")
+        );
+        assert_eq!(
+            error.message(towavue_core::localization::Language::Japanese),
+            format!("このフォルダーを検索できません: {native}")
+        );
+        let invalid = scan(
+            FileSearchRequest {
+                root: PathBuf::from("relative"),
+                query: "image".into(),
+            },
+            &Cancellation::default(),
+        )
+        .expect("invalid request result");
+        assert_eq!(
+            invalid
+                .error
+                .expect("request refusal")
+                .message(towavue_core::localization::Language::Japanese),
+            "検索にはフォルダーの絶対パスと空でない検索語が必要です"
+        );
         worker.update(None);
         assert!(worker.result().is_none());
         let cancellation = Cancellation::default();

@@ -27,7 +27,9 @@ impl VideoResizeDialog {
             geometry.2,
         )
         .ok_or(Text::VideoResizeEven.in_language(display_language))?;
-        self.snapshot.validate(EditOperation::ResizeVideo(value))?;
+        self.snapshot
+            .validate(EditOperation::ResizeVideo(value))
+            .map_err(|error| error.message(display_language))?;
         Ok(value)
     }
 

@@ -14,11 +14,11 @@ pub(super) struct VideoEditSnapshot {
 }
 
 impl VideoEditSnapshot {
-    pub fn validate(&self, operation: EditOperation) -> Result<(), String> {
+    pub fn validate(&self, operation: EditOperation) -> Result<(), RenderError> {
         self.geometry_with(operation).map(|_| ())
     }
 
-    pub fn geometry_with(&self, operation: EditOperation) -> Result<(u32, u32, f32), String> {
+    pub fn geometry_with(&self, operation: EditOperation) -> Result<(u32, u32, f32), RenderError> {
         let mut edits = self.operations.clone();
         edits.push(operation);
         let edits = towavue_core::compose_rotations(&edits);
@@ -29,15 +29,20 @@ impl VideoEditSnapshot {
             &edits,
             self.max_side,
         )
-        .map_err(|error| error.to_string())
     }
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn capture_video_edit(&self) -> Result<VideoEditSnapshot, String> {
         let geometry = self.validate_video_operations(self.video_operations())?;
-        let tab = self.tabs.active().ok_or("Video tab is unavailable")?;
-        let path = self.path.as_ref().ok_or("Video path is unavailable")?;
+        let tab = self
+            .tabs
+            .active()
+            .ok_or(localization::Text::VideoEditTabUnavailable.in_language(self.language()))?;
+        let path = self
+            .path
+            .as_ref()
+            .ok_or(localization::Text::VideoEditPathUnavailable.in_language(self.language()))?;
         let session = self.session.as_ref().expect("validated video session");
         Ok(VideoEditSnapshot {
             tab: tab.id,

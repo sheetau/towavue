@@ -50,8 +50,9 @@ fn language_preferences_publish_before_completion_and_drain_on_shutdown() {
         assert_eq!(
             receive
                 .recv_timeout(Duration::from_secs(5))
-                .expect("completed"),
-            Ok(language)
+                .expect("completed")
+                .expect("saved language"),
+            language
         );
         assert_eq!(read(&fixture.path()).expect("published"), Some(language));
     }
@@ -91,11 +92,17 @@ fn language_preferences_preserve_unknown_corrupt_and_externally_changed_content(
     .expect("open");
     fs::write(fixture.path(), b"external replacement").expect("external write");
     store.remember(Language::Japanese).expect("queue");
+    let error = receive
+        .recv_timeout(Duration::from_secs(5))
+        .expect("failure")
+        .expect_err("unknown content refused");
+    assert_eq!(error.to_string(), "Invalid language preference");
+    assert_eq!(
+        error.message(Language::Japanese),
+        "表示言語の設定が不正です"
+    );
     assert!(
-        receive
-            .recv_timeout(Duration::from_secs(5))
-            .expect("failure")
-            .is_err()
+        matches!(error, LanguagePreferenceError::Io(ref io) if io.kind() == io::ErrorKind::InvalidData)
     );
     assert_eq!(
         fs::read(fixture.path()).expect("intact"),
@@ -132,7 +139,34 @@ fn language_preferences_report_locked_storage_and_remain_retryable() {
     drop(lock);
     store.remember(Language::Japanese).expect("retry");
     assert_eq!(
-        receive.recv_timeout(Duration::from_secs(5)).expect("saved"),
-        Ok(Language::Japanese)
+        receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("saved")
+            .expect("retry succeeds"),
+        Language::Japanese
+    );
+}
+
+#[test]
+fn language_queue_refusal_keeps_would_block_and_native_text() {
+    let (sender, _receiver) = mpsc::sync_channel(0);
+    let store = LanguagePreferences {
+        initial: Language::English,
+        sender: Some(sender),
+        worker: None,
+    };
+    let error = store
+        .remember(Language::Japanese)
+        .expect_err("no waiting receiver");
+    assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    assert_eq!(error.to_string(), "Language preference writer is busy");
+    assert_eq!(
+        LanguagePreferenceError::io_message(&error, Language::Japanese),
+        "表示言語の設定を保存中です"
+    );
+    let external = io::Error::other("Invalid language preference");
+    assert_eq!(
+        LanguagePreferenceError::io_message(&external, Language::Japanese),
+        "Invalid language preference"
     );
 }

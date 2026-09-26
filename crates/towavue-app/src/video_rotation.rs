@@ -37,7 +37,9 @@ impl VideoRotationDialog {
         )
         .ok_or(Text::RotatedCanvasLimit.in_language(display_language))?;
         if value.tenths() != 0 {
-            self.snapshot.validate(EditOperation::RotateVideo(value))?;
+            self.snapshot
+                .validate(EditOperation::RotateVideo(value))
+                .map_err(|error| error.message(display_language))?;
         }
         Ok(value)
     }

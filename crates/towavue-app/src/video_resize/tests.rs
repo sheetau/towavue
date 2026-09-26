@@ -39,6 +39,19 @@ fn japanese_video_resize_keeps_even_display_dimensions_and_compact_actions() {
             |context| dialog.show(context),
         );
         let compact = egui::vec2(320.0, 240.0);
+        dialog.snapshot.max_side = 1;
+        let reason =
+            "動画編集がGPUの画像サイズ上限、または画像と補間係数の512 MiB上限を超えています";
+        assert_eq!(
+            dialog
+                .value_in(Language::Japanese)
+                .expect_err("device limit"),
+            reason
+        );
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == reason)));
+        ui::visible_button(&output, "サイズ変更を適用", compact, false);
+        dialog.snapshot.max_side = 16384;
         let output = ui::settle(&context, compact, |context| dialog.show(context));
         ui::visible_button(&output, "サイズ変更を適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);

@@ -1099,36 +1099,51 @@ fn run_video_decode(
 ) -> Result<(), decode::DecodeError> {
     let mut hardware_output_seen = false;
     let source = input.frame_source.clone();
-    let hardware_result = input.decode_hardware(
-        graphics_device,
-        target,
-        end,
-        &|| cancelled.load(Ordering::Relaxed),
-        |output| {
-            if !hardware_output_seen {
-                hardware_output_seen = true;
-                notify(PlaybackEvent::DecodePathSelected(
-                    generation,
-                    DecodePath::D3d11va,
-                ));
-            }
-            match output {
-                ParallelRuntimeDecodeOutput::VideoFinished => true,
-                ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
-                    metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
-                    send_video_frame(
-                        PresentationFrame::Hardware(frame),
-                        video_tx,
+    #[cfg(not(feature = "presentation-verification"))]
+    let force_software = false;
+    #[cfg(feature = "presentation-verification")]
+    let force_software = {
+        static REQUESTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *REQUESTED.get_or_init(|| std::env::var_os("TOWAVUE_SEEK_SOFTWARE").is_some())
+    };
+    // The explicit probe bypasses only playback hardware decoding. The renderer,
+    // shared device, auxiliary workers and ordinary software fallback stay intact.
+    let hardware_result = if force_software {
+        Err(decode::DecodeError::HardwareUnavailable(
+            "explicit software playback verification".into(),
+        ))
+    } else {
+        input.decode_hardware(
+            graphics_device,
+            target,
+            end,
+            &|| cancelled.load(Ordering::Relaxed),
+            |output| {
+                if !hardware_output_seen {
+                    hardware_output_seen = true;
+                    notify(PlaybackEvent::DecodePathSelected(
                         generation,
-                        cancelled,
-                        notify,
-                        timeline,
-                        source.clone(),
-                    )
+                        DecodePath::D3d11va,
+                    ));
                 }
-            }
-        },
-    );
+                match output {
+                    ParallelRuntimeDecodeOutput::VideoFinished => true,
+                    ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                        metrics.hardware_frame_count.fetch_add(1, Ordering::Relaxed);
+                        send_video_frame(
+                            PresentationFrame::Hardware(frame),
+                            video_tx,
+                            generation,
+                            cancelled,
+                            notify,
+                            timeline,
+                            source.clone(),
+                        )
+                    }
+                }
+            },
+        )
+    };
 
     match hardware_result {
         _ if cancelled.load(Ordering::Relaxed) => Err(decode::DecodeError::ConsumerClosed),

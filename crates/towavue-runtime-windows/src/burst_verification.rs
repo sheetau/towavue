@@ -49,6 +49,8 @@ pub enum BurstEvent {
     ProbeGestureFrame = 36,
     SwapChainPresentStarted = 37,
     NonblockingPresentReturned = 38,
+    ProbePlaybackState = 39,
+    HardwareDecodeStep = 40,
 }
 
 /// Eight u64 words: committed sequence, QPC tick, kind, generation, source ID, a/b/c.

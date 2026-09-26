@@ -1163,6 +1163,8 @@ fn run_parallel_workers(
                         video_packet_rx,
                         &video_output_tx,
                         preroll_before,
+                        #[cfg(feature = "presentation-verification")]
+                        cancelled,
                     ) {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
                     } else {
@@ -1406,7 +1408,47 @@ fn run_parallel_video_worker(
     packets: mpsc::Receiver<ffmpeg::Packet>,
     output: &SyncSender<ParallelDecodeOutput>,
     preroll_before: Option<MediaTime>,
+    #[cfg(feature = "presentation-verification")] cancelled: &dyn Fn() -> bool,
 ) -> Result<(), DecodeError> {
+    #[cfg(feature = "presentation-verification")]
+    let trace_id = if matches!(&config, ParallelVideoConfig::Hardware(..)) && crate::burst_enabled()
+    {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    } else {
+        0
+    };
+    #[cfg(feature = "presentation-verification")]
+    let trace = |stage, packet| {
+        if trace_id != 0 {
+            crate::record_burst(
+                crate::BurstEvent::HardwareDecodeStep,
+                trace_id,
+                None,
+                [
+                    stage,
+                    packet,
+                    preroll_before.map_or(u64::MAX, |time| time.as_nanoseconds() as u64),
+                ],
+            );
+        }
+    };
+    #[cfg(feature = "presentation-verification")]
+    trace(0, 0);
+    #[cfg(feature = "presentation-verification")]
+    let batch_size = std::env::var("TOWAVUE_PREROLL_BATCH")
+        .ok()
+        .map(|value| value.parse::<u64>().expect("preroll batch integer"))
+        .unwrap_or(0);
+    #[cfg(feature = "presentation-verification")]
+    let pacing = match &config {
+        ParallelVideoConfig::Hardware(_, device) if batch_size > 0 && preroll_before.is_some() => {
+            Some(crate::renderer::preroll_probe::PrerollProbe::new(device))
+        }
+        _ => None,
+    };
+    #[cfg(feature = "presentation-verification")]
+    let mut target_reached = false;
     let mut pipeline = match config {
         ParallelVideoConfig::Software(config) => {
             ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
@@ -1415,6 +1457,10 @@ fn run_parallel_video_worker(
             ParallelVideoPipeline::Hardware(create_hardware_video_pipeline_from(config, &device)?)
         }
     };
+    #[cfg(feature = "presentation-verification")]
+    trace(1, 0);
+    #[cfg(feature = "presentation-verification")]
+    let mut packet_index = 0;
     let mut summary = DecodeSummary::default();
     for packet in packets {
         match &mut pipeline {
@@ -1423,20 +1469,50 @@ fn run_parallel_video_worker(
                 pipeline.receive_parallel(output, &mut summary, preroll_before)?;
             }
             ParallelVideoPipeline::Hardware(pipeline) => {
-                if let Err(error) = pipeline.decoder.send_packet(&packet) {
+                #[cfg(feature = "presentation-verification")]
+                trace(2, packet_index);
+                let sent = pipeline.decoder.send_packet(&packet);
+                #[cfg(feature = "presentation-verification")]
+                trace(3, packet_index);
+                if let Err(error) = sent {
                     if summary.video_frames == 0 {
                         return Err(DecodeError::HardwareUnavailable(error.to_string()));
                     }
                     return Err(error.into());
                 }
-                pipeline.receive(
+                let received = pipeline.receive(
                     &mut |output_frame| match output_frame {
-                        RuntimeDecodeOutput::Video(frame) => output
-                            .send(ParallelDecodeOutput::HardwareVideo(frame))
-                            .is_ok(),
+                        RuntimeDecodeOutput::Video(frame) => {
+                            #[cfg(feature = "presentation-verification")]
+                            {
+                                target_reached |= preroll_before
+                                    .is_none_or(|target| frame.presentation_time >= target);
+                            }
+                            output
+                                .send(ParallelDecodeOutput::HardwareVideo(frame))
+                                .is_ok()
+                        }
                     },
                     &mut summary,
-                )?;
+                );
+                #[cfg(feature = "presentation-verification")]
+                {
+                    trace(4, packet_index);
+                    packet_index += 1;
+                }
+                received?;
+                #[cfg(feature = "presentation-verification")]
+                if !target_reached
+                    && let Some(pacing) = &pacing
+                    && packet_index.is_multiple_of(batch_size)
+                {
+                    trace(5, packet_index - 1);
+                    let completed = pacing.wait(cancelled);
+                    trace(6, packet_index - 1);
+                    if !completed {
+                        return Ok(());
+                    }
+                }
             }
         }
     }

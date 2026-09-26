@@ -5,6 +5,7 @@ const HELD_FRAMES: usize = 120;
 
 pub(super) struct Probe {
     case: usize,
+    case_count: usize,
     prepared: bool,
     active: Option<Gesture>,
     settled_waveform: bool,
@@ -35,6 +36,11 @@ impl Probe {
         assert!(matches!(mode.as_str(), "live" | "settled"));
         Some(Self {
             case: 0,
+            case_count: if std::env::var_os("TOWAVUE_SEEK_PAUSED_ONLY").is_some() {
+                2
+            } else {
+                4
+            },
             prepared: false,
             active: None,
             settled_waveform: mode == "settled",
@@ -42,7 +48,7 @@ impl Probe {
     }
 
     pub(super) fn complete(&self) -> bool {
-        self.case == 4
+        self.case == self.case_count
     }
 
     pub(super) fn before_frame(&mut self, app: &mut App) {
@@ -148,6 +154,18 @@ impl Probe {
                 app.verification_waveform_shape().1 as u64,
             ],
         );
+        let session = app.session.as_ref().expect("session");
+        let metrics = session.metrics();
+        towavue_runtime_windows::record_burst(
+            towavue_runtime_windows::BurstEvent::ProbePlaybackState,
+            self.case as u64,
+            app.path.as_deref(),
+            [
+                u64::from(session.video_refresh_pending()),
+                metrics.hardware_frame_count,
+                metrics.cpu_transfer_count,
+            ],
+        );
         let input = app.ui_state.as_mut().expect("UI state").egui_input_mut();
         input.focused = true;
         match gesture.frame {
@@ -244,8 +262,7 @@ impl Probe {
                     app.seek_latencies.len() > gesture.latency_count,
                     "press seek submitted"
                 );
-                assert!(session.metrics().hardware_frame_count > 0);
-                assert_eq!(session.metrics().cpu_transfer_count, 0);
+                verify_decode_path(session);
                 gesture.held_ms.sort_by(f64::total_cmp);
                 gesture.interval_ms.sort_by(f64::total_cmp);
                 assert_eq!(gesture.held_ms.len(), HELD_FRAMES);
@@ -278,7 +295,9 @@ impl Probe {
                 self.active = None;
                 if self.complete() {
                     eprintln!(
-                        "APP_DRAG_CHECKS cases=4 held_frames=480 selection=true no_held_seeks=true complete=true"
+                        "APP_DRAG_CHECKS cases={} held_frames={} selection=true no_held_seeks=true complete=true",
+                        self.case_count,
+                        self.case_count * HELD_FRAMES
                     );
                 }
                 return;

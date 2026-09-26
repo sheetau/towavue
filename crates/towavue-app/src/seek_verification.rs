@@ -7,6 +7,17 @@ mod drag;
 
 type App = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 
+fn verify_decode_path(session: &PlaybackSession) {
+    let metrics = session.metrics();
+    if std::env::var_os("TOWAVUE_SEEK_SOFTWARE").is_some() {
+        assert_eq!(metrics.hardware_frame_count, 0, "explicit software control");
+        assert!(metrics.cpu_transfer_count > 0, "actual software frames");
+    } else {
+        assert!(metrics.hardware_frame_count > 0, "actual hardware frames");
+        assert_eq!(metrics.cpu_transfer_count, 0, "no CPU transfers");
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum EditMode {
     None,
@@ -54,6 +65,7 @@ struct Trial {
     drag: Option<drag::Probe>,
     sample: Option<Sample>,
     index: usize,
+    sample_count: usize,
     next_at: Instant,
     next_frame_at: Instant,
     deadline: Instant,
@@ -157,6 +169,7 @@ impl Trial {
                     self.index,
                     session.verification_seek_stages()
                 );
+                verify_decode_path(session);
                 sample.submitted = Some(elapsed);
             }
             if let Some(submitted) = sample.submitted {
@@ -406,7 +419,10 @@ impl ApplicationHandler<window_host::Event> for Trial {
         self.app.media_kind = Some(MediaKind::Video);
         self.app.set_playback_volume(0.0);
         self.app.load_path(self.source.clone(), MediaKind::Video);
-        eprintln!("APP_SEEK_START hidden=true muted=true render_cadence_hz=60");
+        eprintln!(
+            "APP_SEEK_START hidden=true muted=true render_cadence_hz=60 software_requested={}",
+            std::env::var_os("TOWAVUE_SEEK_SOFTWARE").is_some()
+        );
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: window_host::Event) {
@@ -436,7 +452,7 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.index
         );
         if Instant::now() >= self.next_frame_at {
-            if self.index == 12
+            if self.index == self.sample_count
                 && let Some(drag) = &mut self.drag
             {
                 drag.before_frame(&mut self.app);
@@ -444,7 +460,7 @@ impl ApplicationHandler<window_host::Event> for Trial {
             let started = Instant::now();
             self.app.render_frame();
             let elapsed = started.elapsed();
-            if self.index == 12
+            if self.index == self.sample_count
                 && let Some(drag) = &mut self.drag
             {
                 drag.after_frame(&self.app, elapsed);
@@ -473,13 +489,13 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.next_frame_at = Instant::now() + Duration::from_nanos(16_666_667);
         }
         self.observe();
-        if self.index == 12 && self.drag.as_ref().is_none_or(drag::Probe::complete) {
+        if self.index == self.sample_count && self.drag.as_ref().is_none_or(drag::Probe::complete) {
             self.complete = true;
             event_loop.exit();
             event_loop.set_control_flow(ControlFlow::Poll);
             return;
         }
-        if self.index < 12
+        if self.index < self.sample_count
             && self.sample.is_none()
             && Instant::now() >= self.next_at
             && self.app.media_duration.is_some()
@@ -568,6 +584,11 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         drag: drag::Probe::from_environment(),
         sample: None,
         index: 0,
+        sample_count: if std::env::var_os("TOWAVUE_SEEK_PAUSED_ONLY").is_some() {
+            6
+        } else {
+            12
+        },
         next_at: Instant::now(),
         next_frame_at: Instant::now(),
         deadline: Instant::now() + Duration::from_secs(180),
@@ -584,11 +605,14 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         trial.complete,
         "all command/pointer paused/playing samples completed"
     );
+    let sample_count = trial.sample_count;
     drop(trial);
     if towavue_runtime_windows::burst_enabled() {
         towavue_runtime_windows::write_burst_trace(&root.join("burst.csv"))?;
     }
     assert_eq!(stamp(), before);
-    eprintln!("APP_SEEK_CHECKS samples=12 fresh_frames=true source_stamps=true complete=true");
+    eprintln!(
+        "APP_SEEK_CHECKS samples={sample_count} fresh_frames=true source_stamps=true complete=true"
+    );
     Ok(())
 }

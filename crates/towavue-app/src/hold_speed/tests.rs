@@ -19,9 +19,10 @@ fn japanese_hold_progress_keeps_target_rate_history_and_gesture_lifetime() {
                 token: 1,
                 media: app.media_generation,
                 rate,
+                progress: 0,
                 was_paused: false,
             });
-            for progress in [0, 50, 100] {
+            for progress in [0, 25, 50, 99, 100] {
                 app.show_hold_progress(progress);
                 app.status_message.as_mut().expect("notice").1 =
                     Instant::now() - Duration::from_secs(60);
@@ -30,14 +31,18 @@ fn japanese_hold_progress_keeps_target_rate_history_and_gesture_lifetime() {
                 } else {
                     "下にドラッグ"
                 };
-                let expected = format!("長押し中は2× · {target}への固定まで{progress}% · {hint}");
+                let expected = if progress == 100 {
+                    format!("2× · {target}への固定まで{progress}% · {hint}")
+                } else {
+                    format!("2× · {target}への固定まで{progress}%（{hint}）")
+                };
                 assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
-                for _ in 0..3 {
+                for width in [1000.0, 480.0, 480.0] {
                     let output = context.run_ui(
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(
                                 egui::Pos2::ZERO,
-                                egui::vec2(1000.0, 300.0),
+                                egui::vec2(width, 300.0),
                             )),
                             ..Default::default()
                         },
@@ -46,8 +51,39 @@ fn japanese_hold_progress_keeps_target_rate_history_and_gesture_lifetime() {
                         },
                     );
                     assert_eq!(output.pixels_per_point, density);
-                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)));
+                    let text = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text)
+                                if text.galley.text() == expected && !text.galley.elided =>
+                            {
+                                Some(text)
+                            }
+                            _ => None,
+                        })
+                        .expect("complete held-rate notice");
+                    // egui merges equal adjacent formats at 100%; verify every
+                    // displayed character rather than its internal section count.
+                    for (index, _) in expected.char_indices() {
+                        assert_eq!(
+                            text.galley
+                                .job
+                                .format_at_byte(egui::text::ByteIndex(index))
+                                .color,
+                            if index < "2×".len() || progress == 100 {
+                                chrome::FOREGROUND
+                            } else {
+                                chrome::MUTED
+                            },
+                            "held-rate color at byte {index}, progress {progress}"
+                        );
+                    }
+                    assert!(
+                        text.override_text_color.is_none(),
+                        "painting retains the two section colors"
+                    );
+                    assert!(app.hold_progress_label("unrelated failure").is_none());
                 }
                 assert_eq!(app.held_speed.as_ref().expect("gesture").rate, rate);
                 assert_eq!(app.edits, history);
@@ -72,9 +108,10 @@ fn held_video_progress_reaches_painted_status_and_does_not_expire_mid_gesture() 
         token: 1,
         media: app.media_generation,
         rate: 2.0,
+        progress: 0,
         was_paused: false,
     });
-    for progress in [0, 50, 100] {
+    for progress in [0, 25, 50, 99, 100] {
         app.show_hold_progress(progress);
         app.status_message.as_mut().expect("notice").1 = Instant::now() - Duration::from_secs(60);
         for _ in 0..2 {
@@ -553,6 +590,17 @@ fn run_session_trial(audio: bool, test: &str) {
                             );
                             assert_eq!(app.playback_rate(), if commit { target } else { original });
                             assert_eq!(app.preview_rate(), if commit { target } else { original });
+                            if commit && target == 1.0 {
+                                assert!(app.status_notice().is_none(), "unlatching to 1x is quiet");
+                            } else if commit {
+                                assert_eq!(
+                                    app.status_notice(),
+                                    Some(towavue_core::localization::formatted::preview_rate(
+                                        app.language(),
+                                        2.0
+                                    ))
+                                );
+                            }
                             let after = app.edits[&tab].operations().to_vec();
                             app.handle_hold_speed(
                                 app.media_generation,

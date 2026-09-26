@@ -124,7 +124,7 @@ messages! {
     NoPreviousFrame => ("No previous video frame", "前の動画フレームがありません"),
     HoldSpeedHint => ("2× while held · release to restore playback", "長押し中は2× · 離すと元の再生状態に戻ります"),
     HoldApplySuffix => (" · release to apply", " · 離すと適用"),
-    HoldDragSuffix => (" · drag down", " · 下にドラッグ"),
+    HoldDragSuffix => (" (drag down)", "（下にドラッグ）"),
     PastingImage => ("Pasting image...", "画像を貼り付け中…"),
     ResumeHistoryUnavailable => ("Could not clear video positions: resume history is unavailable", "再生位置の履歴を利用できないため、動画の再生位置を消去できません"),
     SelectionDimensionsInvalid => ("Media dimensions cannot form this selection", "メディアのサイズでは、この選択範囲を作成できません"),

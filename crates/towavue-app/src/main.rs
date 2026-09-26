@@ -6742,6 +6742,8 @@ where
                                 hint.layout(12.0).into()
                             } else if reading_hint {
                                 fonts::reading_hint(&text, 12.0, color).into()
+                            } else if let Some(job) = self.hold_progress_label(&text) {
+                                job.into()
                             } else {
                                 RichText::new(text).size(12.0).color(color).into()
                             };

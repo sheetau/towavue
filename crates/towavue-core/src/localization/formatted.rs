@@ -59,7 +59,7 @@ templates! {
     seek_preview_unavailable(time: &str) => ("{time} · No preview", "{time} · プレビューなし"),
     audio_order_failed(error: &str) => ("Audio order unavailable: {error}", "音声ファイルの並び順を取得できません: {error}"),
     frame_step_failed(error: &str) => ("Frame step: {error}", "コマ送り: {error}"),
-    hold_speed_progress(progress: u8, target: &str, hint: &str) => ("2× while held · {progress}% to lock {target}{hint}", "長押し中は2× · {target}への固定まで{progress}%{hint}"),
+    hold_speed_progress(progress: u8, target: &str, hint: &str) => ("2× · {progress}% to lock {target}{hint}", "2× · {target}への固定まで{progress}%{hint}"),
     image_paste_failed(error: &str) => ("Could not paste image: {error}", "画像を貼り付けられませんでした: {error}"),
     playback_volume_save_failed(error: &str) => ("Could not save playback volume: {error}", "再生音量を保存できませんでした: {error}"),
     video_resume_failed(error: &str) => ("Video resume unavailable: {error}", "動画の再生位置を復元できません: {error}"),

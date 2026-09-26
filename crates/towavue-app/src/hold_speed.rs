@@ -12,6 +12,7 @@ pub(super) struct Held {
     token: u64,
     media: u64,
     rate: f32,
+    progress: u8,
     pub(super) was_paused: bool,
 }
 
@@ -340,6 +341,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         self.toggle_pause();
                     }
                     self.set_preview_rate(if held.rate == 2.0 { 1.0 } else { 2.0 });
+                    if held.rate == 2.0
+                        && self.preview_rate() == 1.0
+                        && self.state != PlaybackState::Faulted
+                    {
+                        self.status_message = None;
+                    }
                 } else {
                     self.handle_hold_speed(media, generation, Action::End(token));
                 }
@@ -354,6 +361,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             token,
             media: self.media_generation,
             rate: self.playback_rate(),
+            progress: 0,
             was_paused: self.state == PlaybackState::Paused,
         };
         self.held_speed = Some(held);
@@ -370,8 +378,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
-    fn show_hold_progress(&mut self, progress: u8) {
-        let display_language = self.language();
+    fn hold_progress_message(&self, progress: u8) -> String {
+        let language = self.language();
         let target = if self
             .held_speed
             .as_ref()
@@ -381,16 +389,60 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         } else {
             "2×"
         };
-        self.set_status(towavue_core::localization::formatted::hold_speed_progress(
-            display_language,
+        towavue_core::localization::formatted::hold_speed_progress(
+            language,
             progress,
             target,
             if progress == 100 {
-                localization::Text::HoldApplySuffix.in_language(display_language)
+                localization::Text::HoldApplySuffix.in_language(language)
             } else {
-                localization::Text::HoldDragSuffix.in_language(display_language)
+                localization::Text::HoldDragSuffix.in_language(language)
             },
-        ));
+        )
+    }
+
+    fn show_hold_progress(&mut self, progress: u8) {
+        let Some(held) = &mut self.held_speed else {
+            return;
+        };
+        held.progress = progress.min(100);
+        let message = self.hold_progress_message(progress.min(100));
+        self.set_status(message);
+    }
+
+    pub(super) fn hold_progress_label(&self, text: &str) -> Option<egui::text::LayoutJob> {
+        let held = self.held_speed.as_ref()?;
+        if self.media_kind != Some(MediaKind::Video)
+            || text != self.hold_progress_message(held.progress)
+        {
+            return None;
+        }
+        // Both catalog templates begin with the current numeric rate. Keep only
+        // that rate bright until the owned gesture reaches its latch threshold.
+        let suffix = text.strip_prefix("2×")?;
+        let mut job = egui::text::LayoutJob::default();
+        for (part, color) in [
+            ("2×", chrome::FOREGROUND),
+            (
+                suffix,
+                if held.progress == 100 {
+                    chrome::FOREGROUND
+                } else {
+                    chrome::MUTED
+                },
+            ),
+        ] {
+            job.append(
+                part,
+                0.0,
+                egui::TextFormat {
+                    font_id: egui::FontId::proportional(12.0),
+                    color,
+                    ..Default::default()
+                },
+            );
+        }
+        Some(job)
     }
 
     pub(super) fn cancel_hold_speed(&mut self) -> bool {

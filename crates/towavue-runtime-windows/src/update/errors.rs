@@ -15,7 +15,7 @@ impl UpdateError {
                 return Text::UpdateMetadataInvalid.in_language(language).into();
             }
         }
-        // External OS, encoding and helper diagnostics are literal details.
+        // External OS and encoding diagnostics are literal details.
         self.to_string()
     }
 }
@@ -63,7 +63,8 @@ impl Failure {
             Self::Text(text) => text.in_language(language).into(),
             Self::Http(status) => formatted::update_http_status(language, *status),
             Self::HelperExited { status, detail } => {
-                formatted::update_helper_exited(language, status, detail)
+                let detail = super::helper_error::message(language, detail);
+                formatted::update_helper_exited(language, status, &detail)
             }
         }
     }
@@ -149,6 +150,16 @@ mod tests {
         assert_eq!(
             error.message(Language::Japanese),
             format!("更新用の補助プロセスが準備完了前に終了しました（exit code: 7）: {detail}")
+        );
+        let record = "towavue-update-error-v1\nsignature\n\nUpdate signature verification failed.";
+        let error = UpdateError::from(helper_exited("exit code: 20".into(), record.into()));
+        assert_eq!(
+            error.clone().message(Language::Japanese),
+            "更新用の補助プロセスが準備完了前に終了しました（exit code: 20）: 更新署名を検証できませんでした。"
+        );
+        assert_eq!(
+            error.to_string(),
+            "Update helper exited before readiness (exit code: 20): Update signature verification failed."
         );
         let error = UpdateError::from(http_status(503));
         assert_eq!(error.to_string(), "Update server returned HTTP 503");

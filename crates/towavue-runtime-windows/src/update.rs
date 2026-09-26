@@ -3,6 +3,7 @@ use towavue_core::localization::Text;
 mod crypto;
 mod errors;
 mod handoff;
+mod helper_error;
 mod http;
 mod service;
 mod storage;

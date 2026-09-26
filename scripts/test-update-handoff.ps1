@@ -170,6 +170,20 @@ public static class FixtureSetup {
             Assert-True ($code -eq $expectedCode) "Expected refusal: $case; actual exit: $code"
             Assert-True (-not (Test-Path -LiteralPath (Join-Path $stagePath 'setup.called'))) 'Invalid update executed.'
         }
+        $expectedReason = switch ($case) {
+            'manifest' { 'signature' }
+            'payload' { 'payload-hash' }
+            'parent' { 'parent' }
+            'setup-failure' { 'setup-exit' }
+            'reboot' { 'setup-exit' }
+        }
+        if ($expectedReason) {
+            $record = [IO.File]::ReadAllText((Join-Path $stagePath ($attempt + '.error')),[Text.Encoding]::UTF8)
+            $fields = $record.Split(@([char]10),4)
+            Assert-True ($fields.Length -eq 4 -and $fields[0] -ceq 'towavue-update-error-v1' -and $fields[1] -ceq $expectedReason) 'Structured error reason differs.'
+            $expectedArgument = if ($case -eq 'setup-failure') { '20' } elseif ($case -eq 'reboot') { '3010' } else { '' }
+            Assert-True ($fields[2] -ceq $expectedArgument -and $fields[3].Length -gt 0) 'Structured error argument or diagnostic differs.'
+        }
         if ($case -notin @('success','missing-media','junction')) { Assert-True ([IO.File]::ReadAllText((Join-Path $cache 'state.txt')).EndsWith("failed`n")) 'Failure was not retained for one-shot recovery.' }
         $results.Add([pscustomobject]@{case=$case;status='passed'})
     } finally {

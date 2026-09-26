@@ -18,6 +18,23 @@ macro_rules! messages {
 }
 
 messages! {
+    HelperPathType => ("Update path is a link or has the wrong file type.", "更新用のパスがリンクか、種類の異なるファイルです。"),
+    HelperLocalPath => ("A normalized local absolute path is required.", "正規化されたローカルの絶対パスが必要です。"),
+    HelperMetadataLimit => ("Update metadata exceeds its limit.", "更新情報のサイズが上限を超えています。"),
+    HelperStateChanged => ("The selected update state has changed.", "選択した更新の状態が変わりました。"),
+    HelperHexMetadata => ("Invalid hexadecimal metadata.", "更新情報の16進数表記が不正です。"),
+    HelperStableVersion => ("Invalid stable version.", "正式版のバージョン番号が不正です。"),
+    HelperSignatureSize => ("Invalid signature size.", "更新署名のサイズが不正です。"),
+    HelperSignature => ("Update signature verification failed.", "更新署名を検証できませんでした。"),
+    HelperManifest => ("Invalid update manifest.", "更新マニフェストが不正です。"),
+    HelperPayloadSize => ("Update size does not match the manifest.", "更新ファイルのサイズがマニフェストと一致しません。"),
+    HelperPayloadHash => ("Update payload hash mismatch.", "更新ファイルのハッシュ値が一致しません。"),
+    HelperInstallation => ("No matching, complete production installation was found.", "一致する正式版の完全なインストールが見つかりませんでした。"),
+    HelperGeneration => ("Invalid update generation.", "更新処理の識別子が不正です。"),
+    HelperParent => ("The update parent process identity differs.", "更新を開始したアプリのプロセスが一致しません。"),
+    HelperNotNewer => ("The update is not newer.", "更新のバージョンが現在より新しくありません。"),
+    HelperShutdownTimeout => ("Application shutdown timed out; update was not started.", "アプリが時間内に終了しなかったため、更新を開始しませんでした。"),
+    HelperInstalledVersion => ("Setup did not install the expected version.", "セットアップで予定のバージョンをインストールできませんでした。"),
     PreviewCancelled => ("preview cancelled", "プレビュー生成をキャンセルしました"),
     PreviewNoFrame => ("no video frame at the requested preview position", "指定したプレビュー位置に動画フレームがありません"),
     PreviewInvalidDuration => ("media duration is unavailable or invalid", "メディアの長さを取得できないか、値が不正です"),

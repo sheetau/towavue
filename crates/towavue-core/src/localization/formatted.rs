@@ -50,6 +50,7 @@ templates! {
     graphics_pipeline_recovery_failed(error: &str) => ("D3D11 pipeline recovery failed: {error}", "D3D11の再生処理を復旧できません: {error}"),
     detailed_waveform_failed(error: &str) => ("Detailed waveform unavailable: {error}", "詳細な波形を取得できません: {error}"),
     update_http_status(status: u32) => ("Update server returned HTTP {status}", "更新サーバーがHTTP {status}を返しました"),
+    helper_setup_exit(code: i32) => ("Setup exited with code {code}.", "セットアップが終了コード{code}で終了しました。"),
     update_helper_exited(status: &str, detail: &str) => ("Update helper exited before readiness ({status}): {detail}", "更新用の補助プロセスが準備完了前に終了しました（{status}）: {detail}"),
     update_unavailable(error: &str) => ("Update unavailable: {error}", "更新を利用できません: {error}"),
     language_restart_failed(error: &str) => ("towavue could not restart: {error}\nStart towavue manually to apply the saved language.", "towavueを再起動できませんでした: {error}\n手動でtowavueを起動すると、保存した表示言語が適用されます。"),

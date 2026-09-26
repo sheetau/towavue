@@ -19,6 +19,20 @@ public static class TowavueReleaseHandoff {
     const string StateHeader = "towavue-update-state-v1\n";
     static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
 
+    // Only owned reasons have a stable ID. Native exception diagnostics remain
+    // literal, and both forms retain the original English Message for logging.
+    sealed class OwnedFailure : IOException {
+        internal readonly string Reason, Argument;
+        internal OwnedFailure(string reason, string message, string argument = "") : base(message) {
+            Reason = reason; Argument = argument;
+        }
+    }
+    static string ErrorRecord(Exception error) {
+        var owned = error as OwnedFailure;
+        return owned == null ? error.Message
+            : "towavue-update-error-v1\n" + owned.Reason + "\n" + owned.Argument + "\n" + owned.Message;
+    }
+
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern SafeFileHandle CreateFileW(string path, uint access, uint share,
         IntPtr security, uint creation, uint flags, IntPtr template);
@@ -42,7 +56,7 @@ public static class TowavueReleaseHandoff {
             int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new Win32Exception(error);
         }
         if ((info.Attributes & 0x400u) != 0 || ((info.Attributes & 0x10u) != 0) != directory) {
-            handle.Dispose(); throw new IOException("Update path is a link or has the wrong file type.");
+            handle.Dispose(); throw new OwnedFailure("path-type", "Update path is a link or has the wrong file type.");
         }
         return handle;
     }
@@ -50,7 +64,7 @@ public static class TowavueReleaseHandoff {
     static string LocalPath(string path) {
         if (path == null || path.Length < 4 || !Char.IsLetter(path[0]) || path[1] != ':' || path[2] != '\\'
             || path.Any(c => c < 32 || c == '"') || !String.Equals(Path.GetFullPath(path), path, StringComparison.Ordinal))
-            throw new IOException("A normalized local absolute path is required.");
+            throw new OwnedFailure("local-path", "A normalized local absolute path is required.");
         return path;
     }
 
@@ -70,7 +84,7 @@ public static class TowavueReleaseHandoff {
     static FileStream Mutex(string path) { return new FileStream(Open(path, false, 0xc0000000u, 0u, 4u), FileAccess.ReadWrite); }
     static byte[] Bounded(string path, int maximum) {
         using (var file = Read(path)) {
-            if (file.Length > maximum) throw new IOException("Update metadata exceeds its limit.");
+            if (file.Length > maximum) throw new OwnedFailure("metadata-limit", "Update metadata exceeds its limit.");
             var bytes = new byte[(int)file.Length];
             int at = 0;
             while (at < bytes.Length) { int n = file.Read(bytes, at, bytes.Length - at); if (n == 0) throw new EndOfStreamException(); at += n; }
@@ -86,7 +100,7 @@ public static class TowavueReleaseHandoff {
         using (var lease = Mutex(Path.Combine(root, "cache.lock"))) {
             string expected = StateHeader + stage + "\ninstalling\n";
             if (Utf8.GetString(Bounded(Path.Combine(root, "state.txt"), 256)) != expected)
-                throw new IOException("The selected update state has changed.");
+                throw new OwnedFailure("state-changed", "The selected update state has changed.");
             if (phase == "installing") return;
             string temporary = Path.Combine(root, Guid.NewGuid().ToString("N") + ".state");
             WriteNew(temporary, Utf8.GetBytes(StateHeader + stage + "\n" + phase + "\n"));
@@ -96,7 +110,7 @@ public static class TowavueReleaseHandoff {
     }
     static byte[] Hex(string text) {
         if ((text.Length & 1) != 0 || text.Any(c => !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f')))
-            throw new IOException("Invalid hexadecimal metadata.");
+            throw new OwnedFailure("hex-metadata", "Invalid hexadecimal metadata.");
         var bytes = new byte[text.Length / 2];
         for (int i = 0; i < bytes.Length; ++i) bytes[i] = Convert.ToByte(text.Substring(i * 2, 2), 16);
         return bytes;
@@ -104,29 +118,29 @@ public static class TowavueReleaseHandoff {
     static Version Stable(string value) {
         var parts = value.Split('.');
         if (parts.Length != 3 || parts.Any(p => p.Length == 0 || (p.Length > 1 && p[0] == '0') || p.Any(c => c < '0' || c > '9')))
-            throw new IOException("Invalid stable version.");
+            throw new OwnedFailure("stable-version", "Invalid stable version.");
         return new Version(value);
     }
     static string Verify(string directory, FileStream setup) {
         byte[] bytes = Bounded(Path.Combine(directory, "manifest.txt"), 256);
         byte[] signature = Bounded(Path.Combine(directory, "manifest.sig"), 512);
-        if (signature.Length != 512) throw new IOException("Invalid signature size.");
+        if (signature.Length != 512) throw new OwnedFailure("signature-size", "Invalid signature size.");
         using (var key = CngKey.Import(Hex(PublicKeyHex), CngKeyBlobFormat.GenericPublicBlob))
         using (var rsa = new RSACng(key)) {
             if (rsa.KeySize != 4096 || !rsa.VerifyData(bytes, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
-                throw new IOException("Update signature verification failed.");
+                throw new OwnedFailure("signature", "Update signature verification failed.");
         }
         string[] lines = Utf8.GetString(bytes).Split('\n');
         if (lines.Length != 6 || lines[0] != "towavue-update-v1" || lines[2] != "windows-x64" || lines[5] != "")
-            throw new IOException("Invalid update manifest.");
+            throw new OwnedFailure("manifest", "Invalid update manifest.");
         Stable(lines[1]);
         ulong size;
         if (!UInt64.TryParse(lines[3], out size) || size < 1 || size > 536870912 || size.ToString() != lines[3]
             || (ulong)setup.Length != size || lines[4].Length != 64)
-            throw new IOException("Update size does not match the manifest.");
+            throw new OwnedFailure("payload-size", "Update size does not match the manifest.");
         using (var hash = SHA256.Create()) {
             setup.Position = 0;
-            if (!hash.ComputeHash(setup).SequenceEqual(Hex(lines[4]))) throw new IOException("Update payload hash mismatch.");
+            if (!hash.ComputeHash(setup).SequenceEqual(Hex(lines[4]))) throw new OwnedFailure("payload-hash", "Update payload hash mismatch.");
         }
         return lines[1];
     }
@@ -138,7 +152,7 @@ public static class TowavueReleaseHandoff {
                 || !String.Equals((string)key.GetValue("InstallLocation"), directory, StringComparison.OrdinalIgnoreCase)
                 || key.GetValueKind("DisplayVersion") != RegistryValueKind.String
                 || key.GetValueNames().Contains("TowavuePendingUpdate"))
-                throw new IOException("No matching, complete production installation was found.");
+                throw new OwnedFailure("installation", "No matching, complete production installation was found.");
             string version = (string)key.GetValue("DisplayVersion"); Stable(version); return version;
         }
     }
@@ -162,7 +176,7 @@ public static class TowavueReleaseHandoff {
             LocalPath(root); LocalPath(installation);
             if (!System.Text.RegularExpressions.Regex.IsMatch(stage, "\\Astage-[0-9a-f]{56}\\z")
                 || !System.Text.RegularExpressions.Regex.IsMatch(attempt, "\\Astage-[0-9a-f]{56}\\z"))
-                throw new IOException("Invalid update generation.");
+                throw new OwnedFailure("generation", "Invalid update generation.");
             directory = Path.Combine(root, stage);
             using (var dirs = new Directories(directory))
             using (var installDirs = new Directories(installation))
@@ -178,11 +192,11 @@ public static class TowavueReleaseHandoff {
                         string executable = Path.Combine(installation, "towavue.exe");
                         if (parent.StartTime.ToUniversalTime().ToFileTimeUtc() != parentStart
                             || !String.Equals(parent.MainModule.FileName, executable, StringComparison.OrdinalIgnoreCase))
-                            throw new IOException("The update parent process identity differs.");
+                            throw new OwnedFailure("parent", "The update parent process identity differs.");
                         string version = Verify(directory, setup);
-                        if (Stable(version) <= Stable(InstalledVersion(installation))) throw new IOException("The update is not newer.");
+                        if (Stable(version) <= Stable(InstalledVersion(installation))) throw new OwnedFailure("not-newer", "The update is not newer.");
                         WriteNew(Path.Combine(directory, attempt + ".ready"), Utf8.GetBytes("ready\n"));
-                        if (!parent.WaitForExit(120000)) throw new IOException("Application shutdown timed out; update was not started.");
+                        if (!parent.WaitForExit(120000)) throw new OwnedFailure("shutdown-timeout", "Application shutdown timed out; update was not started.");
                         parentExited = true;
                         State(root, stage, "installing");
                         // /D must be last and unquoted, including spaces (NSIS).
@@ -194,16 +208,16 @@ public static class TowavueReleaseHandoff {
                             // journaled transaction. New hosts see handoff.lock.
                             installer.WaitForExit();
                             if (installer.ExitCode == 3010) restartAllowed = false;
-                            if (installer.ExitCode != 0) throw new IOException("Setup exited with code " + installer.ExitCode + ".");
+                            if (installer.ExitCode != 0) throw new OwnedFailure("setup-exit", "Setup exited with code " + installer.ExitCode + ".", installer.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture));
                         }
                         if (InstalledVersion(installation) != version
                             || FileVersionInfo.GetVersionInfo(executable).ProductVersion != version)
-                            throw new IOException("Setup did not install the expected version.");
+                            throw new OwnedFailure("installed-version", "Setup did not install the expected version.");
                         completed = true;
                     }
                 } catch (Exception error) {
                     try { State(root, stage, "failed"); } catch { }
-                    WriteNew(Path.Combine(directory, attempt + ".error"), Utf8.GetBytes(error.Message));
+                    WriteNew(Path.Combine(directory, attempt + ".error"), Utf8.GetBytes(ErrorRecord(error)));
                     // Recovery belongs to Setup; never perform an implicit
                     // rollback or retry a failed transaction from this helper.
                 }

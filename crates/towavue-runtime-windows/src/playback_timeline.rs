@@ -5,6 +5,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use towavue_core::{AudioTrackId, EditTimeline, MediaTime, TimeRange};
 
 #[derive(Clone, Copy)]
+pub(super) enum AudioSource<'a> {
+    Track(Option<AudioTrackId>),
+    All(&'a [AudioTrackId]),
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct Segment {
     source: TimeRange,
     start: MediaTime,
@@ -126,6 +132,33 @@ pub(super) fn decode_listening_audio(
 pub(crate) fn decode_audio_with_policy(
     path: &Path,
     track: Option<AudioTrackId>,
+    plan: &EditTimeline,
+    target: MediaTime,
+    end: Option<MediaTime>,
+    master_rate: f32,
+    format: AudioFormat,
+    policy: decode::AudioSeekPolicy,
+    cancelled: &AtomicBool,
+    emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<(), DecodeError> {
+    decode_audio_source(
+        path,
+        AudioSource::Track(track),
+        plan,
+        target,
+        end,
+        master_rate,
+        format,
+        policy,
+        cancelled,
+        emit,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn decode_audio_source(
+    path: &Path,
+    source: AudioSource<'_>,
     plan: &EditTimeline,
     target: MediaTime,
     end: Option<MediaTime>,
@@ -304,21 +337,35 @@ pub(crate) fn decode_audio_with_policy(
         }
         true
     };
-    let result = match (track, policy) {
-        (None, decode::AudioSeekPolicy::Exact) => decode::decode_audio_intervals_cancellable(
-            path,
-            source_start,
-            source_end,
-            &intervals,
-            &cancelled,
-            receive,
-        ),
-        _ => decode::decode_audio_track_intervals_with_policy(
+    let result = match (source, policy) {
+        (AudioSource::Track(None), decode::AudioSeekPolicy::Exact) => {
+            decode::decode_audio_intervals_cancellable(
+                path,
+                source_start,
+                source_end,
+                &intervals,
+                &cancelled,
+                receive,
+            )
+            .map(|_| ())
+        }
+        (AudioSource::Track(track), _) => decode::decode_audio_track_intervals_with_policy(
             path,
             track,
             source_start,
             source_end,
             &intervals,
+            policy,
+            &cancelled,
+            receive,
+        )
+        .map(|_| ()),
+        (AudioSource::All(tracks), _) => super::audio_mix::decode(
+            path,
+            tracks,
+            source_start,
+            Some(source_end),
+            format,
             policy,
             &cancelled,
             receive,

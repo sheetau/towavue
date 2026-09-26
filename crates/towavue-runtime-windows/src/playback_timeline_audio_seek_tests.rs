@@ -224,7 +224,7 @@ fn compare(path: &Path, exact_equality: bool, exact_interiors: bool, numerator: 
         (metadata.len(), metadata.modified().expect("mtime"))
     };
     let before = stamp();
-    let format = decode::probe_playback_formats(path)
+    let format = decode::probe_playback_formats(path, None)
         .expect("format")
         .0
         .expect("audio");

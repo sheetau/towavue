@@ -6,12 +6,15 @@ use std::thread::{self, JoinHandle};
 
 use thiserror::Error;
 use towavue_core::{
-    AudioTrackCatalog, AudioTrackId, EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange,
-    TimeRange,
+    AudioTrackCatalog, AudioTrackId, AudioTrackSelection, EditTimeline, MediaTime,
+    PlaybackGeneration, PlaybackRange, TimeRange,
 };
 
 #[path = "playback_timeline.rs"]
 pub(crate) mod timeline;
+
+#[path = "playback_audio_mix.rs"]
+mod audio_mix;
 
 #[cfg(test)]
 #[path = "playback_audio_track_tests.rs"]
@@ -146,7 +149,7 @@ pub struct PlaybackSession {
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
     audio_tracks: AudioTrackCatalog,
-    audio_track: Option<AudioTrackId>,
+    audio_selection: AudioTrackSelection,
     source_video_frame_rate: Option<f64>,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
     pending_video: Option<QueuedVideoFrame>,
@@ -196,13 +199,38 @@ impl PlaybackSession {
         paused: bool,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
-        let mut session = Self::open_with_pause(
+        Self::open_input_with_audio(
+            input,
+            graphics_device,
+            volume,
+            rate,
+            range,
+            paused,
+            AudioTrackSelection::Default,
+            notify,
+        )
+    }
+
+    /// Select audio before starting either feed, including retained-tab reopen.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_input_with_audio(
+        input: crate::MediaInput,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        selection: AudioTrackSelection,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
+        let mut session = Self::open_with_audio(
             input.path(),
             graphics_device,
             volume,
             rate,
             range,
             paused,
+            selection,
             notify,
         )?;
         session.input_owner = Some(input);
@@ -258,11 +286,38 @@ impl PlaybackSession {
         paused: bool,
         notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
     ) -> Result<Self, PlaybackError> {
+        Self::open_with_audio(
+            path,
+            graphics_device,
+            volume,
+            rate,
+            range,
+            paused,
+            AudioTrackSelection::Default,
+            notify,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_with_audio(
+        path: &Path,
+        graphics_device: GraphicsDevice,
+        volume: f32,
+        rate: f32,
+        range: PlaybackRange,
+        paused: bool,
+        selection: AudioTrackSelection,
+        notify: impl Fn(PlaybackEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlaybackError> {
         // Capture before probing/starting decoders, never at Save time. Viewing
         // unsupported file identities (e.g. symlinks) remains available.
         let source = crate::FileOperationSource::capture(path).ok();
+        let selected = match selection {
+            AudioTrackSelection::Track(track) => Some(track),
+            AudioTrackSelection::Default | AudioTrackSelection::All => None,
+        };
         let (audio_format, source_video_frame_rate, audio_tracks) =
-            decode::probe_playback_formats(path)?;
+            decode::probe_playback_formats(path, selected)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
             hardware_frame_count: AtomicU64::new(0),
@@ -278,7 +333,7 @@ impl PlaybackSession {
             notify: Arc::new(notify),
             audio_format,
             audio_tracks,
-            audio_track: None,
+            audio_selection: selection,
             source_video_frame_rate,
             video_rx: None,
             pending_video: None,
@@ -388,9 +443,17 @@ impl PlaybackSession {
         &self.audio_tracks
     }
 
-    /// None retains the source's preferred track. Explicit IDs belong to this source.
+    /// The explicit single-track choice, if any. Use audio_selection to distinguish
+    /// all-track preview from the source's default selection.
     pub fn audio_track(&self) -> Option<AudioTrackId> {
-        self.audio_track
+        match self.audio_selection {
+            AudioTrackSelection::Track(id) => Some(id),
+            AudioTrackSelection::Default | AudioTrackSelection::All => None,
+        }
+    }
+
+    pub fn audio_selection(&self) -> AudioTrackSelection {
+        self.audio_selection
     }
 
     /// Validate before retiring the active pipeline; switching retains the edit
@@ -400,11 +463,26 @@ impl PlaybackSession {
         target: MediaTime,
         track: Option<AudioTrackId>,
     ) -> Result<PlaybackGeneration, PlaybackError> {
-        if self.audio_track == track {
+        self.set_audio_selection_at(
+            target,
+            track.map_or(AudioTrackSelection::Default, AudioTrackSelection::Track),
+        )
+    }
+
+    pub fn set_audio_selection_at(
+        &mut self,
+        target: MediaTime,
+        selection: AudioTrackSelection,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        if self.audio_selection == selection {
             return Ok(self.generation);
         }
+        let track = match selection {
+            AudioTrackSelection::Track(track) => Some(track),
+            AudioTrackSelection::Default | AudioTrackSelection::All => None,
+        };
         let format = decode::probe_audio_track_format(&self.path, track)?;
-        self.audio_track = track;
+        self.audio_selection = selection;
         self.audio_format = format;
         self.seek(target)
     }
@@ -628,7 +706,16 @@ impl PlaybackSession {
             let timeline = self.timeline.clone();
             let rate = self.rate;
             let format = self.audio_format.expect("started audio output");
-            let track = self.audio_track;
+            let selection = self.audio_selection;
+            let tracks: Vec<_> = if selection == AudioTrackSelection::All {
+                self.audio_tracks
+                    .tracks
+                    .iter()
+                    .map(|track| track.id)
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let path = self.path.clone();
             let target = self.target;
             let end = self.range_end();
@@ -640,10 +727,17 @@ impl PlaybackSession {
                 .name("towavue-audio-feed".into())
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let source = match selection {
+                            AudioTrackSelection::Default => timeline::AudioSource::Track(None),
+                            AudioTrackSelection::Track(track) => {
+                                timeline::AudioSource::Track(Some(track))
+                            }
+                            AudioTrackSelection::All => timeline::AudioSource::All(&tracks),
+                        };
                         if let Some(plan) = timeline {
-                            timeline::decode_audio_with_policy(
+                            timeline::decode_audio_source(
                                 &path,
-                                track,
+                                source,
                                 &plan,
                                 target,
                                 end,
@@ -656,8 +750,26 @@ impl PlaybackSession {
                             audio
                                 .finish()
                                 .map_err(|_| decode::DecodeError::ConsumerClosed)
-                        } else {
+                        } else if let timeline::AudioSource::Track(track) = source {
                             run_audio_decode(&path, track, &audio, target, end, rate, &cancelled)
+                        } else {
+                            audio_mix::decode(
+                                &path,
+                                &tracks,
+                                target,
+                                end,
+                                format,
+                                if rate == 1.0 {
+                                    decode::AudioSeekPolicy::Playback
+                                } else {
+                                    decode::AudioSeekPolicy::Exact
+                                },
+                                &|| cancelled.load(Ordering::Relaxed),
+                                |chunk| audio.push(chunk).is_ok(),
+                            )?;
+                            audio
+                                .finish()
+                                .map_err(|_| decode::DecodeError::ConsumerClosed)
                         }
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));

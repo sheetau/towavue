@@ -226,7 +226,56 @@ fn selected_audio_preserves_delays_edits_waveforms_and_session_restarts() {
         assert_eq!(session.generation(), before);
         assert_eq!(session.audio_track(), Some(track));
     }
+    session
+        .set_audio_selection_at(time(100), AudioTrackSelection::All)
+        .expect("all tracks");
+    session
+        .set_rate_at(time(100), 0.5, true)
+        .expect("mixed rate restart");
+    session
+        .replace_graphics_device(
+            GraphicsDevice::warp_for_test().expect("mixed WARP"),
+            time(100),
+        )
+        .expect("mixed device restart");
+    assert_eq!(session.audio_selection(), AudioTrackSelection::All);
+    assert_eq!(session.timeline(), Some(&plan));
+    assert!(session.paused);
+    session
+        .set_audio_selection_at(time(100), AudioTrackSelection::Default)
+        .expect("restore preferred");
+    assert_eq!(session.audio_selection(), AudioTrackSelection::Default);
     drop(session);
+    for selection in [
+        AudioTrackSelection::Track(AudioTrackId::from_index(2)),
+        AudioTrackSelection::All,
+    ] {
+        let session = PlaybackSession::open_input_with_audio(
+            crate::MediaInput::new(path.clone()),
+            GraphicsDevice::warp_for_test().expect("initial selected WARP"),
+            0.0,
+            1.0,
+            PlaybackRange::default(),
+            true,
+            selection,
+            |_| {},
+        )
+        .expect("initial audio choice");
+        assert_eq!(
+            session.generation(),
+            PlaybackGeneration::INITIAL,
+            "initial choice must not restart a default feed"
+        );
+        assert_eq!(session.audio_selection(), selection);
+        if matches!(selection, AudioTrackSelection::Track(_)) {
+            assert_eq!(
+                session.audio_format.expect("selected format").sample_rate,
+                48000
+            );
+        }
+        assert!(session.input_owner.is_some());
+        assert!(session.paused);
+    }
     assert_eq!(fs::read(&path).expect("unchanged input"), original);
     fs::remove_dir_all(root).expect("remove owned fixture");
 }

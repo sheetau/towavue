@@ -2132,6 +2132,7 @@ pub(crate) fn probe_audio_track_format(
 /// file open or render-thread probing is required to display source FPS.
 pub(crate) fn probe_playback_formats(
     path: &Path,
+    track: Option<AudioTrackId>,
 ) -> Result<
     (
         Option<AudioFormat>,
@@ -2146,7 +2147,10 @@ pub(crate) fn probe_playback_formats(
         positive_frame_rate(stream.avg_frame_rate()).or_else(|| positive_frame_rate(stream.rate()))
     });
     Ok((
-        create_audio_pipeline(&input)?.map(|pipeline| pipeline.output_format),
+        audio_tracks::selected_config(&input, track)?
+            .map(create_audio_pipeline_from)
+            .transpose()?
+            .map(|pipeline| pipeline.output_format),
         fps,
         audio_tracks::catalog(&input),
     ))
@@ -2499,7 +2503,7 @@ mod tests {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let (audio, fps, _) = super::probe_playback_formats(&path).expect("probe");
+            let (audio, fps, _) = super::probe_playback_formats(&path, None).expect("probe");
             assert!(audio.is_none());
             assert!((fps.expect("video FPS") - expected).abs() < 0.000001);
             let mut session = crate::PlaybackSession::open_paused(

@@ -12,13 +12,15 @@ pub struct PinnedCursor {
 }
 
 impl PinnedCursor {
-    pub fn new(window: Arc<Window>, position: (f64, f64)) -> Result<Self, String> {
+    pub fn new(window: Arc<Window>, position: (f64, f64)) -> Result<Self, crate::NativeUiError> {
         let size = window.inner_size();
         if !window.has_focus()
             || !(0.0..f64::from(size.width)).contains(&position.0)
             || !(0.0..f64::from(size.height)).contains(&position.1)
         {
-            return Err("Cursor locking requires a focused window and an interior position".into());
+            return Err(crate::NativeUiError::Message(
+                towavue_core::localization::Text::NativeCursorLockPosition,
+            ));
         }
         let cursor = Self {
             window,
@@ -27,11 +29,11 @@ impl PinnedCursor {
         cursor
             .window
             .set_cursor_position(PhysicalPosition::new(position.0, position.1))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| crate::NativeUiError::Diagnostic(error.to_string()))?;
         cursor
             .window
             .set_cursor_grab(CursorGrabMode::Locked)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| crate::NativeUiError::Diagnostic(error.to_string()))?;
         Ok(cursor)
     }
 }

@@ -10389,7 +10389,7 @@ where
             Err(error) => {
                 self.set_status(towavue_core::localization::formatted::reading_drag_failed(
                     language,
-                    &error.to_string(),
+                    &error.message(language),
                 ));
                 return;
             }

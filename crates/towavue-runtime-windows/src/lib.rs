@@ -13,6 +13,8 @@ mod burst_verification;
 pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_burst};
 mod cancellation;
 mod caption;
+mod native_ui_error;
+pub use native_ui_error::{NativeUiError, native_ui_error_message};
 mod clipboard_image_error;
 pub use clipboard_image_error::ClipboardImageError;
 mod decode;
@@ -74,7 +76,9 @@ pub use presentation_verification::{
 pub use project_link::ProjectLink;
 mod recent;
 mod video_resume;
-pub use video_resume::{VideoResume, VideoResumeEvent, VideoResumeHistory, VideoResumeSource};
+pub use video_resume::{
+    VideoResume, VideoResumeError, VideoResumeEvent, VideoResumeHistory, VideoResumeSource,
+};
 mod renderer;
 mod selection_outline;
 mod shell;

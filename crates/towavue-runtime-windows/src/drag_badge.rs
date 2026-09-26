@@ -69,7 +69,10 @@ impl DragBadge {
                 .iter()
                 .any(|p| p[..3].iter().any(|c| *c > p[3]))
         {
-            return Err("Invalid drag badge pixels".into());
+            return Err(crate::NativeUiError::Message(
+                towavue_core::localization::Text::NativeDragBadgePixels,
+            )
+            .into());
         }
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
@@ -338,7 +341,15 @@ mod tests {
                 }
                 assert_eq!(GetForegroundWindow(), foreground);
             }
-            assert!(badge.set_image(0, &[]).is_err());
+            let error = badge.set_image(0, &[]).expect_err("invalid owned pixels");
+            assert_eq!(error.to_string(), "Invalid drag badge pixels");
+            assert_eq!(
+                crate::native_ui_error_message(
+                    error.as_ref(),
+                    towavue_core::localization::Language::Japanese
+                ),
+                "ドラッグ表示の画像データが不正です"
+            );
             assert!(badge.set_image(257, &[]).is_err());
             assert!(badge.set_image(1, &[255, 0, 0, 128]).is_err());
             assert!(badge.set_image(2, &[0; 4]).is_err());

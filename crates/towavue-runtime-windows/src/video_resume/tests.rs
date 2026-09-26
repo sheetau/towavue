@@ -1,5 +1,107 @@
 use super::*;
 
+#[test]
+fn resume_validation_keeps_invalid_data_classification_and_existing_bytes() {
+    use towavue_core::localization::Language;
+    let root = root();
+    let media = root.join("source.mkv");
+    let history = root.join("resume.txt");
+    fs::write(&media, b"owned source").expect("source");
+    let source = VideoResumeSource::capture(&media).expect("source identity");
+    let prefix = format!("{HEADER}\ncleared\t0\n");
+    for (bytes, english, japanese) in [
+        (
+            "unknown history".into(),
+            "Unknown resume history format; existing file retained",
+            "再生位置の履歴形式が不明です。既存のファイルは保持しました",
+        ),
+        (
+            format!("{HEADER}\ncleared\twrong\n"),
+            "Invalid resume clear boundary",
+            "再生位置の履歴の消去基準日時が不正です",
+        ),
+        (
+            format!("{prefix}wrong\t1\t1\t1\t{}\n", media.display()),
+            "Invalid resume history number",
+            "再生位置の履歴に不正な数値があります",
+        ),
+        (
+            format!(
+                "{prefix}1\t{}\t1\t1\t{}\n",
+                u128::from(u64::MAX) + 1,
+                media.display()
+            ),
+            "Invalid resume source length",
+            "再生位置の保存元のファイルサイズが不正です",
+        ),
+        (
+            format!("{prefix}1\t1\t1\t{}\t{}\n", u64::MAX, media.display()),
+            "Invalid resume position",
+            "保存された再生位置が不正です",
+        ),
+        (
+            format!("{prefix}1\t1\t1\t1\n"),
+            "Missing resume source",
+            "再生位置の保存元が指定されていません",
+        ),
+        (
+            format!("{prefix}1\t1\t1\t1\trelative.mkv\n"),
+            "Invalid resume history entry; existing file retained",
+            "再生位置の履歴項目が不正です。既存のファイルは保持しました",
+        ),
+        (
+            format!("{HEADER}\ncleared\t2\n1\t1\t1\t1\t{}\n", media.display()),
+            "Resume entry precedes its clear boundary",
+            "再生位置の履歴項目が消去基準日時以前のものです",
+        ),
+        (
+            "x".repeat(MAX_BYTES as usize + 1),
+            "Resume history exceeds its size limit",
+            "再生位置の履歴がサイズ上限を超えています",
+        ),
+    ] {
+        fs::write(&history, &bytes).expect("malformed owned history");
+        let error = match read(&history) {
+            Ok(_) => panic!("invalid history accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        let error = VideoResumeError::from(error);
+        assert_eq!(error.to_string(), english);
+        assert_eq!(error.message(Language::Japanese), japanese);
+        assert!(
+            remember_video_resume(&history, &source, Duration::from_secs(2), SystemTime::now())
+                .is_err()
+        );
+        assert_eq!(
+            fs::read(&history).expect("retained history"),
+            bytes.as_bytes()
+        );
+        clear_video_resume(&history, SystemTime::now()).expect("explicit repair");
+        assert!(read(&history).expect("repaired history").entries.is_empty());
+        assert_eq!(
+            VideoResumeSource::capture(&media).expect("unchanged source"),
+            source
+        );
+    }
+    let detail = "native {detail}: Ω";
+    let error = VideoResumeError::from(io::Error::new(io::ErrorKind::PermissionDenied, detail));
+    assert_eq!(error.message(Language::Japanese), detail);
+    assert!(
+        matches!(error, VideoResumeError::Io(ref error) if error.kind() == io::ErrorKind::PermissionDenied)
+    );
+    let error = VideoResumeError::from(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Invalid resume position",
+    ));
+    assert_eq!(
+        error.message(Language::Japanese),
+        "Invalid resume position",
+        "native text is not catalog-matched"
+    );
+    fs::remove_dir_all(root).expect("remove owned fixtures");
+}
+
 fn root() -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

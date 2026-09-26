@@ -207,8 +207,12 @@ impl WindowHost {
                 .source_client_position(item.source, item.point)
                 .and_then(|point| {
                     if self.tab_badge.is_none() {
-                        self.tab_badge =
-                            Some(tab_drag::badge::Badge::new().map_err(|error| error.to_string())?);
+                        self.tab_badge = Some(tab_drag::badge::Badge::new().map_err(|error| {
+                            towavue_runtime_windows::native_ui_error_message(
+                                error.as_ref(),
+                                display_language,
+                            )
+                        })?);
                     }
                     let badge = self.tab_badge.as_mut().expect("created badge");
                     let density = badge.density_at(event_loop, (point.x, point.y));
@@ -219,7 +223,12 @@ impl WindowHost {
                             density,
                             visible,
                         )
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| {
+                            towavue_runtime_windows::native_ui_error_message(
+                                error.as_ref(),
+                                display_language,
+                            )
+                        })
                 });
             if let Err(error) = result {
                 self.tab_badge = None;

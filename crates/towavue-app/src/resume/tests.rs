@@ -1,6 +1,92 @@
 use super::*;
 
 #[test]
+fn resume_worker_failures_use_receiving_language_without_accepting_stale_loads() {
+    use towavue_core::localization::Language;
+    use towavue_runtime_windows::VideoResumeSource;
+    let Some(root) = crate::tests::isolated_test_root(
+        "resume::tests::resume_worker_failures_use_receiving_language_without_accepting_stale_loads",
+    ) else {
+        return;
+    };
+    let path = root.join("unopened.mkv");
+    let history = root.join("owned-resume.txt");
+    std::fs::write(&path, b"owned source").expect("source");
+    std::fs::write(&history, b"unknown history").expect("malformed history");
+    let source = VideoResumeSource::capture(&path).expect("source identity");
+    let (send, receive) = std::sync::mpsc::channel();
+    let worker = VideoResumeHistory::new(history.clone(), move |event| {
+        send.send(event).expect("resume receiver");
+    })
+    .expect("worker");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.path = Some(path.clone());
+    app.media_kind = Some(MediaKind::Video);
+    app.state = PlaybackState::Loading;
+    app.resume_revision = 7;
+    worker.load(6, path.clone());
+    let event = receive
+        .recv_timeout(Duration::from_secs(5))
+        .expect("load failure");
+    let VideoResumeEvent::Loaded {
+        result: Err(ref error),
+        ..
+    } = event
+    else {
+        panic!("expected invalid history");
+    };
+    assert_eq!(
+        error.message(Language::Japanese),
+        "再生位置の履歴形式が不明です。既存のファイルは保持しました"
+    );
+    app.language_settings.display = Language::Japanese;
+    app.set_status("previous notice".into());
+    app.handle_video_resume(event);
+    assert_eq!(app.status_notice().as_deref(), Some("previous notice"));
+    assert!(app.session.is_none() && app.resume_open.is_none());
+    worker.remember(
+        source.clone(),
+        Duration::from_secs(2),
+        std::time::SystemTime::now(),
+    );
+    app.handle_video_resume(
+        receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("save refusal"),
+    );
+    assert_eq!(
+        app.status_notice().as_deref(),
+        Some(
+            "動画の再生位置を保存できませんでした: 再生位置の履歴形式が不明です。既存のファイルは保持しました"
+        )
+    );
+    worker.clear(std::time::UNIX_EPOCH);
+    app.handle_video_resume(
+        receive
+            .recv_timeout(Duration::from_secs(5))
+            .expect("clear refusal"),
+    );
+    assert_eq!(
+        app.status_notice().as_deref(),
+        Some(
+            "動画の再生位置を消去できませんでした: 再生位置の履歴を消去する日時はUnixエポックより後である必要があります"
+        )
+    );
+    assert_eq!(
+        std::fs::read(&history).expect("retained history"),
+        b"unknown history"
+    );
+    assert_eq!(
+        VideoResumeSource::capture(&path).expect("source identity"),
+        source
+    );
+    assert_eq!(app.state, PlaybackState::Loading);
+    assert_eq!(app.resume_revision, 7);
+    assert!(app.session.is_none() && app.resume_open.is_none());
+    drop(worker);
+}
+
+#[test]
 fn unavailable_resume_history_reports_clear_failure_without_opening_pending_media() {
     let Some(root) = crate::tests::isolated_test_root(
         "resume::tests::unavailable_resume_history_reports_clear_failure_without_opening_pending_media",

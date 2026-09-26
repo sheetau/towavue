@@ -72,7 +72,10 @@ impl Badge {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let size = (23.0 * density).round().clamp(1.0, 256.0) as u32;
         if self.image != Some((kind, size)) {
-            let pixels = render(kind, size).ok_or("Could not render drag badge")?;
+            let pixels =
+                render(kind, size).ok_or(towavue_runtime_windows::NativeUiError::Message(
+                    towavue_core::localization::Text::NativeDragBadgeRenderFailed,
+                ))?;
             self.window.set_image(size, pixels.data())?;
             self.image = Some((kind, size));
         }

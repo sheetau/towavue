@@ -255,7 +255,12 @@ impl WindowHost {
         for (source, path) in local {
             let result = self.open_launched_window_with(Some(path), visible, |app, device| {
                 app.start_on_device(event_loop, device, false)
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| {
+                        towavue_runtime_windows::native_ui_error_message(
+                            error.as_ref(),
+                            display_language,
+                        )
+                    })
             });
             if let Err(error) = result
                 && let Some(app) = self.windows.get_mut(&source)

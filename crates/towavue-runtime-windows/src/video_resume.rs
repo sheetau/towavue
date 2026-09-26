@@ -1,6 +1,10 @@
 //! Bounded local resume history. All functions perform blocking filesystem IO
 //! and belong on a worker, never in a paint/input callback. Media is read-only.
 
+mod error;
+pub use error::VideoResumeError;
+use towavue_core::localization::Text;
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -39,8 +43,11 @@ struct History {
     entries: Vec<Entry>,
 }
 
-fn invalid(message: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+fn invalid(message: Text) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        VideoResumeError::Message(message),
+    )
 }
 
 impl VideoResumeSource {
@@ -51,13 +58,11 @@ impl VideoResumeSource {
                 .to_str()
                 .is_none_or(|value| value.contains(['\n', '\r', '\0']))
         {
-            return Err(invalid(
-                "Resume source requires an absolute representable path",
-            ));
+            return Err(invalid(Text::ResumeAbsolutePath));
         }
         let metadata = fs::metadata(path)?;
         if !metadata.is_file() {
-            return Err(invalid("Resume source is not a file"));
+            return Err(invalid(Text::ResumeNotFile));
         }
         Ok(Self {
             path: path.to_owned(),
@@ -65,7 +70,7 @@ impl VideoResumeSource {
             modified: metadata
                 .modified()?
                 .duration_since(UNIX_EPOCH)
-                .map_err(|_| invalid("Resume source timestamp precedes Unix epoch"))?
+                .map_err(|_| invalid(Text::ResumeSourceTimestamp))?
                 .as_nanos(),
         })
     }
@@ -96,10 +101,10 @@ fn remember_video_resume(
     let position = u64::try_from(position.as_nanos())
         .ok()
         .filter(|value| *value <= i64::MAX as u64)
-        .ok_or_else(|| invalid("Resume position exceeds the media time range"))?;
+        .ok_or_else(|| invalid(Text::ResumePositionRange))?;
     let observed = observed
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| invalid("Invalid resume observation time"))?
+        .map_err(|_| invalid(Text::ResumeObservationTime))?
         .as_nanos();
     let _lock = lock_history(history)?;
     let mut data = read(history)?;
@@ -131,7 +136,7 @@ fn remember_video_resume(
 fn lock_history(history: &Path) -> io::Result<File> {
     let parent = history
         .parent()
-        .ok_or_else(|| invalid("Resume history has no parent"))?;
+        .ok_or_else(|| invalid(Text::ResumeHistoryParent))?;
     fs::create_dir_all(parent)?;
     let lock = OpenOptions::new()
         .read(true)
@@ -149,10 +154,10 @@ fn lock_history(history: &Path) -> io::Result<File> {
 fn clear_video_resume(history: &Path, observed: SystemTime) -> io::Result<()> {
     let cutoff = observed
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| invalid("Invalid resume clear time"))?
+        .map_err(|_| invalid(Text::ResumeClearTime))?
         .as_nanos();
     if cutoff == 0 {
-        return Err(invalid("Resume clear time must follow Unix epoch"));
+        return Err(invalid(Text::ResumeClearEpoch));
     }
     let _lock = lock_history(history)?;
     let mut data = match read(history) {
@@ -174,7 +179,7 @@ fn read(path: &Path) -> io::Result<History> {
     let mut text = String::new();
     file.take(MAX_BYTES + 1).read_to_string(&mut text)?;
     if text.len() as u64 > MAX_BYTES {
-        return Err(invalid("Resume history exceeds its size limit"));
+        return Err(invalid(Text::ResumeHistorySize));
     }
     let mut lines = text.lines();
     let cleared = match lines.next() {
@@ -183,11 +188,9 @@ fn read(path: &Path) -> io::Result<History> {
             .next()
             .and_then(|line| line.strip_prefix("cleared\t"))
             .and_then(|value| value.parse().ok())
-            .ok_or_else(|| invalid("Invalid resume clear boundary"))?,
+            .ok_or_else(|| invalid(Text::ResumeClearBoundary))?,
         _ => {
-            return Err(invalid(
-                "Unknown resume history format; existing file retained",
-            ));
+            return Err(invalid(Text::ResumeUnknownFormat));
         }
     };
     let mut entries: Vec<Entry> = Vec::new();
@@ -197,29 +200,26 @@ fn read(path: &Path) -> io::Result<History> {
             fields
                 .next()
                 .and_then(|value| value.parse::<u128>().ok())
-                .ok_or_else(|| invalid("Invalid resume history number"))
+                .ok_or_else(|| invalid(Text::ResumeHistoryNumber))
         };
         let observed = number()?;
-        let length =
-            u64::try_from(number()?).map_err(|_| invalid("Invalid resume source length"))?;
+        let length = u64::try_from(number()?).map_err(|_| invalid(Text::ResumeSourceLength))?;
         let modified = number()?;
         let position = u64::try_from(number()?)
             .ok()
             .filter(|value| *value <= i64::MAX as u64)
-            .ok_or_else(|| invalid("Invalid resume position"))?;
+            .ok_or_else(|| invalid(Text::ResumeInvalidPosition))?;
         let path = PathBuf::from(
             fields
                 .next()
-                .ok_or_else(|| invalid("Missing resume source"))?,
+                .ok_or_else(|| invalid(Text::ResumeMissingSource))?,
         );
         if !path.is_absolute()
             || line.contains('\0')
             || entries.len() == LIMIT
             || entries.iter().any(|entry| entry.source.path == path)
         {
-            return Err(invalid(
-                "Invalid resume history entry; existing file retained",
-            ));
+            return Err(invalid(Text::ResumeHistoryEntry));
         }
         entries.push(Entry {
             source: VideoResumeSource {
@@ -232,7 +232,7 @@ fn read(path: &Path) -> io::Result<History> {
         });
     }
     if cleared != 0 && entries.iter().any(|entry| entry.observed <= cleared) {
-        return Err(invalid("Resume entry precedes its clear boundary"));
+        return Err(invalid(Text::ResumeEntryClearBoundary));
     }
     Ok(History { cleared, entries })
 }
@@ -250,11 +250,11 @@ fn write(path: &Path, data: &History) -> io::Result<()> {
             source
                 .path
                 .to_str()
-                .ok_or_else(|| invalid("Unrepresentable resume path"))?
+                .ok_or_else(|| invalid(Text::ResumePathEncoding))?
         ));
     }
     if text.len() as u64 > MAX_BYTES {
-        return Err(invalid("Resume history exceeds its size limit"));
+        return Err(invalid(Text::ResumeHistorySize));
     }
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)

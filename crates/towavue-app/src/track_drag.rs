@@ -124,7 +124,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Err(error) => {
                     self.set_status(towavue_core::localization::formatted::track_drag_failed(
                         display_language,
-                        &error.to_string(),
+                        &error.message(display_language),
                     ));
                     return;
                 }

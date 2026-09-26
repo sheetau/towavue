@@ -169,12 +169,18 @@ impl NativeCaption {
     pub fn new(window: Arc<Window>) -> Result<Self, Box<dyn std::error::Error>> {
         let initial_size = window.inner_size();
         let RawWindowHandle::Win32(handle) = window.window_handle()?.as_raw() else {
-            return Err("Native caption requires a Windows window".into());
+            return Err(crate::NativeUiError::Message(
+                towavue_core::localization::Text::NativeCaptionWindowsRequired,
+            )
+            .into());
         };
         let handle = HWND(handle.hwnd.get() as *mut _);
         // SAFETY: the retained winit window owns this handle. Neither API retains data.
         if unsafe { GetWindowThreadProcessId(handle, None) != GetCurrentThreadId() } {
-            return Err("Native caption must be installed on its window thread".into());
+            return Err(crate::NativeUiError::Message(
+                towavue_core::localization::Text::NativeCaptionWindowThread,
+            )
+            .into());
         }
         let state = Rc::new(CaptionState {
             window: Arc::downgrade(&window),
@@ -208,7 +214,10 @@ impl NativeCaption {
             unsafe {
                 drop(Rc::from_raw(callback_state));
             }
-            return Err("Could not install the native caption".into());
+            return Err(crate::NativeUiError::Message(
+                towavue_core::localization::Text::NativeCaptionInstallFailed,
+            )
+            .into());
         }
         let caption = Self {
             window,

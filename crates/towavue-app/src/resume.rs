@@ -198,7 +198,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         self.set_status(
                             towavue_core::localization::formatted::video_resume_failed(
                                 display_language,
-                                &error.to_string(),
+                                &error.message(display_language),
                             ),
                         );
                         None
@@ -214,13 +214,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             VideoResumeEvent::SaveFailed(error) => self.set_status(
                 towavue_core::localization::formatted::video_position_save_failed(
                     display_language,
-                    &error.to_string(),
+                    &error.message(display_language),
                 ),
             ),
             VideoResumeEvent::ClearFailed(error) => self.set_status(
                 towavue_core::localization::formatted::video_positions_clear_failed(
                     display_language,
-                    &error.to_string(),
+                    &error.message(display_language),
                 ),
             ),
         }

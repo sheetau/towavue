@@ -7,10 +7,10 @@ pub enum VideoResumeEvent {
     Loaded {
         token: u64,
         path: PathBuf,
-        result: Result<VideoResume, String>,
+        result: Result<VideoResume, VideoResumeError>,
     },
-    SaveFailed(String),
-    ClearFailed(String),
+    SaveFailed(VideoResumeError),
+    ClearFailed(VideoResumeError),
 }
 
 struct PendingWrite {
@@ -65,7 +65,7 @@ impl VideoResumeHistory {
                     if let Some(observed) = clear
                         && let Err(error) = clear_video_resume(&path, observed)
                     {
-                        notify(VideoResumeEvent::ClearFailed(error.to_string()));
+                        notify(VideoResumeEvent::ClearFailed(error.into()));
                     }
                     // A same-window reopen must observe its preceding close/save.
                     for write in writes {
@@ -75,7 +75,7 @@ impl VideoResumeHistory {
                             write.position,
                             write.observed,
                         ) {
-                            notify(VideoResumeEvent::SaveFailed(error.to_string()));
+                            notify(VideoResumeEvent::SaveFailed(error.into()));
                         }
                     }
                     if closed {
@@ -83,7 +83,7 @@ impl VideoResumeHistory {
                     }
                     if let Some((token, media)) = lookup {
                         let result =
-                            load_video_resume(&path, &media).map_err(|error| error.to_string());
+                            load_video_resume(&path, &media).map_err(VideoResumeError::from);
                         notify(VideoResumeEvent::Loaded {
                             token,
                             path: media,

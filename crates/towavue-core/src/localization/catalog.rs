@@ -18,6 +18,23 @@ macro_rules! messages {
 }
 
 messages! {
+    FrameImageValidationAlphaCapableWebmDecoderIsUnavailable => ("alpha-capable WebM decoder is unavailable", "アルファに対応したWebMデコーダーを利用できません"),
+    FrameImageValidationAmbiguousDuplicateFrameTimestamp => ("ambiguous duplicate frame timestamp", "フレームの時刻が重複しているため、一意に特定できません"),
+    FrameImageValidationCannotAllocateFrameColorConverter => ("cannot allocate frame color converter", "フレームの色変換処理に必要な領域を確保できません"),
+    FrameImageValidationCannotAllocateInterlacedFrameColorConverter => ("cannot allocate interlaced frame color converter", "インターレースフレームの色変換処理に必要な領域を確保できません"),
+    FrameImageValidationCouldNotAllocateNormalizedExif => ("could not allocate normalized EXIF", "正規化したEXIFの領域を確保できませんでした"),
+    FrameImageValidationCropExceedsTheCurrentFrame => ("crop exceeds the current frame", "切り抜き範囲が現在のフレームを超えています"),
+    FrameImageValidationDeclaredWebmAlphaPlaneWasNotDecoded => ("declared WebM alpha plane was not decoded", "WebMに指定されたアルファプレーンをデコードできませんでした"),
+    FrameImageValidationEditSourceGeometryDoesNotMatchTheCurrentFrame => ("edit source geometry does not match the current frame", "編集元の形状が現在のフレームと一致しません"),
+    FrameImageValidationEmptyNormalizedExif => ("empty normalized EXIF", "正規化したEXIFが空です"),
+    FrameImageValidationEmptyPngPacket => ("empty PNG packet", "PNGのパケットが空です"),
+    FrameImageValidationImageOnlyOperationInVideoFrameExport => ("image-only operation in video frame export", "動画フレームの書き出しに画像専用の編集操作が含まれています"),
+    FrameImageValidationIncompleteFrameColorConversion => ("incomplete frame color conversion", "フレームの色変換が不完全です"),
+    FrameImageValidationNoFrameAtTheRequestedSourceTimestamp => ("no frame at the requested source timestamp", "指定された元の時刻にフレームがありません"),
+    FrameImageValidationNonmonotonicSourceFrameTimestamps => ("nonmonotonic source frame timestamps", "元のフレームの時刻が順番どおりに並んでいません"),
+    FrameImageValidationPngRequiresIntegerSamplesOfAtMost16Bits => ("PNG requires integer samples of at most 16 bits", "PNGには16ビット以下の整数サンプルが必要です"),
+    FrameImageValidationUnknownSourcePixelFormat => ("unknown source pixel format", "元の画素形式が不明です"),
+    FrameImageValidationUnsupportedSourceColorMatrix => ("unsupported source color matrix", "元の色変換行列に対応していません"),
     MetadataSourceFile => ("File", "ファイル"),
     MetadataSourceVideo => ("Video", "映像"),
     MetadataSourceAudio => ("Audio", "音声"),

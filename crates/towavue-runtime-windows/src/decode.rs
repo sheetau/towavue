@@ -169,7 +169,7 @@ pub struct DecodeSummary {
 #[derive(Debug, Error)]
 pub enum DecodeError {
     #[error("could not extract video frame: {0}")]
-    FrameImage(String),
+    FrameImage(#[source] crate::FrameImageFailure),
     #[error("frame stepping requires video presentation timestamps")]
     MissingVideoTimestamp,
     #[error("video display matrix is not a supported quarter-turn or reflection")]

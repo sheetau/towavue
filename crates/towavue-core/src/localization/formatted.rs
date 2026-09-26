@@ -36,6 +36,7 @@ macro_rules! templates {
 }
 
 templates! {
+    frame_image_unexpected(actual_width: u32, actual_height: u32, actual_format: &str, expected_width: u32, expected_height: u32, expected_format: &str) => ("unexpected edited frame: {actual_width}x{actual_height} {actual_format}, expected {expected_width}x{expected_height} {expected_format}", "編集後のフレームが一致しません。実際の値: {actual_width}x{actual_height} {actual_format}、必要な値: {expected_width}x{expected_height} {expected_format}"),
     metadata_source_xmp(format: &str) => ("{format} XMP", "{format} XMP"),
     metadata_source_xmp_language(format: &str, tag: &str) => ("{format} XMP ({tag})", "{format} XMP（{tag}）"),
     metadata_source_xmp_creator(format: &str, creator: usize) => ("{format} XMP (creator {creator})", "{format} XMP（作成者{creator}）"),

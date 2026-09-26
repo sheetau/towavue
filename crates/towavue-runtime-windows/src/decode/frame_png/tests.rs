@@ -427,7 +427,7 @@ fn native_frame_png_selects_vfr_b_frames_transport_origins_and_rejects_duplicate
     );
     assert!(
         matches!(source_video_frame_png(&path, MediaTime::ZERO, &|| false),
-        Err(DecodeError::FrameImage(message)) if message.contains("duplicate"))
+        Err(DecodeError::FrameImage(message)) if message.to_string().contains("duplicate"))
     );
     fs::remove_dir_all(root).expect("frame PNG fixture");
 }

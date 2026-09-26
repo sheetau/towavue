@@ -14,6 +14,8 @@ pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_
 mod cancellation;
 mod caption;
 mod decode;
+mod frame_image_failure;
+pub use frame_image_failure::FrameImageFailure;
 mod diagnostics;
 mod dialog;
 pub use diagnostics::{Diagnostics, record_diagnostic, start_diagnostics};

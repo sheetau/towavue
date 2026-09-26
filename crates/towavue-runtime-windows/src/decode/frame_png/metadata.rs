@@ -123,16 +123,16 @@ pub(super) fn remove_thumbnail(frame: &mut frame::Video) -> Result<(), DecodeErr
         let buffer = buffer
             .0
             .as_ref()
-            .ok_or_else(|| invalid("empty normalized EXIF"))?;
+            .ok_or_else(|| invalid(Text::FrameImageValidationEmptyNormalizedExif))?;
         if buffer.size == 0 || buffer.data.is_null() {
-            return Err(invalid("empty normalized EXIF"));
+            return Err(invalid(Text::FrameImageValidationEmptyNormalizedExif));
         }
         std::slice::from_raw_parts(buffer.data, buffer.size).to_vec()
     };
     frame.remove_side_data(Type::EXIF);
     let mut side = frame
         .new_side_data(Type::EXIF, bytes.len())
-        .ok_or_else(|| invalid("could not allocate normalized EXIF"))?;
+        .ok_or_else(|| invalid(Text::FrameImageValidationCouldNotAllocateNormalizedExif))?;
     // SAFETY: exclusive access to the newly allocated frame-owned region. Source
     // side data belongs to a different reference and was never modified in place.
     unsafe {

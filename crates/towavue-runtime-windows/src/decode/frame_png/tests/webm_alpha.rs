@@ -264,7 +264,7 @@ fn webm_frame_png_retains_decoded_alpha_through_selection_and_edits() {
         );
         assert!(
             matches!(source_video_frame_png(&missing_alpha, MediaTime::ZERO, &|| false),
-            Err(DecodeError::FrameImage(message)) if message.contains("alpha plane"))
+            Err(DecodeError::FrameImage(message)) if message.to_string().contains("alpha plane"))
         );
 
         assert_eq!(fs::read(&path).expect("source bytes"), original);

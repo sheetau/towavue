@@ -344,8 +344,11 @@ fn duplicate_frame_times_across_keyframes_and_at_eof_never_replace_targets() {
                             std::error::Error::source(error)
                                 .and_then(|cause| cause.downcast_ref::<crate::DecodeError>()),
                             Some(crate::DecodeError::FrameImage(message))
-                                if message.contains("ambiguous duplicate")
+                                if message.to_string().contains("ambiguous duplicate")
                         ));
+                        assert!(error.message(towavue_core::localization::Language::Japanese)
+                            .contains(towavue_core::localization::Text::FrameImageValidationAmbiguousDuplicateFrameTimestamp
+                                .in_language(towavue_core::localization::Language::Japanese)));
                         drop(job);
                         assert!(rx.try_recv().is_err(), "one terminal event");
                         if let Some(before) = before {

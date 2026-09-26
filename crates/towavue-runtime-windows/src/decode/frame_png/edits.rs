@@ -17,7 +17,9 @@ pub(super) fn apply(
                     || crop.x.checked_add(crop.width).is_none_or(|x| x > size.0)
                     || crop.y.checked_add(crop.height).is_none_or(|y| y > size.1)
                 {
-                    return Err(invalid("crop exceeds the current frame"));
+                    return Err(invalid(
+                        Text::FrameImageValidationCropExceedsTheCurrentFrame,
+                    ));
                 }
                 (
                     (crop.width, crop.height),
@@ -79,7 +81,9 @@ pub(super) fn apply(
                 continue;
             }
             operation if !operation.applies_to(MediaKind::Video) => {
-                return Err(invalid("image-only operation in video frame export"));
+                return Err(invalid(
+                    Text::FrameImageValidationImageOnlyOperationInVideoFrameExport,
+                ));
             }
             _ => continue,
         };
@@ -104,7 +108,7 @@ fn validate_source(
     if (source.width(), source.height()) != size || (actual - aspect).abs() > actual.abs() * 0.00001
     {
         return Err(invalid(
-            "edit source geometry does not match the current frame",
+            Text::FrameImageValidationEditSourceGeometryDoesNotMatchTheCurrentFrame,
         ));
     }
     Ok(())
@@ -253,15 +257,14 @@ fn filtered(
         .frame(&mut output)?;
     check_cancelled(cancelled)?;
     if (output.width(), output.height()) != size || output.format() != source.format() {
-        return Err(invalid(&format!(
-            "unexpected edited frame: {}x{} {:?}, expected {}x{} {:?}",
-            output.width(),
-            output.height(),
-            output.format(),
-            size.0,
-            size.1,
-            source.format()
-        )));
+        return Err(DecodeError::FrameImage(
+            crate::FrameImageFailure::UnexpectedFrame {
+                actual_size: (output.width(), output.height()),
+                actual_format: format!("{:?}", output.format()),
+                expected_size: size,
+                expected_format: format!("{:?}", source.format()),
+            },
+        ));
     }
     copy_properties(source, &mut output, aspect)?;
     Ok(output)

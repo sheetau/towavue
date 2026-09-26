@@ -41,7 +41,9 @@ impl PlaybackError {
 impl DecodeError {
     pub fn message(&self, language: Language) -> String {
         match self {
-            Self::FrameImage(error) => formatted::frame_extract_failed(language, error),
+            Self::FrameImage(error) => {
+                formatted::frame_extract_failed(language, &error.message(language))
+            }
             Self::MissingVideoTimestamp => {
                 Text::DecodeMissingTimestamp.in_language(language).into()
             }

@@ -1,5 +1,6 @@
 use super::*;
 use towavue_core::EditOperation;
+use towavue_core::localization::Text;
 
 mod color;
 mod edits;
@@ -9,8 +10,8 @@ pub(crate) mod verification;
 
 const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
-fn invalid(message: &str) -> DecodeError {
-    DecodeError::FrameImage(message.into())
+fn invalid(reason: Text) -> DecodeError {
+    DecodeError::FrameImage(crate::FrameImageFailure::Message(reason))
 }
 
 /// Decode an original-source PTS into an original-resolution PNG on a worker.
@@ -57,8 +58,9 @@ pub fn edited_video_frame_png(
             .is_some_and(|stream| stream.metadata().get("alpha_mode") == Some("1"))
     });
     let codec = if let Some(name) = alpha_decoder {
-        codec::decoder::find_by_name(name)
-            .ok_or_else(|| invalid("alpha-capable WebM decoder is unavailable"))?
+        codec::decoder::find_by_name(name).ok_or_else(|| {
+            invalid(Text::FrameImageValidationAlphaCapableWebmDecoderIsUnavailable)
+        })?
     } else {
         codec::decoder::find(config.parameters.id()).ok_or(ffmpeg::Error::DecoderNotFound)?
     };
@@ -88,7 +90,9 @@ pub fn edited_video_frame_png(
                         .ok_or(DecodeError::MissingVideoTimestamp)?;
                     let time = timestamp_to_media_time(Some(timestamp), config.time_base);
                     if previous.is_some_and(|previous| time < previous) {
-                        return Err(invalid("nonmonotonic source frame timestamps"));
+                        return Err(invalid(
+                            Text::FrameImageValidationNonmonotonicSourceFrameTimestamps,
+                        ));
                     }
                     previous = Some(time);
                     if time > target {
@@ -96,7 +100,9 @@ pub fn edited_video_frame_png(
                     }
                     if time == target {
                         if selected.is_some() {
-                            return Err(invalid("ambiguous duplicate frame timestamp"));
+                            return Err(invalid(
+                                Text::FrameImageValidationAmbiguousDuplicateFrameTimestamp,
+                            ));
                         }
                         selected = Some(decoded);
                     }
@@ -136,7 +142,8 @@ pub fn edited_video_frame_png(
         decoder.send_eof()?;
         receive(&mut decoder)?;
     }
-    let selected = selected.ok_or_else(|| invalid("no frame at the requested source timestamp"))?;
+    let selected = selected
+        .ok_or_else(|| invalid(Text::FrameImageValidationNoFrameAtTheRequestedSourceTimestamp))?;
     if alpha_decoder.is_some() {
         // SAFETY: immutable FFmpeg descriptor for the selected owned frame;
         // no pointer is retained. Do not silently publish an opaque substitute
@@ -147,7 +154,9 @@ pub fn edited_video_frame_png(
                 .is_some_and(|desc| desc.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0)
         };
         if !has_alpha {
-            return Err(invalid("declared WebM alpha plane was not decoded"));
+            return Err(invalid(
+                Text::FrameImageValidationDeclaredWebmAlphaPlaneWasNotDecoded,
+            ));
         }
     }
     encode(&selected, orientation, operations, cancelled)
@@ -168,7 +177,7 @@ fn encode(
     // SAFETY: the descriptor is immutable FFmpeg storage for the frame's format;
     // no pointer escapes this call and the borrowed source is never mutated.
     let descriptor = unsafe { ffmpeg::ffi::av_pix_fmt_desc_get(source.format().into()).as_ref() }
-        .ok_or_else(|| invalid("unknown source pixel format"))?;
+        .ok_or_else(|| invalid(Text::FrameImageValidationUnknownSourcePixelFormat))?;
     let depth = descriptor.comp[..usize::from(descriptor.nb_components)]
         .iter()
         .map(|component| component.depth)
@@ -179,7 +188,9 @@ fn encode(
             & (ffmpeg::ffi::AV_PIX_FMT_FLAG_FLOAT | ffmpeg::ffi::AV_PIX_FMT_FLAG_HWACCEL) as u64
             != 0
     {
-        return Err(invalid("PNG requires integer samples of at most 16 bits"));
+        return Err(invalid(
+            Text::FrameImageValidationPngRequiresIntegerSamplesOfAtMost16Bits,
+        ));
     }
     let alpha = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_ALPHA as u64 != 0;
     let grayscale = descriptor.nb_components <= 2
@@ -201,7 +212,11 @@ fn encode(
         AVCOL_SPC_FCC => ffmpeg::ffi::SWS_CS_FCC,
         AVCOL_SPC_SMPTE240M => ffmpeg::ffi::SWS_CS_SMPTE240M,
         AVCOL_SPC_BT2020_NCL => ffmpeg::ffi::SWS_CS_BT2020,
-        _ => return Err(invalid("unsupported source color matrix")),
+        _ => {
+            return Err(invalid(
+                Text::FrameImageValidationUnsupportedSourceColorMatrix,
+            ));
+        }
     };
     let full = descriptor.flags & ffmpeg::ffi::AV_PIX_FMT_FLAG_RGB as u64 != 0
         || (descriptor.nb_components <= 2 && source.color_range() != ffmpeg::color::Range::MPEG)
@@ -291,7 +306,7 @@ fn encode(
     check_cancelled(cancelled)?;
     Ok(packet
         .data()
-        .ok_or_else(|| invalid("empty PNG packet"))?
+        .ok_or_else(|| invalid(Text::FrameImageValidationEmptyPngPacket))?
         .to_vec())
 }
 

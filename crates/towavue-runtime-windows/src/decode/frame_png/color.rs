@@ -67,7 +67,9 @@ fn convert_planes(
     // owns its result and also handles null/all initialization failure paths.
     let scaler = Scaler(unsafe { sws_alloc_context() });
     if scaler.0.is_null() {
-        return Err(invalid("cannot allocate frame color converter"));
+        return Err(invalid(
+            Text::FrameImageValidationCannotAllocateFrameColorConverter,
+        ));
     }
     let input_format: AVPixelFormat = source.format().into();
     let output_format: AVPixelFormat = pixel.into();
@@ -143,7 +145,9 @@ fn convert_planes(
         return Err(ffmpeg::Error::from(rows).into());
     }
     if rows != source.height() as i32 {
-        return Err(invalid("incomplete frame color conversion"));
+        return Err(invalid(
+            Text::FrameImageValidationIncompleteFrameColorConversion,
+        ));
     }
     Ok(output)
 }
@@ -157,7 +161,9 @@ fn convert_interlaced(
     // SAFETY: the guard owns the allocation even on initialization failure.
     let scaler = Scaler(unsafe { sws_alloc_context() });
     if scaler.0.is_null() {
-        return Err(invalid("cannot allocate interlaced frame color converter"));
+        return Err(invalid(
+            Text::FrameImageValidationCannotAllocateInterlacedFrameColorConverter,
+        ));
     }
     let mut input = frame::Video::empty();
     // SAFETY: retain the borrowed pixels in a separate frame header. Changes to

@@ -89,6 +89,34 @@ fn japanese_update_notices_preserve_states_external_details_and_guarded_edits() 
         });
         check(&mut host, &expected);
 
+        let failure: towavue_runtime_windows::update::UpdateError =
+            towavue_runtime_windows::update::SignedUpdate::authenticate(b"invalid", b"invalid")
+                .expect_err("malformed signed metadata")
+                .into();
+        assert_eq!(
+            failure.to_string(),
+            "invalid or unsupported update metadata"
+        );
+        host.update_event(UpdateEvent::Unavailable(failure.clone()));
+        check(
+            &mut host,
+            "更新を利用できません: 更新情報が不正か、対応していない形式です",
+        );
+        host.check_updates(true);
+        check(
+            &mut host,
+            "更新を利用できません: 更新情報が不正か、対応していない形式です",
+        );
+        host.update_event(UpdateEvent::Error {
+            message: failure,
+            startup: false,
+            operation: None,
+        });
+        check(
+            &mut host,
+            "更新を利用できません: 更新情報が不正か、対応していない形式です",
+        );
+
         host.windows.get_mut(&second).expect("second").about_open = true;
         host.begin_update(false);
         assert!(host.updates.attempt.is_none());

@@ -1,9 +1,12 @@
 //! Native update download, authentication and staging boundary.
+use towavue_core::localization::Text;
 mod crypto;
+mod errors;
 mod handoff;
 mod http;
 mod service;
 mod storage;
+pub use errors::UpdateError;
 pub use handoff::PendingHandoff;
 pub use service::{UpdateEvent, UpdateService};
 pub use storage::{CachedUpdate, StartupUpdate, UpdatePhase, UpdateStore};
@@ -30,7 +33,7 @@ impl SignedUpdate {
         let manifest = ReleaseManifest::parse(manifest_bytes).map_err(io::Error::other)?;
         let text = PUBLIC_KEY_HEX.trim();
         if !text.len().is_multiple_of(2) || text.len() > 4096 {
-            return Err(io::Error::other("Invalid embedded update public key"));
+            return Err(errors::text(Text::UpdateKeyInvalid));
         }
         let key = (0..text.len())
             .step_by(2)
@@ -66,9 +69,7 @@ impl SignedUpdate {
     pub fn download(&self, file: &mut File, cancel: &Cancellation) -> io::Result<()> {
         use std::io::{Seek, SeekFrom};
         if file.metadata()?.len() != 0 {
-            return Err(io::Error::other(
-                "Update download requires an empty staging file",
-            ));
+            return Err(errors::text(Text::UpdateStageNotEmpty));
         }
         file.seek(SeekFrom::Start(0))?;
         http::get(
@@ -89,16 +90,12 @@ impl SignedUpdate {
     pub fn verify_file(&self, file: &mut File) -> io::Result<()> {
         use std::io::{Seek, SeekFrom};
         if !file.metadata()?.is_file() || file.metadata()?.len() != self.manifest.bytes {
-            return Err(io::Error::other(
-                "Update file size does not match signed metadata",
-            ));
+            return Err(errors::text(Text::UpdateSignedSizeMismatch));
         }
         file.seek(SeekFrom::Start(0))?;
         use std::io::Read;
         if crypto::sha256(file.take(self.manifest.bytes + 1))? != self.manifest.sha256 {
-            return Err(io::Error::other(
-                "Update file hash does not match signed metadata",
-            ));
+            return Err(errors::text(Text::UpdateSignedHashMismatch));
         }
         Ok(())
     }

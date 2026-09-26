@@ -7,6 +7,7 @@ use std::{
     ptr,
     time::{Duration, Instant},
 };
+use towavue_core::localization::Text;
 use windows::{
     Win32::Networking::WinHttp::*,
     core::{PCWSTR, w},
@@ -42,22 +43,20 @@ fn parts(url: &str) -> io::Result<(&str, &str)> {
             .bytes()
             .any(|byte| byte <= 32 || byte == 127 || byte == b'\\' || byte == b'#')
     {
-        return Err(io::Error::other("Invalid update URL"));
+        return Err(super::errors::text(Text::UpdateUrlInvalid));
     }
     let rest = url
         .strip_prefix("https://")
-        .ok_or_else(|| io::Error::other("Update requires HTTPS"))?;
+        .ok_or_else(|| super::errors::text(Text::UpdateHttpsRequired))?;
     let split = rest
         .find('/')
-        .ok_or_else(|| io::Error::other("Update URL has no path"))?;
+        .ok_or_else(|| super::errors::text(Text::UpdateUrlPathMissing))?;
     let (host, path) = rest.split_at(split);
     if !matches!(
         host,
         "github.com" | "release-assets.githubusercontent.com" | "objects.githubusercontent.com"
     ) {
-        return Err(io::Error::other(
-            "Update redirect is outside GitHub release storage",
-        ));
+        return Err(super::errors::text(Text::UpdateRedirectForeign));
     }
     Ok((host, path))
 }
@@ -170,7 +169,7 @@ pub(super) fn get(
             let length = location
                 .iter()
                 .position(|unit| *unit == 0)
-                .ok_or_else(|| io::Error::other("Unterminated redirect"))?;
+                .ok_or_else(|| super::errors::text(Text::UpdateRedirectUnterminated))?;
             let location = String::from_utf16(&location[..length]).map_err(io::Error::other)?;
             next = if location.starts_with('/') && !location.starts_with("//") {
                 format!("https://{}{location}", parts(&next)?.0)
@@ -184,9 +183,7 @@ pub(super) fn get(
             return Err(io::ErrorKind::NotFound.into());
         }
         if status != 200 {
-            return Err(io::Error::other(format!(
-                "Update server returned HTTP {status}"
-            )));
+            return Err(super::errors::http_status(status));
         }
         let mut total = 0u64;
         let mut buffer = [0u8; 64 * 1024];
@@ -208,12 +205,12 @@ pub(super) fn get(
             }
             total += u64::from(count);
             if total > maximum {
-                return Err(io::Error::other("Update response exceeds its size limit"));
+                return Err(super::errors::text(Text::UpdateResponseSizeLimit));
             }
             output.write_all(&buffer[..count as usize])?;
         }
     }
-    Err(io::Error::other("Too many update redirects"))
+    Err(super::errors::text(Text::UpdateRedirectLimit))
 }
 
 #[cfg(test)]

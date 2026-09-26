@@ -1,6 +1,6 @@
 //! One blocking worker owns disk/network work and the installer helper. UI
 //! messages contain values only; dropping a stale event cannot launch Setup.
-use super::{PendingHandoff, StartupUpdate, UpdatePhase, UpdateStore};
+use super::{PendingHandoff, StartupUpdate, UpdateError, UpdatePhase, UpdateStore};
 use crate::Cancellation;
 use std::{
     fs::File,
@@ -9,6 +9,7 @@ use std::{
     sync::mpsc,
     thread,
 };
+use towavue_core::localization::Text;
 use towavue_core::release::ReleaseVersion;
 use windows::{
     Win32::{
@@ -22,7 +23,7 @@ use windows::{
 #[derive(Clone, Debug)]
 pub enum UpdateEvent {
     Disabled,
-    Unavailable(String),
+    Unavailable(UpdateError),
     StartupComplete,
     InstallationInProgress,
     Ready {
@@ -36,7 +37,7 @@ pub enum UpdateEvent {
     Committed(u64),
     Cancelled(u64),
     Error {
-        message: String,
+        message: UpdateError,
         startup: bool,
         operation: Option<u64>,
     },
@@ -83,7 +84,7 @@ impl UpdateService {
                         return;
                     }
                     Err(error) => {
-                        notify(UpdateEvent::Unavailable(error.to_string()));
+                        notify(UpdateEvent::Unavailable(error.into()));
                         return;
                     }
                 };
@@ -175,13 +176,11 @@ fn registry_string(name: PCWSTR) -> io::Result<Option<String>> {
     }
     status.ok().map_err(io::Error::other)?;
     if bytes < 2 || !bytes.is_multiple_of(2) || bytes as usize > buffer.len() * 2 {
-        return Err(io::Error::other("Invalid installation registration string"));
+        return Err(super::errors::text(Text::UpdateRegistrationInvalid));
     }
     let text = &buffer[..bytes as usize / 2];
     if text.last() != Some(&0) || text[..text.len() - 1].contains(&0) {
-        return Err(io::Error::other(
-            "Ambiguous installation registration string",
-        ));
+        return Err(super::errors::text(Text::UpdateRegistrationAmbiguous));
     }
     String::from_utf16(&text[..text.len() - 1])
         .map(Some)
@@ -223,21 +222,17 @@ impl Installation {
             return Ok(false);
         }
         if registration(w!("DisplayVersion"))?.as_deref() != Some(installed.to_string().as_str()) {
-            return Err(io::Error::other(
-                "Installed and registered versions differ. Run Setup to recover the installation.",
-            ));
+            return Err(super::errors::text(Text::UpdateVersionMismatch));
         }
         if registration(w!("TowavuePendingUpdate"))?.is_some() {
-            return Err(io::Error::other(
-                "An interrupted installation needs recovery. Run Setup before updating.",
-            ));
+            return Err(super::errors::text(Text::UpdateInterruptedInstallation));
         }
         let identity = registration(w!("TowavueOwnershipId"))?
-            .ok_or_else(|| io::Error::other("Installation ownership is missing"))?;
+            .ok_or_else(|| super::errors::text(Text::UpdateOwnershipMissing))?;
         let hash = identity
             .strip_prefix("towavue-release-")
             .filter(|hash| hash.len() == 64)
-            .ok_or_else(|| io::Error::other("Not a production installation"))?;
+            .ok_or_else(|| super::errors::text(Text::UpdateNotProduction))?;
         let mut inventory = Vec::new();
         File::open(self.directory.join("licenses/INSTALLED-FILES.json"))?
             .take(4 * 1024 * 1024 + 1)
@@ -247,9 +242,7 @@ impl Installation {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         if inventory.len() > 4 * 1024 * 1024 || digest != hash {
-            return Err(io::Error::other(
-                "The installed file inventory changed. Run Setup to inspect the installation.",
-            ));
+            return Err(super::errors::text(Text::UpdateInventoryChanged));
         }
         Ok(true)
     }
@@ -282,7 +275,7 @@ fn run(
         }
         Err(error) => {
             notify(UpdateEvent::Error {
-                message: error.to_string(),
+                message: error.into(),
                 startup: true,
                 operation: None,
             });
@@ -332,7 +325,7 @@ fn run(
                 Request::Defer => {
                     let cached = cached
                         .as_mut()
-                        .ok_or_else(|| io::Error::other("Check for updates again"))?;
+                        .ok_or_else(|| super::errors::text(Text::UpdateCheckAgain))?;
                     if cached.phase() == UpdatePhase::Failed {
                         context.store.transition(cached, UpdatePhase::Ready)?;
                     }
@@ -348,13 +341,11 @@ fn run(
                         return Ok(());
                     }
                     if handoff.is_some() {
-                        return Err(io::Error::other(
-                            "An installation is already being prepared",
-                        ));
+                        return Err(super::errors::text(Text::UpdateAlreadyPreparing));
                     }
                     let mut selected = cached
                         .take()
-                        .ok_or_else(|| io::Error::other("Check for updates again"))?;
+                        .ok_or_else(|| super::errors::text(Text::UpdateCheckAgain))?;
                     if selected.phase() == UpdatePhase::Failed
                         && let Err(error) =
                             context.store.transition(&mut selected, UpdatePhase::Ready)
@@ -407,7 +398,7 @@ fn run(
                 cached = selected;
             }
             notify(UpdateEvent::Error {
-                message: error.to_string(),
+                message: error.into(),
                 startup: false,
                 operation,
             });

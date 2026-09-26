@@ -36,6 +36,8 @@ macro_rules! templates {
 }
 
 templates! {
+    update_http_status(status: u32) => ("Update server returned HTTP {status}", "更新サーバーがHTTP {status}を返しました"),
+    update_helper_exited(status: &str, detail: &str) => ("Update helper exited before readiness ({status}): {detail}", "更新用の補助プロセスが準備完了前に終了しました（{status}）: {detail}"),
     update_unavailable(error: &str) => ("Update unavailable: {error}", "更新を利用できません: {error}"),
     language_restart_failed(error: &str) => ("towavue could not restart: {error}\nStart towavue manually to apply the saved language.", "towavueを再起動できませんでした: {error}\n手動でtowavueを起動すると、保存した表示言語が適用されます。"),
     image_open_failed(error: &str) => ("could not open image: {error}", "画像を開けません: {error}"),

@@ -14,6 +14,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
+use towavue_core::localization::Text;
 use towavue_core::release::ReleaseVersion;
 use windows::{Win32::Storage::FileSystem::*, core::PCWSTR};
 
@@ -64,17 +65,17 @@ impl State {
         let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
         let fields: Vec<_> = text.split('\n').collect();
         let ["towavue-update-state-v1", stage, phase, ""] = fields.as_slice() else {
-            return Err(invalid("Invalid update cache state"));
+            return Err(invalid(Text::UpdateCacheStateInvalid));
         };
         if !valid_stage(stage) {
-            return Err(invalid("Invalid update stage identity"));
+            return Err(invalid(Text::UpdateStageIdentityInvalid));
         }
         let phase = match *phase {
             "ready" => UpdatePhase::Ready,
             "next-launch" => UpdatePhase::NextLaunch,
             "installing" => UpdatePhase::Installing,
             "failed" => UpdatePhase::Failed,
-            _ => return Err(invalid("Unknown update cache phase")),
+            _ => return Err(invalid(Text::UpdateCachePhaseUnknown)),
         };
         Ok(Self {
             stage: (*stage).into(),
@@ -83,8 +84,8 @@ impl State {
     }
 }
 
-fn invalid(message: &str) -> io::Error {
-    io::Error::other(message)
+fn invalid(message: Text) -> io::Error {
+    super::errors::text(message)
 }
 fn valid_stage(name: &str) -> bool {
     name.strip_prefix("stage-").is_some_and(|part| {
@@ -120,9 +121,7 @@ impl Directories {
                 .components()
                 .any(|p| matches!(p, Component::ParentDir | Component::CurDir))
         {
-            return Err(invalid(
-                "Update cache requires a normalized local absolute path",
-            ));
+            return Err(invalid(Text::UpdateCachePathInvalid));
         }
         let mut held = Vec::new();
         for part in path
@@ -144,9 +143,7 @@ impl Directories {
             if !metadata.is_dir()
                 || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
             {
-                return Err(invalid(
-                    "Update cache must not traverse links or reparse points",
-                ));
+                return Err(invalid(Text::UpdateCacheLinks));
             }
             held.push(directory);
         }
@@ -162,7 +159,7 @@ pub(super) fn read_file(path: &Path) -> io::Result<File> {
         .open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
-        return Err(invalid("Update cache entry is not a regular file"));
+        return Err(invalid(Text::UpdateCacheFileInvalid));
     }
     Ok(file)
 }
@@ -171,7 +168,7 @@ fn bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     read_file(path)?.take(limit + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
-        return Err(invalid("Update cache entry exceeds its size limit"));
+        return Err(invalid(Text::UpdateCacheSizeLimit));
     }
     Ok(bytes)
 }
@@ -259,7 +256,7 @@ impl UpdateStore {
         if !lock.metadata()?.is_file()
             || lock.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
         {
-            return Err(invalid("Invalid update cache lock"));
+            return Err(invalid(Text::UpdateCacheLockInvalid));
         }
         Ok((directories, lock))
     }
@@ -351,7 +348,7 @@ impl UpdateStore {
                 if !metadata.is_file()
                     || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
                 {
-                    return Err(invalid("Invalid installer handoff lock"));
+                    return Err(invalid(Text::UpdateInstallerLockInvalid));
                 }
                 file
             }
@@ -395,7 +392,7 @@ impl UpdateStore {
                 if !metadata.is_file()
                     || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
                 {
-                    return Err(invalid("Invalid installer handoff lock"));
+                    return Err(invalid(Text::UpdateInstallerLockInvalid));
                 }
                 Ok(false)
             }
@@ -480,9 +477,7 @@ impl UpdateStore {
                 if previous.phase() != UpdatePhase::Ready
                     || previous.version() >= verified.version()
                 {
-                    return Err(invalid(
-                        "An update is already scheduled or a newer update is cached",
-                    ));
+                    return Err(invalid(Text::UpdateAlreadyScheduled));
                 }
                 Some(previous)
             } else {
@@ -516,9 +511,7 @@ impl UpdateStore {
         if selected.directory.parent() != Some(self.root.as_path())
             || self.state()?.as_ref() != Some(&selected.state)
         {
-            return Err(invalid(
-                "The selected update changed; check for updates again",
-            ));
+            return Err(invalid(Text::UpdateSelectionChanged));
         }
         let allowed = matches!(
             (selected.phase(), phase),
@@ -530,7 +523,7 @@ impl UpdateStore {
                 | (UpdatePhase::Failed, UpdatePhase::Ready)
         );
         if !allowed {
-            return Err(invalid("Invalid update state transition"));
+            return Err(invalid(Text::UpdateTransitionInvalid));
         }
         let next = State {
             stage: selected.state.stage.clone(),

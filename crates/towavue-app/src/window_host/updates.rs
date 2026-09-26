@@ -306,7 +306,7 @@ impl WindowHost {
                 self.updates.next_check = None;
                 let message = towavue_core::localization::formatted::update_unavailable(
                     self.language.settings.display,
-                    &message,
+                    &message.message(self.language.settings.display),
                 );
                 self.updates.unavailable = Some(message.clone());
                 self.update_status(message);
@@ -438,7 +438,7 @@ impl WindowHost {
                 self.updates.manual = false;
                 self.update_status(towavue_core::localization::formatted::update_unavailable(
                     self.language.settings.display,
-                    &message,
+                    &message.message(self.language.settings.display),
                 ));
             }
         }

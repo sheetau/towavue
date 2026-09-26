@@ -16800,14 +16800,14 @@ mod tests {
                     4 => &[
                         "Unsaved edits",
                         "Save and continue",
-                        "Discard edits",
+                        "Discard all edits and exit",
                         "Cancel",
                         "Cancel current export",
                     ],
                     _ => &[
                         "Unsaved edits",
                         "Save and continue",
-                        "Discard edits",
+                        "Discard all edits and exit",
                         "Cancel",
                     ],
                 };

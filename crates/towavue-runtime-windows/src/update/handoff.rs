@@ -11,6 +11,7 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
+use towavue_core::localization::Text;
 use windows::Win32::{
     Foundation::FILETIME,
     System::{
@@ -35,9 +36,7 @@ pub struct PendingHandoff {
 impl PendingHandoff {
     pub fn commit(mut self) -> io::Result<()> {
         if self.child.try_wait()?.is_some() {
-            return Err(io::Error::other(
-                "The update helper stopped before shutdown",
-            ));
+            return Err(super::errors::text(Text::UpdateHelperStopped));
         }
         self.committed = true;
         Ok(())
@@ -137,7 +136,7 @@ impl UpdateStore {
             .take(expected_script.len() as u64 + 1)
             .read_to_string(&mut observed)?;
         if observed != expected_script {
-            return Err(io::Error::other("The update helper script changed"));
+            return Err(super::errors::text(Text::UpdateHelperScriptChanged));
         }
         self.transition(&mut selected, UpdatePhase::Installing)?;
         let result = (|| {
@@ -160,7 +159,7 @@ impl UpdateStore {
                 .arg(
                     directory
                         .file_name()
-                        .ok_or_else(|| io::Error::other("Invalid update stage"))?,
+                        .ok_or_else(|| super::errors::text(Text::UpdateStageInvalid))?,
                 )
                 .arg("-Attempt")
                 .arg(&attempt)
@@ -207,9 +206,7 @@ impl UpdateStore {
                         Ok(text)
                     })
                     .unwrap_or_default();
-                return Err(io::Error::other(format!(
-                    "Update helper exited before readiness ({status}): {detail}"
-                )));
+                return Err(super::errors::helper_exited(status.to_string(), detail));
             }
             match read_file(&directory.join(format!("{attempt}.ready"))) {
                 Ok(file) => {
@@ -218,7 +215,7 @@ impl UpdateStore {
                     if bytes == b"ready\n" {
                         return Ok(pending);
                     }
-                    return Err(io::Error::other("Invalid update helper acknowledgment"));
+                    return Err(super::errors::text(Text::UpdateHelperAckInvalid));
                 }
                 Err(error)
                     if error.kind() == io::ErrorKind::NotFound
@@ -226,9 +223,9 @@ impl UpdateStore {
                 Err(error) => return Err(error),
             }
             if Instant::now() >= deadline {
-                return Err(io::Error::new(
+                return Err(super::errors::with_kind(
                     io::ErrorKind::TimedOut,
-                    "Update helper did not become ready",
+                    Text::UpdateHelperTimeout,
                 ));
             }
             std::thread::sleep(Duration::from_millis(50));

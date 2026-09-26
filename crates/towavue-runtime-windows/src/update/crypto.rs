@@ -1,4 +1,5 @@
 use std::io::{self, Read};
+use towavue_core::localization::Text;
 use windows::Win32::Security::Cryptography::*;
 
 fn error(value: windows::core::Error) -> io::Error {
@@ -53,7 +54,7 @@ pub(super) fn sha256(mut reader: impl Read) -> io::Result<[u8; 32]> {
 pub(super) fn verify(public_blob: &[u8], manifest: &[u8], signature: &[u8]) -> io::Result<()> {
     // Bound all native input even if a future caller omits transport limits.
     if public_blob.len() > 2048 || manifest.len() > 256 || signature.len() != 512 {
-        return Err(io::Error::other("Invalid update signature size"));
+        return Err(super::errors::text(Text::UpdateSignatureSizeInvalid));
     }
     let mut handle = BCRYPT_KEY_HANDLE::default();
     // SAFETY: CNG copies the bounded public blob; Key owns the result and is
@@ -87,7 +88,7 @@ pub(super) fn verify(public_blob: &[u8], manifest: &[u8], signature: &[u8]) -> i
         )
     }
     .ok()
-    .map_err(|_| io::Error::other("Update signature verification failed"))
+    .map_err(|_| super::errors::text(Text::UpdateSignatureInvalid))
 }
 
 #[cfg(test)]

@@ -1054,6 +1054,8 @@ mod tests {
 
     #[test]
     fn native_caption_owns_subclass_and_preserves_winit_close_delivery() {
+        use std::os::windows::process::CommandExt;
+
         // winit permits only one event loop per process, including across test threads.
         if std::env::var_os("TOWAVUE_CAPTION_TEST_CHILD").is_none() {
             let output = std::process::Command::new(
@@ -1064,6 +1066,7 @@ mod tests {
                 "caption::tests::native_caption_owns_subclass_and_preserves_winit_close_delivery",
                 "--nocapture",
             ])
+            .creation_flags(0x0800_0000)
             .env("TOWAVUE_CAPTION_TEST_CHILD", "1")
             .output()
             .expect("isolated caption test");

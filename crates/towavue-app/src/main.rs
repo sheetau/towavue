@@ -16400,6 +16400,8 @@ mod tests {
     }
 
     pub(super) fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
+        use std::os::windows::process::CommandExt;
+
         const TEST_ROOT: &str = "TOWAVUE_APP_TEST_ROOT";
         let Some(root) = std::env::var_os(TEST_ROOT) else {
             static NEXT_ROOT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -16418,6 +16420,7 @@ mod tests {
             let result =
                 std::process::Command::new(std::env::current_exe().expect("test executable"))
                     .args(["--exact", test_name, "--nocapture", "--include-ignored"])
+                    .creation_flags(0x0800_0000)
                     .env(TEST_ROOT, &root)
                     .env("APPDATA", root.join("config"))
                     .env("LOCALAPPDATA", root.join("local"))

@@ -516,7 +516,7 @@ fn webp_real_export_keeps_sets_removes_nine_fields_and_protects_files_on_failure
     for field in ImageMetadataFormat::Webp.fields() {
         assert!(shown.iter().any(|value| value.field == *field
             && Some(value.value.as_str()) == settings().get(*field)
-            && value.scope.starts_with("WebP XMP")));
+            && value.scope.to_string().starts_with("WebP XMP")));
     }
     for remove in [false, true] {
         let mut metadata = MetadataExportOptions::default();

@@ -67,10 +67,47 @@ impl MetadataField {
     }
 }
 
+/// Source labels remain typed until the receiving window chooses its language.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MetadataSourceScope {
+    File,
+    Video,
+    Audio,
+    PngText,
+    Xmp(ImageMetadataFormat),
+    XmpLanguage(ImageMetadataFormat, String),
+    XmpCreator(ImageMetadataFormat, usize),
+}
+
+impl MetadataSourceScope {
+    pub fn message(&self, language: towavue_core::localization::Language) -> String {
+        use towavue_core::localization::{Text, formatted};
+        match self {
+            Self::File => Text::MetadataSourceFile.in_language(language).into(),
+            Self::Video => Text::MetadataSourceVideo.in_language(language).into(),
+            Self::Audio => Text::MetadataSourceAudio.in_language(language).into(),
+            Self::PngText => Text::MetadataSourcePngText.in_language(language).into(),
+            Self::Xmp(format) => formatted::metadata_source_xmp(language, format.label()),
+            Self::XmpLanguage(format, tag) => {
+                formatted::metadata_source_xmp_language(language, format.label(), tag)
+            }
+            Self::XmpCreator(format, creator) => {
+                formatted::metadata_source_xmp_creator(language, format.label(), *creator)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for MetadataSourceScope {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message(towavue_core::localization::Language::English))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MetadataSourceValue {
     pub field: MetadataField,
-    pub scope: String,
+    pub scope: MetadataSourceScope,
     pub value: String,
     pub truncated: bool,
 }
@@ -135,7 +172,7 @@ pub fn read_export_metadata(
     let input =
         ffmpeg::format::input(path).map_err(|error| ExportError::Failed(error.to_string()))?;
     let mut values = Vec::new();
-    let mut collect = |scope: &str, tags: ffmpeg::DictionaryRef<'_>| {
+    let mut collect = |scope: MetadataSourceScope, tags: ffmpeg::DictionaryRef<'_>| {
         for field in MetadataField::ALL {
             if let Some((_, value)) = tags
                 .iter()
@@ -143,21 +180,21 @@ pub fn read_export_metadata(
             {
                 values.push(MetadataSourceValue {
                     field,
-                    scope: scope.into(),
+                    scope: scope.clone(),
                     value: value[..value.floor_char_boundary(1024)].to_owned(),
                     truncated: value.len() > 1024,
                 });
             }
         }
     };
-    collect("File", input.metadata());
+    collect(MetadataSourceScope::File, input.metadata());
     if kind == MediaKind::Video
         && let Some(stream) = input.streams().best(ffmpeg::media::Type::Video)
     {
-        collect("Video", stream.metadata());
+        collect(MetadataSourceScope::Video, stream.metadata());
     }
     if let Some(stream) = input.streams().best(ffmpeg::media::Type::Audio) {
-        collect("Audio", stream.metadata());
+        collect(MetadataSourceScope::Audio, stream.metadata());
     }
     Ok(values)
 }

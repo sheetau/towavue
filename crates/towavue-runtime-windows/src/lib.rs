@@ -108,9 +108,9 @@ pub use dialog::{
 pub use export::{
     AudioChannels, AudioExportOptions, AudioNormalization, ExportDialogRequest, ExportError,
     ExportEvent, ExportJob, ExportOptions, ExportOutcome, ExportOutput, ExportRequest,
-    ImageMetadataFormat, LoudnessTarget, MetadataExportOptions, MetadataField, MetadataSourceValue,
-    VideoExportQuality, VideoFrameSnapshot, export_media, export_media_with_options,
-    export_media_with_output, export_video_frame, read_export_metadata,
+    ImageMetadataFormat, LoudnessTarget, MetadataExportOptions, MetadataField, MetadataSourceScope,
+    MetadataSourceValue, VideoExportQuality, VideoFrameSnapshot, export_media,
+    export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
 };
 pub use file_details::FileDetails;
 pub use file_operation::{

@@ -73,14 +73,18 @@ impl MetadataDialog {
                 Mode::Remove => Some(String::new()),
                 Mode::Set => Some(draft.text.clone()),
             };
-            options
-                .set(field, value)
-                .map_err(|error| format!("{}: {error}", field.label_in(display_language)))?;
+            options.set(field, value).map_err(|error| {
+                format!(
+                    "{}: {}",
+                    field.label_in(display_language),
+                    error.message(display_language)
+                )
+            })?;
         }
         if let Some(format) = self.image_format() {
             format
                 .validate_options(&options)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| error.message(display_language))?;
         }
         Ok(options)
     }
@@ -261,7 +265,7 @@ impl MetadataDialog {
                                 found = true;
                                 ui.label(format!(
                                     "{}{}: {}",
-                                    value.scope,
+                                    value.scope.message(display_language),
                                     if value.truncated {
                                         Text::TruncatedSuffix.in_language(display_language)
                                     } else {

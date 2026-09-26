@@ -656,7 +656,11 @@ fn png_text_inspection_reads_all_encodings_variants_and_bounds_display_only() {
     fs::write(&source, &bytes).expect("source");
     let values = read_export_metadata(&source, MediaKind::Image).expect("PNG values");
     assert_eq!(values.len(), 4);
-    assert!(values.iter().all(|value| value.scope == "PNG text"));
+    assert!(
+        values
+            .iter()
+            .all(|value| value.scope.to_string() == "PNG text")
+    );
     assert_eq!(values[0].value, "Old title");
     assert_eq!(values[1].value, "André");
     assert_eq!(values[2].value, "題名\ntext");

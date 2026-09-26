@@ -246,23 +246,24 @@ fn jpeg_metadata_inspection_is_bounded_but_default_keep_preserves_full_languages
     fs::write(&source, &original).expect("source");
     let shown = read_export_metadata(&source, MediaKind::Image).expect("public inspection");
     assert_eq!(shown.len(), 9);
-    assert_eq!(shown[0].scope, "JPEG XMP (x-default)");
-    assert_eq!(shown[1].scope, format!("JPEG XMP ({}…)", "a".repeat(63)));
+    assert_eq!(shown[0].scope.to_string(), "JPEG XMP (x-default)");
+    assert_eq!(
+        shown[1].scope.to_string(),
+        format!("JPEG XMP ({}…)", "a".repeat(63))
+    );
     assert_eq!(shown[1].value, long[..long.floor_char_boundary(1024)]);
     assert!(shown[1].truncated);
-    assert_eq!(shown[2].scope, "JPEG XMP (creator 1)");
-    assert_eq!(shown[3].scope, "JPEG XMP (creator 2)");
+    assert_eq!(shown[2].scope.to_string(), "JPEG XMP (creator 1)");
+    assert_eq!(shown[3].scope.to_string(), "JPEG XMP (creator 2)");
     assert_eq!(shown[3].value, "Second <author>");
     for (field, text) in [
         (MetadataField::Album, "Original album"),
         (MetadataField::Composer, "Original composer"),
         (MetadataField::Genre, "Original genre"),
     ] {
-        assert!(
-            shown.iter().any(|value| value.field == field
-                && value.scope == "JPEG XMP"
-                && value.value == text)
-        );
+        assert!(shown.iter().any(|value| value.field == field
+            && value.scope.to_string() == "JPEG XMP"
+            && value.value == text));
     }
     assert!(
         shown

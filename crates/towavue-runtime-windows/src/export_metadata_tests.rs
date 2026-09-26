@@ -57,17 +57,18 @@ fn metadata_inspection_selects_playback_streams_and_bounds_display_without_chang
         let values = read_export_metadata(&source, kind).expect("source tags");
         assert!(values.len() <= 30);
         assert!(
-            values
-                .iter()
-                .any(|value| value.scope == "File" && value.value == "Audio derivative fixture")
+            values.iter().any(|value| value.scope.to_string() == "File"
+                && value.value == "Audio derivative fixture")
         );
         assert!(
             values
                 .iter()
-                .any(|value| value.scope == "Audio" && value.value == "Selected audio")
+                .any(|value| value.scope.to_string() == "Audio" && value.value == "Selected audio")
         );
         assert_eq!(
-            values.iter().any(|value| value.scope == "Video"),
+            values
+                .iter()
+                .any(|value| value.scope.to_string() == "Video"),
             kind == MediaKind::Video
         );
         assert!(
@@ -473,4 +474,33 @@ fn metadata_composes_with_timeline_normalization_worker_and_selected_stream_over
         .expect("derivative metadata");
     assert_eq!(fs::read(&source).expect("source"), original);
     fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
+fn metadata_scope_languages_keep_source_identity_and_creator_number() {
+    use towavue_core::localization::Language;
+    for (scope, english, japanese) in [
+        (MetadataSourceScope::File, "File", "ファイル"),
+        (MetadataSourceScope::Video, "Video", "映像"),
+        (MetadataSourceScope::Audio, "Audio", "音声"),
+        (MetadataSourceScope::PngText, "PNG text", "PNGテキスト"),
+        (
+            MetadataSourceScope::Xmp(ImageMetadataFormat::Jpeg),
+            "JPEG XMP",
+            "JPEG XMP",
+        ),
+        (
+            MetadataSourceScope::XmpLanguage(ImageMetadataFormat::Webp, "x-default".into()),
+            "WebP XMP (x-default)",
+            "WebP XMP（x-default）",
+        ),
+        (
+            MetadataSourceScope::XmpCreator(ImageMetadataFormat::Jpeg, 2),
+            "JPEG XMP (creator 2)",
+            "JPEG XMP（作成者2）",
+        ),
+    ] {
+        assert_eq!(scope.to_string(), english);
+        assert_eq!(scope.message(Language::Japanese), japanese);
+    }
 }

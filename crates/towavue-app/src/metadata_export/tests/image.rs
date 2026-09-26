@@ -568,9 +568,16 @@ fn metadata_save_resave_all_keep_remove_format_failure_guard_and_source_lifecycl
     let source_values: Vec<_> = values(&source)
         .into_iter()
         .map(|mut value| {
-            value.scope = value
-                .scope
-                .replacen(source_format.label(), target_format.label(), 1);
+            use towavue_runtime_windows::MetadataSourceScope;
+            match &mut value.scope {
+                MetadataSourceScope::Xmp(format)
+                | MetadataSourceScope::XmpLanguage(format, _)
+                | MetadataSourceScope::XmpCreator(format, _) => {
+                    assert_eq!(*format, source_format);
+                    *format = target_format;
+                }
+                _ => {}
+            }
             value
         })
         .collect();

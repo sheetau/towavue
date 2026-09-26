@@ -260,19 +260,21 @@ pub(super) fn display_values(
     values
         .into_iter()
         .map(|value| {
-            let label = format.label();
             let scope = if let Some(language) = value.language {
                 // The XMP reader accepts only ASCII language tags.
-                format!(
-                    "{label} XMP ({}{})",
-                    &language[..language.len().min(63)],
-                    if language.len() > 63 { "…" } else { "" }
+                MetadataSourceScope::XmpLanguage(
+                    format,
+                    format!(
+                        "{}{}",
+                        &language[..language.len().min(63)],
+                        if language.len() > 63 { "…" } else { "" }
+                    ),
                 )
             } else if value.field == MetadataField::Artist {
                 creator += 1;
-                format!("{label} XMP (creator {creator})")
+                MetadataSourceScope::XmpCreator(format, creator)
             } else {
-                format!("{label} XMP")
+                MetadataSourceScope::Xmp(format)
             };
             MetadataSourceValue {
                 field: value.field,

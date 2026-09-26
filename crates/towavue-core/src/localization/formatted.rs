@@ -36,6 +36,9 @@ macro_rules! templates {
 }
 
 templates! {
+    metadata_source_xmp(format: &str) => ("{format} XMP", "{format} XMP"),
+    metadata_source_xmp_language(format: &str, tag: &str) => ("{format} XMP ({tag})", "{format} XMP（{tag}）"),
+    metadata_source_xmp_creator(format: &str, creator: usize) => ("{format} XMP (creator {creator})", "{format} XMP（作成者{creator}）"),
     export_jpeg_validation(status: &str, detail: &str) => ("JPEG decode validation failed ({status}): {detail}", "JPEGのデコード検証に失敗しました（{status}）: {detail}"),
     export_process_exit(status: &str) => ("process exited with {status}", "処理が終了しました: {status}"),
     export_metadata_not_retained(field: &str) => ("Output format did not retain the requested '{field}' metadata; existing target unchanged", "出力形式で指定した「{field}」メタデータを保持できませんでした。既存の保存先は変更していません"),

@@ -485,7 +485,7 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
             token,
             Ok(vec![MetadataSourceValue {
                 field: MetadataField::Title,
-                scope: "File".into(),
+                scope: towavue_runtime_windows::MetadataSourceScope::File,
                 value: "Original title".into(),
                 truncated: false,
             }]),
@@ -1005,4 +1005,96 @@ fn metadata_ime_and_popup_escape(source: &Path, kind: MediaKind) {
     app.media_generation += 1;
     frame(&mut app, size, vec![]);
     assert!(app.metadata_dialog.is_none() && !egui::Popup::is_any_open(&context));
+}
+
+#[test]
+fn japanese_metadata_sources_and_validation_preserve_user_values() {
+    use crate::localization::test_ui as ui;
+    use towavue_runtime_windows::MetadataSourceScope;
+    for density in [1.0, 1.25, 2.0] {
+        let context = ui::japanese_context(density);
+        let mut tabs = TabSet::default();
+        let source = PathBuf::from("fixture.jpeg");
+        let scopes = [
+            MetadataSourceScope::File,
+            MetadataSourceScope::Video,
+            MetadataSourceScope::Audio,
+            MetadataSourceScope::PngText,
+            MetadataSourceScope::XmpCreator(ImageMetadataFormat::Jpeg, 2),
+            MetadataSourceScope::XmpLanguage(ImageMetadataFormat::Webp, "x-default".into()),
+        ];
+        let mut dialog = MetadataDialog {
+            token: 1,
+            tab: tabs.open_new(source.clone(), MediaKind::Image),
+            source,
+            kind: MediaKind::Image,
+            generation: 0,
+            fields: Default::default(),
+            selected: 0,
+            current: Some(Ok(scopes
+                .iter()
+                .map(|scope| MetadataSourceValue {
+                    field: MetadataField::Title,
+                    scope: scope.clone(),
+                    value: "日本語 {original}".into(),
+                    truncated: false,
+                })
+                .collect())),
+            first_frame: true,
+            focused_control: None,
+            ime_composing: false,
+        };
+        let output = ui::settle(&context, egui::vec2(640.0, 700.0), |context| {
+            dialog.show(context)
+        });
+        for scope in &scopes {
+            let expected = format!("{}: 日本語 {{original}}", scope.message(Language::Japanese));
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected)),
+                "missing {expected}"
+            );
+        }
+        let compact = egui::vec2(320.0, 240.0);
+        let output = ui::settle(&context, compact, |context| dialog.show(context));
+        ui::visible_button(&output, "メタデータ設定を適用", compact, true);
+        ui::visible_button(&output, "キャンセル", compact, true);
+        assert!(
+            dialog
+                .current
+                .as_ref()
+                .expect("cached result")
+                .as_ref()
+                .expect("values")
+                .iter()
+                .all(|value| value.value == "日本語 {original}")
+        );
+
+        let date = MetadataField::ALL
+            .iter()
+            .position(|field| *field == MetadataField::Date)
+            .expect("date field");
+        dialog.fields[date].mode = Mode::Set;
+        dialog.fields[date].text = "not-a-date".into();
+        assert!(
+            dialog
+                .options_in(Language::English)
+                .expect_err("invalid XMP date")
+                .contains("Date must be an XMP release date")
+        );
+        assert!(
+            dialog
+                .options_in(Language::Japanese)
+                .expect_err("invalid XMP date")
+                .contains("日付にはXMPのリリース日形式が必要です")
+        );
+        dialog.fields[date].mode = Mode::Keep;
+        dialog.fields[0].mode = Mode::Set;
+        dialog.fields[0].text = "\0".into();
+        let error = dialog
+            .options_in(Language::Japanese)
+            .expect_err("NUL metadata is rejected");
+        assert!(error.starts_with("タイトル: "));
+        assert!(error.contains(Text::ExportMetadataTextLimit.in_language(Language::Japanese)));
+    }
 }

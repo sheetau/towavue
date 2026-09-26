@@ -51,8 +51,8 @@ mod webp_metadata;
 #[path = "export_xmp.rs"]
 mod xmp;
 pub use metadata::{
-    ImageMetadataFormat, MetadataExportOptions, MetadataField, MetadataSourceValue,
-    read_export_metadata,
+    ImageMetadataFormat, MetadataExportOptions, MetadataField, MetadataSourceScope,
+    MetadataSourceValue, read_export_metadata,
 };
 
 #[cfg(test)]

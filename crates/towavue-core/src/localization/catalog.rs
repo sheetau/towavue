@@ -18,6 +18,10 @@ macro_rules! messages {
 }
 
 messages! {
+    MetadataSourceFile => ("File", "ファイル"),
+    MetadataSourceVideo => ("Video", "映像"),
+    MetadataSourceAudio => ("Audio", "音声"),
+    MetadataSourcePngText => ("PNG text", "PNGテキスト"),
     ExportPngValidationContext => ("PNG decode validation", "PNGのデコード検証"),
     ExportTrimProbeContext => ("trim output contains no readable media", "トリミング後の出力からメディアを読み取れません"),
     ExportStreamProbeContext => ("could not inspect export streams", "書き出し対象のストリームを確認できませんでした"),

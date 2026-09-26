@@ -129,13 +129,15 @@ impl Hud {
 // The generic rectangle blur clamps its penumbra to the three-point track's
 // thickness and can leave dark cap artifacts. Nested capsules approximate the
 // soft twelve-point penumbra without that thin-rectangle tessellation path.
+// Taper the outside layers to avoid a visible outer contour; keep the same
+// geometry and layer count, with less cumulative opacity than uniform layers.
 fn paint_shadow(painter: &egui::Painter, track: Rect) {
-    for layer in 0..12 {
+    for (layer, alpha) in [1, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8].into_iter().enumerate() {
         let spread = 7.0 - layer as f32 * 0.5;
         painter.rect_filled(
             track.expand(spread),
             egui::CornerRadius::same(u8::MAX),
-            Color32::from_black_alpha(8),
+            Color32::from_black_alpha(alpha),
         );
     }
 }

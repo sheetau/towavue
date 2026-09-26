@@ -22,7 +22,15 @@ fn native_hud_caps_and_cti_slopes_are_smooth_and_symmetric() {
             let mut old_asymmetry = 0;
             let mut old_cap_rise = 0;
             for density in [1.0, 1.25, 1.5, 2.0] {
-                for scene in ["old-shadow", "new-shadow", "new-hud", "old-cti", "new-cti"] {
+                let mut uniform_shadows = [Vec::new(), Vec::new()];
+                for scene in [
+                    "old-shadow",
+                    "uniform-shadow",
+                    "new-shadow",
+                    "new-hud",
+                    "old-cti",
+                    "new-cti",
+                ] {
                     for horizontal in [false, true] {
                         if scene.ends_with("cti") && horizontal {
                             continue;
@@ -65,6 +73,15 @@ fn native_hud_caps_and_cti_slopes_are_smooth_and_symmetric() {
                                         }
                                         .as_shape(track, 2),
                                     );
+                                }
+                                "uniform-shadow" => {
+                                    for layer in 0..12 {
+                                        ui.painter().rect_filled(
+                                            track.expand(7.0 - layer as f32 * 0.5),
+                                            egui::CornerRadius::same(u8::MAX),
+                                            Color32::from_black_alpha(8),
+                                        );
+                                    }
                                 }
                                 "new-shadow" => paint_shadow(ui.painter(), track),
                                 "new-hud" => {
@@ -130,7 +147,59 @@ fn native_hud_caps_and_cti_slopes_are_smooth_and_symmetric() {
                             )
                             .expect("generated reference");
                         }
+                        if scene == "uniform-shadow" {
+                            uniform_shadows[usize::from(horizontal)] = pixels.clone();
+                        }
                         let sample = |x: usize, y: usize| pixels[(y * side as usize + x) * 4];
+                        if scene == "new-shadow" {
+                            let old = &uniform_shadows[usize::from(horizontal)];
+                            assert_eq!(old.len(), pixels.len());
+                            let background = sample(side as usize - 1, side as usize - 1);
+                            let mut previous_depth = 0;
+                            let mut depth = 0;
+                            for (new, old) in
+                                pixels.as_chunks::<4>().0.iter().zip(old.as_chunks::<4>().0)
+                            {
+                                assert!(
+                                    new[0].saturating_add(2) >= old[0],
+                                    "no darker shadow pixel"
+                                );
+                                previous_depth =
+                                    previous_depth.max(background.saturating_sub(old[0]));
+                                depth = depth.max(background.saturating_sub(new[0]));
+                            }
+                            assert!(
+                                depth > 0 && depth as f32 <= previous_depth as f32 * 0.85,
+                                "lighter shadow at {density}, horizontal={horizontal}: {depth}/{previous_depth}"
+                            );
+                            let axis = usize::from(!horizontal);
+                            let along = (track.center()[axis] * density).floor() as usize;
+                            let mut outer_depth = 0;
+                            let mut previous_outer_depth = 0;
+                            for transverse in ((track.max[1 - axis] + 5.0) * density).ceil()
+                                as usize
+                                ..=((track.max[1 - axis] + 7.0) * density).ceil() as usize
+                            {
+                                let (x, y) = if horizontal {
+                                    (along, transverse)
+                                } else {
+                                    (transverse, along)
+                                };
+                                outer_depth =
+                                    outer_depth.max(background.saturating_sub(sample(x, y)));
+                                previous_outer_depth = previous_outer_depth.max(
+                                    background.saturating_sub(old[(y * side as usize + x) * 4]),
+                                );
+                            }
+                            assert!(
+                                previous_outer_depth > 0
+                                    && outer_depth as f32 <= previous_outer_depth as f32 * 0.5,
+                                "outer contour fades at {density}, horizontal={horizontal}: {outer_depth}/{previous_outer_depth}"
+                            );
+                            eprintln!(
+                                "HUD shadow density={density}, horizontal={horizontal}: peak {previous_depth}->{depth}, outer {previous_outer_depth}->{outer_depth}"
+                            );
+                        }
                         if scene.ends_with("cti") {
                             let center = (100.0 * density).floor() as usize;
                             let mut difference = 0;

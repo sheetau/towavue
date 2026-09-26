@@ -442,7 +442,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             None => Some(position),
         };
         if let Some(position) = position {
-            self.subtitles.paint.show(ui, &document, position, delay);
+            let mut viewport = ui.max_rect().intersect(ui.clip_rect());
+            if self.fullscreen {
+                // Keep a stable baseline while the bottom transport bar appears
+                // or disappears, including the seek strip above the status row.
+                viewport.max.y = viewport
+                    .max
+                    .y
+                    .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
+            }
+            self.subtitles
+                .paint
+                .show(ui, viewport, &document, position, delay);
         }
     }
 }

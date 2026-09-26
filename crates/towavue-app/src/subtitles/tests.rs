@@ -3,6 +3,8 @@ use std::sync::mpsc;
 use towavue_core::{SubtitleCue, SubtitleTimeline};
 use towavue_runtime_windows::SubtitleContent;
 
+mod lifecycle;
+
 type TestApp = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 
 fn app(path: &Path) -> (TestApp, mpsc::Receiver<AppEvent>) {

@@ -1,6 +1,9 @@
 use super::*;
 use towavue_runtime_windows::SubtitleContent;
 
+#[cfg(test)]
+mod gpu_tests;
+
 #[derive(Default)]
 pub(super) struct Cache {
     document: Option<Arc<SubtitleDocument>>,
@@ -11,6 +14,7 @@ impl Cache {
     pub(super) fn show(
         &mut self,
         ui: &egui::Ui,
+        viewport: egui::Rect,
         document: &Arc<SubtitleDocument>,
         position: MediaTime,
         delay: SubtitleDelay,
@@ -23,7 +27,7 @@ impl Cache {
             self.images.clear();
             self.document = Some(Arc::clone(document));
         }
-        let viewport = ui.max_rect().intersect(ui.clip_rect());
+        let viewport = viewport.intersect(ui.max_rect()).intersect(ui.clip_rect());
         if viewport.width() < 8.0 || viewport.height() < 8.0 {
             return;
         }
@@ -188,6 +192,7 @@ mod tests {
                                     |ui| {
                                         cache.show(
                                             ui,
+                                            viewport,
                                             &document,
                                             MediaTime::from_nanoseconds(time),
                                             SubtitleDelay::from_tenths(delay),

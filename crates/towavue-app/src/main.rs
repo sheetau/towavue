@@ -174,6 +174,7 @@ const STATUS_MESSAGE_DURATION: Duration = Duration::from_secs(4);
 const VIDEO_EARLY_TOLERANCE: Duration = Duration::from_millis(5);
 const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
 const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
+const FULLSCREEN_CONTROL_BAND: f32 = 48.0;
 
 fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "presentation-verification")]
@@ -6380,7 +6381,7 @@ where
         let (held, at_edge, focused, outside_press) = context.input(|input| {
             let held = input.pointer.any_down() || input.pointer.any_released();
             let at_edge = input.pointer.hover_pos().is_some_and(|pointer| {
-                screen.contains(pointer) && pointer.y >= screen.bottom() - 48.0
+                screen.contains(pointer) && pointer.y >= screen.bottom() - FULLSCREEN_CONTROL_BAND
             });
             (
                 held,
@@ -6392,7 +6393,10 @@ where
                     .find_map(|event| match event {
                         egui::Event::PointerButton {
                             pos, pressed: true, ..
-                        } => Some(!screen.contains(*pos) || pos.y < screen.bottom() - 48.0),
+                        } => Some(
+                            !screen.contains(*pos)
+                                || pos.y < screen.bottom() - FULLSCREEN_CONTROL_BAND,
+                        ),
                         _ => None,
                     })
                     .unwrap_or(false),

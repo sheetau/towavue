@@ -23,12 +23,20 @@ struct Trial {
     sample: Option<Sample>,
     index: usize,
     next_at: Instant,
+    next_frame_at: Instant,
     deadline: Instant,
     complete: bool,
 }
 
 impl Trial {
     fn observe(&mut self) {
+        assert!(
+            self.app
+                .window
+                .as_ref()
+                .is_none_or(|window| window.is_visible() == Some(false)),
+            "reference verification must not show its owned window"
+        );
         assert!(
             self.app.playback_error.is_none(),
             "{:?}",
@@ -168,6 +176,11 @@ impl Trial {
                 screen.bottom() - chrome::STATUS_HEIGHT,
             )
         });
+        eprintln!(
+            "APP_SEEK_BEGIN index={} target_s={:.3}",
+            self.index,
+            target.as_seconds_f64()
+        );
         self.sample = Some(Sample {
             started: Instant::now(),
             ready: None,
@@ -209,8 +222,8 @@ impl Trial {
 impl ApplicationHandler<window_host::Event> for Trial {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.app
-            .start_on_device(event_loop, None, true)
-            .expect("nonactivating production window");
+            .start_on_device(event_loop, None, false)
+            .expect("hidden production window");
         let tab = self
             .app
             .tabs
@@ -219,6 +232,7 @@ impl ApplicationHandler<window_host::Event> for Trial {
         self.app.media_kind = Some(MediaKind::Video);
         self.app.set_playback_volume(0.0);
         self.app.load_path(self.source.clone(), MediaKind::Video);
+        eprintln!("APP_SEEK_START hidden=true muted=true render_cadence_hz=60");
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: window_host::Event) {
@@ -233,29 +247,11 @@ impl ApplicationHandler<window_host::Event> for Trial {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        let redraw = matches!(event, WindowEvent::RedrawRequested);
-        self.observe();
-        self.app.window_event(event_loop, id, event);
-        self.observe();
-        if redraw
-            && let Some(sample) = &mut self.sample
-            && sample.release_pending
-        {
-            sample.release_pending = false;
-            let position = sample.pointer.expect("pointer sample");
-            self.app
-                .ui_state
-                .as_mut()
-                .expect("UI state")
-                .egui_input_mut()
-                .events
-                .push(egui::Event::PointerButton {
-                    pos: position,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                });
-            self.app.request_redraw();
+        // A hidden HWND does not provide a representative WM_PAINT cadence.
+        // Drive ordinary rendering below at an explicit bounded test cadence.
+        if !matches!(event, WindowEvent::RedrawRequested) {
+            self.app.window_event(event_loop, id, event);
+            self.observe();
         }
     }
 
@@ -265,6 +261,28 @@ impl ApplicationHandler<window_host::Event> for Trial {
             "bounded application trial, sample {}",
             self.index
         );
+        if Instant::now() >= self.next_frame_at {
+            self.app.render_frame();
+            if let Some(sample) = &mut self.sample
+                && sample.release_pending
+            {
+                sample.release_pending = false;
+                let position = sample.pointer.expect("pointer sample");
+                self.app
+                    .ui_state
+                    .as_mut()
+                    .expect("UI state")
+                    .egui_input_mut()
+                    .events
+                    .push(egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+            }
+            self.next_frame_at = Instant::now() + Duration::from_nanos(16_666_667);
+        }
         self.observe();
         if self.index == 12 {
             self.complete = true;
@@ -284,13 +302,15 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.begin();
         }
         self.app.about_to_wait(event_loop);
-        // Only the test's next command/deadline adds a wakeup; rendering and native
-        // worker events retain the production scheduler without a busy frame loop.
+        // Native worker/audio events retain production scheduling; the hidden
+        // verification additionally wakes for its explicit rendering cadence.
+        // These submission times are not compositor/physical-scanout timings.
         let deadline = if self.sample.is_none() {
             self.next_at.max(Instant::now() + Duration::from_millis(10))
         } else {
             self.deadline
-        };
+        }
+        .min(self.next_frame_at);
         match event_loop.control_flow() {
             ControlFlow::Poll => {}
             ControlFlow::Wait => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
@@ -351,6 +371,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         sample: None,
         index: 0,
         next_at: Instant::now(),
+        next_frame_at: Instant::now(),
         deadline: Instant::now() + Duration::from_secs(180),
         complete: false,
     };

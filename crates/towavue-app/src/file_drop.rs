@@ -1,7 +1,7 @@
 use crate::localization::{self, Text};
 use egui::{Color32, Context, Rect, pos2, vec2};
 
-pub(super) fn draw(context: &Context, blocked: bool) {
+pub(super) fn draw(context: &Context, blocked: bool, video: bool) {
     if !context.input(|input| !input.raw.hovered_files.is_empty()) {
         return;
     }
@@ -24,8 +24,21 @@ pub(super) fn draw(context: &Context, blocked: bool) {
     dashed_border(&painter, card, context.pixels_per_point());
     let painter = painter.with_clip_rect(card.shrink(8.0));
     let language = localization::language(context);
+    let subtitle = context.input(|input| {
+        input.raw.hovered_files.iter().any(|file| {
+            file.path
+                .as_deref()
+                .is_some_and(crate::subtitles::supported)
+        })
+    });
     let label = if blocked {
         Text::DropGuideBlocked
+    } else if subtitle {
+        if video {
+            Text::DropGuideSubtitle
+        } else {
+            Text::SubtitleVideoRequired
+        }
     } else {
         Text::DropGuideOpen
     }
@@ -68,6 +81,12 @@ pub(super) fn draw(context: &Context, blocked: bool) {
         node.set_description(
             if blocked {
                 Text::DropGuideBlockedHelp
+            } else if subtitle {
+                if video {
+                    Text::DropGuideSubtitle
+                } else {
+                    Text::SubtitleVideoRequired
+                }
             } else {
                 Text::DropGuideHelp
             }
@@ -109,6 +128,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn subtitle_drop_guidance_distinguishes_video_targets_and_modal_guards() {
+        for language in [
+            localization::Language::English,
+            localization::Language::Japanese,
+        ] {
+            let context = crate::fonts::test_context();
+            localization::set_language(&context, language);
+            context.enable_accesskit();
+            for (video, blocked, expected) in [
+                (true, false, Text::DropGuideSubtitle),
+                (false, false, Text::SubtitleVideoRequired),
+                (true, true, Text::DropGuideBlocked),
+            ] {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(800.0, 500.0),
+                        )),
+                        hovered_files: vec![egui::HoveredFile {
+                            path: Some("captions.SRT".into()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    },
+                    |_| draw(&context, blocked, video),
+                );
+                let tree = output.platform_output.accesskit_update.expect("drop guide");
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, node)| node.label() == Some(expected.in_language(language)))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn drop_guide_matches_reference_geometry_and_retires_after_hover() {
         for language in [
             localization::Language::English,
@@ -137,7 +194,7 @@ mod tests {
                                     events: vec![egui::Event::PointerMoved(pos2(2.0, 2.0))],
                                     ..Default::default()
                                 },
-                                |_| draw(&context, blocked),
+                                |_| draw(&context, blocked, false),
                             )
                         };
                         frame(true);

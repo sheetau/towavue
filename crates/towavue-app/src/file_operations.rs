@@ -245,6 +245,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn quiesce_file_relocation(&mut self, source: &Path) {
+        self.subtitles.clear_read();
         self.filmstrip
             .preserve_after_file_operation(self.ui_context.as_ref(), source, None);
         self.file_operations.locked = true;
@@ -301,6 +302,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     choice.relocate(source, target);
                 }
                 if let Some(choice) = self.audio_preview_choices.get_mut(id) {
+                    choice.relocate(source, target);
+                }
+                if let Some(choice) = self.subtitles.choices.get_mut(id) {
                     choice.relocate(source, target);
                 }
                 if let Some(version) = self.source_versions.get_mut(id) {

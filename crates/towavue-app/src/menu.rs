@@ -10,6 +10,7 @@ mod choices;
 mod image_choices_tests;
 #[cfg(test)]
 mod language_tests;
+mod subtitles;
 pub(crate) use choices::Choices;
 
 pub(crate) fn shortcut_text(ui: &egui::Ui, label: String, enabled: bool) -> egui::RichText {
@@ -53,6 +54,9 @@ pub(crate) struct MenuData<'a> {
     pub audio_tracks: Option<&'a towavue_core::AudioTrackCatalog>,
     pub audio_selection: towavue_core::AudioTrackSelection,
     pub audio_action: Option<towavue_core::AudioTrackSelection>,
+    pub subtitle_tracks: Option<&'a [towavue_core::SubtitleTrack]>,
+    pub subtitle_settings: crate::subtitles::Settings,
+    pub subtitle_action: Option<crate::subtitles::Action>,
 }
 
 /// Project folder history at delivery, without filesystem work or new persisted
@@ -153,6 +157,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 ToggleVideoRepeat,
                 ToggleAudioShuffle,
                 CycleAudioTrack,
+                LoadSubtitles,
             ],
             &[
                 PreviousMedia,
@@ -372,6 +377,20 @@ fn show_items(
                     crate::chrome::separator(ui);
                 }
                 for id in *group {
+                    if *id == LoadSubtitles {
+                        if context.media_kind == Some(towavue_core::MediaKind::Video) {
+                            let (response, command) =
+                                subtitles::submenu(ui, context, requested, recent, ancestor);
+                            if response.enabled() {
+                                items.push(response.id);
+                            }
+                            if response.gained_focus() {
+                                response.scroll_to_me(None);
+                            }
+                            chosen = chosen.or(command);
+                        }
+                        continue;
+                    }
                     if *id == CycleAudioTrack {
                         if context.media_kind == Some(towavue_core::MediaKind::Video) {
                             let (response, command) = audio_tracks::submenu(
@@ -1807,7 +1826,14 @@ mod tests {
             for group in *groups {
                 assert!(!group.is_empty());
                 for command in *group {
-                    if let Some((_, rows)) = choices::options(*command) {
+                    if *command == LoadSubtitles {
+                        // The dynamic subtitle submenu has two command leaves,
+                        // plus source selection and a numeric preview setting.
+                        // Its rendered control test covers both leaves.
+                        for child in [LoadSubtitles, ToggleSubtitles] {
+                            assert!(placed.insert(child), "duplicate subtitle command");
+                        }
+                    } else if let Some((_, rows)) = choices::options(*command) {
                         if matches!(command, ToggleImageInterpolation | ToggleImageMinification) {
                             assert_eq!(rows.len(), 2);
                             assert_ne!(rows[0].1, rows[1].1);

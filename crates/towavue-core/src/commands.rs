@@ -120,6 +120,8 @@ pub enum CommandId {
     ToggleImageMinification,
     CycleAudioRepeat,
     CycleAudioTrack,
+    LoadSubtitles,
+    ToggleSubtitles,
     ToggleVideoRepeat,
     ToggleAudioShuffle,
     PreviousVideoFrame,
@@ -289,6 +291,8 @@ impl CommandId {
             Self::ResizeImage => "resize_image",
             Self::CycleAudioRepeat => "cycle_audio_repeat",
             Self::CycleAudioTrack => "cycle_audio_track",
+            Self::LoadSubtitles => "load_subtitles",
+            Self::ToggleSubtitles => "toggle_subtitles",
             Self::ToggleVideoRepeat => "toggle_video_repeat",
             Self::ToggleAudioShuffle => "toggle_audio_shuffle",
             Self::PreviousVideoFrame => "previous_video_frame",
@@ -601,8 +605,13 @@ impl CommandDefinition {
         if self.id == CommandId::ExportFrame && !context.has_video_frame {
             return false;
         }
-        if (matches!(self.id, CommandId::TogglePause | CommandId::CycleAudioTrack)
-            || self.id.video_seek_percent().is_some())
+        if (matches!(
+            self.id,
+            CommandId::TogglePause
+                | CommandId::CycleAudioTrack
+                | CommandId::LoadSubtitles
+                | CommandId::ToggleSubtitles
+        ) || self.id.video_seek_percent().is_some())
             && context.playback_blocked
         {
             return false;
@@ -761,6 +770,8 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::PlayTimeSelection, PLAYABLE_MEDIA),
     command(CommandId::CycleAudioRepeat, &[MediaKind::Audio]),
     command(CommandId::CycleAudioTrack, &[MediaKind::Video]),
+    command(CommandId::LoadSubtitles, &[MediaKind::Video]),
+    command(CommandId::ToggleSubtitles, &[MediaKind::Video]),
     command(CommandId::ToggleVideoRepeat, &[MediaKind::Video]),
     command(CommandId::ToggleAudioShuffle, &[MediaKind::Audio]),
     command(CommandId::SeekBackward, PLAYABLE_MEDIA),

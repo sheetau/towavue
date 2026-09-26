@@ -32,6 +32,7 @@ pub(super) struct MediaTabTransfer {
     playback_volume: Option<playback_volume::PlaybackVolume>,
     preview_rate: Option<f32>,
     audio_preview: Option<audio_preview::Choice>,
+    subtitles: Option<subtitles::Choice>,
     focus: Option<egui::Id>,
     timeline: Option<egui::containers::panel::PanelState>,
 }
@@ -327,6 +328,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             playback_volume: self.playback_volumes.remove(&id),
             preview_rate: self.preview_rates.remove(&id),
             audio_preview: self.audio_preview_choices.remove(&id),
+            subtitles: self.subtitles.take_choice(id),
             focus,
             timeline,
         };
@@ -407,6 +409,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(choice) = transfer.audio_preview {
             self.audio_preview_choices.insert(id, choice);
+        }
+        if let Some(choice) = transfer.subtitles {
+            self.subtitles.choices.insert(id, choice);
         }
         if let Some(rate) = transfer.preview_rate {
             self.preview_rates.insert(id, rate);

@@ -354,7 +354,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn source_readers_idle(&self) -> bool {
-        self.image_loader.is_idle()
+        self.subtitles.is_idle()
+            && self.image_loader.is_idle()
             && self.image_preview_worker.is_idle()
             && self.image_edit_worker.is_idle()
             && self.playlist_duration_worker.is_idle()

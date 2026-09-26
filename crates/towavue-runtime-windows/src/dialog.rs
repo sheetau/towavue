@@ -74,6 +74,7 @@ impl DialogError {
 #[derive(Clone, Debug)]
 pub enum FileDialogKind {
     OpenFile,
+    OpenSubtitle,
     OpenFolder,
     RenameFile {
         source: PathBuf,
@@ -522,6 +523,9 @@ fn dialog_thread(
         let _apartment = DialogApartment;
         match kind {
             FileDialogKind::OpenFile => show_initialized_dialog(language, false, owner_handle),
+            FileDialogKind::OpenSubtitle => {
+                show_initialized_open_dialog(language, false, true, owner_handle)
+            }
             FileDialogKind::RenameFile { source } => {
                 show_relocation_dialog(language, &source, owner_handle, false)
             }
@@ -625,6 +629,15 @@ unsafe fn show_initialized_dialog(
     folder: bool,
     owner: HWND,
 ) -> Result<Option<PathBuf>, DialogError> {
+    unsafe { show_initialized_open_dialog(language, folder, false, owner) }
+}
+
+unsafe fn show_initialized_open_dialog(
+    language: Language,
+    folder: bool,
+    subtitles: bool,
+    owner: HWND,
+) -> Result<Option<PathBuf>, DialogError> {
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL)?;
         let mut options: FILEOPENDIALOGOPTIONS =
@@ -633,9 +646,19 @@ unsafe fn show_initialized_dialog(
             options |= FOS_PICKFOLDERS;
         }
         dialog.SetOptions(options)?;
-        if language == Language::Japanese {
+        if subtitles {
+            let label = wide(Text::Subtitles.in_language(language));
+            let pattern = wide("*.srt;*.vtt;*.ass;*.ssa;*.sub;*.idx;*.sup");
+            dialog.SetFileTypes(&[COMDLG_FILTERSPEC {
+                pszName: PCWSTR(label.as_ptr()),
+                pszSpec: PCWSTR(pattern.as_ptr()),
+            }])?;
+        }
+        if subtitles || language == Language::Japanese {
             let title = wide(
-                if folder {
+                if subtitles {
+                    Text::CommandLoadSubtitles
+                } else if folder {
                     Text::CommandOpenFolder
                 } else {
                     Text::CommandOpenFile

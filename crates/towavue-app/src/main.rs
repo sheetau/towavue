@@ -93,6 +93,7 @@ mod source_save;
 mod speed_edit;
 mod status_file_details;
 mod status_info;
+mod subtitles;
 mod tab_drag;
 mod tab_focus;
 mod tab_menu;
@@ -316,6 +317,7 @@ impl PlaybackClock {
 enum UiAction {
     Language(localization::Language),
     AudioTrack(Option<TabId>, u64, towavue_core::AudioTrackSelection),
+    Subtitle(Option<TabId>, u64, subtitles::Action),
     KeybindingChange(TabId, keyboard_settings::Change),
     ConfigureKeybinding(CommandId),
     HoldSpeed(u64, PlaybackGeneration, hold_speed::Action),
@@ -415,6 +417,13 @@ enum AppEvent {
         Result<towavue_runtime_windows::VideoPreviewSheet, String>,
     ),
     MetadataLoaded(u64, Result<Vec<MetadataSourceValue>, String>),
+    SubtitlesLoaded(
+        u64,
+        Result<
+            Arc<towavue_runtime_windows::SubtitleDocument>,
+            towavue_runtime_windows::SubtitleError,
+        >,
+    ),
     FrameStep(u64, Result<Option<MediaTime>, String>),
     Accessibility(accesskit_winit::Event),
     ImagesReady,
@@ -529,6 +538,7 @@ enum FolderIntent {
 }
 
 enum DialogIntent {
+    OpenSubtitle(subtitles::Owner),
     RelocateFile,
     OpenFile,
     OpenFolder,
@@ -1090,6 +1100,7 @@ struct Application<N> {
     playback_volumes: BTreeMap<TabId, playback_volume::PlaybackVolume>,
     preview_rates: BTreeMap<TabId, f32>,
     audio_preview_choices: BTreeMap<TabId, audio_preview::Choice>,
+    subtitles: subtitles::State,
     language_settings: localization::Settings,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
@@ -1393,6 +1404,7 @@ where
             playback_volumes: BTreeMap::new(),
             preview_rates: BTreeMap::new(),
             audio_preview_choices: BTreeMap::new(),
+            subtitles: subtitles::State::default(),
             language_settings: localization::Settings::default(),
             last_playback_volume: Arc::default(),
             playback_volume_preferences: None,
@@ -1868,6 +1880,10 @@ where
         self.file_search.update(None);
         self.grid_open = false;
         self.cancel_shortcut_prefix();
+        if subtitles::supported(&path) && !path.is_dir() {
+            self.load_external_subtitles(path);
+            return;
+        }
         if path.is_dir() {
             self.open_folder_path(path);
         } else {
@@ -3335,6 +3351,7 @@ where
                 }
             }
             AppEvent::MetadataLoaded(token, values) => self.finish_metadata_read(token, values),
+            AppEvent::SubtitlesLoaded(token, result) => self.finish_subtitle_read(token, result),
             AppEvent::FrameStep(serial, result) => self.finish_frame_step(serial, result),
             AppEvent::Accessibility(event) => {
                 if self.window.as_ref().map(|window| window.id()) == Some(event.window_id)
@@ -4170,6 +4187,7 @@ where
         self.cancel_stale_video_resize();
         self.cancel_stale_speed_edit();
         self.cancel_stale_audio_export_options();
+        self.update_subtitle_read();
         self.cancel_stale_metadata_dialog();
         self.video_raster_operations = None;
         self.image_seek_preview_active = false;
@@ -4327,6 +4345,7 @@ where
                     self.draw_image(ui);
                 } else if self.media_kind == Some(MediaKind::Video) {
                     self.draw_video_edit_overlay(ui, &mut volume_targets, actions);
+                    self.draw_subtitles(ui);
                 }
                 if !modal_blocked
                     && !self.palette_open
@@ -4431,7 +4450,11 @@ where
             self.image_loading || self.state == PlaybackState::Loading,
             !self.fullscreen,
         );
-        file_drop::draw(&context, self.modal_input_blocked());
+        file_drop::draw(
+            &context,
+            self.modal_input_blocked(),
+            self.media_kind == Some(MediaKind::Video),
+        );
         if self.image_view.selection != previous_selection {
             // Windowed status is laid out before the media processes input.
             context.request_repaint();
@@ -5553,6 +5576,12 @@ where
                         audio_tracks: self.session.as_ref().map(PlaybackSession::audio_tracks),
                         audio_selection: self.audio_selection(),
                         audio_action: None,
+                        subtitle_tracks: self
+                            .session
+                            .as_ref()
+                            .map(PlaybackSession::subtitle_tracks),
+                        subtitle_settings: self.subtitle_settings(),
+                        subtitle_action: None,
                         choices: menu::Choices {
                             video_quality: self.video_export_quality(),
                             volume_step: self.volume_step_percent,
@@ -5580,6 +5609,13 @@ where
                             self.displayed_tab,
                             self.media_generation,
                             selection,
+                        ));
+                    }
+                    if let Some(action) = recent.subtitle_action {
+                        actions.push(UiAction::Subtitle(
+                            self.displayed_tab,
+                            self.media_generation,
+                            action,
                         ));
                     }
                     if let Some(language) = recent.language_action {
@@ -7726,6 +7762,11 @@ where
                     self.select_audio_track(selection);
                 }
             }
+            UiAction::Subtitle(tab, generation, action) => {
+                if tab == self.displayed_tab && generation == self.media_generation {
+                    self.apply_subtitle_action(action);
+                }
+            }
             UiAction::Recent(action) => self.handle_recent_action(action),
             UiAction::ThumbnailMenu(intent) => self.handle_thumbnail_menu(intent),
             UiAction::TimelineMenu(intent) => self.handle_timeline_menu(intent),
@@ -8045,6 +8086,9 @@ where
             CommandId::NextSameKind => self.navigate(true, true),
             CommandId::CycleAudioRepeat => self.change_audio_mode(false),
             CommandId::CycleAudioTrack => self.cycle_audio_track(),
+            CommandId::LoadSubtitles => self.open_subtitle_picker(),
+            CommandId::ToggleSubtitles => self
+                .apply_subtitle_action(subtitles::Action::Show(!self.subtitle_settings().visible)),
             CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
             CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
             CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
@@ -9232,6 +9276,7 @@ where
         };
         let cancelled_or_failed = !matches!(&result, Ok(Some(_)));
         match intent {
+            DialogIntent::OpenSubtitle(owner) => self.finish_subtitle_picker(owner, result),
             DialogIntent::RelocateFile => self.finish_file_destination(result),
             DialogIntent::ExportFrame(intent) => intent.finish(self, result),
             DialogIntent::OpenFile => match result {
@@ -10166,6 +10211,7 @@ where
         self.playback_volumes.remove(&id);
         self.preview_rates.remove(&id);
         self.audio_preview_choices.remove(&id);
+        self.subtitles.take_choice(id);
         if remember
             && !deleted
             && let Some(path) = removed.target.current_path()
@@ -11067,6 +11113,7 @@ where
     }
 
     fn prepare_graphics_recovery(&mut self) {
+        self.subtitles.reset_graphics();
         self.cancel_video_scrub();
         self.video_sheets.clear();
         let position = self.current_position();

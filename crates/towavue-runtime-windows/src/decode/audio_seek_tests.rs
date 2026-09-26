@@ -90,6 +90,274 @@ pub(super) fn collect(
 }
 
 #[test]
+fn single_use_audio_discards_other_streams_without_changing_selected_pcm_or_timestamps() {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let directory = std::env::temp_dir().join(format!(
+        "towavue-audio-discard-{}-{nonce}",
+        std::process::id()
+    ));
+    fs::create_dir(&directory).expect("owned fixture directory");
+    let source = directory.join("source.mkv");
+    let remux = directory.join("remux.mp4");
+    let executable =
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+    let generated = std::process::Command::new(&executable)
+        .creation_flags(0x0800_0000)
+        .args([
+            "-v",
+            "error",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=64x48:rate=10:duration=3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=220:sample_rate=48000:duration=3",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=997:sample_rate=48000:duration=3",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
+            "-map",
+            "2:a",
+            "-c:v",
+            "libopenh264",
+            "-c:a",
+            "aac",
+            "-aac_pns",
+            "0",
+            "-disposition:a:0",
+            "0",
+            "-disposition:a:1",
+            "default",
+        ])
+        .arg(&source)
+        .output()
+        .expect("generate selected-stream fixture");
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let remuxed = std::process::Command::new(&executable)
+        .creation_flags(0x0800_0000)
+        .args(["-v", "error", "-n", "-i"])
+        .arg(&source)
+        .args(["-map", "0", "-c", "copy"])
+        .arg(&remux)
+        .output()
+        .expect("remux selected-stream fixture");
+    assert!(
+        remuxed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remuxed.stderr)
+    );
+    for path in [&source, &remux] {
+        let original = fs::read(path).expect("original fixture bytes");
+        let mut reusable = ParallelInput::open(path, &|| false).expect("reference input");
+        assert_eq!(
+            best_stream_config(&reusable.input, Type::Audio)
+                .expect("audio")
+                .index,
+            2,
+            "default stream is not the first audio stream"
+        );
+        for start in [0, 1_234_567_000, 2_750_000_000] {
+            let target = MediaTime::from_nanoseconds(start);
+            let end = target.saturating_add(Duration::from_millis(200));
+            let mut expected = Vec::new();
+            let mut reference =
+                ParallelInput::open(path, &|| false).expect("fresh reference input");
+            reference
+                .decode_software(
+                    target,
+                    Some(end),
+                    Some(DecodeStream::Audio),
+                    &|| false,
+                    |output| {
+                        if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) =
+                            output
+                        {
+                            expected.push((chunk.presentation_time, chunk.frames, chunk.bytes));
+                        }
+                        true
+                    },
+                )
+                .expect("reference with all stream policies retained");
+            assert!(!expected.is_empty(), "selected audio samples");
+            let mut actual = Vec::new();
+            decode_file_parallel_cancellable(
+                path,
+                target,
+                Some(end),
+                Some(DecodeStream::Audio),
+                &|| false,
+                |output| {
+                    if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output {
+                        actual.push((chunk.presentation_time, chunk.frames, chunk.bytes));
+                    }
+                    true
+                },
+            )
+            .expect("fresh audio-only input");
+            assert!(
+                actual == expected,
+                "exact PCM, chunks and timestamps: {path:?} {start}; chunks {}/{}; first PTS {:?}/{:?}",
+                actual.len(),
+                expected.len(),
+                actual.first().map(|chunk| chunk.0),
+                expected.first().map(|chunk| chunk.0)
+            );
+        }
+        // A reusable input must still decode video after its audio run.
+        reusable
+            .decode_software(
+                MediaTime::ZERO,
+                Some(MediaTime::from_nanoseconds(200_000_000)),
+                Some(DecodeStream::Audio),
+                &|| false,
+                |_| true,
+            )
+            .expect("reusable audio input");
+        let mut video = 0;
+        reusable
+            .decode_software(
+                MediaTime::ZERO,
+                Some(MediaTime::from_nanoseconds(200_000_000)),
+                Some(DecodeStream::Video),
+                &|| false,
+                |output| {
+                    if matches!(
+                        output,
+                        ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_))
+                    ) {
+                        video += 1;
+                    }
+                    true
+                },
+            )
+            .expect("reuse for video");
+        assert!(video > 0);
+        assert!(matches!(
+            decode_file_parallel_cancellable(
+                path,
+                MediaTime::ZERO,
+                None,
+                Some(DecodeStream::Audio),
+                &|| true,
+                |_| panic!("cancelled output")
+            ),
+            Err(DecodeError::ConsumerClosed)
+        ));
+        assert_eq!(fs::read(path).expect("unchanged source"), original);
+    }
+    fs::remove_dir_all(directory).expect("owned fixtures");
+}
+
+#[test]
+#[ignore = "Release read-only owner reference: exact audio PCM and process read-byte comparison"]
+fn reference_single_use_audio_reports_exact_prefix_io() {
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessIoCounters, IO_COUNTERS};
+
+    fn read_bytes() -> u64 {
+        let mut counters = IO_COUNTERS::default();
+        // The process pseudo-handle needs no close. Windows writes only this live
+        // local structure; no pointer is retained and no process state changes.
+        unsafe { GetProcessIoCounters(GetCurrentProcess(), &mut counters) }.expect("process I/O");
+        counters.ReadTransferCount
+    }
+
+    if cfg!(debug_assertions) {
+        panic!("use Release for timing");
+    }
+    let path = PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let stamp = || {
+        let metadata = fs::metadata(&path).expect("source");
+        (metadata.len(), metadata.modified().expect("mtime"))
+    };
+    let before = stamp();
+    let input = format::input(&path).expect("read-only duration");
+    let duration = input.duration();
+    assert!(duration > 0);
+    drop(input);
+    for (index, numerator) in [3, 5].into_iter().enumerate() {
+        let target = MediaTime::from_nanoseconds(duration * 1000 * numerator / 8);
+        let end = target.saturating_add(Duration::from_millis(200));
+        let mut previous = None;
+        for optimized in if index == 0 {
+            [false, true]
+        } else {
+            [true, false]
+        } {
+            let io_before = read_bytes();
+            let started = Instant::now();
+            let cancelled = || started.elapsed() > Duration::from_secs(120);
+            let mut chunks = Vec::new();
+            let mut first_ms = None;
+            let mut emit = |output| {
+                if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) = output {
+                    first_ms.get_or_insert_with(|| started.elapsed().as_secs_f64() * 1000.0);
+                    chunks.push((chunk.presentation_time, chunk.frames, chunk.bytes));
+                }
+                true
+            };
+            if optimized {
+                decode_file_parallel_cancellable(
+                    &path,
+                    target,
+                    Some(end),
+                    Some(DecodeStream::Audio),
+                    &cancelled,
+                    &mut emit,
+                )
+            } else {
+                ParallelInput::open(&path, &cancelled)
+                    .expect("fresh original route")
+                    .decode_software(
+                        target,
+                        Some(end),
+                        Some(DecodeStream::Audio),
+                        &cancelled,
+                        &mut emit,
+                    )
+            }
+            .expect("bounded exact audio decode");
+            let total_ms = started.elapsed().as_secs_f64() * 1000.0;
+            let bytes = read_bytes().saturating_sub(io_before);
+            assert!(!chunks.is_empty());
+            let frames: usize = chunks.iter().map(|chunk| chunk.1).sum();
+            println!(
+                "AUDIO_PREFIX_IO index={index} optimized={optimized} target_ns={} first_ms={:.3} total_ms={total_ms:.3} read_bytes={bytes} frames={frames}",
+                target.as_nanoseconds(),
+                first_ms.expect("first audio")
+            );
+            if let Some(previous) = &previous {
+                assert!(
+                    &chunks == previous,
+                    "original and optimized exact PCM/chunks/PTS differ at {target:?}"
+                );
+            } else {
+                previous = Some(chunks);
+            }
+        }
+    }
+    assert_eq!(stamp(), before);
+    println!(
+        "AUDIO_PREFIX_IO_CHECKS targets=2 exact_pcm_chunks_pts=true source_stamp_unchanged=true playback=false"
+    );
+}
+
+#[test]
 fn retained_audio_intervals_skip_decoding_deleted_packets_without_changing_samples() {
     for (rate, channels, codec, packet_frames) in [
         (44100, 1, "pcm_s16le", 1001),

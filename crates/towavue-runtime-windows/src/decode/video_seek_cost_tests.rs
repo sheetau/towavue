@@ -1022,3 +1022,174 @@ fn reference_session_reports_fractional_seek_readiness() {
     drop(session);
     assert_eq!(stamp(), before);
 }
+
+#[test]
+#[ignore = "Release read-only edited reference timings; windowless hardware and muted WASAPI, no presentation"]
+fn reference_session_compares_ordinary_range_and_timeline_seek_readiness() {
+    use towavue_core::{EditTimeline, PlaybackRange, TimeRange, TimelineEdit};
+
+    if cfg!(debug_assertions) {
+        panic!("use Release for timing");
+    }
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let stamp = || {
+        let metadata = std::fs::metadata(&path).expect("source");
+        (metadata.len(), metadata.modified().expect("mtime"))
+    };
+    let before = stamp();
+    let input = format::input(&path).expect("read-only duration probe");
+    let duration_ns = input.duration().checked_mul(1000).expect("duration range");
+    assert!(
+        duration_ns > 8_000_000_000,
+        "reference longer than eight seconds"
+    );
+    drop(input);
+    let fraction = |numerator| MediaTime::from_nanoseconds(duration_ns * numerator / 8);
+    let bounds = TimeRange::new(fraction(2), fraction(6)).expect("middle half");
+    let mut plan = EditTimeline::new(
+        MediaTime::from_nanoseconds(duration_ns),
+        PlaybackRange::default(),
+    )
+    .expect("full timeline");
+    assert!(plan.apply(TimelineEdit::Keep(bounds)));
+    let device = GraphicsDevice::hardware_for_test().expect("windowless hardware device");
+    let mut samples = 0;
+    for playing in [false, true] {
+        for mode in ["ordinary", "range", "timeline"] {
+            let (notify, events) = mpsc::channel();
+            let opened = Instant::now();
+            let mut session = crate::PlaybackSession::open_paused(
+                &path,
+                device.clone(),
+                0.0,
+                1.0,
+                PlaybackRange::default(),
+                move |event| {
+                    let _ = notify.send(event);
+                },
+            )
+            .expect("muted session");
+            assert!(
+                session.has_audio(),
+                "reference must exercise audio readiness"
+            );
+            println!(
+                "EDITED_OPEN mode={mode} playing={playing} ms={:.3}",
+                opened.elapsed().as_secs_f64() * 1000.0
+            );
+            // All modes request the same source points. The repeated first point
+            // distinguishes session reuse from a fresh input without claiming cold I/O.
+            for (index, numerator) in [3, 5, 3].into_iter().enumerate() {
+                let source_target = fraction(numerator);
+                let target = if mode == "timeline" {
+                    plan.edited_time(source_target).expect("kept source point")
+                } else {
+                    source_target
+                };
+                session.set_paused(!playing).expect("requested transport");
+                let started = Instant::now();
+                match mode {
+                    "ordinary" => {
+                        session.seek_with_edits(target, 1.0, PlaybackRange::default(), !playing)
+                    }
+                    "range" => session.seek_with_edits(
+                        target,
+                        1.0,
+                        PlaybackRange {
+                            start: bounds.start(),
+                            end: Some(bounds.end()),
+                        },
+                        !playing,
+                    ),
+                    "timeline" => session.seek_with_timeline(target, 1.0, plan.clone(), !playing),
+                    _ => unreachable!(),
+                }
+                .expect("seek mode");
+                let command_ms = started.elapsed().as_secs_f64() * 1000.0;
+                let mut video_ms = None;
+                let mut audio_ms = None;
+                let mut source_pts = None;
+                loop {
+                    for event in events
+                        .try_iter()
+                        .filter(|event| session.accepts_event(event))
+                    {
+                        assert!(
+                            !matches!(
+                                event,
+                                crate::PlaybackEvent::Failed(..)
+                                    | crate::PlaybackEvent::VideoFailed(..)
+                                    | crate::PlaybackEvent::DeviceRemoved(..)
+                            ),
+                            "{event:?}"
+                        );
+                    }
+                    if let Some(event) = session.try_audio_event() {
+                        assert!(
+                            matches!(event, crate::AudioOutputEvent::Drained),
+                            "{event:?}"
+                        );
+                    }
+                    if video_ms.is_none()
+                        && let Some(time) = session.pending_video_time()
+                    {
+                        assert!(
+                            time >= target && time <= target.saturating_add(Duration::from_secs(1)),
+                            "fresh target PTS"
+                        );
+                        assert!(session.advance_pending());
+                        video_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+                        let source = session.current_source_video_time().expect("source PTS");
+                        assert!(
+                            source >= source_target
+                                && source <= source_target.saturating_add(Duration::from_secs(1)),
+                            "same source target across modes"
+                        );
+                        source_pts = Some(source);
+                    }
+                    if playing
+                        && audio_ms.is_none()
+                        && session.audio_position().is_some_and(|time| {
+                            time >= target.saturating_add(Duration::from_millis(20))
+                        })
+                    {
+                        audio_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    if video_ms.is_some() && (!playing || audio_ms.is_some()) {
+                        break;
+                    }
+                    assert!(
+                        started.elapsed() < Duration::from_secs(120),
+                        "bounded {mode} seek wait: video={video_ms:?} audio={audio_ms:?}"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                println!(
+                    "EDITED_SEEK mode={mode} playing={playing} index={index} source_target_ns={} target_ns={} source_pts_ns={} command_ms={command_ms:.3} video_ms={:.3} audio_advance_ms={audio_ms:?} stages={:?} hardware={} transfers={}",
+                    source_target.as_nanoseconds(),
+                    target.as_nanoseconds(),
+                    source_pts.expect("frame").as_nanoseconds(),
+                    video_ms.expect("ready"),
+                    session.seek_stage_ms(),
+                    session.metrics().hardware_frame_count,
+                    session.metrics().cpu_transfer_count
+                );
+                session.set_paused(true).expect("pause before next command");
+                samples += 1;
+            }
+            let retired = Instant::now();
+            drop(session);
+            println!(
+                "EDITED_CLOSE mode={mode} playing={playing} ms={:.3}",
+                retired.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    }
+    assert_eq!(stamp(), before);
+    assert_eq!(samples, 18);
+    println!(
+        "EDITED_SEEK_CHECKS samples={samples} source_stamp_unchanged=true same_source_targets=true muted=true presentation=false"
+    );
+}

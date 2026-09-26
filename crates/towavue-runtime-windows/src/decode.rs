@@ -719,13 +719,9 @@ pub(crate) fn decode_file_parallel_cancellable(
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    ParallelInput::open(path, cancelled)?.decode_software(
-        minimum_time,
-        maximum_time,
-        stream,
-        cancelled,
-        emit,
-    )
+    let mut input = ParallelInput::open(path, cancelled)?;
+    input.single_use_audio = stream == Some(DecodeStream::Audio);
+    input.decode_software(minimum_time, maximum_time, stream, cancelled, emit)
 }
 
 /// Ordinary unedited listening only. Editing/export consumers keep the exact
@@ -737,12 +733,9 @@ pub(crate) fn decode_playback_audio_cancellable(
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    ParallelInput::open(path, cancelled)?.decode_playback_audio(
-        minimum_time,
-        maximum_time,
-        cancelled,
-        emit,
-    )
+    let mut input = ParallelInput::open(path, cancelled)?;
+    input.single_use_audio = true;
+    input.decode_playback_audio(minimum_time, maximum_time, cancelled, emit)
 }
 
 /// Decode ordered retained intervals on one continuous sample axis. The audio worker
@@ -794,6 +787,9 @@ pub(crate) struct ParallelInput {
     input: format::context::Input,
     pub(crate) frame_source: Option<std::sync::Arc<crate::export::frame::FrameSource>>,
     started: bool,
+    // Only fresh path wrappers set this and drop the input after their one run.
+    // Reusable inputs must preserve every stream's discard policy for later video.
+    single_use_audio: bool,
     audio_checkpoints: AudioCheckpoints,
 }
 
@@ -825,6 +821,7 @@ impl ParallelInput {
             input,
             frame_source: None,
             started: false,
+            single_use_audio: false,
             audio_checkpoints: AudioCheckpoints::new(path),
         })
     }
@@ -1040,11 +1037,11 @@ impl ParallelInput {
             seek_input(input, seek_target, video.is_some(), cancelled)?;
         }
         check_cancelled(cancelled)?;
-        if !audio_intervals.is_empty()
+        if (self.single_use_audio || !audio_intervals.is_empty())
             && let Some(audio) = &audio
         {
-            // Retained-interval runs own a fresh audio-only input, never reused
-            // for video. Preserve the existing seek anchor before discarding:
+            // These runs own a fresh audio-only input, never reused for video.
+            // Preserve the existing seek anchor before discarding:
             // demuxers can choose a different anchor when video is disabled.
             discard_other_streams(input, audio.index);
         }

@@ -154,6 +154,7 @@ impl WindowHost {
             if matches!(
                 event,
                 AppEvent::Language(_)
+                    | AppEvent::RestartLanguage(_)
                     | AppEvent::VideoExportQualityChanged
                     | AppEvent::Update(_)
                     | AppEvent::VideoResume(_)
@@ -486,6 +487,9 @@ impl WindowHost {
             Event::Window(origin, AppEvent::Update(action)) => self.update_choice(origin, action),
             Event::Window(origin, AppEvent::Language(language)) => {
                 self.select_language(origin, language)
+            }
+            Event::Window(origin, AppEvent::RestartLanguage(language)) => {
+                self.begin_language_restart(origin, language)
             }
             Event::LanguageSaved(result) => self.finish_language_save(result),
             Event::PlaybackVolumePreferenceFailed(error) => {

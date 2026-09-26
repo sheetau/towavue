@@ -12,6 +12,9 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> Application<N> {
             FallbackPrompt::LanguageNotice(message) => {
                 (message.clone(), PromptButtons::Information)
             }
+            FallbackPrompt::LanguageRestart(_, message) => {
+                (message.clone(), PromptButtons::RestartApplication)
+            }
             FallbackPrompt::ConfigurationWarning(message) => (message.clone(), PromptButtons::Ok),
             FallbackPrompt::UpdateNotice(notice) => (
                 formatted::native_update_notice(
@@ -45,7 +48,7 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> Application<N> {
                     PromptButtons::SaveDiscardCancel {
                         discard_all: matches!(
                             self.pending_guard,
-                            Some(GuardedAction::Exit | GuardedAction::UpdateExit(_))
+                            Some(GuardedAction::Exit | GuardedAction::CoordinatedExit(_))
                         ),
                     },
                 )

@@ -72,6 +72,7 @@ mod reading_view;
 mod recent_tests;
 mod recent_views;
 mod resize;
+mod restart;
 mod resume;
 mod rotation;
 #[cfg(test)]
@@ -191,7 +192,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     configure_mouse_input(&mut event_loop);
     let event_loop = event_loop.build()?;
     let proxy = event_loop.create_proxy();
-    let _launch_server = match towavue_runtime_windows::LaunchServer::start_or_forward_target(
+    let launch_server = match towavue_runtime_windows::LaunchServer::start_or_forward_target(
         initial_path.as_deref(),
         new_window,
         move |request| {
@@ -205,6 +206,15 @@ fn run() -> Result<(), Box<dyn Error>> {
         window_host::WindowHost::new(initial_path.clone(), Some(event_loop.create_proxy()))?;
     application.start_updates(initial_path)?;
     event_loop.run_app(&mut application)?;
+    let restart_language = application.language_restart_ready();
+    restart::retire_then_restart(application, launch_server, restart_language, |language| {
+        let result = std::env::current_exe()
+            .and_then(|executable| std::process::Command::new(executable).spawn().map(|_| ()));
+        if let Err(error) = &result {
+            towavue_runtime_windows::show_restart_failure(language, &error.to_string());
+        }
+        result
+    })?;
     Ok(())
 }
 
@@ -351,6 +361,7 @@ enum UiAction {
 
 enum AppEvent {
     Language(localization::Language),
+    RestartLanguage(localization::Language),
     FileOperationSource(
         u64,
         Result<towavue_runtime_windows::FileOperationSource, String>,
@@ -514,7 +525,7 @@ enum GuardedAction {
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
     Exit,
-    UpdateExit(u64),
+    CoordinatedExit(u64),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -526,6 +537,7 @@ enum GuardDecision {
 
 enum FallbackPrompt {
     LanguageNotice(String),
+    LanguageRestart(localization::Language, String),
     ConfigurationWarning(String),
     UpdateNotice(updates::Notice),
     Recovery {
@@ -3253,7 +3265,7 @@ where
             return;
         }
         match event {
-            AppEvent::Language(_) => {} // Handled by the host.
+            AppEvent::Language(_) | AppEvent::RestartLanguage(_) => {} // Handled by the host.
             AppEvent::VideoExportQualityChanged => self.request_redraw(),
             AppEvent::Update(_) => {} // Routed by the shared host.
             AppEvent::ShortcutsChanged(bindings) => {
@@ -4373,6 +4385,15 @@ where
 
     fn draw_unsaved_guard(&self, context: &egui::Context, actions: &mut Vec<UiAction>) {
         let language = self.language();
+        let discard = if matches!(
+            self.pending_guard,
+            Some(GuardedAction::Exit | GuardedAction::CoordinatedExit(_))
+        ) {
+            localization::Text::NativeDiscardAll
+        } else {
+            localization::Text::NativeDiscard
+        }
+        .in_language(language);
         let name = self
             .path
             .as_deref()
@@ -4381,7 +4402,7 @@ where
             chrome::modal(context, "unsaved-edit-guard".into(), false).show(context, |ui| {
                 let mut labels = vec![
                     localization::Text::NativeSaveContinue.in_language(language),
-                    localization::Text::NativeDiscard.in_language(language),
+                    discard,
                     localization::Text::Cancel.in_language(language),
                 ];
                 if self.active_export.is_some() {
@@ -4419,10 +4440,7 @@ where
                     {
                         actions.push(UiAction::ResolveGuard(GuardDecision::Save));
                     }
-                    if ui
-                        .button(localization::Text::NativeDiscard.in_language(language))
-                        .clicked()
-                    {
+                    if ui.button(discard).clicked() {
                         actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
                     }
                     if ui
@@ -9194,7 +9212,9 @@ where
                 }
             },
         }
-        if cancelled_or_failed && matches!(self.pending_guard, Some(GuardedAction::UpdateExit(_))) {
+        if cancelled_or_failed
+            && matches!(self.pending_guard, Some(GuardedAction::CoordinatedExit(_)))
+        {
             self.handle_update_action(updates::Action::Cancel);
         }
         if cancelled_or_failed
@@ -9648,7 +9668,7 @@ where
 
     fn request_guarded(&mut self, action: GuardedAction) {
         let language = self.language();
-        if matches!(action, GuardedAction::UpdateExit(token) if self.update_close.as_ref().is_none_or(|close| close.token != token))
+        if matches!(action, GuardedAction::CoordinatedExit(token) if self.update_close.as_ref().is_none_or(|close| close.token != token))
         {
             return;
         }
@@ -9657,7 +9677,7 @@ where
                 self.handle_update_action(updates::Action::Cancel);
                 return;
             }
-            if self.update_is_held() || !matches!(action, GuardedAction::UpdateExit(_)) {
+            if self.update_is_held() || !matches!(action, GuardedAction::CoordinatedExit(_)) {
                 return;
             }
         }
@@ -9773,7 +9793,7 @@ where
                 | GuardedAction::NavigateFromFolder(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
-                GuardedAction::Exit | GuardedAction::UpdateExit(_) => true,
+                GuardedAction::Exit | GuardedAction::CoordinatedExit(_) => true,
             };
             if affects_export {
                 if self.renderer.is_none() {
@@ -9812,7 +9832,7 @@ where
                     .is_some_and(EditHistory::is_dirty)
                     .then_some(tab.id)
             }),
-            GuardedAction::Exit | GuardedAction::UpdateExit(_) => self
+            GuardedAction::Exit | GuardedAction::CoordinatedExit(_) => self
                 .edits
                 .iter()
                 .find_map(|(id, history)| history.is_dirty().then_some(*id)),
@@ -9907,7 +9927,7 @@ where
                     recent.record_folder(folder);
                 }
             }
-            GuardedAction::UpdateExit(token) => {
+            GuardedAction::CoordinatedExit(token) => {
                 if let Some(close) = &mut self.update_close
                     && close.token == token
                 {
@@ -10765,7 +10785,9 @@ where
         #[cfg(test)]
         if matches!(
             prompt,
-            FallbackPrompt::UpdateNotice(_) | FallbackPrompt::LanguageNotice(_)
+            FallbackPrompt::UpdateNotice(_)
+                | FallbackPrompt::LanguageNotice(_)
+                | FallbackPrompt::LanguageRestart(..)
         ) && self
             .window
             .as_ref()
@@ -10791,6 +10813,12 @@ where
 
     fn native_prompt_failed(&mut self, prompt: FallbackPrompt, error: DialogError) {
         towavue_runtime_windows::diagnostic!("towavue: native prompt failed: {error}");
+        if matches!(prompt, FallbackPrompt::LanguageRestart(..)) {
+            self.set_status(towavue_core::localization::formatted::confirmation_failed(
+                self.language(),
+                &error.message(self.language()),
+            ));
+        }
         if matches!(prompt, FallbackPrompt::UpdateNotice(_)) {
             self.handle_update_action(updates::Action::Dismiss);
             self.set_status(towavue_core::localization::formatted::update_notice_failed(
@@ -10822,6 +10850,11 @@ where
         };
         match prompt {
             FallbackPrompt::ConfigurationWarning(_) | FallbackPrompt::LanguageNotice(_) => {}
+            FallbackPrompt::LanguageRestart(language, _) => {
+                if response == PromptResponse::Yes {
+                    (self.notify)(AppEvent::RestartLanguage(language));
+                }
+            }
             FallbackPrompt::UpdateNotice(_) => self.handle_update_action(match response {
                 PromptResponse::Yes => updates::Action::Install,
                 PromptResponse::No => updates::Action::NextLaunch,
@@ -11553,7 +11586,7 @@ where
             || self.audio_export_dialog.is_some()
             || self.metadata_dialog.is_some()
             || self.native_prompt.is_some()
-            || self.pending_guard.as_ref().is_some_and(|action| !matches!(action, GuardedAction::UpdateExit(token) if same_update && Some(*token) == update))
+            || self.pending_guard.as_ref().is_some_and(|action| !matches!(action, GuardedAction::CoordinatedExit(token) if same_update && Some(*token) == update))
             || self.export_error.is_some()
     }
 

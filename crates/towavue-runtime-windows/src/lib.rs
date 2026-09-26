@@ -93,7 +93,7 @@ pub use decode::{
 pub use dialog::{
     AboutEvent, AboutResponse, DeleteConfirmation, DialogError, FileDialogKind, PromptButtons,
     PromptResponse, confirm_file_delete, cursor_position_in_window, pick_path, pick_save_as,
-    show_about, show_prompt,
+    show_about, show_prompt, show_restart_failure,
 };
 pub use export::{
     AudioChannels, AudioExportOptions, AudioNormalization, ExportDialogRequest, ExportError,

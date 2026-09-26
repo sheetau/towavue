@@ -36,6 +36,7 @@ macro_rules! templates {
 }
 
 templates! {
+    language_restart_failed(error: &str) => ("towavue could not restart: {error}\nStart towavue manually to apply the saved language.", "towavueを再起動できませんでした: {error}\n手動でtowavueを起動すると、保存した表示言語が適用されます。"),
     image_open_failed(error: &str) => ("could not open image: {error}", "画像を開けません: {error}"),
     image_decode_failed(error: &str) => ("could not decode image: {error}", "画像を読み込めません: {error}"),
     gif_decode_failed(error: &str) => ("could not decode GIF: {error}", "GIFを読み込めません: {error}"),

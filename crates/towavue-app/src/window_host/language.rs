@@ -146,7 +146,13 @@ impl WindowHost {
         }
         let (_, message) = self.language.notice.take().expect("queued language notice");
         app.set_status(message.clone());
-        app.open_native_prompt(FallbackPrompt::LanguageNotice(message));
+        app.open_native_prompt(
+            if self.language.settings.next == self.language.settings.display {
+                FallbackPrompt::LanguageNotice(message)
+            } else {
+                FallbackPrompt::LanguageRestart(self.language.settings.next, message)
+            },
+        );
     }
 }
 

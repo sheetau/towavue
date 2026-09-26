@@ -1,5 +1,5 @@
 use super::*;
-use crate::updates::{Action, Close, Notice};
+use crate::updates::{Action, Close, ClosePurpose, Notice};
 use towavue_core::release::ReleaseVersion;
 use towavue_runtime_windows::update::{UpdateEvent, UpdatePhase, UpdateService};
 
@@ -16,6 +16,7 @@ enum Step {
 struct Attempt {
     token: u64,
     step: Step,
+    purpose: ClosePurpose,
 }
 
 #[derive(Default)]
@@ -34,6 +35,7 @@ pub(super) struct Updates {
     next_token: u64,
     cancelling: Option<u64>,
     deferring: bool,
+    restart_ready: bool,
     #[cfg(test)]
     headless_prompt: bool,
 }
@@ -149,6 +151,38 @@ impl WindowHost {
     }
 
     fn begin_update(&mut self, startup: bool) {
+        self.begin_exit(startup, ClosePurpose::Update);
+    }
+
+    pub(super) fn begin_language_restart(
+        &mut self,
+        origin: WindowKey,
+        language: localization::Language,
+    ) {
+        if self.language.settings.saving
+            || self.language.settings.next != language
+            || self.language.settings.display == language
+            || self
+                .windows
+                .get(&origin)
+                .is_none_or(|app| app.exit_requested)
+            || self.updates.startup
+            || self.updates.deferring
+        {
+            return;
+        }
+        self.begin_exit(false, ClosePurpose::LanguageRestart);
+    }
+
+    pub(crate) fn language_restart_ready(&self) -> Option<localization::Language> {
+        // The new process reads its saved preference. Keep the old display
+        // language only for a relaunch-failure prompt in this retiring process.
+        self.updates
+            .restart_ready
+            .then_some(self.language.settings.display)
+    }
+
+    fn begin_exit(&mut self, startup: bool, purpose: ClosePurpose) {
         if self.updates.attempt.is_some() || self.updates.cancelling.is_some() {
             return;
         }
@@ -158,9 +192,11 @@ impl WindowHost {
                 || !self.pending_launches.is_empty()
                 || self.windows.values().any(|app| !app.update_can_prompt()))
         {
-            self.update_status(
-                "Finish the active operation in every window before installing the update.",
-            );
+            self.update_status(if purpose == ClosePurpose::LanguageRestart {
+                localization::Text::LanguageRestartBusy.in_language(self.language.settings.display)
+            } else {
+                "Finish the active operation in every window before installing the update."
+            });
             return;
         }
         self.updates.next_token = self
@@ -172,16 +208,20 @@ impl WindowHost {
         self.updates.attempt = Some(Attempt {
             token,
             step: Step::Guards,
+            purpose,
         });
-        self.updates.notice = None;
+        if purpose == ClosePurpose::Update {
+            self.updates.notice = None;
+        }
         for app in self.windows.values_mut() {
             app.update_notice = None;
             app.update_close = Some(Close {
                 token,
+                purpose,
                 approved: None,
                 committing: false,
             });
-            app.request_guarded(GuardedAction::UpdateExit(token));
+            app.request_guarded(GuardedAction::CoordinatedExit(token));
         }
         self.advance_update();
     }
@@ -214,10 +254,12 @@ impl WindowHost {
             self.updates.attempt = Some(attempt);
             return;
         }
-        if let Some(service) = &mut self.updates.service {
-            service.cancel_install(attempt.token);
+        if attempt.purpose == ClosePurpose::Update {
+            if let Some(service) = &mut self.updates.service {
+                service.cancel_install(attempt.token);
+            }
+            self.updates.cancelling = Some(attempt.token);
         }
-        self.updates.cancelling = Some(attempt.token);
         self.updates.startup = false;
         for app in self.windows.values_mut() {
             if app
@@ -226,14 +268,18 @@ impl WindowHost {
                 .is_some_and(|close| close.token == attempt.token)
             {
                 app.update_close = None;
-                if matches!(app.pending_guard, Some(GuardedAction::UpdateExit(_))) {
+                if matches!(app.pending_guard, Some(GuardedAction::CoordinatedExit(_))) {
                     app.pending_guard = None;
                 }
-                // A user-approved save may finish; UpdateExit carries the old
+                // A user-approved save may finish; CoordinatedExit carries the old
                 // token and cannot close or approve a later update attempt.
             }
         }
-        self.update_status(reason);
+        self.update_status(if attempt.purpose == ClosePurpose::LanguageRestart {
+            localization::Text::LanguageRestartCancelled.in_language(self.language.settings.display)
+        } else {
+            reason
+        });
     }
 
     pub(super) fn update_event(&mut self, event: UpdateEvent) {
@@ -301,12 +347,11 @@ impl WindowHost {
                 self.update_status("The update will install on the next launch.");
             }
             UpdateEvent::HandoffReady(token) => {
-                if self
-                    .updates
-                    .attempt
-                    .as_ref()
-                    .is_some_and(|a| a.token == token && a.step == Step::Preparing)
-                    && self.update_approvals_current(token)
+                if self.updates.attempt.as_ref().is_some_and(|a| {
+                    a.purpose == ClosePurpose::Update
+                        && a.token == token
+                        && a.step == Step::Preparing
+                }) && self.update_approvals_current(token)
                 {
                     self.updates.attempt.as_mut().expect("current attempt").step = Step::Committing;
                     for app in self.windows.values_mut() {
@@ -323,7 +368,7 @@ impl WindowHost {
                         .updates
                         .attempt
                         .as_ref()
-                        .is_some_and(|a| a.token == token)
+                        .is_some_and(|a| a.purpose == ClosePurpose::Update && a.token == token)
                     {
                         self.cancel_update("Update cancelled because a window changed.");
                     }
@@ -334,6 +379,7 @@ impl WindowHost {
             }
             UpdateEvent::Committed(token) => {
                 if let Some(attempt) = &mut self.updates.attempt
+                    && attempt.purpose == ClosePurpose::Update
                     && attempt.token == token
                     && attempt.step == Step::Committing
                 {
@@ -362,7 +408,7 @@ impl WindowHost {
                         .updates
                         .attempt
                         .as_ref()
-                        .is_some_and(|a| a.token == token)
+                        .is_some_and(|a| a.purpose == ClosePurpose::Update && a.token == token)
                     {
                         // Commit failed before helper detachment; the worker has
                         // already dropped it. Restore the application as a unit.
@@ -419,6 +465,15 @@ impl WindowHost {
                     "Update cancelled because a window changed or a save was cancelled.",
                 );
             } else if step == Step::Guards && self.update_approvals_current(token) {
+                if attempt.purpose == ClosePurpose::LanguageRestart {
+                    self.updates.attempt.as_mut().expect("current attempt").step = Step::Exiting;
+                    self.updates.restart_ready = true;
+                    for app in self.windows.values_mut() {
+                        app.update_close.as_mut().expect("approved exit").committing = true;
+                        app.exit_requested = true;
+                    }
+                    return;
+                }
                 self.updates.attempt.as_mut().expect("current attempt").step = Step::Preparing;
                 if let Some(service) = &mut self.updates.service {
                     service.prepare(token);
@@ -500,7 +555,7 @@ impl WindowHost {
 
     pub(super) fn clear_stale_update_guards(&mut self) {
         for app in self.windows.values_mut() {
-            if matches!(app.pending_guard, Some(GuardedAction::UpdateExit(token)) if app.update_close.as_ref().is_none_or(|close| close.token != token))
+            if matches!(app.pending_guard, Some(GuardedAction::CoordinatedExit(token)) if app.update_close.as_ref().is_none_or(|close| close.token != token))
             {
                 app.pending_guard = None;
                 app.request_redraw();

@@ -166,6 +166,7 @@ pub enum PromptButtons {
     YesNoCancel,
     SaveDiscardCancel { discard_all: bool },
     InstallUpdate,
+    RestartApplication,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -288,7 +289,9 @@ pub fn show_prompt(
             let message: Vec<u16> = message.encode_utf16().chain(Some(0)).collect();
             if matches!(
                 buttons,
-                PromptButtons::SaveDiscardCancel { .. } | PromptButtons::InstallUpdate
+                PromptButtons::SaveDiscardCancel { .. }
+                    | PromptButtons::InstallUpdate
+                    | PromptButtons::RestartApplication
             ) {
                 // SAFETY: this new worker owns its STA through the modal and releases it
                 // on the same thread, including errors. Native accessibility uses COM.
@@ -305,6 +308,12 @@ pub fn show_prompt(
                         update_prompt_buttons(language).to_vec(),
                         Text::NativeUpdateTitle,
                         Text::NativeUpdateInstruction,
+                        IDNO.0,
+                    ),
+                    PromptButtons::RestartApplication => (
+                        restart_prompt_buttons(language).to_vec(),
+                        Text::NativeRestartTitle,
+                        Text::NativeRestartInstruction,
                         IDNO.0,
                     ),
                     _ => unreachable!("task dialog buttons checked above"),
@@ -340,7 +349,9 @@ pub fn show_prompt(
                 PromptButtons::Ok => MB_OK,
                 PromptButtons::RetryCancel => MB_RETRYCANCEL | MB_DEFBUTTON2,
                 PromptButtons::YesNoCancel => MB_YESNOCANCEL | MB_DEFBUTTON3,
-                PromptButtons::SaveDiscardCancel { .. } | PromptButtons::InstallUpdate => {
+                PromptButtons::SaveDiscardCancel { .. }
+                | PromptButtons::InstallUpdate
+                | PromptButtons::RestartApplication => {
                     unreachable!("handled above")
                 }
             } | if matches!(buttons, PromptButtons::Information) {
@@ -401,6 +412,32 @@ fn update_prompt_buttons(language: Language) -> [(i32, Vec<u16>); 2] {
             (IDNO.0, Text::NativeInstallNext),
         ],
     )
+}
+
+fn restart_prompt_buttons(language: Language) -> [(i32, Vec<u16>); 2] {
+    button_labels(
+        language,
+        [
+            (IDYES.0, Text::NativeRestartNow),
+            (IDNO.0, Text::NativeRestartLater),
+        ],
+    )
+}
+
+/// Reports a failed relaunch after all old windows have already retired.
+pub fn show_restart_failure(language: Language, error: &str) {
+    let message = wide(&formatted::language_restart_failed(language, error));
+    let title = wide(Text::NativeRestartTitle.in_language(language));
+    // SAFETY: synchronous ownerless native UI; both NUL-terminated buffers remain
+    // alive until return. No HWND, graphics resource or borrowed pointer escapes.
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(message.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        )
+    };
 }
 
 fn unsaved_prompt_buttons(language: Language, discard_all: bool) -> [(i32, Vec<u16>); 3] {
@@ -782,6 +819,26 @@ mod tests {
             }),
             ["Install now", "Install on next launch"]
         );
+    }
+
+    #[test]
+    fn restart_prompt_retains_native_action_ids_and_localized_labels() {
+        for (language, expected) in [
+            (Language::English, ["Restart now", "Later"]),
+            (Language::Japanese, ["今すぐ再起動", "後で"]),
+        ] {
+            let labels = restart_prompt_buttons(language);
+            let buttons = labels.each_ref().map(button_view);
+            assert_eq!(buttons.map(|button| button.nButtonID), [IDYES.0, IDNO.0]);
+            assert_eq!(
+                buttons.map(|button| {
+                    let label = button.pszButtonText;
+                    // SAFETY: owned NUL-terminated label buffers outlive these views.
+                    unsafe { label.to_string() }.expect("label")
+                }),
+                expected
+            );
+        }
     }
 
     #[test]

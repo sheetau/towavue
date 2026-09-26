@@ -17,15 +17,24 @@ pub(super) struct Notice {
     pub failed: bool,
 }
 
+// Updates and language restarts share the all-window save/hold protocol, but
+// only an update may prepare or commit an installer handoff.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClosePurpose {
+    Update,
+    LanguageRestart,
+}
+
 pub(super) struct Close {
     pub token: u64,
+    pub purpose: ClosePurpose,
     pub approved: Option<BTreeMap<TabId, EditHistory>>,
     pub committing: bool,
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn update_save_token(&self) -> Option<u64> {
-        let GuardedAction::UpdateExit(token) =
+        let GuardedAction::CoordinatedExit(token) =
             self.active_export.as_ref()?.continuation.as_ref()?
         else {
             return None;
@@ -108,7 +117,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         let language = localization::language(ui.ctx());
-        let message = if close.committing {
+        let message = if close.purpose == ClosePurpose::LanguageRestart {
+            Text::LanguageRestartPreparing.in_language(language)
+        } else if close.committing {
             Text::UpdateRestarting.in_language(language)
         } else {
             Text::UpdatePreparing.in_language(language)
@@ -161,11 +172,23 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                             egui::WidgetInfo::labeled(
                                 egui::WidgetType::Button,
                                 cancel.enabled(),
-                                Text::UpdateCancel.in_language(language),
+                                if close.purpose == ClosePurpose::LanguageRestart {
+                                    Text::LanguageRestartCancel
+                                } else {
+                                    Text::UpdateCancel
+                                }
+                                .in_language(language),
                             )
                         });
                         if cancel
-                            .help_text(Text::UpdateCancelHelp.in_language(language))
+                            .help_text(
+                                if close.purpose == ClosePurpose::LanguageRestart {
+                                    Text::LanguageRestartCancel
+                                } else {
+                                    Text::UpdateCancelHelp
+                                }
+                                .in_language(language),
+                            )
                             .clicked()
                         {
                             actions.push(UiAction::Update(Action::Cancel));

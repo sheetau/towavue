@@ -61,12 +61,12 @@ fn language_selection_is_durable_shared_and_does_not_restart_or_change_live_wind
     host.show_language_notice();
     assert!(matches!(
         host.windows[&first].native_prompt,
-        Some(FallbackPrompt::LanguageNotice(_))
+        Some(FallbackPrompt::LanguageRestart(Language::Japanese, _))
     ));
     host.windows
         .get_mut(&first)
         .expect("first")
-        .finish_native_prompt(Ok(PromptResponse::Ok));
+        .finish_native_prompt(Ok(PromptResponse::No));
     for app in host.windows.values() {
         assert!(!app.exit_requested);
         assert!(app.pending_guard.is_none());
@@ -142,7 +142,7 @@ fn language_save_failure_preserves_selection_and_closed_owner_notice_moves_to_a_
     ));
     assert!(matches!(
         host.windows[&second].native_prompt,
-        Some(FallbackPrompt::LanguageNotice(_))
+        Some(FallbackPrompt::LanguageRestart(Language::Japanese, _))
     ));
     assert!(!host.windows[&second].exit_requested);
 }

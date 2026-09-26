@@ -1,5 +1,131 @@
 use super::*;
 
+#[test]
+fn language_restart_coordinates_dirty_windows_and_never_commits_an_update() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::language_restart_coordinates_dirty_windows_and_never_commits_an_update",
+    ) else {
+        return;
+    };
+    let path = root.join("original.bmp");
+    crate::tab_transfer::tests::bitmap(&path);
+    let original = std::fs::read(&path).expect("source bytes");
+    let (mut host, first, second) = host();
+    let third = host.add_application(None).expect("clean peer");
+    host.windows.get_mut(&third).expect("third").state = PlaybackState::Paused;
+    let a = attach(&mut host, first, &path, true);
+    let b = attach(&mut host, second, &path, true);
+    host.language.settings.next = localization::Language::Japanese;
+    let edits: Vec<_> = host.windows.values().map(|app| app.edits.clone()).collect();
+
+    // The real native-response boundary routes through the host, without showing UI.
+    let app = host.windows.get_mut(&first).expect("origin");
+    app.open_native_prompt(FallbackPrompt::LanguageRestart(
+        localization::Language::Japanese,
+        "saved".into(),
+    ));
+    let (_, buttons) = app.native_prompt_content(app.native_prompt.as_ref().expect("prompt"));
+    assert!(matches!(buttons, PromptButtons::RestartApplication));
+    app.finish_native_prompt(Ok(PromptResponse::Yes));
+    crate::window_host::tests::drain_captured(&mut host);
+    let token = host.updates.attempt.as_ref().expect("guards").token;
+    assert!(host.windows[&third].update_is_held());
+    host.windows
+        .get_mut(&first)
+        .expect("first")
+        .resolve_guard(GuardDecision::Discard);
+    // An update worker cannot approve or terminate a language restart.
+    host.update_event(UpdateEvent::HandoffReady(token));
+    host.update_event(UpdateEvent::Committed(token));
+    assert!(host.windows.values().all(|app| !app.exit_requested));
+    host.windows
+        .get_mut(&second)
+        .expect("second")
+        .resolve_guard(GuardDecision::Cancel);
+    crate::window_host::tests::drain_captured(&mut host);
+    host.advance_update();
+    assert!(host.updates.attempt.is_none() && host.updates.cancelling.is_none());
+    assert!(host.language_restart_ready().is_none());
+    assert_eq!(
+        host.windows
+            .values()
+            .map(|app| app.edits.clone())
+            .collect::<Vec<_>>(),
+        edits
+    );
+    assert!(
+        host.windows
+            .values()
+            .all(|app| !app.exit_requested && app.update_close.is_none())
+    );
+
+    // A late save continuation from the cancelled attempt cannot approve a new one.
+    host.begin_language_restart(first, localization::Language::Japanese);
+    let next = host.updates.attempt.as_ref().expect("new guards").token;
+    assert_ne!(next, token);
+    host.windows
+        .get_mut(&first)
+        .expect("first")
+        .perform_guarded(GuardedAction::CoordinatedExit(token));
+    assert!(!host.windows[&first].update_is_held());
+    host.windows
+        .get_mut(&first)
+        .expect("first")
+        .resolve_guard(GuardDecision::Discard);
+    host.windows
+        .get_mut(&second)
+        .expect("second")
+        .resolve_guard(GuardDecision::Discard);
+    host.advance_update();
+    assert_eq!(
+        host.language_restart_ready(),
+        Some(localization::Language::English)
+    );
+    assert!(host.windows.values().all(|app| app.exit_requested));
+    assert!(
+        host.windows[&first].edits[&a].is_dirty() && host.windows[&second].edits[&b].is_dirty()
+    );
+    assert_eq!(std::fs::read(&path).expect("original retained"), original);
+    assert!(host.updates.cancelling.is_none() && !host.updates.deferring);
+}
+
+#[test]
+fn language_restart_rejects_busy_stale_and_changed_owners() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::language_restart_rejects_busy_stale_and_changed_owners",
+    ) else {
+        return;
+    };
+    let (mut host, first, second) = host();
+    host.language.settings.next = localization::Language::Japanese;
+    host.windows.get_mut(&second).expect("peer").about_open = true;
+    host.begin_language_restart(first, localization::Language::Japanese);
+    assert!(host.updates.attempt.is_none());
+    host.windows.get_mut(&second).expect("peer").about_open = false;
+    host.begin_language_restart(first, localization::Language::English);
+    assert!(
+        host.updates.attempt.is_none(),
+        "stale notice must not restart"
+    );
+    host.language.settings.saving = true;
+    host.begin_language_restart(first, localization::Language::Japanese);
+    assert!(host.updates.attempt.is_none());
+    host.language.settings.saving = false;
+    let path = root.join("source.bmp");
+    crate::tab_transfer::tests::bitmap(&path);
+    let id = attach(&mut host, second, &path, true);
+    host.begin_language_restart(first, localization::Language::Japanese);
+    let changed = host.windows[&second].edits[&id].clone();
+    host.windows
+        .get_mut(&first)
+        .expect("approved peer")
+        .edits
+        .insert(id, changed);
+    host.advance_update();
+    assert!(host.updates.attempt.is_none() && host.language_restart_ready().is_none());
+    assert!(host.windows.values().all(|app| !app.exit_requested));
+}
+
 fn host() -> (WindowHost, WindowKey, WindowKey) {
     let mut host = WindowHost::new(None, None).expect("host");
     *host.captured_events.lock().expect("events") = Some(VecDeque::new());
@@ -144,7 +270,7 @@ fn update_all_window_discard_waits_for_helper_ack_and_cancellation_preserves_edi
     );
     approved.about_open = false;
     assert!(
-        matches!(host.windows[&second].pending_guard, Some(GuardedAction::UpdateExit(t)) if t == token)
+        matches!(host.windows[&second].pending_guard, Some(GuardedAction::CoordinatedExit(t)) if t == token)
     );
     assert!(host.windows.values().all(|app| !app.exit_requested));
     host.windows
@@ -220,10 +346,10 @@ fn update_cancel_before_ready_event_and_stale_save_continuations_never_close_win
     crate::window_host::tests::drain_captured(&mut host);
     host.update_event(UpdateEvent::Cancelled(token));
     let app = host.windows.get_mut(&first).expect("first");
-    app.request_guarded(GuardedAction::UpdateExit(token));
-    app.perform_guarded(GuardedAction::UpdateExit(token));
+    app.request_guarded(GuardedAction::CoordinatedExit(token));
+    app.perform_guarded(GuardedAction::CoordinatedExit(token));
     assert!(!app.exit_requested && app.pending_guard.is_none());
-    app.pending_guard = Some(GuardedAction::UpdateExit(token));
+    app.pending_guard = Some(GuardedAction::CoordinatedExit(token));
     host.clear_stale_update_guards();
     assert!(host.windows[&first].pending_guard.is_none());
     // The OS Close button cancels the attempt even while a dirty guard is open.
@@ -382,6 +508,7 @@ fn update_status_in_language(language: crate::localization::Language) {
             app.native_prompt = native.then_some(FallbackPrompt::ExportBusy);
             app.update_close = Some(Close {
                 token: 1,
+                purpose: ClosePurpose::Update,
                 approved: Some(app.edits.clone()),
                 committing,
             });
@@ -632,7 +759,7 @@ fn native_update_startup_gate_recovers_initial_media_and_dirty_cancel_keeps_ever
                 choose(&mut self.host, first, Action::Install);
                 assert!(matches!(
                     self.host.windows[&first].pending_guard,
-                    Some(GuardedAction::UpdateExit(_))
+                    Some(GuardedAction::CoordinatedExit(_))
                 ));
                 self.host
                     .windows
@@ -692,4 +819,100 @@ fn native_update_startup_gate_recovers_initial_media_and_dirty_cancel_keeps_ever
     eprintln!(
         "PASS hidden native update: scheduled startup did not open media/windows; failed preparation restored initial media; dirty cancellation retained two native windows and edits"
     );
+}
+
+#[test]
+fn language_restart_save_as_cancel_and_late_save_preserve_windows() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::language_restart_save_as_cancel_and_late_save_preserve_windows",
+    ) else {
+        return;
+    };
+    let (mut host, first, second) = host();
+    let app = host.windows.get_mut(&first).expect("first");
+    app.ui_context = Some(crate::fonts::test_context());
+    app.open_pasted_image(crate::image_paste::tests::fixture())
+        .expect("owned paste");
+    let id = app.tabs.active_id().expect("pasted image");
+    app.dispatch(CommandId::RotateClockwise);
+    let original = app.document_input(id).expect("retained pixels");
+    host.language.settings.next = localization::Language::Japanese;
+    host.begin_language_restart(first, localization::Language::Japanese);
+    let token = host.updates.attempt.as_ref().expect("guards").token;
+    assert!(host.windows[&second].update_is_held());
+    let app = host.windows.get_mut(&first).expect("first");
+    // Inject the pending native picker boundary, without displaying a picker.
+    app.pending_dialog = Some(DialogIntent::Export {
+        tab: id,
+        source: original.logical_path().to_owned(),
+        kind: MediaKind::Image,
+        generation: app.media_generation,
+        output: ExportOutput::Media,
+        continuation: app.pending_guard.take(),
+    });
+    app.finish_test_dialog(Ok(None));
+    crate::window_host::tests::drain_captured(&mut host);
+    host.advance_update();
+    host.clear_stale_update_guards();
+    assert!(host.updates.attempt.is_none());
+    assert!(host.windows[&first].path.is_none() && host.windows[&first].edits[&id].is_dirty());
+    assert_eq!(
+        host.windows[&first]
+            .document_input(id)
+            .expect("pixels kept"),
+        original
+    );
+    host.update_event(UpdateEvent::Cancelled(token));
+    host.language.settings.next = localization::Language::Japanese;
+    host.begin_language_restart(first, localization::Language::Japanese);
+    let next = host.updates.attempt.as_ref().expect("new guards").token;
+    let target = root.join("saved.png");
+    let app = host.windows.get_mut(&first).expect("first");
+    let continuation = app.pending_guard.take();
+    assert!(app.start_test_save_as(target.clone(), continuation));
+    choose(&mut host, second, Action::Cancel);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while host.source_save.is_some() || host.windows[&first].active_export.is_some() {
+        assert!(Instant::now() < deadline, "accepted Save as completion");
+        crate::window_host::tests::drain_captured(&mut host);
+        host.advance_source_save();
+        host.advance_update();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(
+        host.windows
+            .values()
+            .all(|app| !app.exit_requested && app.export_error.is_none())
+    );
+    assert_eq!(host.windows[&first].path.as_ref(), Some(&target));
+    assert!(!host.windows[&first].edits[&id].is_dirty());
+    assert!(target.is_file());
+    host.update_event(UpdateEvent::HandoffReady(next));
+    assert!(host.updates.attempt.is_none());
+    // An uncancelled Save as approves closure only after successful publication.
+    host.windows
+        .get_mut(&first)
+        .expect("first")
+        .dispatch(CommandId::FlipHorizontal);
+    assert!(host.windows[&first].edits[&id].is_dirty());
+    host.begin_language_restart(first, localization::Language::Japanese);
+    let saved = root.join("saved-again.png");
+    let app = host.windows.get_mut(&first).expect("first");
+    let continuation = app.pending_guard.take();
+    assert!(app.start_test_save_as(saved.clone(), continuation));
+    assert!(host.windows.values().all(|app| !app.exit_requested));
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while host.language_restart_ready().is_none() {
+        assert!(
+            Instant::now() < deadline,
+            "restart after successful Save as"
+        );
+        crate::window_host::tests::drain_captured(&mut host);
+        host.advance_source_save();
+        host.advance_update();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(saved.is_file());
+    assert!(!host.windows[&first].edits[&id].is_dirty());
+    assert!(host.windows.values().all(|app| app.exit_requested));
 }

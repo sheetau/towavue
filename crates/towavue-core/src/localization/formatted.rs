@@ -36,6 +36,18 @@ macro_rules! templates {
 }
 
 templates! {
+    image_open_failed(error: &str) => ("could not open image: {error}", "画像を開けません: {error}"),
+    image_decode_failed(error: &str) => ("could not decode image: {error}", "画像を読み込めません: {error}"),
+    gif_decode_failed(error: &str) => ("could not decode GIF: {error}", "GIFを読み込めません: {error}"),
+    ffmpeg_image_decode_failed(error: &str) => ("FFmpeg could not decode image: {error}", "FFmpegで画像を読み込めません: {error}"),
+    avif_decode_failed(error: &str) => ("could not decode AVIF: {error}", "AVIFを読み込めません: {error}"),
+    png_decode_failed(error: &str) => ("could not decode PNG: {error}", "PNGを読み込めません: {error}"),
+    apng_encode_failed(error: &str) => ("could not encode APNG export frames: {error}", "書き出し用のAPNGフレームを生成できません: {error}"),
+    frame_extract_failed(error: &str) => ("could not extract video frame: {error}", "動画フレームを取り出せません: {error}"),
+    ffmpeg_decode_failed(error: &str) => ("FFmpeg failed: {error}", "FFmpegの処理に失敗しました: {error}"),
+    hardware_decode_unavailable(error: &str) => ("D3D11VA is unavailable: {error}", "D3D11VAを利用できません: {error}"),
+    decode_worker_start_failed(error: &str) => ("a decode worker could not start: {error}", "メディアの読み込み処理を開始できません: {error}"),
+    image_texture_limit(limit: usize) => ("Image dimensions exceed this graphics device's {limit}px texture limit", "画像サイズがこのGPUの画像サイズ上限（{limit}px）を超えています"),
     file_preview(path: &str) => ("Preview: {path}", "プレビュー: {path}"),
     tab_metadata_unavailable(error: &str) => ("Tab metadata unavailable: {error}", "タブのメタデータを取得できません: {error}"),
     recent_files_unavailable(error: &str) => ("Recent files unavailable: {error}", "最近使ったファイルを取得できません: {error}"),

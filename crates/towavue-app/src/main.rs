@@ -561,6 +561,31 @@ struct ImagePresentation {
     held_edit_view: Option<image_handoff::ImageEditView>,
 }
 
+#[derive(Debug)]
+enum ImagePresentationError {
+    MissingFrame,
+    TextureLimit(usize),
+}
+
+impl ImagePresentationError {
+    fn message(&self, language: localization::Language) -> String {
+        match self {
+            Self::MissingFrame => localization::Text::ImageRequestedFrameMissing
+                .in_language(language)
+                .into(),
+            Self::TextureLimit(limit) => {
+                towavue_core::localization::formatted::image_texture_limit(language, *limit)
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for ImagePresentationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message(localization::Language::English))
+    }
+}
+
 struct ImagePreviewPresentation {
     texture: TextureHandle,
     pixels: Arc<egui::ColorImage>,
@@ -656,7 +681,7 @@ impl ImageTextureCache {
         path: &Path,
         decoded: Arc<DecodedImage>,
         options: TextureOptions,
-    ) -> Result<ImagePresentation, String> {
+    ) -> Result<ImagePresentation, ImagePresentationError> {
         if let Some(index) = self
             .entries
             .iter()
@@ -707,7 +732,7 @@ impl ImagePresentation {
         context: &egui::Context,
         path: &Path,
         decoded: Arc<DecodedImage>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ImagePresentationError> {
         Self::from_decoded_frame(context, path, decoded, 0, TextureOptions::LINEAR)
     }
 
@@ -717,7 +742,7 @@ impl ImagePresentation {
         decoded: Arc<DecodedImage>,
         frame_index: usize,
         options: TextureOptions,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ImagePresentationError> {
         Self::from_named_frame(
             context,
             &path.display().to_string(),
@@ -733,20 +758,18 @@ impl ImagePresentation {
         decoded: Arc<DecodedImage>,
         frame_index: usize,
         options: TextureOptions,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ImagePresentationError> {
         let frame = decoded
             .frames
             .get(frame_index)
-            .ok_or_else(|| "decoded image did not contain the requested frame".to_owned())?;
+            .ok_or(ImagePresentationError::MissingFrame)?;
         let limit = context.input(|input| input.max_texture_side);
         if decoded
             .frames
             .iter()
             .any(|frame| frame.width as usize > limit || frame.height as usize > limit)
         {
-            return Err(format!(
-                "Image dimensions exceed this graphics device's {limit}px texture limit"
-            ));
+            return Err(ImagePresentationError::TextureLimit(limit));
         }
         let texture = context.load_texture(format!("image:{label}"), color_image(frame), options);
         let next_frame_at = decoded.is_animated().then(|| Instant::now() + frame.delay);
@@ -2831,7 +2854,11 @@ where
 
     fn request_image_paths(&mut self, paths: Vec<PathBuf>, offset: usize) {
         if !self.document_source_available(self.displayed_tab) {
-            self.image_error = Some("The original source needs recovery. Reopen the recovered file before editing or exporting.".into());
+            self.image_error = Some(
+                localization::Text::RecoverBeforeImageEdit
+                    .in_language(self.language())
+                    .into(),
+            );
             self.image_loading = false;
             self.request_redraw();
             return;
@@ -2970,7 +2997,7 @@ where
         path: &Path,
         decoded: Arc<DecodedImage>,
         options: TextureOptions,
-    ) -> Result<ImagePresentation, String> {
+    ) -> Result<ImagePresentation, ImagePresentationError> {
         // A reading reload can keep the same animated pages. Reuse their local clocks
         // and textures only when immutable decode ownership proves the source unchanged.
         if self.reading_mode
@@ -3043,6 +3070,7 @@ where
             self.image_previews.remove(path);
         }
         let options = self.image_sampling();
+        let language = self.language();
         let mut images = result.images.into_iter();
         if result.first_index == 0 {
             if !self.reading_mode {
@@ -3051,9 +3079,11 @@ where
             self.reset_image_edits();
             let (path, decoded) = images.next().expect("nonempty first chunk");
             match decoded
-                .map_err(|error| error.to_string())
-                .and_then(|decoded| self.load_image_presentation(&context, &path, decoded, options))
-            {
+                .map_err(|error| (error.to_string(), error.message(language)))
+                .and_then(|decoded| {
+                    self.load_image_presentation(&context, &path, decoded, options)
+                        .map_err(|error| (error.to_string(), error.message(language)))
+                }) {
                 Ok(image) => {
                     if let Some(id) = self.displayed_tab {
                         self.source_versions.entry(id).or_insert(result.source);
@@ -3073,11 +3103,11 @@ where
                     self.image_error = None;
                     self.state = PlaybackState::Paused;
                 }
-                Err(error) => {
+                Err((diagnostic, message)) => {
                     self.image = None;
-                    self.image_error = Some(error.clone());
+                    self.image_error = Some(message.clone());
                     self.image_sequence = image_navigation::ImageSequence::default();
-                    self.fail(error);
+                    self.fail_with_message(diagnostic, message);
                 }
             }
             self.reading_pages.clear();
@@ -3085,8 +3115,11 @@ where
         }
         for (path, decoded) in images {
             let image = decoded
-                .map_err(|error| error.to_string())
-                .and_then(|decoded| self.load_image_presentation(&context, &path, decoded, options))
+                .map_err(|error| error.message(language))
+                .and_then(|decoded| {
+                    self.load_image_presentation(&context, &path, decoded, options)
+                        .map_err(|error| error.message(language))
+                })
                 .map_err(|error| format!("{}: {error}", display_name(&path)));
             self.reading_pages.push(image);
         }
@@ -8518,7 +8551,9 @@ where
 
     fn install_edited_image(&mut self, decoded: Arc<DecodedImage>) -> Result<(), String> {
         let Some(context) = &self.ui_context else {
-            return Err("Image view is unavailable".into());
+            return Err(localization::Text::ImageViewUnavailable
+                .in_language(self.language())
+                .into());
         };
         let frame_index = self.image.as_ref().map_or(0, |previous| {
             previous
@@ -8536,7 +8571,8 @@ where
             decoded,
             frame_index,
             options,
-        )?;
+        )
+        .map_err(|error| error.message(self.language()))?;
         if let Some(previous) = &self.image {
             image.next_frame_at = previous.next_frame_at;
             image.plays_left = previous.plays_left;

@@ -65,10 +65,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn open_pasted_image(&mut self, pasted: PastedImage) -> Result<(), String> {
-        let context = self
-            .ui_context
-            .as_ref()
-            .ok_or("Image view is unavailable")?;
+        let context = self.ui_context.as_ref().ok_or_else(|| {
+            localization::Text::ImageViewUnavailable
+                .in_language(self.language())
+                .to_owned()
+        })?;
         // Validate the destination texture before changing the selected tab.
         let image = ImagePresentation::from_named_frame(
             context,
@@ -76,7 +77,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             Arc::clone(pasted.image()),
             0,
             self.image_sampling(),
-        )?;
+        )
+        .map_err(|error| error.message(self.language()))?;
         let id = self.tabs.open_untitled_image();
         self.source_backings.insert(id, pasted.original().clone());
         self.edits.entry(id).or_default();

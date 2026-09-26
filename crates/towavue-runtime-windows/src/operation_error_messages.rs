@@ -1,6 +1,51 @@
 //! Localized operation errors; Display remains the stable English diagnostic.
-use crate::{ExportError, FileOperationError, SourceSaveError};
+use crate::{DecodeError, ExportError, FileOperationError, ImageDecodeError, SourceSaveError};
 use towavue_core::localization::{Language, Text, formatted};
+
+impl DecodeError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::FrameImage(error) => formatted::frame_extract_failed(language, error),
+            Self::MissingVideoTimestamp => {
+                Text::DecodeMissingTimestamp.in_language(language).into()
+            }
+            Self::UnsupportedOrientation => Text::DecodeUnsupportedOrientation
+                .in_language(language)
+                .into(),
+            Self::Ffmpeg(error) => formatted::ffmpeg_decode_failed(language, &error.to_string()),
+            Self::NoMediaStream => Text::DecodeNoStream.in_language(language).into(),
+            Self::FrameTooLarge => Text::DecodeFrameTooLarge.in_language(language).into(),
+            Self::ConsumerClosed => Text::DecodeConsumerStopped.in_language(language).into(),
+            Self::HardwareUnavailable(error) => {
+                formatted::hardware_decode_unavailable(language, error)
+            }
+            Self::WorkerStart(error) => {
+                formatted::decode_worker_start_failed(language, &error.to_string())
+            }
+            Self::WorkerPanicked => Text::DecodeWorkerPanicked.in_language(language).into(),
+        }
+    }
+}
+
+impl ImageDecodeError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::Open(error) => formatted::image_open_failed(language, &error.to_string()),
+            Self::Decode(error) => formatted::image_decode_failed(language, &error.to_string()),
+            Self::Gif(error) => formatted::gif_decode_failed(language, &error.to_string()),
+            Self::Ffmpeg(error) => {
+                formatted::ffmpeg_image_decode_failed(language, &error.message(language))
+            }
+            Self::Avif(error) => formatted::avif_decode_failed(language, error),
+            Self::Png(error) => formatted::png_decode_failed(language, &error.to_string()),
+            Self::PngEncode(error) => formatted::apng_encode_failed(language, &error.to_string()),
+            Self::UnknownFormat => Text::ImageFormatUnknown.in_language(language).into(),
+            Self::Empty => Text::ImageDecodedEmpty.in_language(language).into(),
+            Self::TooLarge => Text::ImageMemoryBudget.in_language(language).into(),
+            Self::Cancelled => Text::ImageSuperseded.in_language(language).into(),
+        }
+    }
+}
 
 impl ExportError {
     pub fn message(&self, language: Language) -> String {
@@ -62,6 +107,52 @@ impl SourceSaveError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decode_errors_keep_english_diagnostics_and_localize_nested_image_failures() {
+        let detail = "native {detail}\n日本語.png = 32";
+        for error in [
+            DecodeError::FrameImage(detail.into()),
+            DecodeError::MissingVideoTimestamp,
+            DecodeError::UnsupportedOrientation,
+            DecodeError::Ffmpeg(ffmpeg_next::Error::InvalidData),
+            DecodeError::NoMediaStream,
+            DecodeError::FrameTooLarge,
+            DecodeError::ConsumerClosed,
+            DecodeError::HardwareUnavailable(detail.into()),
+            DecodeError::WorkerStart(std::io::Error::other(detail)),
+            DecodeError::WorkerPanicked,
+        ] {
+            let diagnostic = error.to_string();
+            let japanese = error.message(Language::Japanese);
+            assert_eq!(error.message(Language::English), diagnostic);
+            assert_ne!(japanese, diagnostic);
+            if diagnostic.contains(detail) {
+                assert!(japanese.contains(detail), "external details are literal");
+            }
+            let nested = ImageDecodeError::Ffmpeg(error);
+            assert_eq!(nested.message(Language::English), nested.to_string());
+            assert_eq!(
+                nested.message(Language::Japanese),
+                format!("FFmpegで画像を読み込めません: {japanese}")
+            );
+        }
+        for error in [
+            ImageDecodeError::Open(std::io::Error::other(detail)),
+            ImageDecodeError::Decode(image::ImageError::IoError(std::io::Error::other(detail))),
+            ImageDecodeError::Avif(detail.into()),
+            ImageDecodeError::UnknownFormat,
+            ImageDecodeError::Empty,
+            ImageDecodeError::TooLarge,
+            ImageDecodeError::Cancelled,
+        ] {
+            assert_eq!(error.message(Language::English), error.to_string());
+            assert_ne!(error.message(Language::Japanese), error.to_string());
+            if error.to_string().contains(detail) {
+                assert!(error.message(Language::Japanese).contains(detail));
+            }
+        }
+    }
 
     #[test]
     fn operation_errors_keep_english_diagnostics_and_nested_japanese_details() {

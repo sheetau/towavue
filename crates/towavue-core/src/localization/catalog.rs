@@ -18,6 +18,19 @@ macro_rules! messages {
 }
 
 messages! {
+    ImageFormatUnknown => ("image format could not be determined", "画像形式を判別できません"),
+    ImageDecodedEmpty => ("decoded image contained no frames", "読み込んだ画像にフレームがありません"),
+    ImageMemoryBudget => ("image exceeds the available decoded-image memory budget", "画像の展開に必要なメモリが上限を超えています"),
+    ImageSuperseded => ("image request was superseded", "画像の読み込み要求が新しい要求に置き換わりました"),
+    DecodeMissingTimestamp => ("frame stepping requires video presentation timestamps", "コマ送りには動画の表示時刻情報が必要です"),
+    DecodeUnsupportedOrientation => ("video display matrix is not a supported quarter-turn or reflection", "動画の向き情報が、対応する90度単位の回転や反転ではありません"),
+    DecodeNoStream => ("the input has no decodable audio or video stream", "ファイルに再生可能な音声や動画がありません"),
+    DecodeFrameTooLarge => ("decoded frame dimensions exceed the addressable buffer size", "フレームのサイズが処理可能な上限を超えています"),
+    DecodeConsumerStopped => ("the output consumer stopped accepting decoded data", "読み込んだメディアの受け取り処理が停止しました"),
+    DecodeWorkerPanicked => ("a decode worker panicked", "メディアの読み込み処理が予期せず停止しました"),
+    ImageRequestedFrameMissing => ("decoded image did not contain the requested frame", "読み込んだ画像に指定したフレームがありません"),
+    ImageViewUnavailable => ("Image view is unavailable", "画像の表示領域を利用できません"),
+    RecoverBeforeImageEdit => ("The original source needs recovery. Reopen the recovered file before editing or exporting.", "元ファイルの復旧が必要です。復旧したファイルを開き直してから編集や書き出しを行ってください。"),
     GalleryNoMatchingFiles => ("No matching files.", "該当するファイルはありません。"),
     DeletedPrefix => ("(deleted) ", "（削除済み） "),
     FilmstripCurrentSuffix => (" (current item)", " （表示中）"),

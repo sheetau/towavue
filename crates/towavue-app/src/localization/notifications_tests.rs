@@ -2,6 +2,150 @@ use super::Language;
 use crate::*;
 
 #[test]
+fn japanese_image_failures_preserve_owners_reading_pages_and_external_details() {
+    use towavue_runtime_windows::{DecodeError, DecodedImageFrame, ImageDecodeError, LoadedImages};
+    let Some(root) = crate::tests::isolated_test_root(
+        "localization::notifications_tests::japanese_image_failures_preserve_owners_reading_pages_and_external_details",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let context = super::test_ui::japanese_context(density);
+        let path = root.join("日本語{original}.png");
+        let other = root.join("日本語{other}.png");
+        let limit = context.input(|input| input.max_texture_side);
+        let image = |width: u32| {
+            Arc::new(DecodedImage {
+                animation_plays: 1,
+                format: "PNG",
+                frames: vec![DecodedImageFrame {
+                    width,
+                    height: 1,
+                    rgba: vec![255; 4],
+                    delay: Duration::ZERO,
+                }],
+            })
+        };
+        let empty = Arc::new(DecodedImage {
+            animation_plays: 1,
+            format: "PNG",
+            frames: Vec::new(),
+        });
+        let detail = "native {detail}: 日本語.png";
+        for (result, expected) in [
+            (
+                Err(ImageDecodeError::UnknownFormat),
+                "画像形式を判別できません".to_owned(),
+            ),
+            (
+                Err(ImageDecodeError::Ffmpeg(DecodeError::NoMediaStream)),
+                "FFmpegで画像を読み込めません: ファイルに再生可能な音声や動画がありません".into(),
+            ),
+            (
+                Err(ImageDecodeError::Open(std::io::Error::other(detail))),
+                format!("画像を開けません: {detail}"),
+            ),
+            (
+                Ok(empty.clone()),
+                "読み込んだ画像に指定したフレームがありません".into(),
+            ),
+            (
+                Ok(image(limit as u32 + 1)),
+                format!("画像サイズがこのGPUの画像サイズ上限（{limit}px）を超えています"),
+            ),
+        ] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            app.ui_context = Some(context.clone());
+            app.language_settings.display = Language::Japanese;
+            app.language_settings.next = Language::English;
+            let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+            app.displayed_tab = Some(tab);
+            app.path = Some(path.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.image_generation = 42;
+            app.image_loading = true;
+            let history = app.edits.clone();
+            app.apply_loaded_images(LoadedImages {
+                source: None,
+                generation: 42,
+                first_index: 0,
+                total: 1,
+                images: vec![(path.clone(), result)],
+            });
+            assert_eq!(app.image_error.as_deref(), Some(expected.as_str()));
+            assert_eq!(app.status_notice().as_deref(), Some(expected.as_str()));
+            assert_eq!(app.state, PlaybackState::Faulted);
+            assert!(app.image.is_none() && !app.image_loading);
+            assert_eq!(app.edits, history);
+            assert_eq!(app.tabs.active_id(), Some(tab));
+            assert_eq!(app.path.as_ref(), Some(&path));
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1000.0, 600.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                    },
+                );
+            }
+            assert_eq!(output.pixels_per_point, density);
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)),
+                "complete image error reaches the painted status: {expected}"
+            );
+            // A stale failure must not replace the current error or owner.
+            app.apply_loaded_images(LoadedImages {
+                source: None,
+                generation: 41,
+                first_index: 0,
+                total: 1,
+                images: vec![(other.clone(), Err(ImageDecodeError::TooLarge))],
+            });
+            assert_eq!(app.image_error.as_deref(), Some(expected.as_str()));
+            app.reading_mode = true;
+            app.image_loading = true;
+            app.apply_loaded_images(LoadedImages {
+                source: None,
+                generation: 42,
+                first_index: 0,
+                total: 2,
+                images: vec![(path.clone(), Ok(image(1)))],
+            });
+            let texture = app.image.as_ref().expect("first reading page").texture.id();
+            app.apply_loaded_images(LoadedImages {
+                source: None,
+                generation: 42,
+                first_index: 1,
+                total: 2,
+                images: vec![(other.clone(), Err(ImageDecodeError::UnknownFormat))],
+            });
+            assert_eq!(
+                app.image
+                    .as_ref()
+                    .expect("first page retained")
+                    .texture
+                    .id(),
+                texture
+            );
+            assert!(app.image_error.is_none());
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert_eq!(
+                app.reading_pages[0].as_ref().err().map(String::as_str),
+                Some("日本語{other}.png: 画像形式を判別できません")
+            );
+            assert_eq!(app.edits, history);
+        }
+    }
+}
+
+#[test]
 fn japanese_export_failures_keep_edits_and_guarded_continuations() {
     let Some(root) = crate::tests::isolated_test_root(
         "localization::notifications_tests::japanese_export_failures_keep_edits_and_guarded_continuations",

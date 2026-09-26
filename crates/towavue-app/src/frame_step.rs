@@ -215,7 +215,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .adjacent(input.path(), base, forward, plan.as_ref(), &|| {
                     cancellation.is_cancelled()
                 })
-                .map_err(|error| error.to_string());
+                .map_err(|error| error.message(display_language));
             if !cancellation.is_cancelled() {
                 notify(AppEvent::FrameStep(serial, result));
             }

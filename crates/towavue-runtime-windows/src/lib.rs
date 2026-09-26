@@ -5,6 +5,8 @@ pub use drag_badge::DragBadge;
 
 mod audio;
 mod avif_container;
+mod avif_failure;
+pub use avif_failure::AvifFailure;
 #[cfg(feature = "presentation-verification")]
 mod burst_verification;
 #[cfg(feature = "presentation-verification")]

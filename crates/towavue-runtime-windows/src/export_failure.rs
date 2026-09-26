@@ -13,6 +13,7 @@ pub struct ExportFailure {
 enum Reason {
     Text(Text),
     Diagnostic(String),
+    Avif(crate::AvifFailure),
     Image(Box<ImageDecodeError>),
     PreparedImage(Box<ImageDecodeError>),
     FrameDelay {
@@ -39,6 +40,13 @@ impl ExportFailure {
         Self {
             context,
             reason: Reason::Diagnostic(error.to_string()),
+        }
+    }
+
+    pub(crate) fn avif(context: Text, error: crate::AvifFailure) -> Self {
+        Self {
+            context,
+            reason: Reason::Avif(error),
         }
     }
 
@@ -90,6 +98,7 @@ impl ExportFailure {
         let reason = match &self.reason {
             Reason::Text(text) => text.in_language(language).into(),
             Reason::Diagnostic(detail) => detail.clone(),
+            Reason::Avif(error) => error.message(language),
             Reason::Image(error) => error.message(language),
             Reason::PreparedImage(error) => {
                 formatted::export_animation_preparation(language, &error.message(language))
@@ -127,6 +136,7 @@ impl Error for ExportFailure {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match &self.reason {
             Reason::Image(error) | Reason::PreparedImage(error) => Some(error.as_ref()),
+            Reason::Avif(error) => Some(error),
             _ => None,
         }
     }

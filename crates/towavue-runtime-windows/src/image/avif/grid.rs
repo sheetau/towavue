@@ -37,7 +37,7 @@ fn decode_tile(
     )?;
     let frame = decoder
         .next(current)?
-        .ok_or_else(|| invalid("empty grid tile"))?;
+        .ok_or_else(|| invalid(Text::AvifValidationEmptyGridTile))?;
     if frame.size != size
         || frame.aperture.is_some()
         || frame
@@ -45,13 +45,13 @@ fn decode_tile(
             .is_some_and(|value| value != crate::VideoOrientation::default())
         || decoder.next(current)?.is_some()
     {
-        return Err(invalid("invalid grid tile frame or transform"));
+        return Err(invalid(Text::AvifValidationInvalidGridTileFrameOrTransform));
     }
     Ok(frame)
 }
 
 fn unsigned(value: i32) -> Result<u32, ImageDecodeError> {
-    u32::try_from(value).map_err(|_| invalid("negative grid geometry"))
+    u32::try_from(value).map_err(|_| invalid(Text::AvifValidationNegativeGridGeometry))
 }
 
 impl Grid {
@@ -71,14 +71,14 @@ impl Grid {
                 return Ok(None);
             }
             if context.nb_stream_groups > 65536 || context.stream_groups.is_null() {
-                return Err(invalid("invalid stream group list"));
+                return Err(invalid(Text::AvifValidationInvalidStreamGroupList));
             }
             for &group in
                 std::slice::from_raw_parts(context.stream_groups, context.nb_stream_groups as usize)
             {
                 let group = group
                     .as_ref()
-                    .ok_or_else(|| invalid("missing stream group"))?;
+                    .ok_or_else(|| invalid(Text::AvifValidationMissingStreamGroup))?;
                 if group.id != i64::from(id) {
                     continue;
                 }
@@ -86,13 +86,15 @@ impl Grid {
                     || group.type_
                         != ffmpeg::ffi::AVStreamGroupParamsType::AV_STREAM_GROUP_PARAMS_TILE_GRID
                 {
-                    return Err(invalid("ambiguous or unsupported image group"));
+                    return Err(invalid(
+                        Text::AvifValidationAmbiguousOrUnsupportedImageGroup,
+                    ));
                 }
                 let grid = group
                     .params
                     .tile_grid
                     .as_ref()
-                    .ok_or_else(|| invalid("missing tile grid"))?;
+                    .ok_or_else(|| invalid(Text::AvifValidationMissingTileGrid))?;
                 if grid.nb_tiles == 0
                     || grid.nb_tiles > 65536
                     || grid.offsets.is_null()
@@ -100,7 +102,7 @@ impl Grid {
                     || group.nb_streams > 65536
                     || group.streams.is_null()
                 {
-                    return Err(invalid("invalid tile grid arrays"));
+                    return Err(invalid(Text::AvifValidationInvalidTileGridArrays));
                 }
                 let streams = std::slice::from_raw_parts(group.streams, group.nb_streams as usize);
                 let mut tiles = Vec::with_capacity(grid.nb_tiles as usize);
@@ -108,15 +110,17 @@ impl Grid {
                     let stream = streams
                         .get(offset.idx as usize)
                         .and_then(|stream| stream.as_ref())
-                        .ok_or_else(|| invalid("invalid group-relative tile index"))?;
+                        .ok_or_else(|| {
+                            invalid(Text::AvifValidationInvalidGroupRelativeTileIndex)
+                        })?;
                     let parameters = stream
                         .codecpar
                         .as_ref()
-                        .ok_or_else(|| invalid("missing tile codec"))?;
+                        .ok_or_else(|| invalid(Text::AvifValidationMissingTileCodec))?;
                     if stream.id <= 0
                         || parameters.codec_id != ffmpeg::ffi::AVCodecID::AV_CODEC_ID_AV1
                     {
-                        return Err(invalid("invalid AV1 tile"));
+                        return Err(invalid(Text::AvifValidationInvalidAv1Tile));
                     }
                     tiles.push(Tile {
                         id: stream.id as u32,
@@ -127,11 +131,11 @@ impl Grid {
                 }
                 let mut orientation = None;
                 if grid.nb_coded_side_data < 0 || grid.nb_coded_side_data > 65536 {
-                    return Err(invalid("invalid grid side data count"));
+                    return Err(invalid(Text::AvifValidationInvalidGridSideDataCount));
                 }
                 if grid.nb_coded_side_data > 0 {
                     if grid.coded_side_data.is_null() {
-                        return Err(invalid("missing grid side data"));
+                        return Err(invalid(Text::AvifValidationMissingGridSideData));
                     }
                     for data in std::slice::from_raw_parts(
                         grid.coded_side_data,
@@ -141,7 +145,7 @@ impl Grid {
                             == ffmpeg::ffi::AVPacketSideDataType::AV_PKT_DATA_DISPLAYMATRIX
                         {
                             if data.data.is_null() || data.size != 36 || orientation.is_some() {
-                                return Err(invalid("invalid grid display matrix"));
+                                return Err(invalid(Text::AvifValidationInvalidGridDisplayMatrix));
                             }
                             orientation = Some(
                                 crate::VideoOrientation::from_bytes(Some(
@@ -184,7 +188,7 @@ impl Grid {
         if self.tiles.iter().any(|tile| tile.alpha.is_some())
             && self.tiles.iter().any(|tile| tile.alpha.is_none())
         {
-            return Err(invalid("incomplete tile alpha associations"));
+            return Err(invalid(Text::AvifValidationIncompleteTileAlphaAssociations));
         }
         Ok(())
     }
@@ -193,7 +197,7 @@ impl Grid {
         check_size(self.size, limit)?;
         check_size(self.coded, limit)?;
         let Some(first) = self.tiles.first() else {
-            return Err(invalid("empty grid"));
+            return Err(invalid(Text::AvifValidationEmptyGrid));
         };
         let (w, h) = first.size;
         if w == 0
@@ -203,7 +207,7 @@ impl Grid {
             || u64::from(self.origin.0) + u64::from(self.size.0) > u64::from(self.coded.0)
             || u64::from(self.origin.1) + u64::from(self.size.1) > u64::from(self.coded.1)
         {
-            return Err(invalid("invalid grid canvas or tile size"));
+            return Err(invalid(Text::AvifValidationInvalidGridCanvasOrTileSize));
         }
         let columns = self.coded.0 / w;
         let rows = self.coded.1 / h;
@@ -211,14 +215,16 @@ impl Grid {
             || rows == 0
             || u64::from(columns) * u64::from(rows) != self.tiles.len() as u64
         {
-            return Err(invalid("incomplete grid"));
+            return Err(invalid(Text::AvifValidationIncompleteGrid));
         }
         for (index, tile) in self.tiles.iter().enumerate() {
             let index = index as u32;
             if tile.size != first.size
                 || tile.position != (index % columns * w, index / columns * h)
             {
-                return Err(invalid("nonuniform or overlapping grid tiles"));
+                return Err(invalid(
+                    Text::AvifValidationNonuniformOrOverlappingGridTiles,
+                ));
             }
         }
         Ok(())

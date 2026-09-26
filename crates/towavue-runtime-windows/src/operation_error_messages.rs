@@ -72,7 +72,7 @@ impl ImageDecodeError {
             Self::Ffmpeg(error) => {
                 formatted::ffmpeg_image_decode_failed(language, &error.message(language))
             }
-            Self::Avif(error) => formatted::avif_decode_failed(language, error),
+            Self::Avif(error) => formatted::avif_decode_failed(language, &error.message(language)),
             Self::Png(error) => formatted::png_decode_failed(language, &error.to_string()),
             Self::PngEncode(error) => formatted::apng_encode_failed(language, &error.to_string()),
             Self::UnknownFormat => Text::ImageFormatUnknown.in_language(language).into(),

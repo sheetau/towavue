@@ -16,7 +16,7 @@ impl Key {
         // SAFETY: immutable native descriptor for the live decoded frame; no
         // pointer is retained. Full-resolution axes must not acquire an offset.
         let descriptor = unsafe { av_pix_fmt_desc_get(frame.format().into()).as_ref() }
-            .ok_or_else(|| invalid("unknown AVIF pixel format"))?;
+            .ok_or_else(|| invalid(Text::AvifValidationUnknownAvifPixelFormat))?;
         if descriptor.nb_components >= 3
             && descriptor.flags & AV_PIX_FMT_FLAG_RGB as u64 == 0
             && frame.chroma_location() != ffmpeg::util::chroma::Location::Unspecified
@@ -70,7 +70,9 @@ impl Scaler {
             key,
         };
         if scaler.context.is_null() {
-            return Err(invalid("cannot allocate AVIF color converter"));
+            return Err(invalid(
+                Text::AvifValidationCannotAllocateAvifColorConverter,
+            ));
         }
         // SAFETY: exclusively owned, not yet initialized. The plane decoder
         // checked dimensions against its canvas/byte limit before conversion.
@@ -149,7 +151,7 @@ pub(super) fn convert(
         return Err(ffmpeg_error(ffmpeg::Error::from(rows)));
     }
     if rows != key.height as i32 {
-        return Err(invalid("incomplete AVIF color conversion"));
+        return Err(invalid(Text::AvifValidationIncompleteAvifColorConversion));
     }
     Ok(output)
 }

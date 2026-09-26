@@ -3,6 +3,7 @@ use crate::avif_container::{self as container, boxes, one};
 use ffmpeg::format::Pixel;
 use ffmpeg_next as ffmpeg;
 use std::path::PathBuf;
+use towavue_core::localization::Text;
 
 mod grid;
 mod scaler;
@@ -17,8 +18,8 @@ impl From<container::Error> for ImageDecodeError {
     }
 }
 
-fn invalid(message: &str) -> ImageDecodeError {
-    ImageDecodeError::Avif(message.into())
+fn invalid(reason: Text) -> ImageDecodeError {
+    ImageDecodeError::Avif(crate::AvifFailure::Message(reason))
 }
 
 fn ffmpeg_error(error: ffmpeg::Error) -> ImageDecodeError {
@@ -94,7 +95,7 @@ fn decode_frames(
         if let Some(alpha_decoder) = &mut alpha_decoder {
             let alpha = alpha_decoder
                 .next(current)?
-                .ok_or_else(|| invalid("missing alpha frame"))?;
+                .ok_or_else(|| invalid(Text::AvifValidationMissingAlphaFrame))?;
             color_frame.merge_alpha(alpha, premultiplied)?;
         }
         if let Some(aperture) = color_frame.aperture {
@@ -123,7 +124,7 @@ fn decode_frames(
                 color_frame.size.1,
                 color_frame.pixels,
             )
-            .ok_or_else(|| invalid("invalid decoded RGBA canvas"))?;
+            .ok_or_else(|| invalid(Text::AvifValidationInvalidDecodedRgbaCanvas))?;
             let mut image = image::DynamicImage::ImageRgba8(image);
             image.apply_orientation(orientation.image_orientation());
             let image = image.into_rgba8();
@@ -133,7 +134,7 @@ fn decode_frames(
         }
         if let Some(previous) = previous_time {
             if color_frame.time <= previous {
-                return Err(invalid("non-increasing frame time"));
+                return Err(invalid(Text::AvifValidationNonIncreasingFrameTime));
             }
             if let Some(frame) = frames.last_mut() {
                 frame.delay = delay(color_frame.time - previous);
@@ -167,10 +168,10 @@ fn decode_frames(
     if let Some(alpha) = &mut alpha_decoder
         && alpha.next(current)?.is_some()
     {
-        return Err(invalid("extra alpha frames"));
+        return Err(invalid(Text::AvifValidationExtraAlphaFrames));
     }
     if count == 0 {
-        return Err(invalid("no decoded frames"));
+        return Err(invalid(Text::AvifValidationNoDecodedFrames));
     }
     Ok((frames, count, color.plays))
 }
@@ -216,20 +217,22 @@ fn select(
         .filter(|track| track.alpha_for.is_none())
         .collect();
     if colors.len() != 1 || tracks.len() > 2 {
-        return Err(invalid("ambiguous color or auxiliary tracks"));
+        return Err(invalid(Text::AvifValidationAmbiguousColorOrAuxiliaryTracks));
     }
     let color = colors[0];
     let alpha = tracks
         .iter()
         .find(|track| track.alpha_for == Some(color.id));
     if tracks.len() == 2 && alpha.is_none() {
-        return Err(invalid("unlinked auxiliary track"));
+        return Err(invalid(Text::AvifValidationUnlinkedAuxiliaryTrack));
     }
     if color
         .premultiplied_with
         .is_some_and(|id| alpha.is_none_or(|alpha| alpha.id != id))
     {
-        return Err(invalid("invalid premultiplied-alpha reference"));
+        return Err(invalid(
+            Text::AvifValidationInvalidPremultipliedAlphaReference,
+        ));
     }
 
     let selected = |track: &container::Track| Selection {
@@ -260,7 +263,9 @@ struct PlaneFrame {
 impl PlaneFrame {
     fn merge_alpha(&mut self, alpha: Self, premultiplied: bool) -> Result<(), ImageDecodeError> {
         if self.size != alpha.size || self.time != alpha.time || self.duration != alpha.duration {
-            return Err(invalid("alpha geometry or timing differs from color"));
+            return Err(invalid(
+                Text::AvifValidationAlphaGeometryOrTimingDiffersFromColor,
+            ));
         }
         // Older libavif files omit alpha transforms. An explicit transform
         // must agree; rotate the merged canvas once, never just its colors.
@@ -268,13 +273,17 @@ impl PlaneFrame {
             .orientation
             .is_some_and(|orientation| orientation != self.orientation.unwrap_or_default())
         {
-            return Err(invalid("alpha orientation differs from color"));
+            return Err(invalid(
+                Text::AvifValidationAlphaOrientationDiffersFromColor,
+            ));
         }
         if alpha
             .aperture
             .is_some_and(|aperture| aperture != self.aperture.unwrap_or_default())
         {
-            return Err(invalid("alpha clean aperture differs from color"));
+            return Err(invalid(
+                Text::AvifValidationAlphaCleanApertureDiffersFromColor,
+            ));
         }
         for (pixel, alpha) in self
             .pixels
@@ -391,9 +400,9 @@ impl PlaneDecoder {
         });
         let stream = matching
             .next()
-            .ok_or_else(|| invalid("missing image item or timed track"))?;
+            .ok_or_else(|| invalid(Text::AvifValidationMissingImageItemOrTimedTrack))?;
         if matching.next().is_some() || stream.parameters().id() != ffmpeg::codec::Id::AV1 {
-            return Err(invalid("ambiguous or non-AV1 image item/track"));
+            return Err(invalid(Text::AvifValidationAmbiguousOrNonAv1ImageItemTrack));
         }
         let index = stream.index();
         let matrix = stream
@@ -411,7 +420,7 @@ impl PlaneDecoder {
             .map(|data| container::CleanAperture::from_bytes(data.data()))
             .transpose()?;
         if time_base.numerator() <= 0 || time_base.denominator() <= 0 {
-            return Err(invalid("invalid image time base"));
+            return Err(invalid(Text::AvifValidationInvalidImageTimeBase));
         }
         let context = ffmpeg::codec::context::Context::from_parameters(stream.parameters())
             .map_err(ffmpeg_error)?;
@@ -422,7 +431,7 @@ impl PlaneDecoder {
         options.set("flags", "+low_delay");
         options.set("err_detect", "explode");
         let codec = ffmpeg::codec::decoder::find(ffmpeg::codec::Id::AV1)
-            .ok_or_else(|| invalid("AV1 decoder unavailable"))?;
+            .ok_or_else(|| invalid(Text::AvifValidationAv1DecoderUnavailable))?;
         let decoder = context
             .decoder()
             .open_as_with(codec, options)
@@ -471,7 +480,7 @@ impl PlaneDecoder {
                     let (time, duration) = if self.timed {
                         let time = frame
                             .timestamp()
-                            .ok_or_else(|| invalid("missing presentation time"))?;
+                            .ok_or_else(|| invalid(Text::AvifValidationMissingPresentationTime))?;
                         (
                             nanos(time),
                             (frame.packet().duration > 0).then(|| nanos(frame.packet().duration)),
@@ -504,7 +513,7 @@ impl PlaneDecoder {
                 match packet.read(&mut self.input) {
                     Ok(()) if packet.stream() == self.index => {
                         if packet.is_corrupt() {
-                            return Err(invalid("corrupt sample"));
+                            return Err(invalid(Text::AvifValidationCorruptSample));
                         }
                         self.decoder.send_packet(&packet).map_err(ffmpeg_error)?;
                         break;

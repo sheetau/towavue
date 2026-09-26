@@ -9,7 +9,7 @@ pub(crate) struct Still {
 fn number(data: &mut &[u8], width: usize) -> Result<u32, Error> {
     let head = data
         .get(..width)
-        .ok_or_else(|| invalid("truncated item field"))?;
+        .ok_or_else(|| invalid(Text::AvifValidationTruncatedItemField))?;
     let value = head
         .iter()
         .fold(0, |value, byte| (value << 8) | u32::from(*byte));
@@ -23,7 +23,7 @@ fn full_children(
     current: &dyn Fn() -> bool,
 ) -> Result<(u8, Vec<BoxRange>), Error> {
     if item.end - item.start < 4 {
-        return Err(invalid("truncated full box"));
+        return Err(invalid(Text::AvifValidationTruncatedFullBox));
     }
     let header = bytes(
         file,
@@ -34,7 +34,7 @@ fn full_children(
         4,
     )?;
     if header[1..] != [0, 0, 0] {
-        return Err(invalid("unsupported full-box flags"));
+        return Err(invalid(Text::AvifValidationUnsupportedFullBoxFlags));
     }
     Ok((header[0], boxes(file, item.start + 4, item.end, current)?))
 }
@@ -45,22 +45,26 @@ fn visit_properties(
     current: &dyn Fn() -> bool,
     mut visit: impl FnMut(&mut fs::File, u32, BoxRange) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let properties = one(meta, b"iprp")?.ok_or_else(|| invalid("missing item properties"))?;
+    let properties =
+        one(meta, b"iprp")?.ok_or_else(|| invalid(Text::AvifValidationMissingItemProperties))?;
     let properties = boxes(file, properties.start, properties.end, current)?;
-    let values = one(&properties, b"ipco")?.ok_or_else(|| invalid("missing property container"))?;
+    let values = one(&properties, b"ipco")?
+        .ok_or_else(|| invalid(Text::AvifValidationMissingPropertyContainer))?;
     let values = boxes(file, values.start, values.end, current)?;
     for association in properties.iter().filter(|item| &item.kind == b"ipma") {
         let payload = bytes(file, *association, 1024 * 1024)?;
         let mut payload = payload.as_slice();
         let control = number(&mut payload, 4)?;
         if control & 0x00fffffe != 0 || control >> 24 > 1 {
-            return Err(invalid("unsupported property association flags/version"));
+            return Err(invalid(
+                Text::AvifValidationUnsupportedPropertyAssociationFlagsVersion,
+            ));
         }
         let id_width = if control >> 24 == 0 { 2 } else { 4 };
         let wide = control & 1 != 0;
         let count = number(&mut payload, 4)?;
         if count > 65536 {
-            return Err(invalid("too many property associations"));
+            return Err(invalid(Text::AvifValidationTooManyPropertyAssociations));
         }
         for _ in 0..count {
             check_current(current)?;
@@ -74,12 +78,12 @@ fn visit_properties(
                 }
                 let value = values
                     .get(index as usize - 1)
-                    .ok_or_else(|| invalid("invalid property index"))?;
+                    .ok_or_else(|| invalid(Text::AvifValidationInvalidPropertyIndex))?;
                 visit(file, id, *value)?;
             }
         }
         if !payload.is_empty() {
-            return Err(invalid("invalid property association size"));
+            return Err(invalid(Text::AvifValidationInvalidPropertyAssociationSize));
         }
     }
     Ok(())
@@ -94,16 +98,17 @@ pub(crate) fn aperture(
     let mut file = fs::File::open(path)?;
     let length = file.metadata()?.len();
     let root = boxes(&mut file, 0, length, current)?;
-    let meta = one(&root, b"meta")?.ok_or_else(|| invalid("missing image metadata"))?;
+    let meta =
+        one(&root, b"meta")?.ok_or_else(|| invalid(Text::AvifValidationMissingImageMetadata))?;
     let (version, meta) = full_children(&mut file, meta, current)?;
     if version != 0 {
-        return Err(invalid("unsupported meta version"));
+        return Err(invalid(Text::AvifValidationUnsupportedMetaVersion));
     }
     let mut aperture = None;
     visit_properties(&mut file, &meta, current, |file, item, value| {
         if item == id && value.kind == *b"clap" {
             if aperture.is_some() {
-                return Err(invalid("multiple clean aperture properties"));
+                return Err(invalid(Text::AvifValidationMultipleCleanApertureProperties));
             }
             aperture = Some(CleanAperture::from_clap(&bytes(file, value, 32)?, size)?);
         }
@@ -117,12 +122,14 @@ pub(crate) fn read(
     root: &[BoxRange],
     current: &dyn Fn() -> bool,
 ) -> Result<Still, Error> {
-    let meta = one(root, b"meta")?.ok_or_else(|| invalid("missing image metadata"))?;
+    let meta =
+        one(root, b"meta")?.ok_or_else(|| invalid(Text::AvifValidationMissingImageMetadata))?;
     let (version, meta) = full_children(file, meta, current)?;
     if version != 0 {
-        return Err(invalid("unsupported meta version"));
+        return Err(invalid(Text::AvifValidationUnsupportedMetaVersion));
     }
-    let primary = one(&meta, b"pitm")?.ok_or_else(|| invalid("missing primary item"))?;
+    let primary =
+        one(&meta, b"pitm")?.ok_or_else(|| invalid(Text::AvifValidationMissingPrimaryItem))?;
     let primary = bytes(file, primary, 8)?;
     let mut primary = primary.as_slice();
     let version = number(&mut primary, 4)?;
@@ -131,11 +138,11 @@ pub(crate) fn read(
         match version {
             0 => 2,
             0x01000000 => 4,
-            _ => return Err(invalid("invalid pitm version")),
+            _ => return Err(invalid(Text::AvifValidationInvalidPitmVersion)),
         },
     )?;
     if !primary.is_empty() || color == 0 {
-        return Err(invalid("invalid primary item"));
+        return Err(invalid(Text::AvifValidationInvalidPrimaryItem));
     }
     Ok(associations(file, &meta, &[color], current)?
         .remove(&color)
@@ -150,10 +157,11 @@ pub(crate) fn item_alphas(
     let mut file = fs::File::open(path)?;
     let length = file.metadata()?.len();
     let root = boxes(&mut file, 0, length, current)?;
-    let meta = one(&root, b"meta")?.ok_or_else(|| invalid("missing image metadata"))?;
+    let meta =
+        one(&root, b"meta")?.ok_or_else(|| invalid(Text::AvifValidationMissingImageMetadata))?;
     let (version, meta) = full_children(&mut file, meta, current)?;
     if version != 0 {
-        return Err(invalid("unsupported meta version"));
+        return Err(invalid(Text::AvifValidationUnsupportedMetaVersion));
     }
     associations(&mut file, &meta, colors, current)
 }
@@ -175,7 +183,7 @@ fn associations(
         let width = match version {
             0 => 2,
             1 => 4,
-            _ => return Err(invalid("unsupported iref version")),
+            _ => return Err(invalid(Text::AvifValidationUnsupportedIrefVersion)),
         };
         for reference in references
             .into_iter()
@@ -194,18 +202,18 @@ fn associations(
                 {
                     link_count += 1;
                     if link_count > 65536 {
-                        return Err(invalid("too many auxiliary links"));
+                        return Err(invalid(Text::AvifValidationTooManyAuxiliaryLinks));
                     }
                 }
                 if &reference.kind == b"prem"
                     && let Some((_, premultiplied)) = pending.get_mut(&from)
                     && premultiplied.replace(to).is_some()
                 {
-                    return Err(invalid("multiple premultiplied references"));
+                    return Err(invalid(Text::AvifValidationMultiplePremultipliedReferences));
                 }
             }
             if !payload.is_empty() {
-                return Err(invalid("invalid item reference size"));
+                return Err(invalid(Text::AvifValidationInvalidItemReferenceSize));
             }
         }
     }
@@ -232,10 +240,10 @@ fn associations(
             let mut matches = auxiliaries.intersection(&alpha_items);
             let alpha = matches.next().copied();
             if matches.next().is_some() {
-                return Err(invalid("multiple alpha items"));
+                return Err(invalid(Text::AvifValidationMultipleAlphaItems));
             }
             if alpha == Some(color) || (premultiplied.is_some() && premultiplied != alpha) {
-                return Err(invalid("invalid premultiplied alpha item"));
+                return Err(invalid(Text::AvifValidationInvalidPremultipliedAlphaItem));
             }
             Ok((
                 color,

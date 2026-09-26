@@ -95,6 +95,9 @@ impl From<crate::avif_container::Error> for ExportError {
     fn from(error: crate::avif_container::Error) -> Self {
         match error {
             crate::avif_container::Error::Cancelled => Self::Cancelled,
+            crate::avif_container::Error::Invalid(error) => {
+                crate::ExportFailure::avif(Text::ImageEditAvifContext, error).into()
+            }
             error => invalid(error),
         }
     }

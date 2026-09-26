@@ -84,7 +84,7 @@ pub enum ImageDecodeError {
     #[error("FFmpeg could not decode image: {0}")]
     Ffmpeg(#[from] DecodeError),
     #[error("could not decode AVIF: {0}")]
-    Avif(String),
+    Avif(#[source] crate::AvifFailure),
     #[error("could not decode PNG: {0}")]
     Png(#[from] png::DecodingError),
     #[error("could not encode APNG export frames: {0}")]

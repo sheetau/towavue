@@ -40,6 +40,7 @@ templates! {
     export_millisecond_delay(delay: u32, format: &str, alternative: &str) => ("{delay} ms frame delay cannot be represented exactly in {format}; use {alternative} output", "{delay} msのフレーム遅延を{format}で正確に表現できません。{alternative}出力を使用してください"),
     export_exact_delay(format: &str, alternative: &str) => ("frame delay cannot be represented exactly in {format}; use {alternative} output", "フレーム遅延を{format}で正確に表現できません。{alternative}出力を使用してください"),
     export_xmp_unsupported_field(field: &str) => ("'{field}' is not supported; XMP currently supports Title, Artist, Album, Composer, Genre, Date, Track, Comment and Copyright", "「{field}」には対応していません。XMPで現在使用できる項目はタイトル、アーティスト、アルバム、作曲者、ジャンル、日付、トラック番号、コメント、著作権です"),
+    avif_duplicate_box(kind: &str) => ("duplicate {kind} box", "{kind}ボックスが重複しています"),
     export_sequence_child(child: &str, parent: &str) => ("unexpected sequence child {child} in {parent}", "シーケンスの{parent}に予期しない子要素{child}があります"),
     recovery_original_retained(error: &str, directory: &str) => ("{error}; document original retained in {directory}", "{error}。元のドキュメントを{directory}に保持しています"),
     audio_tempo_failed(error: &str) => ("audio tempo processing failed: {error}", "音声の速度処理に失敗しました: {error}"),

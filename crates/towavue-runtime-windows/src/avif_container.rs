@@ -1,5 +1,7 @@
+use crate::AvifFailure;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
+use towavue_core::localization::Text;
 
 pub(crate) mod still;
 
@@ -14,7 +16,9 @@ pub(crate) struct CleanAperture {
 
 impl CleanAperture {
     pub(crate) fn from_clap(data: &[u8], size: (u32, u32)) -> Result<Self, Error> {
-        let data: &[u8; 32] = data.try_into().map_err(|_| invalid("invalid clap size"))?;
+        let data: &[u8; 32] = data
+            .try_into()
+            .map_err(|_| invalid(Text::AvifValidationInvalidClapSize))?;
         let values: [u32; 8] = std::array::from_fn(|i| {
             let i = i * 4;
             u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
@@ -22,21 +26,25 @@ impl CleanAperture {
         let axis = |canvas: u32, extent: u32, divisor: u32, offset: u32, offset_divisor: u32| {
             if divisor == 0 || offset_divisor == 0 || extent == 0 || !extent.is_multiple_of(divisor)
             {
-                return Err(invalid("invalid or fractional clean aperture extent"));
+                return Err(invalid(
+                    Text::AvifValidationInvalidOrFractionalCleanApertureExtent,
+                ));
             }
             let extent = extent / divisor;
             let denominator = 2 * i128::from(offset_divisor);
             let numerator = (i128::from(canvas) - i128::from(extent)) * i128::from(offset_divisor)
                 + 2 * i128::from(offset as i32);
             if numerator < 0 || numerator % denominator != 0 {
-                return Err(invalid("outside or fractional clean aperture origin"));
+                return Err(invalid(
+                    Text::AvifValidationOutsideOrFractionalCleanApertureOrigin,
+                ));
             }
-            let start =
-                u32::try_from(numerator / denominator).map_err(|_| invalid("aperture overflow"))?;
+            let start = u32::try_from(numerator / denominator)
+                .map_err(|_| invalid(Text::AvifValidationApertureOverflow))?;
             let end = canvas
                 .checked_sub(start)
                 .and_then(|value| value.checked_sub(extent))
-                .ok_or_else(|| invalid("clean aperture lies outside canvas"))?;
+                .ok_or_else(|| invalid(Text::AvifValidationCleanApertureLiesOutsideCanvas))?;
             Ok((start, end))
         };
         let (left, right) = axis(size.0, values[0], values[1], values[4], values[5])?;
@@ -52,7 +60,7 @@ impl CleanAperture {
     pub(crate) fn from_bytes(data: &[u8]) -> Result<Self, Error> {
         let data: &[u8; 16] = data
             .try_into()
-            .map_err(|_| invalid("invalid aperture side data"))?;
+            .map_err(|_| invalid(Text::AvifValidationInvalidApertureSideData))?;
         let [top, bottom, left, right] = [0, 4, 8, 12].map(|offset| {
             u32::from_le_bytes([
                 data[offset],
@@ -85,7 +93,9 @@ impl CleanAperture {
                 width,
                 height,
             }),
-            _ => Err(invalid("clean aperture lies outside the decoded canvas")),
+            _ => Err(invalid(
+                Text::AvifValidationCleanApertureLiesOutsideTheDecodedCanvas,
+            )),
         }
     }
 }
@@ -171,13 +181,13 @@ pub(crate) enum Error {
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
-    Invalid(String),
+    Invalid(#[source] AvifFailure),
     #[error("AVIF request was superseded")]
     Cancelled,
 }
 
-fn invalid(error: impl std::fmt::Display) -> Error {
-    Error::Invalid(error.to_string())
+fn invalid(reason: Text) -> Error {
+    Error::Invalid(AvifFailure::Message(reason))
 }
 fn check_current(current: &dyn Fn() -> bool) -> Result<(), Error> {
     if current() {
@@ -206,7 +216,9 @@ pub(crate) fn boxes(
     while position < end {
         check_current(current)?;
         if end - position < 8 || result.len() == 65536 {
-            return Err(invalid("invalid box boundary or too many boxes"));
+            return Err(invalid(
+                Text::AvifValidationInvalidBoxBoundaryOrTooManyBoxes,
+            ));
         }
         file.seek(SeekFrom::Start(position)).map_err(Error::Io)?;
         let mut header = [0; 8];
@@ -217,7 +229,7 @@ pub(crate) fn boxes(
             1 => {
                 let mut size = [0; 8];
                 if end - position < 16 {
-                    return Err(invalid("incomplete large box"));
+                    return Err(invalid(Text::AvifValidationIncompleteLargeBox));
                 }
                 file.read_exact(&mut size).map_err(Error::Io)?;
                 (u64::from_be_bytes(size), 16)
@@ -225,7 +237,7 @@ pub(crate) fn boxes(
             size => (u64::from(size), 8),
         };
         if size < header_size || size > end - position {
-            return Err(invalid("box exceeds parent bounds"));
+            return Err(invalid(Text::AvifValidationBoxExceedsParentBounds));
         }
         result.push(BoxRange {
             kind: header[4..].try_into().expect("box kind"),
@@ -242,17 +254,14 @@ pub(crate) fn one(boxes: &[BoxRange], kind: &[u8; 4]) -> Result<Option<BoxRange>
     let mut found = boxes.iter().filter(|item| &item.kind == kind);
     let result = found.next().copied();
     if found.next().is_some() {
-        return Err(invalid(format!(
-            "duplicate {} box",
-            String::from_utf8_lossy(kind)
-        )));
+        return Err(Error::Invalid(AvifFailure::DuplicateBox(*kind)));
     }
     Ok(result)
 }
 
 pub(crate) fn bytes(file: &mut fs::File, item: BoxRange, limit: usize) -> Result<Vec<u8>, Error> {
     if item.end - item.start > limit as u64 {
-        return Err(invalid("oversized control box"));
+        return Err(invalid(Text::AvifValidationOversizedControlBox));
     }
     file.seek(SeekFrom::Start(item.start)).map_err(Error::Io)?;
     let mut bytes = vec![0; (item.end - item.start) as usize];
@@ -265,14 +274,14 @@ pub(crate) fn u32_at(bytes: &[u8], offset: usize) -> Result<u32, Error> {
         .get(offset..offset + 4)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u32::from_be_bytes)
-        .ok_or_else(|| invalid("truncated control field"))
+        .ok_or_else(|| invalid(Text::AvifValidationTruncatedControlField))
 }
 pub(crate) fn u64_at(bytes: &[u8], offset: usize) -> Result<u64, Error> {
     bytes
         .get(offset..offset + 8)
         .and_then(|bytes| bytes.try_into().ok())
         .map(u64::from_be_bytes)
-        .ok_or_else(|| invalid("truncated control field"))
+        .ok_or_else(|| invalid(Text::AvifValidationTruncatedControlField))
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -292,23 +301,27 @@ pub(crate) fn track(
     current: &dyn Fn() -> bool,
 ) -> Result<Track, Error> {
     let children = boxes(file, item.start, item.end, current)?;
-    let header = one(&children, b"tkhd")?.ok_or_else(|| invalid("track has no tkhd"))?;
+    let header =
+        one(&children, b"tkhd")?.ok_or_else(|| invalid(Text::AvifValidationTrackHasNoTkhd))?;
     let header = bytes(file, header, 128)?;
     let (id, duration) = match header.first() {
         Some(0) => (u32_at(&header, 12)?, u64::from(u32_at(&header, 20)?)),
         Some(1) => (u32_at(&header, 20)?, u64_at(&header, 28)?),
-        _ => return Err(invalid("unsupported tkhd version")),
+        _ => return Err(invalid(Text::AvifValidationUnsupportedTkhdVersion)),
     };
     if id == 0 {
-        return Err(invalid("invalid track ID"));
+        return Err(invalid(Text::AvifValidationInvalidTrackId));
     }
     let mut loops = None;
     if let Some(edts) = one(&children, b"edts")? {
         let edits = boxes(file, edts.start, edts.end, current)?;
-        let edit = one(&edits, b"elst")?.ok_or_else(|| invalid("edts has no elst"))?;
+        let edit =
+            one(&edits, b"elst")?.ok_or_else(|| invalid(Text::AvifValidationEdtsHasNoElst))?;
         let edit = bytes(file, edit, 64)?;
         if u32_at(&edit, 4)? != 1 {
-            return Err(invalid("multiple edit-list segments are not supported"));
+            return Err(invalid(
+                Text::AvifValidationMultipleEditListSegmentsAreNotSupported,
+            ));
         }
         let (segment, time, rate) = match edit.first() {
             Some(0) if edit.len() == 20 => (
@@ -319,16 +332,18 @@ pub(crate) fn track(
             Some(1) if edit.len() == 28 => {
                 (u64_at(&edit, 8)?, u64_at(&edit, 16)?, u32_at(&edit, 24)?)
             }
-            _ => return Err(invalid("invalid elst version or length")),
+            _ => return Err(invalid(Text::AvifValidationInvalidElstVersionOrLength)),
         };
         if segment == 0 || time != 0 || rate != 65536 || edit[1..3] != [0, 0] || edit[3] & !1 != 0 {
-            return Err(invalid("unsupported edit-list time, rate or flags"));
+            return Err(invalid(
+                Text::AvifValidationUnsupportedEditListTimeRateOrFlags,
+            ));
         }
         loops = Some(if edit[3] & 1 == 0 {
             1
         } else {
             if duration == 0 {
-                return Err(invalid("repeating track has zero duration"));
+                return Err(invalid(Text::AvifValidationRepeatingTrackHasZeroDuration));
             }
             let count = duration.div_ceil(segment);
             if count > i32::MAX as u64 {
@@ -351,42 +366,48 @@ pub(crate) fn track(
             }
         }
     }
-    let media = one(&children, b"mdia")?.ok_or_else(|| invalid("track has no mdia"))?;
+    let media =
+        one(&children, b"mdia")?.ok_or_else(|| invalid(Text::AvifValidationTrackHasNoMdia))?;
     let media = boxes(file, media.start, media.end, current)?;
     if alpha_for.is_some() {
         // An auxiliary reference alone does not establish that the samples are alpha.
         let mut parent = media.clone();
         for kind in [b"minf", b"stbl"] {
-            let item = one(&parent, kind)?.ok_or_else(|| invalid("missing alpha sample table"))?;
+            let item = one(&parent, kind)?
+                .ok_or_else(|| invalid(Text::AvifValidationMissingAlphaSampleTable))?;
             parent = boxes(file, item.start, item.end, current)?;
         }
-        let descriptions = one(&parent, b"stsd")?.ok_or_else(|| invalid("missing alpha stsd"))?;
+        let descriptions =
+            one(&parent, b"stsd")?.ok_or_else(|| invalid(Text::AvifValidationMissingAlphaStsd))?;
         if descriptions.end - descriptions.start < 8 {
-            return Err(invalid("truncated sample descriptions"));
+            return Err(invalid(Text::AvifValidationTruncatedSampleDescriptions));
         }
         let descriptions = boxes(file, descriptions.start + 8, descriptions.end, current)?;
         if descriptions.len() != 1 || descriptions[0].kind != *b"av01" {
-            return Err(invalid("unsupported alpha sample description"));
+            return Err(invalid(
+                Text::AvifValidationUnsupportedAlphaSampleDescription,
+            ));
         }
         let description = descriptions[0];
         if description.end - description.start < 78 {
-            return Err(invalid("truncated visual sample entry"));
+            return Err(invalid(Text::AvifValidationTruncatedVisualSampleEntry));
         }
         let properties = boxes(file, description.start + 78, description.end, current)?;
-        let alpha = one(&properties, b"auxi")?.ok_or_else(|| invalid("missing alpha type"))?;
+        let alpha = one(&properties, b"auxi")?
+            .ok_or_else(|| invalid(Text::AvifValidationMissingAlphaType))?;
         if bytes(file, alpha, 48)? != b"\0\0\0\0urn:mpeg:mpegB:cicp:systems:auxiliary:alpha\0" {
-            return Err(invalid("unsupported auxiliary type"));
+            return Err(invalid(Text::AvifValidationUnsupportedAuxiliaryType));
         }
     }
-    let media = one(&media, b"mdhd")?.ok_or_else(|| invalid("track has no mdhd"))?;
+    let media = one(&media, b"mdhd")?.ok_or_else(|| invalid(Text::AvifValidationTrackHasNoMdhd))?;
     let media = bytes(file, media, 64)?;
     let (timescale, media_duration) = match media.first() {
         Some(0) => (u32_at(&media, 12)?, u64::from(u32_at(&media, 16)?)),
         Some(1) => (u32_at(&media, 20)?, u64_at(&media, 24)?),
-        _ => return Err(invalid("unsupported mdhd version")),
+        _ => return Err(invalid(Text::AvifValidationUnsupportedMdhdVersion)),
     };
     if timescale == 0 || timescale > i32::MAX as u32 || media_duration == 0 {
-        return Err(invalid("invalid media time base or duration"));
+        return Err(invalid(Text::AvifValidationInvalidMediaTimeBaseOrDuration));
     }
     Ok(Track {
         id,

@@ -977,7 +977,60 @@ impl FrameRenderer {
             surface.refresh_clip(width, height)?;
         }
         // The swap chain and device stay owned for the duration of presentation.
-        unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()? };
+        #[cfg(not(feature = "presentation-verification"))]
+        let sync_interval = 1;
+        #[cfg(feature = "presentation-verification")]
+        let sync_interval = {
+            static INTERVAL: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+            *INTERVAL.get_or_init(
+                || match std::env::var("TOWAVUE_PRESENT_INTERVAL").as_deref() {
+                    Ok("0") => 0,
+                    Ok("1") | Err(std::env::VarError::NotPresent) => 1,
+                    _ => panic!("TOWAVUE_PRESENT_INTERVAL must be 0 or 1"),
+                },
+            )
+        };
+        #[cfg(feature = "presentation-verification")]
+        let probe_nonblocking = {
+            static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *ENABLED.get_or_init(|| std::env::var_os("TOWAVUE_PRESENT_NONBLOCKING_PROBE").is_some())
+        };
+        #[cfg(feature = "presentation-verification")]
+        let flags = if probe_nonblocking {
+            windows::Win32::Graphics::Dxgi::DXGI_PRESENT_DO_NOT_WAIT
+        } else {
+            DXGI_PRESENT(0)
+        };
+        #[cfg(not(feature = "presentation-verification"))]
+        let flags = DXGI_PRESENT(0);
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::SwapChainPresentStarted,
+            0,
+            None,
+            [u64::from(sync_interval), 0, 0],
+        );
+        let result = unsafe { self.swap_chain.Present(sync_interval, flags) };
+        #[cfg(feature = "presentation-verification")]
+        let result = if probe_nonblocking {
+            crate::record_burst(
+                crate::BurstEvent::NonblockingPresentReturned,
+                0,
+                None,
+                [u64::from(result.0 as u32), 0, 0],
+            );
+            // Diagnostic only: finish every refused submission normally, so the
+            // app never reports an unsubmitted frame as successfully presented.
+            if result == windows::Win32::Graphics::Dxgi::DXGI_ERROR_WAS_STILL_DRAWING {
+                // SAFETY: the same retained swap chain, device and UI-thread owner.
+                unsafe { self.swap_chain.Present(sync_interval, DXGI_PRESENT(0)) }
+            } else {
+                result
+            }
+        } else {
+            result
+        };
+        result.ok()?;
         Ok(())
     }
 

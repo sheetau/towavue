@@ -585,6 +585,9 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         "all command/pointer paused/playing samples completed"
     );
     drop(trial);
+    if towavue_runtime_windows::burst_enabled() {
+        towavue_runtime_windows::write_burst_trace(&root.join("burst.csv"))?;
+    }
     assert_eq!(stamp(), before);
     eprintln!("APP_SEEK_CHECKS samples=12 fresh_frames=true source_stamps=true complete=true");
     Ok(())

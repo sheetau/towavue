@@ -3902,6 +3902,13 @@ where
                 return;
             }
         };
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::MediaRendered,
+                self.image_generation,
+            );
+        }
         let mut platform_output = match self
             .renderer
             .as_mut()
@@ -4107,6 +4114,13 @@ where
             }
         }
         self.finish_image_sequence_frame(image_presentation);
+        #[cfg(feature = "presentation-verification")]
+        if trace_frame {
+            self.trace_burst(
+                towavue_runtime_windows::BurstEvent::FrameActionsFinished,
+                self.image_generation,
+            );
+        }
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {

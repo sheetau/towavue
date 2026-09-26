@@ -44,6 +44,11 @@ pub enum BurstEvent {
     FolderCompleted = 31,
     FolderApplied = 32,
     FolderApplyPhase = 33,
+    MediaRendered = 34,
+    FrameActionsFinished = 35,
+    ProbeGestureFrame = 36,
+    SwapChainPresentStarted = 37,
+    NonblockingPresentReturned = 38,
 }
 
 /// Eight u64 words: committed sequence, QPC tick, kind, generation, source ID, a/b/c.
@@ -66,6 +71,18 @@ impl BurstRecord {
             word.store(value, Ordering::Relaxed);
         }
         self.words[0].store(sequence, Ordering::Release);
+    }
+
+    fn snapshot(&self, sequence: u64) -> Option<[u64; 8]> {
+        if self.words[0].load(Ordering::Acquire) != sequence {
+            return None;
+        }
+        let words = self
+            .words
+            .each_ref()
+            .map(|word| word.load(Ordering::Relaxed));
+        (words[0] == sequence && words[1] != 0 && self.words[0].load(Ordering::Acquire) == sequence)
+            .then_some(words)
     }
 }
 
@@ -131,6 +148,48 @@ pub fn record_burst(event: BurstEvent, generation: u64, path: Option<&Path>, pay
     );
 }
 
+/// Persist a complete scalar-only trace after the diagnostic owner stops its workers.
+/// Refuse a dropped/unpublished trace or an existing destination; never reset records.
+pub fn write_burst_trace(path: &Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind, Write};
+    let count = TOWAVUE_BURST_NEXT.load(Ordering::Acquire);
+    if count > BURST_CAPACITY as u64 {
+        return Err(Error::new(ErrorKind::InvalidData, "burst trace overflow"));
+    }
+    let records: Vec<_> = TOWAVUE_BURST_RECORDS[..count as usize]
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            record.snapshot(index as u64 + 1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    "unpublished or untimed burst record",
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let mut frequency = 0;
+    // SAFETY: the API initializes one local scalar; no native reference escapes.
+    unsafe { windows::Win32::System::Performance::QueryPerformanceFrequency(&mut frequency) }
+        .map_err(Error::other)?;
+    if frequency <= 0 {
+        return Err(Error::new(ErrorKind::InvalidData, "invalid QPC frequency"));
+    }
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    let mut output = std::io::BufWriter::new(file);
+    writeln!(output, "qpc_frequency,{frequency}")?;
+    for [sequence, tick, kind, generation, source, a, b, c] in records {
+        writeln!(
+            output,
+            "{sequence},{tick},{kind},{generation},{source},{a},{b},{c}"
+        )?;
+    }
+    output.flush()
+}
+
 #[test]
 fn burst_record_layout_publication_and_private_source_identity_are_explicit() {
     assert_eq!(std::mem::size_of::<BurstRecord>(), 64);
@@ -141,7 +200,13 @@ fn burst_record_layout_publication_and_private_source_identity_are_explicit() {
     );
     let record = BurstRecord::new();
     assert_eq!(record.words[0].load(Ordering::Acquire), 0);
+    assert_eq!(record.snapshot(1), None);
     record.publish(7, [1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(record.snapshot(6), None);
+    assert_eq!(record.snapshot(7), Some([7, 1, 2, 3, 4, 5, 6, 7]));
+    let untimed = BurstRecord::new();
+    untimed.publish(1, [0; 7]);
+    assert_eq!(untimed.snapshot(1), None);
     assert_eq!(record.words[0].load(Ordering::Acquire), 7);
     assert_eq!(
         record

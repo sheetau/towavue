@@ -138,6 +138,16 @@ impl Probe {
             });
         }
         let gesture = self.active.as_mut().expect("gesture");
+        towavue_runtime_windows::record_burst(
+            towavue_runtime_windows::BurstEvent::ProbeGestureFrame,
+            self.case as u64,
+            app.path.as_deref(),
+            [
+                gesture.frame as u64,
+                u64::from(playing),
+                app.verification_waveform_shape().1 as u64,
+            ],
+        );
         let input = app.ui_state.as_mut().expect("UI state").egui_input_mut();
         input.focused = true;
         match gesture.frame {

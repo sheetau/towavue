@@ -10,7 +10,9 @@ pub use avif_failure::AvifFailure;
 #[cfg(feature = "presentation-verification")]
 mod burst_verification;
 #[cfg(feature = "presentation-verification")]
-pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_burst};
+pub use burst_verification::{
+    BurstEvent, burst_enabled, burst_source_id, record_burst, write_burst_trace,
+};
 mod cancellation;
 mod caption;
 mod native_ui_error;

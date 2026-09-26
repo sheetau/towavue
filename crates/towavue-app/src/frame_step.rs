@@ -80,7 +80,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .expect("audio session")
             .set_paused(true)
         {
-            self.fail(error.to_string());
+            self.fail_with_message(error.to_string(), error.message(self.language()));
             return;
         }
         if let Some(clock) = &mut self.clock {
@@ -132,7 +132,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         }
         if let Err(error) = session.set_paused(true) {
-            self.fail(error.to_string());
+            self.fail_with_message(error.to_string(), error.message(self.language()));
             return;
         }
         if let Some(clock) = &mut self.clock {

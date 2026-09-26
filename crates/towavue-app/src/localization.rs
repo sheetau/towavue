@@ -14,6 +14,8 @@ pub(crate) struct Settings {
 #[cfg(test)]
 mod notifications_tests;
 #[cfg(test)]
+mod playback_tests;
+#[cfg(test)]
 mod surfaces_tests;
 #[cfg(test)]
 pub(crate) mod test_ui;

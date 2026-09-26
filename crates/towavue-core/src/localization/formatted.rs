@@ -36,6 +36,13 @@ macro_rules! templates {
 }
 
 templates! {
+    audio_tempo_failed(error: &str) => ("audio tempo processing failed: {error}", "音声の速度処理に失敗しました: {error}"),
+    audio_unsupported_format(rate: u32, channels: u16) => ("unsupported audio format: {rate} Hz, {channels} channels", "未対応の音声形式です: {rate} Hz、{channels}チャンネル"),
+    audio_wasapi_failed(error: &str) => ("WASAPI output failed: {error}", "WASAPI音声出力に失敗しました: {error}"),
+    playback_probe_failed(error: &str) => ("media probing failed: {error}", "メディアの情報を取得できませんでした: {error}"),
+    playback_audio_failed(error: &str) => ("audio output failed: {error}", "音声出力に失敗しました: {error}"),
+    playback_thread_failed(error: &str) => ("the decode thread could not start: {error}", "デコード処理を開始できませんでした: {error}"),
+    background_pipeline_recovery_failed(error: &str) => ("Background pipeline recovery failed: {error}", "バックグラウンドの再生処理を復旧できません: {error}"),
     render_d3d11(error: &str) => ("D3D11 failed: {error}", "D3D11の処理に失敗しました: {error}"),
     render_device_removed(error: &str) => ("the D3D11 device was removed: {error}", "D3D11デバイスを利用できなくなりました: {error}"),
     graphics_device_recovery_failed(error: &str) => ("D3D11 device recovery failed: {error}", "D3D11デバイスを復旧できません: {error}"),

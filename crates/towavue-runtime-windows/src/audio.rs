@@ -36,7 +36,7 @@ mod startup_tests;
 pub enum AudioOutputEvent {
     Drained,
     EndpointChanged,
-    Failed(String),
+    Failed(crate::PlaybackFailure),
 }
 
 /// A failure while starting or controlling WASAPI output.
@@ -52,6 +52,8 @@ pub enum AudioOutputError {
     Closed,
     #[error("the audio endpoint changed or became invalid")]
     EndpointChanged,
+    #[error("WASAPI output failed: IAudioClock returned a zero frequency")]
+    ZeroClockFrequency,
 }
 
 enum AudioMessage {
@@ -202,7 +204,7 @@ impl AudioOutput {
                     .map_err(|error| AudioOutputError::Wasapi(error.to_string()));
                 if let Err(error) = initialization {
                     let _ = ready_tx.send(Err(error.clone()));
-                    let _ = event_tx.send(AudioOutputEvent::Failed(error.to_string()));
+                    let _ = event_tx.send(AudioOutputEvent::Failed(error.into()));
                     notify();
                     return;
                 }
@@ -234,7 +236,7 @@ impl AudioOutput {
                         let _ = event_tx.send(AudioOutputEvent::EndpointChanged);
                     }
                     Err(error) => {
-                        let _ = event_tx.send(AudioOutputEvent::Failed(error.to_string()));
+                        let _ = event_tx.send(AudioOutputEvent::Failed(error.into()));
                     }
                 }
                 notify();
@@ -462,9 +464,7 @@ fn render_audio_loop(
     let mut wall_started_at: Option<Instant> = None;
     let clock_frequency = clock.get_frequency().map_err(wasapi_error)?;
     if clock_frequency == 0 {
-        return Err(AudioOutputError::Wasapi(
-            "IAudioClock returned a zero frequency".to_owned(),
-        ));
+        return Err(AudioOutputError::ZeroClockFrequency);
     }
     let (clock_origin, _) = clock.get_position().map_err(wasapi_error)?;
 

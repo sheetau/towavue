@@ -44,7 +44,9 @@ mod language_preferences;
 mod orientation;
 mod pinned_cursor;
 mod playback;
+mod playback_failure;
 pub use language_preferences::LanguagePreferences;
+pub use playback_failure::PlaybackFailure;
 mod playback_preferences;
 pub use playback_preferences::PlaybackVolumePreferences;
 #[cfg(feature = "presentation-verification")]

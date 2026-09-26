@@ -492,7 +492,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 true
             }
             Err(error) => {
-                self.fail(error.to_string());
+                self.fail_with_message(error.to_string(), error.message(self.language()));
                 false
             }
         }

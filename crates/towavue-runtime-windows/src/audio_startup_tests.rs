@@ -42,11 +42,24 @@ fn queued_startup_returns_before_setup_and_reports_its_failure_once() {
     events
         .recv_timeout(Duration::from_secs(5))
         .expect("failure wakes owner");
+    let event = output.try_event();
     assert_eq!(
-        output.try_event(),
+        event,
         Some(AudioOutputEvent::Failed(
             "WASAPI output failed: injected startup failure".into()
         ))
+    );
+    let Some(AudioOutputEvent::Failed(error)) = event else {
+        panic!("startup failure");
+    };
+    assert_eq!(
+        error.message(towavue_core::localization::Language::Japanese),
+        "WASAPI音声出力に失敗しました: injected startup failure"
+    );
+    assert!(
+        std::error::Error::source(&error)
+            .expect("startup cause")
+            .is::<AudioOutputError>()
     );
     drop(output);
     assert!(events.try_recv().is_err(), "one terminal notification");
@@ -119,7 +132,7 @@ fn invalid_endpoint_during_setup_fails_instead_of_requesting_another_restart() {
     assert_eq!(
         output.try_event(),
         Some(AudioOutputEvent::Failed(
-            AudioOutputError::EndpointChanged.to_string()
+            AudioOutputError::EndpointChanged.into()
         ))
     );
 }

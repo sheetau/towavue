@@ -372,7 +372,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         self.decode_finished = false;
                         self.pending_time = None;
                     }
-                    Err(error) => self.fail(error.to_string()),
+                    Err(error) => {
+                        self.fail_with_message(error.to_string(), error.message(self.language()))
+                    }
                 }
             }
             self.clock = Some(if self.state == PlaybackState::Playing {
@@ -397,7 +399,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     if let Err(error) =
                         session.resume_after_file_operation_input(inputs[id].clone(), position)
                     {
-                        saved.fail(error.to_string());
+                        saved.fail(error.message(saved.language));
                     } else {
                         saved.audio_drained = !session.has_audio();
                         saved.pending_time = None;

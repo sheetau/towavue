@@ -210,7 +210,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 true
             }
             Err(error) => {
-                saved.fail(error.to_string());
+                saved.fail(error.message(saved.language));
                 self.request_redraw();
                 false
             }

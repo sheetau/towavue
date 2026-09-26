@@ -800,14 +800,24 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_control
                 .as_ref()
                 .expect("second session")
                 .generation();
+            app.retained_playback
+                .get_mut(&second)
+                .expect("background tab")
+                .language = localization::Language::Japanese;
             app.handle_app_event(AppEvent::Playback(
                 second_instance,
-                PlaybackEvent::Failed(background_generation, "owned background fault".into()),
+                PlaybackEvent::Failed(
+                    background_generation,
+                    towavue_runtime_windows::DecodeError::NoMediaStream.into(),
+                ),
             ));
             assert_eq!(app.retained_playback[&second].state, PlaybackState::Faulted);
             assert_eq!(
                 app.retained_playback[&second].error.as_deref(),
-                Some("owned background fault")
+                Some(
+                    localization::Text::DecodeNoStream
+                        .in_language(localization::Language::Japanese)
+                )
             );
             assert!(app.playback_error.is_none());
             assert_eq!(app.tabs.active().expect("image remains active").id, image);

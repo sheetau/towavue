@@ -148,7 +148,7 @@ impl RetainedPlaybackTab {
                 self.pending_time = None;
                 self.metrics_recorded = false;
             }
-            Err(error) => self.fail(error.to_string()),
+            Err(error) => self.fail(error.message(self.language)),
         }
     }
 
@@ -203,7 +203,7 @@ impl RetainedPlaybackTab {
                 )
             };
             if let Err(error) = result.and_then(|_| session.set_paused(false).map_err(Into::into)) {
-                self.fail(error.to_string());
+                self.fail(error.message(self.language));
                 return;
             }
             self.audio_drained = !session.has_audio();
@@ -226,7 +226,7 @@ impl RetainedPlaybackTab {
         }
         let paused = next == PlaybackState::Paused;
         if let Err(error) = self.session.as_mut().expect("session").set_paused(paused) {
-            self.fail(error.to_string());
+            self.fail(error.message(self.language));
             return;
         }
         self.anchor(position, paused);
@@ -305,7 +305,7 @@ impl RetainedPlaybackTab {
                 // Hidden video does not produce a first-frame clock anchor.
                 self.anchor(target, self.state != PlaybackState::Playing);
             }
-            Err(error) => self.fail(error.to_string()),
+            Err(error) => self.fail(error.message(self.language)),
         }
     }
 
@@ -321,7 +321,7 @@ impl RetainedPlaybackTab {
                     self.pending_time = None;
                     self.decode_finished = false;
                 }
-                Err(error) => self.fail(error.to_string()),
+                Err(error) => self.fail(error.message(self.language)),
             }
         }
     }
@@ -354,10 +354,10 @@ impl RetainedPlaybackTab {
                         self.decode_finished = false;
                         self.audio_drained = !self.session.as_ref().expect("session").has_audio();
                     }
-                    Err(error) => self.fail(error.to_string()),
+                    Err(error) => self.fail(error.message(self.language)),
                 }
             }
-            Some(AudioOutputEvent::Failed(error)) => self.fail(error),
+            Some(AudioOutputEvent::Failed(error)) => self.fail(error.message(self.language)),
             None => {}
         }
         self.suspend_video_if_bounded();
@@ -411,7 +411,7 @@ impl RetainedPlaybackTab {
                 ));
             }
             if let Err(error) = self.session.as_mut().expect("session").set_paused(true) {
-                self.fail(error.to_string());
+                self.fail(error.message(self.language));
             }
         }
     }
@@ -443,7 +443,12 @@ impl RetainedPlaybackTab {
         self.graphics_epoch = epoch;
         if let Some(session) = &mut self.session {
             if let Err(error) = session.replace_graphics_device(device, position) {
-                self.fail(format!("Background pipeline recovery failed: {error}"));
+                self.fail(
+                    towavue_core::localization::formatted::background_pipeline_recovery_failed(
+                        self.language,
+                        &error.message(self.language),
+                    ),
+                );
                 return;
             }
             self.audio_drained = !session.has_audio();

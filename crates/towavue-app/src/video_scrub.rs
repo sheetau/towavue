@@ -169,7 +169,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return false;
         };
         if let Err(error) = session.set_paused(paused) {
-            self.fail(error.to_string());
+            self.fail_with_message(error.to_string(), error.message(self.language()));
             return false;
         }
         if let Some(clock) = &mut self.clock {

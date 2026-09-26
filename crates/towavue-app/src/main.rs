@@ -2140,7 +2140,7 @@ where
             if let Some(session) = &mut saved.session
                 && let Err(error) = session.set_video_visible(true, position)
             {
-                saved.fail(error.to_string());
+                saved.fail(error.message(saved.language));
             }
             saved.pending_time = None;
             saved.decode_finished = false;
@@ -2417,7 +2417,7 @@ where
                 self.session = Some(session);
                 self.state = PlaybackState::Playing;
             }
-            Err(error) => self.fail(error.to_string()),
+            Err(error) => self.fail_with_message(error.to_string(), error.message(self.language())),
         }
         if self.state == PlaybackState::Playing
             && let Some(resume) = resume
@@ -3641,7 +3641,7 @@ where
                 return;
             }
             PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
-                saved.fail(error)
+                saved.fail(error.message(saved.language))
             }
             _ => saved.poll(),
         }
@@ -3681,7 +3681,7 @@ where
                 self.recover_graphics_device(self.current_position());
             }
             PlaybackEvent::Failed(_, error) | PlaybackEvent::VideoFailed(_, error) => {
-                self.fail(error)
+                self.fail_with_message(error.to_string(), error.message(self.language()))
             }
         }
         self.request_redraw();
@@ -10548,7 +10548,7 @@ where
             return;
         };
         if let Err(error) = session.set_paused(paused) {
-            self.fail(error.to_string());
+            self.fail_with_message(error.to_string(), error.message(self.language()));
             return;
         }
         if let Some(clock) = self.clock.as_mut() {
@@ -10743,7 +10743,7 @@ where
                     .then_some(target)
             }
             Err(error) => {
-                self.fail(error.to_string());
+                self.fail_with_message(error.to_string(), error.message(self.language()));
                 None
             }
         }
@@ -11070,7 +11070,7 @@ where
             self.state = PlaybackState::Paused;
         }
         if let Err(error) = session.set_paused(self.state != PlaybackState::Playing) {
-            self.fail(error.to_string());
+            self.fail_with_message(error.to_string(), error.message(self.language()));
             return;
         }
         match session.replace_graphics_device(graphics_device, position) {
@@ -11090,7 +11090,7 @@ where
                 ),
                 towavue_core::localization::formatted::graphics_pipeline_recovery_failed(
                     self.language(),
-                    &error.to_string(),
+                    &error.message(self.language()),
                 ),
             ),
         }
@@ -11131,7 +11131,9 @@ where
                 self.seek_to(self.current_position());
                 self.pending_seek_started = None;
             }
-            AudioOutputEvent::Failed(error) => self.fail(error),
+            AudioOutputEvent::Failed(error) => {
+                self.fail_with_message(error.to_string(), error.message(self.language()))
+            }
         }
     }
 
@@ -11254,6 +11256,7 @@ where
         );
     }
 
+    #[cfg(test)]
     fn fail(&mut self, error: String) {
         self.fail_with_message(error.clone(), error);
     }
@@ -27795,6 +27798,33 @@ mod tests {
                     app.decode_finished,
                     "current session notifications are accepted"
                 );
+                app.language_settings.display = localization::Language::Japanese;
+                app.language_settings.next = localization::Language::English;
+                let history = app.edits.clone();
+                app.handle_app_event(AppEvent::Playback(
+                    old_media,
+                    PlaybackEvent::Failed(
+                        old_playback,
+                        towavue_runtime_windows::DecodeError::NoMediaStream.into(),
+                    ),
+                ));
+                assert!(app.playback_error.is_none(), "stale typed failure");
+                app.handle_app_event(AppEvent::Playback(
+                    app.media_generation,
+                    PlaybackEvent::VideoFailed(
+                        app.generation,
+                        towavue_runtime_windows::DecodeError::NoMediaStream.into(),
+                    ),
+                ));
+                assert_eq!(app.state, PlaybackState::Faulted);
+                assert_eq!(
+                    app.playback_error.as_deref(),
+                    Some(
+                        localization::Text::DecodeNoStream
+                            .in_language(localization::Language::Japanese)
+                    )
+                );
+                assert_eq!(app.edits, history);
                 eprintln!("reopened playback: live session identity checks passed");
                 event_loop.exit();
             }

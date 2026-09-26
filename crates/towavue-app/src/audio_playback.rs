@@ -492,7 +492,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     saved.session = Some(session);
                     saved.state = PlaybackState::Playing;
                 }
-                Err(error) => saved.fail(error.to_string()),
+                Err(error) => saved.fail(error.message(saved.language)),
             }
             self.load_duration_for(path.clone(), instance);
         }

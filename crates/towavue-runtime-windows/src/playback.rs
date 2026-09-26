@@ -51,8 +51,8 @@ pub enum PlaybackEvent {
     DecodePathSelected(PlaybackGeneration, DecodePath),
     DecodeFinished(PlaybackGeneration),
     DeviceRemoved(PlaybackGeneration, String),
-    VideoFailed(PlaybackGeneration, String),
-    Failed(PlaybackGeneration, String),
+    VideoFailed(PlaybackGeneration, crate::PlaybackFailure),
+    Failed(PlaybackGeneration, crate::PlaybackFailure),
 }
 
 impl PlaybackEvent {
@@ -623,7 +623,7 @@ impl PlaybackSession {
                             notify(PlaybackEvent::DecodeFinished(generation));
                         }
                         Ok(()) | Err(decode::DecodeError::ConsumerClosed) => {}
-                        Err(error) => notify(PlaybackEvent::Failed(generation, error.to_string())),
+                        Err(error) => notify(PlaybackEvent::Failed(generation, error.into())),
                     }
                 }) {
                 Ok(thread) => self.audio_thread = Some(thread),
@@ -717,10 +717,7 @@ impl PlaybackSession {
                         Some(reason) => {
                             notify(PlaybackEvent::DeviceRemoved(video_generation, reason))
                         }
-                        None => notify(PlaybackEvent::VideoFailed(
-                            video_generation,
-                            error.to_string(),
-                        )),
+                        None => notify(PlaybackEvent::VideoFailed(video_generation, error.into())),
                     },
                 }
                 input
@@ -1825,7 +1822,7 @@ mod tests {
             generation
         );
         assert_eq!(
-            PlaybackEvent::Failed(generation, "failed".to_owned()).generation(),
+            PlaybackEvent::Failed(generation, "failed".into()).generation(),
             generation
         );
     }

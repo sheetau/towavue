@@ -18,6 +18,10 @@ macro_rules! messages {
 }
 
 messages! {
+    AudioOutputClosed => ("the audio output thread stopped", "音声出力の処理が停止しました"),
+    AudioEndpointChanged => ("the audio endpoint changed or became invalid", "音声の出力先が変更されたか、利用できなくなりました"),
+    AudioZeroClockFrequency => ("IAudioClock returned a zero frequency", "IAudioClockが周波数0を返しました"),
+    PlaybackInvalidSelection => ("the playback selection exceeds the edited timeline", "再生範囲が編集後のタイムラインを超えています"),
     TransferCloseDialog => ("close the dialog before moving a tab", "タブを移動する前にダイアログを閉じてください"),
     TransferWaitGraphics => ("wait for the window's graphics device to become available", "ウィンドウの描画準備が整うまでお待ちください"),
     TransferTabClosed => ("the tab is no longer open", "対象のタブはすでに閉じられています"),

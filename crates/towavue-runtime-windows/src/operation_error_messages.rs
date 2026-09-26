@@ -1,6 +1,42 @@
 //! Localized operation errors; Display remains the stable English diagnostic.
-use crate::{DecodeError, ExportError, FileOperationError, ImageDecodeError, SourceSaveError};
+use crate::{
+    AudioOutputError, DecodeError, ExportError, FileOperationError, ImageDecodeError,
+    PlaybackError, SourceSaveError,
+};
 use towavue_core::localization::{Language, Text, formatted};
+
+impl AudioOutputError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::Tempo(error) => formatted::audio_tempo_failed(language, &error.to_string()),
+            Self::UnsupportedFormat(rate, channels) => {
+                formatted::audio_unsupported_format(language, *rate, *channels)
+            }
+            Self::Wasapi(error) => formatted::audio_wasapi_failed(language, error),
+            Self::Closed => Text::AudioOutputClosed.in_language(language).into(),
+            Self::EndpointChanged => Text::AudioEndpointChanged.in_language(language).into(),
+            Self::ZeroClockFrequency => formatted::audio_wasapi_failed(
+                language,
+                Text::AudioZeroClockFrequency.in_language(language),
+            ),
+        }
+    }
+}
+
+impl PlaybackError {
+    pub fn message(&self, language: Language) -> String {
+        match self {
+            Self::InvalidSelection => Text::PlaybackInvalidSelection.in_language(language).into(),
+            Self::Probe(error) => {
+                formatted::playback_probe_failed(language, &error.message(language))
+            }
+            Self::Audio(error) => {
+                formatted::playback_audio_failed(language, &error.message(language))
+            }
+            Self::Thread(error) => formatted::playback_thread_failed(language, &error.to_string()),
+        }
+    }
+}
 
 impl DecodeError {
     pub fn message(&self, language: Language) -> String {

@@ -5,7 +5,8 @@ use std::thread::{self, JoinHandle};
 
 use towavue_core::UnitPoint;
 
-use crate::DecodedImage;
+use crate::{ClipboardImageError, DecodedImage};
+use towavue_core::localization::Text;
 
 pub struct ImageCopyRequest {
     pub image: Arc<DecodedImage>,
@@ -22,7 +23,7 @@ pub struct ImageCopyJob {
 impl ImageCopyJob {
     pub fn start(
         request: ImageCopyRequest,
-        notify: impl FnOnce(Result<(u32, u32), String>) + Send + 'static,
+        notify: impl FnOnce(Result<(u32, u32), ClipboardImageError>) + Send + 'static,
     ) -> std::io::Result<Self> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel = Arc::clone(&cancelled);
@@ -31,7 +32,9 @@ impl ImageCopyJob {
             .spawn(move || {
                 let result = pixels(&request, &cancel).and_then(|rgba| {
                     if cancel.load(Ordering::Relaxed) {
-                        return Err("Image copy cancelled".into());
+                        return Err(ClipboardImageError::Message(
+                            Text::ClipboardImageCopyCancelled,
+                        ));
                     }
                     arboard::Clipboard::new()
                         .and_then(|mut clipboard| {
@@ -41,7 +44,7 @@ impl ImageCopyJob {
                                 bytes: Cow::Owned(rgba),
                             })
                         })
-                        .map_err(|error| error.to_string())?;
+                        .map_err(|error| ClipboardImageError::Diagnostic(error.to_string()))?;
                     Ok(request.size)
                 });
                 notify(result);
@@ -62,17 +65,25 @@ impl Drop for ImageCopyJob {
     }
 }
 
-fn pixels(request: &ImageCopyRequest, cancelled: &AtomicBool) -> Result<Vec<u8>, String> {
-    let frame = request
-        .image
-        .frames
-        .get(request.frame_index)
-        .ok_or("Image frame is unavailable")?;
+fn pixels(
+    request: &ImageCopyRequest,
+    cancelled: &AtomicBool,
+) -> Result<Vec<u8>, ClipboardImageError> {
+    let frame =
+        request
+            .image
+            .frames
+            .get(request.frame_index)
+            .ok_or(ClipboardImageError::Message(
+                Text::ClipboardImageFrameUnavailable,
+            ))?;
     let (width, height) = request.size;
     let bytes = (u64::from(width) * u64::from(height))
         .checked_mul(4)
         .filter(|bytes| *bytes <= 512 * 1024 * 1024)
-        .ok_or("Image copy exceeds its memory limit")?;
+        .ok_or(ClipboardImageError::Message(
+            Text::ClipboardImageCopyMemoryLimit,
+        ))?;
     if width == 0
         || height == 0
         || frame.width == 0
@@ -86,17 +97,23 @@ fn pixels(request: &ImageCopyRequest, cancelled: &AtomicBool) -> Result<Vec<u8>,
                 || !(0.0..=1.0).contains(&p.y)
         })
     {
-        return Err("Invalid or oversized image copy region".into());
+        return Err(ClipboardImageError::Message(
+            Text::ClipboardImageCopyInvalidRegion,
+        ));
     }
     if cancelled.load(Ordering::Relaxed) {
-        return Err("Image copy cancelled".into());
+        return Err(ClipboardImageError::Message(
+            Text::ClipboardImageCopyCancelled,
+        ));
     }
     let mut output = Vec::with_capacity(bytes as usize);
     let [top_left, top_right, _, bottom_left] = request.source_uv;
     // Orthogonal image edits map pixel centers exactly; no display scaling or alpha conversion.
     for y in 0..height {
         if cancelled.load(Ordering::Relaxed) {
-            return Err("Image copy cancelled".into());
+            return Err(ClipboardImageError::Message(
+                Text::ClipboardImageCopyCancelled,
+            ));
         }
         let v = (f64::from(y) + 0.5) / f64::from(height);
         for x in 0..width {
@@ -119,6 +136,77 @@ fn pixels(request: &ImageCopyRequest, cancelled: &AtomicBool) -> Result<Vec<u8>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use towavue_core::localization::Language;
+
+    #[test]
+    fn copy_validation_stays_typed_without_accessing_the_clipboard() {
+        let mut request = ImageCopyRequest {
+            image: Arc::new(DecodedImage {
+                animation_plays: 0,
+                format: "test",
+                frames: vec![],
+            }),
+            frame_index: 0,
+            source_uv: [UnitPoint { x: 0.0, y: 0.0 }; 4],
+            size: (1, 1),
+        };
+        let (send, receive) = std::sync::mpsc::channel();
+        let job = ImageCopyJob::start(request, move |result| {
+            send.send(result).expect("copy receiver");
+        })
+        .expect("copy worker");
+        let error = receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("copy notification")
+            .expect_err("missing frame prevents native clipboard access");
+        drop(job);
+        assert_eq!(error.to_string(), "Image frame is unavailable");
+        assert_eq!(
+            error.message(Language::Japanese),
+            "画像のフレームを利用できません"
+        );
+
+        request = ImageCopyRequest {
+            image: Arc::new(DecodedImage {
+                animation_plays: 0,
+                format: "test",
+                frames: vec![crate::DecodedImageFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![0; 4],
+                    delay: std::time::Duration::ZERO,
+                }],
+            }),
+            frame_index: 0,
+            source_uv: [UnitPoint { x: 0.0, y: 0.0 }; 4],
+            size: (1, 1),
+        };
+        for (size, cancelled, english, japanese) in [
+            (
+                (u32::MAX, u32::MAX),
+                false,
+                "Image copy exceeds its memory limit",
+                "コピーする画像がメモリ上限を超えています",
+            ),
+            (
+                (0, 1),
+                false,
+                "Invalid or oversized image copy region",
+                "画像のコピー範囲が不正か、大きすぎます",
+            ),
+            (
+                (1, 1),
+                true,
+                "Image copy cancelled",
+                "画像のコピーをキャンセルしました",
+            ),
+        ] {
+            request.size = size;
+            let error = pixels(&request, &AtomicBool::new(cancelled)).expect_err("rejected copy");
+            assert_eq!(error.to_string(), english);
+            assert_eq!(error.message(Language::Japanese), japanese);
+        }
+    }
 
     #[test]
     #[ignore = "requires an interactive Windows clipboard and explicitly replaces its image contents"]

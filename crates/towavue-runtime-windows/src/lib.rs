@@ -13,6 +13,8 @@ mod burst_verification;
 pub use burst_verification::{BurstEvent, burst_enabled, burst_source_id, record_burst};
 mod cancellation;
 mod caption;
+mod clipboard_image_error;
+pub use clipboard_image_error::ClipboardImageError;
 mod decode;
 mod frame_image_failure;
 pub use frame_image_failure::FrameImageFailure;

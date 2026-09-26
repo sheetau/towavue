@@ -375,7 +375,10 @@ enum AppEvent {
     FileOperationFinished(u64, Result<file_operations::Completed, String>),
     SourceSave(u64, towavue_runtime_windows::SourceSaveEvent),
     SaveAs(u64, towavue_runtime_windows::SaveAsEvent),
-    ImagePasted(u64, Result<towavue_runtime_windows::PastedImage, String>),
+    ImagePasted(
+        u64,
+        Result<towavue_runtime_windows::PastedImage, towavue_runtime_windows::ClipboardImageError>,
+    ),
     SaveAsPublished(
         u64,
         Result<towavue_runtime_windows::SavedAsSource, source_save::PublicationError>,
@@ -434,7 +437,7 @@ enum AppEvent {
     RecentFilesReady,
     VideoResume(towavue_runtime_windows::VideoResumeEvent),
     FileSearchReady,
-    ImageCopied(Result<(u32, u32), String>),
+    ImageCopied(Result<(u32, u32), towavue_runtime_windows::ClipboardImageError>),
     ImageEdited(
         u64,
         Result<Arc<DecodedImage>, towavue_runtime_windows::ImageEditError>,
@@ -3449,7 +3452,7 @@ where
                     }
                     Err(error) => towavue_core::localization::formatted::image_copy_failed(
                         language,
-                        &error.to_string(),
+                        &error.message(language),
                     ),
                 });
             }

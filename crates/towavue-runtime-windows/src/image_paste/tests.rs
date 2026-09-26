@@ -70,6 +70,7 @@ fn pasted_pixels_keep_transparency_and_original_lifetime_through_edit_export() {
 
 #[test]
 fn paste_rejects_empty_malformed_oversized_and_cancelled_input() {
+    use towavue_core::localization::Language;
     let cancel = AtomicBool::new(false);
     for (width, height, bytes) in [
         (0, 0, vec![]),
@@ -79,22 +80,35 @@ fn paste_rejects_empty_malformed_oversized_and_cancelled_input() {
         (u32::MAX as usize, 2, vec![]),
         (16384, 16384, vec![]),
     ] {
-        assert!(
-            prepare(
-                arboard::ImageData {
-                    width,
-                    height,
-                    bytes: Cow::Owned(bytes),
-                },
-                &cancel,
+        let error = prepare(
+            arboard::ImageData {
+                width,
+                height,
+                bytes: Cow::Owned(bytes),
+            },
+            &cancel,
+        )
+        .expect_err("invalid pasted pixels");
+        let (english, japanese) = if width > u32::MAX as usize || height > u32::MAX as usize {
+            (
+                "Invalid clipboard image dimensions",
+                "クリップボードの画像サイズが不正です",
             )
-            .is_err()
-        );
+        } else {
+            (
+                "Invalid clipboard image or image exceeds its memory limit",
+                "クリップボードの画像が不正か、メモリ上限を超えています",
+            )
+        };
+        assert_eq!(error.to_string(), english);
+        assert_eq!(error.message(Language::Japanese), japanese);
     }
     cancel.store(true, Ordering::Relaxed);
+    let error = prepare(raw(), &cancel).expect_err("cancelled");
+    assert_eq!(error.to_string(), "Image paste cancelled");
     assert_eq!(
-        prepare(raw(), &cancel).expect_err("cancelled"),
-        "Image paste cancelled"
+        error.message(Language::Japanese),
+        "画像の貼り付けをキャンセルしました"
     );
 }
 
@@ -140,7 +154,8 @@ fn paste_worker_delivers_owned_result_once_and_reports_reader_failure() {
         receive
             .recv_timeout(Duration::from_secs(5))
             .expect("notification")
-            .expect_err("failure"),
+            .expect_err("failure")
+            .to_string(),
         "No image available"
     );
     drop(job);
@@ -177,7 +192,8 @@ fn paste_cancelled_during_clipboard_read_never_delivers_an_image() {
         receive
             .recv_timeout(Duration::from_secs(5))
             .expect("notification")
-            .expect_err("cancelled"),
+            .expect_err("cancelled")
+            .to_string(),
         "Image paste cancelled"
     );
     drop(job);

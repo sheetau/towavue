@@ -329,6 +329,15 @@ fn japanese_operation_notices_keep_edits_and_external_values() {
         app.status_notice(),
         Some(format!("画像をコピーできませんでした: {detail}"))
     );
+    app.handle_app_event(AppEvent::ImageCopied(Err(
+        towavue_runtime_windows::ClipboardImageError::Message(
+            localization::Text::ClipboardImageFrameUnavailable,
+        ),
+    )));
+    assert_eq!(
+        app.status_notice().as_deref(),
+        Some("画像をコピーできませんでした: 画像のフレームを利用できません")
+    );
     app.handle_app_event(AppEvent::FileRevealed(Ok(path.clone())));
     assert_eq!(
         app.status_notice(),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ClipboardImageError;
 use std::io::{BufWriter, Write};
 
 impl RetainedSource {
@@ -7,20 +8,19 @@ impl RetainedSource {
     /// as source saving; the immutable lease is acquired only after writer close.
     pub(crate) fn from_pasted_frame(
         frame: &crate::DecodedImageFrame,
-        current: &dyn Fn() -> Result<(), String>,
-    ) -> Result<Self, String> {
+        current: &dyn Fn() -> Result<(), ClipboardImageError>,
+    ) -> Result<Self, ClipboardImageError> {
         current()?;
-        let files = Files::under(Path::new("untitled.png"), &std::env::temp_dir(), "pasted")
-            .map_err(|error| error.to_string())?;
+        let files = Files::under(Path::new("untitled.png"), &std::env::temp_dir(), "pasted")?;
         Self::write_pasted_frame(frame, current, files)
     }
 
     fn write_pasted_frame(
         frame: &crate::DecodedImageFrame,
-        current: &dyn Fn() -> Result<(), String>,
+        current: &dyn Fn() -> Result<(), ClipboardImageError>,
         files: Arc<Files>,
-    ) -> Result<Self, String> {
-        let write = || -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Self, ClipboardImageError> {
+        let write = || -> Result<(), ClipboardImageError> {
             let mut file = BufWriter::new(
                 OpenOptions::new()
                     .write(true)
@@ -46,12 +46,9 @@ impl RetainedSource {
             current()?;
             Ok(())
         };
-        write().map_err(|error| error.to_string())?;
-        let source =
-            FileOperationSource::capture(&files.original).map_err(|error| error.to_string())?;
-        let lease = source
-            .verify_for_copy()
-            .map_err(|error| error.to_string())?;
+        write()?;
+        let source = FileOperationSource::capture(&files.original)?;
+        let lease = source.verify_for_copy()?;
         current()?;
         Ok(Self(Arc::new(Original {
             _lease: lease,
@@ -64,6 +61,7 @@ impl RetainedSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ClipboardImageError;
     use std::cell::Cell;
 
     #[test]
@@ -83,14 +81,21 @@ mod tests {
             &|| {
                 count.set(count.get() + 1);
                 if count.get() == 3 {
-                    Err("test cancellation".into())
+                    Err(ClipboardImageError::Message(
+                        towavue_core::localization::Text::ClipboardImagePasteCancelled,
+                    ))
                 } else {
                     Ok(())
                 }
             },
             files,
         );
-        assert_eq!(result.expect_err("cancelled"), "test cancellation");
+        let error = result.expect_err("cancelled");
+        assert_eq!(error.to_string(), "Image paste cancelled");
+        assert_eq!(
+            error.message(towavue_core::localization::Language::Japanese),
+            "画像の貼り付けをキャンセルしました"
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while directory.exists() {
             assert!(std::time::Instant::now() < deadline, "partial PNG cleanup");

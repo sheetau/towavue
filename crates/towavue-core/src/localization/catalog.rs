@@ -18,6 +18,13 @@ macro_rules! messages {
 }
 
 messages! {
+    ClipboardImageCopyCancelled => ("Image copy cancelled", "画像のコピーをキャンセルしました"),
+    ClipboardImageFrameUnavailable => ("Image frame is unavailable", "画像のフレームを利用できません"),
+    ClipboardImageCopyMemoryLimit => ("Image copy exceeds its memory limit", "コピーする画像がメモリ上限を超えています"),
+    ClipboardImageCopyInvalidRegion => ("Invalid or oversized image copy region", "画像のコピー範囲が不正か、大きすぎます"),
+    ClipboardImagePasteCancelled => ("Image paste cancelled", "画像の貼り付けをキャンセルしました"),
+    ClipboardImagePasteDimensions => ("Invalid clipboard image dimensions", "クリップボードの画像サイズが不正です"),
+    ClipboardImagePasteMemoryLimit => ("Invalid clipboard image or image exceeds its memory limit", "クリップボードの画像が不正か、メモリ上限を超えています"),
     FrameImageValidationAlphaCapableWebmDecoderIsUnavailable => ("alpha-capable WebM decoder is unavailable", "アルファに対応したWebMデコーダーを利用できません"),
     FrameImageValidationAmbiguousDuplicateFrameTimestamp => ("ambiguous duplicate frame timestamp", "フレームの時刻が重複しているため、一意に特定できません"),
     FrameImageValidationCannotAllocateFrameColorConverter => ("cannot allocate frame color converter", "フレームの色変換処理に必要な領域を確保できません"),

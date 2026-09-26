@@ -1,5 +1,5 @@
 use crate::*;
-use towavue_runtime_windows::{ImagePasteJob, PastedImage};
+use towavue_runtime_windows::{ClipboardImageError, ImagePasteJob, PastedImage};
 
 pub(super) const DEFAULT_NAME: &str = "image.png";
 
@@ -43,7 +43,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
-    pub(super) fn finish_image_paste(&mut self, serial: u64, result: Result<PastedImage, String>) {
+    pub(super) fn finish_image_paste(
+        &mut self,
+        serial: u64,
+        result: Result<PastedImage, ClipboardImageError>,
+    ) {
         let display_language = self.language();
         if serial != self.image_paste.serial || self.image_paste.pending.is_none() {
             return;
@@ -52,7 +56,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.exit_requested {
             return;
         }
-        match result.and_then(|pasted| self.open_pasted_image(pasted)) {
+        match result
+            .map_err(|error| error.message(display_language))
+            .and_then(|pasted| self.open_pasted_image(pasted))
+        {
             Ok(()) => {}
             Err(error) => {
                 self.set_status(towavue_core::localization::formatted::image_paste_failed(

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 
-use crate::{DecodedImage, DecodedImageFrame, RetainedSource};
+use crate::{ClipboardImageError, DecodedImage, DecodedImageFrame, RetainedSource};
+use towavue_core::localization::Text;
 
 /// Pixels and their lossless original. The backing file is private storage, not a
 /// saved document path. Clones keep it alive across workers and window transfers.
@@ -32,13 +33,13 @@ pub struct ImagePasteJob {
 
 impl ImagePasteJob {
     pub fn start(
-        notify: impl FnOnce(Result<PastedImage, String>) + Send + 'static,
+        notify: impl FnOnce(Result<PastedImage, ClipboardImageError>) + Send + 'static,
     ) -> std::io::Result<Self> {
         Self::start_with_reader(
             || {
                 arboard::Clipboard::new()
                     .and_then(|mut clipboard| clipboard.get_image())
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| ClipboardImageError::Diagnostic(error.to_string()))
             },
             notify,
         )
@@ -49,7 +50,7 @@ impl ImagePasteJob {
         width: u32,
         height: u32,
         rgba: Vec<u8>,
-        notify: impl FnOnce(Result<PastedImage, String>) + Send + 'static,
+        notify: impl FnOnce(Result<PastedImage, ClipboardImageError>) + Send + 'static,
     ) -> std::io::Result<Self> {
         Self::start_with_reader(
             move || {
@@ -64,8 +65,8 @@ impl ImagePasteJob {
     }
 
     fn start_with_reader(
-        read: impl FnOnce() -> Result<arboard::ImageData<'static>, String> + Send + 'static,
-        notify: impl FnOnce(Result<PastedImage, String>) + Send + 'static,
+        read: impl FnOnce() -> Result<arboard::ImageData<'static>, ClipboardImageError> + Send + 'static,
+        notify: impl FnOnce(Result<PastedImage, ClipboardImageError>) + Send + 'static,
     ) -> std::io::Result<Self> {
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel = Arc::clone(&cancelled);
@@ -97,19 +98,26 @@ impl Drop for ImagePasteJob {
     }
 }
 
-fn check_cancelled(cancelled: &AtomicBool) -> Result<(), String> {
+fn check_cancelled(cancelled: &AtomicBool) -> Result<(), ClipboardImageError> {
     if cancelled.load(Ordering::Relaxed) {
-        Err("Image paste cancelled".into())
+        Err(ClipboardImageError::Message(
+            Text::ClipboardImagePasteCancelled,
+        ))
     } else {
         Ok(())
     }
 }
 
-fn prepare(raw: arboard::ImageData<'_>, cancelled: &AtomicBool) -> Result<PastedImage, String> {
+fn prepare(
+    raw: arboard::ImageData<'_>,
+    cancelled: &AtomicBool,
+) -> Result<PastedImage, ClipboardImageError> {
     check_cancelled(cancelled)?;
     let (width, height) = (u32::try_from(raw.width), u32::try_from(raw.height));
     let (Ok(width), Ok(height)) = (width, height) else {
-        return Err("Invalid clipboard image dimensions".into());
+        return Err(ClipboardImageError::Message(
+            Text::ClipboardImagePasteDimensions,
+        ));
     };
     let length = raw
         .width
@@ -117,7 +125,9 @@ fn prepare(raw: arboard::ImageData<'_>, cancelled: &AtomicBool) -> Result<Pasted
         .and_then(|pixels| pixels.checked_mul(4))
         .filter(|bytes| *bytes <= 512 * 1024 * 1024);
     if width == 0 || height == 0 || length != Some(raw.bytes.len()) {
-        return Err("Invalid clipboard image or image exceeds its memory limit".into());
+        return Err(ClipboardImageError::Message(
+            Text::ClipboardImagePasteMemoryLimit,
+        ));
     }
     // arboard owns straight RGBA8. Move its allocation instead of making another
     // full-sized copy; the private PNG preserves even hidden transparent RGB.

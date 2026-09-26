@@ -1,6 +1,55 @@
 use super::*;
 use std::sync::mpsc;
 
+#[test]
+fn untitled_paste_failure_uses_receiving_language_and_keeps_stale_owner_guard() {
+    use towavue_core::localization::Language;
+    let Some(_root) = crate::tests::isolated_test_root(
+        "image_paste::tests::untitled_paste_failure_uses_receiving_language_and_keeps_stale_owner_guard",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let before = app.tabs.active_id();
+    for (language, expected) in [
+        (
+            Language::Japanese,
+            "画像を貼り付けられませんでした: クリップボードの画像が不正か、メモリ上限を超えています",
+        ),
+        (
+            Language::English,
+            "Could not paste image: Invalid clipboard image or image exceeds its memory limit",
+        ),
+    ] {
+        let (sent, received) = mpsc::channel();
+        app.image_paste.serial += 1;
+        let serial = app.image_paste.serial;
+        app.image_paste.pending = Some(
+            ImagePasteJob::from_rgba(1, 1, vec![], move |result| {
+                sent.send(result).expect("paste receiver");
+            })
+            .expect("invalid owned input worker"),
+        );
+        let result = received
+            .recv_timeout(Duration::from_secs(5))
+            .expect("result");
+        assert!(result.is_err());
+        // Choose the display language only after the real worker has finished.
+        app.language_settings.display = language;
+        app.set_status("previous notice".into());
+        app.finish_image_paste(serial.wrapping_sub(1), Err("stale failure".into()));
+        assert!(app.image_paste.pending.is_some());
+        assert_eq!(app.status_notice().as_deref(), Some("previous notice"));
+        app.finish_image_paste(serial, result);
+        assert!(app.image_paste.pending.is_none());
+        assert_eq!(app.status_notice().as_deref(), Some(expected));
+        assert_eq!(app.tabs.active_id(), before);
+        assert!(app.path.is_none() && app.source_backings.is_empty());
+        app.finish_image_paste(serial, Err("duplicate failure".into()));
+        assert_eq!(app.status_notice().as_deref(), Some(expected));
+    }
+}
+
 pub(crate) fn fixture() -> PastedImage {
     let (sent, result) = mpsc::channel();
     let job = ImagePasteJob::from_rgba(3, 2, [40, 80, 160, 255].repeat(6), move |value| {

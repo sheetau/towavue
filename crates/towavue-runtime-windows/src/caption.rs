@@ -24,6 +24,8 @@ use windows::core::w;
 use winit::window::Window;
 
 const SUBCLASS_ID: usize = 0x7476_6361;
+const MOVE_SIZE_TIMER_ID: usize = 0x7476_6d73;
+const MOVE_SIZE_FRAME_MS: u32 = 10;
 
 mod placement;
 
@@ -46,6 +48,9 @@ struct CaptionState {
     window: std::sync::Weak<Window>,
     fullscreen: Cell<bool>,
     sizing: Cell<bool>,
+    move_size_timer: Cell<bool>,
+    #[cfg(test)]
+    move_size_redraws: Cell<usize>,
     changing_dpi: Cell<bool>,
     resize_frame: Cell<bool>,
     time_settings_changed: Cell<bool>,
@@ -186,6 +191,9 @@ impl NativeCaption {
             window: Arc::downgrade(&window),
             fullscreen: Cell::new(false),
             sizing: Cell::new(false),
+            move_size_timer: Cell::new(false),
+            #[cfg(test)]
+            move_size_redraws: Cell::new(0),
             changing_dpi: Cell::new(false),
             resize_frame: Cell::new(false),
             time_settings_changed: Cell::new(false),
@@ -544,6 +552,7 @@ fn caption_bounds(handle: HWND) -> RECT {
 
 impl Drop for NativeCaption {
     fn drop(&mut self) {
+        stop_move_size_timer(self.handle, &self.state);
         // SAFETY: !Send keeps teardown on the window thread; the retained Arc keeps
         // the HWND alive. Remove before dropping callback state; never destroy winit's HWND.
         if unsafe { RemoveWindowSubclass(self.handle, Some(caption_proc), SUBCLASS_ID) }.as_bool() {
@@ -552,6 +561,15 @@ impl Drop for NativeCaption {
                 drop(Rc::from_raw(Rc::as_ptr(&self.state)));
             }
         }
+    }
+}
+
+fn stop_move_size_timer(handle: HWND, state: &CaptionState) {
+    state.sizing.set(false);
+    if state.move_size_timer.replace(false) {
+        // SAFETY: caption ownership restricts this call to the HWND's thread.
+        // This ID belongs only to the caption; no callback pointer is installed.
+        let _ = unsafe { KillTimer(Some(handle), MOVE_SIZE_TIMER_ID) };
     }
 }
 
@@ -592,6 +610,7 @@ unsafe extern "system" fn caption_proc(
     // Stack pointers are used only synchronously and are not retained by any callee.
     unsafe {
         if message == WM_NCDESTROY {
+            stop_move_size_timer(handle, state);
             if RemoveWindowSubclass(handle, Some(caption_proc), SUBCLASS_ID).as_bool() {
                 drop(Rc::from_raw(data as *const CaptionState));
             }
@@ -606,7 +625,36 @@ unsafe extern "system" fn caption_proc(
                 window.request_redraw();
             }
         } else if matches!(message, WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE | WM_CANCELMODE) {
-            state.sizing.set(message == WM_ENTERSIZEMOVE);
+            if message == WM_ENTERSIZEMOVE {
+                state.sizing.set(true);
+                if !state.move_size_timer.get() {
+                    // DefWindowProc's move/size loop dispatches window messages,
+                    // but not winit's normal AboutToWait playback deadlines.
+                    // Request ordinary redraws only; never call application or
+                    // graphics code reentrantly from this subclass timer.
+                    state.move_size_timer.set(
+                        SetTimer(Some(handle), MOVE_SIZE_TIMER_ID, MOVE_SIZE_FRAME_MS, None) != 0,
+                    );
+                }
+            } else {
+                stop_move_size_timer(handle, state);
+            }
+        } else if message == WM_TIMER && wparam.0 == MOVE_SIZE_TIMER_ID {
+            // KillTimer does not remove already queued WM_TIMER messages. Ignore
+            // stale messages after exit/cancellation instead of restarting paint.
+            if state.sizing.get()
+                && state.move_size_timer.get()
+                && !state.fullscreen.get()
+                && !state.changing_dpi.get()
+                && let Some(window) = state.window.upgrade()
+            {
+                #[cfg(test)]
+                state
+                    .move_size_redraws
+                    .set(state.move_size_redraws.get() + 1);
+                window.request_redraw();
+            }
+            return LRESULT(0);
         } else if message == WM_WINDOWPOSCHANGING
             && state.fullscreen.get()
             && let Some(bounds) = state.fullscreen_dpi_bounds.get()
@@ -1061,6 +1109,83 @@ mod tests {
         assert_eq!(hit(100, 1), HTCLIENT as isize);
     }
 
+    fn verify_move_size_timer(caption: &NativeCaption) {
+        use std::time::{Duration, Instant};
+
+        let dispatch_tick = || {
+            // SAFETY: this same-thread hidden window owns both the subclass and
+            // timer ID. Only scalar parameters are sent; no desktop input occurs.
+            unsafe {
+                SendMessageW(
+                    caption.handle,
+                    WM_TIMER,
+                    Some(WPARAM(MOVE_SIZE_TIMER_ID)),
+                    None,
+                );
+            }
+        };
+        let requests = || caption.state.move_size_redraws.get();
+        assert!(!caption.state.move_size_timer.get());
+        dispatch_tick();
+        assert_eq!(
+            requests(),
+            0,
+            "inactive timer messages cannot wake rendering"
+        );
+        for end in [WM_EXITSIZEMOVE, WM_CANCELMODE] {
+            caption.verification_size_move(true);
+            assert!(caption.state.move_size_timer.get(), "real timer creation");
+            let before = requests();
+            let start = Instant::now();
+            while requests() < before + 3 && start.elapsed() < Duration::from_secs(1) {
+                // Pump real HWND timer messages without running winit's outer
+                // AboutToWait callback, as in the native move/size loop. This
+                // verifies wake requests, not visible painting or physical input.
+                let mut message = MSG::default();
+                unsafe {
+                    if PeekMessageW(
+                        &mut message,
+                        Some(caption.handle),
+                        WM_TIMER,
+                        WM_TIMER,
+                        PM_REMOVE,
+                    )
+                    .as_bool()
+                    {
+                        assert_eq!(message.wParam.0, MOVE_SIZE_TIMER_ID);
+                        DispatchMessageW(&message);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert!(
+                requests() >= before + 3,
+                "timer wakes while dimensions are unchanged"
+            );
+            for fullscreen in [true, false] {
+                caption.state.fullscreen.set(fullscreen);
+                caption.state.changing_dpi.set(!fullscreen);
+                let before = requests();
+                dispatch_tick();
+                assert_eq!(requests(), before, "suppress fullscreen/DPI transitions");
+            }
+            caption.state.changing_dpi.set(false);
+            let before = requests();
+            dispatch_tick();
+            assert_eq!(requests(), before + 1, "wake resumes after suppression");
+            // SAFETY: owned HWND and a pointer-free lifecycle notification.
+            unsafe { SendMessageW(caption.handle, end, None, None) };
+            assert!(!caption.state.move_size_timer.get());
+            let before = requests();
+            dispatch_tick();
+            assert_eq!(
+                requests(),
+                before,
+                "discard a queued tick after cancellation/exit"
+            );
+        }
+    }
+
     #[test]
     fn native_caption_owns_subclass_and_preserves_winit_close_delivery() {
         use std::os::windows::process::CommandExt;
@@ -1109,6 +1234,7 @@ mod tests {
                 );
                 let caption = NativeCaption::new(window.clone()).expect("native frame");
                 let handle = caption.handle;
+                verify_move_size_timer(&caption);
                 verify_top_gutter_hits(&caption);
                 assert!(!caption.take_time_settings_changed());
                 let visible_time_trial =
@@ -1752,7 +1878,11 @@ mod tests {
                     assert_eq!(Rc::strong_count(&state), 4);
                     drop(surface);
                     assert_eq!(Rc::strong_count(&state), 3);
+                    caption.verification_size_move(true);
+                    assert!(state.move_size_timer.get());
                     drop(caption);
+                    assert!(!state.move_size_timer.get(), "teardown retires the timer");
+                    assert!(!state.sizing.get());
                     assert_eq!(Rc::strong_count(&state), 1);
                 }
                 // Reinstall for the real close-delivery check, with the same live HWND.

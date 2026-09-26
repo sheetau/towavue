@@ -1,4 +1,5 @@
 use super::*;
+use crate::localization::Text;
 use crate::updates::{Action, Close, ClosePurpose, Notice};
 use towavue_core::release::ReleaseVersion;
 use towavue_runtime_windows::update::{UpdateEvent, UpdatePhase, UpdateService};
@@ -87,11 +88,17 @@ impl WindowHost {
         }
     }
 
+    fn update_status_text(&mut self, text: Text) {
+        self.update_status(text.in_language(self.language.settings.display));
+    }
+
     fn check_updates(&mut self, manual: bool) {
         if !self.updates.enabled {
             if manual {
                 self.update_status(self.updates.unavailable.clone().unwrap_or_else(|| {
-                    "Automatic updates are available in an installed production copy.".into()
+                    Text::UpdateInstalledOnly
+                        .in_language(self.language.settings.display)
+                        .into()
                 }));
             }
             return;
@@ -110,7 +117,7 @@ impl WindowHost {
             service.check(manual);
         }
         if manual {
-            self.update_status("Checking for updates…");
+            self.update_status_text(Text::UpdateChecking);
         }
     }
 
@@ -126,7 +133,7 @@ impl WindowHost {
                     app.update_notice = None;
                 }
             }
-            Action::Cancel => self.cancel_update("Update cancelled. Your windows remain open."),
+            Action::Cancel => self.cancel_update(Text::UpdateCancelled),
             Action::Install | Action::NextLaunch => {
                 if self.updates.notice.is_none()
                     || self.updates.attempt.is_some()
@@ -192,10 +199,10 @@ impl WindowHost {
                 || !self.pending_launches.is_empty()
                 || self.windows.values().any(|app| !app.update_can_prompt()))
         {
-            self.update_status(if purpose == ClosePurpose::LanguageRestart {
-                localization::Text::LanguageRestartBusy.in_language(self.language.settings.display)
+            self.update_status_text(if purpose == ClosePurpose::LanguageRestart {
+                Text::LanguageRestartBusy
             } else {
-                "Finish the active operation in every window before installing the update."
+                Text::UpdateBusy
             });
             return;
         }
@@ -246,7 +253,7 @@ impl WindowHost {
             })
     }
 
-    pub(super) fn cancel_update(&mut self, reason: &str) {
+    pub(super) fn cancel_update(&mut self, reason: Text) {
         let Some(attempt) = self.updates.attempt.take() else {
             return;
         };
@@ -275,8 +282,8 @@ impl WindowHost {
                 // token and cannot close or approve a later update attempt.
             }
         }
-        self.update_status(if attempt.purpose == ClosePurpose::LanguageRestart {
-            localization::Text::LanguageRestartCancelled.in_language(self.language.settings.display)
+        self.update_status_text(if attempt.purpose == ClosePurpose::LanguageRestart {
+            Text::LanguageRestartCancelled
         } else {
             reason
         });
@@ -297,7 +304,10 @@ impl WindowHost {
                 self.updates.checking = false;
                 self.updates.manual = false;
                 self.updates.next_check = None;
-                let message = format!("Update unavailable: {message}");
+                let message = towavue_core::localization::formatted::update_unavailable(
+                    self.language.settings.display,
+                    &message,
+                );
                 self.updates.unavailable = Some(message.clone());
                 self.update_status(message);
             }
@@ -337,14 +347,14 @@ impl WindowHost {
             UpdateEvent::Current => {
                 self.updates.checking = false;
                 if self.updates.manual {
-                    self.update_status("No new update is available.");
+                    self.update_status_text(Text::UpdateCurrent);
                 }
                 self.updates.manual = false;
             }
             UpdateEvent::Deferred => {
                 self.updates.deferring = false;
                 self.updates.notice = None;
-                self.update_status("The update will install on the next launch.");
+                self.update_status_text(Text::UpdateDeferred);
             }
             UpdateEvent::HandoffReady(token) => {
                 if self.updates.attempt.as_ref().is_some_and(|a| {
@@ -370,7 +380,7 @@ impl WindowHost {
                         .as_ref()
                         .is_some_and(|a| a.purpose == ClosePurpose::Update && a.token == token)
                     {
-                        self.cancel_update("Update cancelled because a window changed.");
+                        self.cancel_update(Text::UpdateCancelledChanged);
                     }
                     if let Some(service) = &mut self.updates.service {
                         service.cancel_install(token);
@@ -414,7 +424,7 @@ impl WindowHost {
                         // already dropped it. Restore the application as a unit.
                         self.updates.attempt.as_mut().expect("current attempt").step =
                             Step::Preparing;
-                        self.cancel_update("Update could not start.");
+                        self.cancel_update(Text::UpdateStartFailed);
                     }
                 } else {
                     self.updates.checking = false;
@@ -426,7 +436,10 @@ impl WindowHost {
                     self.updates.next_check = Some(Instant::now() + CHECK_INTERVAL);
                 }
                 self.updates.manual = false;
-                self.update_status(format!("Update unavailable: {message}"));
+                self.update_status(towavue_core::localization::formatted::update_unavailable(
+                    self.language.settings.display,
+                    &message,
+                ));
             }
         }
         self.advance_update();
@@ -461,9 +474,7 @@ impl WindowHost {
                         })
                 });
             if invalid {
-                self.cancel_update(
-                    "Update cancelled because a window changed or a save was cancelled.",
-                );
+                self.cancel_update(Text::UpdateCancelledSave);
             } else if step == Step::Guards && self.update_approvals_current(token) {
                 if attempt.purpose == ClosePurpose::LanguageRestart {
                     self.updates.attempt.as_mut().expect("current attempt").step = Step::Exiting;
@@ -536,7 +547,10 @@ impl WindowHost {
             }
             self.updates.shutdown_requested = false;
             if let Err(error) = self.start_update_worker(None, false) {
-                self.update_status(format!("Update unavailable: {error}"));
+                self.update_status(towavue_core::localization::formatted::update_unavailable(
+                    self.language.settings.display,
+                    &error.to_string(),
+                ));
             }
         }
         if !self.updates.enabled

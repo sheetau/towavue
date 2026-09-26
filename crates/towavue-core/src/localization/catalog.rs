@@ -18,6 +18,15 @@ macro_rules! messages {
 }
 
 messages! {
+    UpdateInstalledOnly => ("Automatic updates are available in an installed production copy.", "自動更新は、インストールされた製品版で利用できます。"),
+    UpdateChecking => ("Checking for updates…", "更新を確認中…"),
+    UpdateCurrent => ("No new update is available.", "利用できる新しい更新はありません。"),
+    UpdateDeferred => ("The update will install on the next launch.", "更新は次回起動時にインストールされます。"),
+    UpdateCancelled => ("Update cancelled. Your windows remain open.", "更新をキャンセルしました。ウィンドウは開いたままです。"),
+    UpdateBusy => ("Finish the active operation in every window before installing the update.", "更新をインストールする前に、すべてのウィンドウで実行中の操作を完了してください。"),
+    UpdateCancelledChanged => ("Update cancelled because a window changed.", "ウィンドウの状態が変わったため、更新をキャンセルしました。"),
+    UpdateStartFailed => ("Update could not start.", "更新を開始できませんでした。"),
+    UpdateCancelledSave => ("Update cancelled because a window changed or a save was cancelled.", "ウィンドウの状態が変わったか保存がキャンセルされたため、更新をキャンセルしました。"),
     ImageFormatUnknown => ("image format could not be determined", "画像形式を判別できません"),
     ImageDecodedEmpty => ("decoded image contained no frames", "読み込んだ画像にフレームがありません"),
     ImageMemoryBudget => ("image exceeds the available decoded-image memory budget", "画像の展開に必要なメモリが上限を超えています"),

@@ -1,6 +1,145 @@
 use super::*;
 
 #[test]
+fn japanese_update_notices_preserve_states_external_details_and_guarded_edits() {
+    use crate::localization::{Language, Settings};
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::updates::tests::japanese_update_notices_preserve_states_external_details_and_guarded_edits",
+    ) else {
+        return;
+    };
+    let path = root.join("日本語 {source}.bmp");
+    crate::tab_transfer::tests::bitmap(&path);
+    let original = std::fs::read(&path).expect("source");
+    for density in [1.0, 1.25, 2.0] {
+        let (mut host, first, second) = host();
+        let id = attach(&mut host, second, &path, true);
+        host.language.settings = Settings {
+            display: Language::Japanese,
+            next: Language::English,
+            saving: false,
+        };
+        for app in host.windows.values_mut() {
+            app.language_settings = host.language.settings;
+            let context = crate::fonts::test_context();
+            crate::localization::test_ui::configure_japanese(&context, density);
+            app.ui_context = Some(context);
+        }
+        let history = host.windows[&second].edits.clone();
+        let check = |host: &mut WindowHost, expected: &str| {
+            for app in host.windows.values_mut() {
+                assert_eq!(app.status_notice().as_deref(), Some(expected));
+                assert!(!app.exit_requested);
+                let context = app.ui_context.clone().expect("context");
+                let mut output = egui::FullOutput::default();
+                for _ in 0..3 {
+                    output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1100.0, 600.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
+                        },
+                    );
+                }
+                assert_eq!(output.pixels_per_point, density);
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == expected && !text.galley.elided)), "painted status: {expected}");
+            }
+            assert_eq!(host.windows[&second].edits, history);
+        };
+
+        host.updates.enabled = false;
+        host.check_updates(true);
+        check(
+            &mut host,
+            "自動更新は、インストールされた製品版で利用できます。",
+        );
+        host.updates.enabled = true;
+        host.check_updates(true);
+        assert!(host.updates.checking && host.updates.manual && host.updates.next_check.is_some());
+        check(&mut host, "更新を確認中…");
+        host.update_event(UpdateEvent::Current);
+        assert!(!host.updates.checking && !host.updates.manual);
+        check(&mut host, "利用できる新しい更新はありません。");
+        host.update_status("retained automatic-check notice");
+        host.update_event(UpdateEvent::Current);
+        check(&mut host, "retained automatic-check notice");
+        host.updates.deferring = true;
+        host.update_event(UpdateEvent::Deferred);
+        assert!(!host.updates.deferring);
+        check(&mut host, "更新は次回起動時にインストールされます。");
+
+        let detail = "native {detail} 日本語.png 0x80004005";
+        let expected = format!("更新を利用できません: {detail}");
+        host.update_event(UpdateEvent::Unavailable(detail.into()));
+        assert!(!host.updates.enabled && host.updates.next_check.is_none());
+        check(&mut host, &expected);
+        host.update_status("replace this transient notice");
+        host.check_updates(true);
+        check(&mut host, &expected);
+        host.update_event(UpdateEvent::Error {
+            message: detail.into(),
+            startup: false,
+            operation: None,
+        });
+        check(&mut host, &expected);
+
+        host.windows.get_mut(&second).expect("second").about_open = true;
+        host.begin_update(false);
+        assert!(host.updates.attempt.is_none());
+        check(
+            &mut host,
+            "更新をインストールする前に、すべてのウィンドウで実行中の操作を完了してください。",
+        );
+        host.windows.get_mut(&second).expect("second").about_open = false;
+        for (reason, expected) in [
+            (
+                Text::UpdateCancelled,
+                "更新をキャンセルしました。ウィンドウは開いたままです。",
+            ),
+            (
+                Text::UpdateCancelledChanged,
+                "ウィンドウの状態が変わったため、更新をキャンセルしました。",
+            ),
+            (
+                Text::UpdateCancelledSave,
+                "ウィンドウの状態が変わったか保存がキャンセルされたため、更新をキャンセルしました。",
+            ),
+            (Text::UpdateStartFailed, "更新を開始できませんでした。"),
+            (
+                Text::UpdateCancelledByLaunch,
+                "別の起動要求があったため、更新をキャンセルしました。",
+            ),
+        ] {
+            host.begin_update(false);
+            let token = host.updates.attempt.as_ref().expect("guarding").token;
+            assert!(host.windows[&first].update_is_held());
+            assert!(host.windows[&second].pending_guard.is_some());
+            host.cancel_update(reason);
+            assert!(host.updates.attempt.is_none());
+            assert_eq!(host.updates.cancelling, Some(token));
+            check(&mut host, expected);
+            host.update_event(UpdateEvent::Cancelled(token));
+            assert!(host.updates.cancelling.is_none());
+            assert!(host.windows[&second].edits[&id].is_dirty());
+        }
+        host.begin_language_restart(first, Language::English);
+        host.cancel_update(Text::UpdateCancelled);
+        check(
+            &mut host,
+            Text::LanguageRestartCancelled.in_language(Language::Japanese),
+        );
+        assert!(host.language_restart_ready().is_none());
+    }
+    assert_eq!(std::fs::read(&path).expect("unchanged source"), original);
+}
+
+#[test]
 fn language_restart_coordinates_dirty_windows_and_never_commits_an_update() {
     let Some(root) = crate::tests::isolated_test_root(
         "window_host::updates::tests::language_restart_coordinates_dirty_windows_and_never_commits_an_update",

@@ -472,9 +472,7 @@ impl WindowHost {
                 if self.update_committing() {
                     request.acknowledge(false);
                 } else {
-                    self.cancel_update(
-                        localization::Text::UpdateCancelledByLaunch.in_language(display_language),
-                    );
+                    self.cancel_update(localization::Text::UpdateCancelledByLaunch);
                     self.updates.startup = false;
                     self.pending_launches.push(request);
                 }

@@ -1,6 +1,7 @@
 use crate::localization::{Language, Text, language};
 use crate::*;
 use towavue_core::localization::formatted;
+use towavue_core::{AudioTrack, AudioTrackRetention};
 use towavue_runtime_windows::{AudioChannels, AudioNormalization, LoudnessTarget};
 
 pub(super) struct AudioExportDialog {
@@ -10,8 +11,24 @@ pub(super) struct AudioExportDialog {
     kind: MediaKind,
     generation: u64,
     options: AudioExportOptions,
+    tracks: Option<Vec<AudioTrack>>,
+    retention: AudioTrackRetention,
     first_frame: bool,
     focused_option: Option<egui::Id>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct TrackChoice {
+    path: PathBuf,
+    retention: AudioTrackRetention,
+}
+
+impl TrackChoice {
+    pub(super) fn relocate(&mut self, source: &Path, target: &Path) {
+        if self.path == source {
+            self.path = target.to_owned();
+        }
+    }
 }
 
 pub(super) fn summary(options: AudioExportOptions, display_language: Language) -> String {
@@ -94,6 +111,55 @@ impl AudioExportDialog {
                         Text::Cancel.in_language(display_language),
                     ],
                     |ui| {
+                        if self.kind == MediaKind::Video {
+                            ui.label(Text::SavedAudioTracks.in_language(display_language));
+                            if let Some(tracks) = &self.tracks {
+                                for (index, track) in tracks.iter().enumerate() {
+                                    let mut checked = match &self.retention {
+                                        AudioTrackRetention::All => true,
+                                        AudioTrackRetention::Selected(ids) => {
+                                            ids.contains(&track.id)
+                                        }
+                                    };
+                                    let response = ui.checkbox(
+                                        &mut checked,
+                                        audio_preview::track_label(display_language, index, track),
+                                    );
+                                    if self.first_frame {
+                                        response.request_focus();
+                                        self.first_frame = false;
+                                    }
+                                    if response.changed() {
+                                        let mut ids = match &self.retention {
+                                            AudioTrackRetention::All => tracks
+                                                .iter()
+                                                .map(|track| track.id)
+                                                .collect::<Vec<_>>(),
+                                            AudioTrackRetention::Selected(ids) => ids.clone(),
+                                        };
+                                        ids.retain(|id| *id != track.id);
+                                        if checked {
+                                            ids.push(track.id);
+                                        }
+                                        let ids = tracks
+                                            .iter()
+                                            .map(|track| track.id)
+                                            .filter(|id| ids.contains(id))
+                                            .collect::<Vec<_>>();
+                                        self.retention = if ids.len() == tracks.len() {
+                                            AudioTrackRetention::All
+                                        } else {
+                                            AudioTrackRetention::Selected(ids)
+                                        };
+                                    }
+                                    reveal_focus(&response);
+                                }
+                            } else {
+                                ui.label(Text::AudioTracksLoading.in_language(display_language));
+                            }
+                            ui.label(Text::SavedAudioTracksHelp.in_language(display_language));
+                            crate::chrome::separator(ui);
+                        }
                         ui.label(Text::Normalization.in_language(display_language));
                         for (value, label) in [
                             (
@@ -194,6 +260,15 @@ impl AudioExportDialog {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn audio_retention_for(&self, id: TabId, path: &Path) -> AudioTrackRetention {
+        self.audio_export_tracks
+            .get(&id)
+            .filter(|choice| choice.path == path)
+            .map_or_else(AudioTrackRetention::default, |choice| {
+                choice.retention.clone()
+            })
+    }
+
     pub(super) fn open_audio_export_options(&mut self) {
         if self.modal_input_blocked()
             || !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
@@ -223,6 +298,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.audio_export_dialog = Some(AudioExportDialog {
             token: self.audio_export_generation,
             tab: tab.id,
+            retention: self.audio_retention_for(tab.id, &source),
+            tracks: self
+                .session
+                .as_ref()
+                .map(|session| session.audio_tracks().tracks.clone()),
             source,
             kind: tab.target.media_kind(),
             generation: self.media_generation,
@@ -269,6 +349,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         actions: &mut Vec<UiAction>,
     ) {
         if let Some(dialog) = &mut self.audio_export_dialog
+            && dialog.tracks.is_none()
+            && let Some(session) = &self.session
+        {
+            dialog.tracks = Some(session.audio_tracks().tracks.clone());
+        }
+        if let Some(dialog) = &mut self.audio_export_dialog
             && let Some(action) = dialog.show(context)
         {
             actions.push(UiAction::FinishAudioExportOptions(dialog.token, action));
@@ -293,6 +379,19 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .expect("matching options dialog");
         if let Some(value) = value {
             if self.audio_export_dialog_is_current(&dialog) {
+                if dialog.kind == MediaKind::Video {
+                    if dialog.retention == AudioTrackRetention::All {
+                        self.audio_export_tracks.remove(&dialog.tab);
+                    } else {
+                        self.audio_export_tracks.insert(
+                            dialog.tab,
+                            TrackChoice {
+                                path: dialog.source.clone(),
+                                retention: dialog.retention,
+                            },
+                        );
+                    }
+                }
                 if value == AudioExportOptions::default() {
                     self.audio_export_settings.remove(&dialog.tab);
                 } else {
@@ -316,3 +415,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+pub(crate) mod track_tests;

@@ -26,6 +26,7 @@ pub(super) struct MediaTabTransfer {
     deleted_source: Option<source_backing::DeletedSource>,
     export_path: Option<PathBuf>,
     audio_options: Option<AudioExportOptions>,
+    audio_tracks: Option<audio_export::TrackChoice>,
     metadata_options: Option<MetadataExportOptions>,
     audio_queue: Option<audio_playback::AudioTab>,
     playback_volume: Option<playback_volume::PlaybackVolume>,
@@ -320,6 +321,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             deleted_source: self.deleted_sources.remove(&id),
             export_path: self.export_paths.remove(&id),
             audio_options: self.audio_export_settings.remove(&id),
+            audio_tracks: self.audio_export_tracks.remove(&id),
             metadata_options: self.metadata_export_settings.remove(&id),
             audio_queue: self.audio_queues.remove(&id),
             playback_volume: self.playback_volumes.remove(&id),
@@ -396,6 +398,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(options) = transfer.audio_options {
             self.audio_export_settings.insert(id, options);
+        }
+        if let Some(choice) = transfer.audio_tracks {
+            self.audio_export_tracks.insert(id, choice);
         }
         if let Some(options) = transfer.metadata_options {
             self.metadata_export_settings.insert(id, options);

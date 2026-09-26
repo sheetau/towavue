@@ -21,6 +21,7 @@ pub(super) struct Plan {
     correction: f64,
     peak_margin: f64,
     sample_rate: i32,
+    pub(super) output_track: Option<usize>,
 }
 
 impl Plan {
@@ -44,6 +45,7 @@ impl Plan {
             correction: 0.0,
             peak_margin: 0.1,
             sample_rate,
+            output_track: None,
         })
     }
 
@@ -99,7 +101,15 @@ impl Plan {
             operations: Vec::new(),
             hardware_encode: false,
         };
-        let streams = ExportStreams::probe(&request)?;
+        let mut streams = ExportStreams::probe(&request)?;
+        if let Some(ordinal) = self.output_track {
+            let tracks = super::audio_tracks::probe(&request.source)?;
+            let track = tracks
+                .get(ordinal)
+                .ok_or(ExportError::Message(Text::ExportAudioTrackUnavailable))?;
+            streams.audio = Some(track.stream);
+            streams.audio_channels = Some(track.channels);
+        }
         let output = measure(
             self.target,
             &request,

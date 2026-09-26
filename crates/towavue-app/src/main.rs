@@ -1134,6 +1134,7 @@ struct Application<N> {
     audio_export_dialog: Option<audio_export::AudioExportDialog>,
     audio_export_generation: u64,
     audio_export_settings: BTreeMap<TabId, AudioExportOptions>,
+    audio_export_tracks: BTreeMap<TabId, audio_export::TrackChoice>,
     metadata_dialog: Option<metadata_export::MetadataDialog>,
     metadata_generation: u64,
     metadata_export_settings: BTreeMap<TabId, MetadataExportOptions>,
@@ -1437,6 +1438,7 @@ where
             audio_export_dialog: None,
             audio_export_generation: 0,
             audio_export_settings: BTreeMap::new(),
+            audio_export_tracks: BTreeMap::new(),
             metadata_dialog: None,
             metadata_generation: 0,
             metadata_export_settings: BTreeMap::new(),
@@ -9354,6 +9356,7 @@ where
                     .get(&id)
                     .map_or_else(Vec::new, |history| history.operations().to_vec()),
                 options: ExportOptions {
+                    audio_tracks: self.audio_retention_for(id, &source),
                     output,
                     audio: self
                         .audio_export_settings
@@ -9424,6 +9427,7 @@ where
         };
         let notify = Arc::clone(&self.notify);
         let options = ExportOptions {
+            audio_tracks: self.audio_retention_for(id, &request.source),
             output,
             video_quality: self.effective_video_export_quality(kind, output),
             audio: self
@@ -10188,6 +10192,7 @@ where
         }
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
+        self.audio_export_tracks.remove(&id);
         self.metadata_export_settings.remove(&id);
         if self.tabs.tabs().is_empty()
             || (removed.target.media_kind() == MediaKind::Image
@@ -10572,6 +10577,7 @@ where
             }
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
+            self.audio_export_tracks.remove(&id);
             self.metadata_export_settings.remove(&id);
         }
         self.load_path_inner(path, kind, false, handoff);

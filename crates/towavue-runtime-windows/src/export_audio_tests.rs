@@ -67,13 +67,17 @@ pub(super) fn fixture(path: &Path) {
 }
 
 pub(super) fn pcm(path: &Path) -> Vec<u8> {
+    pcm_track(path, 0)
+}
+
+pub(super) fn pcm_track(path: &Path, ordinal: usize) -> Vec<u8> {
     let output = Command::new(crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg"))
         .creation_flags(CREATE_NO_WINDOW)
         .args(["-v", "error", "-i"])
         .arg(path)
         .args([
             "-map",
-            "0:a:0",
+            &format!("0:a:{ordinal}"),
             "-f",
             "f32le",
             "-c:a",
@@ -455,13 +459,28 @@ fn global_playback_equivalent_histories_export_identical_audio_and_video() {
                 hardware_encode: false,
             };
             export_media_with_output(&request, output).expect("baseline export");
-            let expected_audio = pcm(&target);
+            let ordinal = usize::from(output == ExportOutput::Media);
+            let expected_audio = pcm_track(&target, ordinal);
             assert!(expected_audio.iter().any(|value| *value != 0));
             let expected_video = (output == ExportOutput::Media).then(|| pixels(&target));
             request.target = root.join(format!("equivalent.{extension}"));
             request.operations = equivalent.clone();
             export_media_with_output(&request, output).expect("equivalent export");
-            assert_eq!(pcm(&request.target), expected_audio);
+            assert_eq!(pcm_track(&request.target, ordinal), expected_audio);
+            if output == ExportOutput::Media {
+                assert_eq!(
+                    crate::probe_audio_tracks(&request.target)
+                        .expect("all tracks")
+                        .tracks
+                        .len(),
+                    2
+                );
+                assert_eq!(
+                    pcm(&request.target),
+                    pcm(&target),
+                    "silent first track also retained"
+                );
+            }
             if let Some(expected) = expected_video {
                 assert!(!expected.is_empty());
                 assert_eq!(pixels(&request.target), expected);

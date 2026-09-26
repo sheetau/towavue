@@ -139,6 +139,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             hardware_encode: self.prefer_hardware_encode,
         };
         let options = ExportOptions {
+            audio_tracks: self.audio_retention_for(id, &source),
             output: ExportOutput::Media,
             video_quality: self.effective_video_export_quality(request.kind, ExportOutput::Media),
             audio: self
@@ -153,6 +154,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .unwrap_or_default(),
         };
         if request.operations.is_empty()
+            && options.audio_tracks == towavue_core::AudioTrackRetention::All
             && options.video_quality == towavue_runtime_windows::VideoExportQuality::High
             && options.audio == AudioExportOptions::default()
             && options.metadata.is_empty()
@@ -408,9 +410,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .insert(id, Some(saved.current_source().clone()));
             let same_quality = self.effective_video_export_quality(request.kind, options.output)
                 == options.video_quality;
+            let same_tracks = self.audio_retention_for(id, source) == options.audio_tracks;
             let history = self.edits.entry(id).or_default();
             if same_input
                 && same_quality
+                && same_tracks
                 && self
                     .audio_export_settings
                     .get(&id)

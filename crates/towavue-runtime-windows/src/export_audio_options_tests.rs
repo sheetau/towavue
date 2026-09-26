@@ -1,10 +1,14 @@
 use super::*;
-use crate::export::audio_tests::{ffmpeg, fixture, pcm, root};
+use crate::export::audio_tests::{ffmpeg, fixture, pcm_track, root};
 use std::os::windows::process::CommandExt;
 use towavue_core::{MediaTime, TimeRange, TimelineEdit};
 
 fn samples(path: &Path) -> Vec<f32> {
-    pcm(path)
+    track_samples(path, 0)
+}
+
+fn track_samples(path: &Path, ordinal: usize) -> Vec<f32> {
+    pcm_track(path, ordinal)
         .as_chunks::<4>()
         .0
         .iter()
@@ -127,7 +131,7 @@ fn ordinary_rate_counts_selected_audio_not_container_and_normalizes_bounded_outp
                 options.output = ExportOutput::AudioOnly;
             }
             export_media_with_options(&request, options).expect("short selected audio");
-            let actual = samples(&request.target);
+            let actual = track_samples(&request.target, usize::from(!audio_only));
             assert_eq!(actual.len(), 120 * 2, "480 source frames / 4x, stereo");
             assert!(
                 peak(&actual) > 0.001,
@@ -446,7 +450,7 @@ fn normalization_uses_edited_best_audio_and_matches_video_and_audio_only_without
         baseline,
         "normalization does not change video pixels/frame count"
     );
-    let video_audio = samples(&request.target);
+    let video_audio = track_samples(&request.target, 1);
     request.target = root.join("normalized.wav");
     let derivative = ExportOptions {
         output: ExportOutput::AudioOnly,

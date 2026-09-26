@@ -16,6 +16,8 @@ fn japanese_audio_options_choose_the_same_encoder_settings_and_keep_compact_acti
             kind: MediaKind::Audio,
             generation: 0,
             options: AudioExportOptions::default(),
+            tracks: None,
+            retention: AudioTrackRetention::All,
             first_frame: true,
             focused_option: None,
         };
@@ -190,6 +192,8 @@ fn compact_audio_export_arrow_focus_remains_visible_without_changing_options() {
             kind: MediaKind::Audio,
             generation: 1,
             options: AudioExportOptions::default(),
+            tracks: None,
+            retention: AudioTrackRetention::All,
             first_frame: true,
             focused_option: None,
         };

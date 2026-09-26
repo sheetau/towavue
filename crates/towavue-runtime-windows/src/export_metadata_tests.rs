@@ -17,7 +17,7 @@ fn webp_metadata_exposes_the_shared_xmp_fields_and_validation() {
         format.validate_options(&options).expect("valid date");
     }
 }
-use crate::export::audio_tests::{ffmpeg, fixture, pcm, root};
+use crate::export::audio_tests::{ffmpeg, fixture, pcm, pcm_track, root};
 use std::os::windows::process::CommandExt;
 
 fn edits(field: MetadataField, value: &str) -> MetadataExportOptions {
@@ -413,11 +413,15 @@ fn metadata_composes_with_timeline_normalization_worker_and_selected_stream_over
         ..Default::default()
     };
     export_media_with_options(&export, options.clone()).expect("normalized baseline");
-    let baseline = pcm(&export.target);
+    let baseline = [pcm_track(&export.target, 0), pcm_track(&export.target, 1)];
     options.metadata = edits(MetadataField::Title, "One edited title");
     export.target = root.join("edited.avi");
     export_media_with_options(&export, options.clone()).expect("video metadata and timeline");
-    assert_eq!(pcm(&export.target), baseline);
+    assert_eq!(
+        [pcm_track(&export.target, 0), pcm_track(&export.target, 1)],
+        baseline,
+        "metadata preserves both retained tracks"
+    );
     edits(MetadataField::Artist, "Keep this artist")
         .verify(&export.target)
         .expect("unmodified field kept");
@@ -467,7 +471,11 @@ fn metadata_composes_with_timeline_normalization_worker_and_selected_stream_over
     assert!(analyzed && encoded);
     drop(job);
     assert!(receiver.try_recv().is_err(), "one completion");
-    assert_eq!(pcm(&export.target), baseline);
+    assert_eq!(
+        pcm(&export.target),
+        baseline[1],
+        "derivative uses the preferred source track"
+    );
     options
         .metadata
         .verify(&export.target)

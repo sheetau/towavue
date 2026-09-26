@@ -154,6 +154,8 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
                 .map(|track| track.id)
                 .collect();
             assert_eq!(tracks.len(), 2);
+            let retention = towavue_core::AudioTrackRetention::Selected(vec![tracks[1]]);
+            crate::audio_export::track_tests::choose(&mut app, retention.clone());
             let mut last_generation = app.generation;
             for selection in [
                 AudioTrackSelection::Track(tracks[1]),
@@ -193,6 +195,7 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
             app.about_open = false;
             let request = app.tab_detach_request(tab).expect("transfer request");
             let transfer = app.take_tab_transfer(&request, None);
+            assert!(!app.audio_export_tracks.contains_key(&tab));
             assert!(!app.audio_preview_choices.contains_key(&tab));
             let mut destination = self::app();
             destination.ui_context = Some(fonts::test_context());
@@ -210,6 +213,7 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
             );
             destination.window = Some(destination_window);
             let moved = destination.accept_tab_transfer(transfer, 0);
+            assert_eq!(destination.audio_retention_for(moved, &self.0), retention);
             assert_eq!(
                 destination.audio_selection_for(Some(moved), &self.0),
                 AudioTrackSelection::Track(tracks[0])
@@ -241,6 +245,11 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
                 }),
             );
             assert_eq!(destination.path.as_ref(), Some(&renamed));
+            assert_eq!(destination.audio_retention_for(moved, &renamed), retention);
+            assert_eq!(
+                destination.audio_retention_for(moved, &self.0),
+                towavue_core::AudioTrackRetention::All
+            );
             assert_eq!(
                 destination.audio_selection(),
                 AudioTrackSelection::Track(tracks[0])
@@ -257,6 +266,7 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
             assert_eq!(destination.state, PlaybackState::Paused);
             assert_eq!(destination.audio_selection(), AudioTrackSelection::All);
             destination.remove_tab(moved, false);
+            assert!(!destination.audio_export_tracks.contains_key(&moved));
             assert!(!destination.audio_preview_choices.contains_key(&moved));
             event_loop.exit();
         }

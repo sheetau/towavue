@@ -130,6 +130,7 @@ fn loudness_linear_gain_preserves_wide_dynamics_and_encoded_formats_meet_targets
         correction: 0.0,
         peak_margin: 0.1,
         sample_rate: 48000,
+        output_track: None,
     };
     assert!(plan.filters().expect("normalization filters")[0].starts_with("volume="));
     let original = samples(&source);
@@ -173,6 +174,7 @@ fn loudness_peak_limiting_verifies_lossy_candidates_and_unreachable_target_is_no
         correction: 0.0,
         peak_margin: 0.1,
         sample_rate: 48000,
+        output_track: None,
     };
     assert!(
         plan.filters().expect("normalization filters")[0].starts_with("loudnorm="),
@@ -345,6 +347,19 @@ fn loudness_video_audio_only_and_source_save_share_verified_output() {
             outcome.used_hardware_encoder
         );
         let measured = measurement(&output, LoudnessTarget::default());
+        if !audio_only {
+            assert_eq!(
+                crate::probe_audio_tracks(&output)
+                    .expect("retained catalog")
+                    .tracks
+                    .len(),
+                2
+            );
+            assert!(
+                pcm(&output).iter().all(|byte| *byte == 0),
+                "silent companion remains silent"
+            );
+        }
         assert!((measured.integrated + 14.0).abs() <= 0.100001);
         assert!(measured.true_peak < -1.0);
         let probe = ExportStreams::probe(&ExportRequest {
@@ -432,6 +447,7 @@ fn loudness_dynamic_pass_uses_measured_range_above_seven_and_retries_original_in
         correction: 0.0,
         peak_margin: 0.1,
         sample_rate: 48000,
+        output_track: None,
     };
     assert!(input.range > 7.0, "{input:?}");
     let filter = &plan.filters().expect("normalization filters")[0];

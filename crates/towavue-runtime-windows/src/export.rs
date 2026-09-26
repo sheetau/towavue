@@ -30,6 +30,8 @@ mod gif_animation;
 
 #[path = "export_audio_options.rs"]
 mod audio_options;
+#[path = "export_audio_tracks.rs"]
+mod audio_tracks;
 #[path = "export_loudness.rs"]
 mod loudness;
 pub use audio_options::{AudioChannels, AudioExportOptions, AudioNormalization, LoudnessTarget};
@@ -78,6 +80,7 @@ pub struct ExportOptions {
     pub video_quality: VideoExportQuality,
     pub output: ExportOutput,
     pub audio: AudioExportOptions,
+    pub audio_tracks: towavue_core::AudioTrackRetention,
     pub metadata: MetadataExportOptions,
 }
 
@@ -320,15 +323,7 @@ pub(crate) fn export_options_cancellable(
         return Err(ExportError::Message(Text::ExportFrameSnapshotRequired));
     }
     if options.output == ExportOutput::Media {
-        return export_audio_cancellable(
-            request,
-            options.audio,
-            options.video_quality,
-            &options.metadata,
-            cancelled,
-            progress,
-            analyzing,
-        );
+        return export_configured(request, &options, cancelled, progress, analyzing);
     }
     check_cancelled(cancelled)?;
     if same_path(&request.source, &request.target) {
@@ -405,6 +400,30 @@ fn export_audio_cancellable(
     progress: &(impl Fn(Duration) + Sync),
     analyzing: &(impl Fn(Duration) + Sync),
 ) -> Result<ExportOutcome, ExportError> {
+    export_configured(
+        request,
+        &ExportOptions {
+            audio: options,
+            video_quality,
+            metadata: metadata.clone(),
+            ..Default::default()
+        },
+        cancelled,
+        progress,
+        analyzing,
+    )
+}
+
+fn export_configured(
+    request: &ExportRequest,
+    configuration: &ExportOptions,
+    cancelled: &AtomicBool,
+    progress: &(impl Fn(Duration) + Sync),
+    analyzing: &(impl Fn(Duration) + Sync),
+) -> Result<ExportOutcome, ExportError> {
+    let options = configuration.audio;
+    let video_quality = configuration.video_quality;
+    let metadata = &configuration.metadata;
     if same_path(&request.source, &request.target) {
         return Err(ExportError::SameAsSource);
     }
@@ -546,7 +565,13 @@ fn export_audio_cancellable(
     })
     .transpose()?
     .flatten();
-    let mut streams = ExportStreams::probe(request)?;
+    let retained = audio_tracks::retained(request, &configuration.audio_tracks)?;
+    let mut streams = ExportStreams::probe_with_audio(request, retained.is_none())?;
+    streams.audio_set = retained;
+    if let Some(tracks) = &streams.audio_set {
+        streams.audio = tracks.first().map(|track| track.stream);
+        streams.audio_channels = tracks.first().map(|track| track.channels);
+    }
     streams.video_encoding = video_encoding::HighDepth::probe(request)?;
     streams.video_quality = video_quality;
     streams.gif_animation = gif_animation.is_some();
@@ -589,7 +614,9 @@ fn export_audio_cancellable(
             return Err(ExportError::InvalidTimeline);
         }
     }
-    streams.audio_post_filters = options.filters(streams.audio_channels)?;
+    if streams.audio_set.is_none() {
+        streams.audio_post_filters = options.filters(streams.audio_channels)?;
+    }
     let trimmed_kind = (request.kind == MediaKind::Audio
         || state.trim_start.is_some()
         || state.trim_end.is_some()
@@ -762,7 +789,25 @@ fn export_audio_cancellable(
         streams.png_image_sequence = true;
     }
     let executable = crate::media_tools::tool_path("ffmpeg.exe").map_err(ExportError::Start)?;
-    if streams.timeline.is_none() && streams.audio.is_some() && state.rate != 1.0 {
+    let mut track_processing = audio_tracks::Processing::prepare(
+        &staged_request,
+        &mut streams,
+        options,
+        &staging,
+        &executable,
+        cancelled,
+        analyzing,
+    )?;
+    if streams.audio_set.is_some()
+        && let Some(stamp) = &source_stamp
+    {
+        stamp.verify(&request.source)?;
+    }
+    if streams.audio_set.is_none()
+        && streams.timeline.is_none()
+        && streams.audio.is_some()
+        && state.rate != 1.0
+    {
         if !(0.25..=4.0).contains(&state.rate) {
             return Err(ExportError::Message(Text::ExportInvalidAudioRate));
         }
@@ -788,7 +833,7 @@ fn export_audio_cancellable(
                 .map_err(|_| ExportError::Message(Text::ExportAudioSampleCountTooLarge))?,
         );
     }
-    if options.normalization == AudioNormalization::Peak {
+    if streams.audio_set.is_none() && options.normalization == AudioNormalization::Peak {
         let gain = audio_options::analyze(
             &staged_request,
             &streams,
@@ -804,7 +849,9 @@ fn export_audio_cancellable(
             .audio_post_filters
             .push(format!("volume={gain:.17e}:precision=double"));
     }
-    let mut loudness = if let AudioNormalization::Loudness(target) = options.normalization {
+    let mut loudness = if let AudioNormalization::Loudness(target) = options.normalization
+        && streams.audio_set.is_none()
+    {
         let plan = loudness::Plan::analyze(
             target,
             &staged_request,
@@ -838,6 +885,7 @@ fn export_audio_cancellable(
     };
     let mut attempt = 0;
     let used_hardware_encoder = loop {
+        track_processing.apply(&mut streams)?;
         streams.audio_post_filters = base_audio_filters.clone();
         if let Some(plan) = &loudness {
             streams.audio_post_filters.extend(plan.filters()?);
@@ -881,6 +929,10 @@ fn export_audio_cancellable(
         if let Some(plan) = &mut loudness
             && !plan.verify_candidate(&staging, &executable, cancelled, analyzing, attempt)?
         {
+            attempt += 1;
+            continue;
+        }
+        if !track_processing.verify(&staging, &executable, cancelled, analyzing, attempt)? {
             attempt += 1;
             continue;
         }
@@ -1194,6 +1246,8 @@ struct ExportStreams {
     audio_channels: Option<u16>,
     audio_output_samples: Option<u64>,
     audio_post_filters: Vec<String>,
+    audio_set: Option<Vec<audio_tracks::Track>>,
+    audio_alignment: Option<String>,
     metadata: MetadataExportOptions,
     duration: Option<towavue_core::MediaTime>,
     timeline: Option<towavue_core::EditTimeline>,
@@ -1231,6 +1285,10 @@ impl ExportStreams {
     }
 
     fn probe(request: &ExportRequest) -> Result<Self, ExportError> {
+        Self::probe_with_audio(request, true)
+    }
+
+    fn probe_with_audio(request: &ExportRequest, include_audio: bool) -> Result<Self, ExportError> {
         if request.kind == MediaKind::Image {
             return Ok(Self::default());
         }
@@ -1258,9 +1316,9 @@ impl ExportStreams {
                     ))
                 })
                 .transpose()?;
-            let audio = input
-                .streams()
-                .best(ffmpeg::media::Type::Audio)
+            let audio = include_audio
+                .then(|| input.streams().best(ffmpeg::media::Type::Audio))
+                .flatten()
                 .map(|stream| {
                     let decoder =
                         ffmpeg::codec::context::Context::from_parameters(stream.parameters())?
@@ -1302,6 +1360,8 @@ impl ExportStreams {
                 duration,
                 timeline: None,
                 audio_post_filters: Vec::new(),
+                audio_set: None,
+                audio_alignment: None,
                 metadata: MetadataExportOptions::default(),
             })
         };
@@ -1389,6 +1449,10 @@ fn ffmpeg_arguments(
     if request.kind == MediaKind::Audio {
         arguments.extend(["-vn".into(), "-sn".into(), "-dn".into()]);
     }
+    if streams.audio_set.is_some() {
+        audio_tracks::arguments(&mut arguments, request, hardware, streams, video_input);
+        return arguments;
+    }
     if let Some(timeline) = &streams.timeline {
         arguments.extend([
             "-copyts".into(),
@@ -1471,6 +1535,9 @@ fn ffmpeg_arguments(
                 streams.audio.map(|(_, time_base)| time_base),
                 streams.audio_output_samples,
             );
+            if let Some(alignment) = &streams.audio_alignment {
+                audio.insert(0, alignment.clone());
+            }
             audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
@@ -1482,6 +1549,9 @@ fn ffmpeg_arguments(
                 streams.audio.map(|(_, time_base)| time_base),
                 streams.audio_output_samples,
             );
+            if let Some(alignment) = &streams.audio_alignment {
+                audio.insert(0, alignment.clone());
+            }
             audio.extend(streams.audio_post_filters.iter().cloned());
             if !audio.is_empty() {
                 arguments.extend(["-af".into(), audio.join(",")]);
@@ -1534,7 +1604,14 @@ fn timeline_filters(
             let outputs = (0..count)
                 .map(|part| format!("[{prefix}s{part}]"))
                 .collect::<String>();
-            filters.push(format!("[{input}:{index}]{split}={count}{outputs}"));
+            let align = if prefix == "a"
+                && let Some(alignment) = &streams.audio_alignment
+            {
+                format!("{alignment},")
+            } else {
+                String::new()
+            };
+            filters.push(format!("[{input}:{index}]{align}{split}={count}{outputs}"));
         }
     }
     let mut inputs = String::new();

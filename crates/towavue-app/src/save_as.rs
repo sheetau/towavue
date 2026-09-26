@@ -49,6 +49,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             hardware_encode: self.prefer_hardware_encode,
         };
         let options = ExportOptions {
+            audio_tracks: self.audio_retention_for(id, &source),
             output: ExportOutput::Media,
             video_quality: self.effective_video_export_quality(kind, ExportOutput::Media),
             audio: self
@@ -235,6 +236,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(choice) = self.audio_preview_choices.get_mut(&id) {
             choice.relocate(source, target);
         }
+        if let Some(choice) = self.audio_export_tracks.get_mut(&id) {
+            choice.relocate(source, target);
+        }
         self.source_backings.insert(id, saved.retained_source());
         self.source_versions
             .insert(id, Some(saved.current_source().clone()));
@@ -242,6 +246,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.export_paths.remove(&id);
         let same_options = self.effective_video_export_quality(request.kind, options.output)
             == options.video_quality
+            && self.audio_retention_for(id, target) == options.audio_tracks
             && self
                 .audio_export_settings
                 .get(&id)

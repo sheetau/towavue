@@ -434,6 +434,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.deleted_sources.remove(&id);
         self.export_paths.remove(&id);
         self.audio_export_settings.remove(&id);
+        self.audio_export_tracks.remove(&id);
         self.metadata_export_settings.remove(&id);
         if let Some(context) = &self.ui_context {
             tab_focus::forget(context, id);

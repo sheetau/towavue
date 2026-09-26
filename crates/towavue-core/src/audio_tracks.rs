@@ -36,6 +36,15 @@ pub enum AudioTrackSelection {
     All,
 }
 
+/// Source-scoped output retention, independent of the listening selection.
+/// An empty explicit selection creates a video with no audio tracks.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum AudioTrackRetention {
+    #[default]
+    All,
+    Selected(Vec<AudioTrackId>),
+}
+
 impl AudioTrackCatalog {
     /// Cycle concrete tracks in source order; All starts at the first track.
     pub fn next_track(&self, selection: AudioTrackSelection) -> Option<AudioTrackId> {

@@ -474,6 +474,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             self.export_paths.remove(&id);
             self.audio_export_settings.remove(&id);
+            self.audio_export_tracks.remove(&id);
             self.metadata_export_settings.remove(&id);
             let instance = saved.instance;
             saved.origin = self.window_key.map(|key| (key, instance));

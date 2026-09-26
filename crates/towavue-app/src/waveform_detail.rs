@@ -699,6 +699,38 @@ impl Detail {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    /// Complete a synthetic envelope without opening media or starting a worker.
+    #[cfg(feature = "presentation-verification")]
+    pub(super) fn verification_complete_waveform(&mut self, refined: bool) -> u32 {
+        let detail = &mut self.waveform_detail;
+        let columns = detail.key.as_ref().expect("laid-out waveform key").columns;
+        detail.started = true;
+        detail.finished = true;
+        detail.held_gain = None;
+        detail.values = refined.then(|| {
+            (0..columns)
+                .map(|column| 0.1 + (column as f32 * 0.037).sin().abs() * 0.9)
+                .collect::<Vec<_>>()
+                .into()
+        });
+        columns
+    }
+
+    #[cfg(feature = "presentation-verification")]
+    pub(super) fn verification_waveform_shape(&self) -> (u32, usize) {
+        (
+            self.waveform_detail
+                .key
+                .as_ref()
+                .expect("waveform key")
+                .columns,
+            self.waveform_detail
+                .values
+                .as_deref()
+                .map_or(0, <[f32]>::len),
+        )
+    }
+
     pub(super) fn draw_waveform_activity(&self, ui: &mut egui::Ui, rect: egui::Rect) {
         let language = localization::language(ui.ctx());
         let label = if self.waveform_loading {

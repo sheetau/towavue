@@ -100,6 +100,8 @@ mod tab_transfer;
 mod taskbar;
 mod thumbnail_menu;
 mod time_selection;
+#[cfg(feature = "presentation-verification")]
+mod timeline_cpu_verification;
 mod timeline_edit;
 mod timeline_input;
 mod timeline_menu;
@@ -172,6 +174,10 @@ const KEYBOARD_SEEK_STEP: Duration = Duration::from_secs(5);
 const VIDEO_LATE_TOLERANCE: Duration = Duration::from_millis(40);
 
 fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "presentation-verification")]
+    if std::env::var_os("TOWAVUE_VERIFY_TIMELINE_CPU").is_some() {
+        return timeline_cpu_verification::run();
+    }
     #[cfg(feature = "presentation-verification")]
     if std::env::var_os("TOWAVUE_VERIFY_SEEK").is_some() {
         return window_host::verify_reference_seek();

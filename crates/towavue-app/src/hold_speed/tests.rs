@@ -113,6 +113,8 @@ fn audio_hold_preserves_history_bounds_and_the_prior_transport_state() {
 }
 
 fn run_session_trial(audio: bool, test: &str) {
+    use std::os::windows::process::CommandExt;
+
     let Some(root) = crate::tests::isolated_test_root(test) else {
         return;
     };
@@ -120,6 +122,7 @@ fn run_session_trial(audio: bool, test: &str) {
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe");
     let mut command = std::process::Command::new(ffmpeg);
+    command.creation_flags(0x0800_0000);
     command.args([
         "-v",
         "error",
@@ -439,6 +442,73 @@ fn run_session_trial(audio: bool, test: &str) {
                 app.timeline_open = false;
                 app.set_time_selection(None);
                 app.playback_selection = None;
+                let prior_view = app.image_view;
+                app.image_view.zoom = ZoomMode::Custom(8.0);
+                let start = egui::pos2(240.0, 150.0);
+                let end = egui::pos2(220.0, 140.0);
+                let pan_button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                for paused in [false, true] {
+                    app.seek_to(time(400));
+                    if (app.state == PlaybackState::Paused) != paused {
+                        app.toggle_pause();
+                    }
+                    let state = app.state;
+                    let edits = app.edits[&tab].clone();
+                    app.image_view.pan = (0.0, 0.0);
+                    ui_time += 1.0;
+                    body_frame(
+                        &mut app,
+                        &context,
+                        ui_time,
+                        vec![egui::Event::PointerMoved(start)],
+                    );
+                    assert_eq!(
+                        body_frame(
+                            &mut app,
+                            &context,
+                            ui_time + 0.1,
+                            vec![pan_button(start, true)]
+                        )
+                        .0,
+                        egui::CursorIcon::Grabbing,
+                        "ordinary video press must preserve the pan cursor"
+                    );
+                    assert_eq!(
+                        body_frame(
+                            &mut app,
+                            &context,
+                            ui_time + 0.2,
+                            vec![egui::Event::PointerMoved(end)]
+                        )
+                        .0,
+                        egui::CursorIcon::Grabbing
+                    );
+                    assert_eq!(app.image_view.pan, (-20.0, -10.0));
+                    assert_eq!(
+                        body_frame(&mut app, &context, ui_time + 0.3, vec![]).0,
+                        egui::CursorIcon::Grabbing,
+                        "stationary held frames keep the cursor"
+                    );
+                    assert_eq!(
+                        body_frame(
+                            &mut app,
+                            &context,
+                            ui_time + 0.4,
+                            vec![pan_button(end, false)]
+                        )
+                        .0,
+                        egui::CursorIcon::PointingHand
+                    );
+                    assert!(app.view_drag.is_none());
+                    assert_eq!(app.state, state);
+                    assert_eq!(app.edits[&tab], edits);
+                }
+                app.image_view = prior_view;
                 for original in [1.0, 1.25, 2.0, 3.0] {
                     app.set_preview_rate(original);
                     for paused in [false, true] {

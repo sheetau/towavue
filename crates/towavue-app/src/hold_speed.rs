@@ -270,6 +270,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             actions.push(UiAction::Command(CommandId::TogglePause));
         }
         if self.view_input_allowed(&response.ctx)
+            && !matches!(self.view_drag, Some(ViewDrag::Pan { .. }))
             && self.session.is_some()
             && matches!(
                 self.state,

@@ -547,7 +547,7 @@ fn source_save_native_video_reopens_all_hosted_readers_on_their_retained_origina
     };
     let source = root.join("source.mp4");
     assert!(
-        std::process::Command::new(
+        crate::tests::hidden_command(
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe")
         )
         .args([

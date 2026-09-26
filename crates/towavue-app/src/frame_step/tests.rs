@@ -56,7 +56,7 @@ fn asynchronous_steps_present_actual_vfr_pts_and_reject_obsolete_results() {
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg")).join("bin/ffmpeg.exe");
     assert!(
-        std::process::Command::new(ffmpeg)
+        crate::tests::hidden_command(ffmpeg)
             .args([
                 "-v",
                 "error",

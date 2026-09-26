@@ -36,7 +36,7 @@ fn video_resume_reopens_from_disk_preserves_tabs_and_rejects_delayed_delivery() 
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
     assert!(
-        std::process::Command::new(ffmpeg)
+        crate::tests::hidden_command(ffmpeg)
             .args([
                 "-v",
                 "error",

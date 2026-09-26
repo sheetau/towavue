@@ -4,7 +4,7 @@ use towavue_runtime_windows::{decode_image, export_media};
 fn fixture(path: &Path, video: bool) {
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
-    let mut command = std::process::Command::new(ffmpeg);
+    let mut command = crate::tests::hidden_command(ffmpeg);
     command.args([
         "-v",
         "error",

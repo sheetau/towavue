@@ -544,7 +544,7 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
         .as_ref()
         .expect("fixture")
         .with_file_name("transfer-silence.wav");
-    let output = std::process::Command::new("ffmpeg.exe")
+    let output = crate::tests::hidden_command("ffmpeg.exe")
         .args([
             "-v",
             "error",
@@ -650,7 +650,7 @@ fn exercise_audio(host: &mut WindowHost, event_loop: &ActiveEventLoop, destinati
 
 fn exercise_unopened(host: &mut WindowHost, event_loop: &ActiveEventLoop, video: &Path) {
     let image = video.with_file_name("unopened-transfer.png");
-    let output = std::process::Command::new("ffmpeg.exe")
+    let output = crate::tests::hidden_command("ffmpeg.exe")
         .args(["-v", "error", "-i"])
         .arg(video)
         .args(["-frames:v", "1"])

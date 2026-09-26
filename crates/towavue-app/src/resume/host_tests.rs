@@ -17,7 +17,7 @@ fn hosted_resume_process_restart_and_transfer() {
     }
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
-    let result = std::process::Command::new(ffmpeg)
+    let result = crate::tests::hidden_command(ffmpeg)
         .args([
             "-v",
             "error",
@@ -47,17 +47,18 @@ fn hosted_resume_process_restart_and_transfer() {
     // Each child creates the production WindowHost with the same isolated APPDATA.
     // The normal window close must drain its writes before the next process opens.
     for phase in 0..4 {
-        let result = std::process::Command::new(std::env::current_exe().expect("test executable"))
-            .args([
-                "--exact",
-                TEST,
-                "--ignored",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .env(PHASE, phase.to_string())
-            .output()
-            .expect("resume process");
+        let result =
+            crate::tests::hidden_command(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    TEST,
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(PHASE, phase.to_string())
+                .output()
+                .expect("resume process");
         eprint!("{}", String::from_utf8_lossy(&result.stderr));
         assert!(
             result.status.success(),

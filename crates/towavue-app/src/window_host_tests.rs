@@ -219,7 +219,7 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
         .toggle_playback_mute();
     drop(host); // Flush the latest adjustment before launching a fresh process.
     for phase in ["muted", "level"] {
-        let output = std::process::Command::new(std::env::current_exe().expect("test executable"))
+        let output = crate::tests::hidden_command(std::env::current_exe().expect("test executable"))
             .args(["--exact", "window_host::tests::new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_existing_tabs", "--nocapture"])
             .env("TOWAVUE_VOLUME_RESTART_TRIAL", phase)
             .output().expect("new process with the same isolated preferences");
@@ -591,7 +591,7 @@ fn native_host_routes_workers_and_keeps_other_windows_alive_after_close() {
     let path = root.join("silent.mp4");
     let source =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4");
-    let output = std::process::Command::new("ffmpeg.exe")
+    let output = crate::tests::hidden_command("ffmpeg.exe")
         .args(["-v", "error", "-i"])
         .arg(source)
         .args(["-map", "0:v:0", "-c", "copy", "-an"])

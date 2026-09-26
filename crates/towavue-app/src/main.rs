@@ -16401,6 +16401,17 @@ mod tests {
         static SHELL_TEST_CLEANUP: ShellTestCleanup = const { ShellTestCleanup };
     }
 
+    pub(super) fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+        use std::os::windows::process::CommandExt;
+
+        // Isolated fixtures have no console for their children to inherit.
+        // Suppress each media/helper process explicitly instead of relying on
+        // the original hidden build runner's console.
+        let mut command = std::process::Command::new(program);
+        command.creation_flags(0x0800_0000);
+        command
+    }
+
     pub(super) fn isolated_test_root(test_name: &str) -> Option<PathBuf> {
         use std::os::windows::process::CommandExt;
 
@@ -25996,7 +26007,7 @@ mod tests {
         let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
             .join("bin/ffmpeg.exe");
         assert!(
-            std::process::Command::new(ffmpeg)
+            crate::tests::hidden_command(ffmpeg)
                 .args(["-v", "error", "-stream_loop", "9", "-i"])
                 .arg(source)
                 .args(["-an", "-c:v", "copy"])
@@ -27600,7 +27611,7 @@ mod tests {
         let ffmpeg = PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("fixed FFmpeg"))
             .join("bin/ffmpeg.exe");
         assert!(
-            std::process::Command::new(ffmpeg)
+            crate::tests::hidden_command(ffmpeg)
                 .args(["-v", "error", "-i"])
                 .arg(source)
                 .args(["-an", "-c:v", "copy"])
@@ -27804,7 +27815,7 @@ mod tests {
         for rotation in [0, 90, 180, 270] {
             for mirror in [false, true] {
                 let input = root.join(format!("{rotation}-{mirror}.mp4"));
-                let mut command = std::process::Command::new(&ffmpeg);
+                let mut command = crate::tests::hidden_command(&ffmpeg);
                 command.args(["-v", "error", "-display_rotation", &rotation.to_string()]);
                 if mirror {
                     command.arg("-display_hflip");

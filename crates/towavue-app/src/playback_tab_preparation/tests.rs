@@ -21,7 +21,7 @@ fn fixtures(root: &Path) -> (PathBuf, PathBuf) {
     let audio = root.join("a.wav");
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
-    let output = std::process::Command::new(ffmpeg)
+    let output = crate::tests::hidden_command(ffmpeg)
         .args([
             "-v",
             "error",

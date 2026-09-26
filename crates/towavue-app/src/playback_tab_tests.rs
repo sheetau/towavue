@@ -444,7 +444,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_control
     if audio {
         std::fs::copy(&source, &video).expect("owned A/V copy");
         assert!(
-            std::process::Command::new(&ffmpeg)
+            crate::tests::hidden_command(&ffmpeg)
                 .args(["-v", "error", "-i"])
                 .arg(&source)
                 .args(["-vn", "-c:a", "pcm_s16le"])
@@ -455,7 +455,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_control
         );
     } else {
         assert!(
-            std::process::Command::new(&ffmpeg)
+            crate::tests::hidden_command(&ffmpeg)
                 .args(["-v", "error", "-i"])
                 .arg(&source)
                 .args(["-an", "-c:v", "copy"])
@@ -467,7 +467,7 @@ fn run_trial(root: PathBuf, audio: bool, unknown_duration: bool, preview_control
     }
     std::fs::copy(&video, root.join("second.mp4")).expect("second video");
     assert!(
-        std::process::Command::new(&ffmpeg)
+        crate::tests::hidden_command(&ffmpeg)
             .args([
                 "-v",
                 "error",

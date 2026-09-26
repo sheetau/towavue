@@ -353,7 +353,7 @@ fn save_as_native_video_adopts_destination_and_resumes_original_input() {
     };
     let source = root.join("source.mp4");
     assert!(
-        std::process::Command::new(
+        crate::tests::hidden_command(
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe")
         )
         .args([

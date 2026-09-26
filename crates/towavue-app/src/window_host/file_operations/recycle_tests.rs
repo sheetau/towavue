@@ -627,7 +627,7 @@ fn native_recycle_video_retains_hosted_readers_positions_and_recreates_edits() {
     };
     let source = root.join("source.mp4");
     assert!(
-        std::process::Command::new(
+        crate::tests::hidden_command(
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe")
         )
         .args([

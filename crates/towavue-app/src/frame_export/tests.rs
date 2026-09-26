@@ -21,7 +21,7 @@ fn current_frame_export_keeps_clicked_picture_edits_save_state_and_owner_guards(
     };
     let source = root.join("source.mkv");
     assert!(
-        std::process::Command::new(
+        crate::tests::hidden_command(
             PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe")
         )
         .args([

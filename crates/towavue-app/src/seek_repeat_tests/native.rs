@@ -65,7 +65,7 @@ fn held_video_seeks_wait_for_presented_results_without_backlog_or_discrete_input
                 continue;
             }
             let path = root.join(format!("{codec}-{audio}.mp4"));
-            let mut command = std::process::Command::new(&ffmpeg);
+            let mut command = crate::tests::hidden_command(&ffmpeg);
             command
                 .args(["-v", "error", "-stream_loop", "9", "-i"])
                 .arg(&source);

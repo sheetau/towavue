@@ -13,13 +13,15 @@ use ffmpeg::software::scaling::{self, flag::Flags};
 use ffmpeg::{ChannelLayout, Rational, Rescale, Rounding};
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
-use towavue_core::{MediaTime, TimeRange};
+use towavue_core::{AudioTrackId, MediaTime, TimeRange};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::core::Interface;
 
 use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
+mod audio_tracks;
+pub use audio_tracks::probe_audio_tracks;
 mod frame_png;
 #[cfg(test)]
 pub(crate) use frame_png::verification::with_encoder_observer;
@@ -180,6 +182,8 @@ pub enum DecodeError {
     Ffmpeg(#[from] ffmpeg::Error),
     #[error("the input has no decodable audio or video stream")]
     NoMediaStream,
+    #[error("the selected audio track is not present in this source")]
+    AudioTrackUnavailable,
     #[error("decoded frame dimensions exceed the addressable buffer size")]
     FrameTooLarge,
     #[error("the output consumer stopped accepting decoded data")]
@@ -713,6 +717,7 @@ pub(crate) fn decode_file_parallel(
     decode_file_parallel_cancellable(path, minimum_time, maximum_time, stream, &|| false, emit)
 }
 
+#[cfg(test)]
 pub(crate) fn decode_file_parallel_cancellable(
     path: &Path,
     minimum_time: MediaTime,
@@ -726,16 +731,36 @@ pub(crate) fn decode_file_parallel_cancellable(
     input.decode_software(minimum_time, maximum_time, stream, cancelled, emit)
 }
 
-/// Unit-rate listening only. Waveform/export consumers keep the exact
-/// entry points; tempo-changing playback also keeps exact decoding.
-pub(crate) fn decode_playback_audio_cancellable(
+pub(crate) fn decode_audio_track_cancellable(
     path: &Path,
+    track: Option<AudioTrackId>,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    let mut input = ParallelInput::open(path, cancelled)?;
+    let mut input = ParallelInput::open_audio_track(path, track, cancelled)?;
+    input.single_use_audio = true;
+    input.decode_software(
+        minimum_time,
+        maximum_time,
+        Some(DecodeStream::Audio),
+        cancelled,
+        emit,
+    )
+}
+
+/// Unit-rate listening only. Waveform/export consumers keep the exact
+/// entry points; tempo-changing playback also keeps exact decoding.
+pub(crate) fn decode_playback_audio_track_cancellable(
+    path: &Path,
+    track: Option<AudioTrackId>,
+    minimum_time: MediaTime,
+    maximum_time: Option<MediaTime>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+    emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    let mut input = ParallelInput::open_audio_track(path, track, cancelled)?;
     input.single_use_audio = true;
     input.decode_playback_audio(minimum_time, maximum_time, cancelled, emit)
 }
@@ -770,9 +795,32 @@ pub(crate) fn decode_audio_intervals_with_policy(
     intervals: &[TimeRange],
     policy: AudioSeekPolicy,
     cancelled: &(dyn Fn() -> bool + Sync),
+    emit: impl FnMut(AudioChunk) -> bool,
+) -> Result<DecodeSummary, DecodeError> {
+    decode_audio_track_intervals_with_policy(
+        path,
+        None,
+        minimum_time,
+        maximum_time,
+        intervals,
+        policy,
+        cancelled,
+        emit,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decode_audio_track_intervals_with_policy(
+    path: &Path,
+    track: Option<AudioTrackId>,
+    minimum_time: MediaTime,
+    maximum_time: MediaTime,
+    intervals: &[TimeRange],
+    policy: AudioSeekPolicy,
+    cancelled: &(dyn Fn() -> bool + Sync),
     mut emit: impl FnMut(AudioChunk) -> bool,
 ) -> Result<DecodeSummary, DecodeError> {
-    ParallelInput::open(path, cancelled)?.decode(
+    ParallelInput::open_audio_track(path, track, cancelled)?.decode(
         None,
         minimum_time,
         Some(maximum_time),
@@ -807,6 +855,9 @@ pub(crate) fn discard_other_streams(input: &mut format::context::Input, selected
 /// Decoders and packet queues are per run; no stream borrow escapes a run.
 pub(crate) struct ParallelInput {
     input: format::context::Input,
+    // Immutable for this input's lifetime, so scalar audio checkpoints can never
+    // be reused for a different track with the same path and packet timestamps.
+    audio_track: Option<AudioTrackId>,
     pub(crate) frame_source: Option<std::sync::Arc<crate::export::frame::FrameSource>>,
     started: bool,
     // Only fresh path wrappers set this and drop the input after their one run.
@@ -816,6 +867,17 @@ pub(crate) struct ParallelInput {
 }
 
 impl ParallelInput {
+    fn open_audio_track(
+        path: &Path,
+        track: Option<AudioTrackId>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self, DecodeError> {
+        let mut input = Self::open(path, cancelled)?;
+        audio_tracks::selected_config(&input.input, track)?;
+        input.audio_track = track;
+        Ok(input)
+    }
+
     /// Only playback video needs frame-export identity. Other decode consumers
     /// retain their existing open path and do not acquire an extra file lease.
     pub(crate) fn open_tracked_video(
@@ -841,6 +903,7 @@ impl ParallelInput {
         check_cancelled(cancelled)?;
         Ok(Self {
             input,
+            audio_track: None,
             frame_source: None,
             started: false,
             single_use_audio: false,
@@ -987,9 +1050,11 @@ impl ParallelInput {
             }
             (None, config) => config.map(ParallelVideoConfig::Software),
         };
-        let audio = (stream != Some(DecodeStream::Video))
-            .then(|| best_stream_config(input, Type::Audio))
-            .flatten();
+        let audio = if stream != Some(DecodeStream::Video) {
+            audio_tracks::selected_config(input, self.audio_track)?
+        } else {
+            None
+        };
         if video.is_none() && audio.is_none() {
             if let Some(stream) = stream
                 && best_stream_config(
@@ -1051,12 +1116,40 @@ impl ParallelInput {
                 // Include encoder priming packets before presentation time zero.
                 let origin = input_origin(input);
                 let start = origin.saturating_sub(if compressed_preroll { 250_000 } else { 0 });
-                input.seek(start, ..origin)?;
+                if video.is_none()
+                    && input
+                        .format()
+                        .name()
+                        .split(',')
+                        .any(|name| matches!(name, "mov" | "mp4" | "matroska" | "webm"))
+                    && let Some(audio) = audio
+                        .as_ref()
+                        .filter(|audio| audio.parameters.id() == codec::Id::AAC)
+                {
+                    // A default video/other-audio anchor can skip this track's
+                    // negative-time AAC priming packet on rewind. Restore the
+                    // selected audio's own index before creating its new decoder.
+                    // Keep other demuxers' bounded seek path: raw MP3, for
+                    // example, rejects the negative av_seek_frame timestamp.
+                    seek_stream_packet(
+                        input,
+                        audio.index,
+                        start.rescale(ffmpeg::rescale::TIME_BASE, audio.time_base),
+                    )?;
+                } else {
+                    input.seek(start, ..origin)?;
+                }
             }
         }
         self.started = true;
         if resume.is_none() {
-            seek_input(input, seek_target, video.is_some(), cancelled)?;
+            seek_input_with_audio_track(
+                input,
+                seek_target,
+                video.is_some(),
+                self.audio_track,
+                cancelled,
+            )?;
         }
         check_cancelled(cancelled)?;
         if (self.single_use_audio || !audio_intervals.is_empty())
@@ -1663,6 +1756,16 @@ fn seek_input(
     video: bool,
     cancelled: &(dyn Fn() -> bool + Sync),
 ) -> Result<(), DecodeError> {
+    seek_input_with_audio_track(input, target, video, None, cancelled)
+}
+
+fn seek_input_with_audio_track(
+    input: &mut format::context::Input,
+    target: MediaTime,
+    video: bool,
+    audio_track: Option<AudioTrackId>,
+    cancelled: &(dyn Fn() -> bool + Sync),
+) -> Result<(), DecodeError> {
     check_cancelled(cancelled)?;
     if target <= MediaTime::ZERO {
         return Ok(());
@@ -1686,13 +1789,21 @@ fn seek_input(
     }
     let timestamp_microseconds =
         (target.as_nanoseconds() / 1_000).saturating_add(input_origin(input));
-    let timestamp_microseconds = ogg_audio_seek_anchor(input, timestamp_microseconds);
+    let timestamp_microseconds = ogg_audio_seek_anchor(input, timestamp_microseconds, audio_track);
     input.seek(timestamp_microseconds, ..timestamp_microseconds)?;
     Ok(())
 }
 
-fn ogg_audio_seek_anchor(input: &format::context::Input, target: i64) -> i64 {
-    let Some(stream) = input.streams().best(Type::Audio).filter(|stream| {
+fn ogg_audio_seek_anchor(
+    input: &format::context::Input,
+    target: i64,
+    track: Option<AudioTrackId>,
+) -> i64 {
+    let selected = match track {
+        Some(id) => input.stream(id.index()),
+        None => input.streams().best(Type::Audio),
+    };
+    let Some(stream) = selected.filter(|stream| {
         input.format().name() == "ogg"
             && matches!(
                 stream.parameters().id(),
@@ -2000,15 +2111,35 @@ fn normalize_packet_time(packet: &mut ffmpeg::Packet, time_base: Rational, origi
     packet.set_dts(packet.dts().map(|time| time.saturating_sub(offset)));
 }
 
+#[cfg(test)]
 pub(crate) fn probe_audio_format(path: &Path) -> Result<Option<AudioFormat>, DecodeError> {
-    Ok(probe_playback_formats(path)?.0)
+    probe_audio_track_format(path, None)
+}
+
+pub(crate) fn probe_audio_track_format(
+    path: &Path,
+    track: Option<AudioTrackId>,
+) -> Result<Option<AudioFormat>, DecodeError> {
+    ffmpeg::init()?;
+    let input = format::input(path)?;
+    Ok(audio_tracks::selected_config(&input, track)?
+        .map(create_audio_pipeline_from)
+        .transpose()?
+        .map(|pipeline| pipeline.output_format))
 }
 
 /// Reuse the initial playback probe for descriptive video metadata; no second
 /// file open or render-thread probing is required to display source FPS.
 pub(crate) fn probe_playback_formats(
     path: &Path,
-) -> Result<(Option<AudioFormat>, Option<f64>), DecodeError> {
+) -> Result<
+    (
+        Option<AudioFormat>,
+        Option<f64>,
+        towavue_core::AudioTrackCatalog,
+    ),
+    DecodeError,
+> {
     ffmpeg::init()?;
     let input = format::input(path)?;
     let fps = input.streams().best(Type::Video).and_then(|stream| {
@@ -2017,6 +2148,7 @@ pub(crate) fn probe_playback_formats(
     Ok((
         create_audio_pipeline(&input)?.map(|pipeline| pipeline.output_format),
         fps,
+        audio_tracks::catalog(&input),
     ))
 }
 
@@ -2204,8 +2336,11 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
 }
 
 fn best_stream_config(input: &format::context::Input, media_type: Type) -> Option<StreamConfig> {
-    let stream = input.streams().best(media_type)?;
-    Some(StreamConfig {
+    input.streams().best(media_type).map(stream_config)
+}
+
+fn stream_config(stream: ffmpeg::Stream<'_>) -> StreamConfig {
+    StreamConfig {
         index: stream.index(),
         time_base: stream.time_base(),
         parameters: stream.parameters(),
@@ -2213,7 +2348,7 @@ fn best_stream_config(input: &format::context::Input, media_type: Type) -> Optio
             .side_data()
             .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix)
             .map(|data| data.data().to_vec()),
-    })
+    }
 }
 
 fn copy_video_frame(
@@ -2364,7 +2499,7 @@ mod tests {
                 "{}",
                 String::from_utf8_lossy(&output.stderr)
             );
-            let (audio, fps) = super::probe_playback_formats(&path).expect("probe");
+            let (audio, fps, _) = super::probe_playback_formats(&path).expect("probe");
             assert!(audio.is_none());
             assert!((fps.expect("video FPS") - expected).abs() < 0.000001);
             let mut session = crate::PlaybackSession::open_paused(

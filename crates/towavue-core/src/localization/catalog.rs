@@ -575,6 +575,7 @@ messages! {
     DecodeMissingTimestamp => ("frame stepping requires video presentation timestamps", "コマ送りには動画の表示時刻情報が必要です"),
     DecodeUnsupportedOrientation => ("video display matrix is not a supported quarter-turn or reflection", "動画の向き情報が、対応する90度単位の回転や反転ではありません"),
     DecodeNoStream => ("the input has no decodable audio or video stream", "ファイルに再生可能な音声や動画がありません"),
+    DecodeAudioTrackUnavailable => ("the selected audio track is not present in this source", "選択した音声トラックがこのファイルにありません"),
     DecodeFrameTooLarge => ("decoded frame dimensions exceed the addressable buffer size", "フレームのサイズが処理可能な上限を超えています"),
     DecodeConsumerStopped => ("the output consumer stopped accepting decoded data", "読み込んだメディアの受け取り処理が停止しました"),
     DecodeWorkerPanicked => ("a decode worker panicked", "メディアの読み込み処理が予期せず停止しました"),

@@ -112,7 +112,7 @@ pub use cancellation::Cancellation;
 pub use caption::{CaptionAction, CaptionButton, NativeCaption};
 pub use decode::{
     AudioChunk, AudioFormat, DecodeError, DecodeOutput, DecodeSummary, FrameStepCache, VideoFrame,
-    adjacent_video_frame, edited_video_frame_png, source_video_frame_png,
+    adjacent_video_frame, edited_video_frame_png, probe_audio_tracks, source_video_frame_png,
 };
 pub use dialog::{
     AboutEvent, AboutResponse, DeleteConfirmation, DialogError, FileDialogKind, PromptButtons,
@@ -168,7 +168,7 @@ pub use shell::{
     shell_workers_pending,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
-pub use waveform::timeline_waveform;
+pub use waveform::{timeline_audio_track_waveform, timeline_waveform};
 
 use std::path::Path;
 

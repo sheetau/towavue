@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod audio_queue;
+mod audio_tracks;
 mod commands;
 mod crop;
 mod edit;
@@ -22,6 +23,7 @@ use std::fmt;
 use std::time::Duration;
 
 pub use audio_queue::{AudioQueue, RepeatMode};
+pub use audio_tracks::{AudioTrack, AudioTrackCatalog, AudioTrackId, AudioTrackSelection};
 pub use commands::{
     CommandContext, CommandDefinition, CommandId, Key, KeySequence, KeyStroke, Modifiers,
     ShortcutBindings, ShortcutMatch, command_definitions,

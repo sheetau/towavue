@@ -5,10 +5,17 @@ use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 
 use thiserror::Error;
-use towavue_core::{EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange, TimeRange};
+use towavue_core::{
+    AudioTrackCatalog, AudioTrackId, EditTimeline, MediaTime, PlaybackGeneration, PlaybackRange,
+    TimeRange,
+};
 
 #[path = "playback_timeline.rs"]
 pub(crate) mod timeline;
+
+#[cfg(test)]
+#[path = "playback_audio_track_tests.rs"]
+mod audio_track_tests;
 
 #[cfg(test)]
 #[path = "retained_surface_tests.rs"]
@@ -138,6 +145,8 @@ pub struct PlaybackSession {
     graphics_device: GraphicsDevice,
     notify: Arc<dyn Fn(PlaybackEvent) + Send + Sync>,
     audio_format: Option<AudioFormat>,
+    audio_tracks: AudioTrackCatalog,
+    audio_track: Option<AudioTrackId>,
     source_video_frame_rate: Option<f64>,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
     pending_video: Option<QueuedVideoFrame>,
@@ -252,7 +261,8 @@ impl PlaybackSession {
         // Capture before probing/starting decoders, never at Save time. Viewing
         // unsupported file identities (e.g. symlinks) remains available.
         let source = crate::FileOperationSource::capture(path).ok();
-        let (audio_format, source_video_frame_rate) = decode::probe_playback_formats(path)?;
+        let (audio_format, source_video_frame_rate, audio_tracks) =
+            decode::probe_playback_formats(path)?;
         let adapter_luid = graphics_device.adapter_luid();
         let metrics = Arc::new(SharedMetrics {
             hardware_frame_count: AtomicU64::new(0),
@@ -267,6 +277,8 @@ impl PlaybackSession {
             graphics_device,
             notify: Arc::new(notify),
             audio_format,
+            audio_tracks,
+            audio_track: None,
             source_video_frame_rate,
             video_rx: None,
             pending_video: None,
@@ -370,6 +382,31 @@ impl PlaybackSession {
 
     pub fn rate(&self) -> f32 {
         self.rate
+    }
+
+    pub fn audio_tracks(&self) -> &AudioTrackCatalog {
+        &self.audio_tracks
+    }
+
+    /// None retains the source's preferred track. Explicit IDs belong to this source.
+    pub fn audio_track(&self) -> Option<AudioTrackId> {
+        self.audio_track
+    }
+
+    /// Validate before retiring the active pipeline; switching retains the edit
+    /// plan, range, rate, volume and paused state and uses the ordinary seek owner.
+    pub fn set_audio_track_at(
+        &mut self,
+        target: MediaTime,
+        track: Option<AudioTrackId>,
+    ) -> Result<PlaybackGeneration, PlaybackError> {
+        if self.audio_track == track {
+            return Ok(self.generation);
+        }
+        let format = decode::probe_audio_track_format(&self.path, track)?;
+        self.audio_track = track;
+        self.audio_format = format;
+        self.seek(target)
     }
 
     /// Change transport speed without replacing the edit plan or audition bounds.
@@ -591,6 +628,7 @@ impl PlaybackSession {
             let timeline = self.timeline.clone();
             let rate = self.rate;
             let format = self.audio_format.expect("started audio output");
+            let track = self.audio_track;
             let path = self.path.clone();
             let target = self.target;
             let end = self.range_end();
@@ -603,13 +641,15 @@ impl PlaybackSession {
                 .spawn(move || {
                     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         if let Some(plan) = timeline {
-                            timeline::decode_listening_audio(
+                            timeline::decode_audio_with_policy(
                                 &path,
+                                track,
                                 &plan,
                                 target,
                                 end,
                                 rate,
                                 format,
+                                decode::AudioSeekPolicy::Playback,
                                 &cancelled,
                                 |chunk| audio.push(chunk).is_ok(),
                             )?;
@@ -617,7 +657,7 @@ impl PlaybackSession {
                                 .finish()
                                 .map_err(|_| decode::DecodeError::ConsumerClosed)
                         } else {
-                            run_audio_decode(&path, &audio, target, end, rate, &cancelled)
+                            run_audio_decode(&path, track, &audio, target, end, rate, &cancelled)
                         }
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
@@ -1055,8 +1095,10 @@ impl Drop for PlaybackSession {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_audio_decode(
     path: &Path,
+    track: Option<AudioTrackId>,
     audio: &AudioOutputSender,
     target: MediaTime,
     end: Option<MediaTime>,
@@ -1070,16 +1112,9 @@ fn run_audio_decode(
         _ => unreachable!("audio-only decoder emitted video"),
     };
     if rate == 1.0 {
-        decode::decode_playback_audio_cancellable(path, target, end, &cancelled, emit)
+        decode::decode_playback_audio_track_cancellable(path, track, target, end, &cancelled, emit)
     } else {
-        decode::decode_file_parallel_cancellable(
-            path,
-            target,
-            end,
-            Some(DecodeStream::Audio),
-            &cancelled,
-            emit,
-        )
+        decode::decode_audio_track_cancellable(path, track, target, end, &cancelled, emit)
     }
     .map(|_| ())
 }

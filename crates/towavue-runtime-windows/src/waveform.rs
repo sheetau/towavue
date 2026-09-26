@@ -21,6 +21,20 @@ pub fn timeline_waveform(
     columns: u32,
     cancellation: &crate::Cancellation,
 ) -> Result<Vec<f32>, crate::PreviewError> {
+    timeline_audio_track_waveform(source, None, plan, rate, volume, columns, cancellation)
+}
+
+/// Exact edited envelope for a source-scoped audio track. Preview track changes
+/// must also invalidate the caller's waveform request/cache identity.
+pub fn timeline_audio_track_waveform(
+    source: &std::path::Path,
+    track: Option<towavue_core::AudioTrackId>,
+    plan: &towavue_core::EditTimeline,
+    rate: f32,
+    volume: f32,
+    columns: u32,
+    cancellation: &crate::Cancellation,
+) -> Result<Vec<f32>, crate::PreviewError> {
     use crate::{PreviewError, decode, playback::timeline as playback_timeline};
     if cancellation.is_cancelled() {
         return Err(PreviewError::Cancelled);
@@ -38,7 +52,7 @@ pub fn timeline_waveform(
     if plan.spans().is_empty() {
         return Ok(vec![0.0; columns as usize]);
     }
-    let format = decode::probe_audio_format(source)?.ok_or(PreviewError::Message(
+    let format = decode::probe_audio_track_format(source, track)?.ok_or(PreviewError::Message(
         towavue_core::localization::Text::WaveformNoAudio,
     ))?;
     let frames = crate::tempo::output_sample_boundary(
@@ -48,22 +62,38 @@ pub fn timeline_waveform(
     );
     let mut envelope = DisplayEnvelope::new(columns, frames);
     let mut invalid = false;
-    let result = playback_timeline::decode_audio(
-        source,
-        plan,
-        towavue_core::MediaTime::ZERO,
-        None,
-        rate,
-        format,
-        cancellation.flag(),
-        |chunk| {
-            if !envelope.push_stereo(&chunk.bytes, f64::from(volume)) {
-                invalid = true;
-                return false;
-            }
-            !cancellation.is_cancelled()
-        },
-    );
+    let receive = |chunk: decode::AudioChunk| {
+        if !envelope.push_stereo(&chunk.bytes, f64::from(volume)) {
+            invalid = true;
+            return false;
+        }
+        !cancellation.is_cancelled()
+    };
+    let result = if track.is_none() {
+        playback_timeline::decode_audio(
+            source,
+            plan,
+            towavue_core::MediaTime::ZERO,
+            None,
+            rate,
+            format,
+            cancellation.flag(),
+            receive,
+        )
+    } else {
+        playback_timeline::decode_audio_with_policy(
+            source,
+            track,
+            plan,
+            towavue_core::MediaTime::ZERO,
+            None,
+            rate,
+            format,
+            decode::AudioSeekPolicy::Exact,
+            cancellation.flag(),
+            receive,
+        )
+    };
     if cancellation.is_cancelled() {
         return Err(PreviewError::Cancelled);
     }

@@ -78,6 +78,9 @@ impl DecodeError {
                 .into(),
             Self::Ffmpeg(error) => formatted::ffmpeg_decode_failed(language, &error.to_string()),
             Self::NoMediaStream => Text::DecodeNoStream.in_language(language).into(),
+            Self::AudioTrackUnavailable => Text::DecodeAudioTrackUnavailable
+                .in_language(language)
+                .into(),
             Self::FrameTooLarge => Text::DecodeFrameTooLarge.in_language(language).into(),
             Self::ConsumerClosed => Text::DecodeConsumerStopped.in_language(language).into(),
             Self::HardwareUnavailable(error) => {

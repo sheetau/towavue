@@ -2,7 +2,7 @@ use crate::decode::{self, AudioChunk, AudioFormat, DecodeError};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use towavue_core::{EditTimeline, MediaTime, TimeRange};
+use towavue_core::{AudioTrackId, EditTimeline, MediaTime, TimeRange};
 
 #[derive(Clone, Copy)]
 pub(super) struct Segment {
@@ -83,6 +83,7 @@ pub(crate) fn decode_audio(
 ) -> Result<(), DecodeError> {
     decode_audio_with_policy(
         path,
+        None,
         plan,
         target,
         end,
@@ -95,6 +96,7 @@ pub(crate) fn decode_audio(
 }
 
 /// Listening only; waveform and export consumers retain `decode_audio`.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn decode_listening_audio(
     path: &Path,
@@ -108,6 +110,7 @@ pub(super) fn decode_listening_audio(
 ) -> Result<(), DecodeError> {
     decode_audio_with_policy(
         path,
+        None,
         plan,
         target,
         end,
@@ -120,8 +123,9 @@ pub(super) fn decode_listening_audio(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn decode_audio_with_policy(
+pub(crate) fn decode_audio_with_policy(
     path: &Path,
+    track: Option<AudioTrackId>,
     plan: &EditTimeline,
     target: MediaTime,
     end: Option<MediaTime>,
@@ -163,6 +167,7 @@ fn decode_audio_with_policy(
     let mut emitted = 0_u64;
     let mut index = 0;
     let mut tempo = None;
+    let mut input_end = None;
     let mut queue = VecDeque::new();
     let mut process = |chunk: Option<AudioChunk>| -> Result<bool, DecodeError> {
         while let Some(segment) = segments.get(index) {
@@ -187,12 +192,48 @@ fn decode_audio_with_policy(
                         (chunk.frames as u64 * 1_000_000_000)
                             .div_ceil(u64::from(format.sample_rate)),
                     ));
-                let (frames, _) = decode::clip_audio_bounds(
+                let (frames, first_time) = decode::clip_audio_bounds(
                     chunk,
                     segment.source_target(target),
                     Some(segment.source.end()),
                 );
                 if !frames.is_empty() {
+                    // Preserve delayed track starts and real timestamp gaps before
+                    // tempo processing. Sub-sample clipping/PTS rounding is not a
+                    // gap. Drain bounded silence blocks through the same output
+                    // path, so a late-starting track cannot allocate its whole lead-in.
+                    let expected = input_end.unwrap_or(segment.source_target(target));
+                    let gap_ns = first_time.as_nanoseconds() - expected.as_nanoseconds();
+                    let mut silence = (i128::from(gap_ns.max(0)) * i128::from(format.sample_rate)
+                        / 1_000_000_000) as u64;
+                    while silence > 0 && emitted < limit {
+                        if cancelled() {
+                            return Err(DecodeError::ConsumerClosed);
+                        }
+                        let count = silence.min(1024) as usize;
+                        tempo
+                            .as_mut()
+                            .expect("tempo")
+                            .push(&[0; 8192][..count * 8], &mut queue)?;
+                        send_audio(
+                            &mut queue,
+                            &mut emitted,
+                            limit,
+                            segment.volume,
+                            target,
+                            master_rate,
+                            format,
+                            &cancelled,
+                            &mut emit,
+                        )?;
+                        silence -= count as u64;
+                    }
+                    input_end = Some(MediaTime::from_nanoseconds(
+                        first_time.as_nanoseconds().saturating_add(
+                            (frames.len() as u64 * 1_000_000_000 / u64::from(format.sample_rate))
+                                as i64,
+                        ),
+                    ));
                     // A decoded chunk may cross several edits or a deleted span.
                     // Borrow only this segment's samples; keep the original for later spans.
                     let stride = usize::from(chunk.format.channels) * size_of::<f32>();
@@ -241,6 +282,7 @@ fn decode_audio_with_policy(
                 )?;
             }
             index += 1;
+            input_end = None;
         }
         Ok(index == segments.len())
     };
@@ -262,8 +304,8 @@ fn decode_audio_with_policy(
         }
         true
     };
-    let result = match policy {
-        decode::AudioSeekPolicy::Exact => decode::decode_audio_intervals_cancellable(
+    let result = match (track, policy) {
+        (None, decode::AudioSeekPolicy::Exact) => decode::decode_audio_intervals_cancellable(
             path,
             source_start,
             source_end,
@@ -271,8 +313,9 @@ fn decode_audio_with_policy(
             &cancelled,
             receive,
         ),
-        decode::AudioSeekPolicy::Playback => decode::decode_audio_intervals_with_policy(
+        _ => decode::decode_audio_track_intervals_with_policy(
             path,
+            track,
             source_start,
             source_end,
             &intervals,

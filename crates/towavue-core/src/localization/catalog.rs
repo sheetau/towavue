@@ -1216,6 +1216,7 @@ messages! {
     SubtitleChooseSource => ("Choose a subtitle track or load a subtitle file.", "字幕トラックを選ぶか、字幕ファイルを読み込んでください。"),
     SubtitleDelay => ("Subtitle delay", "字幕の時間シフト"),
     SubtitleDelayHelp => ("Positive values display subtitles later; negative values display them earlier.", "正の値で字幕を遅らせ、負の値で早めます。"),
+    SubtitleExportHelp => ("Embedded text subtitles are saved as plain text in MKV, MP4, MOV, WebM and 3GP. Other video formats omit subtitles. External/bitmap subtitles and display delay are preview-only.", "埋め込みのテキスト字幕はMKV／MP4／MOV／WebM／3GPに文字情報として保存します。他の動画形式には字幕を保存しません。外部字幕・画像形式の字幕・表示の時間シフトはプレビュー専用です。"),
     SubtitleVideoRequired => ("Open a video tab before loading subtitles.", "字幕を読み込むには動画タブを開いてください。"),
     SubtitlesLoading => ("Loading subtitles…", "字幕を読み込み中…"),
     DropGuideSubtitle => ("Load subtitles into this video", "この動画に字幕を読み込む"),

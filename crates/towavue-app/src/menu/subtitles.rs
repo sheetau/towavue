@@ -54,10 +54,12 @@ pub(super) fn submenu(
                                 command = Some(LoadSubtitles);
                                 ui.close();
                             }
-                            let response = ui.checkbox(
-                                &mut data.subtitle_settings.visible,
-                                text(ui.ctx(), Text::CommandToggleSubtitles),
-                            );
+                            let response = ui
+                                .checkbox(
+                                    &mut data.subtitle_settings.visible,
+                                    text(ui.ctx(), Text::CommandToggleSubtitles),
+                                )
+                                .on_hover_text(text(ui.ctx(), Text::SubtitleExportHelp));
                             items.push(response.id);
                             if response.changed() {
                                 data.subtitle_action =

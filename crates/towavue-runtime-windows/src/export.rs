@@ -34,6 +34,8 @@ mod audio_options;
 mod audio_tracks;
 #[path = "export_loudness.rs"]
 mod loudness;
+#[path = "export_subtitles.rs"]
+mod subtitles;
 pub use audio_options::{AudioChannels, AudioExportOptions, AudioNormalization, LoudnessTarget};
 
 #[path = "export_frame.rs"]
@@ -869,6 +871,10 @@ fn export_configured(
     } else {
         None
     };
+    // Sidecars are owned after staging so they are removed before its directory.
+    // Keep preparation out of audio analysis and leave video input indices intact.
+    let subtitle_files = subtitles::Prepared::prepare(request, &streams, &staging, cancelled)?;
+    streams.subtitles = subtitle_files.tracks.clone();
     let base_audio_filters = streams.audio_post_filters.clone();
     let png_input = |writer: &mut dyn Write, stopped: &AtomicBool| {
         let result = crate::image::apng::write_frames(&request.source, writer, &|| {
@@ -1251,6 +1257,8 @@ struct ExportStreams {
     metadata: MetadataExportOptions,
     duration: Option<towavue_core::MediaTime>,
     timeline: Option<towavue_core::EditTimeline>,
+    subtitles: Option<subtitles::Tracks>,
+    subtitle_sources: Vec<subtitles::Source>,
 }
 
 impl ExportStreams {
@@ -1359,6 +1367,12 @@ impl ExportStreams {
                 audio_output_samples: None,
                 duration,
                 timeline: None,
+                subtitles: None,
+                subtitle_sources: if request.kind == MediaKind::Video {
+                    subtitles::catalog(&input)
+                } else {
+                    Vec::new()
+                },
                 audio_post_filters: Vec::new(),
                 audio_set: None,
                 audio_alignment: None,
@@ -1372,6 +1386,20 @@ impl ExportStreams {
 }
 
 fn ffmpeg_arguments(
+    request: &ExportRequest,
+    hardware: bool,
+    streams: &ExportStreams,
+) -> Vec<String> {
+    let mut arguments = media_arguments(request, hardware, streams);
+    if request.kind == MediaKind::Video
+        && let Some(tracks) = &streams.subtitles
+    {
+        tracks.arguments(&mut arguments);
+    }
+    arguments
+}
+
+fn media_arguments(
     request: &ExportRequest,
     hardware: bool,
     streams: &ExportStreams,

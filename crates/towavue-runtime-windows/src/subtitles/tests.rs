@@ -271,7 +271,7 @@ fn bitmap_palette_runs_preserve_alpha_and_clear_events_close_the_active_cue() {
 /// Tiny authored PGS display sets: one 4x2 white object at (20, 40) on a
 /// 64x48 canvas, and optionally a later clear. These exercise the real SUP
 /// demuxer and PGS decoder rather than just constructing decoder output.
-fn pgs(path: &Path, clear: bool) {
+pub(crate) fn pgs(path: &Path, clear: bool) {
     fn segment(output: &mut Vec<u8>, time: u32, kind: u8, data: &[u8]) {
         output.extend_from_slice(b"PG");
         output.extend_from_slice(&(time * 90_000).to_be_bytes());
@@ -310,6 +310,34 @@ fn pgs(path: &Path, clear: bool) {
         segment(&mut output, 3, 0x80, &[]);
     }
     fs::write(path, output).expect("owned PGS fixture");
+}
+
+#[test]
+fn srt_and_vtt_character_references_are_decoded_once_and_ass_keeps_literal_entities() {
+    let root = root("entities");
+    for (extension, contents) in [
+        (
+            "srt",
+            "1\n00:00:01,000 --> 00:00:02,000\n&amp; &lt;tag&gt; &amp;lt; 日本語\n",
+        ),
+        (
+            "vtt",
+            "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n&amp; &lt;tag&gt; &amp;lt; 日本語\n",
+        ),
+    ] {
+        let path = root.join(format!("captions.{extension}"));
+        fs::write(&path, contents).expect("entity fixture");
+        let document = read(&path, None);
+        let SubtitleContent::Text(text) = document.cues()[0].content() else {
+            panic!("text")
+        };
+        assert_eq!(text, "& <tag> &lt; 日本語", "{extension}");
+    }
+    assert_eq!(
+        super::text::plain("0,0,Default,,0,0,0,,&amp;lt;", true),
+        "&amp;lt;"
+    );
+    fs::remove_dir_all(root).expect("owned readers released");
 }
 
 #[test]

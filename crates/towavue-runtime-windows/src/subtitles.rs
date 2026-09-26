@@ -13,7 +13,7 @@ mod text;
 pub use bitmap::SubtitleBitmap;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 const MAX_CUES: usize = 100_000;
 const MAX_BYTES: usize = 128 * 1024 * 1024;
@@ -93,6 +93,10 @@ pub fn read_subtitles(
             })
             .ok_or(SubtitleError::Message(Text::SubtitleTrackUnavailable))?;
         let base = stream.time_base();
+        let html_markup = matches!(
+            stream.parameters().id(),
+            ffmpeg::codec::Id::SRT | ffmpeg::codec::Id::SUBRIP
+        );
         let mut context =
             ffmpeg::codec::context::Context::from_parameters(stream.parameters())?.decoder();
         context.set_packet_time_base(base);
@@ -103,7 +107,10 @@ pub fn read_subtitles(
             0
         };
         crate::decode::discard_other_streams(&mut input, selected.index());
-        let mut builder = Builder::default();
+        let mut builder = Builder {
+            html_markup,
+            ..Default::default()
+        };
         loop {
             check()?;
             let mut packet = ffmpeg::Packet::empty();
@@ -183,6 +190,7 @@ impl Drop for Decoded {
 
 #[derive(Default)]
 struct Builder {
+    html_markup: bool,
     cues: Vec<SubtitleCue<SubtitleContent>>,
     pending_bitmap: Option<(i64, Option<i64>, Vec<SubtitleBitmap>)>,
     bytes: usize,
@@ -258,6 +266,14 @@ impl Builder {
                         return Err(SubtitleError::Message(Text::SubtitleTooLarge));
                     }
                     let text = text::plain(&value, ass);
+                    // FFmpeg translates markup to ASS but leaves HTML character
+                    // references verbatim in SubRip. Decode them once after
+                    // stripping tags. WebVTT already decodes them natively.
+                    let text = if self.html_markup {
+                        text::entities(&text)
+                    } else {
+                        text
+                    };
                     self.bytes += text.len();
                     if !text.is_empty() {
                         texts.push(text);

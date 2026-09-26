@@ -10,12 +10,20 @@ fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves
     };
     let config = root.join("config").join("towavue");
     std::fs::create_dir_all(&config).expect("owned config directory");
-    let shortcut_path = config.join("shortcuts.conf");
-    let grid_path = config.join("grid.conf");
+    // Diagnostics preserve APPDATA's spelling, including Windows short aliases.
+    // The isolated fixture root is canonicalized independently.
+    let shortcut_path = shortcuts::config_path().expect("isolated shortcuts path");
+    let grid_path = grid::config_path().expect("isolated grid path");
     let shortcut_bytes = "# Keep 日本語 {notes}\nunknown = Ctrl+O\n";
     let grid_bytes = "# Keep grid notes\nvideo = open_file\n";
     std::fs::write(&shortcut_path, shortcut_bytes).expect("invalid shortcuts");
     std::fs::write(&grid_path, grid_bytes).expect("invalid grid");
+    for path in [&shortcut_path, &grid_path] {
+        assert_eq!(
+            crate::canonical_shell_path(path).expect("canonical fixture file"),
+            config.join(path.file_name().expect("configuration filename"))
+        );
+    }
     let mut app = Application::new(None, |_| {}).expect("recoverable startup");
     assert_eq!(app.language(), Language::English);
     let english = app

@@ -58,7 +58,44 @@ pub(crate) enum PreparationPolicy {
 }
 
 mod drag;
-mod swipe;
+pub(crate) mod swipe;
+
+// Retain the transfer implementation while Gallery gestures scroll the grid.
+const GALLERY_DRAG_OUT: bool = false;
+pub(crate) const GALLERY_GAP: f32 = 32.0;
+
+pub(crate) fn gallery_side_inset(width: f32) -> f32 {
+    (GALLERY_GAP * 2.0).min(((width - 160.0) / 2.0).max(8.0))
+}
+
+fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {
+    Rect::from_center_size(cell.center(), size * (cell.width() / size.length()) * scale)
+}
+
+fn gallery_video_uv(image: &towavue_runtime_windows::PreviewImage) -> Rect {
+    // Shared video previews contain transparent padding. Exclude it only for
+    // Gallery geometry; opaque black source pixels and Filmstrip stay intact.
+    let mut bounds = Rect::NOTHING;
+    for (index, pixel) in image.rgba.as_chunks::<4>().0.iter().enumerate() {
+        if pixel[3] != 0 {
+            let point = egui::pos2(
+                (index as u32 % image.width) as f32,
+                (index as u32 / image.width) as f32,
+            );
+            bounds.extend_with(point);
+            bounds.extend_with(point + Vec2::splat(1.0));
+        }
+    }
+    if bounds.is_positive() {
+        let size = egui::vec2(image.width as f32, image.height as f32);
+        Rect::from_min_max(
+            (bounds.min.to_vec2() / size).to_pos2(),
+            (bounds.max.to_vec2() / size).to_pos2(),
+        )
+    } else {
+        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
+    }
+}
 
 #[cfg(test)]
 pub(crate) mod drag_tests;
@@ -99,6 +136,7 @@ pub struct Filmstrip {
     visible: Vec<PathBuf>,
     foreground: usize,
     previews: HashMap<PathBuf, Preview>,
+    gallery_video_uvs: HashMap<PathBuf, Rect>,
     preview_order: Vec<PathBuf>,
     gallery_viewport: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
@@ -138,6 +176,7 @@ impl Filmstrip {
             visible: Vec::new(),
             foreground: 0,
             previews: HashMap::new(),
+            gallery_video_uvs: HashMap::new(),
             preview_order: Vec::new(),
             gallery_viewport: Vec::new(),
             refreshing: Vec::new(),
@@ -289,6 +328,7 @@ impl Filmstrip {
             self.visible.clear();
         }
         self.previews.clear();
+        self.gallery_video_uvs.clear();
         self.preview_order.clear();
         self.gallery_viewport.clear();
         self.refreshing.clear();
@@ -331,6 +371,8 @@ impl Filmstrip {
             removed.remove(&item.path);
         }
         self.previews.retain(|path, _| !removed.contains(path));
+        self.gallery_video_uvs
+            .retain(|path, _| !removed.contains(path));
         if !open {
             self.pause_preparation();
             // Keep ready pixels until use permits revalidation, including textures
@@ -549,8 +591,13 @@ impl Filmstrip {
                 continue;
             }
             self.refreshing.retain(|path| path != &preview.path);
+            self.gallery_video_uvs.remove(&preview.path);
             let result = preview.result.map(|media| {
                 let image = media.image;
+                if MediaKind::from_path(&preview.path) == Some(MediaKind::Video) {
+                    self.gallery_video_uvs
+                        .insert(preview.path.clone(), gallery_video_uv(&image));
+                }
                 let texture = context.load_texture(
                     format!("filmstrip:{}", preview.path.display()),
                     crate::image_color::preview_color_image(&image),
@@ -1176,20 +1223,20 @@ impl Filmstrip {
         let mut wanted = Vec::new();
         let origin = ui.cursor().top();
         let width = ui.available_width();
-        const GAP: f32 = 2.0;
-        let mut columns = (((width + GAP) / (156.0 + GAP)).floor() as usize).max(1);
+        const GAP: f32 = GALLERY_GAP;
+        let mut columns = (((width + GAP) / (176.0 + GAP)).floor() as usize).max(1);
         // Large windows use larger cards instead of exceeding the existing
         // thumbnail working set and leaving visible cells without requests.
         while columns > 1 {
             let cell = (width - (columns - 1) as f32 * GAP) / columns as f32;
-            let rows = (ui.clip_rect().height() / (cell * 2.0 / 3.0 + GAP)).ceil() as usize + 1;
+            let rows = (ui.clip_rect().height() / (cell + GAP)).ceil() as usize + 1;
             if columns.saturating_mul(rows) <= VISIBLE_PREVIEW_LIMIT {
                 break;
             }
             columns -= 1;
         }
         let cell_width = ((width - (columns - 1) as f32 * GAP) / columns as f32).max(1.0);
-        let cell_height = cell_width * 2.0 / 3.0;
+        let cell_height = cell_width;
         let row_height = cell_height + GAP;
         let row_count = paths.len().div_ceil(columns);
         let mut focus = self
@@ -1251,8 +1298,15 @@ impl Filmstrip {
                     let mut card_ui =
                         ui.new_child(egui::UiBuilder::new().id_salt(path).max_rect(rect));
                     let ui = &mut card_ui;
-                    let response =
-                        ui.interact(rect, ui.id().with("card"), egui::Sense::click_and_drag());
+                    let response = ui.interact(
+                        rect,
+                        ui.id().with("card"),
+                        if GALLERY_DRAG_OUT {
+                            egui::Sense::click_and_drag()
+                        } else {
+                            egui::Sense::click()
+                        },
+                    );
                     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
                     response.widget_info(|| {
                         egui::WidgetInfo::labeled(
@@ -1284,29 +1338,42 @@ impl Filmstrip {
                         wanted.push((path.clone(), kind));
                     }
                     let image_rect = rect;
-                    self.recent_drag.observe_recent(&response, path, image_rect);
-                    ui.painter()
-                        .rect_filled(image_rect, 3.0, crate::chrome::BORDER);
+                    if GALLERY_DRAG_OUT {
+                        self.recent_drag.observe_recent(&response, path, image_rect);
+                    }
+                    let hover = ui.ctx().animate_bool_with_time_and_easing(
+                        response.id.with("gallery-hover"),
+                        response.hovered() || response.has_focus(),
+                        0.16,
+                        egui::emath::easing::cubic_out,
+                    );
                     match self.previews.get(path) {
                         Some(Ok((texture, duration))) => {
-                            let scale = (image_rect.size() / texture.size_vec2()).min_elem();
-                            let target = Rect::from_center_size(
-                                image_rect.center(),
-                                texture.size_vec2() * scale,
+                            let uv =
+                                self.gallery_video_uvs
+                                    .get(path)
+                                    .copied()
+                                    .unwrap_or_else(|| {
+                                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
+                                    });
+                            let target = gallery_thumbnail(
+                                image_rect,
+                                texture.size_vec2() * uv.size(),
+                                1.0 + 0.05 * hover,
                             );
                             crate::media_preview::image_rounded(
                                 ui,
                                 texture.id(),
                                 target,
-                                Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                                image_rect,
-                                egui::CornerRadius::same(3),
+                                uv,
+                                target,
+                                egui::CornerRadius::ZERO,
                                 thumbnail_tint(
                                     MediaKind::from_path(path).unwrap_or(MediaKind::Image),
                                 ),
                             );
                             if let Some(duration) = duration {
-                                draw_preview_duration(ui, image_rect, *duration, 11.0);
+                                draw_gallery_duration(ui, target, *duration);
                             }
                         }
                         Some(Err(_)) => {
@@ -1319,14 +1386,6 @@ impl Filmstrip {
                             );
                         }
                         None => {}
-                    }
-                    if response.hovered() || response.has_focus() {
-                        ui.painter().rect_stroke(
-                            image_rect,
-                            3.0,
-                            egui::Stroke::new(1.0, crate::chrome::FOREGROUND),
-                            egui::StrokeKind::Inside,
-                        );
                     }
                     crate::thumbnail_menu::show(
                         ui,
@@ -1445,6 +1504,8 @@ impl Filmstrip {
             self.preview_order.truncate(VISIBLE_PREVIEW_LIMIT);
             self.previews
                 .retain(|path, _| self.preview_order.contains(path));
+            self.gallery_video_uvs
+                .retain(|path, _| self.preview_order.contains(path));
             self.refreshing
                 .retain(|path| self.preview_order.contains(path));
             let mut index = 0;
@@ -1475,16 +1536,36 @@ fn filmstrip_label(path: &Path, deleted: bool, language: localization::Language)
 }
 
 fn draw_preview_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32) {
+    draw_duration(ui, rect, duration, font_size, false);
+}
+
+fn draw_gallery_duration(ui: &egui::Ui, rect: Rect, duration: Duration) {
+    draw_duration(ui, rect, duration, 11.0, true);
+}
+
+fn duration_background(rect: Rect, size: Vec2, gallery: bool) -> Rect {
+    let origin = rect.right_bottom() - Vec2::splat(4.0) - size;
+    Rect::from_min_size(
+        if gallery {
+            origin.max(rect.center())
+        } else {
+            origin
+        },
+        size,
+    )
+}
+
+fn draw_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32, gallery: bool) {
     let galley = ui.painter().layout_no_wrap(
         format_time(media_time(duration)),
         FontId::proportional(font_size),
         Color32::WHITE,
     );
     let padding = Vec2::new(4.0, 2.0);
-    let inset = Vec2::splat(4.0);
     let size = galley.size() + 2.0 * padding;
-    let background = Rect::from_min_size(rect.right_bottom() - inset - size, size);
-    let painter = ui.painter_at(rect);
+    let background = duration_background(rect, size, gallery);
+    // Very thin thumbnails may place the badge beyond the image, within its cell.
+    let painter = ui.painter_at(if gallery { ui.clip_rect() } else { rect });
     painter.rect_filled(background, 2.0, crate::chrome::HOVER.gamma_multiply(0.6));
     painter.galley(background.min + padding, galley, Color32::WHITE);
 }
@@ -2195,7 +2276,7 @@ mod tests {
                         egui::RawInput {
                             screen_rect: Some(Rect::from_min_size(
                                 egui::Pos2::ZERO,
-                                egui::vec2(width, 240.0),
+                                egui::vec2(width, 300.0),
                             )),
                             time: Some(time),
                             events,
@@ -2388,12 +2469,12 @@ mod tests {
         assert!(output.shapes.iter().any(
             |shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id)
         ));
-        let image_left = output
+        let image_bounds = output
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
                 egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
-                    Some(mesh.calc_bounds().left())
+                    Some(mesh.calc_bounds())
                 }
                 _ => None,
             })
@@ -2419,7 +2500,9 @@ mod tests {
             Some(paths[0].to_string_lossy().as_ref())
         );
         let bounds = node.bounds().expect("card bounds");
-        assert!((f64::from(image_left) - bounds.x0).abs() < 1.0);
+        assert!((f64::from(image_bounds.center().x) - (bounds.x0 + bounds.x1) * 0.5).abs() < 1.0);
+        assert!((f64::from(image_bounds.center().y) - (bounds.y0 + bounds.y1) * 0.5).abs() < 1.0);
+        assert!((f64::from(image_bounds.size().length()) - (bounds.x1 - bounds.x0)).abs() < 1.0);
         let position = egui::pos2((bounds.x0 + 20.0) as f32, (bounds.y0 + 20.0) as f32);
         for (step, enabled) in [true, false, true].into_iter().enumerate() {
             if step == 2 {
@@ -2620,7 +2703,9 @@ mod tests {
             .collect();
         paths.insert(0, root.join("unsupported.txt"));
         paths.push(paths[0].clone());
-        paths.extend_from_within(1..3);
+        // Keep duplicates away from the final viewport so its first supported
+        // card is distinguishable from newest-first speculative preparation.
+        paths.splice(20..20, paths[1..3].to_vec());
         let context = crate::fonts::test_context();
         let mut offset = 0.0;
         for _ in 0..3 {
@@ -2648,7 +2733,7 @@ mod tests {
             "unsupported entries are skipped"
         );
         assert!(
-            paths[90..101].contains(&strip.visible[0]),
+            paths[90..].contains(&strip.visible[0]),
             "visible bottom rows precede offscreen preparation: {:?}",
             strip.visible[0]
         );

@@ -1,10 +1,10 @@
 use crate::*;
 
 #[test]
-fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_day() {
+fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_day() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(
-        "gallery_tests::gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_day",
+        "gallery_tests::gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_day",
     ) else {
         return;
     };
@@ -64,19 +64,20 @@ fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_d
             row.sort_by(|a, b| a.1.x0.total_cmp(&b.1.x0));
             let tolerance = 1.0 / f64::from(density);
             assert!(
-                row.last().expect("row").1.x1 - first.x0 > f64::from(size.x) * 0.85,
-                "grid fills the available width at {density}x / {size:?}: {row:?}"
+                (first.x0 - (f64::from(size.x) - row.last().expect("row").1.x1)).abs() <= tolerance,
+                "grid centers against the window, ignoring the rail: {row:?}"
             );
+            assert!((first.x0 - 64.0).abs() <= tolerance);
             for pair in row.windows(2) {
                 assert!(
-                    (pair[1].1.x0 - pair[0].1.x1 - 2.0).abs() <= tolerance,
-                    "two-point horizontal gap"
+                    (pair[1].1.x0 - pair[0].1.x1 - 32.0).abs() <= tolerance,
+                    "generous horizontal gap"
                 );
             }
             for (_, rect) in &bounds {
                 assert!(
-                    ((rect.y1 - rect.y0) - (rect.x1 - rect.x0) * 2.0 / 3.0).abs() <= tolerance,
-                    "no filename row"
+                    ((rect.y1 - rect.y0) - (rect.x1 - rect.x0)).abs() <= tolerance,
+                    "square cells center thumbnails without filename rows"
                 );
             }
             let next = bounds
@@ -86,8 +87,8 @@ fn gallery_tiles_fill_the_view_without_filenames_and_status_tracks_the_visible_d
                 .expect("second row")
                 .1;
             assert!(
-                (next.y0 - first.y1 - 2.0).abs() <= tolerance,
-                "two-point vertical gap"
+                (next.y0 - first.y1 - 32.0).abs() <= tolerance,
+                "matching vertical gap"
             );
             assert!(
                 bounds
@@ -742,8 +743,10 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         let output = frame(&mut app, size, vec![]);
         assert!(app.path.is_none(), "rail navigation does not open a card");
         let selected_top = card_top(&output, "december-20.png");
+        // ScrollArea snaps to physical pixels, then egui's logical layout grid.
+        let tolerance = 1.0 / f64::from(density) + f64::from(egui::emath::GUI_ROUNDING);
         assert!(
-            (selected_top - first_row_top).abs() <= 1.0 / f64::from(density),
+            (selected_top - first_row_top).abs() <= tolerance,
             "selected month aligns its first row at {density}x: {selected_top} vs {first_row_top}"
         );
         app.pending_guard = Some(GuardedAction::Exit);
@@ -778,7 +781,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         );
         let output = frame(&mut app, size, vec![]);
         assert!(
-            (card_top(&output, "july-10.png") - first_row_top).abs() <= 1.0 / f64::from(density),
+            (card_top(&output, "july-10.png") - first_row_top).abs() <= tolerance,
             "keyboard activation uses the same month target"
         );
         let set = |value: &str| {

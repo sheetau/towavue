@@ -7,7 +7,7 @@ const MAX_ACCUMULATED_SPEED: f32 = 12_000.0;
 const REPEAT_WINDOW: f64 = 0.3;
 const DECELERATION: f32 = 4_000.0;
 
-#[derive(PartialEq)]
+#[derive(Clone, PartialEq)]
 struct Scope {
     folder: PathBuf,
     generation: u64,
@@ -16,12 +16,12 @@ struct Scope {
     density: f32,
 }
 
-#[derive(Default)]
-pub(super) struct State {
+#[derive(Clone, Default)]
+pub(crate) struct State {
     scope: Option<Scope>,
     last_frame: Option<u64>,
     blocked: bool,
-    pub(super) exclusions: Vec<Rect>,
+    pub(crate) exclusions: Vec<Rect>,
     pointer: Option<egui::Pos2>,
     coast: Option<(f64, f32, f32)>,
     carry: Option<(f64, f32)>,
@@ -41,18 +41,48 @@ impl State {
         maximum: f32,
         recenter: bool,
     ) {
-        let context = &response.ctx;
-        let frame = context.cumulative_frame_nr();
-        if self.last_frame == Some(frame) {
-            return;
-        }
         let scope = Scope {
             folder: snapshot.folder_path.clone(),
             generation: snapshot.generation,
             current: current.map(Path::to_owned),
             rect: response.rect,
-            density: context.pixels_per_point(),
+            density: response.ctx.pixels_per_point(),
         };
+        self.update_axis(response, scope, 0, offset, maximum, recenter);
+    }
+
+    pub(crate) fn update_vertical(
+        &mut self,
+        response: &egui::Response,
+        identity: egui::Id,
+        offset: &mut f32,
+        maximum: f32,
+        reset: bool,
+    ) {
+        let scope = Scope {
+            folder: PathBuf::new(),
+            generation: identity.value(),
+            current: None,
+            rect: response.rect,
+            density: response.ctx.pixels_per_point(),
+        };
+        self.update_axis(response, scope, 1, offset, maximum, reset);
+    }
+
+    fn update_axis(
+        &mut self,
+        response: &egui::Response,
+        scope: Scope,
+        axis: usize,
+        offset: &mut f32,
+        maximum: f32,
+        recenter: bool,
+    ) {
+        let context = &response.ctx;
+        let frame = context.cumulative_frame_nr();
+        if self.last_frame == Some(frame) {
+            return;
+        }
         let (pointer, events, time) =
             context.input(|input| (input.pointer.clone(), input.events.clone(), input.time));
         let interrupted = context.input(|input| {
@@ -146,10 +176,10 @@ impl State {
                     egui::Event::PointerGone => (previous, true),
                     _ => continue,
                 };
-                *offset = (*offset - (point.x - previous.x)).clamp(0.0, maximum);
+                *offset = (*offset - (point[axis] - previous[axis])).clamp(0.0, maximum);
                 previous = point;
                 if release {
-                    let velocity = self.release_speed(time, pointer.velocity().x);
+                    let velocity = self.release_speed(time, pointer.velocity()[axis]);
                     self.coast = (velocity.abs() >= MIN_SPEED).then_some((time, velocity, *offset));
                     break;
                 }

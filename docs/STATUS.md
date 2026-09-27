@@ -1,6 +1,14 @@
 # Current work and handoff
 
-Last consolidated: 2026-09-27. This is the only current-status and handoff document. Update rows in place; detailed history stays in Git. [Development](DEVELOPMENT.md) provides setup, checks, and historical lookup; [Architecture](ARCHITECTURE.md) provides accepted contracts.
+Last consolidated: 2026-09-28. This is the only current-status and handoff document. Update rows in place; detailed history stays in Git. [Development](DEVELOPMENT.md) provides setup, checks, and historical lookup; [Architecture](ARCHITECTURE.md) provides accepted contracts.
+
+## Next release: Gallery grid redesign (2026-09-28)
+
+Only the Gallery grid item from the owner's follow-up plan is implemented. Header/grid bounds are centered against the whole viewport, with 32-point cell gaps and 64-point side insets (reduced on narrow viewports). Thumbnails share a diagonal, retain their aspect and have no card background or rounded corners. Hover/focus eases to 105% around the center. Duration badges follow the thumbnail's bottom-right edge and clamp their top-left to its center for extreme aspect ratios. Gallery excludes shared video-preview transparent padding from display geometry without changing cached pixels or Filmstrip rendering. Thumbnail/whitespace drags now use the Filmstrip swipe/momentum integrator vertically; Gallery drag-out entry is disabled while its transfer code remains available.
+
+Verification: Gallery 42 passed/two opt-ins ignored; Filmstrip 46 passed/four opt-ins ignored; Welcome 11, list navigation three and thumbnail menus four passed (overlapping filters, not a unique total). The hidden D3D11 Gallery opt-in separately passes at 100/125/200%, retaining six idle/hover readbacks and checking all cards, clear cell corners, centered 105% hover and an unchanged neighboring card. Geometry controls cover square/portrait/landscape/extreme ratios and opaque-black video content; injected gestures cover thumbnail/gap/gutter scrolling, batched release, query reset and ordinary click preservation. Clippy with warnings denied and formatting pass. Evidence is under target/tmp/gallery-redesign. These are automated/offscreen and hidden-GPU checks, not physical input or desktop appearance approval.
+
+Local next-release work only: no version bump, push or release replacement. Other follow-up-plan tasks remain outside this change. Run the complete shared CI phases before a future non-documentation push as required by AGENTS.
 
 ## Next release: integrated VC prerequisite (1.0.3 or later)
 

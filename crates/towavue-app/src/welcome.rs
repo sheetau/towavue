@@ -7,6 +7,13 @@ use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
 use towavue_core::localization::formatted;
 
+#[derive(Clone, Default)]
+struct GallerySwipe {
+    gesture: crate::filmstrip::swipe::State,
+    maximum: f32,
+    projection: Option<egui::Id>,
+}
+
 pub(super) fn tab(
     ui: &mut egui::Ui,
     rect: egui::Rect,
@@ -112,9 +119,10 @@ pub fn show(
         ui.disable();
         ui.set_opacity(opacity);
     }
-    let width = (ui.available_width() - 40.0).max(0.0);
-    let gap = (ui.available_width() - width).max(0.0);
-    let left = (gap / 2.0).min((gap - 40.0).max(0.0));
+    // Center against the complete viewport, independently of the date rail.
+    let side = crate::filmstrip::gallery_side_inset(viewport.width());
+    let width = (viewport.width() - 2.0 * side).max(0.0);
+    let left = viewport.left() + side - inset.left();
     let mut chosen = None;
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
         ui.cursor().min + egui::vec2(left, 0.0),
@@ -169,6 +177,35 @@ pub fn show(
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
     ui.visuals_mut().widgets.active.fg_stroke.color = color;
     let body = ui.available_rect_before_wrap();
+    let rail = egui::Rect::from_min_max(
+        egui::pos2(body.right() - 32.0, inset.top()),
+        egui::pos2(body.right(), inset.bottom()),
+    );
+    let swipe_id = ui.make_persistent_id("gallery-swipe");
+    let mut swipe = ui.data_mut(|data| data.get_temp::<GallerySwipe>(swipe_id).unwrap_or_default());
+    swipe.gesture.exclusions = vec![rail];
+    let background = ui.interact(
+        egui::Rect::from_min_max(egui::pos2(viewport.left(), body.top()), viewport.max),
+        swipe_id,
+        egui::Sense::drag(),
+    );
+    let scroll_id = ui.make_persistent_id("welcome");
+    let mut offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
+        .unwrap_or_default()
+        .offset
+        .y;
+    let previous_offset = offset;
+    let projection = swipe_id.with((query.as_str(), *filter, paths.len()));
+    let reset =
+        search_changed || previous_filter != *filter || swipe.projection != Some(projection);
+    swipe.projection = Some(projection);
+    swipe.gesture.update_vertical(
+        &background,
+        projection,
+        &mut offset,
+        swipe.maximum,
+        reset || egui::Popup::is_any_open(ui.ctx()),
+    );
     let gutter_scroll = if ui.is_enabled()
         && ui
             .input(|input| input.pointer.hover_pos())
@@ -186,12 +223,19 @@ pub fn show(
     let mut scroll = egui::ScrollArea::vertical()
         .content_margin(egui::Margin::ZERO)
         .id_salt("welcome")
+        .scroll_source(egui::scroll_area::ScrollSource {
+            drag: egui::scroll_area::DragScroll::Never,
+            ..Default::default()
+        })
         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
         .auto_shrink([false, false]);
+    if offset != previous_offset {
+        scroll = scroll.vertical_scroll_offset(offset);
+    }
     if let Some(offset) = keyboard_offset {
         scroll = scroll.vertical_scroll_offset(offset);
     }
-    if search_changed || previous_filter != *filter {
+    if reset {
         scroll = scroll.vertical_scroll_offset(0.0);
     }
     let mut output = scroll.show_styled(ui, |ui| {
@@ -202,9 +246,13 @@ pub fn show(
                 egui::style::ScrollAnimation::none(),
             );
         }
-        ui.allocate_ui_with_layout(
-            egui::vec2(width, 0.0),
-            egui::Layout::top_down(egui::Align::Min),
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(
+                    ui.cursor().min + egui::vec2(left, 0.0),
+                    egui::vec2(width, 0.0),
+                ))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
             |ui| {
                 // Keep scrolling cards below the fixed header without introducing
                 // a horizontal row's vertical centering offset.
@@ -225,10 +273,8 @@ pub fn show(
         )
         .inner
     });
-    let rail = egui::Rect::from_min_max(
-        egui::pos2(body.right() - 32.0, inset.top()),
-        egui::pos2(body.right(), inset.bottom()),
-    );
+    swipe.maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
+    ui.data_mut(|data| data.insert_temp(swipe_id, swipe));
     crate::gallery_rail::show(ui, &mut output, rail);
     chosen
 }

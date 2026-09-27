@@ -51,7 +51,7 @@ cargo test --workspace --all-targets
 cargo build -p towavue-app --release
 ```
 
-CI uses [test-ci.ps1](../scripts/test-ci.ps1) so hosted and local gates share commands. Before pushing CI/fixture fixes or preparing a release, run all three phases from the repository root:
+CI uses [test-ci.ps1](../scripts/test-ci.ps1) so hosted and local gates share commands. Before every code/script/workflow push or release, run all three phases from the repository root and fix failures locally before pushing. Development-time checks can remain scoped; documentation-only pushes use content/link/diff review:
 
 ```powershell
 .\scripts\test-ci.ps1 -Phase Rust

@@ -27,4 +27,5 @@ towavue is a Windows media viewer/player in Rust.
 - Change ARCHITECTURE only when a durable contract changes; DEVELOPMENT only when instructions change; README only when the product description changes. Do not copy a checkpoint into multiple documents.
 - Use English for code, comments, diagnostics, tests, commits, this file, README, and handoff notes. Owner-facing planning/design may use Japanese.
 - Keep generated media, build output, caches, local FFmpeg, and `concepts/` untracked. Never commit secrets, machine-specific paths, or redistributable binaries without a distribution decision.
+- Before every non-documentation push, run all `scripts/test-ci.ps1` phases locally and fix failures before pushing. Then verify CI on that exact commit; documentation-only pushes use the lighter checks above.
 - Inspect the worktree before staging and after pushing. Commit coherent verified work; push when requested. Do not force-push, rewrite history, or discard unrelated changes.

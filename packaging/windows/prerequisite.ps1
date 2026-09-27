@@ -13,12 +13,12 @@ try {
     if ($state.state -ne 'required') { exit 20 }
     if ($Mode -eq 'Inspect') { exit 10 }
 
-    # Only the installer's explicit confirmation reaches this branch. The original
-    # interactive Microsoft UI owns consent; no passive/quiet mode or forced restart.
-    $process = Start-Process -FilePath $PackagePath -ArgumentList @('/install','/norestart') -Verb RunAs -WindowStyle Normal -WorkingDirectory $PSScriptRoot -PassThru
+    # Setup owns progress and error UI; only Windows owns the elevation prompt.
+    # The verified original package runs quietly and never restarts Windows.
+    $process = Start-Process -FilePath $PackagePath -ArgumentList @('/install','/quiet','/norestart') -Verb RunAs -WindowStyle Hidden -WorkingDirectory $PSScriptRoot -PassThru
     # Cache the process handle before it exits so Windows PowerShell retains ExitCode.
     [void]$process.Handle
-    Write-Output "VC package PID $($process.Id), start UTC $($process.StartTime.ToUniversalTime().ToString('o')). Waiting for its original UI."
+    Write-Output "VC package PID $($process.Id), start UTC $($process.StartTime.ToUniversalTime().ToString('o')). Installing quietly; Setup is waiting for completion."
     $process.WaitForExit()
     $code = $process.ExitCode
     Write-Output "VC package exit code: $code"

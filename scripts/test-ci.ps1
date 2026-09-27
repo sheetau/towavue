@@ -93,7 +93,7 @@ switch ($Phase) {
         Invoke-Script 'test-setup-fixture' ('-NsisArchive "' + $NsisArchive + '"')
         Invoke-Script 'test-setup-update-lifecycle' ('-NsisArchive "' + $NsisArchive + '"')
         Invoke-Script 'test-candidate-material-archive'
-        Invoke-Script 'test-setup-prerequisite'
+        Invoke-Script 'test-setup-prerequisite' ('-NsisArchive "' + $NsisArchive + '"')
         Invoke-Script 'test-setup-registration'
         Invoke-Script 'test-setup-update-plan'
         Invoke-Script 'test-setup-update-transaction'

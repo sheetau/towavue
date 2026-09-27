@@ -32,8 +32,8 @@
     "key": "SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64",
     "fields": ["Installed", "Version", "Major", "Minor", "Bld", "Rbld"]
   },
-  "planned_install_arguments": ["/install", "/norestart"],
-  "planned_ui": "Use the original package UI so the user can review and accept Microsoft's terms. Do not silently accept terms or force a restart.",
+  "planned_install_arguments": ["/install", "/quiet", "/norestart"],
+  "planned_ui": "For 1.0.3 and later, Setup presents component information and owns progress/errors. Run the unchanged package quietly with UAC elevation only when needed; never force a restart.",
   "community_license": {
     "landing_url": "https://visualstudio.microsoft.com/license-terms/vs2026-ga-community/",
     "document_url": "https://visualstudio.microsoft.com/wp-content/uploads/2025/10/Visual_Studio_2026-License-Community_ENU.docx",

@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$NsisArchive)
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
@@ -37,8 +37,8 @@ $global:FixtureCase = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'case.js
 function global:Start-Process {
     param($FilePath,$ArgumentList,$Verb,$WindowStyle,$WorkingDirectory,[switch]$PassThru)
     if ($FilePath -ne (Join-Path $global:FixtureRoot 'does-not-exist.exe') -or
-        ($ArgumentList -join ' ') -ne '/install /norestart' -or $Verb -ne 'RunAs' -or
-        $WindowStyle -ne 'Normal' -or $WorkingDirectory -ne $global:FixtureRoot -or -not $PassThru) { throw 'Unexpected native launch contract.' }
+        ($ArgumentList -join ' ') -ne '/install /quiet /norestart' -or $Verb -ne 'RunAs' -or
+        $WindowStyle -ne 'Hidden' -or $WorkingDirectory -ne $global:FixtureRoot -or -not $PassThru) { throw 'Unexpected native launch contract.' }
     [IO.File]::WriteAllText((Join-Path $global:FixtureRoot 'started.txt'),'mock only')
     if ($global:FixtureCase.launch_error) { throw 'Simulated UAC cancellation.' }
     $process = [pscustomobject]@{Id=123;StartTime=[datetime]'2000-01-01T00:00:00Z';ExitCode=[int]$global:FixtureCase.native}
@@ -70,4 +70,7 @@ foreach ($case in $cases) {
     if ((Get-FileHash -LiteralPath $copy).Hash -ne $wrapperHash) { throw 'Test mutated the production wrapper copy.' }
 }
 if ((Get-FileHash -LiteralPath $wrapper).Hash -ne $wrapperHash) { throw 'Original prerequisite wrapper changed.' }
-Write-Output "PASS: $($cases.Count) synthetic prerequisite UI/return/postcheck cases. No actual redistributable was executed. Evidence: $trialRoot"
+Write-Output "PASS: $($cases.Count) synthetic prerequisite quiet-launch/return/postcheck cases. No actual redistributable was executed. Evidence: $trialRoot"
+
+if ($NsisArchive) { & (Join-Path $PSScriptRoot 'test-setup-prerequisite-flow.ps1') -NsisArchive $NsisArchive }
+else { Write-Output 'SKIP: native Setup prerequisite flow requires -NsisArchive.' }

@@ -2,6 +2,14 @@
 
 Last consolidated: 2026-09-27. This is the only current-status and handoff document. Update rows in place; detailed history stays in Git. [Development](DEVELOPMENT.md) provides setup, checks, and historical lookup; [Architecture](ARCHITECTURE.md) provides accepted contracts.
 
+## Next release: integrated VC prerequisite (1.0.3 or later)
+
+The owner authorized Setup plus UAC as the complete prerequisite flow. The verified Microsoft package now runs with /install /quiet /norestart and elevation only when needed. Setup identifies the component/terms, reports installation in its own details, and handles errors/reboot-required completion without a separate Microsoft installer or prerequisite confirmation dialog. Automatic updates share this path. Existing satisfied/unknown-state checks, post-install verification, failure-before-publication, 3010 propagation, launch suppression on reboot and shared-runtime preservation remain. See [VC integration](VC_REDIST.md#setup-integration-103-onward) for the contract.
+
+Verification: vc-quiet-prerequisite1 passes all 16 wrapper cases and seven native NSIS flows; vc-quiet-flow2 confirms the native flow with compiler configuration disabled. vc-quiet-installer1 passes the complete shared Installer phase, including interruption/rollback and the new native prerequisite cases. vc-quiet-production1 passes the actual production NSIS update branch with private generated payloads and a satisfied prerequisite fixture. vc-quiet-package1 passes 26 state controls and read-only verification of the pinned Microsoft package. No actual VC installation, UAC interaction, clean-machine or visible progress-page check was performed; the host's shared runtime is untouched.
+
+This is a local next-release change, not pushed or released. No Rust application code or version was changed, and the existing v1.0.2 tag/draft/assets were not replaced. Before a future non-documentation push, run all shared CI phases as required by AGENTS; current verification is scoped to the installer changes. Update the release version during the next release preparation.
+
 ## v1.0.2 draft complete (2026-09-27)
 
 [GitHub draft](https://github.com/sheetau/towavue/releases/tag/untagged-d7defd9ef6293fd453fa), release ID 397444568, is uploaded and verified but **not published**. Tag v1.0.2 points to c15235b1ee844e17f7fba6e2d3ae2044790faa3f. [CI 36281119347](https://github.com/sheetau/towavue/actions/runs/36281119347) passes all three jobs on that exact commit: Rust checks, Installer fixture lifecycle, and Notices and prerequisite policy. The owner's product-preview PNG is committed. About/update UI use CARGO_PKG_VERSION 1.0.2, and the exact packaged EXE has FileVersion/ProductVersion 1.0.2. The draft body matches the committed Added/Changed/Fixed notes and short Install and update introduction. Published latest remains v1.0.1.

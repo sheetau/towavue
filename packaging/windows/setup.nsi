@@ -57,9 +57,9 @@ Var CompletionText
 !define MUI_FINISHPAGE_TEXT "$CompletionText"
 !define MUI_WELCOMEPAGE_TITLE "${APPLICATION_LABEL} Setup"
 !ifdef TOWAVUE_SETUP_RELEASE
-!define MUI_WELCOMEPAGE_TEXT "Install towavue for the current user on Windows 11 x64.$\r$\n$\r$\nChoose an empty folder or this user's registered production installation to update. Close towavue before continuing. Evaluation installations are separate.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. Licenses and matching source links are installed with the app. Setup will not restart Windows."
+!define MUI_WELCOMEPAGE_TEXT "Install towavue for the current user on Windows 11 x64.$\r$\n$\r$\nChoose an empty folder or this user's registered production installation to update. Close towavue before continuing. Evaluation installations are separate.$\r$\n$\r$\nSetup installs the Microsoft Visual C++ runtime if needed, with administrator approval. Microsoft license terms apply. Licenses and matching source links are installed with the app. Setup will not restart Windows."
 !else
-!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nChoose an empty folder or this user's registered installation to update. Interrupted updates must be restored first. Close towavue and any uninstallers before continuing.$\r$\n$\r$\nIf required, the original Microsoft Visual C++ installer asks you to review its terms. No automatic restart or application launch follows. This is a local evaluation; source archives are supplied separately."
+!define MUI_WELCOMEPAGE_TEXT "This installs towavue and its adjacent media runtime, with a Start menu shortcut and uninstall entry for the current user.$\r$\n$\r$\nChoose an empty folder or this user's registered installation to update. Interrupted updates must be restored first. Close towavue and any uninstallers before continuing.$\r$\n$\r$\nSetup installs the Microsoft Visual C++ runtime if needed, with administrator approval. Microsoft license terms apply. No automatic restart or application launch follows. This is a local evaluation; source archives are supplied separately."
 !endif
 ; Never let the Finish page request a system restart.
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
@@ -379,7 +379,7 @@ Function .onInit
     ${IfNot} ${Errors}
     ${AndIf} $1 == "1"
       ; Unattended safety rules still apply while the native progress page is
-      ; visible. Welcome/directory/Finish and prerequisite consent are excluded.
+      ; visible. Welcome/directory/Finish are excluded; required elevation remains interactive.
       SetSilent normal
     ${EndIf}
   ${EndIf}
@@ -544,15 +544,7 @@ Function CheckPrerequisite
   Pop $0
   DetailPrint "$0"
   ${If} $PrerequisiteResult == 10
-    ${If} ${Silent}
-    ${OrIf} $AutomaticUpdate == 1
-      SetErrorLevel 3
-      Abort "Run Setup interactively to review and install the required Visual C++ runtime."
-    ${EndIf}
-    MessageBox MB_OKCANCEL|MB_ICONINFORMATION "The Microsoft Visual C++ x64 runtime is required. Open its original installer to review the terms and choose whether to install? Cancelling stops towavue Setup without installing the application." IDOK install_prerequisite
-    SetErrorLevel 2
-    Abort "Prerequisite cancelled. No application files were installed."
-    install_prerequisite:
+    DetailPrint "Installing the Microsoft Visual C++ runtime. Approve Windows administrator access if prompted, then wait for Setup to continue."
     nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\scripts\prerequisite.ps1" -Mode Install -PackagePath "$PLUGINSDIR\vc_redist.x64.exe"'
     Pop $PrerequisiteResult
     Pop $0
@@ -560,7 +552,6 @@ Function CheckPrerequisite
   ${EndIf}
   ${If} $PrerequisiteResult == 3010
     DetailPrint "The prerequisite requests a restart. Restart manually before launching towavue. Setup will not restart Windows."
-    MessageBox MB_OK|MB_ICONINFORMATION "The prerequisite requests a restart. Restart Windows manually before launching towavue. Setup will not restart Windows or launch the application." /SD IDOK
   ${ElseIf} $PrerequisiteResult != 0
     SetErrorLevel 3
     Abort "Prerequisite did not pass (checker result $PrerequisiteResult). See the details. No application files were installed."
@@ -619,7 +610,7 @@ Section "Files"
     Abort "Application registration is unavailable. No application files were installed. See details."
   ${EndIf}
   Call CheckPrerequisite
-  ; The user may spend time in the prerequisite UI. Recheck before target writes.
+  ; Prerequisite installation may take time. Recheck before target writes.
   Call CheckEmptyDirectory
   ${If} $PathError != ""
     SetErrorLevel 2

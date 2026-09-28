@@ -85,6 +85,220 @@ fn card(output: &egui::FullOutput, name: &str) -> Rect {
 }
 
 #[test]
+fn filmstrip_navigation_eases_but_reopening_and_media_handoff_snap() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_navigation_eases_but_reopening_and_media_handoff_snap",
+    ) else {
+        return;
+    };
+    let mut snapshot = snapshot(&root);
+    for index in 3..100 {
+        let mut item = snapshot.items[0].clone();
+        item.path = root.join(format!("{index}.png"));
+        snapshot.items.push(item);
+    }
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        let mut time = 0.0;
+        let mut render = |strip: &mut Filmstrip, current: usize, events, elapsed| {
+            time += elapsed;
+            let mut raw = input(events);
+            raw.time = Some(time);
+            let (output, actions) = frame(
+                strip,
+                &context,
+                &snapshot,
+                &snapshot.items[current].path,
+                true,
+                raw,
+            );
+            assert!(actions.is_empty());
+            output
+        };
+        strip.focus_current();
+        for _ in 0..3 {
+            render(&mut strip, 20, vec![], 1.0 / 60.0);
+        }
+        let initial = strip.scroll_offset;
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        render(&mut strip, 20, vec![key(egui::Key::D)], 10.0);
+        assert!(strip.scroll_offset > initial);
+        assert!(
+            strip.scroll_offset < strip.layout.center_offset(21) - 1.0,
+            "idle input still eases"
+        );
+        // Rapid repeat keeps advancing the target before the previous motion finishes.
+        render(&mut strip, 20, vec![key(egui::Key::D)], 1.0 / 60.0);
+        assert_eq!(strip.scroll_target, Some(22));
+        let mut previous = strip.scroll_offset;
+        for _ in 0..40 {
+            render(&mut strip, 20, vec![], 1.0 / 60.0);
+            assert!(strip.scroll_offset >= previous);
+            previous = strip.scroll_offset;
+        }
+        assert!((strip.scroll_offset - strip.layout.center_offset(22)).abs() < 0.1);
+        render(&mut strip, 20, vec![key(egui::Key::A)], 1.0 / 60.0);
+        strip.cancel_drag();
+        strip.focus_current();
+        let output = render(&mut strip, 20, vec![], 1.0 / 60.0);
+        assert!(
+            (card(&output, "20.png").center().x - 480.0).abs() < 0.51 / density,
+            "reopened center {:?}, offset {}, target {}",
+            card(&output, "20.png").center(),
+            strip.scroll_offset,
+            strip.layout.center_offset(20)
+        );
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(20));
+        assert!(strip.scroll_target.is_none());
+        // A media change (including native Tab) also centers before presentation.
+        let output = render(&mut strip, 50, vec![], 1.0 / 60.0);
+        assert!(
+            (card(&output, "50.png").center().x - 480.0).abs() < 0.51 / density,
+            "center {:?}, offset {}, target {}",
+            card(&output, "50.png").center(),
+            strip.scroll_offset,
+            strip.layout.center_offset(50)
+        );
+        for _ in 0..10 {
+            render(&mut strip, 50, vec![], 1.0 / 60.0);
+        }
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(50));
+        let wheel = || egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(-3.0, 0.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        };
+        render(
+            &mut strip,
+            50,
+            vec![egui::Event::PointerMoved(egui::pos2(1.0, 100.0)), wheel()],
+            1.0 / 60.0,
+        );
+        strip.cancel_drag();
+        strip.focus_current();
+        for _ in 0..20 {
+            render(&mut strip, 50, vec![], 1.0 / 60.0);
+            assert_eq!(
+                strip.scroll_offset,
+                strip.layout.center_offset(50),
+                "reopening retires the shared wheel smoothing tail"
+            );
+        }
+        render(&mut strip, 50, vec![wheel()], 1.0 / 60.0);
+        for _ in 0..20 {
+            render(&mut strip, 50, vec![], 1.0 / 60.0);
+        }
+        assert!(
+            strip.scroll_offset > strip.layout.center_offset(50) + 30.0,
+            "a fresh wheel gesture still works"
+        );
+    }
+}
+
+#[test]
+fn filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts",
+    ) else {
+        return;
+    };
+    let mut snapshot = snapshot(&root);
+    for index in 3..100 {
+        let mut item = snapshot.items[0].clone();
+        item.path = root.join(format!("{index}.png"));
+        snapshot.items.push(item);
+    }
+    for coast in [false, true] {
+        let contexts = [crate::fonts::test_context(), crate::fonts::test_context()];
+        let mut strips = [0, 1].map(|_| {
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip")
+        });
+        let mut time = 0.0;
+        let mut render = |strips: &mut [Filmstrip; 2], events: Vec<egui::Event>| {
+            time += 1.0 / 60.0;
+            for (strip, context) in strips.iter_mut().zip(&contexts) {
+                let mut raw = input(events.clone());
+                raw.time = Some(time);
+                let (_, actions) = frame(
+                    strip,
+                    context,
+                    &snapshot,
+                    &snapshot.items[20].path,
+                    true,
+                    raw,
+                );
+                assert!(actions.is_empty());
+            }
+        };
+        let origin = egui::pos2(680.0, 100.0);
+        for _ in 0..4 {
+            render(&mut strips, vec![egui::Event::PointerMoved(origin)]);
+        }
+        render(&mut strips, vec![pointer(origin, true)]);
+        for step in 1..=3 {
+            render(
+                &mut strips,
+                vec![egui::Event::PointerMoved(
+                    origin - egui::vec2(step as f32 * 40.0, 0.0),
+                )],
+            );
+        }
+        if coast {
+            render(
+                &mut strips,
+                vec![pointer(origin - egui::vec2(120.0, 0.0), false)],
+            );
+        }
+        let anchor = strips[0].layout.nearest(strips[0].scroll_offset);
+        let texture = contexts[1].load_texture(
+            "late-portrait",
+            egui::ColorImage::filled([10, 200], Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        strips[1]
+            .previews
+            .insert(snapshot.items[anchor].path.clone(), Ok((texture, None)));
+        let before = strips[0].scroll_offset;
+        for step in 4..=10 {
+            render(
+                &mut strips,
+                if coast {
+                    vec![]
+                } else {
+                    vec![egui::Event::PointerMoved(
+                        origin - egui::vec2(step as f32 * 40.0, 0.0),
+                    )]
+                },
+            );
+            let centers = strips
+                .each_ref()
+                .map(|strip| strip.layout.center_offset(anchor) - strip.scroll_offset);
+            assert!(
+                (centers[0] - centers[1]).abs() < 0.01,
+                "loading must not perturb motion: coast={coast}, centers={centers:?}"
+            );
+        }
+        assert!(
+            strips[0].scroll_offset > before + 100.0,
+            "the comparison must include ongoing motion"
+        );
+    }
+}
+
+#[test]
 fn filmstrip_folder_updates_reveal_relocated_focus_once() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip::drag_tests::filmstrip_folder_updates_reveal_relocated_focus_once",
@@ -1189,7 +1403,13 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     let opened = |actions: Vec<UiAction>, expected: &Path| {
         assert_eq!(actions.len(), 1, "activation occurs once");
         assert!(
-            matches!(&actions[0], UiAction::OpenFilmstripMedia(path, false) if path == expected)
+            matches!(&actions[0], UiAction::OpenFilmstripMedia(path, false) if path == expected),
+            "expected {}, received {:?}; density={density}, discard={discard}",
+            expected.display(),
+            match &actions[0] {
+                UiAction::OpenFilmstripMedia(path, _) => Some(path),
+                _ => None,
+            }
         );
     };
     opened(
@@ -1246,18 +1466,18 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             .focus,
         third_id
     );
-    opened(
-        frame(
-            &mut strip,
-            &context,
-            &snapshot,
-            current,
-            true,
-            input(vec![enter()]),
-        )
-        .1,
-        &snapshot.items[2].path,
+    let (activation_frame, actions) = frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![enter()]),
     );
+    opened(actions, &snapshot.items[2].path);
+    // Navigation now moves visible cards too. Hit the position actually
+    // presented in this frame, not the response retained from the prior pass.
+    let second_rect = card(&activation_frame, &name);
     opened(
         frame(
             &mut strip,
@@ -1266,7 +1486,7 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             current,
             true,
             input(vec![
-                egui::Event::PointerMoved(rect.center() + egui::vec2(1.0, 0.0)),
+                egui::Event::PointerMoved(second_rect.center() + egui::vec2(1.0, 0.0)),
                 enter(),
             ]),
         )
@@ -1328,8 +1548,19 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             egui::Pos2::ZERO,
             egui::vec2(320.0, 240.0),
         ));
-        let (output, actions) = frame(&mut strip, &context, &snapshot, current, true, raw);
+        let (mut output, actions) = frame(&mut strip, &context, &snapshot, current, true, raw);
         opened(actions, &snapshot.items[target].path);
+        // Activation is immediate; revealing a virtualized target is eased.
+        for _ in 0..40 {
+            let mut raw = input(vec![]);
+            raw.screen_rect = Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(320.0, 240.0),
+            ));
+            let (settled, actions) = frame(&mut strip, &context, &snapshot, current, true, raw);
+            assert!(actions.is_empty());
+            output = settled;
+        }
         let selected = card(&output, &display_name(&snapshot.items[target].path));
         assert!(outlines(&output).is_empty());
         assert!(selected.left() >= 8.0 && selected.right() <= 312.0);

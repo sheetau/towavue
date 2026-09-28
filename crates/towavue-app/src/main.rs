@@ -11928,6 +11928,25 @@ where
         }
     }
 
+    /// Filmstrip traversal belongs to egui even before its first card gains focus.
+    fn filmstrip_owns_key(&self, stroke: &KeyStroke) -> bool {
+        self.filmstrip_open
+            && !self.palette_open
+            && !self.grid_open
+            && !self.modal_input_blocked()
+            && !self.ui_context.as_ref().is_some_and(|context| {
+                egui::Popup::is_any_open(context) || context.text_edit_focused()
+            })
+            && !stroke.modifiers.control
+            && !stroke.modifiers.alt
+            && !stroke.modifiers.logo
+            && !stroke.modifiers.shift
+            && matches!(
+                stroke.key,
+                Key::ArrowLeft | Key::ArrowRight | Key::Character('A' | 'D' | 'a' | 'd')
+            )
+    }
+
     fn owns_tab_key(&self, stroke: &KeyStroke) -> bool {
         if stroke.key != Key::Tab
             || self.palette_open
@@ -11960,6 +11979,21 @@ where
                 .shortcuts
                 .resolve(std::slice::from_ref(stroke), context)
                 != ShortcutMatch::None
+    }
+
+    fn navigate_filmstrip_tab(&mut self, stroke: &KeyStroke) -> bool {
+        if !self.filmstrip_open
+            || stroke.key != Key::Tab
+            || stroke.modifiers.control
+            || stroke.modifiers.alt
+            || stroke.modifiers.logo
+            || !self.owns_tab_key(stroke)
+        {
+            return false;
+        }
+        self.navigate(!stroke.modifiers.shift, false);
+        self.filmstrip.focus_current();
+        true
     }
 
     fn owns_seek_shortcut(&self, stroke: &KeyStroke) -> bool {
@@ -12115,6 +12149,13 @@ where
         if event.state != ElementState::Pressed {
             return;
         }
+        // Native Tab traverses media while the strip stays open. Handle both
+        // the initial press and OS repeats before generic held-key dispatch.
+        if let Some(stroke) = self.key_stroke(event)
+            && self.navigate_filmstrip_tab(&stroke)
+        {
+            return;
+        }
         if event.repeat {
             if let Some(stroke) = self.key_stroke(event) {
                 self.repeat_media_shortcut(stroke);
@@ -12154,16 +12195,6 @@ where
             }
             return;
         }
-        if self.filmstrip_open
-            && event.logical_key == WinitKey::Named(NamedKey::Tab)
-            && !self
-                .modifiers
-                .intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
-        {
-            self.navigate(!self.modifiers.shift_key(), false);
-            self.filmstrip.focus_current();
-            return;
-        }
         let Some(stroke) = self.key_stroke(event) else {
             return;
         };
@@ -12171,6 +12202,10 @@ where
     }
 
     fn repeat_media_shortcut(&mut self, stroke: KeyStroke) {
+        if self.filmstrip_owns_key(&stroke) {
+            self.request_redraw();
+            return;
+        }
         if self.pan_image_arrow(&stroke) {
             return;
         }
@@ -12235,6 +12270,10 @@ where
     }
 
     fn process_shortcut(&mut self, stroke: KeyStroke) {
+        if self.filmstrip_owns_key(&stroke) {
+            self.request_redraw();
+            return;
+        }
         if self.keyboard_search_owns_shortcut(&stroke) {
             self.keyboard_settings.apply_search_control(&stroke);
             self.request_redraw();
@@ -13228,10 +13267,11 @@ where
         {
             self.expire_shortcut_prefix();
             if self.key_stroke(event).is_some_and(|stroke| {
-                self.owns_tab_key(&stroke)
-                    || (!is_synthetic
-                        && (self.owns_paste_shortcut(&stroke)
-                            || self.owns_focused_shortcut(&stroke)))
+                !self.filmstrip_owns_key(&stroke)
+                    && (self.owns_tab_key(&stroke)
+                        || (!is_synthetic
+                            && (self.owns_paste_shortcut(&stroke)
+                                || self.owns_focused_shortcut(&stroke))))
             }) {
                 self.process_key(event);
                 return;
@@ -13302,10 +13342,9 @@ where
                 self.rotation_modifiers_changed();
             }
             WindowEvent::KeyboardInput { event, .. } if !consumed => {
-                if self
-                    .key_stroke(&event)
-                    .is_some_and(|stroke| self.list_owns_key(&stroke))
-                {
+                if self.key_stroke(&event).is_some_and(|stroke| {
+                    self.list_owns_key(&stroke) || self.filmstrip_owns_key(&stroke)
+                }) {
                     self.request_redraw();
                 } else {
                     self.process_key(&event);
@@ -21387,6 +21426,138 @@ mod tests {
             );
         }
         assert!(!app.owns_focused_shortcut(&stroke("Enter")));
+    }
+
+    #[test]
+    fn filmstrip_direction_keys_stay_in_the_overlay_without_widget_focus() {
+        let Some(root) = isolated_test_root(
+            "tests::filmstrip_direction_keys_stay_in_the_overlay_without_widget_focus",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let path = root.join("current.png");
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.filmstrip_open = true;
+        app.ui_context = Some(fonts::test_context());
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: [
+                root.join("previous.png"),
+                path.clone(),
+                root.join("next.png"),
+            ]
+            .into_iter()
+            .map(|path| towavue_core::FolderMediaItem {
+                identity: towavue_core::ShellIdentity::new(vec![]),
+                path,
+                kind: MediaKind::Image,
+            })
+            .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        for key in ["A", "D", "Left", "Right"] {
+            let stroke: KeyStroke = key.parse().expect("direction");
+            assert!(app.filmstrip_owns_key(&stroke));
+            app.process_shortcut(stroke.clone());
+            app.repeat_media_shortcut(stroke);
+            assert_eq!(app.path.as_ref(), Some(&path));
+            assert!(
+                app.pending_guard.is_none(),
+                "direction keys must not request media navigation"
+            );
+            assert!(app.entered_shortcut.is_empty());
+        }
+        for key in ["Tab", "Shift+Tab", "Ctrl+A", "Shift+D", "Alt+Left"] {
+            assert!(!app.filmstrip_owns_key(&key.parse().expect("other key")));
+        }
+        for key in ["Tab", "Shift+Tab"] {
+            assert!(app.owns_tab_key(&key.parse().expect("media traversal")));
+        }
+        app.palette_open = true;
+        assert!(!app.filmstrip_owns_key(&"D".parse().expect("D")));
+        app.palette_open = false;
+        egui::Popup::open_id(app.ui_context.as_ref().expect("context"), "menu".into());
+        assert!(!app.filmstrip_owns_key(&"A".parse().expect("A")));
+    }
+
+    #[test]
+    fn filmstrip_tab_repeats_keep_media_navigation_and_unsaved_guards() {
+        let Some(root) = isolated_test_root(
+            "tests::filmstrip_tab_repeats_keep_media_navigation_and_unsaved_guards",
+        ) else {
+            return;
+        };
+        let paths: Vec<_> = (0..4)
+            .map(|index| root.join(format!("{index}.bmp")))
+            .collect();
+        let mut bitmap = vec![0_u8; 62];
+        bitmap[..2].copy_from_slice(b"BM");
+        bitmap[2..6].copy_from_slice(&62_u32.to_le_bytes());
+        bitmap[10..14].copy_from_slice(&54_u32.to_le_bytes());
+        bitmap[14..18].copy_from_slice(&40_u32.to_le_bytes());
+        bitmap[18..22].copy_from_slice(&2_u32.to_le_bytes());
+        bitmap[22..26].copy_from_slice(&1_u32.to_le_bytes());
+        bitmap[26..28].copy_from_slice(&1_u16.to_le_bytes());
+        bitmap[28..30].copy_from_slice(&24_u16.to_le_bytes());
+        bitmap[34..38].copy_from_slice(&8_u32.to_le_bytes());
+        for path in &paths {
+            std::fs::write(path, &bitmap).expect("owned bitmap");
+        }
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let tab = app.tabs.open_new(paths[0].clone(), MediaKind::Image);
+        app.displayed_tab = Some(tab);
+        app.path = Some(paths[0].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.filmstrip_open = true;
+        app.folder_navigation_loop = true;
+        app.folder_snapshot = Some(FolderSnapshot {
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            folder_path: root.clone(),
+            items: paths
+                .iter()
+                .map(|path| towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![]),
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: FolderSnapshotSource::LiveExplorerView,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        for (key, indices) in [("Tab", [1, 2, 3, 0]), ("Shift+Tab", [3, 2, 1, 0])] {
+            let stroke = key.parse().expect("Tab");
+            for index in indices {
+                assert!(app.navigate_filmstrip_tab(&stroke));
+                assert_eq!(app.path.as_ref(), Some(&paths[index]));
+                assert!(app.filmstrip_open);
+            }
+        }
+        app.edits
+            .entry(tab)
+            .or_default()
+            .push(EditOperation::RotateClockwise, MediaKind::Image);
+        assert!(app.navigate_filmstrip_tab(&"Tab".parse().expect("Tab")));
+        assert!(
+            matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &paths[1])
+        );
+        assert!(
+            !app.navigate_filmstrip_tab(&"Tab".parse().expect("Tab")),
+            "repeats stop at the unsaved prompt"
+        );
+        assert_eq!(app.path.as_ref(), Some(&paths[0]));
     }
 
     #[test]

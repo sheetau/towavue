@@ -33,11 +33,7 @@ impl Layout {
         );
         let reset = self.key.as_ref() != Some(&key);
         let anchor = (!reset && !self.sizes.is_empty()).then(|| {
-            let index = self
-                .starts
-                .partition_point(|x| *x <= *offset)
-                .saturating_sub(1)
-                .min(self.sizes.len() - 1);
+            let index = self.nearest(*offset);
             (index, *offset - self.center_offset(index))
         });
         if reset {
@@ -87,6 +83,25 @@ impl Layout {
             + (self.sizes.get(index).map_or(0.0, |size| size.x)
                 - self.sizes.first().map_or(0.0, |size| size.x))
                 * 0.5
+    }
+
+    pub fn nearest(&self, offset: f32) -> usize {
+        let (mut left, mut right) = (0, self.sizes.len());
+        while left < right {
+            let middle = left + (right - left) / 2;
+            if self.center_offset(middle) < offset {
+                left = middle + 1;
+            } else {
+                right = middle;
+            }
+        }
+        (left.saturating_sub(1)..=left.min(self.sizes.len().saturating_sub(1)))
+            .min_by(|a, b| {
+                (self.center_offset(*a) - offset)
+                    .abs()
+                    .total_cmp(&(self.center_offset(*b) - offset).abs())
+            })
+            .unwrap_or(0)
     }
 
     pub fn padding(&self, width: f32) -> f32 {
@@ -162,6 +177,30 @@ mod tests {
         }
         layout.prepare(&snapshot, &previews, &uvs, &mut offset);
         assert!((layout.center_offset(25_000) - offset - before).abs() < 0.5);
+        // Loading the nearest card itself must preserve its center, even when
+        // the viewport center is still to its left during ongoing scrolling.
+        offset = layout.center_offset(4) - 35.0;
+        assert_eq!(layout.nearest(offset), 4);
+        let before = layout.center_offset(4) - offset;
+        let texture = context.load_texture(
+            "late-portrait",
+            egui::ColorImage::filled([10, 200], Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        previews.insert(snapshot.items[4].path.clone(), Ok((texture, None)));
+        layout.prepare(&snapshot, &previews, &uvs, &mut offset);
+        assert!((layout.center_offset(4) - offset - before).abs() < 0.001);
+        for step in 0..400 {
+            let offset = step as f32 * 3.0;
+            let expected = (0..20)
+                .min_by(|a, b| {
+                    (layout.center_offset(*a) - offset)
+                        .abs()
+                        .total_cmp(&(layout.center_offset(*b) - offset).abs())
+                })
+                .expect("nonempty centers");
+            assert_eq!(layout.nearest(offset), expected);
+        }
         let rects: Vec<_> = (0..3)
             .map(|index| layout.rect(index, egui::Pos2::ZERO, egui::vec2(960.0, 500.0)))
             .collect();

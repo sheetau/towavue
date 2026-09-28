@@ -28,6 +28,12 @@ pub(crate) struct State {
 }
 
 impl State {
+    pub(super) fn rebase(&mut self, delta: f32) {
+        if let Some((_, _, initial)) = &mut self.coast {
+            *initial += delta;
+        }
+    }
+
     pub(super) fn clear(&mut self) {
         *self = Self::default();
     }

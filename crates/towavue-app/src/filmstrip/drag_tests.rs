@@ -240,9 +240,113 @@ fn filmstrip_navigation_eases_but_reopening_and_media_handoff_snap() {
 }
 
 #[test]
-fn filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts() {
+fn filmstrip_keyboard_motion_owns_selection_and_only_one_thumbnail_zoom() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts",
+        "filmstrip::drag_tests::filmstrip_keyboard_motion_owns_selection_and_only_one_thumbnail_zoom",
+    ) else {
+        return;
+    };
+    let mut snapshot = snapshot(&root);
+    for index in 3..100 {
+        let mut item = snapshot.items[0].clone();
+        item.path = root.join(format!("{index}.png"));
+        snapshot.items.push(item);
+    }
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        let mut time = 0.0;
+        let mut render = |strip: &mut Filmstrip, events| {
+            time += 1.0 / 60.0;
+            let mut raw = input(events);
+            raw.time = Some(time);
+            let (output, actions) = frame(
+                strip,
+                &context,
+                &snapshot,
+                &snapshot.items[20].path,
+                true,
+                raw,
+            );
+            assert!(actions.is_empty());
+            let enlarged = strip
+                .card_paths
+                .iter()
+                .filter(|(_, path, _)| card(&output, &display_name(path)).size().length() > 120.05)
+                .count();
+            assert!(enlarged <= 1, "only one enlarged thumbnail, got {enlarged}");
+            output
+        };
+        let mut output = render(&mut strip, vec![]);
+        for _ in 0..30 {
+            let point = card(&output, "20.png").center();
+            output = render(&mut strip, vec![egui::Event::PointerMoved(point)]);
+        }
+        let mut target = 20;
+        for step in 0..24 {
+            let point = strip
+                .card_paths
+                .iter()
+                .filter(|(_, _, index)| *index != target)
+                .map(|(_, path, _)| card(&output, &display_name(path)).center())
+                .filter(|point| (80.0..880.0).contains(&point.x))
+                .nth(step % 2)
+                .expect("visible non-target card");
+            let mut events = vec![egui::Event::PointerMoved(point)];
+            if step % 2 == 0 {
+                target += 1;
+                events.push(egui::Event::Key {
+                    key: egui::Key::D,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: step > 0,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            let before = strip.scroll_offset;
+            output = render(&mut strip, events);
+            assert_eq!(strip.scroll_target, Some(target));
+            assert!(
+                strip.scroll_offset > before,
+                "hover must not stall repeated navigation"
+            );
+            let focused = context.memory(|memory| memory.focused());
+            assert!(
+                strip
+                    .card_paths
+                    .iter()
+                    .any(|(id, _, index)| { Some(*id) == focused && *index == target })
+            );
+        }
+        for _ in 0..40 {
+            output = render(&mut strip, vec![]);
+        }
+        assert!(strip.scroll_target.is_none());
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(target));
+        let point = card(&output, &format!("{}.png", target - 1)).center();
+        for _ in 0..30 {
+            render(&mut strip, vec![egui::Event::PointerMoved(point)]);
+        }
+        let focused = context.memory(|memory| memory.focused());
+        assert!(
+            strip
+                .card_paths
+                .iter()
+                .any(|(id, _, index)| { Some(*id) == focused && *index == target - 1 }),
+            "fresh pointer movement takes over after arrival"
+        );
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(target));
+    }
+}
+
+#[test]
+fn filmstrip_loading_keeps_fixed_columns_during_swipes_and_coasts() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_loading_keeps_fixed_columns_during_swipes_and_coasts",
     ) else {
         return;
     };
@@ -331,9 +435,9 @@ fn filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts() {
 }
 
 #[test]
-fn filmstrip_tab_views_restore_anchors_across_other_folder_geometry() {
+fn filmstrip_tab_views_restore_offsets_across_other_folder_previews() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_tab_views_restore_anchors_across_other_folder_geometry",
+        "filmstrip::drag_tests::filmstrip_tab_views_restore_offsets_across_other_folder_previews",
     ) else {
         return;
     };
@@ -423,9 +527,9 @@ fn filmstrip_tab_views_restore_anchors_across_other_folder_geometry() {
 }
 
 #[test]
-fn filmstrip_scrollbar_drag_defers_geometry_until_after_release() {
+fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_scrollbar_drag_defers_geometry_until_after_release",
+        "filmstrip::drag_tests::filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release",
     ) else {
         return;
     };
@@ -466,10 +570,6 @@ fn filmstrip_scrollbar_drag_defers_geometry_until_after_release() {
         render(&mut strip, vec![pointer(grab, true)]);
         let moved = grab + egui::vec2(20.0, 0.0);
         render(&mut strip, vec![egui::Event::PointerMoved(moved)]);
-        assert!(
-            strip.scrollbar_held.is_some(),
-            "real scrollbar ownership at density {density}"
-        );
         let before = strip.scroll_offset;
         let width = strip.layout.width(944.0);
         let anchor = strip.layout.nearest(before);
@@ -512,14 +612,14 @@ fn filmstrip_scrollbar_drag_defers_geometry_until_after_release() {
         assert_eq!(
             strip.layout.width(944.0),
             width,
-            "freeze through the release event"
+            "fixed columns also survive the release event"
         );
         render(&mut strip, vec![]);
-        assert!(strip.layout.width(944.0) < width - 50.0);
+        assert_eq!(strip.layout.width(944.0), width);
         assert!(
             (strip.layout.center_offset(released_anchor) - strip.scroll_offset - center).abs()
                 < 0.01,
-            "apply dimensions once around the released view"
+            "loading never requires a release-time position correction"
         );
     }
 }
@@ -954,6 +1054,11 @@ fn filmstrip_tab_navigation_wraps_without_focusing_background_controls() {
             "mixed keys use the current card: {key:?}"
         );
     }
+    // Pointer selection resumes only after keyboard scrolling has arrived.
+    for _ in 0..40 {
+        draw(&mut app, vec![]);
+    }
+    assert!(app.filmstrip.scroll_target.is_none());
     let tree = draw(&mut app, vec![]);
     let hovered = tree
         .nodes
@@ -1713,6 +1818,35 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             true,
             input(vec![
                 egui::Event::PointerMoved(second_rect.center() + egui::vec2(1.0, 0.0)),
+                enter(),
+            ]),
+        )
+        .1,
+        &snapshot.items[2].path,
+    );
+    let mut settled = activation_frame;
+    for _ in 0..40 {
+        settled = frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![]),
+        )
+        .0;
+    }
+    assert!(strip.scroll_target.is_none());
+    let second_rect = card(&settled, &name);
+    opened(
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![
+                egui::Event::PointerMoved(second_rect.center()),
                 enter(),
             ]),
         )

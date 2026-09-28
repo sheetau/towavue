@@ -119,18 +119,12 @@ mod duration_tests;
 pub struct View {
     focus: Option<PathBuf>,
     offset: f32,
-    anchor: Option<(PathBuf, f32)>,
 }
 
 impl View {
     pub fn relocate(&mut self, source: &Path, target: &Path) {
         if self.focus.as_deref() == Some(source) {
             self.focus = Some(target.to_owned());
-        }
-        if let Some((path, _)) = &mut self.anchor
-            && path == source
-        {
-            *path = target.to_owned();
         }
     }
 }
@@ -179,10 +173,7 @@ pub struct Filmstrip {
     scroll_target: Option<usize>,
     scroll_time: Option<f64>,
     wheel_reset_frame: Option<u64>,
-    restored_anchor: Option<(PathBuf, f32)>,
     restore_scroll: bool,
-    scrollbar_id: Option<egui::Id>,
-    scrollbar_held: Option<u64>,
     layout: layout::Layout,
     drag: drag::State,
     recent_drag: drag::State,
@@ -224,10 +215,7 @@ impl Filmstrip {
             scroll_target: None,
             scroll_time: None,
             wheel_reset_frame: None,
-            restored_anchor: None,
             restore_scroll: false,
-            scrollbar_id: None,
-            scrollbar_held: None,
             layout: layout::Layout::default(),
             drag: drag::State::default(),
             recent_drag: drag::State::default(),
@@ -244,7 +232,6 @@ impl Filmstrip {
     /// Retire view/input ownership and pending work without discarding bounded
     /// ready pixels. Revalidate them asynchronously when another view uses them.
     pub fn suspend_view(&mut self) {
-        self.restored_anchor = None;
         self.restore_scroll = false;
         self.held_deleted = None;
         self.held_snapshot = None;
@@ -329,14 +316,12 @@ impl Filmstrip {
     pub fn cancel_drag(&mut self) {
         self.scroll_target = None;
         self.scroll_time = None;
-        self.scrollbar_held = None;
         self.drag.clear();
         self.recent_drag.clear();
         self.swipe.clear();
     }
 
     pub(crate) fn cancel_native_drag(&mut self, context: &Context) -> bool {
-        self.scrollbar_held = None;
         self.scroll_target = None;
         self.scroll_time = None;
         self.swipe.clear();
@@ -447,7 +432,6 @@ impl Filmstrip {
         let view = View {
             focus: self.focus.take(),
             offset,
-            anchor: self.layout.anchor(offset),
         };
         self.suspend_view();
         view
@@ -457,12 +441,10 @@ impl Filmstrip {
         self.suspend_view();
         self.focus = view.focus;
         self.scroll_offset = view.offset;
-        self.restored_anchor = view.anchor;
         self.restore_scroll = true;
     }
 
     pub fn focus_current(&mut self) {
-        self.restored_anchor = None;
         self.restore_scroll = false;
         self.scroll_target = None;
         self.scroll_time = None;
@@ -900,7 +882,10 @@ impl Filmstrip {
         let snap = recenter || self.focus_requested || relocated_focus.is_some();
         let restore = self.restore_scroll && snapshot.is_some();
         let was_scrolling = self.scroll_target.is_some();
-        let pointer_target = pointer_moved
+        // Keyboard navigation owns selection until it reaches its destination.
+        // Fresh pointer movement can take over on a subsequent idle frame.
+        let pointer_selection = pointer_moved && !was_scrolling && tab_target.is_none() && !snap;
+        let pointer_target = pointer_selection
             .then(|| {
                 self.card_paths.iter().find_map(|(id, _, index)| {
                     let response = context.read_response(*id)?;
@@ -952,48 +937,9 @@ impl Filmstrip {
                     .then_some(pointer_target.map(|(_, index)| index))
                     .flatten()
             });
-        let bar_active = self
-            .scrollbar_id
-            .and_then(|id| context.read_response(id))
-            .is_some_and(|response| {
-                context.input(|input| input.pointer.primary_down())
-                    && (response.is_pointer_button_down_on()
-                        || response.dragged()
-                        || context.input(|input| {
-                            input
-                                .pointer
-                                .press_origin()
-                                .is_some_and(|origin| response.interact_rect.contains(origin))
-                        }))
-            });
-        // Freeze the scroll metric through the release frame. Apply all ready
-        // dimensions together on the next frame, anchored to the released view.
-        if bar_active {
-            self.scrollbar_held = Some(frame);
-        }
-        let defer_measurement = self.scrollbar_held.is_some_and(|last| frame <= last + 1);
-        if defer_measurement && !bar_active {
-            context.request_repaint();
-        }
-        if !defer_measurement {
-            self.scrollbar_held = None;
-        }
         if let Some(snapshot) = snapshot {
-            let previous = self.scroll_offset;
-            self.layout.prepare(
-                snapshot,
-                &self.previews,
-                &self.gallery_video_uvs,
-                &mut self.scroll_offset,
-                defer_measurement,
-            );
-            self.swipe.rebase(self.scroll_offset - previous);
-            if restore && let Some(anchor) = self.restored_anchor.take() {
-                self.scroll_offset = self
-                    .layout
-                    .restore_anchor(&anchor)
-                    .unwrap_or(self.scroll_offset);
-            }
+            self.layout
+                .prepare(snapshot, &self.previews, &self.gallery_video_uvs);
         }
         let time = context.input(|input| input.time);
         let mut elapsed = self
@@ -1138,7 +1084,7 @@ impl Filmstrip {
                     // Set the shared target before creating any button so queued
                     // pointer or Tab navigation + Enter cannot activate the old target.
                     let pointer_target =
-                        (pointer_moved && ui.is_enabled() && focus_target.is_none())
+                        (pointer_selection && ui.is_enabled() && focus_target.is_none())
                             .then(|| {
                                 range.clone().find(|index| {
                                     let id = ui
@@ -1165,6 +1111,7 @@ impl Filmstrip {
                     if let Some(id) = requested_target {
                         context.memory_mut(|memory| memory.request_focus(id));
                     }
+                    let zoom_target = context.memory(|memory| memory.focused());
                     let mut cards = Vec::new();
                     let mut focused_card = None;
                     self.card_paths.clear();
@@ -1174,31 +1121,18 @@ impl Filmstrip {
                         if !deleted {
                             wanted.push((item.path.clone(), item.kind));
                         }
-                        let mut base = card_rect(index);
-                        if defer_measurement
-                            && item.kind != MediaKind::Audio
-                            && let Some(Ok((texture, _))) = self.previews.get(&item.path)
-                        {
-                            let source = texture.size_vec2()
-                                * self
-                                    .gallery_video_uvs
-                                    .get(&item.path)
-                                    .map_or(Vec2::splat(1.0), Rect::size);
-                            let scale = (base.width() / source.x).min(base.height() / source.y);
-                            base = Rect::from_center_size(base.center(), source * scale);
-                        }
+                        let base = card_rect(index);
                         let id = ui.id().with(("filmstrip-item", &item.path));
                         let presented_rect = context
                             .read_response(id)
                             .map_or(base, |response| response.rect);
-                        let hovered = ui.is_enabled()
-                            && context
-                                .read_response(id)
-                                .is_some_and(|response| response.hovered() || response.has_focus());
+                        let zoomed = ui.is_enabled() && zoom_target == Some(id);
+                        // Only the selected thumbnail may be enlarged. Retire the
+                        // previous owner immediately instead of overlapping fades.
                         let hover = context.animate_bool_with_time_and_easing(
                             id.with("thumbnail-hover"),
-                            hovered,
-                            0.32,
+                            zoomed,
+                            if zoomed { 0.32 } else { 0.0 },
                             egui::emath::easing::cubic_out,
                         );
                         let rect = Rect::from_center_size(
@@ -1356,7 +1290,6 @@ impl Filmstrip {
                     }
                 });
                 self.scroll_offset = output.state.offset.x;
-                self.scrollbar_id = Some(output.id.with(0usize));
                 self.restore_scroll = false;
                 self.swipe.exclusions.clear();
                 self.swipe
@@ -1379,7 +1312,7 @@ impl Filmstrip {
             });
         // The ready set is bounded; prioritize the anchor and then its neighbors.
         let anchor = self.layout.nearest(self.scroll_offset);
-        if let Some(snapshot) = snapshot.filter(|_| !defer_measurement) {
+        if let Some(snapshot) = snapshot {
             let indices: HashMap<_, _> = self
                 .card_paths
                 .iter()

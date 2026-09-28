@@ -3,14 +3,13 @@ use super::*;
 pub(super) const DIAMETER: f32 = 120.0;
 const GAP: f32 = 20.0;
 
-/// Folder-sized geometry, independent of the bounded texture working set.
-/// Evicting a texture must not change the widths of previously measured cards.
+/// Thumbnail sizes are independent of the fixed column geometry.
+/// Loading or evicting a texture never changes scroll positions.
 #[derive(Default)]
 pub(super) struct Layout {
     key: Option<(PathBuf, u64, std::time::SystemTime, usize)>,
     indices: HashMap<PathBuf, usize>,
     sizes: Vec<Vec2>,
-    starts: Vec<f32>,
 }
 
 pub(super) fn size(source: Vec2) -> Vec2 {
@@ -23,8 +22,6 @@ impl Layout {
         snapshot: &FolderSnapshot,
         previews: &HashMap<PathBuf, Preview>,
         uvs: &HashMap<PathBuf, Rect>,
-        offset: &mut f32,
-        defer_measurement: bool,
     ) {
         let key = (
             snapshot.folder_path.clone(),
@@ -34,10 +31,6 @@ impl Layout {
         );
         let reset = self.key.as_ref() != Some(&key);
         let same_folder = self.key.as_ref().is_some_and(|old| old.0 == key.0);
-        let anchor = (!reset && !self.sizes.is_empty()).then(|| {
-            let index = self.nearest(*offset);
-            (index, *offset - self.center_offset(index))
-        });
         if reset {
             self.key = Some(key);
             let old_indices = std::mem::take(&mut self.indices);
@@ -61,9 +54,8 @@ impl Layout {
                 }));
             }
         }
-        let mut changed = reset;
         // Only inspect the bounded ready texture set on an unchanged folder.
-        for (path, preview) in previews.iter().filter(|_| !defer_measurement) {
+        for (path, preview) in previews {
             if let Some(&index) = self.indices.get(path)
                 && let Ok((texture, _)) = preview
             {
@@ -72,69 +64,19 @@ impl Layout {
                 } else {
                     texture.size_vec2() * uvs.get(path).map_or(Vec2::splat(1.0), Rect::size)
                 };
-                let measured = size(source);
-                changed |= self.sizes[index] != measured;
-                self.sizes[index] = measured;
+                self.sizes[index] = size(source);
             }
         }
-        if changed {
-            self.starts.clear();
-            let mut start = 0.0;
-            for size in &self.sizes {
-                self.starts.push(start);
-                start += size.x + GAP;
-            }
-            if let Some((index, within)) = anchor {
-                *offset = (self.center_offset(index) + within).max(0.0);
-            }
-        }
-    }
-
-    pub fn anchor(&self, offset: f32) -> Option<(PathBuf, f32)> {
-        let nearest = self.nearest(offset);
-        let path = self
-            .indices
-            .iter()
-            .find(|(_, index)| **index == nearest)?
-            .0
-            .clone();
-        Some((path, offset - self.center_offset(nearest)))
-    }
-
-    pub fn restore_anchor(&self, (path, within): &(PathBuf, f32)) -> Option<f32> {
-        self.indices
-            .get(path)
-            .map(|index| (self.center_offset(*index) + within).max(0.0))
     }
 
     pub fn center_offset(&self, index: usize) -> f32 {
-        self.starts.get(index).copied().unwrap_or(0.0)
-            + (self.sizes.get(index).map_or(0.0, |size| size.x)
-                - self.sizes.first().map_or(0.0, |size| size.x))
-                * 0.5
+        index as f32 * (DIAMETER + GAP)
     }
 
     pub fn nearest(&self, offset: f32) -> usize {
-        let (mut left, mut right) = (0, self.sizes.len());
-        while left < right {
-            let middle = left + (right - left) / 2;
-            if self.center_offset(middle) < offset {
-                left = middle + 1;
-            } else {
-                right = middle;
-            }
-        }
-        (left.saturating_sub(1)..=left.min(self.sizes.len().saturating_sub(1)))
-            .min_by(|a, b| {
-                (self.center_offset(*a) - offset)
-                    .abs()
-                    .total_cmp(&(self.center_offset(*b) - offset).abs())
-            })
-            .unwrap_or(0)
-    }
-
-    pub fn padding(&self, width: f32) -> f32 {
-        ((width - self.sizes.first().map_or(0.0, |size| size.x)) * 0.5).max(0.0)
+        // Prefer the left column at an exact midpoint.
+        ((offset / (DIAMETER + GAP) - 0.5).ceil().max(0.0) as usize)
+            .min(self.sizes.len().saturating_sub(1))
     }
 
     pub fn width(&self, viewport: f32) -> f32 {
@@ -148,7 +90,7 @@ impl Layout {
         Rect::from_center_size(
             origin
                 + egui::vec2(
-                    self.padding(viewport.x) + self.starts[index] + self.sizes[index].x * 0.5,
+                    viewport.x * 0.5 + self.center_offset(index),
                     viewport.y * 0.5,
                 ),
             self.sizes[index],
@@ -156,13 +98,17 @@ impl Layout {
     }
 
     pub fn visible(&self, viewport: Rect) -> Range<usize> {
-        let padding = self.padding(viewport.width());
-        let start = self
-            .starts
-            .partition_point(|left| *left + DIAMETER < viewport.left() - padding - 4.0);
-        let end = self
-            .starts
-            .partition_point(|left| *left < viewport.right() - padding + 4.0);
+        let half = viewport.width() * 0.5;
+        // Include enlarged edge pixels while keeping the working set bounded.
+        let radius = DIAMETER * 0.55 + 4.0;
+        let start = ((viewport.left() - half - radius) / (DIAMETER + GAP))
+            .ceil()
+            .max(0.0) as usize;
+        let end = (((viewport.right() - half + radius) / (DIAMETER + GAP))
+            .floor()
+            .max(0.0) as usize
+            + 1)
+        .min(self.sizes.len());
         start..end.min(start + VISIBLE_PREVIEW_LIMIT)
     }
 }
@@ -172,7 +118,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mixed_aspects_keep_equal_diagonals_edge_gaps_and_stable_scroll_on_load() {
+    fn mixed_aspects_keep_fixed_columns_and_stable_scroll_on_load() {
         let context = crate::fonts::test_context();
         let snapshot = FolderSnapshot {
             folder_identity: towavue_core::ShellIdentity::new(vec![]),
@@ -190,11 +136,11 @@ mod tests {
             captured_at: std::time::SystemTime::now(),
         };
         let mut layout = Layout::default();
-        let mut offset = 0.0;
+
         let mut previews = HashMap::new();
         let uvs = HashMap::new();
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
-        offset = layout.center_offset(25_000) + 10.0;
+        layout.prepare(&snapshot, &previews, &uvs);
+        let mut offset = layout.center_offset(25_000) + 10.0;
         let before = layout.center_offset(25_000) - offset;
         for (index, dimensions) in [[160, 80], [80, 160], [100, 100]].into_iter().enumerate() {
             let texture = context.load_texture(
@@ -204,7 +150,7 @@ mod tests {
             );
             previews.insert(snapshot.items[index].path.clone(), Ok((texture, None)));
         }
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
+        layout.prepare(&snapshot, &previews, &uvs);
         assert!((layout.center_offset(25_000) - offset - before).abs() < 0.5);
         // Loading the nearest card itself must preserve its center, even when
         // the viewport center is still to its left during ongoing scrolling.
@@ -217,7 +163,7 @@ mod tests {
             egui::TextureOptions::LINEAR,
         );
         previews.insert(snapshot.items[4].path.clone(), Ok((texture, None)));
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
+        layout.prepare(&snapshot, &previews, &uvs);
         assert!((layout.center_offset(4) - offset - before).abs() < 0.001);
         for step in 0..400 {
             let offset = step as f32 * 3.0;
@@ -238,11 +184,11 @@ mod tests {
             assert!((rect.center().y - 250.0).abs() < 0.001);
         }
         for pair in rects.windows(2) {
-            assert!((pair[1].left() - pair[0].right() - 20.0).abs() < 0.001);
+            assert!((pair[1].center().x - pair[0].center().x - 140.0).abs() < 0.001);
         }
         let measured = layout.sizes.clone();
         previews.clear();
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
+        layout.prepare(&snapshot, &previews, &uvs);
         assert_eq!(
             layout.sizes, measured,
             "texture eviction preserves geometry"
@@ -252,7 +198,7 @@ mod tests {
             ..snapshot.clone()
         };
         let before = offset;
-        layout.prepare(&refreshed, &previews, &uvs, &mut offset, false);
+        layout.prepare(&refreshed, &previews, &uvs);
         assert_eq!(
             layout.sizes, measured,
             "a new listing must retain known widths by path"

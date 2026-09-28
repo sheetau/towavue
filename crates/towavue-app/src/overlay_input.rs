@@ -12,7 +12,7 @@ pub fn context_menu_shown(context: &Context, popup: egui::Id) {
 /// Dismiss an existing menu before laying out the destination of an outside
 /// press. Keep the original event so that destination owns its normal gesture.
 pub fn dismiss_menu_on_outside_press(context: &Context) {
-    if !Popup::is_any_open(context) {
+    if crate::logo_menu::drag::held(context) || !Popup::is_any_open(context) {
         return;
     }
     let Some(position) = context.input(|input| {

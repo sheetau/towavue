@@ -1,5 +1,7 @@
 use crate::*;
 
+pub(crate) mod keyboard;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Action {
     Begin(u64),
@@ -219,7 +221,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.session.is_some()
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open
             && self
                 .playback_duration()
@@ -446,9 +447,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn cancel_hold_speed(&mut self) -> bool {
+        let keyboard = self.space_hold.take().is_some();
         let input = self.ui_context.as_ref().is_some_and(cancel_input);
         let Some(held) = self.held_speed.take() else {
-            return input;
+            return input || keyboard;
         };
         if held.media == self.media_generation
             && self.session.is_some()

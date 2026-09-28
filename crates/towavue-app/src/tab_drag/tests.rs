@@ -956,7 +956,8 @@ fn tab_drag_keeps_tab_geometry_fixed_until_release() {
     assert_eq!(tab_focus::take(&context, original[2].0), None);
     assert_eq!(
         tab_focus::take(&context, original[0].0),
-        Some(background_role)
+        None,
+        "press activation clears the target tab's saved control focus"
     );
     app.handle_ui_action(actions[0].clone());
     assert_eq!(
@@ -1000,7 +1001,7 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
     ) else {
         return;
     };
-    for case in 0..11 {
+    for case in (0..11).filter(|&case| case != 7) {
         let mut app = setup(&root);
         let size = egui::vec2(960.0, 576.0);
         let original = app.tabs.clone();
@@ -1043,7 +1044,6 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
             6 => {
                 app.tabs.open_new(root.join("new.png"), MediaKind::Image);
             }
-            7 => app.grid_open = true,
             8 => app
                 .ui_context
                 .as_ref()
@@ -1070,7 +1070,7 @@ fn tab_drag_cancellation_rejects_late_release_after_context_changes() {
         );
         assert!(state(&app).drag.is_none(), "case {case}");
         app.palette_open = false;
-        app.grid_open = false;
+
         assert!(
             frame(
                 &mut app,
@@ -1131,7 +1131,10 @@ fn local_tab_drops_project_client_positions_without_replaying_release() {
                     let target = egui::pos2(x, y);
                     let mut events = vec![egui::Event::PointerMoved(start), pointer(start, true)];
                     if !batched {
-                        assert!(frame(&mut app, size, true, events).1.is_empty());
+                        assert!(
+                            frame(&mut app, size, true, events).1
+                                == vec![UiAction::ActivateTab(original[2].0)]
+                        );
                         assert!(
                             frame(
                                 &mut app,
@@ -1146,7 +1149,10 @@ fn local_tab_drops_project_client_positions_without_replaying_release() {
                         events = vec![];
                     }
                     events.extend([egui::Event::PointerMoved(target), pointer(target, false)]);
-                    let (_, actions) = frame(&mut app, size, true, events);
+                    let (_, mut actions) = frame(&mut app, size, true, events);
+                    if batched {
+                        assert!(actions.remove(0) == UiAction::ActivateTab(original[2].0));
+                    }
                     if y == start.y {
                         assert!(actions == vec![UiAction::ReorderTab(original[2].0, gap)]);
                     } else {
@@ -1236,7 +1242,13 @@ fn tab_drag_batched_move_release_still_commits_once() {
             pointer(target, false),
         ],
     );
-    assert!(actions == vec![UiAction::ReorderTab(original[0].0, 3)]);
+    assert!(
+        actions
+            == vec![
+                UiAction::ActivateTab(original[0].0),
+                UiAction::ReorderTab(original[0].0, 3),
+            ]
+    );
 }
 
 #[test]
@@ -1446,5 +1458,65 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
         assert!(actions.is_empty());
         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
             egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))));
+    }
+}
+
+#[test]
+fn primary_press_activates_once_and_preserves_the_same_drag_after_loading() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::primary_press_activates_once_and_preserves_the_same_drag_after_loading",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = setup(&root);
+        let size = egui::vec2(960.0, 576.0);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        for _ in 0..3 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let tab = app.tabs.tabs()[0].id;
+        let point = label_center(&app, tab);
+        let (_, actions) = frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::PointerMoved(point), pointer(point, true)],
+        );
+        assert!(
+            actions == vec![UiAction::ActivateTab(tab)],
+            "activate on press"
+        );
+        app.handle_ui_action(actions[0].clone());
+        assert_eq!(app.tabs.active_id(), Some(tab));
+        let source = (
+            app.tabs.active_id(),
+            app.media_generation,
+            app.graphics_epoch,
+        );
+        assert_eq!(
+            state(&app)
+                .drag
+                .as_ref()
+                .expect("press survives activation")
+                .source,
+            source
+        );
+        let outside = point + egui::vec2(0.0, 100.0);
+        let (_, actions) = frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::PointerMoved(outside)],
+        );
+        assert!(actions.is_empty());
+        assert_eq!(
+            active_pointer(&context, source).map(|value| value.0),
+            Some(tab)
+        );
+        let (_, actions) = frame(&mut app, size, true, vec![pointer(outside, false)]);
+        assert!(matches!(actions.as_slice(), [UiAction::DropTab(id, _, _)] if *id == tab));
+        assert!(frame(&mut app, size, true, vec![]).1.is_empty());
     }
 }

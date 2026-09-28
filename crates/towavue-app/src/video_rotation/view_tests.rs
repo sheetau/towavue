@@ -199,10 +199,9 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         app.dispatch(CommandId::ZoomIn);
         frame(app, vec![]);
         let before = app.image_view;
-        for overlay in 0..3 {
+        for overlay in (0..3).filter(|&overlay| overlay != 1) {
             match overlay {
                 0 => app.palette_open = true,
-                1 => app.grid_open = true,
                 _ => app.filmstrip_open = true,
             }
             frame_input(app, egui::Modifiers::CTRL, wheel(start));
@@ -216,7 +215,7 @@ pub(super) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
                 assert_eq!(app.image_view, before, "overlay {overlay}");
             }
             app.palette_open = false;
-            app.grid_open = false;
+
             app.filmstrip_open = false;
             frame(app, vec![]);
         }

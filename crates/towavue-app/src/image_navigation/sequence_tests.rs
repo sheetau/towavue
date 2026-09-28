@@ -399,10 +399,9 @@ fn held_image_keys_preserve_original_order_and_only_repeat_navigation() {
     assert!(app.image_sequence.steps.is_empty());
     assert!(!app.fullscreen);
     assert_eq!(app.path.as_ref(), Some(&paths[99]));
-    for state in 0..4 {
+    for state in (0..4).filter(|&state| state != 2) {
         app.filmstrip_open = state == 0;
         app.palette_open = state == 1;
-        app.grid_open = state == 2;
         app.entered_shortcut = if state == 3 {
             vec!["Ctrl+K".parse().expect("prefix")]
         } else {

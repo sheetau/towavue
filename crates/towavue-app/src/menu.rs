@@ -1,5 +1,4 @@
 use crate::localization::{Text, language, text};
-use crate::scroll_style::ScrollAreaStyle;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 use CommandId::*;
@@ -10,6 +9,7 @@ mod choices;
 mod image_choices_tests;
 #[cfg(test)]
 mod language_tests;
+mod sizing;
 mod subtitles;
 pub(crate) use choices::Choices;
 
@@ -188,12 +188,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 ReadingLeft,
                 ReadingRight,
             ],
-            &[
-                ToggleFilmstrip,
-                ToggleTimeline,
-                ToggleGridMenu,
-                ToggleCommandPalette,
-            ],
+            &[ToggleFilmstrip, ToggleTimeline, ToggleCommandPalette],
         ],
     ),
     (
@@ -327,7 +322,7 @@ fn submenu(
     recent: &mut MenuData<'_>,
 ) -> (egui::Response, Option<CommandId>) {
     let category = ui.next_auto_id();
-    if requested == Some(category) {
+    if requested == Some(category) || crate::logo_menu::drag::submenu(ui, category) {
         let submenu = egui::containers::menu::SubMenu::id_from_widget_id(category);
         egui::containers::menu::MenuState::mark_shown(ui.ctx(), submenu);
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(submenu));
@@ -359,7 +354,8 @@ fn show_items(
         .find(|(name, _)| *name == title)
         .expect("registered menu")
         .1;
-    choices::reserve_cascade(ui, groups, context, ancestor);
+    sizing::items(ui, title, groups, context, shortcuts, ancestor);
+    let height = sizing::height(ui);
     let keyboard = MenuKeyboard::begin(ui);
     let back = keyboard.left;
     let requested = keyboard
@@ -368,82 +364,55 @@ fn show_items(
         .flatten();
     let mut chosen = None;
     let mut items = Vec::new();
-    egui::ScrollArea::vertical()
-        .id_salt(title)
-        .max_height((ui.ctx().content_rect().height() - 64.0).max(100.0))
-        .show_styled(ui, |ui| {
-            for (index, group) in groups.iter().enumerate() {
-                if index > 0 {
-                    crate::chrome::separator(ui);
-                }
-                for id in *group {
-                    if *id == LoadSubtitles {
-                        if context.media_kind == Some(towavue_core::MediaKind::Video) {
-                            let (response, command) =
-                                subtitles::submenu(ui, context, requested, recent, ancestor);
-                            if response.enabled() {
-                                items.push(response.id);
-                            }
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
-                            }
-                            chosen = chosen.or(command);
-                        }
-                        continue;
-                    }
-                    if *id == CycleAudioTrack {
-                        if context.media_kind == Some(towavue_core::MediaKind::Video) {
-                            let (response, command) = audio_tracks::submenu(
-                                ui, context, shortcuts, requested, recent, ancestor,
-                            );
-                            if response.enabled() {
-                                items.push(response.id);
-                            }
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
-                            }
-                            chosen = chosen.or(command);
-                        }
-                        continue;
-                    }
-                    if *id == ExportQualityHigh
-                        && context.media_kind != Some(towavue_core::MediaKind::Video)
-                    {
-                        continue;
-                    }
-                    if let Some((response, command)) = choices::submenu(
-                        ui,
-                        *id,
-                        context,
-                        &recent.choices,
-                        shortcuts,
-                        requested,
-                        ancestor,
-                    ) {
+    crate::logo_menu::drag::scroll(ui, egui::Id::new(title), height, |ui| {
+        for (index, group) in groups.iter().enumerate() {
+            if index > 0 {
+                crate::chrome::separator(ui);
+            }
+            for id in *group {
+                if *id == LoadSubtitles {
+                    if context.media_kind == Some(towavue_core::MediaKind::Video) {
+                        let (response, command) =
+                            subtitles::submenu(ui, context, requested, recent, ancestor);
                         if response.enabled() {
                             items.push(response.id);
                         }
-                        if response.gained_focus()
-                            || (response.has_focus()
-                                && (response.rect.top() < ui.clip_rect().top()
-                                    || response.rect.bottom() > ui.clip_rect().bottom()))
-                        {
+                        if response.gained_focus() {
                             response.scroll_to_me(None);
                         }
                         chosen = chosen.or(command);
-                        continue;
                     }
-                    let definition = command_definitions()
-                        .iter()
-                        .find(|definition| definition.id == *id)
-                        .expect("menu command is registered");
-                    let enabled = definition.is_enabled(context);
-                    let response = ui.add_enabled(
-                        enabled,
-                        egui::Button::new(definition.title_in(language(ui.ctx()))).shortcut_text(
-                            shortcut_text(ui, shortcuts.label(*id, context), enabled),
-                        ),
-                    );
+                    continue;
+                }
+                if *id == CycleAudioTrack {
+                    if context.media_kind == Some(towavue_core::MediaKind::Video) {
+                        let (response, command) = audio_tracks::submenu(
+                            ui, context, shortcuts, requested, recent, ancestor,
+                        );
+                        if response.enabled() {
+                            items.push(response.id);
+                        }
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
+                        }
+                        chosen = chosen.or(command);
+                    }
+                    continue;
+                }
+                if *id == ExportQualityHigh
+                    && context.media_kind != Some(towavue_core::MediaKind::Video)
+                {
+                    continue;
+                }
+                if let Some((response, command)) = choices::submenu(
+                    ui,
+                    *id,
+                    context,
+                    &recent.choices,
+                    shortcuts,
+                    requested,
+                    ancestor,
+                ) {
                     if response.enabled() {
                         items.push(response.id);
                     }
@@ -454,102 +423,125 @@ fn show_items(
                     {
                         response.scroll_to_me(None);
                     }
-                    if response.clicked() {
-                        chosen = Some(*id);
-                        ui.close();
-                    }
-                }
-                if title == Text::MenuView && group.contains(&SeekForward) {
-                    let enabled = context.media_kind == Some(towavue_core::MediaKind::Video)
-                        && !context.playback_blocked;
-                    let (response, command) = ui
-                        .add_enabled_ui(enabled, |ui| {
-                            submenu(
-                                ui,
-                                Text::MenuVideoSeek,
-                                context,
-                                shortcuts,
-                                requested,
-                                recent,
-                            )
-                        })
-                        .inner;
-                    if response.enabled() {
-                        items.push(response.id);
-                    }
-                    if response.gained_focus() {
-                        response.scroll_to_me(None);
-                    }
                     chosen = chosen.or(command);
+                    continue;
                 }
-                if title == Text::MenuFile && index == 0 {
-                    let category = ui.next_auto_id();
-                    if requested == Some(category) {
-                        let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
-                        egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
-                        egui::containers::menu::MenuState::from_ui(ui, |state, _| {
-                            state.open_item = Some(id)
-                        });
-                    }
-                    let root = egui::containers::menu::find_menu_root(ui);
-                    let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
-                    let screen = ui.ctx().content_rect();
-                    // Match the submenu's two-point gap outside the parent's frame.
-                    // Constraining against the whole viewport makes egui slide a wide
-                    // child back over its parent instead of placing it alongside.
-                    let right = screen.right() - parent.right();
-                    let left = parent.left() - screen.left();
-                    // Keep the normal left-to-right cascade away from its root menu.
-                    let side_width = if ancestor.is_some_and(|root| root.right() <= parent.left()) {
-                        right
-                    } else {
-                        right.max(left)
-                    };
-                    let available_width = side_width - 2.0 - 1.0 / ui.ctx().pixels_per_point();
-                    let menu = ui.menu_button(text(ui.ctx(), Text::OpenRecent), |ui| {
-                        show_recent(ui, recent, available_width)
-                    });
-                    if menu.response.enabled() {
-                        items.push(menu.response.id);
-                    }
-                    if menu.response.gained_focus() {
-                        menu.response.scroll_to_me(None);
-                    }
-                    if menu.inner == Some(true) {
-                        egui::containers::menu::MenuState::from_ui(ui, |state, _| {
-                            state.open_item = None
-                        });
-                        menu.response.request_focus();
-                    }
-                }
-            }
-            if title == Text::MenuView {
-                crate::chrome::separator(ui);
-                let (response, command) = submenu(
-                    ui,
-                    Text::MenuImageJump,
-                    context,
-                    shortcuts,
-                    requested,
-                    recent,
+                let definition = command_definitions()
+                    .iter()
+                    .find(|definition| definition.id == *id)
+                    .expect("menu command is registered");
+                let enabled = definition.is_enabled(context);
+                let response = ui.add_enabled(
+                    enabled,
+                    egui::Button::new(definition.title_in(language(ui.ctx())))
+                        .shortcut_text(shortcut_text(ui, shortcuts.label(*id, context), enabled)),
                 );
-                if response.gained_focus() {
-                    response.scroll_to_me(None);
-                }
                 if response.enabled() {
                     items.push(response.id);
+                }
+                if response.gained_focus()
+                    || (response.has_focus()
+                        && (response.rect.top() < ui.clip_rect().top()
+                            || response.rect.bottom() > ui.clip_rect().bottom()))
+                {
+                    response.scroll_to_me(None);
+                }
+                if crate::logo_menu::drag::clicked(&response) {
+                    chosen = Some(*id);
+                    ui.close();
+                }
+            }
+            if title == Text::MenuView && group.contains(&SeekForward) {
+                let enabled = context.media_kind == Some(towavue_core::MediaKind::Video)
+                    && !context.playback_blocked;
+                let (response, command) = ui
+                    .add_enabled_ui(enabled, |ui| {
+                        submenu(
+                            ui,
+                            Text::MenuVideoSeek,
+                            context,
+                            shortcuts,
+                            requested,
+                            recent,
+                        )
+                    })
+                    .inner;
+                if response.enabled() {
+                    items.push(response.id);
+                }
+                if response.gained_focus() {
+                    response.scroll_to_me(None);
                 }
                 chosen = chosen.or(command);
-                crate::chrome::separator(ui);
-                let response = language_menu(ui, requested, recent);
-                if response.enabled() {
-                    items.push(response.id);
+            }
+            if title == Text::MenuFile && index == 0 {
+                let category = ui.next_auto_id();
+                if requested == Some(category) || crate::logo_menu::drag::submenu(ui, category) {
+                    let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
+                    egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
+                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                        state.open_item = Some(id)
+                    });
                 }
-                if response.gained_focus() {
-                    response.scroll_to_me(None);
+                let root = egui::containers::menu::find_menu_root(ui);
+                let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
+                let screen = ui.ctx().content_rect();
+                // Match the submenu's two-point gap outside the parent's frame.
+                // Constraining against the whole viewport makes egui slide a wide
+                // child back over its parent instead of placing it alongside.
+                let right = screen.right() - parent.right();
+                let left = parent.left() - screen.left();
+                // Keep the normal left-to-right cascade away from its root menu.
+                let side_width = if ancestor.is_some_and(|root| root.right() <= parent.left()) {
+                    right
+                } else {
+                    right.max(left)
+                };
+                let available_width = side_width - 2.0 - 1.0 / ui.ctx().pixels_per_point();
+                let menu = ui.menu_button(text(ui.ctx(), Text::OpenRecent), |ui| {
+                    show_recent(ui, recent, available_width)
+                });
+                if menu.response.enabled() {
+                    items.push(menu.response.id);
+                }
+                if menu.response.gained_focus() {
+                    menu.response.scroll_to_me(None);
+                }
+                if menu.inner == Some(true) {
+                    egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                        state.open_item = None
+                    });
+                    menu.response.request_focus();
                 }
             }
-        });
+        }
+        if title == Text::MenuView {
+            crate::chrome::separator(ui);
+            let (response, command) = submenu(
+                ui,
+                Text::MenuImageJump,
+                context,
+                shortcuts,
+                requested,
+                recent,
+            );
+            if response.gained_focus() {
+                response.scroll_to_me(None);
+            }
+            if response.enabled() {
+                items.push(response.id);
+            }
+            chosen = chosen.or(command);
+            crate::chrome::separator(ui);
+            let response = language_menu(ui, requested, recent);
+            if response.enabled() {
+                items.push(response.id);
+            }
+            if response.gained_focus() {
+                response.scroll_to_me(None);
+            }
+        }
+    });
     keyboard.finish(ui, items);
     (chosen, back)
 }
@@ -563,7 +555,7 @@ fn language_menu(
     let menu = ui
         .add_enabled_ui(!data.language.saving, |ui| {
             let category = ui.next_auto_id();
-            if requested == Some(category) {
+            if requested == Some(category) || crate::logo_menu::drag::submenu(ui, category) {
                 let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
                 egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
                 egui::containers::menu::MenuState::from_ui(ui, |state, _| {
@@ -583,7 +575,7 @@ fn language_menu(
                     let mut selected = data.language.next == language;
                     let response = ui.checkbox(&mut selected, text(ui.ctx(), label));
                     items.push(response.id);
-                    if response.clicked() {
+                    if crate::logo_menu::drag::clicked(&response) {
                         data.language_action = Some(language);
                         ui.close();
                     }
@@ -632,79 +624,78 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
         })
         .fold(0.0, f32::max);
     let width = text_width + 2.0 * ui.spacing().button_padding.x + ui.spacing().scroll.bar_width;
-    ui.set_max_width(width.min((available_width - frame_width).max(1.0)));
-    egui::ScrollArea::vertical()
-        .max_height((ui.ctx().content_rect().height() - 64.0).max(80.0))
-        .show_styled(ui, |ui| {
-            for (kind, paths) in [
-                (RecentKind::Folder, recent.folders),
-                (RecentKind::File, recent.files),
-            ] {
-                for path in paths.iter().take(10) {
-                    let response = ui
-                        .push_id((kind == RecentKind::Folder, path), |ui| {
-                            ui.add(egui::Button::new(path.display().to_string()).truncate())
+    ui.set_width(width.min((available_width - frame_width).max(1.0)));
+    let height = sizing::height(ui);
+    crate::logo_menu::drag::scroll(ui, egui::Id::new("recent"), height, |ui| {
+        for (kind, paths) in [
+            (RecentKind::Folder, recent.folders),
+            (RecentKind::File, recent.files),
+        ] {
+            for path in paths.iter().take(10) {
+                let response = ui
+                    .push_id((kind == RecentKind::Folder, path), |ui| {
+                        ui.add(egui::Button::new(path.display().to_string()).truncate())
+                    })
+                    .inner
+                    .help_text(path.display().to_string());
+                if response.enabled() {
+                    items.push(response.id);
+                }
+                if response.gained_focus() {
+                    response.scroll_to_me(None);
+                }
+                let modifiers = ui.input(|input| {
+                    input
+                        .events
+                        .iter()
+                        .rev()
+                        .find_map(|event| match event {
+                            egui::Event::PointerButton {
+                                modifiers,
+                                pressed: false,
+                                ..
+                            }
+                            | egui::Event::Key {
+                                modifiers,
+                                key: egui::Key::Enter | egui::Key::Space,
+                                pressed: true,
+                                ..
+                            } => Some(*modifiers),
+                            _ => None,
                         })
-                        .inner
-                        .help_text(path.display().to_string());
-                    if response.enabled() {
-                        items.push(response.id);
-                    }
-                    if response.gained_focus() {
-                        response.scroll_to_me(None);
-                    }
-                    let modifiers = ui.input(|input| {
-                        input
-                            .events
-                            .iter()
-                            .rev()
-                            .find_map(|event| match event {
-                                egui::Event::PointerButton {
-                                    modifiers,
-                                    pressed: false,
-                                    ..
-                                }
-                                | egui::Event::Key {
-                                    modifiers,
-                                    key: egui::Key::Enter | egui::Key::Space,
-                                    pressed: true,
-                                    ..
-                                } => Some(*modifiers),
-                                _ => None,
-                            })
-                            .unwrap_or(input.modifiers)
-                    });
-                    let modified_enter = response.enabled()
-                        && response.has_focus()
-                        && (modifiers.ctrl || modifiers.alt)
-                        && ui.input_mut(|input| input.consume_key(modifiers, egui::Key::Enter));
-                    if response.clicked() || modified_enter {
-                        let target = if modifiers.ctrl {
-                            OpenTarget::Window
-                        } else if modifiers.alt {
-                            OpenTarget::Replace
-                        } else {
-                            OpenTarget::Tab
-                        };
-                        recent.action = Some(RecentAction::Open(path.clone(), kind, target));
-                        ui.close();
-                    }
-                }
-                if !paths.is_empty() {
-                    crate::chrome::separator(ui);
+                        .unwrap_or(input.modifiers)
+                });
+                let modified_enter = response.enabled()
+                    && response.has_focus()
+                    && (modifiers.ctrl || modifiers.alt)
+                    && ui.input_mut(|input| input.consume_key(modifiers, egui::Key::Enter));
+                if crate::logo_menu::drag::clicked(&response) || modified_enter {
+                    let target = if modifiers.ctrl {
+                        OpenTarget::Window
+                    } else if modifiers.alt {
+                        OpenTarget::Replace
+                    } else {
+                        OpenTarget::Tab
+                    };
+                    recent.action = Some(RecentAction::Open(path.clone(), kind, target));
+                    ui.close();
                 }
             }
-            // Resume positions can outlive the shorter recent-path lists.
-            let response =
-                ui.add(egui::Button::new(text(ui.ctx(), Text::ClearRecentlyOpened)).truncate());
-            if response.enabled() {
-                items.push(response.id);
+            if !paths.is_empty() {
+                crate::chrome::separator(ui);
             }
-            if response.clicked() {
-                recent.action = Some(RecentAction::Clear);
-                ui.close();
-            }
-        });
+        }
+        // Resume positions can outlive the shorter recent-path lists.
+        let response =
+            ui.add(egui::Button::new(text(ui.ctx(), Text::ClearRecentlyOpened)).truncate());
+        if response.enabled() {
+            items.push(response.id);
+        }
+        if crate::logo_menu::drag::clicked(&response) {
+            recent.action = Some(RecentAction::Clear);
+            ui.close();
+        }
+    });
     keyboard.finish(ui, items);
     back
 }
@@ -741,7 +732,7 @@ impl MenuKeyboard {
                 }
             }
             state.1
-        });
+        }) && !crate::logo_menu::drag::held(ui.ctx());
         let (last_pass, items, selected) = ui
             .data(|data| {
                 data.get_temp::<(u64, Vec<egui::Id>, Option<egui::Id>)>(

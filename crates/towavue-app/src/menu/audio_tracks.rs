@@ -20,7 +20,7 @@ pub(super) fn submenu(
         right.max(left)
     };
     let frame = egui::Frame::popup(ui.style()).total_margin().sum().x;
-    let width = (side - frame - 2.0 - 1.0 / ui.ctx().pixels_per_point()).clamp(1.0, 320.0);
+    let width = (side - frame - 2.0 - 1.0 / ui.ctx().pixels_per_point()).max(1.0);
     let enabled = !context.playback_blocked
         && data
             .audio_tracks
@@ -28,7 +28,7 @@ pub(super) fn submenu(
     let menu = ui
         .add_enabled_ui(enabled, |ui| {
             let category = ui.next_auto_id();
-            if requested == Some(category) {
+            if requested == Some(category) || crate::logo_menu::drag::submenu(ui, category) {
                 let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
                 egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
                 egui::containers::menu::MenuState::from_ui(ui, |state, _| {
@@ -42,7 +42,6 @@ pub(super) fn submenu(
             egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
-                ui.set_width(width);
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                 let mut items = Vec::new();
                 let mut command = None;
@@ -64,36 +63,48 @@ pub(super) fn submenu(
                         )
                     }));
                 }
-                egui::ScrollArea::vertical()
-                    .max_height((ui.ctx().content_rect().height() - 96.0).max(40.0))
-                    .show_styled(ui, |ui| {
-                        for (selection, label) in rows {
-                            let mut selected = selection == data.audio_selection;
-                            let response = ui
-                                .checkbox(&mut selected, label.clone())
-                                .on_hover_text(label);
-                            let response = if selection == AudioTrackSelection::All {
-                                response.on_hover_text(text(ui.ctx(), Text::AudioTrackAllWaveform))
-                            } else {
-                                response
-                            };
-                            items.push(response.id);
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
-                            }
-                            if response.clicked() {
-                                data.audio_action = Some(selection);
-                                ui.close();
-                            }
-                        }
-                        crate::chrome::separator(ui);
-                        let response = ui.button(text(ui.ctx(), Text::CommandCycleAudioTrack));
+                let natural = rows
+                    .iter()
+                    .map(|(_, label)| sizing::text_width(ui, label))
+                    .chain(std::iter::once(sizing::text_width(
+                        ui,
+                        text(ui.ctx(), Text::CommandCycleAudioTrack),
+                    )))
+                    .fold(0.0, f32::max)
+                    + ui.spacing().icon_width
+                    + ui.spacing().icon_spacing
+                    + 2.0 * ui.spacing().button_padding.x
+                    + ui.spacing().scroll.bar_width;
+                ui.set_width(natural.min(width));
+                let height = sizing::height(ui);
+                crate::logo_menu::drag::scroll(ui, egui::Id::new("audio-tracks"), height, |ui| {
+                    for (selection, label) in rows {
+                        let mut selected = selection == data.audio_selection;
+                        let response = ui
+                            .checkbox(&mut selected, label.clone())
+                            .on_hover_text(label);
+                        let response = if selection == AudioTrackSelection::All {
+                            response.on_hover_text(text(ui.ctx(), Text::AudioTrackAllWaveform))
+                        } else {
+                            response
+                        };
                         items.push(response.id);
-                        if response.clicked() {
-                            command = Some(CycleAudioTrack);
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
+                        }
+                        if crate::logo_menu::drag::clicked(&response) {
+                            data.audio_action = Some(selection);
                             ui.close();
                         }
-                    });
+                    }
+                    crate::chrome::separator(ui);
+                    let response = ui.button(text(ui.ctx(), Text::CommandCycleAudioTrack));
+                    items.push(response.id);
+                    if crate::logo_menu::drag::clicked(&response) {
+                        command = Some(CycleAudioTrack);
+                        ui.close();
+                    }
+                });
                 keyboard.finish(ui, items);
                 (command, back)
             })

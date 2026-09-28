@@ -158,10 +158,11 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         assert_eq!(app.current_position(), position);
     }
 
-    for overlay in [CommandId::ToggleCommandPalette, CommandId::ToggleGridMenu] {
+    {
+        let overlay = CommandId::ToggleCommandPalette;
         app.dispatch(overlay);
         app.dispatch(CommandId::ResizeVideo);
-        assert!(!app.palette_open && !app.grid_open);
+        assert!(!app.palette_open);
         let token = app
             .video_resize_dialog
             .as_ref()

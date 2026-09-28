@@ -1740,7 +1740,7 @@ fn draw_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32, 
     painter.galley(background.min + padding, galley, Color32::WHITE);
 }
 
-fn thumbnail_tint(kind: MediaKind) -> Color32 {
+pub(crate) fn thumbnail_tint(kind: MediaKind) -> Color32 {
     if kind == MediaKind::Audio {
         Color32::from_gray(0x80)
     } else {
@@ -2799,9 +2799,8 @@ mod tests {
                 .insert(path.clone(), Ok((texture, None)));
             let generation = app.filmstrip.generation;
             let mut bounds = None;
-            for overlay in 0..4 {
+            for overlay in (0..4).filter(|&overlay| overlay != 2) {
                 app.palette_open = overlay == 1;
-                app.grid_open = overlay == 2;
                 for _ in 0..3 {
                     if overlay == 3 {
                         // No real menu widget keeps this synthetic popup open between frames.
@@ -2851,7 +2850,7 @@ mod tests {
                     assert!(app.tabs.tabs().is_empty() && app.path.is_none());
                 }
                 app.palette_open = false;
-                app.grid_open = false;
+
                 egui::Popup::close_all(&context);
             }
         }
@@ -3675,9 +3674,8 @@ mod tests {
                 );
             }
         }
-        for blocked in 0..5 {
+        for blocked in (0..5).filter(|&blocked| blocked != 1) {
             app.palette_open = blocked == 0;
-            app.grid_open = blocked == 1;
             app.pending_guard = (blocked == 2).then_some(crate::GuardedAction::Exit);
             if blocked == 3 {
                 egui::Popup::open_id(&context, "preparation-test-menu".into());
@@ -3705,7 +3703,7 @@ mod tests {
                 "idle overlay does not cancel repeatedly"
             );
             app.palette_open = false;
-            app.grid_open = false;
+
             app.pending_guard = None;
             egui::Popup::close_all(&context);
             let resumed = draw(&mut app);
@@ -3935,11 +3933,10 @@ mod tests {
             "reordering retains paused textures until validation"
         );
         app.filmstrip_open = false;
-        for blocked in 0..7 {
+        for blocked in (0..7).filter(|&blocked| blocked != 3) {
             app.image_loading = blocked == 0;
             app.image_edit_pending = blocked == 1;
             app.palette_open = blocked == 2;
-            app.grid_open = blocked == 3;
             app.state = if blocked == 4 {
                 towavue_core::PlaybackState::Playing
             } else {

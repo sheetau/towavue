@@ -85,7 +85,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && !self.command_context().playback_blocked
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open
             && !self
                 .ui_context

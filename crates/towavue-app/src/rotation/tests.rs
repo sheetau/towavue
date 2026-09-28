@@ -763,11 +763,12 @@ fn rotation_modal_routes_keyboard_and_slider_input_and_restores_selection_focus(
     assert_eq!(context.memory(|memory| memory.focused()), Some(focus));
     assert!(app.edits.is_empty());
     assert_eq!(app.image_view.selection, Some(UnitRect::FULL));
-    for overlay in [CommandId::ToggleGridMenu, CommandId::ToggleCommandPalette] {
+    {
+        let overlay = CommandId::ToggleCommandPalette;
         app.dispatch(overlay);
         frame(&mut app, vec![]);
         app.dispatch(CommandId::FreeRotateImage);
-        assert!(!app.grid_open && !app.palette_open);
+        assert!(!app.palette_open);
         assert_eq!(app.guard_return_focus.map(|(_, id)| id), Some(focus));
         frame(&mut app, vec![]);
         frame(

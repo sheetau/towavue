@@ -57,7 +57,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.timeline_is_visible()
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open
             && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
             && self
@@ -89,14 +88,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 != Some(owner)
                 || self.modal_input_blocked()
                 || self.palette_open
-                || self.grid_open
                 || self.filmstrip_open)
         {
             egui::Popup::close_id(ui.ctx(), popup);
             return;
         }
-        if self.modal_input_blocked() || self.palette_open || self.grid_open || self.filmstrip_open
-        {
+        if self.modal_input_blocked() || self.palette_open || self.filmstrip_open {
             return;
         }
         // Child gain/endpoint controls also belong to this context. Observe only a

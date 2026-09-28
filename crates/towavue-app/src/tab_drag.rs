@@ -13,6 +13,7 @@ struct Drag {
     origin: egui::Pos2,
     pointer: egui::Pos2,
     crossed: bool,
+    started: u64,
     tabs: Vec<(TabId, Option<PathBuf>)>,
     source: (Option<TabId>, u64, u64),
     screen: egui::Rect,
@@ -39,6 +40,7 @@ pub(super) struct Layout {
     state: State,
     gap: Option<(usize, f32)>,
     source_rect: Option<egui::Rect>,
+    pressed_tab: Option<TabId>,
 }
 
 impl Layout {
@@ -134,6 +136,7 @@ impl Layout {
                 origin,
                 pointer: origin,
                 crossed: false,
+                started: context.cumulative_frame_nr(),
                 tabs: tabs.clone(),
                 source,
                 screen,
@@ -166,12 +169,27 @@ impl Layout {
             .filter(|drag| drag.crossed)
             .and_then(|drag| tabs.iter().position(|(id, _)| *id == drag.tab))
             .and_then(|index| rectangles.get(index).copied());
+        let pressed_tab = state
+            .drag
+            .as_ref()
+            .filter(|drag| drag.started == context.cumulative_frame_nr())
+            .map(|drag| drag.tab);
         state.widgets.clear();
         Self {
             state,
             gap,
             source_rect,
+            pressed_tab,
         }
+    }
+
+    pub(super) fn activation_pressed(&self, tab: TabId) -> bool {
+        self.pressed_tab == Some(tab)
+    }
+
+    pub(super) fn activation_requested(&self, tab: TabId, response: &egui::Response) -> bool {
+        self.activation_pressed(tab)
+            || (response.clicked() && !response.ctx.input(|input| input.pointer.primary_released()))
     }
 
     pub(super) fn register(&mut self, tab: TabId, response: &egui::Response) {
@@ -254,6 +272,27 @@ impl Layout {
         context.data_mut(|data| data.insert_temp(state_id(), self.state));
         action
     }
+}
+
+// A press activates the dragged tab before its next frame. Only that exact
+// source transition may refresh the gesture owner; later media changes cancel it.
+pub(super) fn activated(
+    context: &egui::Context,
+    tab: TabId,
+    before: (Option<TabId>, u64, u64),
+    after: (Option<TabId>, u64, u64),
+) {
+    if !context.input(|input| input.pointer.primary_pressed()) {
+        return;
+    }
+    context.data_mut(|data| {
+        if let Some(drag) = &mut data.get_temp_mut_or_default::<State>(state_id()).drag
+            && drag.tab == tab
+            && drag.source == before
+        {
+            drag.source = after;
+        }
+    });
 }
 
 pub(super) fn cancel(context: &egui::Context) -> bool {

@@ -34,7 +34,6 @@ mod gallery_drag_tests;
 mod gallery_rail;
 #[cfg(test)]
 mod gallery_tests;
-mod grid;
 mod hold_speed;
 mod hover_help;
 mod image_color;
@@ -340,6 +339,7 @@ enum UiAction {
         towavue_core::TimelineEdit,
     ),
     Volume(TabId, f32),
+    TabVolume(TabId, PathBuf, Vec<f32>),
     ToggleTabMute(TabId),
     CloseTab(TabId),
     DropTab(TabId, egui::Pos2, egui::Vec2),
@@ -1170,8 +1170,6 @@ struct Application<N> {
     about_open: bool,
     update_notice: Option<updates::Notice>,
     update_close: Option<updates::Close>,
-    grid_layouts: grid::GridLayouts,
-    grid_path: PathBuf,
     path: Option<PathBuf>,
     media_kind: Option<MediaKind>,
     image: Option<ImagePresentation>,
@@ -1213,6 +1211,7 @@ struct Application<N> {
     preview_cache: PreviewCache,
     duration_workers: BTreeMap<u64, LatestTask>,
     volume_hud: volume_hud::Hud,
+    tab_volume_huds: BTreeMap<TabId, volume_hud::Hud>,
     status_file_details: status_file_details::FileDetailsCache,
     playlist_duration_worker: LatestTask,
     playlist_duration_pending: Option<playlist::DurationRequest>,
@@ -1222,6 +1221,7 @@ struct Application<N> {
     video_sheets: video_sheets::VideoSheets,
     frame_steps: frame_step::FrameSteps,
     held_speed: Option<hold_speed::Held>,
+    space_hold: Option<hold_speed::keyboard::Press>,
     timeline_open: bool,
     waveform: Option<TextureHandle>,
     waveform_detail: waveform_detail::Detail,
@@ -1271,7 +1271,6 @@ struct Application<N> {
     tab_preview: tab_preview::TabPreview,
     playlist: playlist::Playlist,
     image_seek_preview_active: bool,
-    grid_open: bool,
     palette_open: bool,
     command_overlay_return_focus: Option<egui::Id>,
     palette: palette::CommandPalette,
@@ -1315,16 +1314,12 @@ where
         preview_cache: PreviewCache,
     ) -> Result<Self, Box<dyn Error>> {
         let shortcut_path = shortcuts::config_path()?;
-        let grid_path = grid::config_path()?;
         let mut warnings = Vec::new();
         let shortcuts = shortcuts::load_from(&shortcut_path).unwrap_or_else(|error| {
             warnings.push((shortcut_path.clone(), error));
             shortcuts::defaults()
         });
-        let grid_layouts = grid::load_from(&grid_path).unwrap_or_else(|error| {
-            warnings.push((grid_path.clone(), error));
-            grid::defaults()
-        });
+
         let configuration_warning = configuration::Warning::new(warnings);
         if let Some(warning) = &configuration_warning {
             towavue_runtime_windows::diagnostic!(
@@ -1473,8 +1468,6 @@ where
             about_open: false,
             update_notice: None,
             update_close: None,
-            grid_layouts,
-            grid_path,
             path: None,
             media_kind: None,
             image: None,
@@ -1521,6 +1514,7 @@ where
             preview_cache,
             duration_workers: BTreeMap::new(),
             volume_hud: volume_hud::Hud::default(),
+            tab_volume_huds: BTreeMap::new(),
             status_file_details: status_file_details::FileDetailsCache::new()?,
             playlist_duration_worker: LatestTask::new("towavue-playlist-duration")?,
             playlist_duration_pending: None,
@@ -1530,6 +1524,7 @@ where
             video_sheets: video_sheets::VideoSheets::new()?,
             frame_steps: frame_step::FrameSteps::new()?,
             held_speed: None,
+            space_hold: None,
             timeline_open: false,
             waveform: None,
             waveform_detail: waveform_detail::Detail::default(),
@@ -1579,7 +1574,6 @@ where
             tab_preview: tab_preview::TabPreview::new()?,
             playlist: playlist::Playlist::default(),
             image_seek_preview_active: false,
-            grid_open: false,
             palette_open: false,
             command_overlay_return_focus: None,
             palette,
@@ -1879,7 +1873,7 @@ where
         self.palette.clear_preview();
         self.command_overlay_return_focus = None;
         self.file_search.update(None);
-        self.grid_open = false;
+
         self.cancel_shortcut_prefix();
         if subtitles::supported(&path) && !path.is_dir() {
             self.load_external_subtitles(path);
@@ -4211,7 +4205,6 @@ where
             &context,
             modal_blocked
                 || self.palette_open
-                || self.grid_open
                 || self.filmstrip_open
                 || self.native_ime_composing
                 || self.prefix_started.is_some(),
@@ -4221,7 +4214,6 @@ where
             self.tabs.active().map(|tab| tab.id),
             !modal_blocked
                 && !self.palette_open
-                && !self.grid_open
                 && !egui::Popup::is_any_open(&context)
                 && context.input(|input| {
                     input.focused && !input.events.contains(&egui::Event::WindowFocused(false))
@@ -4229,7 +4221,6 @@ where
         );
         if modal_blocked
             || self.palette_open
-            || self.grid_open
             || self.filmstrip_open
             || egui::Popup::is_any_open(&context)
         {
@@ -4237,20 +4228,6 @@ where
             self.cancel_view_drag();
             self.finish_reading_drag(true);
             self.finish_track_drag(true);
-        }
-        // Decide before the menu can close itself with this same Escape event.
-        if self.grid_open
-            && !self.palette_open
-            && !modal_blocked
-            && !egui::Popup::is_any_open(&context)
-            && context
-                .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            if self.prefix_started.is_some() {
-                self.cancel_shortcut_prefix();
-            } else {
-                self.cancel_command_overlay();
-            }
         }
         if !modal_blocked && self.guard_return_focus.is_some() {
             if context.memory(|memory| memory.top_modal_layer().is_none()) {
@@ -4324,10 +4301,7 @@ where
                     if let Some(change) = self.keyboard_settings.show(
                         ui,
                         &self.shortcuts,
-                        !modal_blocked
-                            && !self.grid_open
-                            && !self.palette_open
-                            && !egui::Popup::is_any_open(&context),
+                        !modal_blocked && !self.palette_open && !egui::Popup::is_any_open(&context),
                     ) {
                         let action = UiAction::KeybindingChange(
                             self.tabs.active_id().expect("keyboard settings"),
@@ -4338,7 +4312,7 @@ where
                         }
                     }
                 } else if self.media_kind.is_none() {
-                    let enabled = !modal_blocked && !self.grid_open;
+                    let enabled = !modal_blocked;
                     self.draw_gallery(ui, enabled, actions);
                 } else if self.media_kind == Some(MediaKind::Audio) {
                     self.draw_audio_playlist(ui, actions);
@@ -4350,7 +4324,6 @@ where
                 }
                 if !modal_blocked
                     && !self.palette_open
-                    && !self.grid_open
                     && !self.filmstrip_open
                     && !egui::Popup::is_any_open(&context)
                 {
@@ -4391,9 +4364,6 @@ where
         }
         if self.palette_open && !modal_blocked {
             self.draw_command_palette(&context, media_panel.response.rect.top(), actions);
-        }
-        if !modal_blocked {
-            self.draw_grid_menu(&context, actions);
         }
         if !self.about_open && self.native_prompt.is_none() {
             if let Some(error) = &self.export_error {
@@ -4950,7 +4920,6 @@ where
         };
         if !matches!(self.media_kind, Some(MediaKind::Video | MediaKind::Audio))
             || self.modal_input_blocked()
-            || self.grid_open
             || self.filmstrip_open
         {
             return;
@@ -4988,7 +4957,6 @@ where
             || self.window.is_none()
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || self.filmstrip_open
             || self
                 .ui_context
@@ -5065,7 +5033,6 @@ where
 
     fn view_wheel_allowed(&self, context: &egui::Context) -> bool {
         !self.modal_input_blocked()
-            && !self.grid_open
             && !self.filmstrip_open
             && context.memory(|memory| memory.top_modal_layer().is_none())
     }
@@ -5501,6 +5468,8 @@ where
     }
 
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        self.tab_volume_huds
+            .retain(|id, _| self.tabs.tab_ids().any(|tab| tab == *id));
         let language = self.language();
         if self.palette_open {
             logo_menu::cancel(root.ctx());
@@ -5515,21 +5484,18 @@ where
         let preview_allowed = !self.modal_input_blocked()
             && self.incoming_tab_pointer.is_none()
             && !self.palette_open
-            && !self.grid_open
             && !egui::Popup::is_any_open(root.ctx());
-        let tab_menu_focus = (!self.modal_input_blocked()
-            && self.active_export.is_none()
-            && !self.palette_open
-            && !self.grid_open)
-            .then(|| {
-                root.ctx().data_mut(|data| {
-                    let key = "tab-menu-return-focus".into();
-                    let focus = data.get_temp::<(TabId, egui::Id)>(key);
-                    data.remove::<(TabId, egui::Id)>(key);
-                    focus
+        let tab_menu_focus =
+            (!self.modal_input_blocked() && self.active_export.is_none() && !self.palette_open)
+                .then(|| {
+                    root.ctx().data_mut(|data| {
+                        let key = "tab-menu-return-focus".into();
+                        let focus = data.get_temp::<(TabId, egui::Id)>(key);
+                        data.remove::<(TabId, egui::Id)>(key);
+                        focus
+                    })
                 })
-            })
-            .flatten();
+                .flatten();
         let return_to_tab = root.ctx().data_mut(|data| {
             data.remove_temp::<bool>("tab-focus-fallback".into())
                 .unwrap_or(false)
@@ -5717,7 +5683,7 @@ where
                                         self.media_generation,
                                         self.graphics_epoch,
                                     ),
-                                    !self.modal_input_blocked() && !self.grid_open,
+                                    !self.modal_input_blocked(),
                                 );
                                 for (index, id) in self.tabs.tab_ids().enumerate() {
                                     if self.tabs.is_utility(id) {
@@ -5746,7 +5712,7 @@ where
                                                     self.tabs.can_close(id),
                                                 )
                                             };
-                                        if response.clicked() {
+                                        if drag_layout.activation_requested(id, &response) {
                                             actions.push(UiAction::ActivateTab(id));
                                         }
                                         if close.clicked()
@@ -5864,8 +5830,50 @@ where
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.active.bg_stroke =
                                         egui::Stroke::NONE;
-                                    let response =
-                                        chrome::tab_title(&mut tab_ui, label_rect, &label, active);
+                                    let now = Instant::now();
+                                    let notice = active
+                                        .then(|| {
+                                            self.volume_hud.title_opacity(
+                                                tab_ui.ctx(),
+                                                (tab.id, self.media_generation),
+                                                now,
+                                            )
+                                        })
+                                        .flatten()
+                                        .or_else(|| {
+                                            self.tab_volume_huds.get(&tab.id).and_then(|hud| {
+                                                hud.title_opacity(tab_ui.ctx(), (tab.id, 0), now)
+                                            })
+                                        })
+                                        .map(|opacity| (self.playback_volume_for(tab.id), opacity));
+                                    let response = chrome::tab_title_with_volume(
+                                        &mut tab_ui,
+                                        label_rect,
+                                        &label,
+                                        active,
+                                        notice,
+                                    );
+                                    if let Some(path) = tab.target.current_path()
+                                        && self.tab_mute_state(tab.id).is_some()
+                                        && !self.modal_input_blocked()
+                                        && !self.palette_open
+                                    {
+                                        let mut target = response.clone();
+                                        target.interact_rect = rect.intersect(clip);
+                                        let deltas =
+                                            wheel_input::tab_volume_deltas(tab_ui.ctx(), &target);
+                                        if !deltas.is_empty() {
+                                            // The parent strip must not also scroll for a volume wheel.
+                                            tab_ui.input_mut(|input| {
+                                                input.smooth_scroll_delta = egui::Vec2::ZERO;
+                                            });
+                                            actions.push(UiAction::TabVolume(
+                                                tab.id,
+                                                path.to_owned(),
+                                                deltas,
+                                            ));
+                                        }
+                                    }
                                     response.widget_info(|| {
                                         egui::WidgetInfo::labeled(
                                             egui::WidgetType::Button,
@@ -5889,8 +5897,8 @@ where
                                         &response,
                                         egui::PointerButton::Middle,
                                     );
-                                    if response.clicked() {
-                                        if tab_ui.input(|input| input.pointer.primary_released()) {
+                                    if drag_layout.activation_requested(tab.id, &response) {
+                                        if drag_layout.activation_pressed(tab.id) {
                                             // Pointer activation returns keys to the media, not a saved control.
                                             tab_focus::forget(tab_ui.ctx(), tab.id);
                                             response.surrender_focus();
@@ -5992,7 +6000,6 @@ where
                                     });
                                     if !self.modal_input_blocked()
                                         && !self.palette_open
-                                        && !self.grid_open
                                         && let Some((command, focus)) =
                                             tab_menu::popup(&tab_ui, &response, &close, |ui| {
                                                 tab_menu::show(
@@ -6111,6 +6118,13 @@ where
                                             folder.as_ref(),
                                         ) {
                                             actions.push(match action {
+                                                preview_transport::Action::Volume(deltas) => {
+                                                    UiAction::TabVolume(
+                                                        tab.id,
+                                                        target.path.clone(),
+                                                        deltas,
+                                                    )
+                                                }
                                                 preview_transport::Action::Command(command) => {
                                                     UiAction::PreviewTransport(
                                                         tab.id,
@@ -6254,103 +6268,6 @@ where
         );
     }
 
-    fn draw_grid_menu(&mut self, context: &egui::Context, actions: &mut Vec<UiAction>) {
-        let opacity =
-            context.animate_bool_with_time("grid-menu-animation".into(), self.grid_open, 0.12);
-        if opacity <= 0.0 {
-            return;
-        }
-        let Some(kind) = self.media_kind else { return };
-        let commands = *self.grid_layouts.get(kind);
-        let available = context.content_rect().size() - egui::vec2(28.0, 50.0);
-        let cell = ((available - egui::vec2(18.0, 18.0)) / 4.0)
-            .clamp(egui::Vec2::splat(1.0), egui::vec2(110.0, 52.0));
-        egui::Area::new("grid-menu".into())
-            .anchor(Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .order(egui::Order::Foreground)
-            .show(context, |ui| {
-                ui.set_opacity(opacity);
-                if !self.grid_open {
-                    ui.disable();
-                }
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(cell.x * 4.0 + 18.0);
-                    egui::Grid::new("command-grid")
-                        .spacing([6.0, 6.0])
-                        .min_col_width(cell.x)
-                        .max_col_width(cell.x)
-                        .show(ui, |ui| {
-                            for (index, command) in commands.iter().copied().enumerate() {
-                                let title = command_definitions()
-                                    .iter()
-                                    .find(|definition| definition.id == command)
-                                    .map_or(command.as_str(), |definition| {
-                                        definition.title_in(localization::language(ui.ctx()))
-                                    });
-                                chrome::flat_buttons(ui);
-                                let enabled = command_definitions()
-                                    .iter()
-                                    .find(|definition| definition.id == command)
-                                    .is_some_and(|definition| {
-                                        definition.is_enabled(self.command_context())
-                                    });
-                                let label = format!("{}\n{}", grid::KEYS[index], title);
-                                let mut font = egui::TextStyle::Button.resolve(ui.style());
-                                if cell.y < 44.0 {
-                                    font.size = 11.0;
-                                }
-                                let row_height = ui.fonts_mut(|fonts| fonts.row_height(&font));
-                                let padding = ui.spacing().button_padding * 2.0;
-                                let mut text = egui::text::LayoutJob::simple(
-                                    label,
-                                    font,
-                                    ui.visuals().text_color(),
-                                    (cell.x - padding.x).max(1.0),
-                                );
-                                text.wrap.max_rows =
-                                    (((cell.y - padding.y) / row_height) as usize).max(1);
-                                let text = ui.fonts_mut(|fonts| fonts.layout_job(text));
-                                if ui
-                                    .add_enabled(enabled, egui::Button::new(text).min_size(cell))
-                                    .help_text(title)
-                                    .disabled_help_text(title)
-                                    .clicked()
-                                {
-                                    if !matches!(
-                                        command,
-                                        CommandId::ToggleGridMenu
-                                            | CommandId::ToggleCommandPalette
-                                            | CommandId::GoToFile
-                                            | CommandId::OpenRecentFolder
-                                            | CommandId::ToggleFilmstrip
-                                    ) {
-                                        self.grid_open = false;
-                                    }
-                                    actions.push(UiAction::Command(command));
-                                }
-                                if index % 4 == 3 {
-                                    ui.end_row();
-                                }
-                            }
-                        });
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(
-                                towavue_core::localization::formatted::edit_grid_file(
-                                    self.language(),
-                                    &self.grid_path.display().to_string(),
-                                ),
-                            )
-                            .weak(),
-                        )
-                        .truncate()
-                        .show_tooltip_when_elided(false),
-                    )
-                    .help_text(self.grid_path.display().to_string());
-                });
-            });
-    }
-
     fn draw_fullscreen_controls(
         &mut self,
         context: &egui::Context,
@@ -6361,7 +6278,6 @@ where
         let eligible = self.fullscreen
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open
             && !egui::Popup::is_any_open(context)
             && self.view_drag.is_none();
@@ -7041,11 +6957,7 @@ where
                     seekbar::directed_ratio(response.rect, pointer.x, reversed),
                     images.len(),
                 );
-                if !self.filmstrip_open
-                    && !self.palette_open
-                    && !self.grid_open
-                    && !self.modal_input_blocked()
-                {
+                if !self.filmstrip_open && !self.palette_open && !self.modal_input_blocked() {
                     let paths: Vec<_> = if self.reading_mode {
                         snapshot
                             .reading_items(&images[target].path, self.reading_settings)
@@ -7407,7 +7319,7 @@ where
     }
 
     fn draw_audio_playlist(&mut self, ui: &mut egui::Ui, actions: &mut Vec<UiAction>) {
-        let enabled = !self.modal_input_blocked() && !self.grid_open && !self.filmstrip_open;
+        let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
         if !enabled {
             let opacity = ui.opacity();
             ui.disable();
@@ -7531,7 +7443,7 @@ where
         self.file_search.update(None);
         self.palette_open = false;
         self.palette.clear_preview();
-        self.grid_open = false;
+
         if let Some(id) = self.command_overlay_return_focus.take()
             && let Some(context) = &self.ui_context
         {
@@ -7543,7 +7455,6 @@ where
     fn filmstrip_target(&self, path: &Path) -> Option<(TabId, MediaKind)> {
         if !self.filmstrip_open
             || self.palette_open
-            || self.grid_open
             || self
                 .ui_context
                 .as_ref()
@@ -7790,7 +7701,6 @@ where
                 };
                 if self.tabs.active_id() != Some(gallery)
                     || self.palette_open
-                    || self.grid_open
                     || self
                         .ui_context
                         .as_ref()
@@ -7853,6 +7763,7 @@ where
             }
             UiAction::Seek(target) => self.seek_to(target),
             UiAction::CommitVideoScrub(target) => self.commit_video_scrub(target),
+            UiAction::TabVolume(id, path, deltas) => self.tab_volume_wheel(id, &path, &deltas),
             UiAction::Volume(id, volume) => {
                 if self.tabs.active().is_some_and(|tab| tab.id == id) {
                     self.set_playback_volume(volume);
@@ -7971,7 +7882,7 @@ where
             self.close_filmstrip();
         }
         if command == CommandId::ToggleFilmstrip && !self.filmstrip_open {
-            let focus = if self.palette_open || self.grid_open {
+            let focus = if self.palette_open {
                 self.command_overlay_return_focus
             } else {
                 self.ui_context
@@ -7988,18 +7899,15 @@ where
                 | CommandId::EditSpeed
                 | CommandId::AudioExportOptions
                 | CommandId::MetadataExportOptions
-        ) && (self.palette_open || self.grid_open)
+        ) && (self.palette_open)
         {
             self.cancel_command_overlay();
         }
         self.command_overlay_return_focus = if matches!(
             command,
-            CommandId::ToggleCommandPalette
-                | CommandId::ToggleGridMenu
-                | CommandId::GoToFile
-                | CommandId::OpenRecentFolder
+            CommandId::ToggleCommandPalette | CommandId::GoToFile | CommandId::OpenRecentFolder
         ) {
-            if self.palette_open || self.grid_open {
+            if self.palette_open {
                 self.command_overlay_return_focus
             } else {
                 self.ui_context
@@ -8139,7 +8047,7 @@ where
                 if !self.filmstrip_open {
                     self.refresh_folder_snapshot();
                     self.filmstrip.focus_current();
-                    self.grid_open = false;
+
                     self.filmstrip_open = true;
                 } else {
                     self.close_filmstrip();
@@ -8147,7 +8055,6 @@ where
                 self.request_redraw();
             }
             CommandId::ToggleCommandPalette => {
-                self.grid_open = false;
                 self.palette_open = !self.palette_open;
                 self.palette.reset();
                 if self.palette_open
@@ -8158,7 +8065,6 @@ where
                 self.request_redraw();
             }
             CommandId::GoToFile | CommandId::OpenRecentFolder => {
-                self.grid_open = false;
                 self.palette_open = true;
                 self.palette
                     .open_files(command == CommandId::OpenRecentFolder);
@@ -8167,39 +8073,17 @@ where
                 }
                 self.request_redraw();
             }
-            CommandId::ToggleGridMenu => {
-                if self.grid_open {
-                    self.cancel_command_overlay();
-                } else {
-                    if let Some(context) = &self.ui_context {
-                        logo_menu::cancel(context);
-                    }
-                    self.grid_open = true;
-                }
-                self.request_redraw();
-            }
+
             CommandId::ReloadShortcuts => match shortcuts::load() {
                 Ok((bindings, path)) => {
                     self.shortcuts = bindings.clone();
                     (self.notify)(AppEvent::ShortcutsChanged(bindings));
                     self.shortcut_path = path;
-                    match grid::load() {
-                        Ok((layouts, grid_path)) => {
-                            self.grid_layouts = layouts;
-                            self.grid_path = grid_path;
-                            self.set_status(
-                                localization::Text::ShortcutsGridReloaded
-                                    .in_language(language)
-                                    .into(),
-                            );
-                        }
-                        Err(error) => self.set_status(
-                            towavue_core::localization::formatted::grid_reload_failed(
-                                language,
-                                &error.message(language),
-                            ),
-                        ),
-                    }
+                    self.set_status(
+                        localization::Text::ShortcutsReloaded
+                            .in_language(language)
+                            .into(),
+                    );
                 }
                 Err(error) => self.set_status(
                     towavue_core::localization::formatted::shortcuts_reload_failed(
@@ -8325,7 +8209,7 @@ where
                 });
                 self.palette_open = false;
                 self.palette.clear_preview();
-                self.grid_open = false;
+
                 self.request_redraw();
             }
             CommandId::FreeRotateImage => self.open_rotation(),
@@ -9715,6 +9599,11 @@ where
         if self.tabs.active_id() == Some(id) {
             return;
         }
+        let before = (
+            self.tabs.active_id(),
+            self.media_generation,
+            self.graphics_epoch,
+        );
         self.keyboard_settings.cancel_capture();
         if !self.tabs.activate(id) {
             return;
@@ -9731,6 +9620,18 @@ where
             self.retain_image_tab();
             self.retain_playback_tab();
             self.clear_active_media();
+        }
+        if let Some(context) = &self.ui_context {
+            tab_drag::activated(
+                context,
+                id,
+                before,
+                (
+                    self.tabs.active_id(),
+                    self.media_generation,
+                    self.graphics_epoch,
+                ),
+            );
         }
     }
 
@@ -10474,7 +10375,6 @@ where
             || self.command_context().has_unsaved_edits
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || self.filmstrip_open
             || self
                 .ui_context
@@ -11854,7 +11754,7 @@ where
             rect,
             held.as_deref().or(self.folder_snapshot.as_ref()),
             self.path.as_deref(),
-            !self.palette_open && !self.grid_open,
+            !self.palette_open,
             actions,
         );
     }
@@ -11870,7 +11770,6 @@ where
         {
             if self.modal_input_blocked()
                 || self.palette_open
-                || self.grid_open
                 || egui::Popup::is_any_open(context)
                 || context
                     .input(|input| input.pointer.any_down() || !input.raw.hovered_files.is_empty())
@@ -11912,7 +11811,7 @@ where
         if self.modal_input_blocked() {
             return false;
         }
-        if self.palette_open || self.grid_open {
+        if self.palette_open {
             self.cancel_command_overlay();
             true
         } else if self.filmstrip_open {
@@ -11932,7 +11831,6 @@ where
     fn filmstrip_owns_key(&self, stroke: &KeyStroke) -> bool {
         self.filmstrip_open
             && !self.palette_open
-            && !self.grid_open
             && !self.modal_input_blocked()
             && !self.ui_context.as_ref().is_some_and(|context| {
                 egui::Popup::is_any_open(context) || context.text_edit_focused()
@@ -11950,7 +11848,6 @@ where
     fn owns_tab_key(&self, stroke: &KeyStroke) -> bool {
         if stroke.key != Key::Tab
             || self.palette_open
-            || self.grid_open
             || self.modal_input_blocked()
             || self
                 .ui_context
@@ -11998,7 +11895,6 @@ where
 
     fn owns_seek_shortcut(&self, stroke: &KeyStroke) -> bool {
         !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open
             && !self.modal_input_blocked()
             && self.ui_context.as_ref().is_some_and(|context| {
@@ -12068,7 +11964,6 @@ where
             return true;
         }
         if self.palette_open
-            || self.grid_open
             || self.modal_input_blocked()
             || egui::Popup::is_any_open(context)
             || !context.egui_wants_keyboard_input()
@@ -12124,7 +12019,6 @@ where
             )
             && !self.native_ime_composing
             && !self.modal_input_blocked()
-            && !self.grid_open
             && !self.palette_open
             && !self.filmstrip_open
             && ((self.tabs.gallery().is_some() && self.tabs.active_id() == self.tabs.gallery())
@@ -12172,29 +12066,7 @@ where
         {
             return;
         }
-        if let Some(index) = self.grid_key_index(event.physical_key)
-            && let Some(kind) = self.media_kind
-        {
-            let command = self.grid_layouts.get(kind)[index];
-            let enabled = command_definitions()
-                .iter()
-                .find(|definition| definition.id == command)
-                .is_some_and(|definition| definition.is_enabled(self.command_context()));
-            if enabled {
-                if !matches!(
-                    command,
-                    CommandId::ToggleGridMenu
-                        | CommandId::ToggleCommandPalette
-                        | CommandId::GoToFile
-                        | CommandId::OpenRecentFolder
-                        | CommandId::ToggleFilmstrip
-                ) {
-                    self.grid_open = false;
-                }
-                self.dispatch(command);
-            }
-            return;
-        }
+
         let Some(stroke) = self.key_stroke(event) else {
             return;
         };
@@ -12243,7 +12115,6 @@ where
             || self.native_ime_composing
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || self.filmstrip_open
             || !self.entered_shortcut.is_empty()
             || self.ui_context.as_ref().is_some_and(|context| {
@@ -12339,19 +12210,6 @@ where
         }
     }
 
-    fn grid_key_index(&self, physical_key: PhysicalKey) -> Option<usize> {
-        if !self.grid_open
-            || self.palette_open
-            || self.modal_input_blocked()
-            || self
-                .modifiers
-                .intersects(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER)
-        {
-            return None;
-        }
-        grid::key_index(physical_key)
-    }
-
     fn key_stroke(&self, event: &KeyEvent) -> Option<KeyStroke> {
         self.key_stroke_for(&event.logical_key, event.physical_key)
     }
@@ -12417,6 +12275,7 @@ where
         }
         self.check_eof();
         let now = Instant::now();
+        self.update_space_hold(now);
         self.advance_audio_queues();
         self.observe_viewed_history(now);
         let was_hidden = self.viewing_cursor.hidden;
@@ -12575,6 +12434,7 @@ where
             status_expiry,
             seek_notice_expiry,
             prefix_expiry,
+            self.space_hold_deadline(),
             self.viewing_cursor.deadline,
             (self.state == PlaybackState::Playing
                 && self.decode_finished
@@ -12602,15 +12462,15 @@ where
             && self.fullscreen
             && !self.fullscreen_controls_visible
             && matches!(self.media_kind, Some(MediaKind::Image | MediaKind::Video))
-            && !self.image_loading
-            && !self.image_edit_pending
+            // Keyboard navigation can briefly load a replacement without pointer activity.
+            && (self.viewing_cursor.hidden || (!self.image_loading && !self.image_edit_pending))
             && self.image_error.is_none()
             && !self.reading_pages.iter().any(Result::is_err)
-            && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted)
+            && self.state != PlaybackState::Faulted
+            && (self.viewing_cursor.hidden || self.state != PlaybackState::Loading)
             && self.view_drag.is_none()
             && !self.filmstrip_open
             && !self.palette_open
-            && !self.grid_open
             && self.active_export.is_none()
             && !self.modal_input_blocked()
             && self.ui_context.as_ref().is_some_and(|context| {
@@ -13099,6 +12959,20 @@ where
         {
             self.cancel_view_drag();
         }
+        if let WindowEvent::KeyboardInput {
+            event,
+            is_synthetic: false,
+            ..
+        } = &event
+            && event.logical_key == WinitKey::Named(NamedKey::Space)
+            && self.video_space_key(
+                event.state == ElementState::Pressed,
+                event.repeat,
+                Instant::now(),
+            )
+        {
+            return;
+        }
         if matches!(
             &event,
             WindowEvent::Focused(false)
@@ -13209,10 +13083,10 @@ where
                 | WindowEvent::CursorLeft { .. }
                 | WindowEvent::MouseInput { .. }
                 | WindowEvent::MouseWheel { .. }
-                | WindowEvent::KeyboardInput { .. }
                 | WindowEvent::Focused(_)
                 | WindowEvent::Touch(_)
-        ) {
+        ) || (!self.fullscreen && matches!(event, WindowEvent::KeyboardInput { .. }))
+        {
             if self.viewing_cursor.hidden {
                 self.request_redraw();
             }
@@ -13276,12 +13150,6 @@ where
                 self.process_key(event);
                 return;
             }
-        }
-        if let WindowEvent::KeyboardInput { event, .. } = &event
-            && self.grid_key_index(event.physical_key).is_some()
-        {
-            self.process_key(event);
-            return;
         }
         if let WindowEvent::KeyboardInput {
             event,
@@ -13474,95 +13342,50 @@ mod tests {
     }
 
     #[test]
-    fn startup_configuration_fallback_is_independent_and_handles_unreadable_files() {
+    fn retired_grid_files_are_untouched_and_do_not_affect_shortcut_recovery() {
         let Some(root) = isolated_test_root(
-            "tests::startup_configuration_fallback_is_independent_and_handles_unreadable_files",
+            "tests::retired_grid_files_are_untouched_and_do_not_affect_shortcut_recovery",
         ) else {
             return;
         };
         let config = root.join("config/towavue");
-        std::fs::create_dir_all(&config).expect("isolated settings directory");
+        std::fs::create_dir_all(&config).expect("owned settings");
         let shortcut_path = config.join("shortcuts.conf");
         let grid_path = config.join("grid.conf");
-        let custom_grid = format!("image = {}\n", ["rotate_clockwise"; 16].join(", "));
-        for (shortcuts, grid, failed_shortcuts, failed_grid) in [
-            (
-                &b"open_file = Ctrl+P\n"[..],
-                "video = open_file\n",
-                false,
-                true,
-            ),
-            (&b"bad = Ctrl+P\n"[..], "video = open_file\n", true, true),
-            (&b"\xff\xfe\x00"[..], custom_grid.as_str(), true, false),
+        let legacy = b"\xff\xfe\x00 retired grid notes";
+        std::fs::write(&grid_path, legacy).expect("legacy file");
+        for (bytes, valid) in [
+            (&b"open_file = Ctrl+P\ntoggle_grid_menu = G\n"[..], true),
+            (&b"unknown = Ctrl+P\n"[..], false),
+            (&b"\xff\xfe\x00"[..], false),
         ] {
-            std::fs::write(&shortcut_path, shortcuts).expect("shortcut fixture");
-            std::fs::write(&grid_path, grid).expect("grid fixture");
-            let app = Application::new(None, |_| {}).expect("recoverable settings failure");
-            let warning = app
-                .configuration_warning
-                .as_ref()
-                .expect("warning")
-                .message(localization::Language::English);
-            assert_eq!(
-                warning.contains(&app.shortcut_path.display().to_string()),
-                failed_shortcuts
-            );
-            assert_eq!(
-                warning.contains(&app.grid_path.display().to_string()),
-                failed_grid
-            );
+            std::fs::write(&shortcut_path, bytes).expect("shortcut fixture");
+            let mut app = Application::new(None, |_| {}).expect("recoverable settings");
+            assert_eq!(app.configuration_warning.is_none(), valid);
             assert_eq!(
                 app.shortcuts
                     .get(CommandId::OpenFile)
                     .expect("binding")
                     .to_string(),
-                if failed_shortcuts { "Ctrl+O" } else { "Ctrl+P" }
+                if valid { "Ctrl+P" } else { "Ctrl+O" }
             );
+            if let Some(warning) = &app.configuration_warning {
+                let message = warning.message(localization::Language::English);
+                assert!(message.contains("shortcuts.conf"));
+                assert!(!message.contains("grid.conf"));
+            }
+            app.dispatch(CommandId::ReloadShortcuts);
+            assert_eq!(std::fs::read(&grid_path).expect("legacy preserved"), legacy);
             assert_eq!(
-                *app.grid_layouts.get(MediaKind::Image),
-                if failed_grid {
-                    *grid::defaults().get(MediaKind::Image)
-                } else {
-                    [CommandId::RotateClockwise; 16]
-                }
-            );
-            assert_eq!(
-                std::fs::read(&shortcut_path).expect("original shortcuts"),
-                shortcuts
-            );
-            assert_eq!(
-                std::fs::read_to_string(&grid_path).expect("original grid"),
-                grid
+                std::fs::read(&shortcut_path).expect("source preserved"),
+                bytes
             );
         }
-        std::fs::remove_file(&shortcut_path).expect("remove own malformed fixture");
-        std::fs::create_dir(&shortcut_path).expect("non-file configuration fixture");
+        std::fs::remove_file(&shortcut_path).expect("owned malformed fixture");
+        std::fs::create_dir(&shortcut_path).expect("non-file settings");
         let app = Application::new(None, |_| {}).expect("unreadable settings path");
-        assert!(
-            app.configuration_warning
-                .as_ref()
-                .expect("warning")
-                .message(localization::Language::English)
-                .contains("shortcuts.conf")
-        );
+        assert!(app.configuration_warning.is_some());
         assert!(shortcut_path.is_dir());
-        drop(app);
-        std::fs::remove_dir(&shortcut_path).expect("remove own empty fixture");
-        std::fs::write(&shortcut_path, "open_file = Ctrl+P\n").expect("valid shortcuts");
-        let mut app = Application::new(None, |_| {}).expect("both configurations valid");
-        assert!(app.configuration_warning.is_none());
-        let retained_grid = *app.grid_layouts.get(MediaKind::Image);
-        std::fs::write(&grid_path, "image = unknown\n").expect("break grid fixture");
-        app.dispatch(CommandId::ReloadShortcuts);
-        assert_eq!(*app.grid_layouts.get(MediaKind::Image), retained_grid);
-        assert!(
-            app.status_message
-                .as_ref()
-                .expect("grid error")
-                .0
-                .contains("Grid reload failed")
-        );
-        assert!(app.configuration_warning.is_none());
     }
 
     #[test]
@@ -13583,7 +13406,7 @@ mod tests {
             .expect("both failures visible")
             .message(localization::Language::English);
         assert!(warning.contains("shortcuts.conf"));
-        assert!(warning.contains("grid.conf"));
+        assert!(!warning.contains("grid.conf"));
         assert_eq!(
             std::fs::read(&blocked).expect("preserved collision"),
             b"preserve existing file"
@@ -13593,7 +13416,7 @@ mod tests {
         let app = Application::new(None, |_| {}).expect("first-run settings can now be created");
         assert!(app.configuration_warning.is_none());
         assert!(app.shortcut_path.is_file());
-        assert!(app.grid_path.is_file());
+        assert!(!config.join("towavue/grid.conf").exists());
     }
 
     #[test]
@@ -13732,10 +13555,9 @@ mod tests {
                 data: None,
             })
         };
-        for overlay in 0..5 {
+        for overlay in (0..5).filter(|&overlay| overlay != 2) {
             app.filmstrip_open = overlay == 0;
             app.palette_open = overlay == 1;
-            app.grid_open = overlay == 2;
             app.pending_guard = (overlay == 3).then_some(GuardedAction::Exit);
             popup_active.set(overlay == 4);
             let output = frame(&mut app, vec![]).0;
@@ -13798,7 +13620,7 @@ mod tests {
             }
             app.filmstrip_open = false;
             app.palette_open = false;
-            app.grid_open = false;
+
             app.pending_guard = None;
             popup_active.set(false);
             egui::Popup::close_all(&context);
@@ -14640,82 +14462,11 @@ mod tests {
             assert_eq!(crop(&app).x + crop(&app).width, right - 1);
             frame(&mut app, vec![key(egui::Key::ArrowRight)]);
         }
-        for switch_overlay in [false, true] {
-            app.dispatch(CommandId::ToggleGridMenu);
-            frame(&mut app, vec![]);
-            if switch_overlay {
-                app.dispatch(CommandId::ToggleCommandPalette);
-                frame(&mut app, vec![]);
-                app.dispatch(CommandId::ToggleGridMenu);
-            }
-            let tree = frame(&mut app, vec![]);
-            let target = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Button
-                        && node
-                            .label()
-                            .is_some_and(|label| label.contains("Rotate clockwise"))
-                })
-                .expect("grid rotation button")
-                .0;
-            frame(
-                &mut app,
-                vec![egui::Event::AccessKitActionRequest(
-                    egui::accesskit::ActionRequest {
-                        action: egui::accesskit::Action::Focus,
-                        target_tree: egui::accesskit::TreeId::ROOT,
-                        target_node: target,
-                        data: None,
-                    },
-                )],
-            );
-            assert_eq!(frame(&mut app, vec![]).focus, target);
-            if !switch_overlay {
-                app.process_shortcut("Ctrl+K".parse().expect("default prefix"));
-                assert!(app.prefix_started.is_some());
-                frame(&mut app, vec![key(egui::Key::Escape)]);
-                assert!(app.grid_open, "Escape cancels the active prefix first");
-                assert!(app.prefix_started.is_none());
-            }
-            if switch_overlay {
-                let logo = tree
-                    .nodes
-                    .iter()
-                    .find(|(_, node)| node.label() == Some("towavue menu"))
-                    .expect("logo")
-                    .0;
-                frame(
-                    &mut app,
-                    vec![egui::Event::AccessKitActionRequest(
-                        egui::accesskit::ActionRequest {
-                            action: egui::accesskit::Action::Click,
-                            target_tree: egui::accesskit::TreeId::ROOT,
-                            target_node: logo,
-                            data: None,
-                        },
-                    )],
-                );
-                frame(&mut app, vec![]);
-                assert!(egui::Popup::is_any_open(&context));
-                frame(&mut app, vec![key(egui::Key::Escape)]);
-                assert!(!egui::Popup::is_any_open(&context));
-                assert!(app.grid_open, "menu Escape leaves the underlying grid open");
-            }
-            frame(&mut app, vec![key(egui::Key::Escape)]);
-            assert!(!app.grid_open, "one Escape closes a focused grid");
-            assert_eq!(frame(&mut app, vec![]).focus, ids[1]);
-            let right = crop(&app).x + crop(&app).width;
-            frame(&mut app, vec![key(egui::Key::ArrowLeft)]);
-            assert_eq!(crop(&app).x + crop(&app).width, right - 1);
-            frame(&mut app, vec![key(egui::Key::ArrowRight)]);
-        }
+
         let before = app.image_view.selection;
-        for overlay in 0..5 {
+        for overlay in (0..5).filter(|&overlay| overlay != 2) {
             app.pending_guard = (overlay == 0).then_some(GuardedAction::Exit);
             app.palette_open = overlay == 1;
-            app.grid_open = overlay == 2;
             app.filmstrip_open = overlay == 3;
             if overlay == 4 {
                 egui::Popup::open_id(&context, "selection-test-popup".into());
@@ -14733,7 +14484,7 @@ mod tests {
             );
             app.pending_guard = None;
             app.palette_open = false;
-            app.grid_open = false;
+
             app.filmstrip_open = false;
             egui::Popup::close_all(&context);
         }
@@ -15960,8 +15711,13 @@ mod tests {
                         actions == expected.clone().into_iter().collect::<Vec<_>>(),
                         "release at {target:?}, cancelled={cancel}"
                     );
+                } else if index == 2 {
+                    assert!(
+                        actions == [UiAction::ActivateTab(a)],
+                        "press activates once"
+                    );
                 } else {
-                    assert!(actions.is_empty(), "must not commit during drag");
+                    assert!(actions.is_empty(), "reordering commits only on release");
                 }
             }
         }
@@ -16547,7 +16303,7 @@ mod tests {
             );
         }
         assert!(!app.cursor_can_hide(false));
-        for blocked in 0..14 {
+        for blocked in (0..14).filter(|&blocked| blocked != 6) {
             match blocked {
                 0 => app.fullscreen = false,
                 1 => app.image_loading = true,
@@ -16555,7 +16311,6 @@ mod tests {
                 3 => app.state = PlaybackState::Faulted,
                 4 => app.filmstrip_open = true,
                 5 => app.palette_open = true,
-                6 => app.grid_open = true,
                 7 => app.pending_dialog = Some(DialogIntent::OpenFile),
                 8 => app.pending_guard = Some(GuardedAction::Exit),
                 9 => app.export_error = Some("fixture failure".into()),
@@ -16581,7 +16336,7 @@ mod tests {
             app.state = PlaybackState::Paused;
             app.filmstrip_open = false;
             app.palette_open = false;
-            app.grid_open = false;
+
             app.pending_dialog = None;
             app.pending_guard = None;
             app.export_error = None;
@@ -16625,6 +16380,26 @@ mod tests {
             .update(now + Duration::from_secs(2), true);
         assert!(app.viewing_cursor.hidden);
         assert_eq!(app.idle_wakeup(now), None);
+        let _ = app
+            .ui_context
+            .as_ref()
+            .expect("UI context")
+            .run_ui(Default::default(), |_| {});
+        app.image_loading = true;
+        app.image_edit_pending = true;
+        app.state = PlaybackState::Loading;
+        assert!(
+            app.cursor_can_hide(true),
+            "loading must preserve an already hidden cursor"
+        );
+        app.viewing_cursor.update(now, app.cursor_can_hide(true));
+        assert!(app.viewing_cursor.hidden);
+        app.palette_open = true;
+        assert!(
+            !app.cursor_can_hide(true),
+            "interactive overlays still restore the cursor"
+        );
+        app.palette_open = false;
         app.set_fullscreen(false);
         assert!(!app.viewing_cursor.hidden);
         assert_eq!(app.viewing_cursor.deadline, None);
@@ -17307,13 +17082,12 @@ mod tests {
             app.pending_guard = None;
             app.export_error = None;
         }
-        for overlay in 0..3 {
+        for overlay in (0..3).filter(|&overlay| overlay != 2) {
             app.palette_open = overlay == 0;
             app.filmstrip_open = overlay == 1;
-            app.grid_open = overlay == 2;
             assert!(app.dismiss_overlay_or_fullscreen());
             assert!(app.fullscreen);
-            assert!(!app.palette_open && !app.filmstrip_open && !app.grid_open);
+            assert!(!app.palette_open && !app.filmstrip_open);
         }
         assert!(app.dismiss_overlay_or_fullscreen());
         assert!(!app.fullscreen);
@@ -17785,10 +17559,9 @@ mod tests {
             wheel_frame(&mut app, 1.0 / 120.0, vec![], false);
             assert_eq!(app.image_view, before);
         }
-        for blocked in 0..7 {
+        for blocked in (0..7).filter(|&blocked| blocked != 3) {
             app.image_view.actual_size();
             app.palette_open = blocked == 2;
-            app.grid_open = blocked == 3;
             app.pending_guard = (blocked == 4).then_some(GuardedAction::Exit);
             app.pending_dialog = (blocked == 5).then_some(DialogIntent::OpenFile);
             let point = if blocked == 1 {
@@ -17827,7 +17600,7 @@ mod tests {
                 "wheel input case {blocked}"
             );
             app.palette_open = false;
-            app.grid_open = false;
+
             app.pending_guard = None;
             app.pending_dialog = None;
         }
@@ -18634,9 +18407,8 @@ mod tests {
             vec![egui::Event::PointerMoved(egui::pos2(480.0, 300.0))],
         );
         assert!(!app.image_seek_preview_active);
-        for overlay in 0..4 {
+        for overlay in (0..4).filter(|&overlay| overlay != 1) {
             app.palette_open = overlay == 0;
-            app.grid_open = overlay == 1;
             app.filmstrip_open = overlay == 2;
             app.pending_guard = (overlay == 3).then_some(GuardedAction::Exit);
             draw(
@@ -18945,7 +18717,9 @@ mod tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.job.text == "100%" => {
+                    egui::Shape::Text(text)
+                        if text.galley.job.text == "100%" && text.pos.y >= chrome::TITLE_HEIGHT =>
+                    {
                         Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
                     }
                     _ => None,
@@ -18993,7 +18767,12 @@ mod tests {
                     } else {
                         actions.is_empty()
                     },
-                    "each wheel belongs to its event-time position"
+                    "each wheel belongs to its event-time position: width={width}, focused={focused}, expected={expected}, actions={}, tab_volume={}",
+                    actions.len(),
+                    actions
+                        .iter()
+                        .filter(|action| matches!(action, UiAction::TabVolume(..)))
+                        .count()
                 );
             }
             let ctrl = egui::Modifiers {
@@ -19446,7 +19225,7 @@ mod tests {
         app.dispatch(CommandId::Undo);
         assert_eq!(app.edit_state().volume, 1.0);
         assert!((app.playback_volume() - 0.7).abs() < 0.0001);
-        for blocked in 0..11 {
+        for blocked in (0..11).filter(|&blocked| blocked != 3) {
             if blocked == 10 {
                 egui::Popup::open_id(&context, egui::Id::new("volume-test-menu"));
             }
@@ -19457,7 +19236,6 @@ mod tests {
             });
             app.filmstrip_open = blocked == 1;
             app.palette_open = blocked == 2;
-            app.grid_open = blocked == 3;
             app.pending_guard = (blocked == 4).then_some(GuardedAction::Exit);
             app.pending_dialog = (blocked == 5).then_some(DialogIntent::OpenFile);
             let pos = if blocked == 7 {
@@ -20192,7 +19970,7 @@ mod tests {
             assert_eq!(app.edits, edits);
             assert!(app.reading_cursor.is_none());
         }
-        for overlay in 0..4 {
+        for overlay in 0..3 {
             app.reading_drag = Some(reading_input::ReadingDrag::new(
                 ReadingSettings::default(),
                 true,
@@ -20204,17 +19982,15 @@ mod tests {
                 1 => {
                     app.request_guarded(GuardedAction::Exit);
                 }
-                2 => {
+                _ => {
                     app.cancel_view_drag();
                 }
-                _ => app.handle_ui_action(UiAction::Command(CommandId::ToggleGridMenu)),
             }
             assert!(app.reading_drag.is_none());
             assert_eq!(app.reading_settings, ReadingSettings::default());
             assert_eq!(app.edits, edits);
             app.pending_guard = None;
             app.palette_open = false;
-            app.grid_open = false;
         }
     }
 
@@ -21250,9 +21026,8 @@ mod tests {
         );
         assert!(actions.is_empty());
         assert!(!app.fullscreen_controls_visible);
-        for blocked in 0..6 {
+        for blocked in (0..6).filter(|&blocked| blocked != 1) {
             app.palette_open = blocked == 0;
-            app.grid_open = blocked == 1;
             app.filmstrip_open = blocked == 2;
             app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
             app.view_drag = (blocked == 4).then_some(ViewDrag::Selection {
@@ -21383,9 +21158,8 @@ mod tests {
             assert!(!app.filmstrip_open);
         }
         app.fullscreen = false;
-        for blocked in 0..5 {
+        for blocked in (0..5).filter(|&blocked| blocked != 1) {
             app.palette_open = blocked == 0;
-            app.grid_open = blocked == 1;
             app.filmstrip_open = blocked == 2;
             app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);
             if blocked == 4 {
@@ -21394,7 +21168,7 @@ mod tests {
             assert!(!app.owns_focused_shortcut(&stroke("K")));
             assert!(!app.owns_focused_shortcut(&stroke("Enter")));
             app.palette_open = false;
-            app.grid_open = false;
+
             app.filmstrip_open = false;
             app.pending_guard = None;
             egui::Popup::close_all(&context);
@@ -21581,9 +21355,7 @@ mod tests {
             app.palette_open = true;
             assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
             app.palette_open = false;
-            app.grid_open = true;
-            assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
-            app.grid_open = false;
+
             app.pending_guard = Some(GuardedAction::Exit);
             assert!(!app.owns_tab_key(&stroke("Ctrl+Tab")));
             app.pending_guard = None;
@@ -21642,7 +21414,7 @@ mod tests {
         app.media_kind = Some(MediaKind::Video);
         app.shortcuts = ShortcutBindings::default();
         for (command, sequence) in [
-            (CommandId::ToggleGridMenu, "Ctrl+J Ctrl+P"),
+            (CommandId::ToggleFullscreen, "Ctrl+J Ctrl+P"),
             (CommandId::ToggleCommandPalette, "Ctrl+K Ctrl+S"),
             (CommandId::ToggleTimeline, "T"),
         ] {
@@ -21651,7 +21423,7 @@ mod tests {
         }
         let stroke = |key: &str| key.parse::<KeyStroke>().expect("test stroke");
         for first in ["Ctrl+K", "Ctrl+J"] {
-            app.grid_open = false;
+            app.fullscreen = false;
             app.process_shortcut(stroke(first));
             let old_started = Instant::now() - PREFIX_TIMEOUT / 2;
             app.prefix_started = Some(old_started);
@@ -21663,12 +21435,16 @@ mod tests {
             assert_eq!(notice, "Ctrl+J …");
             assert_eq!(Some(*shown), app.prefix_started);
             app.process_shortcut(stroke("Ctrl+P"));
-            assert!(app.grid_open);
+            assert!(app.fullscreen);
             assert!(app.entered_shortcut.is_empty());
             assert!(app.prefix_started.is_none());
-            assert!(app.status_message.is_none());
+            assert_eq!(
+                app.status_message.as_ref().map(|(text, _)| text.as_str()),
+                Some(localization::Text::FullscreenHint.in_language(app.language())),
+                "the dispatched command replaces the prefix notice"
+            );
             app.process_shortcut(stroke("Ctrl+P"));
-            assert!(app.grid_open, "the suffix alone must not toggle again");
+            assert!(app.fullscreen, "the suffix alone must not toggle again");
         }
         app.process_shortcut(stroke("Ctrl+J"));
         app.process_shortcut(stroke("T"));
@@ -21718,7 +21494,7 @@ mod tests {
             app.shortcuts.resolve(&strokes, app.command_context()),
             ShortcutMatch::Command(CommandId::OpenKeyboardSettings)
         );
-        app.dispatch(CommandId::ToggleGridMenu);
+        app.dispatch(CommandId::ToggleCommandPalette);
         assert!(app.entered_shortcut.is_empty());
         assert!(app.prefix_started.is_none());
         assert!(app.status_message.is_none());
@@ -21747,47 +21523,6 @@ mod tests {
         app.request_guarded(GuardedAction::Exit);
         assert!(app.entered_shortcut.is_empty());
         assert!(app.status_message.is_none());
-    }
-
-    #[test]
-    fn grid_keys_yield_to_shortcut_modifiers_palette_and_modal_input() {
-        let Some(_root) = isolated_test_root(
-            "tests::grid_keys_yield_to_shortcut_modifiers_palette_and_modal_input",
-        ) else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        let key = PhysicalKey::Code(winit::keyboard::KeyCode::KeyS);
-        assert_eq!(app.grid_key_index(key), None);
-        app.grid_open = true;
-        for modifiers in [ModifiersState::empty(), ModifiersState::SHIFT] {
-            app.modifiers = modifiers;
-            assert_eq!(app.grid_key_index(key), Some(9));
-        }
-        for modifier in [
-            ModifiersState::CONTROL,
-            ModifiersState::ALT,
-            ModifiersState::SUPER,
-        ] {
-            for modifiers in [modifier, modifier | ModifiersState::SHIFT] {
-                app.modifiers = modifiers;
-                assert_eq!(app.grid_key_index(key), None);
-            }
-        }
-        app.modifiers = ModifiersState::empty();
-        app.palette_open = true;
-        assert_eq!(app.grid_key_index(key), None);
-        app.palette_open = false;
-        app.pending_guard = Some(GuardedAction::Exit);
-        assert_eq!(app.grid_key_index(key), None);
-        app.pending_guard = None;
-        app.pending_dialog = Some(DialogIntent::OpenFile);
-        assert_eq!(app.grid_key_index(key), None);
-        app.pending_dialog = None;
-        assert_eq!(app.grid_key_index(key), Some(9));
-        app.dispatch(CommandId::ToggleCommandPalette);
-        assert!(app.palette_open);
-        assert!(!app.grid_open);
     }
 
     #[test]
@@ -21863,9 +21598,8 @@ mod tests {
                 data: None,
             })
         };
-        for overlay in 0..3 {
+        for overlay in (0..3).filter(|&overlay| overlay != 1) {
             app.palette_open = overlay == 0;
-            app.grid_open = overlay == 1;
             popup.set(overlay == 2);
             frame(&mut app, vec![]);
             let (tree, actions) = frame(&mut app, vec![request(egui::accesskit::Action::Click)]);
@@ -21890,7 +21624,7 @@ mod tests {
                 assert!(app.filmstrip_open, "close only the top command overlay");
             }
             app.palette_open = false;
-            app.grid_open = false;
+
             popup.set(false);
             egui::Popup::close_all(&context);
             frame(&mut app, vec![]);
@@ -22063,227 +21797,6 @@ mod tests {
         assert!(app.dismiss_overlay_or_fullscreen());
         let tree = frame(&mut app, vec![]);
         assert_eq!(tree.focus, tree.tree.expect("root tree").root);
-    }
-
-    #[test]
-    fn configured_grid_actions_preserve_only_cancellation_focus() {
-        let Some(root) =
-            isolated_test_root("tests::configured_grid_actions_preserve_only_cancellation_focus")
-        else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        let path = root.join("image.png");
-        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
-        app.path = Some(path);
-        app.media_kind = Some(MediaKind::Image);
-        let context = fonts::test_context();
-        context.enable_accesskit();
-        app.ui_context = Some(context.clone());
-        let mut time = 0.0;
-        let mut frame = |app: &mut Application<_>, events, focus_origin| {
-            let mut actions = Vec::new();
-            let output = context.run_ui(
-                egui::RawInput {
-                    time: Some(time),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    let response = ui.button("Origin");
-                    if focus_origin {
-                        response.request_focus();
-                    }
-                    if app.palette_open {
-                        app.draw_command_palette(&context, 0.0, &mut actions);
-                    }
-                    app.draw_grid_menu(&context, &mut actions);
-                },
-            );
-            time += 0.1;
-            for action in actions {
-                app.handle_ui_action(action);
-            }
-            output.platform_output.accesskit_update.expect("tree")
-        };
-        for command in [
-            CommandId::ToggleCommandPalette,
-            CommandId::GoToFile,
-            CommandId::OpenRecentFolder,
-            CommandId::ToggleGridMenu,
-            CommandId::ToggleFilmstrip,
-            CommandId::RotateClockwise,
-        ] {
-            std::fs::write(
-                &app.grid_path,
-                format!("image = {}\n", [command.as_str(); 16].join(", ")),
-            )
-            .expect("isolated grid configuration");
-            app.grid_layouts = grid::load().expect("custom grid").0;
-            let origin = frame(&mut app, vec![], true).focus;
-            app.dispatch(CommandId::ToggleGridMenu);
-            frame(&mut app, vec![], false);
-            let tree = frame(&mut app, vec![], false);
-            let target = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Button
-                        && node.label().is_some_and(|label| label.starts_with("1\n"))
-                })
-                .expect("first configured cell")
-                .0;
-            frame(
-                &mut app,
-                vec![egui::Event::AccessKitActionRequest(
-                    egui::accesskit::ActionRequest {
-                        action: egui::accesskit::Action::Click,
-                        target_tree: egui::accesskit::TreeId::ROOT,
-                        target_node: target,
-                        data: None,
-                    },
-                )],
-                false,
-            );
-            assert!(!app.grid_open);
-            if matches!(
-                command,
-                CommandId::ToggleCommandPalette | CommandId::GoToFile | CommandId::OpenRecentFolder
-            ) {
-                assert!(app.palette_open);
-                frame(&mut app, vec![], false);
-                app.cancel_command_overlay();
-            }
-            if command == CommandId::ToggleFilmstrip {
-                assert!(app.filmstrip_open);
-                app.close_filmstrip();
-            }
-            assert!(app.command_overlay_return_focus.is_none());
-            if command == CommandId::RotateClockwise {
-                assert!(app.edits[&tab].is_dirty());
-                app.dispatch(CommandId::Undo);
-            } else {
-                assert_eq!(frame(&mut app, vec![], false).focus, origin);
-            }
-        }
-    }
-
-    #[test]
-    fn grid_cells_remain_inside_small_windows_with_long_labels_and_paths() {
-        let Some(_root) = isolated_test_root(
-            "tests::grid_cells_remain_inside_small_windows_with_long_labels_and_paths",
-        ) else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        app.grid_open = true;
-        app.grid_path = PathBuf::from("long-directory-name/".repeat(30)).join("grid.conf");
-        for kind in [MediaKind::Image, MediaKind::Video, MediaKind::Audio] {
-            app.media_kind = Some(kind);
-            for size in [
-                egui::vec2(960.0, 576.0),
-                egui::vec2(480.0, 300.0),
-                egui::vec2(320.0, 200.0),
-            ] {
-                app.grid_open = true;
-                let context = fonts::test_context();
-                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-                let mut output = egui::FullOutput::default();
-                for frame in 0..5 {
-                    output = context.run_ui(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            time: Some(frame as f64 * 0.1),
-                            ..Default::default()
-                        },
-                        |_| app.draw_grid_menu(&context, &mut Vec::new()),
-                    );
-                }
-                let mut labels = 0;
-                let mut target = None;
-                for shape in &output.shapes {
-                    if let egui::Shape::Text(text) = &shape.shape {
-                        let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
-                        assert!(
-                            screen.contains_rect(bounds),
-                            "{kind:?}, {size:?}: {bounds:?}"
-                        );
-                        if grid::KEYS
-                            .iter()
-                            .any(|key| text.galley.text().starts_with(&format!("{key}\n")))
-                        {
-                            assert!(text.galley.rows.len() >= 2);
-                            labels += 1;
-                        }
-                        if text.galley.text().starts_with("w\n") {
-                            target = Some(bounds.center());
-                        }
-                    }
-                }
-                assert_eq!(labels, 16);
-                let target = target.expect("second row second cell");
-                let mut actions = Vec::new();
-                for (frame, pressed) in [true, false, true, false].into_iter().enumerate() {
-                    let _ = context.run_ui(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            time: Some(0.5 + frame as f64 * 0.01),
-                            events: vec![
-                                egui::Event::PointerMoved(target),
-                                egui::Event::PointerButton {
-                                    pos: target,
-                                    button: egui::PointerButton::Primary,
-                                    pressed,
-                                    modifiers: egui::Modifiers::NONE,
-                                },
-                            ],
-                            ..Default::default()
-                        },
-                        |_| app.draw_grid_menu(&context, &mut actions),
-                    );
-                }
-                assert!(!app.grid_open);
-                assert!(
-                    matches!(actions.as_slice(), [UiAction::Command(command)] if *command == app.grid_layouts.get(kind)[5])
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn grid_repaint_stops_after_open_and_close_animations_settle() {
-        let Some(_root) =
-            isolated_test_root("tests::grid_repaint_stops_after_open_and_close_animations_settle")
-        else {
-            return;
-        };
-        let mut app = Application::new(None, |_| {}).expect("headless application");
-        app.media_kind = Some(MediaKind::Image);
-        let context = fonts::test_context();
-        let mut time = 0.0;
-        for open in [false, true, false] {
-            app.grid_open = open;
-            let mut repaint_delay = Duration::ZERO;
-            for _ in 0..20 {
-                let output = context.run_ui(
-                    egui::RawInput {
-                        time: Some(time),
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(960.0, 576.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |_| app.draw_grid_menu(&context, &mut Vec::new()),
-                );
-                repaint_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
-                time += 0.1;
-            }
-            assert!(
-                repaint_delay > Duration::from_secs(1),
-                "settled grid (open={open}) still requests continuous repaint"
-            );
-        }
     }
 
     #[test]
@@ -27491,7 +27004,7 @@ mod tests {
             pressed,
             modifiers: egui::Modifiers::NONE,
         };
-        for interruption in 0..9 {
+        for interruption in (0..9).filter(|&interruption| interruption != 3) {
             let context = fonts::test_context();
             app.image_view.selection = original;
             let frame = |app: &mut Application<_>, events, focused| {
@@ -27529,7 +27042,6 @@ mod tests {
                 0 => {}
                 1 => app.pending_guard = Some(GuardedAction::Exit),
                 2 => app.palette_open = true,
-                3 => app.grid_open = true,
                 4 => app.filmstrip_open = true,
                 5 => app.pending_dialog = Some(DialogIntent::OpenFile),
                 6 => {
@@ -27548,7 +27060,7 @@ mod tests {
             app.pending_guard = None;
             app.pending_dialog = None;
             app.palette_open = false;
-            app.grid_open = false;
+
             app.filmstrip_open = false;
             app.fullscreen = false;
             egui::Popup::close_id(&context, "interrupt-drag".into());

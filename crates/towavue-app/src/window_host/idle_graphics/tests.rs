@@ -142,7 +142,7 @@ fn shared_device_trims_once_only_after_all_empty_frames_and_reopens() {
                     ControlFlow::WaitUntil(deadline)
                 );
             }
-            for mode in 0..8 {
+            for mode in (0..8).filter(|&mode| mode != 5) {
                 let app = host.windows.get_mut(&first).expect("first");
                 match mode {
                     0 => app.pending_folder = Some((0, FolderIntent::Open)),
@@ -156,7 +156,6 @@ fn shared_device_trims_once_only_after_all_empty_frames_and_reopens() {
                         })
                     }
                     4 => app.palette_open = true,
-                    5 => app.grid_open = true,
                     6 => app.filmstrip_open = true,
                     _ => egui::Popup::open_id(
                         app.ui_context.as_ref().expect("context"),
@@ -170,7 +169,7 @@ fn shared_device_trims_once_only_after_all_empty_frames_and_reopens() {
                 app.export_error = None;
                 app.graphics_recovery_request = None;
                 app.palette_open = false;
-                app.grid_open = false;
+
                 app.filmstrip_open = false;
                 egui::Popup::close_all(app.ui_context.as_ref().expect("context"));
                 assert_eq!(

@@ -13,8 +13,6 @@ pub enum Error {
     MissingEquals { file: &'static str, line: usize },
     UnknownCommand { file: &'static str, line: usize },
     InvalidShortcut { line: usize },
-    UnknownMediaKind { line: usize },
-    GridCommandCount { line: usize, count: usize },
 }
 
 impl Error {
@@ -30,12 +28,6 @@ impl Error {
             }
             Self::InvalidShortcut { line } => {
                 formatted::configuration_invalid_shortcut(language, *line)
-            }
-            Self::UnknownMediaKind { line } => {
-                formatted::configuration_unknown_media_kind(language, *line)
-            }
-            Self::GridCommandCount { line, count } => {
-                formatted::configuration_grid_count(language, *line, *count)
             }
         }
     }

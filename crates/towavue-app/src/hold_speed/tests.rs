@@ -255,6 +255,69 @@ fn run_session_trial(audio: bool, test: &str) {
             app.ui_context = Some(context.clone());
             let mut ui_time = 0.0;
             status_frame(&mut app, &context, ui_time, vec![]);
+            if !self.audio {
+                for paused in [false, true] {
+                    app.seek_to(time(400));
+                    if (app.state == PlaybackState::Paused) != paused {
+                        app.toggle_pause();
+                    }
+                    let original = app.state;
+                    let start = Instant::now();
+                    assert!(app.video_space_key(true, false, start));
+                    assert_eq!(app.state, original, "Space waits for release");
+                    assert!(app.video_space_key(true, true, start + Duration::from_millis(50)));
+                    assert_eq!(app.state, original, "repeat does not toggle");
+                    assert!(app.video_space_key(false, false, start + Duration::from_millis(150)));
+                    assert_ne!(app.state, original, "short release toggles once");
+                    assert!(!app.video_space_key(false, false, start + Duration::from_millis(160)));
+                    app.toggle_pause();
+                    assert_eq!(app.state, original);
+                    assert!(app.video_space_key(true, false, start));
+                    assert_eq!(
+                        app.space_hold_deadline(),
+                        Some(start + Duration::from_millis(400))
+                    );
+                    app.update_space_hold(start + Duration::from_millis(399));
+                    assert!(app.held_speed.is_none());
+                    app.update_space_hold(start + Duration::from_millis(401));
+                    assert!(app.held_speed.is_some());
+                    assert_eq!(app.playback_rate(), 2.0);
+                    assert_eq!(app.state, PlaybackState::Playing);
+                    assert_eq!(app.space_hold_deadline(), None);
+                    assert!(app.video_space_key(true, true, start + Duration::from_millis(500)));
+                    assert!(app.video_space_key(false, false, start + Duration::from_millis(700)));
+                    assert!(app.space_hold.is_none());
+                    assert!(app.held_speed.is_none());
+                    assert_eq!(app.playback_rate(), 1.25);
+                    assert_eq!(app.state, original, "long release restores transport");
+                    assert_eq!(
+                        app.session.as_ref().expect("session").timeline(),
+                        plan.as_ref()
+                    );
+                    assert_eq!(app.session.as_ref().expect("session").range(), bounds);
+                    assert_eq!(app.edits[&tab], history);
+                    assert!(app.video_space_key(true, false, start));
+                    app.window_event(event_loop, window.id(), WindowEvent::Focused(false));
+                    assert!(app.space_hold.is_none());
+                    assert!(!app.video_space_key(false, false, start + Duration::from_millis(100)));
+                    assert_eq!(app.state, original, "cancelled short release never toggles");
+                }
+                app.native_ime_composing = true;
+                assert!(!app.video_space_key(true, false, Instant::now()));
+                app.native_ime_composing = false;
+                app.palette_open = true;
+                assert!(!app.video_space_key(true, false, Instant::now()));
+                app.palette_open = false;
+                let bindings = app.shortcuts.clone();
+                app.shortcuts
+                    .set(CommandId::TogglePause, "K".parse().expect("key"));
+                assert!(!app.video_space_key(true, false, Instant::now()));
+                let before = app.state;
+                app.process_shortcut("K".parse().expect("stroke"));
+                assert_ne!(app.state, before, "K keeps ordinary press activation");
+                assert!(app.space_hold.is_none());
+                app.shortcuts = bindings;
+            }
             for paused in [false, true] {
                 for interrupt in 0..3 {
                     app.playback_selection = Some(range(200, 3800));
@@ -446,13 +509,12 @@ fn run_session_trial(audio: bool, test: &str) {
                 }
                 app.fullscreen = false;
                 app.timeline_open = false;
-                for blocked in 0..6 {
+                for blocked in (0..6).filter(|&blocked| blocked != 2) {
                     ui_time += 1.0;
                     body_frame(&mut app, &context, ui_time, vec![]);
                     match blocked {
                         0 => app.filmstrip_open = true,
                         1 => app.palette_open = true,
-                        2 => app.grid_open = true,
                         3 => app.export_error = Some("injected modal".into()),
                         _ => {}
                     }
@@ -470,7 +532,7 @@ fn run_session_trial(audio: bool, test: &str) {
                     assert_eq!(app.state, PlaybackState::Paused, "blocked click {blocked}");
                     app.filmstrip_open = false;
                     app.palette_open = false;
-                    app.grid_open = false;
+
                     app.export_error = None;
                 }
             }

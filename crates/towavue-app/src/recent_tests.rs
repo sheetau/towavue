@@ -357,7 +357,8 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
         OpenTarget::Replace,
     ));
     app.media_generation = app.media_generation.wrapping_add(1);
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // Shell delivery is asynchronous; this control validates ownership, not latency.
+    let deadline = Instant::now() + Duration::from_secs(15);
     while app.pending_folder.is_some() {
         app.finish_folder_load();
         assert!(Instant::now() < deadline, "stale folder delivery");
@@ -375,7 +376,7 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
             RecentKind::Folder,
             OpenTarget::Replace,
         ));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while app.pending_folder.is_some() {
             app.finish_folder_load();
             assert!(Instant::now() < deadline, "folder delivery");
@@ -506,22 +507,20 @@ fn filmstrip_window_click_preserves_dirty_origin_and_rejects_blocked_or_stale_ta
         generation: 1,
         captured_at: std::time::SystemTime::now(),
     });
-    for (strip, palette, grid, valid) in [
-        (false, false, false, true),
-        (true, true, false, true),
-        (true, false, true, true),
-        (true, false, false, false),
-        (true, false, false, true),
+    for (strip, palette, valid) in [
+        (false, false, true),
+        (true, true, true),
+        (true, false, false),
+        (true, false, true),
     ] {
         app.filmstrip_open = strip;
         app.palette_open = palette;
-        app.grid_open = grid;
         app.handle_ui_action(UiAction::OpenFilmstripWindow(if valid {
             second.clone()
         } else {
             root.join("stale.bmp")
         }));
-        let allowed = strip && !palette && !grid && valid;
+        let allowed = strip && !palette && valid;
         assert_eq!(app.pending_window_launches.len(), usize::from(allowed));
         if allowed {
             assert_eq!(app.pending_window_launches, std::slice::from_ref(&second));

@@ -376,7 +376,7 @@ fn batched_rotation_uses_release_position_and_zero_click_or_invalid_canvas_do_no
 fn rotation_requires_an_owned_alt_press_on_the_image_and_keeps_ordinary_selection() {
     let start = egui::pos2(200.0, 200.0);
     let end = egui::pos2(260.0, 220.0);
-    for case in 0..7 {
+    for case in (0..7).filter(|&case| case != 3) {
         let (mut app, _) = application();
         let context = app.ui_context.clone().expect("context");
         let mut modifiers = egui::Modifiers::ALT;
@@ -385,7 +385,6 @@ fn rotation_requires_an_owned_alt_press_on_the_image_and_keeps_ordinary_selectio
             0 => origin = egui::pos2(-10.0, -10.0),
             1 => modifiers.ctrl = true,
             2 => app.palette_open = true,
-            3 => app.grid_open = true,
             4 => app.filmstrip_open = true,
             5 => app.image_error = Some("test error".into()),
             6 => {}

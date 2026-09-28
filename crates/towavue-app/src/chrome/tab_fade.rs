@@ -1,6 +1,16 @@
 use super::*;
 
 pub fn tab_title(ui: &mut Ui, rect: Rect, label: &str, active: bool) -> egui::Response {
+    tab_title_with_volume(ui, rect, label, active, None)
+}
+
+pub fn tab_title_with_volume(
+    ui: &mut Ui,
+    rect: Rect,
+    label: &str,
+    active: bool,
+    volume: Option<(f32, f32)>,
+) -> egui::Response {
     let response = ui.put(
         rect,
         egui::Button::new("")
@@ -18,10 +28,28 @@ pub fn tab_title(ui: &mut Ui, rect: Rect, label: &str, active: bool) -> egui::Re
             f32::INFINITY,
             egui::TextStyle::Button,
         );
-        let origin = egui::pos2(
-            rect.left() + ui.spacing().button_padding.x,
-            rect.center().y - galley.size().y / 2.0,
-        );
+        let mut left = rect.left() + ui.spacing().button_padding.x;
+        if let Some((level, opacity)) = volume {
+            let color = if active {
+                FOREGROUND
+            } else {
+                ui.style().interact(&response).fg_stroke.color
+            };
+            let prefix = ui.painter().layout_no_wrap(
+                format!("{:.0}%", level * 100.0),
+                egui::TextStyle::Button.resolve(ui.style()),
+                color.gamma_multiply(opacity),
+            );
+            let width = prefix.size().x;
+            ui.painter().with_clip_rect(rect).galley(
+                egui::pos2(left, rect.center().y - prefix.size().y / 2.0),
+                prefix,
+                color,
+            );
+            // The 14-point speaker is centered in its 24-point slot.
+            left += width + (TAB_AUDIO_WIDTH - 14.0) * 0.5;
+        }
+        let origin = egui::pos2(left, rect.center().y - galley.size().y / 2.0);
         ui.painter().with_clip_rect(rect).galley(
             origin,
             galley,

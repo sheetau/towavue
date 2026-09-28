@@ -129,7 +129,6 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::ExportAudio => Text::CommandExportAudio,
         CommandId::ExportFrame => Text::CommandExportFrame,
         CommandId::ToggleTimeline => Text::CommandToggleTimeline,
-        CommandId::ToggleGridMenu => Text::CommandToggleGridMenu,
         CommandId::ExportQualityHigh => Text::CommandExportQualityHigh,
         CommandId::ExportQualityBalanced => Text::CommandExportQualityBalanced,
         CommandId::ExportQualitySmaller => Text::CommandExportQualitySmaller,

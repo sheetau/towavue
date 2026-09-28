@@ -570,11 +570,12 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
                 .focus,
             menu
         );
-        for command in [CommandId::ToggleCommandPalette, CommandId::ToggleGridMenu] {
+        {
+            let command = CommandId::ToggleCommandPalette;
             app.dispatch(command);
             frame(&mut app, size, vec![]);
             app.dispatch(CommandId::MetadataExportOptions);
-            assert!(!app.palette_open && !app.grid_open);
+            assert!(!app.palette_open);
             click(&mut app, "Keep source value");
             click(&mut app, "Cancel");
             assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));

@@ -127,11 +127,22 @@ pub(super) fn paint(
             let scale = (rect.width().min(240.0) / size.x)
                 .min(rect.height() / size.y)
                 .min(1.0);
+            let kind = MediaKind::from_path(path);
+            let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
+            let target = if kind == Some(MediaKind::Audio) {
+                painter.rect_filled(image_rect, 0.0, crate::chrome::BORDER);
+                egui::Rect::from_center_size(
+                    image_rect.center(),
+                    egui::vec2(image_rect.width(), image_rect.height() * (2.0 / 3.0)),
+                )
+            } else {
+                image_rect
+            };
             painter.image(
                 texture.id(),
-                egui::Rect::from_center_size(rect.center(), size * scale),
+                target,
                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
+                kind.map_or(egui::Color32::WHITE, crate::filmstrip::thumbnail_tint),
             );
         }
         Some(Err(_)) => {

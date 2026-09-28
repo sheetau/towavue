@@ -287,7 +287,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.keyboard_settings_active()
             && self.keyboard_settings.capturing()
             && !self.palette_open
-            && !self.grid_open
             && (!self.modal_input_blocked() || self.keyboard_settings.edit.is_some())
             && !self
                 .ui_context
@@ -299,7 +298,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.keyboard_settings_active()
             && !self.native_ime_composing
             && !self.palette_open
-            && !self.grid_open
             && !self.modal_input_blocked()
             && KeyboardSettings::search_control(stroke)
             && self.ui_context.as_ref().is_some_and(|context| {

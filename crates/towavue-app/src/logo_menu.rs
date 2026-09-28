@@ -1,6 +1,8 @@
 use crate::*;
 use menu::Section;
 
+pub(crate) mod drag;
+
 type Source = (Option<TabId>, u64, u64);
 
 #[derive(Clone, Copy)]
@@ -12,12 +14,16 @@ struct Drag {
     screen: egui::Rect,
     density: f32,
     crossed: bool,
+    left_button: bool,
+    section: Option<Section>,
 }
 
 #[derive(Clone, Default)]
 struct State {
     drag: Option<Drag>,
     claimed: Option<u64>,
+    processed: Option<u64>,
+    release: Option<(u64, egui::Pos2)>,
     click_frame: Option<u64>,
     last_frame: u64,
     suppress: bool,
@@ -33,6 +39,7 @@ pub(super) fn cancel(context: &egui::Context) -> bool {
     let active = context.data_mut(|data| {
         let state = data.get_temp_mut_or_default::<State>(state_id());
         let active = state.drag.take();
+        state.release = None;
         state.suppress |= active.is_some();
         active
     });
@@ -112,6 +119,7 @@ pub(super) fn show_with_recent(
             || context.dragged_id().is_some_and(|id| id != response.id)
     }) {
         state.drag = None;
+        state.release = None;
         state.suppress = true;
         egui::Popup::close_id(context, popup);
         if context.dragged_id() == Some(response.id) {
@@ -123,34 +131,37 @@ pub(super) fn show_with_recent(
         response.surrender_focus();
     }
     let mut open = None;
-    let mut pointer_event = false;
-    for event in &events {
-        match event {
-            // A native pointer exit can follow release in the same frame. Only
-            // cancel a still-held gesture, not the submenu already committed.
-            egui::Event::PointerGone => {
-                if state.drag.take().is_some() {
-                    state.suppress = true;
-                    egui::Popup::close_id(context, popup);
-                    if context.dragged_id() == Some(response.id) {
+    let pointer_event = events
+        .iter()
+        .any(|event| matches!(event, egui::Event::PointerButton { .. }));
+    if state.processed != Some(frame) {
+        state.processed = Some(frame);
+        state.release = None;
+        if state.drag.is_some() {
+            // An already owned gesture consumes this batch, including any second press.
+            state.claimed = Some(frame);
+        }
+        for event in &events {
+            match event {
+                egui::Event::PointerGone if state.release.is_none() => {
+                    if state.drag.take().is_some() {
+                        state.suppress = true;
+                        state.section = None;
+                        open = None;
+                        egui::Popup::close_id(context, popup);
                         context.stop_dragging();
                     }
-                    response.surrender_focus();
                 }
-            }
-            egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                ..
-            } => {
-                pointer_event = true;
-                if *pressed
-                    && !interrupted
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    ..
+                } if !interrupted
                     && state.claimed != Some(frame)
                     && response.interact_rect.contains(*pos)
                     && context.layer_id_at(*pos) == Some(response.layer_id)
-                    && context.dragged_id().is_none_or(|id| id == response.id)
+                    && context.dragged_id().is_none_or(|id| id == response.id) =>
                 {
                     state.drag = Some(Drag {
                         id: response.id,
@@ -160,44 +171,72 @@ pub(super) fn show_with_recent(
                         screen: context.content_rect(),
                         density: context.pixels_per_point(),
                         crossed: false,
+                        left_button: false,
+                        section: None,
                     });
                     state.keyboard_origin = false;
                     state.claimed = Some(frame);
                     state.suppress = false;
                     response.surrender_focus();
-                } else if !pressed && let Some(mut drag) = state.drag.take() {
-                    drag.crossed |= (*pos - drag.origin).length_sq() >= 64.0;
-                    state.suppress |= drag.crossed;
-                    if !drag.crossed && response.interact_rect.contains(*pos) {
-                        state.click_frame = Some(frame);
+                }
+                egui::Event::PointerMoved(pos)
+                | egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    ..
+                } => {
+                    let released = matches!(event, egui::Event::PointerButton { .. });
+                    if let Some(owned) = &mut state.drag {
+                        if !response.interact_rect.contains(*pos) {
+                            owned.left_button = true;
+                        }
+                        if owned.section.is_some()
+                            && owned.left_button
+                            && response.interact_rect.contains(*pos)
+                        {
+                            // Reentering the opener re-arms directional selection, without
+                            // reinterpreting ordinary movement among menu rows.
+                            owned.section = None;
+                            owned.left_button = false;
+                            owned.origin = *pos;
+                            state.section = None;
+                            open = None;
+                            egui::Popup::close_id(context, popup);
+                        } else if owned.section.is_none()
+                            && let Some(section) = direction(*pos - owned.origin)
+                            && context.content_rect().contains(*pos)
+                        {
+                            owned.crossed = true;
+                            owned.section = Some(section);
+                            state.section = Some(section);
+                            open = Some(section);
+                        }
+                        owned.crossed |= (*pos - owned.origin).length_sq() >= 64.0;
+                        state.suppress |= owned.crossed;
+                        if released {
+                            if owned.crossed {
+                                state.release = Some((frame, *pos));
+                            } else if response.interact_rect.contains(*pos) {
+                                state.click_frame = Some(frame);
+                            }
+                            state.drag = None;
+                        }
                     }
-                    open = direction(*pos - drag.origin)
-                        .filter(|_| drag.crossed && context.content_rect().contains(*pos));
-                    state.section = open;
                 }
+                _ => {}
             }
-            egui::Event::PointerMoved(pos) => {
-                if let Some(drag) = &mut state.drag {
-                    drag.crossed |= (*pos - drag.origin).length_sq() >= 64.0;
-                }
-            }
-            _ => {}
         }
     }
-    let mut selected = None;
-    if let Some(drag) = &state.drag {
-        selected = pointer.and_then(|position| direction(position - drag.origin));
-        if drag.crossed {
-            state.suppress = true;
-            egui::Popup::close_id(context, popup);
-        }
+    let selected = state.drag.and_then(|drag| drag.section);
+    if state.drag.is_some() {
         if !down || pointer.is_none() {
             state.drag = None;
             state.suppress = true;
-            selected = None;
+            egui::Popup::close_id(context, popup);
         } else {
-            // egui hit-tests batched press/move at the final position. Pin our
-            // validated press before its deferred drag decision picks that widget.
+            // Keep the original owner even when egui sees only the final point
+            // of a batched press/move; leaves receive the release explicitly.
             context.set_dragged_id(response.id);
         }
     }
@@ -225,9 +264,6 @@ pub(super) fn show_with_recent(
         shift,
         response.hovered() || response.has_focus() || egui::Popup::is_id_open(context, popup),
     );
-    if let Some(selected) = selected {
-        show_direction_label(ui, &response, selected);
-    }
     let set_open = if open.is_some() {
         Some(egui::SetOpenCommand::Bool(true))
     } else if response.clicked() && !suppress {
@@ -235,26 +271,24 @@ pub(super) fn show_with_recent(
     } else {
         None
     };
-    let mut popup = egui::Popup::menu(&response).open_memory(set_open);
-    if open.is_some() {
-        // A sparse/batched drag release must not immediately close the newly opened menu.
+    context.data_mut(|data| data.insert_temp(state_id(), state.clone()));
+    let mut popup_ui = egui::Popup::menu(&response).open_memory(set_open);
+    if state.drag.is_some() || state.release.is_some_and(|(at, _)| at == frame) {
+        // The captured release belongs to the hit-tested leaf, not popup click dismissal.
         let config = egui::containers::menu::MenuConfig::new()
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks);
-        popup = popup
+        popup_ui = popup_ui
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
             .info(
                 egui::UiStackInfo::new(egui::UiKind::Menu)
                     .with_tag_value(egui::containers::menu::MenuConfig::MENU_CONFIG_TAG, config),
             );
     }
-    let inner = popup.show(|ui| {
+    let inner = popup_ui.show(|ui| {
         let mut builder = egui::UiBuilder::new();
         if set_open.is_some() {
             // This popup alternates between categories and direct submenus.
-            let size = ui
-                .spacing()
-                .default_area_size
-                .min(context.content_rect().size());
+            let size = context.content_rect().size();
             ui.set_max_size(
                 (size - egui::Frame::popup(ui.style()).total_margin().sum()).max(egui::Vec2::ZERO),
             );
@@ -265,6 +299,12 @@ pub(super) fn show_with_recent(
         })
         .inner
     });
+    if state.release.is_some_and(|(at, _)| at == frame) {
+        egui::Popup::close_id(context, popup);
+        state.section = None;
+        context.stop_dragging();
+        response.surrender_focus();
+    }
     // Only explicit keyboard/accessibility entry returns focus to the opener.
     // Pointer gestures already paint held/open feedback without taking key focus.
     if was_open
@@ -289,45 +329,6 @@ pub(super) fn show_with_recent(
         response,
         inner: inner.map(|inner| inner.inner),
     }
-}
-
-fn show_direction_label(ui: &egui::Ui, response: &egui::Response, section: Section) {
-    let language = crate::localization::language(ui.ctx());
-    let title = section.key().in_language(language);
-    // Paint-only feedback appears during the captured drag without tooltip delay
-    // or a hit-test surface that could intercept its movement/release.
-    let painter = ui.ctx().layer_painter(egui::LayerId::new(
-        egui::Order::Tooltip,
-        response.id.with("direction-label"),
-    ));
-    let frame = egui::Frame::popup(ui.style());
-    let galley = painter.layout_no_wrap(
-        title.into(),
-        egui::FontId::proportional(12.0),
-        chrome::FOREGROUND,
-    );
-    let size = galley.size() + frame.total_margin().sum();
-    let screen = ui.ctx().content_rect();
-    let top = if response.rect.bottom() + 6.0 + size.y <= screen.bottom() {
-        response.rect.bottom() + 6.0
-    } else {
-        response.rect.top() - size.y - 6.0
-    };
-    let outer = egui::Rect::from_min_size(
-        egui::pos2(response.rect.left(), top)
-            .clamp(screen.min, (screen.max - size).max(screen.min)),
-        size,
-    );
-    if screen.contains_rect(outer) && !outer.intersects(response.rect) {
-        let content = outer - frame.total_margin();
-        painter.add(frame.paint(content));
-        painter.galley(content.min, galley, chrome::FOREGROUND);
-    }
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(towavue_core::localization::formatted::release_menu(
-            language, title,
-        ));
-    });
 }
 
 #[cfg(test)]

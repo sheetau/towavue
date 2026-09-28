@@ -80,7 +80,8 @@ pub(super) fn options(command: CommandId) -> Option<Options> {
 }
 
 fn row_width(ui: &egui::Ui, rows: &[(CommandId, Text)]) -> f32 {
-    rows.iter()
+    let width = rows
+        .iter()
         .map(|(_, label)| {
             egui::WidgetText::from(text(ui.ctx(), *label))
                 .into_galley(
@@ -95,7 +96,10 @@ fn row_width(ui: &egui::Ui, rows: &[(CommandId, Text)]) -> f32 {
         .fold(0.0, f32::max)
         + ui.spacing().icon_width
         + ui.spacing().icon_spacing
-        + 2.0 * ui.spacing().button_padding.x
+        + 2.0 * ui.spacing().button_padding.x;
+    // Keep fractional glyph advances inside the pixel-rounded checkbox bounds.
+    (width * ui.ctx().pixels_per_point()).ceil() / ui.ctx().pixels_per_point()
+        + 1.0 / ui.ctx().pixels_per_point()
 }
 
 pub(super) fn reserve_cascade(
@@ -182,8 +186,11 @@ pub(super) fn submenu(
         .find(|definition| definition.id == command)
         .expect("choice command")
         .is_enabled(context);
-    let root = egui::containers::menu::find_menu_root(ui);
-    let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
+    // Submenus anchor to the current row, not the popup Area's retained response.
+    // That response can keep a wider first-pass extent after a parent shrinks.
+    let parent = ui
+        .max_rect()
+        .expand2(egui::Frame::popup(ui.style()).total_margin().sum() * 0.5);
     let screen = ui.ctx().content_rect();
     let right = screen.right() - parent.right();
     let left = parent.left() - screen.left();
@@ -196,7 +203,9 @@ pub(super) fn submenu(
     let menu = ui
         .add_enabled_ui(enabled, |ui| {
             let category = ui.next_auto_id();
-            if enabled && requested == Some(category) {
+            if enabled
+                && (requested == Some(category) || crate::logo_menu::drag::submenu(ui, category))
+            {
                 let id = egui::containers::menu::SubMenu::id_from_widget_id(category);
                 egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
                 egui::containers::menu::MenuState::from_ui(ui, |state, _| {
@@ -231,7 +240,7 @@ pub(super) fn submenu(
                     let mut checked = was_selected;
                     let response = ui.checkbox(&mut checked, text(ui.ctx(), *label));
                     items.push(response.id);
-                    if response.clicked() {
+                    if crate::logo_menu::drag::clicked(&response) {
                         if !toggle || !was_selected {
                             chosen = Some(*id);
                         }
@@ -524,7 +533,7 @@ mod tests {
                             );
                             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                                 egui::Shape::Text(text) if text.galley.text() == label && !text.galley.elided)),
-                                "short choice label must be fully readable: {label}, width={width}, nested={nested}, right={right_edge}, parent={:?}, bounds={:?}, texts={:?}", parent.get(), node.bounds(), output.shapes.iter().filter_map(|shape| match &shape.shape { egui::Shape::Text(t) if t.galley.text().contains("ends") => Some((t.galley.text(),t.galley.size(),t.galley.elided)), _ => None }).collect::<Vec<_>>());
+                                "short choice label must be fully readable: {label}, width={width}, nested={nested}, right={right_edge}, parent={:?}, bounds={:?}, texts={:?}", parent.get(), node.bounds(), output.shapes.iter().filter_map(|shape| match &shape.shape { egui::Shape::Text(t) if t.galley.text().contains("High") || t.galley.text().contains("quality") => Some((t.galley.text(),t.galley.size(),t.galley.elided)), _ => None }).collect::<Vec<_>>());
                             let bounds = node.bounds().expect("choice bounds");
                             assert!(
                                 bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width) + 1.0,

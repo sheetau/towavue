@@ -21,7 +21,6 @@ impl WindowHost {
                     && app.active_export.is_none()
                     && !app.modal_input_blocked()
                     && !app.palette_open
-                    && !app.grid_open
                     && !app.filmstrip_open
                     && !app
                         .ui_context

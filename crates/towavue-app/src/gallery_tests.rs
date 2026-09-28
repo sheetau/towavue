@@ -632,9 +632,8 @@ fn gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions(
             "middle-click always creates a new tab"
         );
         let count = app.tabs.len();
-        for blocked in 0..5 {
+        for blocked in (0..5).filter(|&blocked| blocked != 1) {
             app.palette_open = blocked == 0;
-            app.grid_open = blocked == 1;
             if blocked == 2 {
                 egui::Popup::open_id(&context, egui::Id::new("gallery-test-menu"));
             }
@@ -647,7 +646,7 @@ fn gallery_middle_click_adds_unloaded_background_tabs_and_rejects_stale_actions(
             app.handle_ui_action(UiAction::OpenGalleryBackground(paths[0].clone()));
             assert_eq!(app.tabs.len(), count, "stale action blocked: {blocked}");
             app.palette_open = false;
-            app.grid_open = false;
+
             egui::Popup::close_all(&context);
             app.gallery_search = "item".into();
         }

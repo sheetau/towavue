@@ -8,6 +8,7 @@ pub(super) fn precision_status(context: &Context) -> Option<&'static str> {
 }
 
 pub(crate) const HIT_HEIGHT: f32 = 14.0;
+const HOVER_ABOVE: f32 = 4.0;
 
 #[cfg(test)]
 pub fn show(
@@ -69,13 +70,15 @@ fn show_drag_with_direction(
     area.order(egui::Order::Middle)
         .enabled(enabled)
         .movable(false)
-        .fixed_pos(status.left_top() - egui::vec2(0.0, HIT_HEIGHT * 0.5))
+        .fixed_pos(status.left_top() - egui::vec2(0.0, HIT_HEIGHT * 0.5 + HOVER_ABOVE))
         .constrain(false)
         .show(context, |ui| {
-            let (_, response) = ui.allocate_exact_size(
-                egui::vec2(status.width(), HIT_HEIGHT),
+            let (_, mut response) = ui.allocate_exact_size(
+                egui::vec2(status.width(), HIT_HEIGHT + HOVER_ABOVE),
                 egui::Sense::click_and_drag(),
             );
+            // Expand only the upper hit area; keep the track and precision origin fixed.
+            response.rect.min.y += HOVER_ABOVE;
             show_control(ui, response, progress, allow_timeline, reversed)
         })
         .inner
@@ -162,6 +165,8 @@ fn show_control(
         },
     );
     if response.hovered()
+        && !drag.dragging
+        && !drag.released
         && let Some(pointer) = response.hover_pos()
     {
         ui.painter().rect_filled(
@@ -512,6 +517,9 @@ mod tests {
                     (egui::pos2(0.0, 270.0), true, true),
                     (egui::pos2(350.0, 270.0), true, true),
                     (egui::pos2(500.0, 270.0), true, true),
+                    (egui::pos2(350.0, 260.0), true, true),
+                    (egui::pos2(350.0, 252.0), true, false),
+                    (egui::pos2(350.0, 284.0), true, false),
                     (egui::pos2(350.0, 200.0), true, false),
                     (egui::pos2(350.0, 270.0), false, false),
                 ] {
@@ -532,9 +540,17 @@ mod tests {
                                 ..Default::default()
                             },
                             |_| {
-                                let (_, commit, open) =
+                                let (response, commit, open) =
                                     show(&context, status, value, None, enabled, true);
                                 assert!(commit.is_none() && !open);
+                                // Area positions align to physical pixels at fractional density.
+                                assert!(
+                                    (response.rect.center().y - status.top()).abs()
+                                        <= 1.0 / density
+                                );
+                                assert_eq!(response.rect.top() - response.interact_rect.top(), 4.0);
+                                assert_eq!(response.rect.bottom(), response.interact_rect.bottom());
+                                assert_eq!(response.interact_rect.height(), 18.0);
                             },
                         );
                     }
@@ -582,7 +598,7 @@ mod tests {
             let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0));
             let status = Rect::from_min_size(egui::pos2(0.0, 270.0), egui::vec2(500.0, 30.0));
             let start = egui::pos2(80.0, 270.0);
-            let end = egui::pos2(360.0, 200.0);
+            let end = egui::pos2(360.0, 270.0);
             let button = |position, pressed| egui::Event::PointerButton {
                 pos: position,
                 pressed,
@@ -592,7 +608,8 @@ mod tests {
             let frame = |events, enabled| {
                 let mut visible = false;
                 let mut commit = None;
-                let _ = context.run_ui(
+                let mut dragging = false;
+                let output = context.run_ui(
                     egui::RawInput {
                         screen_rect: Some(screen),
                         events,
@@ -601,6 +618,7 @@ mod tests {
                     |_| {
                         let (response, drag) =
                             show_drag(&context, status, 0.2, None, enabled, allow_timeline);
+                        dragging = drag.dragging;
                         let mut other = response.clone();
                         other.id = response.id.with("unrelated-widget");
                         assert!(!timeline_input::is_dragging(&other));
@@ -615,6 +633,12 @@ mod tests {
                             .is_some();
                     },
                 );
+                if dragging {
+                    assert!(!output.shapes.iter().any(|shape| matches!(
+                        &shape.shape,
+                        egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_white_alpha(64)
+                    )), "dragging must suppress pointer hover progress");
+                }
                 (visible, commit)
             };
             frame(vec![], true);
@@ -630,6 +654,14 @@ mod tests {
             assert!(
                 frame(vec![egui::Event::PointerMoved(end)], true).0,
                 "owned drag must show thumbnail and time outside the track"
+            );
+            assert!(
+                frame(
+                    vec![egui::Event::PointerMoved(egui::pos2(360.0, 180.0))],
+                    true
+                )
+                .0,
+                "precision drag retains its preview above the track"
             );
             assert!(frame(vec![], true).0, "holding the drag keeps the preview");
             assert!(

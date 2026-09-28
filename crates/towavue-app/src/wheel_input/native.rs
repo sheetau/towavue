@@ -5,7 +5,32 @@ use towavue_runtime_windows::{WheelScrollSettings, wheel_scroll_settings};
 struct NativeFrame {
     frame: u64,
     events: std::sync::Arc<[Event]>,
-    settings: WheelScrollSettings,
+    settings: Option<WheelScrollSettings>,
+}
+
+#[derive(Clone, Default)]
+struct VolumeTargets {
+    frame: u64,
+    pass: u64,
+    targets: Vec<(egui::Rect, egui::LayerId)>,
+}
+
+pub(super) fn record_volume_target(context: &Context, target: &egui::Response) {
+    let frame = context.cumulative_frame_nr();
+    let pass = context.cumulative_pass_nr();
+    context.data_mut(|data| {
+        let recorded = data.get_temp_mut_or_default::<VolumeTargets>(Id::new("tab-volume-targets"));
+        if recorded.frame != frame || recorded.pass != pass {
+            recorded.frame = frame;
+            recorded.pass = pass;
+            recorded.targets.clear();
+        }
+        if target.enabled() {
+            recorded
+                .targets
+                .push((target.interact_rect, target.layer_id));
+        }
+    });
 }
 
 #[derive(Clone)]
@@ -132,7 +157,13 @@ pub fn prepare_native_input(context: &Context, input: &mut RawInput) {
 fn prepare(context: &Context, input: &mut RawInput, settings: Option<WheelScrollSettings>) {
     let id = Id::new("native-wheel-frame");
     context.data_mut(|data| data.remove::<NativeFrame>(id));
-    let Some(settings) = settings else { return };
+    if !input
+        .events
+        .iter()
+        .any(|event| matches!(event, Event::MouseWheel { .. }))
+    {
+        return;
+    }
     // Keep the same event order/coordinates for media gestures. OS scroll settings
     // must not change zoom or volume, including when scrolling is disabled.
     let frame = context.cumulative_frame_nr();
@@ -145,6 +176,39 @@ fn prepare(context: &Context, input: &mut RawInput, settings: Option<WheelScroll
                 settings,
             },
         )
+    });
+    let volume_targets = context
+        .data(|data| data.get_temp::<VolumeTargets>(Id::new("tab-volume-targets")))
+        .filter(|targets| {
+            targets.frame.checked_add(1) == Some(frame)
+                && targets.pass.checked_add(1) == Some(context.cumulative_pass_nr())
+        })
+        .filter(|_| {
+            !egui::Popup::is_any_open(context)
+                && !context.input(|input| input.pointer.any_down())
+                && !input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        Event::PointerButton { pressed: true, .. } | Event::WindowFocused(false)
+                    )
+                })
+        })
+        .map_or_else(Vec::new, |targets| targets.targets);
+    // Exclude tab/card volume from egui smoothing before it can leave a scroll
+    // tail. Original events above remain available to ordered volume dispatch.
+    let mut volume_position = context.input(|input| input.pointer.hover_pos());
+    input.events.retain(|event| {
+        match event {
+            Event::PointerMoved(point) | Event::PointerButton { pos: point, .. } => {
+                volume_position = Some(*point)
+            }
+            Event::PointerGone | Event::WindowFocused(false) => volume_position = None,
+            _ => {}
+        }
+        !matches!(event, Event::MouseWheel { delta, modifiers, phase: egui::TouchPhase::Move, .. }
+            if modifiers.is_none() && delta.y.is_finite() && delta.y != 0.0
+                && volume_position.is_some_and(|position| volume_targets.iter().any(|(rect, layer)|
+                    rect.contains(position) && context.layer_id_at(position) == Some(*layer))))
     });
     let extent = input
         .screen_rect
@@ -178,7 +242,9 @@ fn prepare(context: &Context, input: &mut RawInput, settings: Option<WheelScroll
         }
         let layer = position.and_then(|point| context.layer_id_at(point));
         let target = target_size(&areas, position, layer, event).unwrap_or(extent);
-        normalize(event, settings, speed, target);
+        if let Some(settings) = settings {
+            normalize(event, settings, speed, target);
+        }
     }
 }
 
@@ -197,9 +263,9 @@ pub(super) fn original_events(context: &Context) -> Vec<Event> {
 }
 
 pub(super) fn scroll_event(context: &Context, mut event: Event, extent: Vec2) -> Event {
-    if let Some(native) = current(context) {
+    if let Some(settings) = current(context).and_then(|native| native.settings) {
         let speed = context.options(|options| options.input_options.line_scroll_speed);
-        normalize(&mut event, native.settings, speed, extent);
+        normalize(&mut event, settings, speed, extent);
     }
     event
 }

@@ -357,9 +357,8 @@ fn folder_card_guards_cancel_stale_paths_and_preserve_dirty_sources() {
         .or_default()
         .push(EditOperation::RotateClockwise, MediaKind::Image);
     let history = app.edits[&id].clone();
-    for blocked in [0, 1, 3, 4] {
+    for blocked in [0, 3, 4] {
         app.palette_open = blocked == 0;
-        app.grid_open = blocked == 1;
         app.incoming_tab_pointer = (blocked == 3).then_some(egui::Pos2::ZERO);
         let token = if blocked == 4 { instance + 1 } else { instance };
         app.handle_preview_image_seek(id, token, paths[0].clone(), paths[1].clone());

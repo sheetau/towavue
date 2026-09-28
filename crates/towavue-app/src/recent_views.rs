@@ -146,7 +146,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let visible = self.image_animation_visible()
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self.filmstrip_open;
         let active = self.tabs.active_id();
         // Mark/sweep keeps retirement linear in the number of live visits/tabs.

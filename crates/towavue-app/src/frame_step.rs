@@ -251,7 +251,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             || self.session.is_none()
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
         {
             self.cancel_frame_steps();
             return;

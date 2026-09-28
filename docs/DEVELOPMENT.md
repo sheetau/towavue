@@ -32,6 +32,8 @@ Helper lookup is deliberate: colocated ffmpeg.exe/ffprobe.exe take precedence; o
 
 The Release app is a GUI executable and does not open a console. Session warnings/errors are retained under `%LOCALAPPDATA%\towavue\logs` (up to 1 MiB per session, newest five closed/current sessions subject to active-file retention). Debug keeps stderr diagnostics. For logging changes, run the runtime `diagnostics::` filter: it covers bounded UTF-8 messages, saturation, session retention, shutdown drain and a separate native FFmpeg callback process. Check the Release PE subsystem separately; tests use the console subsystem.
 
+For an explicitly requested local font trial, set `TOWAVUE_UI_FONT_TRIAL` to an absolute TTF path before building the app. The build script embeds that face; unset the variable to restore the bundled Figtree on the next build. Keep trial font copies and binaries under ignored `target/`, independently of distribution materials. The supplied face must already map decimal digits to tabular glyphs: egui does not enable OpenType `tnum` automatically. Run the app `fonts::` controls for tabular metrics, icon separation and installed language fallback, then inspect actual UI layout. A successful local trial does not change the font inputs of clean release builds.
+
 ## Verification by impact
 
 | Change | Expected checks |
@@ -288,7 +290,7 @@ For a generated, isolated GPU history control, run `cargo test -p egui-directx11
 
 The same example's `stages`, `stages-sse2` and `stages-serial-paeth` modes isolate inflation/parsing, row reconstruction and packing for noninterlaced RGB/RGBA8 on x64, using png's opt-in benchmark APIs. They retain an additional full filtered canvas for measurement; do not substitute them for the production row decoder. Run the kernel's exhaustive/generated checks with `cargo test -p towavue-runtime-windows --example png-decoder-cost --release --features png-decoder-verification --locked --offline` before reference timing. Never print pixel buffers on equality failure. `stages-sse2` uses the current runtime kernel; `stages-serial-paeth` retains the historical per-pixel SSE2 control. The ignored `repeated_pixels_report_row_cost` test compares flat, mixed-run and noisy generated upper rows with resets and exact equality outside timing. These are row-kernel controls, not navigation or whole-process memory measurements.
 
-User settings live under `%APPDATA%\towavue` (shortcuts.conf, grid.conf, recent-files.txt). Preview disk cache is under `%LOCALAPPDATA%\towavue\preview-cache`. Build output, `tests/generated`, and local FFmpeg are ignored. Never clear user settings or media to make a test pass.
+User settings live under `%APPDATA%\towavue` (shortcuts.conf, recent-files.txt). Preview disk cache is under `%LOCALAPPDATA%\towavue\preview-cache`. Build output, `tests/generated`, and local FFmpeg are ignored. The retired command grid no longer reads or creates grid.conf; existing copies remain untouched. Never clear user settings or media to make a test pass.
 
 For bug reports retain reproduction, expected/actual result, build, Windows/GPU/driver/DPI, and codec/dimensions/duration. Use disposable generated media, not private files. For Explorer ordering include Sort By, whether Explorer was open, and reported snapshot source.
 

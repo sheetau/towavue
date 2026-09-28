@@ -46,23 +46,30 @@ fn popup_bounds(output: &egui::FullOutput) -> Vec<egui::Rect> {
     bounds
 }
 
-fn direction_labels(output: &egui::FullOutput) -> Vec<String> {
-    output
-        .shapes
+fn row_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree");
+    let bounds = tree
+        .nodes
         .iter()
-        .filter_map(|shape| match &shape.shape {
-            egui::Shape::Text(text) if ["File", "Edit", "View"].contains(&text.galley.text()) => {
-                Some(text.galley.text().to_owned())
-            }
-            _ => None,
-        })
-        .collect()
+        .find(|(_, node)| node.label().is_some_and(|text| text.starts_with(label)))
+        .unwrap_or_else(|| panic!("missing {label}"))
+        .1
+        .bounds()
+        .expect("row");
+    egui::pos2(
+        (bounds.x0 + bounds.x1) as f32 * 0.5,
+        (bounds.y0 + bounds.y1) as f32 * 0.5,
+    )
 }
 
 #[test]
-fn drag_direction_label_is_immediate_clear_of_the_button_and_input_transparent() {
+fn held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry() {
     let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::drag_direction_label_is_immediate_clear_of_the_button_and_input_transparent",
+        "logo_menu::tests::held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry",
     ) else {
         return;
     };
@@ -70,94 +77,75 @@ fn drag_direction_label_is_immediate_clear_of_the_button_and_input_transparent()
         let (mut app, origin) = setup(&root);
         let context = app.ui_context.clone().expect("context");
         context.set_pixels_per_point(density);
-        context.global_style_mut(|style| style.interaction.tooltip_delay = 1_000.0);
         let size = egui::vec2(640.0, 480.0);
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
-        let output = frame(
-            &mut app,
-            size,
-            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
-        );
-        assert!(direction_labels(&output).is_empty());
-        let state = context
-            .data(|data| data.get_temp::<State>(state_id()))
-            .expect("gesture");
-        let owner = state.drag.expect("owned press").id;
-        let button = context.read_response(owner).expect("logo response").rect;
-        let output = frame(
+        frame(&mut app, size, vec![pointer(origin, true)]);
+        frame(
             &mut app,
             size,
             vec![egui::Event::PointerMoved(origin + egui::vec2(4.0, 0.0))],
         );
-        assert!(
-            direction_labels(&output).is_empty(),
-            "below the direction threshold"
-        );
-        for (delta, section) in [
-            (egui::vec2(24.0, -12.0), Section::File),
-            (egui::vec2(24.0, 24.0), Section::Edit),
-            (egui::vec2(-12.0, 24.0), Section::View),
+        assert!(!egui::Popup::is_any_open(&context));
+        for (delta, section, label) in [
+            (egui::vec2(24.0, -12.0), Section::File, "Open file "),
+            (egui::vec2(24.0, 24.0), Section::Edit, "Undo "),
+            (egui::vec2(-12.0, 24.0), Section::View, "Toggle fullscreen "),
         ] {
-            let output = frame(
+            frame(
                 &mut app,
                 size,
                 vec![egui::Event::PointerMoved(origin + delta)],
             );
-            assert_eq!(
-                direction_labels(&output),
-                [section.title()],
-                "first direction frame, no tooltip timer"
-            );
-            assert!(!egui::Popup::is_any_open(&context));
-            let bounds = popup_bounds(&output);
-            assert_eq!(bounds.len(), 1);
             assert!(
-                !bounds[0].intersects(button),
-                "label must not cover the menu button"
+                egui::Popup::is_any_open(&context),
+                "opens on direction frame"
             );
-            assert!(context.content_rect().contains_rect(bounds[0]));
-            assert_ne!(
-                context.layer_id_at(bounds[0].center()),
-                Some(egui::LayerId::new(
-                    egui::Order::Tooltip,
-                    owner.with("direction-label")
-                ))
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            row_center(&output, label);
+            frame(
+                &mut app,
+                size,
+                vec![egui::Event::PointerMoved(egui::pos2(600.0, 420.0))],
             );
-            let tree = output
-                .platform_output
-                .accesskit_update
-                .expect("accessibility");
-            let node = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some("towavue menu"))
-                .expect("logo")
-                .1
-                .clone();
             assert_eq!(
-                node.description(),
-                Some(format!("Release to open the {} menu", section.title()).as_str())
+                context
+                    .data(|data| data.get_temp::<State>(state_id()))
+                    .expect("state")
+                    .section,
+                Some(section)
             );
+            frame(&mut app, size, vec![egui::Event::PointerMoved(origin)]);
+            assert!(!egui::Popup::is_any_open(&context), "reentry rearms");
         }
-        for point in [origin, origin - egui::vec2(9.0, 9.0)] {
-            let output = frame(&mut app, size, vec![egui::Event::PointerMoved(point)]);
-            assert!(direction_labels(&output).is_empty());
+        frame(&mut app, size, vec![pointer(origin, false)]);
+        assert!(
+            !egui::Popup::is_any_open(&context),
+            "reentry release does not replay a click"
+        );
+        assert!(app.pending_dialog.is_none() && app.edits.is_empty());
+        for departed in [false, true] {
+            let mut events = vec![
+                pointer(origin, true),
+                egui::Event::PointerMoved(origin + egui::vec2(24.0, 24.0)),
+            ];
+            events.push(if departed {
+                egui::Event::PointerGone
+            } else {
+                egui::Event::PointerMoved(origin)
+            });
+            frame(&mut app, size, events);
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "cancelled opening cannot be replayed in one batch"
+            );
+            frame(&mut app, size, vec![pointer(origin, false)]);
+            assert!(!egui::Popup::is_any_open(&context));
         }
-        let target = origin + egui::vec2(24.0, 24.0);
-        let output = frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
-        assert_eq!(direction_labels(&output), ["Edit"]);
-        frame(&mut app, size, vec![pointer(target, false)]);
-        let output = frame(&mut app, size, vec![]);
-        assert!(
-            direction_labels(&output).is_empty(),
-            "release removes the transient label"
-        );
-        assert!(
-            egui::Popup::is_any_open(&context),
-            "label must not consume the menu-opening release"
-        );
     }
 }
 
@@ -236,7 +224,11 @@ fn check_menu_geometry(root: &Path, density: f32, size: egui::Vec2) {
         frame(
             &mut app,
             size,
-            vec![egui::Event::PointerMoved(target), pointer(target, false)],
+            if delta == egui::Vec2::ZERO {
+                vec![pointer(target, false)]
+            } else {
+                vec![egui::Event::PointerMoved(target)]
+            },
         );
         for _ in 0..4 {
             frame(&mut app, size, vec![]);
@@ -254,43 +246,9 @@ fn check_menu_geometry(root: &Path, density: f32, size: egui::Vec2) {
         let bounds = node.bounds().expect("item bounds");
         measured.push((title, bounds.width(), bounds.height()));
         first_focused.push(tree.focus == *id);
-        if title == "Open file " {
-            let focused = frame(&mut app, size, vec![key(egui::Key::ArrowDown)])
-                .platform_output
-                .accesskit_update
-                .expect("keyboard entry");
-            assert_eq!(focused.focus, *id, "first arrow selects the first command");
-            let second = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.label()
-                        .is_some_and(|label| label.starts_with("Open folder "))
-                })
-                .expect("second command")
-                .1
-                .bounds()
-                .expect("bounds");
-            let output = frame(
-                &mut app,
-                size,
-                vec![egui::Event::PointerMoved(egui::pos2(
-                    ((second.x0 + second.x1) * 0.5) as f32,
-                    ((second.y0 + second.y1) * 0.5) as f32,
-                ))],
-            );
-            assert_eq!(
-                output
-                    .platform_output
-                    .accesskit_update
-                    .expect("pointer return")
-                    .focus,
-                *id,
-                "hovering another command retains the keyboard highlight until a click"
-            );
-        }
         frame(&mut app, size, vec![key(egui::Key::Escape)]);
         frame(&mut app, size, vec![key(egui::Key::Escape)]);
+        frame(&mut app, size, vec![pointer(origin, false)]);
     }
     assert!(
         measured[0].1 < 160.0 && measured[4].1 < 160.0,
@@ -405,111 +363,61 @@ fn logo_direction_threshold_and_sector_boundaries_match_the_three_arrows() {
 }
 
 #[test]
-fn logo_drag_opens_each_existing_submenu_without_dispatch_and_keeps_keyboard_navigation() {
+fn held_leaf_release_dispatches_once_and_pointer_exit_preserves_event_order() {
     let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::logo_drag_opens_each_existing_submenu_without_dispatch_and_keeps_keyboard_navigation",
+        "logo_menu::tests::held_leaf_release_dispatches_once_and_pointer_exit_preserves_event_order",
     ) else {
         return;
     };
-    for (delta, expected) in [
-        (egui::vec2(24.0, -12.0), "Open file "),
-        (egui::vec2(24.0, 24.0), "Undo"),
-        (egui::vec2(-12.0, 24.0), "Toggle fullscreen"),
-    ] {
-        for batched in [false, true] {
+    for density in [1.0, 1.25, 2.0] {
+        for exit_before_release in [false, true] {
             let (mut app, origin) = setup(&root);
-            let size = egui::vec2(640.0, 480.0);
-            let history = app.edits.clone();
-            let target = origin + delta;
-            if batched {
-                frame(
-                    &mut app,
-                    size,
-                    vec![
-                        pointer(origin, true),
-                        egui::Event::PointerMoved(target),
-                        pointer(target, false),
-                    ],
-                );
-            } else {
-                frame(
-                    &mut app,
-                    size,
-                    vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
-                );
-                frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
-                assert!(
-                    !egui::Popup::is_any_open(app.ui_context.as_ref().expect("context")),
-                    "holding never opens a menu"
-                );
-                frame(&mut app, size, vec![pointer(target, false)]);
+            let context = app.ui_context.clone().expect("context");
+            context.set_pixels_per_point(density);
+            let tab = app.tabs.active().expect("tab").id;
+            for _ in 0..2 {
+                app.edits
+                    .entry(tab)
+                    .or_default()
+                    .push(EditOperation::RotateClockwise, MediaKind::Image);
             }
+            let size = egui::vec2(640.0, 480.0);
             for _ in 0..3 {
                 frame(&mut app, size, vec![]);
             }
-            let tree = frame(&mut app, size, vec![])
-                .platform_output
-                .accesskit_update
-                .expect("tree");
-            assert!(
-                !tree.nodes.iter().any(|(_, node)| matches!(
-                    node.label(),
-                    Some("File" | "Edit" | "View" | "Help")
-                )),
-                "direct menu must not show its parent categories"
+            frame(
+                &mut app,
+                size,
+                vec![
+                    pointer(origin, true),
+                    egui::Event::PointerMoved(origin + egui::vec2(24.0, 24.0)),
+                ],
             );
-            let first = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.label()
-                        .is_some_and(|label| label.starts_with(expected))
-                })
-                .expect("direct first item")
-                .1
-                .bounds()
-                .expect("item bounds");
-            assert!(
-                first.x0 < f64::from(origin.x) && first.y0 < 45.0,
-                "direct content stays below the logo: {first:?}"
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let target = row_center(&output, "Undo ");
+            let mut events = vec![egui::Event::PointerMoved(target)];
+            if exit_before_release {
+                events.push(egui::Event::PointerGone);
+            }
+            events.push(pointer(target, false));
+            if !exit_before_release {
+                events.push(egui::Event::PointerGone);
+            }
+            // A second press/release in the same native batch must not replay the first action.
+            events.extend([pointer(origin, true), pointer(target, false)]);
+            frame(&mut app, size, events);
+            for _ in 0..4 {
+                frame(&mut app, size, vec![]);
+            }
+            assert_eq!(
+                app.edits[&tab].operations().len(),
+                if exit_before_release { 2 } else { 1 }
             );
-            assert!(
-                tree.nodes.iter().any(|(_, node)| node
-                    .label()
-                    .is_some_and(|label| label.starts_with(expected))),
-                "missing category content {expected}; labels={:?}",
-                tree.nodes
-                    .iter()
-                    .filter_map(|(_, node)| node.label())
-                    .collect::<Vec<_>>()
-            );
-            assert!(
-                app.pending_dialog.is_none() && app.edits == history,
-                "gesture only opens menu"
-            );
-            frame(&mut app, size, vec![key(egui::Key::ArrowLeft)]);
-            frame(&mut app, size, vec![key(egui::Key::ArrowRight)]);
-            let tree = frame(&mut app, size, vec![])
-                .platform_output
-                .accesskit_update
-                .expect("keyboard reopened submenu");
-            assert!(
-                tree.nodes.iter().any(|(_, node)| {
-                    node.label()
-                        .is_some_and(|label| label.starts_with(expected))
-                }),
-                "keyboard return: {expected}, batched={batched}; focus={:?}, labels={:?}",
-                tree.focus,
-                tree.nodes
-                    .iter()
-                    .filter_map(|(_, node)| node.label())
-                    .collect::<Vec<_>>()
-            );
-            frame(&mut app, size, vec![key(egui::Key::Escape)]);
-            frame(&mut app, size, vec![key(egui::Key::Escape)]);
-            assert!(!egui::Popup::is_any_open(
-                app.ui_context.as_ref().expect("context")
-            ));
+            assert!(!egui::Popup::is_any_open(&context));
+            assert!(context.dragged_id().is_none());
         }
     }
 }
@@ -557,7 +465,6 @@ fn logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab() {
                 .is_some(),
             "owned drag disappeared over {target:?}"
         );
-        frame(&mut app, size, vec![pointer(target, false)]);
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
@@ -576,6 +483,12 @@ fn logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab() {
                 && app.view_drag.is_none()
                 && app.pending_dialog.is_none()
         );
+        frame(
+            &mut app,
+            size,
+            vec![pointer(egui::pos2(900.0, 550.0), false)],
+        );
+        assert!(!egui::Popup::is_any_open(&context));
         assert!(context.dragged_id().is_none());
         frame(&mut app, size, vec![key(egui::Key::Escape)]);
         frame(
@@ -589,60 +502,6 @@ fn logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab() {
             "ordinary separated click still opens root"
         );
         assert!(context.dragged_id().is_none());
-    }
-}
-
-#[test]
-fn logo_pointer_exit_obeys_release_order_in_batched_native_events() {
-    let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::logo_pointer_exit_obeys_release_order_in_batched_native_events",
-    ) else {
-        return;
-    };
-    for batched_press in [false, true] {
-        for exit_before_release in [false, true] {
-            for (delta, expected) in [
-                (egui::vec2(24.0, -12.0), "Open file "),
-                (egui::vec2(24.0, 24.0), "Undo "),
-                (egui::vec2(-12.0, 24.0), "Toggle fullscreen "),
-            ] {
-                let (mut app, origin) = setup(&root);
-                let size = egui::vec2(640.0, 480.0);
-                let target = origin + delta;
-                let history = app.edits.clone();
-                let mut events = vec![pointer(origin, true), egui::Event::PointerMoved(target)];
-                if !batched_press {
-                    frame(&mut app, size, std::mem::take(&mut events));
-                }
-                if exit_before_release {
-                    events.extend([egui::Event::PointerGone, pointer(target, false)]);
-                } else {
-                    events.extend([pointer(target, false), egui::Event::PointerGone]);
-                }
-                frame(&mut app, size, events);
-                for _ in 0..3 {
-                    frame(&mut app, size, vec![]);
-                }
-                assert_eq!(
-                    egui::Popup::is_any_open(app.ui_context.as_ref().expect("context")),
-                    !exit_before_release,
-                    "batched_press={batched_press}, exit_before_release={exit_before_release}, delta={delta:?}"
-                );
-                assert!(app.edits == history && app.pending_dialog.is_none());
-                let output = frame(&mut app, size, vec![]);
-                let tree = output.platform_output.accesskit_update.expect("tree");
-                assert_eq!(
-                    tree.nodes.iter().any(|(_, node)| node
-                        .label()
-                        .is_some_and(|label| label.starts_with(expected))),
-                    !exit_before_release
-                );
-                frame(&mut app, size, vec![key(egui::Key::Escape)]);
-                assert!(!egui::Popup::is_any_open(
-                    app.ui_context.as_ref().expect("context")
-                ));
-            }
-        }
     }
 }
 
@@ -712,12 +571,15 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
                 vec![]
             }
             15 => {
-                app.dispatch(CommandId::ToggleGridMenu);
+                egui::Popup::open_id(
+                    app.ui_context.as_ref().expect("context"),
+                    "foreign-popup".into(),
+                );
                 vec![]
             }
             _ => vec![],
         };
-        let output = frame(
+        frame(
             &mut app,
             if mode == 9 {
                 egui::vec2(480.0, 480.0)
@@ -725,10 +587,6 @@ fn logo_drag_cancellation_never_replays_a_click_and_plain_uia_click_still_opens_
                 size
             },
             events,
-        );
-        assert!(
-            direction_labels(&output).is_empty(),
-            "cancelled gesture has no direction label: {mode}"
         );
         app.palette_open = false;
         app.fullscreen = false;
@@ -793,7 +651,10 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
     for guard in [false, true] {
         let (mut app, origin) = setup(&root);
         let tab = app.tabs.active().expect("tab").id;
-        let size = egui::vec2(640.0, 480.0);
+        let size = egui::vec2(640.0, 1100.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
         let history = app.edits.entry(tab).or_default();
         for _ in 0..2 {
             history.push(EditOperation::RotateClockwise, MediaKind::Image);
@@ -807,13 +668,7 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
         frame(
             &mut app,
             size,
-            vec![
-                egui::Event::PointerMoved(egui::pos2(600.0, 400.0)),
-                pointer(origin, true),
-                pointer(target, false),
-                pointer(origin, true),
-                pointer(origin + egui::vec2(-12.0, 24.0), false),
-            ],
+            vec![pointer(origin, true), egui::Event::PointerMoved(target)],
         );
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
@@ -836,8 +691,18 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
                         .collect::<Vec<_>>()
                 )
             })
-            .0;
-        frame(&mut app, size, vec![access(target, None)]);
+            .1
+            .bounds()
+            .expect("bounds");
+        let target = egui::pos2(
+            (target.x0 + target.x1) as f32 * 0.5,
+            (target.y0 + target.y1) as f32 * 0.5,
+        );
+        frame(
+            &mut app,
+            size,
+            vec![egui::Event::PointerMoved(target), pointer(target, false)],
+        );
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
@@ -904,11 +769,7 @@ fn logo_reopens_different_submenus_after_closed_frames_at_compact_sizes_and_dpi(
                     frame(
                         &mut app,
                         size,
-                        vec![
-                            pointer(origin, true),
-                            egui::Event::PointerMoved(target),
-                            pointer(target, false),
-                        ],
+                        vec![pointer(origin, true), egui::Event::PointerMoved(target)],
                     );
                     for _ in 0..3 {
                         frame(&mut app, size, vec![]);
@@ -925,6 +786,7 @@ fn logo_reopens_different_submenus_after_closed_frames_at_compact_sizes_and_dpi(
                     );
                     frame(&mut app, size, vec![key(egui::Key::Escape)]);
                     frame(&mut app, size, vec![key(egui::Key::Escape)]);
+                    frame(&mut app, size, vec![pointer(target, false)]);
                     assert!(!egui::Popup::is_any_open(
                         app.ui_context.as_ref().expect("context")
                     ));
@@ -1135,7 +997,6 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         for _ in 0..6 {
             crate::video_rotation::tests::frame(app, vec![]);
         }
-        crate::video_rotation::tests::frame(app, vec![pointer(target, false)]);
         for _ in 0..3 {
             crate::video_rotation::tests::frame(app, vec![]);
         }
@@ -1152,6 +1013,7 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         );
         crate::video_rotation::tests::frame(app, vec![key(egui::Key::Escape)]);
         crate::video_rotation::tests::frame(app, vec![key(egui::Key::Escape)]);
+        crate::video_rotation::tests::frame(app, vec![pointer(target, false)]);
         assert!(!egui::Popup::is_any_open(
             app.ui_context.as_ref().expect("context")
         ));
@@ -1173,143 +1035,135 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
 }
 
 #[test]
-fn choice_submenus_from_logo_click_and_drag_apply_once_without_inheriting_parent_geometry() {
+fn choice_submenus_from_logo_click_apply_once_without_inheriting_parent_geometry() {
     let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::choice_submenus_from_logo_click_and_drag_apply_once_without_inheriting_parent_geometry",
+        "logo_menu::tests::choice_submenus_from_logo_click_apply_once_without_inheriting_parent_geometry",
     ) else {
         return;
     };
     for density in [1.0, 1.25, 2.0] {
-        for drag in [false, true] {
-            for edit in [false, true] {
-                let (mut app, origin) = setup(&root);
-                app.ui_context
-                    .as_ref()
-                    .expect("context")
-                    .set_pixels_per_point(density);
-                let size = egui::vec2(640.0, 480.0);
-                let end = origin
-                    + if drag {
-                        if edit {
-                            egui::vec2(24.0, 24.0)
-                        } else {
-                            egui::vec2(-12.0, 24.0)
-                        }
-                    } else {
-                        egui::Vec2::ZERO
-                    };
-                frame(
-                    &mut app,
-                    size,
-                    vec![pointer(origin, true), pointer(end, false)],
-                );
-                // Subsequent actions use accessibility focus, without leaving a
-                // stationary mouse over a different entry in the scrolled menu.
-                frame(&mut app, size, vec![egui::Event::PointerGone]);
-                let title = if edit {
-                    "Listening volume step"
-                } else {
-                    "Folder navigation"
-                };
-                let labels = if drag {
-                    vec![title]
-                } else {
-                    vec![if edit { "Edit" } else { "View" }, title]
-                };
-                for label in labels {
-                    for _ in 0..20 {
-                        frame(&mut app, size, vec![]);
-                    }
-                    let tree = frame(&mut app, size, vec![])
-                        .platform_output
-                        .accesskit_update
-                        .expect("menu tree");
-                    let id = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| {
-                            node.label().is_some_and(|text| {
-                                text.trim_end_matches('\u{23f5}').trim() == label
-                            })
-                        })
-                        .expect("submenu trigger")
-                        .0;
-                    frame(
-                        &mut app,
-                        size,
-                        vec![egui::Event::AccessKitActionRequest(
-                            egui::accesskit::ActionRequest {
-                                action: egui::accesskit::Action::Focus,
-                                target_tree: egui::accesskit::TreeId::ROOT,
-                                target_node: id,
-                                data: None,
-                            },
-                        )],
-                    );
-                    for _ in 0..20 {
-                        frame(&mut app, size, vec![]);
-                    }
-                    let before = frame(&mut app, size, vec![]);
-                    let trigger = before
-                        .platform_output
-                        .accesskit_update
-                        .as_ref()
-                        .expect("visible submenu trigger")
-                        .nodes
-                        .iter()
-                        .find(|(node_id, _)| *node_id == id)
-                        .expect("visible submenu trigger");
-                    assert!(before.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with(label) && shape.clip_rect.contains(text.pos))), "trigger is visible: label={label}, drag={drag}, edit={edit}, bounds={:?}, focus={:?}", trigger.1.bounds(), before.platform_output.accesskit_update.as_ref().expect("visible submenu trigger").focus);
-                    frame(&mut app, size, vec![access(id, None)]);
-                }
+        for edit in [false, true] {
+            let (mut app, origin) = setup(&root);
+            app.ui_context
+                .as_ref()
+                .expect("context")
+                .set_pixels_per_point(density);
+            let size = egui::vec2(640.0, 480.0);
+            frame(
+                &mut app,
+                size,
+                vec![pointer(origin, true), pointer(origin, false)],
+            );
+            // Subsequent actions use accessibility focus, without leaving a
+            // stationary mouse over a different entry in the scrolled menu.
+            frame(&mut app, size, vec![egui::Event::PointerGone]);
+            let title = if edit {
+                "Listening volume step"
+            } else {
+                "Folder navigation"
+            };
+            let labels = [if edit { "Edit" } else { "View" }, title];
+            for label in labels {
                 for _ in 0..20 {
                     frame(&mut app, size, vec![]);
                 }
-                let output = frame(&mut app, size, vec![]);
-                let bounds = popup_bounds(&output);
-                assert!(
-                    bounds.len() >= 2,
-                    "parent and choice menus remain visible: density={density}, drag={drag}, edit={edit}, bounds={bounds:?}, labels={:?}",
-                    output
-                        .platform_output
-                        .accesskit_update
-                        .as_ref()
-                        .expect("tree")
-                        .nodes
-                        .iter()
-                        .filter_map(|(_, node)| node.label())
-                        .collect::<Vec<_>>()
-                );
-                for pair in bounds.windows(2) {
-                    assert!(
-                        pair[0].right() <= pair[1].left(),
-                        "menu frames cannot overlap: {bounds:?}"
-                    );
-                }
-                let tree = output.platform_output.accesskit_update.expect("choices");
-                let selected = if edit { "5%" } else { "Stop at ends" };
-                let row = tree.nodes.iter().find(|(_, node)| node.label() == Some(selected)).unwrap_or_else(|| panic!("choice {selected} is visible: density={density}, drag={drag}, edit={edit}")).1.bounds().expect("choice bounds");
-                let center = egui::pos2(
-                    (row.x0 + row.x1) as f32 * 0.5,
-                    (row.y0 + row.y1) as f32 * 0.5,
-                );
-                let child = bounds
+                let tree = frame(&mut app, size, vec![])
+                    .platform_output
+                    .accesskit_update
+                    .expect("menu tree");
+                let id = tree
+                    .nodes
                     .iter()
-                    .find(|bounds| bounds.contains(center))
-                    .unwrap_or_else(|| panic!("choice popup frame: density={density}, drag={drag}, edit={edit}, center={center:?}, row={row:?}, frames={bounds:?}"));
-                assert!(
-                    child.width() < 180.0 && child.height() < 100.0,
-                    "choice popup sizes from its own two or three rows: {child:?}"
+                    .find(|(_, node)| {
+                        node.label()
+                            .is_some_and(|text| text.trim_end_matches('\u{23f5}').trim() == label)
+                    })
+                    .expect("submenu trigger")
+                    .0;
+                frame(
+                    &mut app,
+                    size,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            action: egui::accesskit::Action::Focus,
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: id,
+                            data: None,
+                        },
+                    )],
                 );
-                frame(&mut app, size, vec![access(node(&tree, selected), None)]);
-                assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
-                assert_eq!(app.folder_navigation_loop, edit);
-                for _ in 0..3 {
+                for _ in 0..20 {
                     frame(&mut app, size, vec![]);
                 }
-                assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
-                assert_eq!(app.folder_navigation_loop, edit);
+                let before = frame(&mut app, size, vec![]);
+                let trigger = before
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("visible submenu trigger")
+                    .nodes
+                    .iter()
+                    .find(|(node_id, _)| *node_id == id)
+                    .expect("visible submenu trigger");
+                assert!(before.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with(label) && shape.clip_rect.contains(text.pos))), "trigger is visible: label={label}, edit={edit}, bounds={:?}, focus={:?}", trigger.1.bounds(), before.platform_output.accesskit_update.as_ref().expect("visible submenu trigger").focus);
+                frame(&mut app, size, vec![access(id, None)]);
             }
+            for _ in 0..20 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let bounds = popup_bounds(&output);
+            assert!(
+                bounds.len() >= 2,
+                "parent and choice menus remain visible: density={density}, edit={edit}, bounds={bounds:?}, labels={:?}",
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| node.label())
+                    .collect::<Vec<_>>()
+            );
+            for pair in bounds.windows(2) {
+                assert!(
+                    pair[0].right() <= pair[1].left(),
+                    "menu frames cannot overlap: {bounds:?}"
+                );
+            }
+            let tree = output.platform_output.accesskit_update.expect("choices");
+            let selected = if edit { "5%" } else { "Stop at ends" };
+            let row = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(selected))
+                .unwrap_or_else(|| {
+                    panic!("choice {selected} is visible: density={density}, edit={edit}")
+                })
+                .1
+                .bounds()
+                .expect("choice bounds");
+            let center = egui::pos2(
+                (row.x0 + row.x1) as f32 * 0.5,
+                (row.y0 + row.y1) as f32 * 0.5,
+            );
+            let child = bounds
+                .iter()
+                .find(|bounds| bounds.contains(center))
+                .unwrap_or_else(|| panic!("choice popup frame: density={density}, edit={edit}, center={center:?}, row={row:?}, frames={bounds:?}"));
+            assert!(
+                child.width() < 180.0 && child.height() < 100.0,
+                "choice popup sizes from its own two or three rows: {child:?}"
+            );
+            frame(&mut app, size, vec![access(node(&tree, selected), None)]);
+            assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
+            assert_eq!(app.folder_navigation_loop, edit);
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            assert_eq!(app.volume_step_percent, if edit { 5 } else { 2 });
+            assert_eq!(app.folder_navigation_loop, edit);
         }
     }
 }
@@ -1443,5 +1297,54 @@ fn keyboard_logo_entry_restores_focus_after_escape() {
             .accesskit_update
             .expect("returned tree");
         assert_eq!(tree.focus, logo);
+    }
+}
+
+#[test]
+fn held_drag_enters_a_choice_submenu_and_applies_the_release_once() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::held_drag_enters_a_choice_submenu_and_applies_the_release_once",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut app, origin) = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        context.set_pixels_per_point(density);
+        let size = egui::vec2(960.0, 1100.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        frame(
+            &mut app,
+            size,
+            vec![
+                pointer(origin, true),
+                egui::Event::PointerMoved(origin + egui::vec2(-12.0, 24.0)),
+            ],
+        );
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        let target = row_center(&output, "Image interpolation");
+        frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        let target = row_center(&output, "Nearest");
+        frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        assert!(!app.nearest_images);
+        frame(&mut app, size, vec![pointer(target, false)]);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        assert!(app.nearest_images);
+        assert!(!egui::Popup::is_any_open(&context));
+        assert!(context.dragged_id().is_none());
     }
 }

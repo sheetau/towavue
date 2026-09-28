@@ -54,6 +54,24 @@ impl Hud {
         }
     }
 
+    pub fn title_opacity(
+        &self,
+        context: &egui::Context,
+        owner: (TabId, u64),
+        now: Instant,
+    ) -> Option<f32> {
+        let notice = self.notice.filter(|notice| {
+            notice.owner == owner && (self.dragging || now < notice.until + FADE)
+        })?;
+        let opacity = notice.opacity(now, self.dragging);
+        if self.dragging || opacity < 1.0 || now >= notice.until {
+            context.request_repaint();
+        } else {
+            context.request_repaint_after(notice.until.saturating_duration_since(now));
+        }
+        Some(opacity)
+    }
+
     pub fn show(
         &mut self,
         ui: &Ui,

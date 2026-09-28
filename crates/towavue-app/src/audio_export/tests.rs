@@ -378,11 +378,12 @@ fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
             .get(&tab)
             .is_none_or(|history| !history.is_dirty())
     );
-    for command in [CommandId::ToggleCommandPalette, CommandId::ToggleGridMenu] {
+    {
+        let command = CommandId::ToggleCommandPalette;
         app.dispatch(command);
         frame(&mut app, size, vec![]);
         app.dispatch(CommandId::AudioExportOptions);
-        assert!(!app.palette_open && !app.grid_open);
+        assert!(!app.palette_open);
         let token = app
             .audio_export_dialog
             .as_ref()

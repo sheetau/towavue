@@ -580,6 +580,17 @@ impl TabPreview {
                     }
                     ui.add(egui::Label::new(&label).wrap());
                 });
+                if matches!(kind, MediaKind::Audio | MediaKind::Video) {
+                    let surface = ui.interact(
+                        ui.min_rect(),
+                        ui.id().with("tab-volume-wheel"),
+                        egui::Sense::hover(),
+                    );
+                    let deltas = crate::wheel_input::tab_volume_deltas(ui.ctx(), &surface);
+                    if !deltas.is_empty() {
+                        return Some(crate::preview_transport::Action::Volume(deltas));
+                    }
+                }
                 action
             })
             .and_then(|output| output.inner)
@@ -1816,7 +1827,7 @@ mod tests {
         assert_eq!(app.edits[&dirty_tab].operations(), history);
         frame(&mut app, egui::pos2(400.0, 300.0), 1.1, false);
         assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
-        for overlay in 0..3 {
+        for overlay in (0..3).filter(|&overlay| overlay != 1) {
             frame(
                 &mut app,
                 egui::pos2(90.0, 16.0),
@@ -1825,7 +1836,6 @@ mod tests {
             );
             assert!(app.tab_preview.target.is_some());
             app.palette_open = overlay == 0;
-            app.grid_open = overlay == 1;
             app.filmstrip_open = overlay == 2;
             frame(
                 &mut app,
@@ -1851,7 +1861,7 @@ mod tests {
                 assert!(app.tab_preview.target.is_none() && app.tab_preview.texture.is_none());
             }
             app.palette_open = false;
-            app.grid_open = false;
+
             app.filmstrip_open = false;
         }
     }

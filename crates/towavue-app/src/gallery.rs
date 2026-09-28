@@ -89,7 +89,6 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             || self.pending_folder.is_some()
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || egui::Popup::is_any_open(context)
             || context.input(|input| !input.raw.hovered_files.is_empty())
             || (context.input(|input| input.pointer.any_down()) && !gallery_rail::dragging(context))

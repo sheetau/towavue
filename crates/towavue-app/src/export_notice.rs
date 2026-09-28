@@ -11,7 +11,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             || shown.elapsed() >= STATUS_MESSAGE_DURATION
             || self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || self
                 .ui_context
                 .as_ref()
@@ -267,7 +266,7 @@ mod tests {
         assert!(app.export_notice.is_none());
         app.handle_ui_action(UiAction::RevealExport(stale));
         assert!(link(&paint(&app, 640.0, vec![]).0).is_none());
-        for blocked in 0..4 {
+        for blocked in (0..4).filter(|&blocked| blocked != 2) {
             let shown = notice(&mut app, &target);
             match blocked {
                 0 => {
@@ -277,7 +276,6 @@ mod tests {
                     assert!(app.export_notice_target(old).is_none());
                 }
                 1 => app.palette_open = true,
-                2 => app.grid_open = true,
                 _ => app.export_error = Some("fixture failure".into()),
             }
             assert!(app.export_notice_target(shown).is_none());
@@ -287,7 +285,7 @@ mod tests {
             app.handle_ui_action(UiAction::OpenExport(shown));
             assert_eq!(app.tabs.len(), count);
             app.palette_open = false;
-            app.grid_open = false;
+
             app.export_error = None;
         }
         assert!(

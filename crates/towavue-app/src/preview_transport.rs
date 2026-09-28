@@ -20,6 +20,7 @@ pub(super) enum Action {
     Command(CommandId),
     Seek(MediaTime),
     ImageSeek(usize),
+    Volume(Vec<f32>),
 }
 
 impl Transport {
@@ -360,7 +361,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn preview_input_blocked(&self) -> bool {
         self.modal_input_blocked()
             || self.palette_open
-            || self.grid_open
             || self.incoming_tab_pointer.is_some()
             || self.ui_context.as_ref().is_some_and(|context| {
                 egui::Popup::is_any_open(context)

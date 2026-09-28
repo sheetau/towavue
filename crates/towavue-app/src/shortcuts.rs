@@ -144,7 +144,6 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::Save, "Ctrl+S"),
         (CommandId::ExportAs, "Ctrl+Shift+S"),
         (CommandId::ToggleTimeline, "T"),
-        (CommandId::ToggleGridMenu, "G"),
         (CommandId::ToggleHardwareEncode, "Ctrl+Shift+E"),
         (CommandId::JumpImagesBackward1, "Ctrl+Shift+1"),
         (CommandId::JumpImagesBackward2, "Ctrl+Shift+2"),
@@ -278,7 +277,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             });
         };
         // Retired generated declarations must not invalidate unrelated custom keys.
-        if command.trim() == "reverse_reading_folder_order" {
+        if matches!(
+            command.trim(),
+            "reverse_reading_folder_order" | "toggle_grid_menu"
+        ) {
             continue;
         }
         let command = command
@@ -595,6 +597,45 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retired_grid_binding_is_ignored_without_reclaiming_custom_g_or_other_keys() {
+        assert!("toggle_grid_menu".parse::<CommandId>().is_err());
+        for kind in [MediaKind::Image, MediaKind::Audio, MediaKind::Video] {
+            let context = CommandContext {
+                media_kind: Some(kind),
+                ..Default::default()
+            };
+            let stroke = "G".parse::<towavue_core::KeyStroke>().expect("G");
+            assert_eq!(
+                defaults().resolve(std::slice::from_ref(&stroke), context),
+                ShortcutMatch::None
+            );
+            for retired in ["G", "Ctrl+G", "invalid retired value"] {
+                let bindings = parse(
+                    &format!("toggle_grid_menu = {retired}\nopen_file = G\nclose_tab = Ctrl+W\n"),
+                    defaults(),
+                )
+                .expect("legacy declaration is retired");
+                assert_eq!(
+                    bindings.resolve(std::slice::from_ref(&stroke), context),
+                    ShortcutMatch::Command(CommandId::OpenFile)
+                );
+                assert_eq!(
+                    bindings
+                        .get(CommandId::CloseTab)
+                        .expect("custom")
+                        .to_string(),
+                    "Ctrl+W"
+                );
+                assert!(!serialize(&bindings).contains("toggle_grid_menu"));
+                assert_eq!(
+                    parse(&serialize(&bindings), defaults()).expect("round trip"),
+                    bindings
+                );
+            }
+        }
+    }
+
     #[test]
     fn deselect_alternative_migrates_without_overriding_custom_keys() {
         let alternative: KeySequence = "Ctrl+Shift+A".parse().expect("key");
@@ -1115,7 +1156,7 @@ mod tests {
             ("Ctrl+3", "toggle_filmstrip"),
             ("Ctrl+Shift+2", "apply_crop"),
             ("Ctrl+5", "undo"),
-            ("Ctrl+Space", "toggle_grid_menu"),
+            ("Ctrl+Space", "toggle_command_palette"),
             ("PageDown", "flip_vertical"),
             ("A", "rotate_clockwise"),
         ] {

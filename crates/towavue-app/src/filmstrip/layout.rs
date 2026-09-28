@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) const DIAMETER: f32 = 120.0;
-const GAP: f32 = 20.0;
+const GAP: f32 = 10.0;
 
 /// Thumbnail sizes are independent of the fixed column geometry.
 /// Loading or evicting a texture never changes scroll positions.
@@ -184,7 +184,7 @@ mod tests {
             assert!((rect.center().y - 250.0).abs() < 0.001);
         }
         for pair in rects.windows(2) {
-            assert!((pair[1].center().x - pair[0].center().x - 140.0).abs() < 0.001);
+            assert!((pair[1].center().x - pair[0].center().x - 130.0).abs() < 0.001);
         }
         let measured = layout.sizes.clone();
         previews.clear();

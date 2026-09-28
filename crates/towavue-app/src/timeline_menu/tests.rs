@@ -436,11 +436,10 @@ fn timeline_context_rejects_changed_owners_selection_and_blocked_views() {
         });
         assert!(app.edits.is_empty());
     }
-    for gate in 0..7 {
+    for gate in (0..7).filter(|&gate| gate != 3) {
         app.timeline_open = gate != 0;
         app.fullscreen = gate == 1;
         app.palette_open = gate == 2;
-        app.grid_open = gate == 3;
         app.filmstrip_open = gate == 4;
         app.about_open = gate == 5;
         app.state = if gate == 6 {

@@ -128,10 +128,9 @@ fn reading_repeats_preserve_overlays_prefixes_custom_bindings_and_dirty_guards()
     };
     let (mut app, _, paths) = fixture(&root);
     app.reading_mode = true;
-    for state in 0..6 {
+    for state in (0..6).filter(|&state| state != 2) {
         app.filmstrip_open = state == 0;
         app.palette_open = state == 1;
-        app.grid_open = state == 2;
         app.image_edit_pending = state == 3;
         app.entered_shortcut = if state == 4 {
             vec!["Ctrl+K".parse().expect("prefix")]

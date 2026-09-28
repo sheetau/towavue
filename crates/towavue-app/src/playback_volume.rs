@@ -1,5 +1,7 @@
 use super::*;
 
+mod tab_wheel;
+
 #[derive(Clone, Copy)]
 pub(super) struct PlaybackVolume {
     level: f32,
@@ -233,8 +235,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(session) = &mut self.session {
             session.set_volume(gain);
         }
-        self.volume_hud
-            .changed(id, self.media_generation, Instant::now());
+        let now = Instant::now();
+        self.volume_hud.changed(id, self.media_generation, now);
+        self.tab_volume_huds
+            .entry(id)
+            .or_default()
+            .changed(id, 0, now);
         self.request_redraw();
     }
 
@@ -669,6 +675,27 @@ mod tests {
                     assert_eq!(app.edits, history_before_mute);
                     check(&app, 0.0);
                 }
+                let background_path = app.retained_playback[&first].path.clone();
+                let generation = app.retained_playback[&first]
+                    .session
+                    .as_ref()
+                    .expect("session")
+                    .generation();
+                for (delta, expected) in [(-1.0, 1.98), (1.0, 2.0)] {
+                    app.tab_volume_wheel(first, &background_path, &[delta]);
+                    let saved = &app.retained_playback[&first];
+                    let session = saved.session.as_ref().expect("background audio");
+                    assert_eq!(session.verification_volume(), (expected, Some(expected)));
+                    assert_eq!(
+                        session.generation(),
+                        generation,
+                        "wheel must not reprime playback"
+                    );
+                    assert_eq!(saved.state, PlaybackState::Paused);
+                    assert_eq!(app.tabs.active_id(), active_before_mute);
+                    assert_eq!(app.edits, history_before_mute);
+                    check(&app, 0.0);
+                }
                 app.retained_playback
                     .get_mut(&first)
                     .expect("background")
@@ -745,7 +772,8 @@ mod tests {
                             .iter()
                             .filter_map(|shape| match &shape.shape {
                                 egui::Shape::Text(text)
-                                    if text.galley.text() == "silence.wav"
+                                    if (text.galley.text() == "silence.wav"
+                                        || text.galley.text().ends_with('%'))
                                         && text.pos.x >= bounds.x1 as f32 =>
                                 {
                                     Some(text.pos.x)

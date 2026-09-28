@@ -27,7 +27,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.filmstrip_open
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self
                 .ui_context
                 .as_ref()
@@ -74,7 +73,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && !self.exit_requested
             && !self.modal_input_blocked()
             && !self.palette_open
-            && !self.grid_open
             && !self
                 .ui_context
                 .as_ref()

@@ -11,7 +11,7 @@ pub use modal::{modal, modal_body, set_modal_bounds};
 
 mod reading_icon;
 mod tab_fade;
-pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade};
+pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade, tab_title_with_volume};
 
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
     let mut actions = Vec::new();

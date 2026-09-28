@@ -168,7 +168,7 @@ fn tab_context_rejects_modified_repeated_and_covered_requests() {
         )
         .is_none()
     );
-    for mode in 0..10 {
+    for mode in (0..10).filter(|&mode| mode != 3) {
         let mut app = setup(&root);
         let context = app.ui_context.clone().expect("context");
         let origin = node(&settle(&mut app), "first.png");
@@ -193,7 +193,6 @@ fn tab_context_rejects_modified_repeated_and_covered_requests() {
             }
             1 => event = key(egui::Key::F10, egui::Modifiers::NONE),
             2 => app.palette_open = true,
-            3 => app.grid_open = true,
             4 => app.filmstrip_open = true,
             5 => app.fullscreen = true,
             6 => app.pending_guard = Some(GuardedAction::Exit),

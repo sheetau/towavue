@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Application, CommandId, FallbackPrompt, PromptButtons, grid, shortcuts};
+use crate::{Application, CommandId, FallbackPrompt, PromptButtons, shortcuts};
 
 #[test]
 fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves_recovery() {
@@ -13,7 +13,7 @@ fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves
     // Diagnostics preserve APPDATA's spelling, including Windows short aliases.
     // The isolated fixture root is canonicalized independently.
     let shortcut_path = shortcuts::config_path().expect("isolated shortcuts path");
-    let grid_path = grid::config_path().expect("isolated grid path");
+    let grid_path = config.join("grid.conf");
     let shortcut_bytes = "# Keep 日本語 {notes}\nunknown = Ctrl+O\n";
     let grid_bytes = "# Keep grid notes\nvideo = open_file\n";
     std::fs::write(&shortcut_path, shortcut_bytes).expect("invalid shortcuts");
@@ -32,7 +32,7 @@ fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves
         .expect("warning")
         .message(Language::English);
     assert!(english.contains("unknown command on shortcuts.conf line 2"));
-    assert!(english.contains("grid.conf line 2 has 1 commands; expected 16"));
+    assert!(!english.contains("grid.conf"));
     app.language_settings.display = Language::Japanese;
     app.language_settings.next = Language::English;
     app.show_configuration_warning();
@@ -46,13 +46,12 @@ fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves
     assert!(message.starts_with("以下の設定には初期設定を使用しています。"));
     for detail in [
         "shortcuts.confの2行目に不明なコマンドがあります",
-        "grid.confの2行目にコマンドが1個あります。16個指定してください",
         "「ファイル」>「キーボードショートカットを再読み込み」",
     ] {
         assert!(message.contains(detail), "{message}");
     }
     assert!(message.contains(shortcut_path.to_str().expect("fixture path")));
-    assert!(message.contains(grid_path.to_str().expect("fixture path")));
+    assert!(!message.contains("grid.conf"));
     let (native, buttons) =
         app.native_prompt_content(&FallbackPrompt::ConfigurationWarning(message.clone()));
     assert_eq!(native, message);
@@ -87,18 +86,9 @@ fn japanese_configuration_warning_uses_host_language_after_loading_and_preserves
             .to_string(),
         "Ctrl+P"
     );
-    assert!(
-        app.status_message
-            .as_ref()
-            .expect("grid error")
-            .0
-            .contains("grid.confの2行目にコマンドが1個あります")
-    );
-    std::fs::write(&grid_path, "# defaults\n").expect("correct grid");
-    app.dispatch(CommandId::ReloadShortcuts);
     assert_eq!(
         app.status_message.as_ref().expect("reload success").0,
-        Text::ShortcutsGridReloaded.in_language(Language::Japanese)
+        Text::ShortcutsReloaded.in_language(Language::Japanese)
     );
     std::fs::write(&shortcut_path, "open_file = Ctrl+\n").expect("invalid shortcut");
     app.dispatch(CommandId::ReloadShortcuts);
@@ -126,56 +116,25 @@ fn japanese_configuration_errors_keep_exact_lines_files_and_english_diagnostics(
         return;
     };
     let path = root.join("日本語 {config}.conf");
-    for (grid_file, source, english, japanese) in [
+    for (source, english, japanese) in [
         (
-            false,
             "# note\nopen_file\n",
             "shortcuts.conf line 2 is missing '='",
             "shortcuts.confの2行目に「=」がありません",
         ),
         (
-            false,
             "unknown = Ctrl+O\n",
             "unknown command on shortcuts.conf line 1",
             "shortcuts.confの1行目に不明なコマンドがあります",
         ),
         (
-            false,
             "\nopen_file = Ctrl+\n",
             "invalid shortcut on shortcuts.conf line 2",
             "shortcuts.confの2行目のショートカットが不正です",
         ),
-        (
-            true,
-            "# note\nimage\n",
-            "grid.conf line 2 is missing '='",
-            "grid.confの2行目に「=」がありません",
-        ),
-        (
-            true,
-            "unknown = open_file\n",
-            "unknown media kind on grid.conf line 1",
-            "grid.confの1行目のメディア種別が不明です",
-        ),
-        (
-            true,
-            "image = open_file,close_tab\n",
-            "grid.conf line 1 has 2 commands; expected 16",
-            "grid.confの1行目にコマンドが2個あります。16個指定してください",
-        ),
-        (
-            true,
-            "image = unknown,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file,open_file\n",
-            "unknown command on grid.conf line 1",
-            "grid.confの1行目に不明なコマンドがあります",
-        ),
     ] {
         std::fs::write(&path, source).expect("owned malformed configuration");
-        let error = if grid_file {
-            grid::load_from(&path).expect_err("invalid grid")
-        } else {
-            shortcuts::load_from(&path).expect_err("invalid shortcuts")
-        };
+        let error = shortcuts::load_from(&path).expect_err("invalid shortcuts");
         assert_eq!(error.to_string(), english);
         assert_eq!(error.message(Language::Japanese), japanese);
         assert_eq!(
@@ -189,7 +148,8 @@ fn japanese_configuration_errors_keep_exact_lines_files_and_english_diagnostics(
 
 #[test]
 fn configuration_paths_keep_owned_causes_through_boxed_window_failures() {
-    for name in ["grid.conf", "shortcuts.conf"] {
+    {
+        let name = "shortcuts.conf";
         let error = path(None, name).expect_err("missing environment root");
         assert_eq!(error.to_string(), "APPDATA is unavailable");
         let boxed: Box<dyn std::error::Error> = error.into();

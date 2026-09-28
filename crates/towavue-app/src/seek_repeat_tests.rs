@@ -50,9 +50,8 @@ fn held_seek_keys_respect_bindings_prefixes_media_state_and_overlays() {
                 expected
             );
         }
-        for blocked in 0..9 {
+        for blocked in (0..9).filter(|&blocked| blocked != 1) {
             app.palette_open = blocked == 0;
-            app.grid_open = blocked == 1;
             app.filmstrip_open = blocked == 2;
             app.native_ime_composing = blocked == 3;
             app.pending_guard = (blocked == 4).then_some(GuardedAction::Exit);

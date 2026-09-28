@@ -1155,9 +1155,8 @@ mod tests {
                 ] {
                     let instance = app.retained_playback[&audio].instance;
                     let source = app.retained_playback[&audio].path.clone();
-                    for blocked in 0..4 {
+                    for blocked in (0..4).filter(|&blocked| blocked != 1) {
                         app.palette_open = blocked == 0;
-                        app.grid_open = blocked == 1;
                         app.filmstrip_open = blocked == 2;
                         app.handle_ui_action(UiAction::PreviewTransport(
                             audio,

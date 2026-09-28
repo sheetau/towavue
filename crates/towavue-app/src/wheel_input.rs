@@ -69,6 +69,27 @@ pub fn volume_deltas(
         .collect()
 }
 
+pub fn tab_volume_deltas(context: &Context, target: &Response) -> Vec<f32> {
+    if egui::Popup::is_any_open(context)
+        || context.input(|input| {
+            input.pointer.any_down()
+                || input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        Event::PointerButton { pressed: true, .. } | Event::WindowFocused(false)
+                    )
+                })
+        })
+    {
+        return Vec::new();
+    }
+    native::record_volume_target(context, target);
+    volume_deltas(context, std::slice::from_ref(target), None)
+        .into_iter()
+        .filter(|delta| delta.is_finite() && *delta != 0.0)
+        .collect()
+}
+
 pub enum ViewWheel {
     Zoom(f32),
     Pan(egui::Vec2),

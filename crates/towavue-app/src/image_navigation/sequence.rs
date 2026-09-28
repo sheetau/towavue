@@ -86,7 +86,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             || self.active_export.is_some()
             || self.command_context().has_unsaved_edits
             || self.palette_open
-            || self.grid_open
             || self.displayed_tab.is_none()
             || self.displayed_tab != self.tabs.active().map(|tab| tab.id)
             || self

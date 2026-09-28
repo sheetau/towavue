@@ -18,7 +18,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             || self.modal_input_blocked()
             || self.filmstrip_open
             || self.palette_open
-            || self.grid_open
             || !self.folder_snapshot.as_ref().is_some_and(|snapshot| {
                 snapshot
                     .items_of_kind(MediaKind::Image)

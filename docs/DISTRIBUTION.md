@@ -1,6 +1,6 @@
 # Distribution audit history
 
-For current production packaging, start with [RELEASING](RELEASING.md). [STATUS](STATUS.md) records published releases and qualification limits; [LOCAL_SETUP](LOCAL_SETUP.md) maintains install/update/uninstall contracts.
+For current production packaging, start with [RELEASING](RELEASING.md). [STATUS](STATUS.md) is the public checkpoint, with current qualification evidence in [the local dashboard](../.dashboard/README.md); [LOCAL_SETUP](LOCAL_SETUP.md) maintains install/update/uninstall contracts.
 
 The September 2026 records below document historical inputs and licensing investigations. The BtbN development binaries were excluded from distribution after Chromaprint's static FFTW dependency was confirmed; preserve [the recorded rejection](ffmpeg-distribution-rejection.json) and [rebuild rationale](FFMPEG_REBUILD.md). The selected native build and materials are described in [NATIVE_FFMPEG_BUILD](NATIVE_FFMPEG_BUILD.md) and [NATIVE_MATERIAL_CATALOG](NATIVE_MATERIAL_CATALOG.md). Historical candidate hashes and open gates below are evidence for those inputs, not the current release state.
 

@@ -1,6 +1,6 @@
 # Windows Setup contracts and evaluation
 
-For production asset assembly and publication, use [RELEASING](RELEASING.md); current qualification is recorded in [STATUS](STATUS.md). This document maintains shared installation/update contracts and historical evaluation evidence. The default local builder uses a pinned unpublished evaluation payload, separate from production release identity. Build and inspection scripts do not install it.
+For production asset assembly and publication, use [RELEASING](RELEASING.md); current qualification is recorded in [the local dashboard](../.dashboard/README.md), with a public checkpoint in [STATUS](STATUS.md). This document maintains shared installation/update contracts and historical evaluation evidence. The default local builder uses a pinned unpublished evaluation payload, separate from production release identity. Build and inspection scripts do not install it.
 
 ## Production identity and version transitions
 

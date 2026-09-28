@@ -1,6 +1,6 @@
 # Release assembly
 
-Production releases target Windows 11 x64. EXE and Setup currently have no Authenticode signature by owner decision; update metadata is independently signed with the retained RSA-4096 key. This guide covers subsequent releases as well as the initial assembly. Use [STATUS](STATUS.md) for published versions, retained inputs and qualification limits. The publisher creates a draft; the owner publishes it.
+Production releases target Windows 11 x64. EXE and Setup currently have no Authenticode signature by owner decision; update metadata is independently signed with the retained RSA-4096 key. This guide covers subsequent releases as well as the initial assembly. Use [the local dashboard](../.dashboard/README.md) for retained release inputs and qualification limits; [STATUS](STATUS.md) is the public checkpoint. Verify publication state against GitHub before a release. The publisher creates a draft; the owner publishes it.
 
 ## Application license from 1.0.2
 
@@ -49,7 +49,7 @@ The builder runs `test-local-setup.ps1 -InputManifest <generated-manifest>` on i
 
 ## Build and upload a draft
 
-After the final qualification gates in STATUS are satisfied, run `scripts/publish-release.ps1` with the same arguments as the builder. The command uses the authenticated GitHub CLI, requires the clean `main` branch and the `sheetau/towavue` origin, builds/verifies the artifacts, pushes the source without force, creates the exact version tag and uploads an unpublished stable draft. The committed notes come from `docs/releases/<version>.md`. It never publishes the release.
+After the final qualification gates in the local release record are satisfied, run `scripts/publish-release.ps1` with the same arguments as the builder. The command uses the authenticated GitHub CLI, requires the clean `main` branch and the `sheetau/towavue` origin, builds/verifies the artifacts, pushes the source without force, creates the exact version tag and uploads an unpublished stable draft. The committed notes come from `docs/releases/<version>.md`. It never publishes the release.
 
 Use `-CheckOnly` to build and perform read-only GitHub preflight without a push, tag or draft change. For an already completed build, use:
 
@@ -65,7 +65,7 @@ An incomplete draft says not to publish it. Normal release notes replace that no
 
 `test-release-publishing.ps1` exercises ownership, published/prerelease/tag refusal, missing-only retries, unchanged no-ops and empty-upload recovery without GitHub mutations. Add `-ArtifactDirectory <completed-build>` for signature/checksum/source-blob verification and seven actual local tampering/incomplete-asset controls. The production private key is not used by this test.
 
-The implementation follows the documented [draft creation options](https://cli.github.com/manual/gh_release_create), [upload behavior](https://cli.github.com/manual/gh_release_upload) and [release asset state/size/digest fields](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28). REST requests select API version 2022-11-28. The publisher finds drafts through authenticated, paginated release listings and rechecks the unique release ID; the tag-release endpoint returns published releases only. The first live upload, safe no-op retry and anonymous draft invisibility are verified in STATUS; pure planner tests remain separate evidence.
+The implementation follows the documented [draft creation options](https://cli.github.com/manual/gh_release_create), [upload behavior](https://cli.github.com/manual/gh_release_upload) and [release asset state/size/digest fields](https://docs.github.com/en/rest/releases/assets?apiVersion=2022-11-28). REST requests select API version 2022-11-28. The publisher finds drafts through authenticated, paginated release listings and rechecks the unique release ID; the tag-release endpoint returns published releases only. The first live upload, safe no-op retry and anonymous draft invisibility have retained evidence in the dashboard archive; pure planner tests remain separate evidence.
 
 ## Local host-update verification before publication
 

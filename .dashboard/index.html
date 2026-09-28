@@ -1,0 +1,1246 @@
+<!doctype html>
+<html lang="ja">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Project desk</title>
+  <link
+    rel="icon"
+    href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Crect width=%2224%22 height=%2224%22 rx=%224%22 fill=%22%23a8dbc3%22/%3E%3Cpath d=%22M7 7h10v10H7z%22 fill=%22%2318201b%22/%3E%3C/svg%3E"
+  />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #181b1e;
+      --raised: #202428;
+      --line: #30363b;
+      --text: #e5e9ec;
+      --muted: #a2abb2;
+      --accent: #a8dbc3;
+      --amber: #e8c38c;
+      --red: #f0a4a4;
+      font:
+        14px/1.55 "Segoe UI Variable",
+        "Yu Gothic UI",
+        system-ui,
+        sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      color: inherit;
+      background: var(--raised);
+      border: 1px solid var(--line);
+      padding: 7px 12px;
+      border-radius: 6px;
+    }
+    button:hover {
+      border-color: #667780;
+      background: #293037;
+    }
+    button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #14271f;
+      border-color: transparent;
+      font-weight: 600;
+    }
+    button.quiet {
+      background: transparent;
+    }
+    input,
+    textarea,
+    select {
+      background: #121517;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 8px 10px;
+      width: 100%;
+    }
+    input:focus,
+    textarea:focus,
+    select:focus,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    textarea {
+      resize: vertical;
+      min-height: 90px;
+      line-height: 1.7;
+    }
+    a {
+      color: var(--accent);
+    }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin: 12px 0 5px;
+    }
+    label.check {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 14px;
+      color: var(--text);
+    }
+    input[type="checkbox"] {
+      width: auto;
+    }
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+    h1 {
+      font-size: 21px;
+      font-weight: 650;
+      letter-spacing: -0.5px;
+    }
+    h2 {
+      font-size: 19px;
+      line-height: 1.6;
+    }
+    h3 {
+      font-size: 13px;
+      margin: 22px 0 9px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    small,
+    .muted {
+      color: var(--muted);
+    }
+    header {
+      height: 72px;
+      padding: 0 30px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .mark {
+      width: 27px;
+      height: 27px;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 3px;
+      transform: rotate(-7deg);
+    }
+    .mark i {
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    .mark i:nth-child(2) {
+      opacity: 0.35;
+    }
+    .mark i:nth-child(3) {
+      opacity: 0.6;
+    }
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+    .workspace {
+      max-width: 1600px;
+      margin: auto;
+      padding: 24px 30px 0;
+    }
+    .overview {
+      display: grid;
+      grid-template-columns: minmax(250px, 1.7fr) repeat(
+          3,
+          minmax(115px, 0.6fr)
+        );
+      gap: 12px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 17px 20px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 29px;
+      font-weight: 550;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.5;
+    }
+    .metric .caption {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    #scope-name {
+      font-size: 18px;
+      color: var(--accent);
+      margin: 3px 0 6px;
+    }
+    .progress-track {
+      height: 3px;
+      background: var(--line);
+      margin-top: 10px;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-track span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+    }
+    .handoff {
+      display: flex;
+      gap: 14px;
+      margin: 16px 0 20px;
+      align-items: flex-start;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .handoff strong {
+      color: var(--text);
+      flex: none;
+      font-weight: 500;
+    }
+    .handoff span {
+      white-space: pre-wrap;
+      max-height: 64px;
+      overflow: auto;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 0 0 12px;
+      flex-wrap: wrap;
+    }
+    .tabs {
+      display: flex;
+      gap: 4px;
+      margin-right: auto;
+    }
+    .tabs button {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      color: var(--muted);
+      padding: 9px 14px;
+      border-bottom: 2px solid transparent;
+    }
+    .tabs button.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .toolbar input {
+      width: 230px;
+    }
+    .toolbar select {
+      width: 180px;
+    }
+    .split {
+      display: grid;
+      grid-template-columns: minmax(300px, 1fr) minmax(340px, 0.92fr);
+      border: 1px solid var(--line);
+      border-radius: 9px 9px 0 0;
+      overflow: hidden;
+      height: calc(100dvh - 332px);
+      min-height: 370px;
+    }
+    .list-region {
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .list-head {
+      display: flex;
+      padding: 12px 18px;
+      color: var(--muted);
+      font-size: 11px;
+      border-bottom: 1px solid var(--line);
+      gap: 8px;
+    }
+    .list-head span:last-child {
+      margin-left: auto;
+    }
+    #list {
+      overflow: auto;
+      flex: 1;
+      scrollbar-gutter: stable;
+    }
+    .row {
+      display: block;
+      width: 100%;
+      border: 0;
+      border-radius: 0;
+      border-bottom: 1px solid #282e32;
+      background: transparent;
+      text-align: left;
+      padding: 17px 20px;
+      border-left: 3px solid transparent;
+    }
+    .row:hover {
+      background: #20262a;
+    }
+    .row.selected {
+      background: #252e2d;
+      border-left-color: var(--accent);
+    }
+    .row-title {
+      font-size: 14px;
+      line-height: 1.65;
+      font-weight: 500;
+      margin: 7px 0;
+      overflow-wrap: anywhere;
+    }
+    .row-meta {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .row-meta time {
+      margin-left: auto;
+    }
+    .row-next {
+      color: var(--muted);
+      font-size: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background: #2a3036;
+      color: #bcc5cc;
+      white-space: nowrap;
+    }
+    .badge.doing,
+    .badge.done,
+    .badge.answered {
+      background: #263c32;
+      color: var(--accent);
+    }
+    .badge.waiting,
+    .badge.open {
+      background: #3b3429;
+      color: var(--amber);
+    }
+    .badge.blocked {
+      background: #412f32;
+      color: var(--red);
+    }
+    .pager {
+      padding: 9px 14px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .pager span {
+      margin-right: auto;
+    }
+    #detail {
+      border-left: 1px solid var(--line);
+      overflow: auto;
+      background: #15181a;
+      padding: 24px 27px;
+      scrollbar-gutter: stable;
+    }
+    .empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      flex-direction: column;
+      height: 100%;
+      color: var(--muted);
+      padding: 30px;
+      gap: 10px;
+    }
+    .empty .symbol {
+      font-size: 36px;
+      color: #60746b;
+    }
+    .detail-top {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .detail-top .id {
+      color: var(--muted);
+      font:
+        11px Consolas,
+        monospace;
+      margin-right: auto;
+    }
+    .body-text {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+      line-height: 1.9;
+      margin-top: 12px;
+    }
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 12px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 18px 0;
+    }
+    .section {
+      padding: 14px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin-top: 15px;
+    }
+    .section h3 {
+      margin: 0 0 7px;
+    }
+    .thread-entry {
+      border-left: 2px solid var(--line);
+      margin: 14px 0;
+      padding: 0 0 0 14px;
+    }
+    .thread-entry .body-text {
+      margin-top: 4px;
+    }
+    .thread-entry summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .thread-entry pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font:
+        11px/1.7 Consolas,
+        monospace;
+      color: var(--muted);
+    }
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+    .warning {
+      padding: 10px;
+      background: #3b3224;
+      color: var(--amber);
+      border-radius: 5px;
+      font-size: 12px;
+    }
+    .relation {
+      display: block;
+      background: transparent;
+      margin: 5px 0;
+      text-align: left;
+      font-size: 12px;
+      width: 100%;
+    }
+    .note-preview {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    details.advanced {
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    details.advanced summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    #toast {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 20px;
+      border: 1px solid #506b5d;
+      background: #22312b;
+      border-radius: 7px;
+      max-width: 80vw;
+      z-index: 20;
+      box-shadow: 0 6px 30px #0006;
+    }
+    #toast.error {
+      background: #402a2c;
+      border-color: #9b555c;
+    }
+    .connection {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .mobile-back {
+      display: none;
+    }
+    #project-form textarea[name="handoff"] {
+      min-height: 130px;
+    }
+    #project-form textarea[name="public_summary"] {
+      min-height: 160px;
+    }
+    .readonly {
+      font-size: 11px;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+    }
+    @media (max-width: 1000px) {
+      header {
+        padding: 0 18px;
+      }
+      .workspace {
+        padding: 18px 16px 0;
+      }
+      .overview {
+        grid-template-columns: 1.5fr 1fr 1fr;
+      }
+      .overview .metric:last-child {
+        display: none;
+      }
+      .toolbar input {
+        width: 180px;
+      }
+      .toolbar select {
+        width: 150px;
+      }
+      .split {
+        grid-template-columns: 1fr 1fr;
+        height: calc(100dvh - 320px);
+      }
+      #detail {
+        padding: 20px 18px;
+      }
+      .connection {
+        display: none;
+      }
+    }
+    @media (max-width: 720px) {
+      .overview {
+        grid-template-columns: 1.5fr 1fr;
+      }
+      .overview .metric:nth-child(3) {
+        display: none;
+      }
+      .metric {
+        padding: 12px;
+      }
+      .header-right .quiet {
+        display: none;
+      }
+      .split {
+        display: block;
+        height: calc(100dvh - 365px);
+        position: relative;
+      }
+      .list-region {
+        height: 100%;
+      }
+      #detail {
+        display: none;
+      }
+      .split.show-detail #detail {
+        display: block;
+        position: absolute;
+        inset: 0;
+        border: 0;
+      }
+      .mobile-back {
+        display: inline-block;
+      }
+      .toolbar input {
+        flex: 1;
+        width: 130px;
+      }
+      .toolbar select {
+        width: 150px;
+      }
+      .tabs {
+        width: 100%;
+      }
+      .tabs button {
+        padding: 7px 10px;
+      }
+      .handoff {
+        margin: 12px 0;
+      }
+      .workspace {
+        padding-top: 12px;
+      }
+      .field-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <header>
+    <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div>
+      <div class="eyebrow">Project desk</div>
+      <h1 id="project-name">読み込み中</h1>
+    </div>
+    <div class="header-right">
+      <span class="connection" id="connection">ローカル記録</span
+      ><button class="quiet" id="backup">バックアップ</button
+      ><button id="settings">引き継ぎを編集</button
+      ><button class="primary" id="new">＋ 追加</button>
+    </div>
+  </header>
+  <main class="workspace">
+    <section class="overview" aria-label="現在の状況">
+      <div class="metric">
+        <div class="eyebrow">Current scope</div>
+        <h2 id="scope-name">—</h2>
+        <p class="caption" id="next-action">—</p>
+      </div>
+      <div class="metric">
+        <div class="caption">今回の完了 / 対象</div>
+        <strong id="progress">—</strong>
+        <div class="progress-track"><span id="progress-bar"></span></div>
+      </div>
+      <div class="metric">
+        <div class="caption">回答・確認待ち</div>
+        <strong id="waiting">—</strong>
+        <div class="caption">未解決の質問と確認</div>
+      </div>
+      <div class="metric">
+        <div class="caption">作業中 / 行き詰まり</div>
+        <strong id="doing">—</strong>
+        <div class="caption">保存された作業状態</div>
+      </div>
+    </section>
+    <div class="handoff">
+      <strong>引き継ぎ</strong><span id="handoff">—</span>
+    </div>
+    <div class="toolbar">
+      <nav class="tabs" aria-label="一覧の種類">
+        <button data-view="tasks" class="active">タスク</button
+        ><button data-view="questions">質問</button
+        ><button data-view="history">履歴</button
+        ><button data-view="archive">アーカイブ</button>
+      </nav>
+      <input
+        id="search"
+        type="search"
+        placeholder="タイトル・本文・IDを検索"
+        aria-label="検索"
+      /><select id="scope" aria-label="対象の範囲">
+        <option value="">すべての範囲</option>
+      </select>
+    </div>
+    <div class="split" id="split">
+      <section class="list-region" aria-label="項目一覧">
+        <div class="list-head">
+          <span id="list-caption">TASKS</span><span id="list-count"></span>
+        </div>
+        <div id="list"></div>
+        <div class="pager">
+          <span id="page-label"></span
+          ><button id="previous" aria-label="前のページ">←</button
+          ><button id="next-page" aria-label="次のページ">→</button>
+        </div>
+      </section>
+      <aside id="detail" aria-label="項目の詳細">
+        <div class="empty">
+          <div class="symbol">◫</div>
+          <p>項目を選ぶと、ここに詳細を表示します。</p>
+          <small>一覧の位置を保ったまま、確認・編集できます。</small>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <div id="toast" role="status" hidden></div>
+  <script>
+    (() => {
+      "use strict";
+      const token = "__DASHBOARD_TOKEN__",
+        $ = (s) => document.querySelector(s),
+        esc = (s) =>
+          String(s ?? "").replace(
+            /[&<>"']/g,
+            (c) =>
+              ({
+                "&": "&amp;",
+                "<": "&lt;",
+                ">": "&gt;",
+                '"': "&quot;",
+                "'": "&#39;",
+              })[c],
+          );
+      const labels = {
+        inbox: "未整理",
+        todo: "予定",
+        doing: "作業中",
+        waiting: "回答・確認待ち",
+        blocked: "行き詰まり",
+        done: "完了",
+        canceled: "取り下げ",
+        open: "回答待ち",
+        answered: "回答済み",
+        closed: "解決",
+        recorded: "記録",
+      };
+      const kinds = { task: "タスク", question: "質問", note: "ノート" },
+        states = {
+          task: [
+            "inbox",
+            "todo",
+            "doing",
+            "waiting",
+            "blocked",
+            "done",
+            "canceled",
+          ],
+          question: ["open", "answered", "closed"],
+          note: ["recorded"],
+        };
+      let view = "tasks",
+        offset = 0,
+        selected = null,
+        current = null,
+        project = null,
+        dirty = false,
+        editing = false,
+        projectEditing = false,
+        cursor = -1,
+        querySequence = 0,
+        detailSequence = 0,
+        total = 0,
+        toastTimer;
+      function tell(message, error = false) {
+        $("#toast").textContent = message;
+        $("#toast").className = error ? "error" : "";
+        $("#toast").hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(
+          () => ($("#toast").hidden = true),
+          error ? 10000 : 4000,
+        );
+      }
+      async function api(path, body) {
+        const result = await fetch(path, {
+          headers: {
+            "X-Dashboard-Token": token,
+            ...(body ? { "Content-Type": "application/json" } : {}),
+          },
+          ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+        });
+        const data = await result.json();
+        if (!result.ok) throw new Error(data.error || "読み込みに失敗しました");
+        return data;
+      }
+      function stamp(value) {
+        return value
+          ? new Date(value).toLocaleString("ja-JP", {
+              timeZone: "Asia/Tokyo",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "時刻不明";
+      }
+      function badge(state) {
+        return `<span class="badge ${esc(state)}">${esc(labels[state] || state)}</span>`;
+      }
+      function input(name, label, value = "", type = "text") {
+        return `<label for="f-${name}">${label}</label><input id="f-${name}" name="${name}" type="${type}" value="${esc(value)}">`;
+      }
+      function area(name, label, value = "", rows = 3) {
+        return `<label for="f-${name}">${label}</label><textarea id="f-${name}" name="${name}" rows="${rows}">${esc(value)}</textarea>`;
+      }
+      function options(values, value, names) {
+        return values
+          .map(
+            (v) =>
+              `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(names?.[v] || v)}</option>`,
+          )
+          .join("");
+      }
+      function canLeave() {
+        return !dirty || confirm("保存していない入力を破棄しますか？");
+      }
+      function trackForm() {
+        dirty = false;
+        $("#detail").oninput = () => {
+          dirty = true;
+        };
+        $("#detail").onchange = () => {
+          dirty = true;
+        };
+      }
+      function top() {
+        return '<button class="mobile-back quiet" id="back-list">← 一覧</button>';
+      }
+      function bindBack() {
+        $("#back-list")?.addEventListener("click", () => {
+          if (canLeave()) {
+            ++detailSequence;
+            $("#split").classList.remove("show-detail");
+            dirty = false;
+          }
+        });
+      }
+      async function refresh(force = false) {
+        try {
+          const brief = await api("/api/brief");
+          project = brief.project;
+          $("#project-name").textContent = project.name;
+          document.title = project.name + " · Project desk";
+          $("#scope-name").textContent = project.current_scope;
+          $("#next-action").textContent =
+            project.next_action || "次の作業は未設定";
+          $("#handoff").textContent =
+            project.handoff || "引き継ぎはまだありません";
+          const counts = brief.counts,
+            done = counts.done || 0,
+            n = Object.entries(counts)
+              .filter(([k]) => k !== "canceled")
+              .reduce((s, [, v]) => s + v, 0);
+          $("#progress").textContent = done + " / " + n;
+          $("#progress-bar").style.width = (n ? (100 * done) / n : 0) + "%";
+          $("#waiting").textContent =
+            brief.questions.total + (counts.waiting || 0);
+          $("#doing").textContent =
+            (counts.doing || 0) + " / " + (counts.blocked || 0);
+          $("#connection").textContent =
+            "ローカル接続 · " + stamp(project.updated_at);
+          const scope = $("#scope").value;
+          $("#scope").innerHTML =
+            '<option value="">すべての範囲</option>' +
+            options(
+              [...new Set([project.current_scope, ...brief.scopes])],
+              scope,
+            );
+          if (force || cursor !== brief.cursor) {
+            cursor = brief.cursor;
+            await list();
+            if (selected && !editing && !dirty && !projectEditing)
+              await select(selected, false, true);
+          }
+        } catch (e) {
+          $("#connection").textContent = "接続が切れています";
+          if (force) tell(e.message, true);
+        }
+      }
+      async function list() {
+        const seq = ++querySequence;
+        const data = await api(
+          "/api/items?" +
+            new URLSearchParams({
+              view,
+              scope: $("#scope").value,
+              search: $("#search").value,
+              offset,
+              limit: 30,
+            }),
+        );
+        if (seq !== querySequence) return;
+        total = data.total;
+        const container = $("#list"),
+          scroll = container.scrollTop;
+        container.innerHTML = data.items.length
+          ? data.items
+              .map(
+                (item) =>
+                  `<button class="row ${item.id === selected ? "selected" : ""}" data-id="${esc(item.id)}"><div class="row-meta">${badge(item.status)}<span>${esc(item.scope)}</span><time title="${esc(item.updated_at)}">${stamp(item.updated_at)}</time></div><div class="row-title">${esc(item.title)}</div><div class="row-next">${esc(item.blocked_reason || item.next_action || item.id)}</div></button>`,
+              )
+              .join("")
+          : '<div class="empty"><div class="symbol">✓</div><p>この条件の項目はありません。</p><small>検索・範囲を変更するか、項目を追加できます。</small></div>';
+        container.scrollTop = scroll;
+        container
+          .querySelectorAll("[data-id]")
+          .forEach(
+            (button) => (button.onclick = () => select(button.dataset.id)),
+          );
+        $("#list-count").textContent = total + "件";
+        $("#list-caption").textContent = {
+          tasks: "TASKS",
+          questions: "QUESTIONS",
+          history: "HISTORY",
+          archive: "ARCHIVE",
+        }[view];
+        $("#page-label").textContent = total
+          ? `${offset + 1}–${Math.min(offset + 30, total)} / ${total}`
+          : "0件";
+        $("#previous").disabled = offset === 0;
+        $("#next-page").disabled = offset + 30 >= total;
+      }
+      async function select(id, check = true, background = false) {
+        if (check && !canLeave()) return;
+        const seq = ++detailSequence;
+        try {
+          const data = await api("/api/item?id=" + encodeURIComponent(id));
+          if (
+            seq !== detailSequence ||
+            (background && (editing || dirty || projectEditing))
+          ) return;
+          const oldScroll = selected === id ? $("#detail").scrollTop : 0;
+          selected = id;
+          current = data.item;
+          editing = false;
+          projectEditing = false;
+          dirty = false;
+          renderDetail(data);
+          $("#detail").scrollTop = oldScroll;
+          if (!background) $("#split").classList.add("show-detail");
+          $("#list")
+            .querySelectorAll("[data-id]")
+            .forEach((row) =>
+              row.classList.toggle("selected", row.dataset.id === id),
+            );
+        } catch (e) {
+          tell(e.message, true);
+        }
+      }
+      function renderDetail(data) {
+        const i = data.item;
+        $("#detail").oninput = null;
+        $("#detail").onchange = null;
+        $("#detail").innerHTML =
+          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.status)}${i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
+        bindBack();
+        $("#edit")?.addEventListener("click", () => edit(i));
+        $("#follow-question")?.addEventListener("click", () =>
+          newItem("question", i.id, i.scope),
+        );
+        $("#make-task")?.addEventListener("click", () =>
+          newItem("task", i.id, i.scope, i.answer || ""),
+        );
+        $("#reply-form")?.addEventListener("input", () => (dirty = true));
+        $("#reply-form")?.addEventListener("submit", async (e) => {
+          e.preventDefault();
+          await reply(false);
+        });
+        $("#answer")?.addEventListener("click", () => reply(true));
+        $("#older")?.addEventListener("click", async () => {
+          try {
+            const events = await api(
+              "/api/events?" +
+                new URLSearchParams({
+                  id: i.id,
+                  before: data.events[data.events.length - 1].seq,
+                }),
+            );
+            $("#thread").insertAdjacentHTML("beforeend", eventsHtml(events));
+            data.events.push(...events);
+            if (events.length < 50) $("#older").remove();
+          } catch (e) {
+            tell(e.message, true);
+          }
+        });
+        $("#detail")
+          .querySelectorAll("[data-link]")
+          .forEach((b) => (b.onclick = () => select(b.dataset.link)));
+      }
+      function relations(i, children) {
+        const links = [
+          ...(i.parent_id ? [{ id: i.parent_id, title: "親の項目" }] : []),
+          ...(i.depends_on || []).map((id) => ({
+            id,
+            title: "先に完了が必要",
+          })),
+          ...(i.required_questions || []).map((id) => ({
+            id,
+            title: "実行前の質問",
+          })),
+          ...children,
+        ];
+        return links.length
+          ? "<h3>関連項目</h3>" +
+              links
+                .map(
+                  (x) =>
+                    `<button class="relation" data-link="${esc(x.id)}">${esc(x.id)} · ${esc(x.title)}</button>`,
+                )
+                .join("")
+          : "";
+      }
+      function eventsHtml(events) {
+        return events
+          .map(
+            (e) =>
+              `<div class="thread-entry"><small>${esc({ user: "あなた", assistant: "AI", system: "システム" }[e.actor])} · ${stamp(e.at)}</small>${e.action === "comment" ? `<div class="body-text">${esc(e.data.text)}</div>` : `<details><summary>${esc({ created: "項目を作成", updated: "項目を更新", project: "引き継ぎを更新" }[e.action] || e.action)}</summary><pre>${esc(JSON.stringify(e.data, null, 2))}</pre></details>`}</div>`,
+          )
+          .join("");
+      }
+      async function reply(answer) {
+        const text = $("#f-reply").value;
+        if (!text.trim()) return;
+        try {
+          await api(
+            "/api",
+            answer
+              ? {
+                  action: "update",
+                  id: current.id,
+                  rev: current.rev,
+                  data: { answer: text, status: "answered" },
+                }
+              : { action: "comment", id: current.id, rev: current.rev, text },
+          );
+          dirty = false;
+          await select(current.id, false);
+          await refresh(true);
+          tell("保存しました");
+        } catch (e) {
+          tell(e.message, true);
+        }
+      }
+      function edit(i, isNew = false) {
+        if (!canLeave()) return;
+        ++detailSequence;
+        editing = true;
+        projectEditing = false;
+        current = i;
+        $("#split").classList.add("show-detail");
+        $("#detail").innerHTML =
+          `${top()}<div class="detail-top"><span class="id">${isNew ? "NEW RECORD" : esc(i.id)}</span><button id="cancel-edit">キャンセル</button></div><h2>${isNew ? "新しい項目" : "項目を編集"}</h2><form id="item-form"><div class="field-grid"><div><label for="f-kind">種類</label><select id="f-kind" name="kind" ${!isNew ? "disabled" : ""}>${options(Object.keys(kinds), i.kind, kinds)}</select></div><div><label for="f-status">状態</label><select id="f-status" name="status">${options(states[i.kind], i.status, labels)}</select></div></div>${input("title", "タイトル", i.title)}${input("scope", "範囲（今回・リリース・将来検討など）", i.scope)}${area("body", "説明・要望", i.body, 6)}${i.kind === "task" ? area("next_action", "次にすること", i.next_action, 2) + area("acceptance", "完了条件", i.acceptance, 2) + area("blocked_reason", "待機・障害の理由（待ち状態では必須）", i.blocked_reason, 2) + area("verification", "検証結果・根拠（自動／実機などを区別）", i.verification, 3) + area("checks", "完了チェック：1行につき [ ] または [x] 項目", (i.checks || []).map((c) => `[${c.done ? "x" : " "}] ${c.text}`).join("\n"), 3) : ""}${i.kind === "question" ? input("asked_by", "質問者", i.asked_by || "user") + input("answer_by", "回答者", i.answer_by || "assistant") + area("recommended", "推奨案", i.recommended, 2) + area("default_action", "未回答でも実行してよい内容（推奨案とは別）", i.default_action, 2) + `<label class="check"><input name="requires_answer" type="checkbox" ${i.requires_answer !== false ? "checked" : ""}>回答が来るまで関連作業を実行しない</label>` + area("answer", "回答", i.answer, 4) : ""}<details class="advanced"><summary>関連付け・根拠</summary>${input("parent_id", "親の項目ID", i.parent_id)}${i.kind === "task" ? input("depends_on", "先に完了が必要なタスクID（カンマ区切り）", (i.depends_on || []).join(", ")) + input("required_questions", "実行前に必要な質問ID（カンマ区切り）", (i.required_questions || []).join(", ")) + input("commit", "関連コミット", i.commit) : ""}${input("source", "出典・参照", i.source)}${area("resolution", "結論", i.resolution, 2)}</details><div class="actions"><button type="submit" class="primary">保存する</button><span class="hint">${isNew ? "新しいタスクは既定で未整理です。" : "同時更新があれば上書きせず通知します。"}</span></div></form>`;
+        bindBack();
+        trackForm();
+        $("#cancel-edit").onclick = () => {
+          if (canLeave()) {
+            dirty = false;
+            if (selected) select(selected, false);
+            else {
+              $("#detail").innerHTML =
+                '<div class="empty">項目を選択してください。</div>';
+              editing = false;
+            }
+          }
+        };
+        $("#f-kind").onchange = () => {
+          const f = new FormData($("#item-form"));
+          const kind = f.get("kind");
+          dirty = false;
+          edit(
+            {
+              ...i,
+              kind,
+              status: states[kind][0],
+              title: f.get("title"),
+              scope: f.get("scope"),
+              body: f.get("body"),
+            },
+            true,
+          );
+          dirty = true;
+        };
+        $("#item-form").onsubmit = async (e) => {
+          e.preventDefault();
+          const f = new FormData(e.target),
+            data = {};
+          for (const k of [
+            "title",
+            "status",
+            "scope",
+            "body",
+            "next_action",
+            "acceptance",
+            "blocked_reason",
+            "verification",
+            "recommended",
+            "default_action",
+            "answer",
+            "asked_by",
+            "answer_by",
+            "parent_id",
+            "source",
+            "resolution",
+            "commit",
+          ])
+            if (f.has(k)) data[k] = f.get(k);
+          for (const k of ["depends_on", "required_questions"])
+            if (f.has(k))
+              data[k] = f
+                .get(k)
+                .split(",")
+                .map((x) => x.trim())
+                .filter(Boolean);
+          if (f.has("checks"))
+            data.checks = f
+              .get("checks")
+              .split("\n")
+              .filter((x) => x.trim())
+              .map((x) => ({
+                text: x.replace(/^\s*\[[ xX]\]\s*/, ""),
+                done: /^\s*\[[xX]\]/.test(x),
+              }));
+          if (i.kind === "question")
+            data.requires_answer = f.has("requires_answer");
+          if (isNew) data.kind = f.get("kind");
+          try {
+            const saved = await api(
+              "/api",
+              isNew
+                ? { action: "create", data }
+                : { action: "update", id: i.id, rev: i.rev, data },
+            );
+            dirty = false;
+            await select(saved.id, false);
+            await refresh(true);
+            tell("保存しました");
+          } catch (error) {
+            tell(error.message, true);
+          }
+        };
+      }
+      function newItem(
+        kind = "task",
+        parent = "",
+        scope = project?.current_scope || "backlog",
+        body = "",
+      ) {
+        edit(
+          {
+            kind,
+            status: states[kind][0],
+            title: "",
+            body,
+            scope,
+            parent_id: parent,
+          },
+          true,
+        );
+      }
+      function projectForm() {
+        if (!canLeave() || !project) return;
+        ++detailSequence;
+        const original = { ...project };
+        projectEditing = true;
+        editing = false;
+        $("#split").classList.add("show-detail");
+        $("#detail").innerHTML =
+          `${top()}<h2>プロジェクトと引き継ぎ</h2><form id="project-form">${input("name", "プロジェクト名", project.name)}${input("current_scope", "今回の作業範囲", project.current_scope)}${area("handoff", "現在の状況・引き継ぎ", project.handoff, 5)}${area("next_action", "次にすること", project.next_action, 2)}<details class="advanced"><summary>Git向けの公開サマリー</summary><p class="hint">個人情報を含めない内容を明示的に記入します。保存だけではGit用ファイルへ書き出しません。</p>${area("public_summary", "公開してよいサマリー（Markdown）", project.public_summary, 8)}</details><div class="actions"><button type="submit" class="primary">保存する</button><button id="close-project" type="button">閉じる</button></div></form>`;
+        bindBack();
+        trackForm();
+        $("#close-project").onclick = () => {
+          if (canLeave()) {
+            dirty = false;
+            projectEditing = false;
+            if (selected) select(selected, false);
+            else
+              $("#detail").innerHTML =
+                '<div class="empty">項目を選択してください。</div>';
+          }
+        };
+        $("#project-form").onsubmit = async (e) => {
+          e.preventDefault();
+          try {
+            await api("/api", {
+              action: "project",
+              rev: original.rev,
+              data: Object.fromEntries(new FormData(e.target)),
+            });
+            dirty = false;
+            await refresh(true);
+            projectForm();
+            tell("引き継ぎを保存しました");
+          } catch (error) {
+            tell(error.message, true);
+          }
+        };
+      }
+      document.querySelectorAll("[data-view]").forEach(
+        (b) =>
+          (b.onclick = async () => {
+            view = b.dataset.view;
+            offset = 0;
+            document
+              .querySelectorAll("[data-view]")
+              .forEach((x) => x.classList.toggle("active", x === b));
+            try {
+              await list();
+            } catch (e) {
+              tell(e.message, true);
+            }
+          }),
+      );
+      let searchTimer;
+      $("#search").oninput = () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          offset = 0;
+          list().catch((e) => tell(e.message, true));
+        }, 200);
+      };
+      $("#scope").onchange = () => {
+        offset = 0;
+        list().catch((e) => tell(e.message, true));
+      };
+      $("#previous").onclick = () => {
+        offset = Math.max(0, offset - 30);
+        list().catch((e) => tell(e.message, true));
+      };
+      $("#next-page").onclick = () => {
+        offset += 30;
+        list().catch((e) => tell(e.message, true));
+      };
+      $("#new").onclick = () =>
+        newItem(
+          view === "questions"
+            ? "question"
+            : view === "history"
+              ? "note"
+              : "task",
+        );
+      $("#settings").onclick = projectForm;
+      $("#backup").onclick = async () => {
+        try {
+          await api("/api", { action: "backup" });
+          tell("ローカルバックアップを作成しました");
+        } catch (e) {
+          tell(e.message, true);
+        }
+      };
+      window.addEventListener("beforeunload", (e) => {
+        if (dirty) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+      refresh(true);
+      setInterval(() => refresh(), 3000);
+    })();
+  </script>
+</html>

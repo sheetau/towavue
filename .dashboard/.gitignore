@@ -1,0 +1,8 @@
+# Only the reusable structure is public. All project records are local.
+*
+!.gitignore
+!app.py
+!index.html
+!open.ps1
+!README.md
+!test_app.py

@@ -142,12 +142,24 @@ fn filmstrip_navigation_eases_but_reopening_and_media_handoff_snap() {
         render(&mut strip, 20, vec![key(egui::Key::D)], 1.0 / 60.0);
         assert_eq!(strip.scroll_target, Some(22));
         let mut previous = strip.scroll_offset;
-        for _ in 0..40 {
-            render(&mut strip, 20, vec![], 1.0 / 60.0);
+        for step in 0..40 {
+            render(
+                &mut strip,
+                20,
+                vec![egui::Event::PointerMoved(egui::pos2(
+                    100.0 + step as f32,
+                    30.0,
+                ))],
+                1.0 / 60.0,
+            );
             assert!(strip.scroll_offset >= previous);
             previous = strip.scroll_offset;
         }
         assert!((strip.scroll_offset - strip.layout.center_offset(22)).abs() < 0.1);
+        assert!(
+            strip.scroll_target.is_none(),
+            "blank-panel pointer motion must not strand keyboard navigation"
+        );
         render(&mut strip, 20, vec![key(egui::Key::A)], 1.0 / 60.0);
         strip.cancel_drag();
         strip.focus_current();
@@ -204,6 +216,26 @@ fn filmstrip_navigation_eases_but_reopening_and_media_handoff_snap() {
             strip.scroll_offset > strip.layout.center_offset(50) + 30.0,
             "a fresh wheel gesture still works"
         );
+        strip.focus_current();
+        render(&mut strip, 50, vec![], 1.0 / 60.0);
+        for target in 51..=75 {
+            let before = strip.scroll_offset;
+            render(&mut strip, 50, vec![key(egui::Key::D)], 1.0 / 30.0);
+            assert_eq!(strip.scroll_target, Some(target));
+            assert!(
+                strip.scroll_offset > before,
+                "every repeated key advances the animation"
+            );
+        }
+        assert!(
+            strip.layout.center_offset(75) - strip.scroll_offset < 200.0,
+            "30 Hz key repeats must not slow animation by discarding half its elapsed time"
+        );
+        for _ in 0..40 {
+            render(&mut strip, 50, vec![], 1.0 / 60.0);
+        }
+        assert_eq!(strip.scroll_offset, strip.layout.center_offset(75));
+        assert!(strip.scroll_target.is_none());
     }
 }
 
@@ -294,6 +326,200 @@ fn filmstrip_loading_preserves_the_center_anchor_during_swipes_and_coasts() {
         assert!(
             strips[0].scroll_offset > before + 100.0,
             "the comparison must include ongoing motion"
+        );
+    }
+}
+
+#[test]
+fn filmstrip_tab_views_restore_anchors_across_other_folder_geometry() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_tab_views_restore_anchors_across_other_folder_geometry",
+    ) else {
+        return;
+    };
+    let mut first = snapshot(&root.join("first"));
+    for index in 3..100 {
+        let mut item = first.items[0].clone();
+        item.path = first.folder_path.join(format!("{index}.png"));
+        first.items.push(item);
+    }
+    let mut second = first.clone();
+    second.folder_path = root.join("second");
+    for item in &mut second.items {
+        item.path = second
+            .folder_path
+            .join(item.path.file_name().expect("name"));
+    }
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    let mut strip = Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+        .expect("strip");
+    let texture = context.load_texture(
+        "portraits",
+        egui::ColorImage::filled([10, 200], Color32::WHITE),
+        egui::TextureOptions::LINEAR,
+    );
+    for item in first.items.iter().take(20) {
+        strip
+            .previews
+            .insert(item.path.clone(), Ok((texture.clone(), None)));
+    }
+    let mut time = 0.0;
+    let mut render = |strip: &mut Filmstrip, snapshot: &FolderSnapshot, events| {
+        time += 1.0 / 60.0;
+        let mut raw = input(events);
+        raw.time = Some(time);
+        let (output, actions) = frame(
+            strip,
+            &context,
+            snapshot,
+            &snapshot.items[20].path,
+            true,
+            raw,
+        );
+        assert!(actions.is_empty());
+        output
+    };
+    for _ in 0..3 {
+        render(&mut strip, &first, vec![]);
+    }
+    strip.scroll_offset = strip.layout.center_offset(25) + 25.0;
+    let output = render(&mut strip, &first, vec![]);
+    let before = card(&output, "25.png").center().x;
+    let view = strip.take_view();
+    render(&mut strip, &second, vec![]);
+    strip.clear_previews();
+    strip.restore_view(view);
+    for _ in 0..5 {
+        let output = render(&mut strip, &first, vec![]);
+        assert!(
+            (card(&output, "25.png").center().x - before).abs() < 0.51,
+            "return to the same file and screen position, not the other folder's pixel offset"
+        );
+    }
+    strip.focus_current();
+    render(&mut strip, &first, vec![]);
+    render(
+        &mut strip,
+        &first,
+        vec![egui::Event::Key {
+            key: egui::Key::D,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(strip.scroll_target, Some(21));
+    let view = strip.take_view();
+    render(&mut strip, &second, vec![]);
+    strip.restore_view(view);
+    let output = render(&mut strip, &first, vec![]);
+    assert!(
+        (card(&output, "21.png").center().x - 480.0).abs() < 0.51,
+        "tab return completes the saved keyboard target"
+    );
+    assert!(strip.scroll_target.is_none());
+}
+
+#[test]
+fn filmstrip_scrollbar_drag_defers_geometry_until_after_release() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_scrollbar_drag_defers_geometry_until_after_release",
+    ) else {
+        return;
+    };
+    let mut snapshot = snapshot(&root);
+    for index in 3..21 {
+        let mut item = snapshot.items[0].clone();
+        item.path = root.join(format!("{index}.png"));
+        snapshot.items.push(item);
+    }
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        context.set_pixels_per_point(density);
+        context.enable_accesskit();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        let mut time = 0.0;
+        let mut render = |strip: &mut Filmstrip, events| {
+            time += 1.0 / 60.0;
+            let mut raw = input(events);
+            raw.time = Some(time);
+            let (output, actions) = frame(
+                strip,
+                &context,
+                &snapshot,
+                &snapshot.items[10].path,
+                true,
+                raw,
+            );
+            assert!(actions.is_empty());
+            output
+        };
+        let grab = egui::pos2(480.0, 566.0);
+        for _ in 0..4 {
+            render(&mut strip, vec![egui::Event::PointerMoved(grab)]);
+        }
+        render(&mut strip, vec![pointer(grab, true)]);
+        let moved = grab + egui::vec2(20.0, 0.0);
+        render(&mut strip, vec![egui::Event::PointerMoved(moved)]);
+        assert!(
+            strip.scrollbar_held.is_some(),
+            "real scrollbar ownership at density {density}"
+        );
+        let before = strip.scroll_offset;
+        let width = strip.layout.width(944.0);
+        let anchor = strip.layout.nearest(before);
+        let texture = context.load_texture(
+            "late-portrait",
+            egui::ColorImage::filled([10, 200], Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        strip
+            .previews
+            .insert(snapshot.items[anchor].path.clone(), Ok((texture, None)));
+        for _ in 0..5 {
+            let output = render(&mut strip, vec![]);
+            assert_eq!(
+                strip.layout.width(944.0),
+                width,
+                "loading must not change the drag metric"
+            );
+            assert!((strip.scroll_offset - before).abs() < 0.01);
+            let rect = card(&output, &display_name(&snapshot.items[anchor].path));
+            assert!(
+                (rect.width() / rect.height() - 0.05).abs() < 0.001,
+                "fit loaded pixels without stretching"
+            );
+        }
+        render(
+            &mut strip,
+            vec![egui::Event::PointerMoved(moved + egui::vec2(15.0, 0.0))],
+        );
+        assert!(
+            strip.scroll_offset > before + 20.0,
+            "the bar remains responsive"
+        );
+        let released_anchor = strip.layout.nearest(strip.scroll_offset);
+        let center = strip.layout.center_offset(released_anchor) - strip.scroll_offset;
+        render(
+            &mut strip,
+            vec![pointer(moved + egui::vec2(15.0, 0.0), false)],
+        );
+        assert_eq!(
+            strip.layout.width(944.0),
+            width,
+            "freeze through the release event"
+        );
+        render(&mut strip, vec![]);
+        assert!(strip.layout.width(944.0) < width - 50.0);
+        assert!(
+            (strip.layout.center_offset(released_anchor) - strip.scroll_offset - center).abs()
+                < 0.01,
+            "apply dimensions once around the released view"
         );
     }
 }

@@ -24,6 +24,7 @@ impl Layout {
         previews: &HashMap<PathBuf, Preview>,
         uvs: &HashMap<PathBuf, Rect>,
         offset: &mut f32,
+        defer_measurement: bool,
     ) {
         let key = (
             snapshot.folder_path.clone(),
@@ -32,26 +33,37 @@ impl Layout {
             snapshot.items.len(),
         );
         let reset = self.key.as_ref() != Some(&key);
+        let same_folder = self.key.as_ref().is_some_and(|old| old.0 == key.0);
         let anchor = (!reset && !self.sizes.is_empty()).then(|| {
             let index = self.nearest(*offset);
             (index, *offset - self.center_offset(index))
         });
         if reset {
             self.key = Some(key);
-            self.indices.clear();
-            self.sizes.clear();
+            let old_indices = std::mem::take(&mut self.indices);
+            let old_sizes = std::mem::take(&mut self.sizes);
             for (index, item) in snapshot.items.iter().enumerate() {
                 self.indices.insert(item.path.clone(), index);
-                self.sizes.push(size(if item.kind == MediaKind::Audio {
-                    egui::vec2(2.0, 1.0)
-                } else {
-                    egui::vec2(3.0, 2.0)
+                let measured = same_folder
+                    .then(|| {
+                        old_indices
+                            .get(&item.path)
+                            .and_then(|index| old_sizes.get(*index))
+                    })
+                    .flatten()
+                    .copied();
+                self.sizes.push(measured.unwrap_or_else(|| {
+                    size(if item.kind == MediaKind::Audio {
+                        egui::vec2(2.0, 1.0)
+                    } else {
+                        egui::vec2(3.0, 2.0)
+                    })
                 }));
             }
         }
         let mut changed = reset;
         // Only inspect the bounded ready texture set on an unchanged folder.
-        for (path, preview) in previews {
+        for (path, preview) in previews.iter().filter(|_| !defer_measurement) {
             if let Some(&index) = self.indices.get(path)
                 && let Ok((texture, _)) = preview
             {
@@ -76,6 +88,23 @@ impl Layout {
                 *offset = (self.center_offset(index) + within).max(0.0);
             }
         }
+    }
+
+    pub fn anchor(&self, offset: f32) -> Option<(PathBuf, f32)> {
+        let nearest = self.nearest(offset);
+        let path = self
+            .indices
+            .iter()
+            .find(|(_, index)| **index == nearest)?
+            .0
+            .clone();
+        Some((path, offset - self.center_offset(nearest)))
+    }
+
+    pub fn restore_anchor(&self, (path, within): &(PathBuf, f32)) -> Option<f32> {
+        self.indices
+            .get(path)
+            .map(|index| (self.center_offset(*index) + within).max(0.0))
     }
 
     pub fn center_offset(&self, index: usize) -> f32 {
@@ -164,7 +193,7 @@ mod tests {
         let mut offset = 0.0;
         let mut previews = HashMap::new();
         let uvs = HashMap::new();
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset);
+        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
         offset = layout.center_offset(25_000) + 10.0;
         let before = layout.center_offset(25_000) - offset;
         for (index, dimensions) in [[160, 80], [80, 160], [100, 100]].into_iter().enumerate() {
@@ -175,7 +204,7 @@ mod tests {
             );
             previews.insert(snapshot.items[index].path.clone(), Ok((texture, None)));
         }
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset);
+        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
         assert!((layout.center_offset(25_000) - offset - before).abs() < 0.5);
         // Loading the nearest card itself must preserve its center, even when
         // the viewport center is still to its left during ongoing scrolling.
@@ -188,7 +217,7 @@ mod tests {
             egui::TextureOptions::LINEAR,
         );
         previews.insert(snapshot.items[4].path.clone(), Ok((texture, None)));
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset);
+        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
         assert!((layout.center_offset(4) - offset - before).abs() < 0.001);
         for step in 0..400 {
             let offset = step as f32 * 3.0;
@@ -213,11 +242,22 @@ mod tests {
         }
         let measured = layout.sizes.clone();
         previews.clear();
-        layout.prepare(&snapshot, &previews, &uvs, &mut offset);
+        layout.prepare(&snapshot, &previews, &uvs, &mut offset, false);
         assert_eq!(
             layout.sizes, measured,
             "texture eviction preserves geometry"
         );
+        let refreshed = FolderSnapshot {
+            generation: snapshot.generation + 1,
+            ..snapshot.clone()
+        };
+        let before = offset;
+        layout.prepare(&refreshed, &previews, &uvs, &mut offset, false);
+        assert_eq!(
+            layout.sizes, measured,
+            "a new listing must retain known widths by path"
+        );
+        assert_eq!(offset, before, "unchanged ordering must not move the view");
         for width in [320.0, 960.0, 100_000.0] {
             let viewport = Rect::from_min_size(egui::pos2(offset, 0.0), egui::vec2(width, 500.0));
             assert!(layout.visible(viewport).len() <= VISIBLE_PREVIEW_LIMIT);

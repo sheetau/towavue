@@ -22,6 +22,7 @@ fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
         )),
         events,
         focused: true,
+        time: Some(context.cumulative_frame_nr() as f64 * 0.1),
         ..Default::default()
     };
     input
@@ -107,6 +108,33 @@ fn gallery_thumbnail_gap_and_gutter_drags_scroll_without_opening_media() {
                 "surface={surface}, batched={batched}, density={density}: {first:?} -> {after:?}"
             );
             assert!(app.pending_window_open.is_none());
+            // Begin a second gesture away from the top. Every motion must add
+            // to the stored offset rather than start again from zero.
+            let start = egui::pos2(16.0, 360.0);
+            let (output, _) = frame(
+                &mut app,
+                density,
+                vec![egui::Event::PointerMoved(start), pointer(start, true)],
+            );
+            let baseline = card(&output, "item-000.png").top();
+            for distance in [12.0, 24.0, 36.0] {
+                let (output, actions) = frame(
+                    &mut app,
+                    density,
+                    vec![egui::Event::PointerMoved(start - egui::vec2(0.0, distance))],
+                );
+                assert!(actions.is_empty());
+                let top = card(&output, "item-000.png").top();
+                assert!(
+                    (baseline - top - distance).abs() <= 1.0,
+                    "stored offset must accumulate: {baseline} -> {top}, distance={distance}"
+                );
+            }
+            frame(
+                &mut app,
+                density,
+                vec![pointer(start - egui::vec2(0.0, 36.0), false)],
+            );
             // A query change retires any drag/momentum and starts at the first row.
             app.gallery_search = "item-000".into();
             frame(&mut app, density, vec![]);

@@ -67,7 +67,14 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
                 (first.x0 - (f64::from(size.x) - row.last().expect("row").1.x1)).abs() <= tolerance,
                 "grid centers against the window, ignoring the rail: {row:?}"
             );
-            assert!((first.x0 - 64.0).abs() <= tolerance);
+            assert!(
+                (first.x0 - f64::from(filmstrip::gallery_side_inset(size.x))).abs() <= tolerance
+            );
+            assert!(first.x0 >= 64.0 - tolerance);
+            assert!(
+                row.len() > ((size.x - 128.0 + 32.0) / (176.0 + 32.0)).floor() as usize,
+                "smaller thumbnails increase the column count while respecting the preview budget"
+            );
             for pair in row.windows(2) {
                 assert!(
                     (pair[1].1.x0 - pair[0].1.x1 - 32.0).abs() <= tolerance,

@@ -189,7 +189,8 @@ pub fn show(
         swipe_id,
         egui::Sense::drag(),
     );
-    let scroll_id = ui.make_persistent_id("welcome");
+    // ScrollArea wraps its salt before composing the persistent ID.
+    let scroll_id = ui.make_persistent_id(egui::IdSalt::new("welcome"));
     let mut offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
         .unwrap_or_default()
         .offset

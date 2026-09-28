@@ -63,13 +63,23 @@ pub(crate) mod swipe;
 // Retain the transfer implementation while Gallery gestures scroll the grid.
 const GALLERY_DRAG_OUT: bool = false;
 pub(crate) const GALLERY_GAP: f32 = 32.0;
+const GALLERY_DIAMETER: f32 = 144.0;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
-    (GALLERY_GAP * 2.0).min(((width - 160.0) / 2.0).max(8.0))
+    let minimum = (GALLERY_GAP * 2.0).min(((width - GALLERY_DIAMETER) / 2.0).max(8.0));
+    let available = (width - 2.0 * minimum).max(1.0);
+    let columns = ((available + GALLERY_GAP) / (GALLERY_DIAMETER + GALLERY_GAP))
+        .floor()
+        .max(1.0);
+    let grid = columns * GALLERY_DIAMETER.min(available) + (columns - 1.0) * GALLERY_GAP;
+    (width - grid) / 2.0
 }
 
 fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {
-    Rect::from_center_size(cell.center(), size * (cell.width() / size.length()) * scale)
+    Rect::from_center_size(
+        cell.center(),
+        size * (cell.width().min(GALLERY_DIAMETER) / size.length()) * scale,
+    )
 }
 
 fn gallery_video_uv(image: &towavue_runtime_windows::PreviewImage) -> Rect {
@@ -1224,7 +1234,7 @@ impl Filmstrip {
         let origin = ui.cursor().top();
         let width = ui.available_width();
         const GAP: f32 = GALLERY_GAP;
-        let mut columns = (((width + GAP) / (176.0 + GAP)).floor() as usize).max(1);
+        let mut columns = (((width + GAP) / (GALLERY_DIAMETER + GAP)).floor() as usize).max(1);
         // Large windows use larger cards instead of exceeding the existing
         // thumbnail working set and leaving visible cells without requests.
         while columns > 1 {
@@ -1298,9 +1308,44 @@ impl Filmstrip {
                     let mut card_ui =
                         ui.new_child(egui::UiBuilder::new().id_salt(path).max_rect(rect));
                     let ui = &mut card_ui;
+                    let id = ui.id().with("card");
+                    // Use the last presented image's hit region to start/stop
+                    // the animation, then register this frame's painted bounds.
+                    let hovered = enabled
+                        && ui
+                            .ctx()
+                            .read_response(id)
+                            .is_some_and(|response| response.hovered() || response.has_focus());
+                    let hover = ui.ctx().animate_bool_with_time_and_easing(
+                        id.with("gallery-hover"),
+                        hovered,
+                        0.32,
+                        egui::emath::easing::cubic_out,
+                    );
+                    let uv = self
+                        .gallery_video_uvs
+                        .get(path)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
+                        });
+                    let kind = MediaKind::from_path(path).unwrap_or(MediaKind::Image);
+                    let image_rect = match self.previews.get(path) {
+                        Some(Ok((texture, _))) => gallery_thumbnail(
+                            rect,
+                            if kind == MediaKind::Audio {
+                                egui::vec2(2.0, 1.0)
+                            } else {
+                                texture.size_vec2() * uv.size()
+                            },
+                            1.0 + 0.05 * hover,
+                        ),
+                        // Pending/failed previews retain their accessible fallback.
+                        _ => rect,
+                    };
                     let response = ui.interact(
-                        rect,
-                        ui.id().with("card"),
+                        image_rect,
+                        id,
                         if GALLERY_DRAG_OUT {
                             egui::Sense::click_and_drag()
                         } else {
@@ -1337,30 +1382,27 @@ impl Filmstrip {
                     {
                         wanted.push((path.clone(), kind));
                     }
-                    let image_rect = rect;
                     if GALLERY_DRAG_OUT {
                         self.recent_drag.observe_recent(&response, path, image_rect);
                     }
-                    let hover = ui.ctx().animate_bool_with_time_and_easing(
-                        response.id.with("gallery-hover"),
-                        response.hovered() || response.has_focus(),
-                        0.16,
-                        egui::emath::easing::cubic_out,
-                    );
                     match self.previews.get(path) {
                         Some(Ok((texture, duration))) => {
-                            let uv =
-                                self.gallery_video_uvs
-                                    .get(path)
-                                    .copied()
-                                    .unwrap_or_else(|| {
-                                        Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0))
-                                    });
-                            let target = gallery_thumbnail(
-                                image_rect,
-                                texture.size_vec2() * uv.size(),
-                                1.0 + 0.05 * hover,
-                            );
+                            let target = if kind == MediaKind::Audio {
+                                ui.painter().rect_filled(
+                                    image_rect,
+                                    egui::CornerRadius::ZERO,
+                                    crate::chrome::BORDER,
+                                );
+                                Rect::from_center_size(
+                                    image_rect.center(),
+                                    egui::vec2(
+                                        image_rect.width(),
+                                        image_rect.height() * (2.0 / 3.0),
+                                    ),
+                                )
+                            } else {
+                                image_rect
+                            };
                             crate::media_preview::image_rounded(
                                 ui,
                                 texture.id(),
@@ -1368,12 +1410,10 @@ impl Filmstrip {
                                 uv,
                                 target,
                                 egui::CornerRadius::ZERO,
-                                thumbnail_tint(
-                                    MediaKind::from_path(path).unwrap_or(MediaKind::Image),
-                                ),
+                                thumbnail_tint(kind),
                             );
                             if let Some(duration) = duration {
-                                draw_gallery_duration(ui, target, *duration);
+                                draw_gallery_duration(ui, image_rect, *duration);
                             }
                         }
                         Some(Err(_)) => {
@@ -2502,7 +2542,8 @@ mod tests {
         let bounds = node.bounds().expect("card bounds");
         assert!((f64::from(image_bounds.center().x) - (bounds.x0 + bounds.x1) * 0.5).abs() < 1.0);
         assert!((f64::from(image_bounds.center().y) - (bounds.y0 + bounds.y1) * 0.5).abs() < 1.0);
-        assert!((f64::from(image_bounds.size().length()) - (bounds.x1 - bounds.x0)).abs() < 1.0);
+        assert!((image_bounds.size().length() - GALLERY_DIAMETER).abs() < 1.0);
+        assert!((image_bounds.width() / image_bounds.height() - 2.0).abs() < 0.001);
         let position = egui::pos2((bounds.x0 + 20.0) as f32, (bounds.y0 + 20.0) as f32);
         for (step, enabled) in [true, false, true].into_iter().enumerate() {
             if step == 2 {

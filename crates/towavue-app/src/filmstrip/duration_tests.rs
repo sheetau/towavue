@@ -125,15 +125,28 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         let egui::Shape::Mesh(mesh) = &output.shapes[image_index].shape else {
                             panic!("thumbnail mesh");
                         };
-                        let bounds = if gallery {
+                        let bounds = if gallery && index != 1 {
                             mesh.calc_bounds()
                         } else if let egui::Shape::Rect(card) =
                             &output.shapes[image_index - 1].shape
                         {
                             card.rect
                         } else {
-                            panic!("filmstrip card background")
+                            panic!("audio Gallery or filmstrip card background")
                         };
+                        if gallery && index == 1 {
+                            let egui::Shape::Rect(card) = &output.shapes[image_index - 1].shape
+                            else {
+                                panic!("audio background");
+                            };
+                            assert_eq!(card.fill, crate::chrome::BORDER);
+                            assert_eq!(card.corner_radius, egui::CornerRadius::ZERO);
+                            let wave = mesh.calc_bounds();
+                            assert!((bounds.width() / bounds.height() - 2.0).abs() < 0.001);
+                            assert!((wave.height() / bounds.height() - 2.0 / 3.0).abs() < 0.001);
+                            assert!(wave.center().distance(bounds.center()) < 0.001);
+                            assert!((wave.width() - bounds.width()).abs() < 0.001);
+                        }
                         assert!((bounds.right() - background.rect.right() - 4.0).abs() < 0.01);
                         assert!((bounds.bottom() - background.rect.bottom() - 4.0).abs() < 0.01);
                         let color = if index == 1 {
@@ -160,7 +173,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
 
 #[test]
 fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
-    let cell = Rect::from_min_size(egui::pos2(64.0, 40.0), Vec2::splat(176.0));
+    let cell = Rect::from_min_size(egui::pos2(64.0, 40.0), Vec2::splat(144.0));
     for size in [
         Vec2::splat(100.0),
         egui::vec2(1920.0, 1080.0),
@@ -170,7 +183,7 @@ fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
     ] {
         for scale in [1.0, 1.05] {
             let image = gallery_thumbnail(cell, size, scale);
-            assert!((image.size().length() - 176.0 * scale).abs() < 0.001);
+            assert!((image.size().length() - 144.0 * scale).abs() < 0.001);
             assert_eq!(image.center(), cell.center());
             for badge_size in [egui::vec2(32.0, 17.0), egui::vec2(78.0, 17.0)] {
                 let badge = duration_background(image, badge_size, true);
@@ -178,6 +191,128 @@ fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
                 assert!(cell.expand(8.0).contains_rect(badge));
             }
         }
+    }
+}
+
+#[test]
+fn gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::duration_tests::gallery_image_bounds_own_hover_and_clicks_while_cell_whitespace_stays_inert",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        context.global_style_mut(|style| style.interaction.tooltip_delay = 60.0);
+        context.enable_accesskit();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("worker");
+        let path = root.join("portrait.png");
+        let texture = context.load_texture(
+            "portrait",
+            egui::ColorImage::filled([16, 64], Color32::RED),
+            egui::TextureOptions::LINEAR,
+        );
+        let texture_id = texture.id();
+        strip.previews.insert(path.clone(), Ok((texture, None)));
+        let mut time = 0.0;
+        let mut frame = |events| {
+            time += 0.08;
+            let mut actions = Vec::new();
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(660.0, 600.0),
+                )),
+                time: Some(time),
+                events,
+                focused: true,
+                ..Default::default()
+            };
+            input
+                .viewports
+                .entry(egui::ViewportId::ROOT)
+                .or_default()
+                .native_pixels_per_point = Some(density);
+            let output = context.run_ui(input, |ui| {
+                strip.show_recent_with_policy(
+                    ui,
+                    std::slice::from_ref(&path),
+                    1,
+                    true,
+                    &mut actions,
+                    PreparationPolicy::Paused,
+                );
+            });
+            let bounds = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .expect("thumbnail");
+            let node = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("portrait.png"))
+                .expect("image button")
+                .1
+                .bounds()
+                .expect("bounds");
+            assert!((node.x0 - f64::from(bounds.left())).abs() < 0.05);
+            assert!((node.x1 - f64::from(bounds.right())).abs() < 0.05);
+            (bounds, output.platform_output.cursor_icon, actions)
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        let idle = frame(vec![]).0;
+        let blank = idle.center() + egui::vec2(45.0, 0.0);
+        assert!(!idle.contains(blank));
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for events in [
+            vec![egui::Event::PointerMoved(blank)],
+            vec![button(blank, true)],
+            vec![button(blank, false)],
+        ] {
+            let (bounds, cursor, actions) = frame(events);
+            assert_eq!(bounds, idle, "cell whitespace does not enlarge the image");
+            assert_eq!(cursor, egui::CursorIcon::Default);
+            assert!(actions.is_empty(), "cell whitespace does not open media");
+        }
+        frame(vec![egui::Event::PointerMoved(idle.center())]);
+        let halfway = frame(vec![]).0;
+        assert!(
+            halfway.width() > idle.width() && halfway.width() < idle.width() * 1.049,
+            "320 ms animation is still easing after two 80 ms ticks: {idle:?} -> {halfway:?}"
+        );
+        for _ in 0..4 {
+            frame(vec![]);
+        }
+        let expanded = frame(vec![]).0;
+        assert!((expanded.width() / idle.width() - 1.05).abs() < 0.001);
+        assert!(expanded.center().distance(idle.center()) < 0.001);
+        let edge = egui::pos2((idle.right() + expanded.right()) * 0.5, idle.center().y);
+        frame(vec![egui::Event::PointerMoved(edge), button(edge, true)]);
+        let (_, _, actions) = frame(vec![button(edge, false)]);
+        assert!(
+            matches!(actions.as_slice(), [UiAction::OpenMedia(opened, true)] if opened == &path),
+            "the enlarged image edge is clickable"
+        );
     }
 }
 
@@ -200,12 +335,12 @@ fn gallery_video_geometry_excludes_transparent_padding_and_preserves_black_pixel
         Rect::from_min_max(egui::pos2(4.0 / 12.0, 0.0), egui::pos2(7.0 / 12.0, 1.0))
     );
     let rect = gallery_thumbnail(
-        Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(176.0)),
+        Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(144.0)),
         egui::vec2(12.0, 8.0) * uv.size(),
         1.0,
     );
     assert!((rect.width() / rect.height() - 3.0 / 8.0).abs() < 0.001);
-    assert!((rect.size().length() - 176.0).abs() < 0.001);
+    assert!((rect.size().length() - 144.0).abs() < 0.001);
 }
 
 #[test]
@@ -254,8 +389,14 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                 .into_iter()
                 .enumerate()
                 {
-                    let path = self.root.join(format!("generated-{index}.mp4"));
-                    let color = Color32::from_rgb(70 + index as u8 * 10, 115, 180);
+                    let extension = if index == 11 { "wav" } else { "mp4" };
+                    let path = self.root.join(format!("generated-{index}.{extension}"));
+                    // Solid white represents a full-scale waveform envelope.
+                    let color = if index == 11 {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_rgb(70 + index as u8 * 10, 115, 180)
+                    };
                     let texture = context.load_texture(
                         format!("fixture-{index}"),
                         egui::ColorImage::filled(size, color),
@@ -271,7 +412,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                 let width = (1160.0 * density) as u32;
                 let height = (740.0 * density) as u32;
                 renderer.resize_surface(width, height).expect("surface");
-                let mut idle_bounds = None;
+                let mut idle_bounds: Option<Rect> = None;
                 for frame in 0..8 {
                     let mut input = egui::RawInput {
                         screen_rect: Some(Rect::from_min_size(
@@ -289,9 +430,9 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         .or_default()
                         .native_pixels_per_point = Some(density);
                     if frame >= 3 {
-                        input
-                            .events
-                            .push(egui::Event::PointerMoved(egui::pos2(170.0, 150.0)));
+                        input.events.push(egui::Event::PointerMoved(
+                            idle_bounds.expect("idle bounds").center(),
+                        ));
                     }
                     let output = context.run_ui(input, |ui| {
                         ui.painter()
@@ -330,6 +471,12 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         })
                         .expect("first image");
                     assert_eq!(output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if textures.contains(&mesh.texture_id))).count(), paths.len(), "all cards remain painted at frame {frame}");
+                    let audio_index = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[11])).expect("audio waveform");
+                    let egui::Shape::Rect(audio_background) = &output.shapes[audio_index - 1].shape
+                    else {
+                        panic!("audio background before waveform");
+                    };
+                    let audio_bounds = audio_background.rect;
                     if frame == 2 {
                         idle_bounds = Some(bounds);
                     }
@@ -350,9 +497,24 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             &pixels[start..start + 4]
                         };
                         assert_eq!(at(66.0, 44.0), &crate::chrome::BACKGROUND.to_array());
-                        assert_eq!(at(170.0, 150.0), &[70, 115, 180, 255]);
                         assert_eq!(
-                            at(580.0, 132.0),
+                            at(audio_bounds.center().x, audio_bounds.top() + 3.0),
+                            &crate::chrome::BORDER.to_array()
+                        );
+                        assert_eq!(
+                            at(audio_bounds.left() + 8.0, audio_bounds.center().y),
+                            &Color32::from_gray(128).to_array()
+                        );
+                        assert_eq!(
+                            at(audio_bounds.left() + 8.0, audio_bounds.bottom() - 3.0),
+                            &crate::chrome::BORDER.to_array()
+                        );
+                        assert_eq!(
+                            at(bounds.center().x, bounds.center().y),
+                            &[70, 115, 180, 255]
+                        );
+                        assert_eq!(
+                            at(492.0, 114.0),
                             &[90, 115, 180, 255],
                             "unhovered card remains visible at frame {frame}"
                         );

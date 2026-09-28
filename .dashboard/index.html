@@ -115,6 +115,10 @@
       font-size: 19px;
       font-weight: 650;
       letter-spacing: -0.5px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     h2 {
       font-size: 19px;
@@ -142,26 +146,9 @@
       gap: 14px;
       border-bottom: 1px solid var(--line);
     }
-    .mark {
-      width: 27px;
-      height: 27px;
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 3px;
-      transform: rotate(-7deg);
-    }
-    .mark i {
-      background: var(--accent);
-      border-radius: 2px;
-    }
-    .mark i:nth-child(2) {
-      opacity: 0.35;
-    }
-    .mark i:nth-child(3) {
-      opacity: 0.6;
-    }
     .header-right {
       margin-left: auto;
+      flex-shrink: 0;
       display: flex;
       gap: 10px;
       align-items: center;
@@ -608,11 +595,7 @@
     }
   </style>
   <header>
-    <div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-    <div>
-      <div class="eyebrow">Project desk</div>
-      <h1 id="project-name">読み込み中</h1>
-    </div>
+    <h1 id="project-name">読み込み中 · Project desk</h1>
     <div class="header-right">
       <span class="connection" id="connection">ローカル記録</span
       ><button class="quiet" id="backup" title="現在の記録を復旧用に複製します。編集は通常の「保存」で記録されるため、毎回押す必要はありません。保存先: .dashboard/backups/">バックアップ</button
@@ -652,6 +635,7 @@
         ><button data-view="questions">質問</button
         ><button data-view="history">履歴</button
         ><button data-view="archive">アーカイブ</button>
+        <button data-view="trash">削除済み</button>
       </nav>
       <input
         id="search"
@@ -707,6 +691,7 @@
         todo: "予定",
         doing: "作業中",
         waiting: "回答・確認待ち",
+        deleted: "削除済み",
         blocked: "行き詰まり",
         done: "完了",
         canceled: "取り下げ",
@@ -820,7 +805,8 @@
         try {
           const brief = await api("/api/brief");
           project = brief.project;
-          $("#project-name").textContent = project.name;
+          $("#project-name").textContent = project.name + " · Project desk";
+          $("#project-name").title = $("#project-name").textContent;
           document.title = project.name + " · Project desk";
           $("#scope-name").textContent = project.current_scope;
           $("#next-action").textContent =
@@ -879,7 +865,7 @@
           ? data.items
               .map(
                 (item) =>
-                  `<button class="row ${item.id === selected ? "selected" : ""}" data-id="${esc(item.id)}"><div class="row-meta">${badge(item.status)}<span>${esc(item.scope)}</span><time title="${esc(item.updated_at)}">${stamp(item.updated_at)}</time></div><div class="row-title">${esc(item.title)}</div><div class="row-next">${esc(item.blocked_reason || item.next_action || item.id)}</div></button>`,
+                  `<button class="row ${item.id === selected ? "selected" : ""}" data-id="${esc(item.id)}"><div class="row-meta">${badge(item.deleted ? "deleted" : item.status)}<span>${esc(item.scope)}</span><time title="${esc(item.updated_at)}">${stamp(item.updated_at)}</time></div><div class="row-title">${esc(item.title)}</div><div class="row-next">${esc(item.blocked_reason || item.next_action || item.id)}</div></button>`,
               )
               .join("")
           : '<div class="empty"><div class="symbol">✓</div><p>この条件の項目はありません。</p><small>検索・範囲を変更するか、項目を追加できます。</small></div>';
@@ -894,6 +880,7 @@
           questions: "QUESTIONS",
           history: "HISTORY",
           archive: "ARCHIVE",
+          trash: "TRASH",
         }[view];
         $("#page-label").textContent = total
           ? `${offset + 1}–${Math.min(offset + pageSize, total)} / ${total}`
@@ -931,9 +918,11 @@
         $("#detail").oninput = null;
         $("#detail").onchange = null;
         $("#detail").innerHTML =
-          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.status)}${data.can_confirm ? '<button id="confirm-review" class="primary">確認できたので完了</button>' : ""}${i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
+          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.deleted ? "deleted" : i.status)}${data.can_confirm ? '<button id="confirm-review" class="primary">確認できたので完了</button>' : ""}${i.deleted ? '<button id="restore-item">元に戻す</button>' : (i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>') + '<button id="delete-item" title="削除済みへ移します。後から戻せます。">削除</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived && !i.deleted ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived && !i.deleted ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
         bindBack();
         $("#edit")?.addEventListener("click", () => edit(i));
+        $("#delete-item")?.addEventListener("click", () => moveToTrash(i, true));
+        $("#restore-item")?.addEventListener("click", () => moveToTrash(i, false));
         $("#confirm-review")?.addEventListener("click", async (e) => {
           if (!canLeave()) return;
           e.currentTarget.disabled = true;
@@ -980,6 +969,21 @@
           .querySelectorAll("[data-link]")
           .forEach((b) => (b.onclick = () => select(b.dataset.link)));
       }
+      async function moveToTrash(i, deleted) {
+        if (!canLeave()) return;
+        const button = $(deleted ? "#delete-item" : "#restore-item");
+        button.disabled = true;
+        try {
+          await api("/api", {action: deleted ? "delete" : "restore-item", id: i.id, rev: i.rev});
+          dirty = false;
+          await select(i.id, false);
+          await refresh(true);
+          tell(deleted ? "削除済みへ移しました。元に戻すこともできます。" : "項目を元に戻しました");
+        } catch (error) {
+          button.disabled = false;
+          tell(error.message, true);
+        }
+      }
       function relations(i, children) {
         const links = [
           ...(i.parent_id ? [{ id: i.parent_id, title: "親の項目" }] : []),
@@ -1007,7 +1011,7 @@
         return events
           .map(
             (e) =>
-              `<div class="thread-entry"><small>${esc({ user: "あなた", assistant: "AI", system: "システム" }[e.actor])} · ${stamp(e.at)}</small>${e.action === "comment" ? `<div class="body-text">${esc(e.data.text)}</div>` : `<details><summary>${esc({ created: "項目を作成", updated: "項目を更新", project: "引き継ぎを更新" }[e.action] || e.action)}</summary><pre>${esc(JSON.stringify(e.data, null, 2))}</pre></details>`}</div>`,
+              `<div class="thread-entry"><small>${esc({ user: "あなた", assistant: "AI", system: "システム" }[e.actor])} · ${stamp(e.at)}</small>${e.action === "comment" ? `<div class="body-text">${esc(e.data.text)}</div>` : `<details><summary>${esc({ created: "項目を作成", updated: "項目を更新", project: "引き継ぎを更新", deleted: "項目を削除", restored: "項目を復元" }[e.action] || e.action)}</summary><pre>${esc(JSON.stringify(e.data, null, 2))}</pre></details>`}</div>`,
           )
           .join("");
       }

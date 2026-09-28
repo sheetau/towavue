@@ -25,7 +25,7 @@ EXTRA = {
     "next_action", "acceptance", "blocked_reason", "parent_id", "depends_on",
     "required_questions", "checks", "answer", "recommended", "default_action",
     "requires_answer", "asked_by", "answer_by", "source", "source_date",
-    "verification", "commit", "archived", "resolution", "owner_review",
+    "verification", "commit", "archived", "resolution", "owner_review", "deleted",
 }
 PROJECT_FIELDS = {"name", "current_scope", "handoff", "next_action", "public_summary"}
 ACTORS = {"user", "assistant", "system"}
@@ -137,13 +137,17 @@ class Store:
         reasons = []
         for identity in item.get("depends_on", []):
             other = self.item(identity)
-            if other["status"] != "done":
+            if other.get("deleted"):
+                reasons.append(f"Dependency {identity} was deleted; restore it or revise the prerequisite")
+            elif other["status"] != "done":
                 reasons.append(f"Dependency {identity} is not done")
         for identity in item.get("required_questions", []):
             question = self.item(identity)
             answered = bool(question.get("answer", "").strip()) and question["status"] in {"answered", "closed"}
             permitted_default = question.get("requires_answer") is False and bool(question.get("default_action", "").strip())
-            if not answered and not permitted_default:
+            if question.get("deleted"):
+                reasons.append(f"Question {identity} was deleted; restore it or revise the prerequisite")
+            elif not answered and not permitted_default:
                 reasons.append(f"Question {identity} needs an answer")
         return reasons
 
@@ -158,7 +162,7 @@ class Store:
                     "source_date", "verification", "commit", "resolution"):
             if key in item and (not isinstance(item[key], str) or len(item[key]) > 2_000_000):
                 raise Problem(f"Invalid text field: {key}")
-        for key in ("requires_answer", "archived", "owner_review"):
+        for key in ("requires_answer", "archived", "owner_review", "deleted"):
             if key in item and type(item[key]) is not bool:
                 raise Problem(f"Invalid boolean: {key}")
         checks = item.get("checks", [])
@@ -204,7 +208,7 @@ class Store:
             raise Problem("A waiting or blocked task needs a reason")
 
     def create(self, payload, actor):
-        allowed = {"kind", "title", "status", "scope", "body"} | EXTRA
+        allowed = {"kind", "title", "status", "scope", "body"} | (EXTRA - {"deleted"})
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise Problem("Unknown record field")
         kind = payload.get("kind", "task")
@@ -226,11 +230,13 @@ class Store:
         return self.item(item["id"])
 
     def update(self, identity, patch, rev, actor):
-        if not isinstance(patch, dict) or set(patch) - ({"title", "status", "scope", "body"} | EXTRA):
+        if not isinstance(patch, dict) or set(patch) - ({"title", "status", "scope", "body"} | (EXTRA - {"deleted"})):
             raise Problem("Unknown or immutable record field")
         with self.transaction():
             old = self.item(identity)
             self.expect(old, rev)
+            if old.get("deleted"):
+                raise Problem("Restore the deleted record before editing it")
             new = {**old, **patch}
             self.validate(new)
             at = now()
@@ -247,14 +253,30 @@ class Store:
         if not isinstance(text, str) or not text.strip() or len(text) > 24000:
             raise Problem("Comment must contain 1-24,000 characters")
         with self.transaction():
-            self.expect(self.item(identity), rev)
+            item = self.item(identity)
+            self.expect(item, rev)
+            if item.get("deleted"):
+                raise Problem("Restore the deleted record before commenting")
             self.db.execute("UPDATE items SET rev=rev+1,updated_at=? WHERE id=?", (now(), identity))
             self.event(identity, actor, "comment", {"text": text})
         return self.item(identity)
 
+    def set_deleted(self, identity, rev, deleted, actor):
+        with self.transaction():
+            item = self.item(identity)
+            self.expect(item, rev)
+            if bool(item.get("deleted")) == deleted:
+                raise Problem("Record is already in the requested state")
+            data = {k: v for k, v in item.items() if k in EXTRA}
+            data["deleted"] = deleted
+            self.db.execute("UPDATE items SET data=?,rev=rev+1,updated_at=? WHERE id=?",
+                            (encode(data), now(), identity))
+            self.event(identity, actor, "deleted" if deleted else "restored", {})
+        return self.item(identity)
+
     def can_confirm(self, item):
         return (item["kind"] == "task" and item["status"] == "waiting"
-                and item.get("owner_review") is True and not item.get("archived")
+                and item.get("owner_review") is True and not item.get("archived") and not item.get("deleted")
                 and not self.gates(item) and all(c["done"] for c in item.get("checks", [])))
 
     def confirm(self, identity, rev, actor):
@@ -291,13 +313,16 @@ class Store:
             "questions": "kind='question' AND status!='closed'",
             "history": "(status IN ('done','canceled','closed') OR kind='note')",
             "archive": "json_extract(data,'$.archived')=1",
+            "trash": "json_extract(data,'$.deleted')=1",
             "all": "1=1",
         }
         if view not in filters:
             raise Problem("Unknown view")
         conditions, params = [filters[view]], []
-        if view not in {"archive", "all"}:
+        if view not in {"archive", "all", "trash"}:
             conditions.append("COALESCE(json_extract(data,'$.archived'),0)=0")
+        if view not in {"trash", "all"}:
+            conditions.append("COALESCE(json_extract(data,'$.deleted'),0)=0")
         if scope:
             conditions.append("scope=?")
             params.append(scope)
@@ -306,12 +331,13 @@ class Store:
             params.extend([search, search, search])
         where = " AND ".join(conditions)
         total = self.db.execute("SELECT count(*) FROM items WHERE " + where, params).fetchone()[0]
-        order = "updated_at DESC,id" if view in {"history", "archive", "all"} else (
+        order = "updated_at DESC,id" if view in {"history", "archive", "all", "trash"} else (
             "CASE status WHEN 'doing' THEN 0 WHEN 'waiting' THEN 1 WHEN 'blocked' THEN 2 "
             "WHEN 'open' THEN 0 WHEN 'answered' THEN 1 WHEN 'todo' THEN 3 ELSE 4 END,updated_at DESC,id")
         columns = ("id,kind,title,status,scope,rev,created_at,updated_at,closed_at,"
                    "json_extract(data,'$.next_action') AS next_action,"
                    "json_extract(data,'$.blocked_reason') AS blocked_reason,"
+                   "json_extract(data,'$.deleted') AS deleted,"
                    "json_extract(data,'$.source_date') AS source_date")
         rows = self.db.execute("SELECT " + columns + " FROM items WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                                (*params, min(max(int(limit), 1), 100), max(int(offset), 0)))
@@ -321,15 +347,15 @@ class Store:
         project = self.project()
         counts = {r["status"]: r["n"] for r in self.db.execute(
             "SELECT status,count(*) AS n FROM items WHERE kind='task' AND scope=? "
-            "AND COALESCE(json_extract(data,'$.archived'),0)=0 GROUP BY status",
+            "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0 GROUP BY status",
             (project["current_scope"],))}
         overall = {r["status"]: r["n"] for r in self.db.execute(
             "SELECT status,count(*) AS n FROM items WHERE kind='task' "
-            "AND COALESCE(json_extract(data,'$.archived'),0)=0 GROUP BY status")}
+            "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0 GROUP BY status")}
         progress = {"done": overall.get("done", 0),
                     "total": sum(n for status, n in overall.items() if status not in {"inbox", "canceled"})}
         open_questions = self.db.execute("SELECT count(*) FROM items WHERE kind='question' AND status='open' "
-                         "AND COALESCE(json_extract(data,'$.archived'),0)=0").fetchone()[0]
+                         "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0").fetchone()[0]
         questions = self.query("questions", limit=10)
         active = self.query("tasks", project["current_scope"], limit=20)
         for item in active["items"]:
@@ -400,6 +426,8 @@ def mutate(store, request, actor):
         return store.comment(request.get("id"), request.get("text"), request.get("rev"), actor)
     if action == "confirm":
         return store.confirm(request.get("id"), request.get("rev"), actor)
+    if action in {"delete", "restore-item"}:
+        return store.set_deleted(request.get("id"), request.get("rev"), action == "delete", actor)
     if action == "project":
         return store.update_project(request.get("data", {}), request.get("rev"), actor)
     if action == "backup":
@@ -493,7 +521,7 @@ def main():
     init.add_argument("--name", default=ROOT.parent.name)
     commands.add_parser("brief")
     query = commands.add_parser("list")
-    query.add_argument("--view", default="tasks", choices=["tasks", "questions", "history", "archive", "all"])
+    query.add_argument("--view", default="tasks", choices=["tasks", "questions", "history", "archive", "trash", "all"])
     query.add_argument("--scope", default="")
     query.add_argument("--search", default="")
     query.add_argument("--limit", type=int, default=30)

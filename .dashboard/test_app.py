@@ -85,6 +85,52 @@ class LedgerTests(unittest.TestCase):
                 self.store.confirm(item["id"], item["rev"], "user")
         self.assertFalse(self.store.can_confirm(question))
 
+    def test_delete_restore_excludes_records_from_views_and_preserves_history(self):
+        records = [self.task(), self.task(status="done"),
+                   self.store.create({"kind": "question", "title": "Pending question"}, "assistant"),
+                   self.store.create({"kind": "note", "title": "Archive", "archived": True}, "assistant")]
+        for item in records:
+            deleted = self.store.set_deleted(item["id"], item["rev"], True, "user")
+            self.assertEqual(deleted["status"], item["status"])
+            with self.assertRaises(app.Problem):
+                self.store.update(item["id"], {"title": "Stale edit"}, item["rev"], "user")
+            with self.assertRaises(app.Problem):
+                self.store.comment(item["id"], "Unexpected edit", deleted["rev"], "user")
+        for view in ["tasks", "questions", "history", "archive"]:
+            self.assertEqual(self.store.query(view)["total"], 0)
+        self.assertEqual(self.store.query("trash")["total"], 4)
+        self.assertEqual(self.store.brief()["progress"], {"done": 0, "total": 0})
+        self.assertEqual(self.store.brief()["open_questions"], 0)
+        restored_path = Path(self.temp.name) / "trash-roundtrip.sqlite"
+        app.restore(restored_path, self.store.export())
+        recovered = app.Store(restored_path)
+        self.assertEqual(recovered.query("trash")["total"], 4)
+        recovered.close()
+        for item in records:
+            current = self.store.item(item["id"])
+            restored = self.store.set_deleted(item["id"], current["rev"], False, "user")
+            self.assertEqual(restored["body"], item["body"])
+            self.assertEqual(restored["closed_at"], item["closed_at"])
+            self.assertEqual(self.store.history(item["id"])[0]["action"], "restored")
+        self.assertEqual(self.store.query("trash")["total"], 0)
+        self.assertEqual(self.store.query("archive")["total"], 1)
+        self.assertEqual(self.store.brief()["progress"], {"done": 1, "total": 1})
+
+    def test_deleted_prerequisites_never_unlock_dependents(self):
+        prerequisite = self.task(status="done")
+        question = self.store.create({"kind": "question", "title": "Answered", "status": "answered", "answer": "Yes"}, "user")
+        task = self.task(status="waiting", blocked_reason="Review", owner_review=True,
+                         depends_on=[prerequisite["id"]], required_questions=[question["id"]])
+        for related in [prerequisite, question]:
+            deleted = self.store.set_deleted(related["id"], related["rev"], True, "user")
+            self.assertFalse(self.store.can_confirm(task))
+            with self.assertRaises(app.Problem):
+                self.store.confirm(task["id"], task["rev"], "user")
+            self.store.set_deleted(related["id"], deleted["rev"], False, "user")
+        self.assertTrue(self.store.can_confirm(task))
+        with self.assertRaises(app.Problem):
+            self.store.update(task["id"], {"deleted": True}, task["rev"], "user")
+
     def test_simultaneous_writes_preserve_winner_and_reject_stale_copy(self):
         t = self.task()
         barrier = threading.Barrier(2)

@@ -25,7 +25,7 @@ EXTRA = {
     "next_action", "acceptance", "blocked_reason", "parent_id", "depends_on",
     "required_questions", "checks", "answer", "recommended", "default_action",
     "requires_answer", "asked_by", "answer_by", "source", "source_date",
-    "verification", "commit", "archived", "resolution",
+    "verification", "commit", "archived", "resolution", "owner_review",
 }
 PROJECT_FIELDS = {"name", "current_scope", "handoff", "next_action", "public_summary"}
 ACTORS = {"user", "assistant", "system"}
@@ -158,7 +158,7 @@ class Store:
                     "source_date", "verification", "commit", "resolution"):
             if key in item and (not isinstance(item[key], str) or len(item[key]) > 2_000_000):
                 raise Problem(f"Invalid text field: {key}")
-        for key in ("requires_answer", "archived"):
+        for key in ("requires_answer", "archived", "owner_review"):
             if key in item and type(item[key]) is not bool:
                 raise Problem(f"Invalid boolean: {key}")
         checks = item.get("checks", [])
@@ -252,6 +252,23 @@ class Store:
             self.event(identity, actor, "comment", {"text": text})
         return self.item(identity)
 
+    def can_confirm(self, item):
+        return (item["kind"] == "task" and item["status"] == "waiting"
+                and item.get("owner_review") is True and not item.get("archived")
+                and not self.gates(item) and all(c["done"] for c in item.get("checks", [])))
+
+    def confirm(self, identity, rev, actor):
+        if actor != "user":
+            raise Problem("Only the owner can confirm a review", 403)
+        item = self.item(identity)
+        self.expect(item, rev)
+        if not self.can_confirm(item):
+            raise Problem("This task is not ready for owner confirmation")
+        # update checks the same revision and all prerequisites again inside its transaction.
+        evidence = (item.get("verification", "").rstrip() + "\nOwner confirmed behavior/appearance at " + now()).strip()
+        return self.update(identity, {"status": "done", "owner_review": False,
+                           "blocked_reason": "", "next_action": "", "verification": evidence}, rev, actor)
+
     def history(self, identity=None, limit=50, before=None, after=None):
         conditions, params = [], []
         if identity:
@@ -303,13 +320,22 @@ class Store:
     def brief(self):
         project = self.project()
         counts = {r["status"]: r["n"] for r in self.db.execute(
-            "SELECT status,count(*) AS n FROM items WHERE kind='task' AND scope=? GROUP BY status",
+            "SELECT status,count(*) AS n FROM items WHERE kind='task' AND scope=? "
+            "AND COALESCE(json_extract(data,'$.archived'),0)=0 GROUP BY status",
             (project["current_scope"],))}
+        overall = {r["status"]: r["n"] for r in self.db.execute(
+            "SELECT status,count(*) AS n FROM items WHERE kind='task' "
+            "AND COALESCE(json_extract(data,'$.archived'),0)=0 GROUP BY status")}
+        progress = {"done": overall.get("done", 0),
+                    "total": sum(n for status, n in overall.items() if status not in {"inbox", "canceled"})}
+        open_questions = self.db.execute("SELECT count(*) FROM items WHERE kind='question' AND status='open' "
+                         "AND COALESCE(json_extract(data,'$.archived'),0)=0").fetchone()[0]
         questions = self.query("questions", limit=10)
         active = self.query("tasks", project["current_scope"], limit=20)
         for item in active["items"]:
             item["gates"] = self.gates(self.item(item["id"]))
-        return {"project": project, "counts": counts, "active": active, "questions": questions,
+        return {"project": project, "counts": counts, "overall_counts": overall, "progress": progress,
+                "open_questions": open_questions, "active": active, "questions": questions,
                 "scopes": [r[0] for r in self.db.execute("SELECT DISTINCT scope FROM items ORDER BY scope")],
                 "cursor": self.db.execute("SELECT COALESCE(max(seq),0) FROM events").fetchone()[0]}
 
@@ -372,6 +398,8 @@ def mutate(store, request, actor):
         return store.update(request.get("id"), request.get("data", {}), request.get("rev"), actor)
     if action == "comment":
         return store.comment(request.get("id"), request.get("text"), request.get("rev"), actor)
+    if action == "confirm":
+        return store.confirm(request.get("id"), request.get("rev"), actor)
     if action == "project":
         return store.update_project(request.get("data", {}), request.get("rev"), actor)
     if action == "backup":
@@ -430,6 +458,7 @@ def server(path, port=0):
                         result = {"item": store.item(args.get("id")), "events": store.history(args.get("id")),
                                   "children": [dict(r) for r in store.db.execute(
                                       "SELECT id,title,kind,status FROM items WHERE json_extract(data,'$.parent_id')=?", (args.get("id"),))]}
+                        result["can_confirm"] = store.can_confirm(result["item"])
                     elif parsed.path == "/api/events":
                         result = store.history(args.get("id"), args.get("limit", 50), args.get("before"), args.get("after"))
                     else:

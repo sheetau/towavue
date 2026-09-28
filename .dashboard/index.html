@@ -44,7 +44,7 @@
       color: inherit;
       background: var(--raised);
       border: 1px solid var(--line);
-      padding: 7px 12px;
+      padding: 5px 10px;
       border-radius: 6px;
     }
     button:hover {
@@ -71,7 +71,7 @@
       color: var(--text);
       border: 1px solid var(--line);
       border-radius: 5px;
-      padding: 8px 10px;
+      padding: 5px 9px;
       width: 100%;
     }
     input:focus,
@@ -83,8 +83,8 @@
     }
     textarea {
       resize: vertical;
-      min-height: 90px;
-      line-height: 1.7;
+      min-height: 64px;
+      line-height: 1.55;
     }
     a {
       color: var(--accent);
@@ -93,7 +93,7 @@
       display: block;
       color: var(--muted);
       font-size: 12px;
-      margin: 12px 0 5px;
+      margin: 9px 0 4px;
     }
     label.check {
       display: flex;
@@ -112,7 +112,7 @@
       margin: 0;
     }
     h1 {
-      font-size: 21px;
+      font-size: 19px;
       font-weight: 650;
       letter-spacing: -0.5px;
     }
@@ -122,7 +122,7 @@
     }
     h3 {
       font-size: 13px;
-      margin: 22px 0 9px;
+      margin: 16px 0 6px;
       color: var(--muted);
       font-weight: 600;
     }
@@ -131,8 +131,12 @@
       color: var(--muted);
     }
     header {
-      height: 72px;
-      padding: 0 30px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--bg);
+      height: 54px;
+      padding: 0 22px;
       display: flex;
       align-items: center;
       gap: 14px;
@@ -171,7 +175,7 @@
     .workspace {
       max-width: 1600px;
       margin: auto;
-      padding: 24px 30px 0;
+      padding: 14px 22px 20px;
     }
     .overview {
       display: grid;
@@ -179,20 +183,20 @@
           3,
           minmax(115px, 0.6fr)
         );
-      gap: 12px;
+      gap: 10px;
     }
     .metric {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      padding: 17px 20px;
+      padding: 10px 14px;
     }
     .metric strong {
       display: block;
-      font-size: 29px;
+      font-size: 25px;
       font-weight: 550;
       font-variant-numeric: tabular-nums;
-      line-height: 1.5;
+      line-height: 1.3;
     }
     .metric .caption {
       font-size: 12px;
@@ -201,12 +205,12 @@
     #scope-name {
       font-size: 18px;
       color: var(--accent);
-      margin: 3px 0 6px;
+      margin: 1px 0 3px;
     }
     .progress-track {
       height: 3px;
       background: var(--line);
-      margin-top: 10px;
+      margin-top: 7px;
       border-radius: 2px;
       overflow: hidden;
     }
@@ -218,7 +222,7 @@
     .handoff {
       display: flex;
       gap: 14px;
-      margin: 16px 0 20px;
+      margin: 10px 0 12px;
       align-items: flex-start;
       color: var(--muted);
       font-size: 13px;
@@ -230,14 +234,12 @@
     }
     .handoff span {
       white-space: pre-wrap;
-      max-height: 64px;
-      overflow: auto;
     }
     .toolbar {
       display: flex;
       align-items: center;
       gap: 10px;
-      margin: 0 0 12px;
+      margin: 0 0 8px;
       flex-wrap: wrap;
     }
     .tabs {
@@ -250,7 +252,7 @@
       border: none;
       border-radius: 0;
       color: var(--muted);
-      padding: 9px 14px;
+      padding: 6px 12px;
       border-bottom: 2px solid transparent;
     }
     .tabs button.active {
@@ -267,20 +269,20 @@
       display: grid;
       grid-template-columns: minmax(300px, 1fr) minmax(340px, 0.92fr);
       border: 1px solid var(--line);
-      border-radius: 9px 9px 0 0;
-      overflow: hidden;
-      height: calc(100dvh - 332px);
-      min-height: 370px;
+      border-radius: 8px;
+      align-items: stretch;
+      background: var(--panel);
+      scroll-margin-top: 64px;
     }
     .list-region {
       background: var(--panel);
       display: flex;
       flex-direction: column;
-      min-height: 0;
+      min-width: 0;
     }
     .list-head {
       display: flex;
-      padding: 12px 18px;
+      padding: 8px 14px;
       color: var(--muted);
       font-size: 11px;
       border-bottom: 1px solid var(--line);
@@ -290,9 +292,7 @@
       margin-left: auto;
     }
     #list {
-      overflow: auto;
-      flex: 1;
-      scrollbar-gutter: stable;
+      min-width: 0;
     }
     .row {
       display: block;
@@ -302,7 +302,7 @@
       border-bottom: 1px solid #282e32;
       background: transparent;
       text-align: left;
-      padding: 17px 20px;
+      padding: 8px 14px;
       border-left: 3px solid transparent;
     }
     .row:hover {
@@ -314,9 +314,9 @@
     }
     .row-title {
       font-size: 14px;
-      line-height: 1.65;
+      line-height: 1.5;
       font-weight: 500;
-      margin: 7px 0;
+      margin: 3px 0;
       overflow-wrap: anywhere;
     }
     .row-meta {
@@ -360,7 +360,7 @@
       color: var(--red);
     }
     .pager {
-      padding: 9px 14px;
+      padding: 6px 12px;
       display: flex;
       gap: 10px;
       align-items: center;
@@ -373,10 +373,9 @@
     }
     #detail {
       border-left: 1px solid var(--line);
-      overflow: auto;
+      min-width: 0;
       background: #15181a;
-      padding: 24px 27px;
-      scrollbar-gutter: stable;
+      padding: 14px 18px;
     }
     .empty {
       display: flex;
@@ -384,9 +383,8 @@
       justify-content: center;
       text-align: center;
       flex-direction: column;
-      height: 100%;
       color: var(--muted);
-      padding: 30px;
+      padding: 24px 18px;
       gap: 10px;
     }
     .empty .symbol {
@@ -397,7 +395,7 @@
       display: flex;
       gap: 8px;
       align-items: center;
-      margin-bottom: 14px;
+      margin-bottom: 9px;
       flex-wrap: wrap;
     }
     .detail-top .id {
@@ -411,8 +409,8 @@
       white-space: pre-wrap;
       overflow-wrap: anywhere;
       font-size: 13px;
-      line-height: 1.9;
-      margin-top: 12px;
+      line-height: 1.65;
+      margin-top: 8px;
     }
     .field-grid {
       display: grid;
@@ -423,21 +421,22 @@
       display: flex;
       gap: 8px;
       align-items: center;
-      margin: 18px 0;
+      margin: 12px 0;
+      flex-wrap: wrap;
     }
     .section {
-      padding: 14px 16px;
+      padding: 9px 12px;
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 6px;
-      margin-top: 15px;
+      margin-top: 10px;
     }
     .section h3 {
       margin: 0 0 7px;
     }
     .thread-entry {
       border-left: 2px solid var(--line);
-      margin: 14px 0;
+      margin: 9px 0;
       padding: 0 0 0 14px;
     }
     .thread-entry .body-text {
@@ -531,7 +530,7 @@
         padding: 0 18px;
       }
       .workspace {
-        padding: 18px 16px 0;
+        padding: 12px 16px 18px;
       }
       .overview {
         grid-template-columns: 1.5fr 1fr 1fr;
@@ -546,11 +545,10 @@
         width: 150px;
       }
       .split {
-        grid-template-columns: 1fr 1fr;
-        height: calc(100dvh - 320px);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
       #detail {
-        padding: 20px 18px;
+        padding: 12px 14px;
       }
       .connection {
         display: none;
@@ -564,27 +562,23 @@
         display: none;
       }
       .metric {
-        padding: 12px;
+        padding: 9px 11px;
       }
       .header-right .quiet {
         display: none;
       }
       .split {
         display: block;
-        height: calc(100dvh - 365px);
-        position: relative;
-      }
-      .list-region {
-        height: 100%;
       }
       #detail {
         display: none;
       }
       .split.show-detail #detail {
         display: block;
-        position: absolute;
-        inset: 0;
         border: 0;
+      }
+      .split.show-detail .list-region {
+        display: none;
       }
       .mobile-back {
         display: inline-block;
@@ -621,7 +615,7 @@
     </div>
     <div class="header-right">
       <span class="connection" id="connection">ローカル記録</span
-      ><button class="quiet" id="backup">バックアップ</button
+      ><button class="quiet" id="backup" title="現在の記録を復旧用に複製します。編集は通常の「保存」で記録されるため、毎回押す必要はありません。保存先: .dashboard/backups/">バックアップ</button
       ><button id="settings">引き継ぎを編集</button
       ><button class="primary" id="new">＋ 追加</button>
     </div>
@@ -634,7 +628,7 @@
         <p class="caption" id="next-action">—</p>
       </div>
       <div class="metric">
-        <div class="caption">今回の完了 / 対象</div>
+        <div class="caption" title="全範囲のタスク。未整理・取り下げ・アーカイブ・質問・ノートは対象外です。">全体の完了 / 対象</div>
         <strong id="progress">—</strong>
         <div class="progress-track"><span id="progress-bar"></span></div>
       </div>
@@ -693,6 +687,7 @@
   <script>
     (() => {
       "use strict";
+      const pageSize = 12;
       const token = "__DASHBOARD_TOKEN__",
         $ = (s) => document.querySelector(s),
         esc = (s) =>
@@ -832,15 +827,13 @@
             project.next_action || "次の作業は未設定";
           $("#handoff").textContent =
             project.handoff || "引き継ぎはまだありません";
-          const counts = brief.counts,
-            done = counts.done || 0,
-            n = Object.entries(counts)
-              .filter(([k]) => k !== "canceled")
-              .reduce((s, [, v]) => s + v, 0);
+          const counts = brief.overall_counts,
+            done = brief.progress.done,
+            n = brief.progress.total;
           $("#progress").textContent = done + " / " + n;
           $("#progress-bar").style.width = (n ? (100 * done) / n : 0) + "%";
           $("#waiting").textContent =
-            brief.questions.total + (counts.waiting || 0);
+            brief.open_questions + (counts.waiting || 0);
           $("#doing").textContent =
             (counts.doing || 0) + " / " + (counts.blocked || 0);
           $("#connection").textContent =
@@ -872,13 +865,16 @@
               scope: $("#scope").value,
               search: $("#search").value,
               offset,
-              limit: 30,
+              limit: pageSize,
             }),
         );
         if (seq !== querySequence) return;
+        if (offset > 0 && offset >= data.total) {
+          offset = Math.max(0, Math.floor((data.total - 1) / pageSize) * pageSize);
+          return list();
+        }
         total = data.total;
-        const container = $("#list"),
-          scroll = container.scrollTop;
+        const container = $("#list");
         container.innerHTML = data.items.length
           ? data.items
               .map(
@@ -887,7 +883,6 @@
               )
               .join("")
           : '<div class="empty"><div class="symbol">✓</div><p>この条件の項目はありません。</p><small>検索・範囲を変更するか、項目を追加できます。</small></div>';
-        container.scrollTop = scroll;
         container
           .querySelectorAll("[data-id]")
           .forEach(
@@ -901,10 +896,10 @@
           archive: "ARCHIVE",
         }[view];
         $("#page-label").textContent = total
-          ? `${offset + 1}–${Math.min(offset + 30, total)} / ${total}`
+          ? `${offset + 1}–${Math.min(offset + pageSize, total)} / ${total}`
           : "0件";
         $("#previous").disabled = offset === 0;
-        $("#next-page").disabled = offset + 30 >= total;
+        $("#next-page").disabled = offset + pageSize >= total;
       }
       async function select(id, check = true, background = false) {
         if (check && !canLeave()) return;
@@ -915,14 +910,12 @@
             seq !== detailSequence ||
             (background && (editing || dirty || projectEditing))
           ) return;
-          const oldScroll = selected === id ? $("#detail").scrollTop : 0;
           selected = id;
           current = data.item;
           editing = false;
           projectEditing = false;
           dirty = false;
           renderDetail(data);
-          $("#detail").scrollTop = oldScroll;
           if (!background) $("#split").classList.add("show-detail");
           $("#list")
             .querySelectorAll("[data-id]")
@@ -938,9 +931,23 @@
         $("#detail").oninput = null;
         $("#detail").onchange = null;
         $("#detail").innerHTML =
-          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.status)}${i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
+          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.status)}${data.can_confirm ? '<button id="confirm-review" class="primary">確認できたので完了</button>' : ""}${i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
         bindBack();
         $("#edit")?.addEventListener("click", () => edit(i));
+        $("#confirm-review")?.addEventListener("click", async (e) => {
+          if (!canLeave()) return;
+          e.currentTarget.disabled = true;
+          try {
+            await api("/api", { action: "confirm", id: i.id, rev: i.rev });
+            dirty = false;
+            await select(i.id, false);
+            await refresh(true);
+            tell("確認済みとして完了しました");
+          } catch (error) {
+            if ($("#confirm-review")) $("#confirm-review").disabled = false;
+            tell(error.message, true);
+          }
+        });
         $("#follow-question")?.addEventListener("click", () =>
           newItem("question", i.id, i.scope),
         );
@@ -1035,7 +1042,7 @@
         current = i;
         $("#split").classList.add("show-detail");
         $("#detail").innerHTML =
-          `${top()}<div class="detail-top"><span class="id">${isNew ? "NEW RECORD" : esc(i.id)}</span><button id="cancel-edit">キャンセル</button></div><h2>${isNew ? "新しい項目" : "項目を編集"}</h2><form id="item-form"><div class="field-grid"><div><label for="f-kind">種類</label><select id="f-kind" name="kind" ${!isNew ? "disabled" : ""}>${options(Object.keys(kinds), i.kind, kinds)}</select></div><div><label for="f-status">状態</label><select id="f-status" name="status">${options(states[i.kind], i.status, labels)}</select></div></div>${input("title", "タイトル", i.title)}${input("scope", "範囲（今回・リリース・将来検討など）", i.scope)}${area("body", "説明・要望", i.body, 6)}${i.kind === "task" ? area("next_action", "次にすること", i.next_action, 2) + area("acceptance", "完了条件", i.acceptance, 2) + area("blocked_reason", "待機・障害の理由（待ち状態では必須）", i.blocked_reason, 2) + area("verification", "検証結果・根拠（自動／実機などを区別）", i.verification, 3) + area("checks", "完了チェック：1行につき [ ] または [x] 項目", (i.checks || []).map((c) => `[${c.done ? "x" : " "}] ${c.text}`).join("\n"), 3) : ""}${i.kind === "question" ? input("asked_by", "質問者", i.asked_by || "user") + input("answer_by", "回答者", i.answer_by || "assistant") + area("recommended", "推奨案", i.recommended, 2) + area("default_action", "未回答でも実行してよい内容（推奨案とは別）", i.default_action, 2) + `<label class="check"><input name="requires_answer" type="checkbox" ${i.requires_answer !== false ? "checked" : ""}>回答が来るまで関連作業を実行しない</label>` + area("answer", "回答", i.answer, 4) : ""}<details class="advanced"><summary>関連付け・根拠</summary>${input("parent_id", "親の項目ID", i.parent_id)}${i.kind === "task" ? input("depends_on", "先に完了が必要なタスクID（カンマ区切り）", (i.depends_on || []).join(", ")) + input("required_questions", "実行前に必要な質問ID（カンマ区切り）", (i.required_questions || []).join(", ")) + input("commit", "関連コミット", i.commit) : ""}${input("source", "出典・参照", i.source)}${area("resolution", "結論", i.resolution, 2)}</details><div class="actions"><button type="submit" class="primary">保存する</button><span class="hint">${isNew ? "新しいタスクは既定で未整理です。" : "同時更新があれば上書きせず通知します。"}</span></div></form>`;
+          `${top()}<div class="detail-top"><span class="id">${isNew ? "NEW RECORD" : esc(i.id)}</span><button id="cancel-edit">キャンセル</button></div><h2>${isNew ? "新しい項目" : "項目を編集"}</h2><form id="item-form"><div class="field-grid"><div><label for="f-kind">種類</label><select id="f-kind" name="kind" ${!isNew ? "disabled" : ""}>${options(Object.keys(kinds), i.kind, kinds)}</select></div><div><label for="f-status">状態</label><select id="f-status" name="status">${options(states[i.kind], i.status, labels)}</select></div></div>${input("title", "タイトル", i.title)}${input("scope", "範囲（今回・リリース・将来検討など）", i.scope)}${area("body", "説明・要望", i.body, 6)}${i.kind === "task" ? area("next_action", "次にすること", i.next_action, 2) + area("acceptance", "完了条件", i.acceptance, 2) + area("blocked_reason", "待機・障害の理由（待ち状態では必須）", i.blocked_reason, 2) + area("verification", "検証結果・根拠（自動／実機などを区別）", i.verification, 3) + `<label class="check"><input name="owner_review" type="checkbox" ${i.owner_review ? "checked" : ""}>動作・見た目の確認だけが残っている</label><p class="hint">確認待ち状態で、前提条件とチェック項目を満たすと完了ボタンが出ます。</p>` + area("checks", "完了チェック：1行につき [ ] または [x] 項目", (i.checks || []).map((c) => `[${c.done ? "x" : " "}] ${c.text}`).join("\n"), 3) : ""}${i.kind === "question" ? input("asked_by", "質問者", i.asked_by || "user") + input("answer_by", "回答者", i.answer_by || "assistant") + area("recommended", "推奨案", i.recommended, 2) + area("default_action", "未回答でも実行してよい内容（推奨案とは別）", i.default_action, 2) + `<label class="check"><input name="requires_answer" type="checkbox" ${i.requires_answer !== false ? "checked" : ""}>回答が来るまで関連作業を実行しない</label>` + area("answer", "回答", i.answer, 4) : ""}<details class="advanced"><summary>関連付け・根拠</summary>${input("parent_id", "親の項目ID", i.parent_id)}${i.kind === "task" ? input("depends_on", "先に完了が必要なタスクID（カンマ区切り）", (i.depends_on || []).join(", ")) + input("required_questions", "実行前に必要な質問ID（カンマ区切り）", (i.required_questions || []).join(", ")) + input("commit", "関連コミット", i.commit) : ""}${input("source", "出典・参照", i.source)}${area("resolution", "結論", i.resolution, 2)}</details><div class="actions"><button type="submit" class="primary">保存する</button><span class="hint">${isNew ? "新しいタスクは既定で未整理です。" : "同時更新があれば上書きせず通知します。"}</span></div></form>`;
         bindBack();
         trackForm();
         $("#cancel-edit").onclick = () => {
@@ -1108,6 +1115,7 @@
               }));
           if (i.kind === "question")
             data.requires_answer = f.has("requires_answer");
+          if (i.kind === "task") data.owner_review = f.has("owner_review");
           if (isNew) data.kind = f.get("kind");
           try {
             const saved = await api(
@@ -1209,12 +1217,14 @@
         list().catch((e) => tell(e.message, true));
       };
       $("#previous").onclick = () => {
-        offset = Math.max(0, offset - 30);
-        list().catch((e) => tell(e.message, true));
+        offset = Math.max(0, offset - pageSize);
+        list().then(() => $("#split").scrollIntoView({ block: "start" }))
+          .catch((e) => tell(e.message, true));
       };
       $("#next-page").onclick = () => {
-        offset += 30;
-        list().catch((e) => tell(e.message, true));
+        offset += pageSize;
+        list().then(() => $("#split").scrollIntoView({ block: "start" }))
+          .catch((e) => tell(e.message, true));
       };
       $("#new").onclick = () =>
         newItem(

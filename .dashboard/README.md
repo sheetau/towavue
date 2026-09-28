@@ -12,6 +12,10 @@ After a fresh clone, recover the private ledger from backup. A missing ledger do
 
 The UI provides tasks, questions, history and an archive; clicking a row opens its detail without replacing the list. New ideas default to inbox. Scope is separate from status: planned work in another release is not authorization to start it. A waiting/blocked task needs a reason. Tasks may link dependencies, prerequisite questions and acceptance checks. Starting/completing rejects unmet prerequisite questions/dependencies; completion also requires its checklist. An answer unlocks a gate but never starts a task. A recommended option is not consent; optional defaults must be explicit. Reopening a prerequisite does not erase historical completion evidence.
 
+Overview progress covers all task scopes and excludes inbox, canceled and archived records; questions and notes are not tasks. Filters and the current work scope never change this denominator. The dense layout uses a sticky header and normal document scrolling, with 12 list entries per page and content-height detail panels.
+
+Set `owner_review: true` only when human behavior/appearance confirmation is the remaining step. A waiting task then offers a one-button completion action if its prerequisites and acceptance checklist are satisfied. The `confirm` operation requires a user actor and current revision, records owner confirmation separately from prior automated evidence, and never answers questions or silently completes unfinished checks. Do not infer review eligibility merely from a waiting status or title.
+
 Question threads can link follow-up questions and implementation tasks. Humans may answer in the browser or chat. The main agent records chat answers with their provenance; it asks questions in chat, never through terminal prompts. Browser editing does not wake a stopped agent. Poll for updates at meaningful work boundaries and on session resumption.
 
 All write paths use transactions and revision checks. A stale form receives a conflict and retains its input. Reload/reconcile deliberately; do not retry blindly with a newer revision. Saved events use the actual UTC clock; the UI displays Japan time. Imported source dates remain separate, and absent original timestamps stay unknown. Imports preserve original requirements rather than treating old suggestions as new instructions.
@@ -58,6 +62,8 @@ python .dashboard/app.py --db .dashboard/recovered.sqlite restore --input .dashb
 ```
 
 Backups use SQLite's consistent backup API. Exports include project data, all records, revisions and events. JSON export refuses to overwrite an existing file. Restore validates into a temporary database and publishes only to a **new** destination. Verify recovered records before replacing the live database, and stop its server before any deliberate file replacement. Backups under this folder are recovery points, not protection against losing the drive; copy a completed backup/export to your normal private backup destination. The tool does not delete older backups.
+
+The header's Backup button creates another recovery snapshot under `.dashboard/backups/`. Edits already persist when saved; the button is useful before a bulk reorganization or import, not after every edit. Server startup also creates a snapshot. Copies remain on the same drive until you move a completed backup to your own backup storage.
 
 ## Public checkpoint
 

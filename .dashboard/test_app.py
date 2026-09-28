@@ -42,6 +42,49 @@ class LedgerTests(unittest.TestCase):
                                       "default_action": "Keep the existing color"}, "assistant")
         self.task(status="doing", required_questions=[optional["id"]])
 
+    def test_overall_progress_excludes_inbox_canceled_archives_and_non_tasks(self):
+        self.task(status="done", scope="current")
+        self.task(status="todo", scope="later")
+        self.task(status="waiting", scope="later", blocked_reason="Owner review")
+        self.task(status="inbox")
+        self.task(status="canceled")
+        self.task(status="done", scope="current", archived=True)
+        self.store.create({"kind": "note", "title": "Evidence"}, "assistant")
+        self.store.create({"kind": "question", "title": "Open"}, "assistant")
+        self.store.create({"kind": "question", "title": "Answered", "status": "answered", "answer": "Yes"}, "user")
+        brief = self.store.brief()
+        self.assertEqual(brief["progress"], {"done": 1, "total": 3})
+        self.assertEqual(brief["counts"], {"done": 1})
+        self.assertEqual(brief["open_questions"], 1)
+        self.store.update_project({"current_scope": "later"}, 1, "user")
+        self.assertEqual(self.store.brief()["progress"], brief["progress"])
+
+    def test_owner_confirmation_requires_explicit_review_and_preserves_gates(self):
+        task = self.task(status="waiting", blocked_reason="Review", owner_review=True,
+                         verification="Automated checks passed")
+        self.assertTrue(self.store.can_confirm(task))
+        with self.assertRaises(app.Problem):
+            self.store.confirm(task["id"], 1, "assistant")
+        result = self.store.confirm(task["id"], 1, "user")
+        self.assertEqual(result["status"], "done")
+        self.assertIn("Automated checks passed\nOwner confirmed", result["verification"])
+        self.assertEqual(result["blocked_reason"], "")
+        self.assertEqual(self.store.history(task["id"])[0]["actor"], "user")
+        with self.assertRaises(app.Problem):
+            self.store.confirm(task["id"], 1, "user")
+        question = self.store.create({"kind": "question", "title": "Needs an answer"}, "assistant")
+        prerequisite = self.task(status="todo")
+        for fields in [
+            {}, {"owner_review": True, "required_questions": [question["id"]]},
+            {"owner_review": True, "depends_on": [prerequisite["id"]]},
+            {"owner_review": True, "checks": [{"text": "Not validated", "done": False}]},
+        ]:
+            item = self.task(status="waiting", blocked_reason="Waiting", **fields)
+            self.assertFalse(self.store.can_confirm(item))
+            with self.assertRaises(app.Problem):
+                self.store.confirm(item["id"], item["rev"], "user")
+        self.assertFalse(self.store.can_confirm(question))
+
     def test_simultaneous_writes_preserve_winner_and_reject_stale_copy(self):
         t = self.task()
         barrier = threading.Barrier(2)

@@ -753,7 +753,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         // ScrollArea snaps to physical pixels, then egui's logical layout grid.
         let tolerance = 1.0 / f64::from(density) + f64::from(egui::emath::GUI_ROUNDING);
         assert!(
-            (selected_top - first_row_top).abs() <= tolerance,
+            (selected_top + f64::from(filmstrip::GALLERY_GAP) - first_row_top).abs() <= tolerance,
             "selected month aligns its first row at {density}x: {selected_top} vs {first_row_top}"
         );
         app.pending_guard = Some(GuardedAction::Exit);
@@ -788,7 +788,9 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         );
         let output = frame(&mut app, size, vec![]);
         assert!(
-            (card_top(&output, "july-10.png") - first_row_top).abs() <= tolerance,
+            (card_top(&output, "july-10.png") + f64::from(filmstrip::GALLERY_GAP) - first_row_top)
+                .abs()
+                <= tolerance,
             "keyboard activation uses the same month target"
         );
         let set = |value: &str| {

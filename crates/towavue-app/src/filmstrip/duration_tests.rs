@@ -125,7 +125,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         let egui::Shape::Mesh(mesh) = &output.shapes[image_index].shape else {
                             panic!("thumbnail mesh");
                         };
-                        let bounds = if gallery && index != 1 {
+                        let bounds = if index != 1 {
                             mesh.calc_bounds()
                         } else if let egui::Shape::Rect(card) =
                             &output.shapes[image_index - 1].shape
@@ -134,7 +134,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         } else {
                             panic!("audio Gallery or filmstrip card background")
                         };
-                        if gallery && index == 1 {
+                        if index == 1 {
                             let egui::Shape::Rect(card) = &output.shapes[image_index - 1].shape
                             else {
                                 panic!("audio background");
@@ -147,8 +147,20 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                             assert!(wave.center().distance(bounds.center()) < 0.001);
                             assert!((wave.width() - bounds.width()).abs() < 0.001);
                         }
-                        assert!((bounds.right() - background.rect.right() - 4.0).abs() < 0.01);
-                        assert!((bounds.bottom() - background.rect.bottom() - 4.0).abs() < 0.01);
+                        assert!(
+                            (background.rect.left()
+                                - (bounds.right() - background.rect.width() - 4.0)
+                                    .max(bounds.center().x))
+                            .abs()
+                                < 0.01
+                        );
+                        assert!(
+                            (background.rect.top()
+                                - (bounds.bottom() - background.rect.height() - 4.0)
+                                    .max(bounds.center().y))
+                            .abs()
+                                < 0.01
+                        );
                         let color = if index == 1 {
                             Color32::from_gray(0x80)
                         } else {
@@ -514,7 +526,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             &[70, 115, 180, 255]
                         );
                         assert_eq!(
-                            at(492.0, 114.0),
+                            at(492.0, 146.0),
                             &[90, 115, 180, 255],
                             "unhovered card remains visible at frame {frame}"
                         );

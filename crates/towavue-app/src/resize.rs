@@ -331,7 +331,16 @@ fn text_input_rows_with_id(
     };
     let mut response = ui
         .scope(|ui| {
-            ui.visuals_mut().weak_text_color = Some(crate::chrome::BORDER);
+            ui.visuals_mut().weak_text_color = Some(if framed {
+                crate::chrome::BORDER
+            } else {
+                ui.visuals()
+                    .widgets
+                    .noninteractive
+                    .fg_stroke
+                    .color
+                    .gamma_multiply(ui.visuals().disabled_alpha())
+            });
             chrome::text_edit(ui, editor.id(id).hint_text(label), rows > 1)
         })
         .inner;

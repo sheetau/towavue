@@ -91,17 +91,19 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             || self.palette_open
             || self.grid_open
             || egui::Popup::is_any_open(context)
-            || context
-                .input(|input| input.pointer.any_down() || !input.raw.hovered_files.is_empty())
+            || context.input(|input| !input.raw.hovered_files.is_empty())
+            || (context.input(|input| input.pointer.any_down()) && !gallery_rail::dragging(context))
         {
             PreparationPolicy::Paused
-        } else if self.retained_playback.values().any(|saved| {
-            !saved.prepared_only
-                && matches!(
-                    saved.state,
-                    towavue_core::PlaybackState::Loading | towavue_core::PlaybackState::Playing
-                )
-        }) {
+        } else if gallery_rail::dragging(context)
+            || self.retained_playback.values().any(|saved| {
+                !saved.prepared_only
+                    && matches!(
+                        saved.state,
+                        towavue_core::PlaybackState::Loading | towavue_core::PlaybackState::Playing
+                    )
+            })
+        {
             PreparationPolicy::Visible
         } else {
             PreparationPolicy::All
@@ -232,7 +234,11 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             .iter()
                             .map(|&(date, index)| gallery_rail::Month {
                                 date,
-                                offset: grid.offset(index),
+                                offset: if index == 0 {
+                                    0.0
+                                } else {
+                                    crate::filmstrip::GALLERY_GAP + grid.offset(index)
+                                },
                             })
                             .collect()
                     },

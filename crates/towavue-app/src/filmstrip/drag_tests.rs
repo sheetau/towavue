@@ -614,9 +614,13 @@ fn first_frame_trial(
                 let mut draw = |app: &mut Application<_>| {
                     let mut raw = input(vec![]);
                     // Settle pre-existing chrome fades before opening the new overlay.
-                    raw.time = Some(
-                        frame_number as f64 / 60.0 + if frame_number >= 3 { 1.0 } else { 0.0 },
-                    );
+                    // Freeze animation time after settling chrome: this control isolates
+                    // first-frame layout/upload from the intentional focus zoom.
+                    raw.time = Some(if frame_number >= 3 {
+                        1.0
+                    } else {
+                        frame_number as f64 / 60.0
+                    });
                     raw.viewports
                         .get_mut(&egui::ViewportId::ROOT)
                         .expect("viewport")
@@ -1170,11 +1174,11 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             })
             .collect::<Vec<_>>()
     };
-    assert_eq!(
-        outlines(&output),
-        [rect.expand(3.0)],
-        "hover replaces the current-item outline"
+    assert!(
+        outlines(&output).is_empty(),
+        "focus does not paint an outline"
     );
+    assert!(card(&output, &name).center().distance(rect.center()) < 0.01);
     let enter = || egui::Event::Key {
         key: egui::Key::Enter,
         physical_key: None,
@@ -1200,20 +1204,12 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         .1,
         &snapshot.items[1].path,
     );
-    let text = output
-        .shapes
-        .iter()
-        .find_map(|shape| match &shape.shape {
-            egui::Shape::Text(text) if text.galley.text() == name => Some(text),
-            _ => None,
-        })
-        .expect("one filename label");
-    assert_eq!(text.galley.rows.len(), 2);
-    let bounds = text.galley.rect.translate(text.pos.to_vec2());
-    assert!((bounds.bottom() - (rect.top() - 10.0)).abs() < 1.0);
-    assert!(bounds.width() > rect.width());
-    assert!((bounds.center().x - rect.center().x).abs() < 1.0);
-    let third = card(&output, "third.png");
+    assert!(
+        !output.shapes.iter().any(
+            |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == name)
+        ),
+        "filename stays accessibility-only"
+    );
     let third_id = output
         .platform_output
         .accesskit_update
@@ -1240,10 +1236,15 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         )]),
     )
     .0;
+    assert!(outlines(&output).is_empty());
     assert_eq!(
-        outlines(&output),
-        [third.expand(3.0)],
-        "explicit focus replaces stationary hover"
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .focus,
+        third_id
     );
     opened(
         frame(
@@ -1290,11 +1291,7 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         input(vec![]),
     )
     .0;
-    assert_eq!(
-        outlines(&output),
-        [rect.expand(3.0)],
-        "the unified target remains after the pointer leaves"
-    );
+    assert!(outlines(&output).is_empty());
     context.memory_mut(|memory| {
         if let Some(id) = memory.focused() {
             memory.surrender_focus(id);
@@ -1310,11 +1307,8 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         input(vec![]),
     )
     .0;
-    assert_eq!(
-        outlines(&reopened),
-        [card(&reopened, "source.png").expand(3.0)],
-        "returning filmstrip is immediately opaque with the current item selected"
-    );
+    assert!(outlines(&reopened).is_empty());
+    assert!(card(&reopened, "source.png").is_positive());
     // Batch navigation with activation, including wrapping into virtualized cards.
     for (shift, target) in [(false, 1), (false, 2), (false, 0), (true, 2), (true, 1)] {
         let mut raw = input(vec![
@@ -1337,7 +1331,7 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         let (output, actions) = frame(&mut strip, &context, &snapshot, current, true, raw);
         opened(actions, &snapshot.items[target].path);
         let selected = card(&output, &display_name(&snapshot.items[target].path));
-        assert_eq!(outlines(&output), [selected.expand(3.0)]);
+        assert!(outlines(&output).is_empty());
         assert!(selected.left() >= 8.0 && selected.right() <= 312.0);
     }
 }
@@ -1907,11 +1901,11 @@ fn filmstrip_drag_copies_the_owned_path_once_without_a_floating_preview() {
         let output = frame(&mut strip, &context, &snapshot, source, true, input(vec![])).0;
         let rect = card(&output, "other.png");
         assert!(
-            output.shapes.iter().any(|shape| matches!(
+            !output.shapes.iter().any(|shape| matches!(
                 &shape.shape, egui::Shape::Rect(shape)
                     if shape.rect == rect && shape.fill == crate::chrome::BORDER
             )),
-            "card uses the shared grayscale surface"
+            "image cards have no background decoration"
         );
         let origin = rect.center();
         let moved = origin + egui::vec2(12.0, -120.0);
@@ -3193,6 +3187,16 @@ fn filmstrip_side_gutters_paint_and_hit_test_visible_card_pixels() {
             let mut strip =
                 Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
                     .expect("strip");
+            for item in &snapshot.items {
+                let texture = context.load_texture(
+                    item.path.display().to_string(),
+                    egui::ColorImage::filled([3, 2], Color32::WHITE),
+                    egui::TextureOptions::LINEAR,
+                );
+                strip
+                    .previews
+                    .insert(item.path.clone(), Ok((texture, None)));
+            }
             let render = |strip: &mut Filmstrip, events| {
                 let mut raw = input(events);
                 raw.screen_rect = Some(Rect::from_min_size(
@@ -3226,9 +3230,7 @@ fn filmstrip_side_gutters_paint_and_hit_test_visible_card_pixels() {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect)
-                        if rect.rect == bounds && rect.fill == chrome::BORDER =>
-                    {
+                    egui::Shape::Mesh(mesh) if mesh.calc_bounds() == bounds => {
                         Some(shape.clip_rect)
                     }
                     _ => None,

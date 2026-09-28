@@ -56,6 +56,64 @@ fn card(output: &egui::FullOutput, label: &str) -> egui::Rect {
 }
 
 #[test]
+fn gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it() {
+    let Some(root) = tests::isolated_test_root(
+        "gallery_drag_tests::gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    context.global_style_mut(chrome::style);
+    app.ui_context = Some(context.clone());
+    app.recent_paths = (0..120)
+        .map(|index| root.join(format!("item-{index:03}.png")))
+        .collect();
+    for _ in 0..3 {
+        frame(&mut app, 1.0, vec![]);
+    }
+    let output = frame(&mut app, 1.0, vec![]).0;
+    let rail = card(&output, "Date unknown");
+    let start = rail.center();
+    frame(
+        &mut app,
+        1.0,
+        vec![egui::Event::PointerMoved(start), pointer(start, true)],
+    );
+    frame(
+        &mut app,
+        1.0,
+        vec![egui::Event::PointerMoved(start + egui::vec2(0.0, 40.0))],
+    );
+    assert!(matches!(
+        app.gallery_preparation_policy(&context),
+        filmstrip::PreparationPolicy::Visible
+    ));
+    app.palette_open = true;
+    assert!(matches!(
+        app.gallery_preparation_policy(&context),
+        filmstrip::PreparationPolicy::Paused
+    ));
+    app.palette_open = false;
+    frame(&mut app, 1.0, vec![pointer(start, false)]);
+    assert!(matches!(
+        app.gallery_preparation_policy(&context),
+        filmstrip::PreparationPolicy::All
+    ));
+    let header = egui::pos2(20.0, 20.0);
+    frame(
+        &mut app,
+        1.0,
+        vec![egui::Event::PointerMoved(header), pointer(header, true)],
+    );
+    assert!(matches!(
+        app.gallery_preparation_policy(&context),
+        filmstrip::PreparationPolicy::Paused
+    ));
+}
+
+#[test]
 fn gallery_thumbnail_gap_and_gutter_drags_scroll_without_opening_media() {
     let Some(root) = tests::isolated_test_root(
         "gallery_drag_tests::gallery_thumbnail_gap_and_gutter_drags_scroll_without_opening_media",

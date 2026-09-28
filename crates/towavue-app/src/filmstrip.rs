@@ -32,8 +32,9 @@ fn click_modifiers(response: &egui::Response) -> egui::Modifiers {
     })
 }
 
+#[cfg(test)]
 const STEP: f32 = 128.0;
-const HEIGHT: f32 = 118.0;
+const HEIGHT: f32 = 136.0;
 
 type Preview = Result<(TextureHandle, Option<Duration>), String>;
 
@@ -58,6 +59,7 @@ pub(crate) enum PreparationPolicy {
 }
 
 mod drag;
+mod layout;
 pub(crate) mod swipe;
 
 // Retain the transfer implementation while Gallery gestures scroll the grid.
@@ -84,7 +86,7 @@ fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {
 
 fn gallery_video_uv(image: &towavue_runtime_windows::PreviewImage) -> Rect {
     // Shared video previews contain transparent padding. Exclude it only for
-    // Gallery geometry; opaque black source pixels and Filmstrip stay intact.
+    // thumbnail geometry; opaque black source pixels stay intact.
     let mut bounds = Rect::NOTHING;
     for (index, pixel) in image.rgba.as_chunks::<4>().0.iter().enumerate() {
         if pixel[3] != 0 {
@@ -168,6 +170,7 @@ pub struct Filmstrip {
     card_paths: Vec<(egui::Id, PathBuf, usize)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
+    layout: layout::Layout,
     drag: drag::State,
     recent_drag: drag::State,
     swipe: swipe::State,
@@ -205,6 +208,7 @@ impl Filmstrip {
             card_paths: Vec::new(),
             tab_navigation: None,
             scroll_offset: 0.0,
+            layout: layout::Layout::default(),
             drag: drag::State::default(),
             recent_drag: drag::State::default(),
             swipe: swipe::State::default(),
@@ -744,38 +748,6 @@ impl Filmstrip {
         let frame = context.cumulative_frame_nr();
         let can_focus =
             enabled && !egui::Popup::is_any_open(context) && context.input(|input| input.focused);
-        if can_focus && !context.text_edit_focused() {
-            let direction = context.input_mut(|input| {
-                let mut direction = None;
-                input.events.retain(|event| {
-                    if let egui::Event::Key {
-                        key,
-                        pressed: true,
-                        modifiers: egui::Modifiers::NONE,
-                        ..
-                    } = event
-                    {
-                        let next = match key {
-                            egui::Key::A => Some(egui::FocusDirection::Left),
-                            egui::Key::D => Some(egui::FocusDirection::Right),
-                            _ => None,
-                        };
-                        if next.is_some() {
-                            direction = next;
-                            return false;
-                        }
-                    }
-                    true
-                });
-                direction
-            });
-            if let Some(direction) = direction {
-                self.swipe.clear();
-                // Use the same spatial focus traversal and reveal as arrow keys.
-                // Consuming the event prevents another move on a discarded pass.
-                context.memory_mut(|memory| memory.move_focus(direction));
-            }
-        }
         let relocated_focus = if can_focus && !recenter && !self.focus_requested {
             context
                 .memory(|memory| memory.focused())
@@ -800,14 +772,25 @@ impl Filmstrip {
         } else {
             None
         };
-        let tab_target = if can_focus {
+        let tab_target = if can_focus && !context.text_edit_focused() {
             if let Some((_, target)) = self.tab_navigation.filter(|(saved, _)| *saved == frame) {
                 Some(target)
             } else if let Some(count) =
                 snapshot
                     .map(|snapshot| snapshot.items.len())
                     .filter(|count| {
-                        *count > 0 && context.input(|input| input.key_pressed(egui::Key::Tab))
+                        *count > 0
+                            && context.input(|input| {
+                                [
+                                    egui::Key::Tab,
+                                    egui::Key::ArrowLeft,
+                                    egui::Key::ArrowRight,
+                                    egui::Key::A,
+                                    egui::Key::D,
+                                ]
+                                .iter()
+                                .any(|key| input.key_pressed(*key))
+                            })
                     })
             {
                 let mut target = if recenter || self.focus_requested {
@@ -831,18 +814,27 @@ impl Filmstrip {
                 context.input_mut(|input| {
                     input.events.retain(|event| {
                         if let egui::Event::Key {
-                            key: egui::Key::Tab,
+                            key,
                             pressed: true,
                             modifiers,
                             ..
                         } = event
+                            && (matches!(
+                                key,
+                                egui::Key::Tab
+                                    | egui::Key::ArrowLeft
+                                    | egui::Key::ArrowRight
+                                    | egui::Key::A
+                                    | egui::Key::D
+                            ))
                             && (*modifiers == egui::Modifiers::NONE
-                                || *modifiers == egui::Modifiers::SHIFT)
+                                || (*key == egui::Key::Tab && *modifiers == egui::Modifiers::SHIFT))
                         {
-                            target = if modifiers.shift {
-                                (target + count - 1) % count
-                            } else {
-                                (target + 1) % count
+                            target = match key {
+                                egui::Key::Tab if modifiers.shift => (target + count - 1) % count,
+                                egui::Key::Tab => (target + 1) % count,
+                                egui::Key::A | egui::Key::ArrowLeft => target.saturating_sub(1),
+                                _ => (target + 1).min(count - 1),
                             };
                             changed = true;
                             false
@@ -859,7 +851,7 @@ impl Filmstrip {
             None
         };
         if let Some(target) = tab_target {
-            // Own Tab traversal instead of egui's global widget order. Reuse this
+            // Resolve folder traversal before virtualization, including offscreen neighbors. Reuse this
             // target across discarded passes so one key cannot advance twice.
             self.tab_navigation = Some((frame, target));
             context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
@@ -867,6 +859,14 @@ impl Filmstrip {
         let focus_target = tab_target
             .or(relocated_focus)
             .or_else(|| self.focus_requested.then_some(selected).flatten());
+        if let Some(snapshot) = snapshot {
+            self.layout.prepare(
+                snapshot,
+                &self.previews,
+                &self.gallery_video_uvs,
+                &mut self.scroll_offset,
+            );
+        }
         let mut wanted = Vec::new();
         let mut band = None;
         egui::Area::new("filmstrip".into())
@@ -919,8 +919,7 @@ impl Filmstrip {
                 };
                 let background =
                     ui.interact(screen, ui.id().with("filmstrip-swipe"), egui::Sense::drag());
-                let padding = ((inset.width() - STEP) / 2.0).max(0.0);
-                let content_width = snapshot.items.len() as f32 * STEP + padding * 2.0;
+                let content_width = self.layout.width(inset.width());
                 self.swipe.update(
                     &background,
                     snapshot,
@@ -955,7 +954,8 @@ impl Filmstrip {
                     || relocated_focus.is_some()
                 {
                     scroll = scroll.horizontal_scroll_offset(
-                        focus_target.or(selected).unwrap_or(0) as f32 * STEP,
+                        self.layout
+                            .center_offset(focus_target.or(selected).unwrap_or(0)),
                     );
                 }
                 let output = scroll.show_viewport_styled(ui, |ui, viewport| {
@@ -967,25 +967,22 @@ impl Filmstrip {
                     ui.set_clip_rect(clip);
                     let origin = ui.min_rect().min;
                     ui.set_min_size(egui::vec2(content_width, viewport.height()));
-                    let range = visible_range(viewport, padding, snapshot.items.len());
-                    let card_rect = |index| {
-                        Rect::from_min_size(
-                            origin
-                                + egui::vec2(
-                                    padding + index as f32 * STEP + 4.0,
-                                    (viewport.height() - HEIGHT) / 2.0 + 24.0,
-                                ),
-                            egui::vec2(120.0, 80.0),
-                        )
-                    };
+                    let range = self.layout.visible(viewport);
+                    let card_rect = |index| self.layout.rect(index, origin, viewport.size());
                     // Set the shared target before creating any button so queued
                     // pointer or Tab navigation + Enter cannot activate the old target.
                     let pointer_target =
                         (pointer_moved && ui.is_enabled() && focus_target.is_none())
                             .then(|| {
-                                range
-                                    .clone()
-                                    .find(|index| ui.rect_contains_pointer(card_rect(*index)))
+                                range.clone().find(|index| {
+                                    let id = ui
+                                        .id()
+                                        .with(("filmstrip-item", &snapshot.items[*index].path));
+                                    ui.rect_contains_pointer(context.read_response(id).map_or_else(
+                                        || card_rect(*index),
+                                        |response| response.rect,
+                                    ))
+                                })
                             })
                             .flatten()
                             .map(|index| {
@@ -1011,7 +1008,25 @@ impl Filmstrip {
                         if !deleted {
                             wanted.push((item.path.clone(), item.kind));
                         }
-                        let rect = card_rect(index);
+                        let base = card_rect(index);
+                        let id = ui.id().with(("filmstrip-item", &item.path));
+                        let presented_rect = context
+                            .read_response(id)
+                            .map_or(base, |response| response.rect);
+                        let hovered = ui.is_enabled()
+                            && context
+                                .read_response(id)
+                                .is_some_and(|response| response.hovered() || response.has_focus());
+                        let hover = context.animate_bool_with_time_and_easing(
+                            id.with("thumbnail-hover"),
+                            hovered,
+                            0.32,
+                            egui::emath::easing::cubic_out,
+                        );
+                        let rect = Rect::from_center_size(
+                            base.center(),
+                            base.size() * (1.0 + 0.05 * hover),
+                        );
                         let response = ui
                             .interact(
                                 rect,
@@ -1027,7 +1042,9 @@ impl Filmstrip {
                             .push((response.id, item.path.clone(), index));
                         let active = selected == Some(index);
                         if !deleted {
-                            self.drag.observe(&response, &item.path);
+                            let mut drag_response = response.clone();
+                            drag_response.rect = presented_rect;
+                            self.drag.observe(&drag_response, &item.path);
                         }
                         if focus_target == Some(index)
                             && response.enabled()
@@ -1065,31 +1082,37 @@ impl Filmstrip {
                         cards.push((index, response));
                     }
                     self.focused_card = focused_card;
-                    let highlighted = cards
-                        .iter()
-                        .find(|(_, response)| response.has_focus())
-                        .map(|(index, _)| *index)
-                        .or(selected);
                     for (index, response) in cards {
                         let item = &snapshot.items[index];
                         let deleted = self.held_deleted.as_ref() == Some(&item.path);
                         let rect = response.rect;
-                        ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
                         match self.previews.get(&item.path) {
                             Some(Ok((texture, duration))) => {
-                                let scale = (rect.width() / texture.size_vec2().x)
-                                    .min(rect.height() / texture.size_vec2().y);
-                                ui.painter().image(
-                                    texture.id(),
+                                let target = if item.kind == MediaKind::Audio {
+                                    ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
                                     Rect::from_center_size(
                                         rect.center(),
-                                        texture.size_vec2() * scale,
-                                    ),
-                                    Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                                        egui::vec2(rect.width(), rect.height() * (2.0 / 3.0)),
+                                    )
+                                } else {
+                                    rect
+                                };
+                                ui.painter().image(
+                                    texture.id(),
+                                    target,
+                                    self.gallery_video_uvs
+                                        .get(&item.path)
+                                        .copied()
+                                        .unwrap_or_else(|| {
+                                            Rect::from_min_max(
+                                                egui::Pos2::ZERO,
+                                                egui::pos2(1.0, 1.0),
+                                            )
+                                        }),
                                     thumbnail_tint(item.kind),
                                 );
                                 if let Some(duration) = duration {
-                                    draw_preview_duration(ui, rect, *duration, 10.0);
+                                    draw_duration(ui, rect, *duration, 10.0, true);
                                 }
                             }
                             _ if deleted => {
@@ -1111,29 +1134,6 @@ impl Filmstrip {
                                 );
                             }
                             None => {}
-                        }
-                        if highlighted == Some(index) {
-                            ui.painter().rect_stroke(
-                                rect.expand(3.0),
-                                2.0,
-                                egui::Stroke::new(1.0, Color32::WHITE),
-                                egui::StrokeKind::Inside,
-                            );
-                            let mut label = egui::text::LayoutJob::simple(
-                                filmstrip_label(&item.path, deleted, language),
-                                egui::TextStyle::Body.resolve(ui.style()),
-                                Color32::WHITE,
-                                screen.width().min(192.0),
-                            );
-                            label.wrap.max_rows = 2;
-                            label.wrap.break_anywhere = true;
-                            label.halign = egui::Align::Center;
-                            let label = ui.fonts_mut(|fonts| fonts.layout_job(label));
-                            ui.painter().galley(
-                                egui::pos2(rect.center().x, rect.top() - 10.0 - label.size().y),
-                                label,
-                                Color32::WHITE,
-                            );
                         }
                         if !deleted {
                             crate::thumbnail_menu::show(
@@ -1575,10 +1575,6 @@ fn filmstrip_label(path: &Path, deleted: bool, language: localization::Language)
     }
 }
 
-fn draw_preview_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32) {
-    draw_duration(ui, rect, duration, font_size, false);
-}
-
 fn draw_gallery_duration(ui: &egui::Ui, rect: Rect, duration: Duration) {
     draw_duration(ui, rect, duration, 11.0, true);
 }
@@ -1657,12 +1653,6 @@ fn neighbor_index(selected: usize, count: usize, rank: usize) -> usize {
     } else {
         selected + (rank - paired)
     }
-}
-
-fn visible_range(viewport: Rect, padding: f32, count: usize) -> Range<usize> {
-    let start = (((viewport.left() - padding) / STEP).floor().max(0.0) as usize).min(count);
-    let end = (((viewport.right() - padding) / STEP).ceil().max(0.0) as usize).min(count);
-    start..end.min(start + VISIBLE_PREVIEW_LIMIT)
 }
 
 #[cfg(test)]
@@ -4150,7 +4140,7 @@ mod tests {
     }
 
     #[test]
-    fn highlighted_title_is_centered_above_the_thumbnail_and_wraps_to_two_rows() {
+    fn filmstrip_has_no_filename_caption_and_keeps_accessible_names() {
         let root =
             std::env::temp_dir().join(format!("towavue-filmstrip-title-{}", std::process::id()));
         let names = [
@@ -4229,23 +4219,10 @@ mod tests {
                             _ => None,
                         })
                         .collect();
-                    assert_eq!(titles.len(), 1, "only the highlighted item has a title");
-                    let (clip, text) = titles[0];
-                    assert_eq!(text.galley.text(), *name);
-                    assert_eq!(text.galley.rows.len(), index + 1);
-                    let title = text.galley.rect.translate(text.pos.to_vec2());
                     assert!(
-                        (title.center().x - ((bounds.x0 + bounds.x1) * 0.5) as f32).abs() < 1.0
+                        titles.is_empty(),
+                        "filenames remain accessible without a painted caption"
                     );
-                    assert!(
-                        (title.bottom() - (bounds.y0 as f32 - 10.0)).abs() < 1.0,
-                        "title above thumbnail: {title:?}, {bounds:?}"
-                    );
-                    assert!(
-                        clip.contains_rect(title),
-                        "title remains visible: {clip:?}, {title:?}"
-                    );
-                    assert!(title.width() <= 192.0);
                     if let Some(y) = thumbnail_y {
                         assert_eq!(bounds.y0, y, "wrapping does not move thumbnail geometry");
                     }
@@ -4548,8 +4525,8 @@ mod tests {
                         );
                         assert_eq!(
                             text.iter().any(|text| text.contains("fixture.png")),
-                            mode != 2,
-                            "only Filmstrip and seek retain captions: mode {mode}"
+                            mode == 1,
+                            "only seek retains captions: mode {mode}"
                         );
                         assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
                         assert_eq!(output.pixels_per_point, density);
@@ -4746,27 +4723,6 @@ mod tests {
         assert!(strip.visible.is_empty() && strip.previews.is_empty());
         drop(strip);
         std::fs::remove_dir_all(root).expect("remove owned preview cache");
-    }
-
-    #[test]
-    fn visible_range_clamps_empty_edges_and_large_viewports() {
-        let viewport =
-            |left, width| Rect::from_min_size(egui::pos2(left, 0.0), egui::vec2(width, HEIGHT));
-        assert_eq!(visible_range(viewport(0.0, 960.0), 416.0, 0), 0..0);
-        assert_eq!(visible_range(viewport(0.0, 960.0), 416.0, 50_000), 0..5);
-        assert_eq!(
-            visible_range(viewport(128_000.0, 960.0), 416.0, 50_000),
-            996..1005
-        );
-        assert_eq!(
-            visible_range(viewport(128_000.0, 960.0), 416.0, 1000),
-            996..1000
-        );
-        assert_eq!(visible_range(viewport(128_000.0, 960.0), 416.0, 10), 10..10);
-        assert_eq!(
-            visible_range(viewport(0.0, 100_000.0), 0.0, 50_000),
-            0..VISIBLE_PREVIEW_LIMIT
-        );
     }
 
     #[test]

@@ -253,7 +253,17 @@ fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
                 "October 2026",
                 "September 2026",
             ][(fraction * 4.0) as usize];
-            let help = label(&hovered, name);
+            let help = hovered
+                .output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == name => {
+                        Some(text.visual_bounding_rect())
+                    }
+                    _ => None,
+                })
+                .expect("visible month label");
             assert!((help.center().y - line[0].y).abs() <= 1.0 / density);
             assert!(help.right() <= line[0].x - 4.0);
             let clicked = frame(
@@ -290,7 +300,17 @@ fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
             true,
             vec![egui::Event::PointerMoved(end)],
         );
-        let help = label(&dragged, "October 2026");
+        let help = dragged
+            .output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "October 2026" => {
+                    Some(text.visual_bounding_rect())
+                }
+                _ => None,
+            })
+            .expect("visible dragged month label");
         assert!(
             (help.center().y - marker(&dragged, chrome::FOREGROUND)[0].y).abs() <= 1.0 / density
         );
@@ -392,6 +412,18 @@ fn paint_only_month_help_does_not_intercept_underlying_clicks() {
         };
         frame(vec![egui::Event::PointerMoved(position)]);
         let output = frame(vec![]).0;
+        let text = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "September 2026" => Some(text),
+                _ => None,
+            })
+            .expect("month label");
+        assert!(
+            (text.visual_bounding_rect().center().y - position.y).abs() < 0.01,
+            "visible glyphs are vertically centered"
+        );
         assert!(
             output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Text(text) if text.galley.text() == "September 2026"

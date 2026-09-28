@@ -132,42 +132,7 @@ pub fn show(
         .horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.spacing_mut().button_padding = egui::vec2(2.0, 0.0);
-            let search_changed = search_field(ui, query, filter, paths);
-            for (command, label, icon) in [
-                (
-                    CommandId::OpenFile,
-                    Text::GalleryOpenFile.in_language(language),
-                    chrome::Icon::OpenFile,
-                ),
-                (
-                    CommandId::OpenFolder,
-                    Text::GalleryOpenFolder.in_language(language),
-                    chrome::Icon::OpenFolder,
-                ),
-            ] {
-                let response = ui
-                    .scope(|ui| {
-                        chrome::surface_hover(ui);
-                        ui.add_sized(
-                            [chrome::SEARCH_BUTTON_SIZE, chrome::SEARCH_BUTTON_SIZE],
-                            egui::Button::new(icon.text())
-                                .stroke(egui::Stroke::NONE)
-                                .frame_when_inactive(false),
-                        )
-                    })
-                    .inner
-                    .help_text(format!(
-                        "{label}  {}",
-                        shortcuts.label(command, Default::default())
-                    ));
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
-                });
-                if response.clicked() {
-                    chosen = Some(command);
-                }
-            }
-            search_changed
+            search_field(ui, query, filter, paths, shortcuts, &mut chosen)
         })
         .inner;
     ui.advance_cursor_after_rect(header.min_rect());
@@ -250,7 +215,7 @@ pub fn show(
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(egui::Rect::from_min_size(
-                    ui.cursor().min + egui::vec2(left, 0.0),
+                    ui.cursor().min + egui::vec2(left, crate::filmstrip::GALLERY_GAP),
                     egui::vec2(width, 0.0),
                 ))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
@@ -285,28 +250,30 @@ fn search_field(
     query: &mut String,
     filter: &mut Option<MediaKind>,
     paths: &[std::path::PathBuf],
+    shortcuts: &ShortcutBindings,
+    chosen: &mut Option<CommandId>,
 ) -> bool {
     let language = localization::language(ui.ctx());
     let (outer, _) = ui.allocate_exact_size(
-        egui::vec2(
-            (ui.available_width() - 2.0 * (chrome::SEARCH_BUTTON_SIZE + 4.0)).max(72.0),
-            chrome::INPUT_HEIGHT,
-        ),
+        egui::vec2(ui.available_width().max(128.0), chrome::INPUT_HEIGHT),
         egui::Sense::hover(),
     );
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     let ui = &mut content;
     let background = ui.painter().add(egui::Shape::Noop);
-    let clear_rect = egui::Rect::from_min_size(
-        outer.right_top() + egui::vec2(-chrome::SEARCH_BUTTON_SIZE - 2.0, 2.0),
-        egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
-    );
-    let filter_rect = clear_rect.translate(egui::vec2(-chrome::SEARCH_BUTTON_SIZE - 2.0, 0.0));
-    // The editor owns only the text slot. Its native horizontal scrolling and
-    // caret clipping stop before the two independent button hit regions.
+    let button_step = chrome::SEARCH_BUTTON_SIZE + 2.0;
+    let buttons = [0.0, button_step, 2.0 * button_step, 3.0 * button_step].map(|offset| {
+        egui::Rect::from_min_size(
+            outer.right_top() + egui::vec2(-button_step - offset, 2.0),
+            egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
+        )
+    });
+    let clear_rect = buttons[3];
+    let filter_rect = buttons[2];
+    // Keep text scrolling and caret clipping outside all button hit regions.
     let text_rect = egui::Rect::from_min_max(
         outer.min,
-        egui::pos2(filter_rect.left() - 2.0, outer.bottom()),
+        egui::pos2(clear_rect.left() - 2.0, outer.bottom()),
     );
     let mut search = ui.put(text_rect, |ui: &mut egui::Ui| {
         ui.spacing_mut().text_edit_width = f32::INFINITY;
@@ -385,6 +352,39 @@ fn search_field(
             Text::GalleryClear.in_language(language),
         )
     });
+    for (rect, command, label, icon) in [
+        (
+            buttons[1],
+            CommandId::OpenFile,
+            Text::GalleryOpenFile,
+            chrome::Icon::OpenFile,
+        ),
+        (
+            buttons[0],
+            CommandId::OpenFolder,
+            Text::GalleryOpenFolder,
+            chrome::Icon::OpenFolder,
+        ),
+    ] {
+        let label = label.in_language(language);
+        let response = chrome::surface_icon_button_at(
+            ui,
+            rect,
+            egui::Button::new(icon.text())
+                .stroke(egui::Stroke::NONE)
+                .frame_when_inactive(false),
+        )
+        .help_text(format!(
+            "{label}  {}",
+            shortcuts.label(command, Default::default())
+        ));
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
+        });
+        if response.clicked() {
+            *chosen = Some(command);
+        }
+    }
     let clear_key = ui.is_enabled()
         && (search.has_focus()
             || ui.memory(|memory| {
@@ -414,11 +414,11 @@ fn search_field(
     let stroke = if search.has_focus() {
         ui.visuals().selection.stroke
     } else {
-        ui.visuals().widgets.hovered.bg_stroke
+        egui::Stroke::NONE
     };
     ui.painter().set(
         background,
-        egui::Shape::rect_filled(outer, chrome::INPUT_RADIUS, chrome::BACKGROUND),
+        egui::Shape::rect_filled(outer, chrome::INPUT_RADIUS, egui::Color32::from_gray(12)),
     );
     ui.painter().rect_stroke(
         outer,
@@ -649,7 +649,8 @@ mod tests {
             let track = node_rect(&idle, "Date unknown");
             let grid_top = grid_origin.get();
             assert!(
-                (grid_clip.get().top() - grid_top).abs() <= 1.0 / density,
+                (grid_clip.get().top() + crate::filmstrip::GALLERY_GAP - grid_top).abs()
+                    <= 1.0 / density,
                 "initial clip {:?}, grid top {grid_top}, density {density}",
                 grid_clip.get()
             );
@@ -694,7 +695,8 @@ mod tests {
                 }
                 let scrolled = marker(&frame(vec![]));
                 assert!(
-                    (grid_clip.get().top() - grid_top).abs() <= 1.0 / density,
+                    (grid_clip.get().top() + crate::filmstrip::GALLERY_GAP - grid_top).abs()
+                        <= 1.0 / density,
                     "scrolling cannot paint into the header gap"
                 );
                 if gutter.y < track.top() {
@@ -796,14 +798,14 @@ mod tests {
                     }
                     let filter_rect = node_rect(&output, "Filter media types");
                     let clear = node_rect(&output, "Clear Gallery search");
-                    assert!(search.right() < filter_rect.left());
-                    assert!(filter_rect.right() < clear.left());
+                    assert!(search.right() < clear.left());
+                    assert!(clear.right() < filter_rect.left());
                     let border = output
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
                             egui::Shape::Rect(rect)
-                                if rect.stroke.color == chrome::BORDER
+                                if rect.fill == egui::Color32::from_gray(12)
                                     && rect.rect.contains_rect(clear)
                                     && rect.rect.contains_rect(search) =>
                             {
@@ -817,12 +819,14 @@ mod tests {
                         "header top matches its side inset: {border:?}"
                     );
                     assert!(
-                        (grid_top.get() - border.bottom() - 8.0).abs() <= 1.0 / density,
+                        (grid_top.get() - border.bottom() - 8.0 - crate::filmstrip::GALLERY_GAP)
+                            .abs()
+                            <= 1.0 / density,
                         "header/body gap matches the side inset: {} vs {border:?}",
                         grid_top.get()
                     );
                     assert!(border.right() - clear.right() >= 1.0);
-                    assert!(node_rect(&output, "Open File…").left() > border.right());
+                    assert!(border.contains_rect(node_rect(&output, "Open File…")));
                     let icon = output
                         .shapes
                         .iter()
@@ -993,7 +997,7 @@ mod tests {
                 assert!(clear.1.is_disabled(), "empty clear retains a disabled slot");
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text() == "Search Gallery"
-                        && text.galley.job.sections.iter().all(|s| s.format.color == chrome::BORDER))));
+                        && text.galley.job.sections.iter().all(|s| s.format.color == chrome::MUTED.gamma_multiply(context.global_style().visuals.disabled_alpha())))));
                 frame(vec![egui::Event::Text("new search".into())]);
                 assert_eq!(query.borrow().as_str(), "new search");
                 let escape = || egui::Event::Key {
@@ -1190,9 +1194,9 @@ mod tests {
             let open = node_rect(&output, Text::GalleryOpenFile.in_language(language));
             let folder = node_rect(&output, Text::GalleryOpenFolder.in_language(language));
             assert!(
-                search.right() < filter.left()
-                    && filter.right() < clear.left()
-                    && clear.right() < open.left()
+                search.right() < clear.left()
+                    && clear.right() < filter.left()
+                    && filter.right() < open.left()
                     && open.right() < folder.left(),
                 "separate slots: {search:?}, {filter:?}, {clear:?}, {open:?}, {folder:?}"
             );
@@ -1206,7 +1210,7 @@ mod tests {
                 .expect("Gallery placeholder");
             assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);
             assert!((search.left() - grid.get().left()).abs() <= 1.0 / density);
-            assert!((folder.right() - grid.get().right()).abs() <= 1.0 / density);
+            assert!((folder.right() + 2.0 - grid.get().right()).abs() <= 1.0 / density);
             let border = |output: &egui::FullOutput| {
                 output
                     .shapes
@@ -1215,7 +1219,7 @@ mod tests {
                         egui::Shape::Rect(rect)
                             if rect.rect.contains_rect(search)
                                 && rect.rect.contains_rect(clear)
-                                && rect.stroke.width > 0.0 =>
+                                && rect.fill == egui::Color32::from_gray(12) =>
                         {
                             Some(rect.stroke)
                         }
@@ -1227,7 +1231,7 @@ mod tests {
             frame(vec![egui::Event::PointerMoved(search.center())]);
             let hovered = frame(vec![egui::Event::PointerMoved(search.center())]).0;
             assert_eq!(border(&hovered), idle_border);
-            assert_eq!(idle_border, egui::Stroke::new(1.0, chrome::BORDER));
+            assert_eq!(idle_border, egui::Stroke::NONE);
             assert!((open.center().y - folder.center().y).abs() < 1.0);
             assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(folder));
             for (label, command) in [

@@ -380,14 +380,14 @@ impl KeyboardSettings {
         let stroke = if search.has_focus() {
             ui.visuals().selection.stroke
         } else {
-            ui.visuals().widgets.hovered.bg_stroke
+            egui::Stroke::NONE
         };
         ui.painter().set(
             background,
             egui::epaint::RectShape::new(
                 outer,
                 chrome::INPUT_RADIUS,
-                egui::Color32::BLACK,
+                egui::Color32::from_gray(12),
                 stroke,
                 egui::StrokeKind::Inside,
             ),

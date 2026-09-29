@@ -237,10 +237,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         let now = Instant::now();
         self.volume_hud.changed(id, self.media_generation, now);
-        self.tab_volume_huds
-            .entry(id)
-            .or_default()
-            .changed(id, 0, now);
         self.request_redraw();
     }
 

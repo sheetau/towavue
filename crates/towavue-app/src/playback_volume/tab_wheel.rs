@@ -26,6 +26,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if self.tabs.active_id() == Some(id) && self.path.as_deref() == Some(path) {
             self.set_playback_volume(level);
+            self.tab_volume_huds
+                .entry(id)
+                .or_default()
+                .changed(id, 0, Instant::now());
             return;
         }
         let volume = self.playback_volumes.entry(id).or_default();
@@ -60,6 +64,84 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_tab_title_volume_requires_tab_or_card_wheel_input() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "playback_volume::tab_wheel::tests::active_tab_title_volume_requires_tab_or_card_wheel_input",
+        ) else {
+            return;
+        };
+        for kind in [MediaKind::Audio, MediaKind::Video] {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            context.global_style_mut(chrome::style);
+            app.ui_context = Some(context.clone());
+            let path = root.join(if kind == MediaKind::Audio {
+                "audio.wav"
+            } else {
+                "video.mp4"
+            });
+            let id = app.tabs.open_new(path.clone(), kind);
+            app.tabs.close_gallery(app.tabs.gallery().expect("gallery"));
+            app.path = Some(path.clone());
+            app.media_kind = Some(kind);
+            let percentages = |app: &mut Application<_>| {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 576.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.draw_top_bar(ui, &mut Vec::new()),
+                );
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text().ends_with('%') => {
+                            Some(text.galley.text().to_owned())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            };
+            for _ in 0..3 {
+                percentages(&mut app);
+            }
+            // This action is shared by media-wheel and media-HUD gestures.
+            app.handle_ui_action(UiAction::Volume(id, 0.7));
+            assert!(
+                app.volume_hud
+                    .title_opacity(&context, (id, app.media_generation), Instant::now())
+                    .is_some()
+            );
+            assert!(percentages(&mut app).is_empty());
+            app.dispatch(CommandId::VolumeUp);
+            assert!(percentages(&mut app).is_empty());
+            app.dispatch(CommandId::ToggleMute);
+            assert!(percentages(&mut app).is_empty());
+            app.toggle_tab_mute(id);
+            assert!(percentages(&mut app).is_empty());
+            assert!(app.tab_volume_huds.is_empty());
+
+            app.tab_volume_wheel(id, &path, &[1.0]);
+            assert_eq!(percentages(&mut app), vec!["74%"]);
+            let mut expired = volume_hud::Hud::default();
+            expired.changed(id, 0, Instant::now() - Duration::from_secs(2));
+            app.tab_volume_huds.insert(id, expired);
+            app.handle_ui_action(UiAction::Volume(id, 0.6));
+            app.toggle_tab_mute(id);
+            assert!(
+                percentages(&mut app).is_empty(),
+                "other controls must not renew the title timer"
+            );
+            app.tab_volume_wheel(id, &path, &[1.0]);
+            assert_eq!(percentages(&mut app), vec!["2%"]);
+        }
+    }
 
     #[test]
     fn background_wheel_preserves_activation_edits_and_rejects_stale_targets() {

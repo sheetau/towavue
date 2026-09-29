@@ -130,7 +130,6 @@ pub(super) fn paint(
             let kind = MediaKind::from_path(path);
             let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
             let target = if kind == Some(MediaKind::Audio) {
-                painter.rect_filled(image_rect, 0.0, crate::chrome::BORDER);
                 egui::Rect::from_center_size(
                     image_rect.center(),
                     egui::vec2(image_rect.width(), image_rect.height() * (2.0 / 3.0)),

@@ -5831,19 +5831,11 @@ where
                                     tab_ui.visuals_mut().widgets.active.bg_stroke =
                                         egui::Stroke::NONE;
                                     let now = Instant::now();
-                                    let notice = active
-                                        .then(|| {
-                                            self.volume_hud.title_opacity(
-                                                tab_ui.ctx(),
-                                                (tab.id, self.media_generation),
-                                                now,
-                                            )
-                                        })
-                                        .flatten()
-                                        .or_else(|| {
-                                            self.tab_volume_huds.get(&tab.id).and_then(|hud| {
-                                                hud.title_opacity(tab_ui.ctx(), (tab.id, 0), now)
-                                            })
+                                    let notice = self
+                                        .tab_volume_huds
+                                        .get(&tab.id)
+                                        .and_then(|hud| {
+                                            hud.title_opacity(tab_ui.ctx(), (tab.id, 0), now)
                                         })
                                         .map(|opacity| (self.playback_volume_for(tab.id), opacity));
                                     let response = chrome::tab_title_with_volume(

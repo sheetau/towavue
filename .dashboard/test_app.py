@@ -25,7 +25,7 @@ class LedgerTests(unittest.TestCase):
         self.temp.cleanup()
 
     def task(self, **fields):
-        return self.store.create({"title": "Test task", **fields}, "assistant")
+        return self.store.create({"title": "Test task", **fields}, "user")
 
     def test_question_gates_default_is_not_recommendation(self):
         q = self.store.create({"kind": "question", "title": "Choose", "recommended": "Option A"}, "assistant")
@@ -36,7 +36,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(self.store.item(t["id"])["rev"], 1)
         self.store.update(q["id"], {"answer": "A", "status": "answered"}, q["rev"], "user")
         # An answer unlocks a gate, but never starts the task automatically.
-        self.assertEqual(self.store.item(t["id"])["status"], "inbox")
+        self.assertEqual(self.store.item(t["id"])["status"], "todo")
         self.store.update(t["id"], {"status": "doing"}, t["rev"], "assistant")
         optional = self.store.create({"kind": "question", "title": "Optional", "requires_answer": False,
                                       "default_action": "Keep the existing color"}, "assistant")
@@ -67,7 +67,7 @@ class LedgerTests(unittest.TestCase):
             self.store.confirm(task["id"], 1, "assistant")
         result = self.store.confirm(task["id"], 1, "user")
         self.assertEqual(result["status"], "done")
-        self.assertIn("Automated checks passed\nOwner confirmed", result["verification"])
+        self.assertEqual("Automated checks passed", result["verification"])
         self.assertEqual(result["blocked_reason"], "")
         self.assertEqual(self.store.history(task["id"])[0]["actor"], "user")
         with self.assertRaises(app.Problem):
@@ -86,7 +86,7 @@ class LedgerTests(unittest.TestCase):
         self.assertFalse(self.store.can_confirm(question))
 
     def test_delete_restore_excludes_records_from_views_and_preserves_history(self):
-        records = [self.task(), self.task(status="done"),
+        records = [self.task(status="inbox"), self.task(status="done"),
                    self.store.create({"kind": "question", "title": "Pending question"}, "assistant"),
                    self.store.create({"kind": "note", "title": "Archive", "archived": True}, "assistant")]
         for item in records:
@@ -130,6 +130,83 @@ class LedgerTests(unittest.TestCase):
         self.assertTrue(self.store.can_confirm(task))
         with self.assertRaises(app.Problem):
             self.store.update(task["id"], {"deleted": True}, task["rev"], "user")
+
+    def test_assistant_completion_always_requires_owner_confirmation(self):
+        task = self.store.create({"title": "Small change"}, "assistant")
+        self.assertEqual(task["status"], "todo")
+        ready = self.store.update(task["id"], {"status": "done"}, task["rev"], "assistant")
+        self.assertEqual(ready["status"], "review")
+        self.assertIsNone(ready["closed_at"])
+        self.assertNotIn("verification", ready)
+        self.assertTrue(self.store.can_confirm(ready))
+        self.assertEqual(self.store.brief()["progress"], {"done": 0, "total": 1})
+        done = self.store.confirm(task["id"], ready["rev"], "user")
+        self.assertEqual(done["status"], "done")
+        self.assertNotIn("verification", done)
+        self.assertEqual(self.store.brief()["progress"], {"done": 1, "total": 1})
+        self.assertEqual(self.store.create({"title": "Already implemented", "status": "done"}, "assistant")["status"], "review")
+
+    def test_task_feedback_and_questions_stay_in_one_thread(self):
+        task = self.task(status="review")
+        changed = self.store.thread(task["id"], task["rev"], "request", "Adjust the spacing", "user")
+        self.assertEqual(changed["status"], "todo")
+        asked = self.store.thread(task["id"], changed["rev"], "question", "Which spacing?", "assistant")
+        self.assertEqual(asked["thread_waiting_for"], "user")
+        for status in ["doing", "review", "done"]:
+            with self.assertRaises(app.Problem):
+                self.store.update(task["id"], {"status": status}, asked["rev"], "assistant")
+        with self.assertRaises(app.Problem):
+            self.store.thread(task["id"], asked["rev"], "answer", "An assumption", "assistant")
+        answered = self.store.thread(task["id"], asked["rev"], "answer", "Use 8px", "user")
+        self.assertEqual(answered["status"], "todo")
+        self.assertFalse(answered["thread_waiting_for"])
+        reviewed = self.store.update(task["id"], {"status": "done"}, answered["rev"], "assistant")
+        done = self.store.confirm(task["id"], reviewed["rev"], "user")
+        self.store.thread(task["id"], done["rev"], "request", "One more correction", "user")
+        self.assertEqual(self.store.query("all")["total"], 1)
+        self.assertIn("Which spacing?", [e["data"].get("text") for e in self.store.history(task["id"])])
+        with self.assertRaises(app.Problem):
+            self.store.thread(task["id"], asked["rev"], "request", "Stale feedback", "user")
+
+    def test_review_dependency_allows_work_but_requires_confirmation_in_order(self):
+        prerequisite = self.task(status="review")
+        task = self.task(depends_on=[prerequisite["id"]])
+        working = self.store.update(task["id"], {"status": "doing"}, task["rev"], "assistant")
+        ready = self.store.update(task["id"], {"status": "done"}, working["rev"], "assistant")
+        self.assertFalse(self.store.can_confirm(ready))
+        with self.assertRaises(app.Problem):
+            self.store.confirm(task["id"], ready["rev"], "user")
+        self.store.confirm(prerequisite["id"], prerequisite["rev"], "user")
+        self.assertTrue(self.store.can_confirm(ready))
+        self.assertEqual(self.store.confirm(task["id"], ready["rev"], "user")["status"], "done")
+
+    def test_question_followups_reopen_without_losing_previous_answers(self):
+        question = self.store.create({"kind": "question", "title": "Design question"}, "user")
+        answer = self.store.thread(question["id"], 1, "answer", "First answer", "assistant")
+        again = self.store.thread(question["id"], answer["rev"], "question", "What about this case?", "user")
+        self.assertEqual(again["status"], "open")
+        self.assertEqual(again["answer"], "")
+        self.assertIn("First answer", [e["data"].get("text") for e in self.store.history(question["id"])])
+        self.assertEqual(self.store.query("all")["total"], 1)
+
+    def test_checkpoint_resets_confirmed_progress_and_carries_unfinished_work(self):
+        previous = self.task(status="done")
+        pending = self.task(status="review")
+        self.task(status="todo")
+        project = self.store.checkpoint(1, "verified-push-one", "assistant")
+        self.assertEqual(self.store.brief()["progress"], {"done": 0, "total": 2})
+        self.assertEqual(self.store.query("history")["total"], 1)
+        self.store.confirm(pending["id"], pending["rev"], "user")
+        self.assertEqual(self.store.brief()["progress"], {"done": 1, "total": 2})
+        self.store.checkpoint(project["rev"], "verified-push-one", "assistant")
+        self.assertEqual(self.store.brief()["progress"], {"done": 1, "total": 2})
+        reopened = self.store.thread(previous["id"], previous["rev"], "request", "A new correction", "user")
+        ready = self.store.update(previous["id"], {"status": "done"}, reopened["rev"], "assistant")
+        self.store.confirm(previous["id"], ready["rev"], "user")
+        self.assertEqual(self.store.brief()["progress"], {"done": 2, "total": 3})
+        self.store.checkpoint(project["rev"], "verified-push-two", "assistant")
+        self.assertEqual(self.store.brief()["progress"], {"done": 0, "total": 1})
+        app.restore(Path(self.temp.name) / "checkpoint.sqlite", self.store.export())
 
     def test_simultaneous_writes_preserve_winner_and_reject_stale_copy(self):
         t = self.task()

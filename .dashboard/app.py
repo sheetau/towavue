@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parent
 VERSION = 1
 STATES = {
-    "task": {"inbox", "todo", "doing", "waiting", "blocked", "done", "canceled"},
+    "task": {"inbox", "todo", "doing", "waiting", "blocked", "review", "done", "canceled"},
     "question": {"open", "answered", "closed"},
     "note": {"recorded"},
 }
@@ -25,9 +25,9 @@ EXTRA = {
     "next_action", "acceptance", "blocked_reason", "parent_id", "depends_on",
     "required_questions", "checks", "answer", "recommended", "default_action",
     "requires_answer", "asked_by", "answer_by", "source", "source_date",
-    "verification", "commit", "archived", "resolution", "owner_review", "deleted",
+    "verification", "commit", "archived", "resolution", "owner_review", "deleted", "thread_waiting_for",
 }
-PROJECT_FIELDS = {"name", "current_scope", "handoff", "next_action", "public_summary"}
+PROJECT_FIELDS = {"name", "current_scope", "handoff", "next_action", "public_summary", "progress_since", "progress_label"}
 ACTORS = {"user", "assistant", "system"}
 
 
@@ -92,7 +92,8 @@ class Store:
 
     def project(self):
         row = dict(self.db.execute("SELECT * FROM project WHERE id=1").fetchone())
-        return {**json.loads(row["data"]), "rev": row["rev"], "updated_at": row["updated_at"]}
+        return {"progress_since": "", "progress_label": "Initial period", **json.loads(row["data"]),
+                "rev": row["rev"], "updated_at": row["updated_at"]}
 
     def event(self, item, actor, action, data):
         if actor not in ACTORS:
@@ -133,13 +134,15 @@ class Store:
             raise Problem("Record not found", 404)
         return self.unpack(row)
 
-    def gates(self, item):
+    def gates(self, item, require_confirmed=True):
         reasons = []
+        if item.get("thread_waiting_for"):
+            reasons.append(f"Thread needs an answer from {item['thread_waiting_for']}")
         for identity in item.get("depends_on", []):
             other = self.item(identity)
             if other.get("deleted"):
                 reasons.append(f"Dependency {identity} was deleted; restore it or revise the prerequisite")
-            elif other["status"] != "done":
+            elif other["status"] not in ({"done"} if require_confirmed else {"done", "review"}):
                 reasons.append(f"Dependency {identity} is not done")
         for identity in item.get("required_questions", []):
             question = self.item(identity)
@@ -159,9 +162,11 @@ class Store:
             raise Problem("Title must contain 1-300 characters")
         for key in ("scope", "body", "next_action", "acceptance", "blocked_reason", "answer",
                     "recommended", "default_action", "asked_by", "answer_by", "source",
-                    "source_date", "verification", "commit", "resolution"):
+                    "source_date", "verification", "commit", "resolution", "thread_waiting_for"):
             if key in item and (not isinstance(item[key], str) or len(item[key]) > 2_000_000):
                 raise Problem(f"Invalid text field: {key}")
+        if item.get("thread_waiting_for", "") not in {"", "user", "assistant"}:
+            raise Problem("Invalid thread recipient")
         for key in ("requires_answer", "archived", "owner_review", "deleted"):
             if key in item and type(item[key]) is not bool:
                 raise Problem(f"Invalid boolean: {key}")
@@ -198,11 +203,11 @@ class Store:
                 stack.extend(self.item(identity).get("depends_on", []))
         if kind == "question" and item["status"] == "answered" and not item.get("answer", "").strip():
             raise Problem("An answered question needs an answer")
-        if enforce_state and kind == "task" and item["status"] in {"doing", "done"}:
-            reasons = self.gates(item)
+        if enforce_state and kind == "task" and item["status"] in {"doing", "review", "done"}:
+            reasons = self.gates(item, require_confirmed=item["status"] == "done")
             if reasons:
                 raise Problem("; ".join(reasons))
-        if item["status"] == "done" and any(not c["done"] for c in checks):
+        if item["status"] in {"review", "done"} and any(not c["done"] for c in checks):
             raise Problem("Complete the acceptance checklist before marking done")
         if item["status"] in {"waiting", "blocked"} and not item.get("blocked_reason", "").strip():
             raise Problem("A waiting or blocked task needs a reason")
@@ -212,9 +217,11 @@ class Store:
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise Problem("Unknown record field")
         kind = payload.get("kind", "task")
-        default = {"task": "inbox", "question": "open", "note": "recorded"}.get(kind)
+        default = {"task": "todo", "question": "open", "note": "recorded"}.get(kind)
         item = dict(kind=kind, title="", status=default, scope="backlog", body="")
         item.update(payload)
+        if kind == "task" and item["status"] == "done" and actor != "user":
+            item["status"] = "review"
         item["id"] = {"task": "T", "question": "Q", "note": "N"}.get(kind, "X") + "-" + secrets.token_hex(4)
         if kind == "question":
             item.setdefault("requires_answer", True)
@@ -229,7 +236,7 @@ class Store:
             self.event(item["id"], actor, "created", {"source": item.get("source", "")})
         return self.item(item["id"])
 
-    def update(self, identity, patch, rev, actor):
+    def update(self, identity, patch, rev, actor, thread_event=None):
         if not isinstance(patch, dict) or set(patch) - ({"title", "status", "scope", "body"} | (EXTRA - {"deleted"})):
             raise Problem("Unknown or immutable record field")
         with self.transaction():
@@ -238,6 +245,12 @@ class Store:
             if old.get("deleted"):
                 raise Problem("Restore the deleted record before editing it")
             new = {**old, **patch}
+            if new["kind"] == "task" and patch.get("status") == "done" and actor != "user":
+                patch = {**patch, "status": "review"}
+                new["status"] = "review"
+            if new["kind"] == "task" and patch.get("status") == "review":
+                patch = {**patch, "blocked_reason": "", "owner_review": False, "next_action": ""}
+                new.update(patch)
             self.validate(new)
             at = now()
             terminal = new["status"] in {"done", "canceled", "closed", "recorded"}
@@ -246,7 +259,10 @@ class Store:
             self.db.execute("""UPDATE items SET title=?,status=?,scope=?,body=?,data=?,rev=rev+1,
                             updated_at=?,closed_at=? WHERE id=?""", (
                 new["title"], new["status"], new["scope"], new["body"], encode(data), at, closed, identity))
-            self.event(identity, actor, "updated", {"before": {k: old.get(k) for k in patch}, "after": patch})
+            event_data = {"before": {k: old.get(k) for k in patch}, "after": patch}
+            if thread_event:
+                event_data.update(thread_event)
+            self.event(identity, actor, "thread" if thread_event else "updated", event_data)
         return self.item(identity)
 
     def comment(self, identity, text, rev, actor):
@@ -275,8 +291,9 @@ class Store:
         return self.item(identity)
 
     def can_confirm(self, item):
-        return (item["kind"] == "task" and item["status"] == "waiting"
-                and item.get("owner_review") is True and not item.get("archived") and not item.get("deleted")
+        return (item["kind"] == "task" and (item["status"] == "review" or
+                (item["status"] == "waiting" and item.get("owner_review") is True))
+                and not item.get("archived") and not item.get("deleted")
                 and not self.gates(item) and all(c["done"] for c in item.get("checks", [])))
 
     def confirm(self, identity, rev, actor):
@@ -287,9 +304,48 @@ class Store:
         if not self.can_confirm(item):
             raise Problem("This task is not ready for owner confirmation")
         # update checks the same revision and all prerequisites again inside its transaction.
-        evidence = (item.get("verification", "").rstrip() + "\nOwner confirmed behavior/appearance at " + now()).strip()
         return self.update(identity, {"status": "done", "owner_review": False,
-                           "blocked_reason": "", "next_action": "", "verification": evidence}, rev, actor)
+                           "blocked_reason": "", "next_action": ""}, rev, actor)
+
+    def thread(self, identity, rev, mode, text, actor):
+        if mode not in {"comment", "request", "question", "answer"}:
+            raise Problem("Unknown thread action")
+        if not isinstance(text, str) or not text.strip() or len(text) > 24000:
+            raise Problem("Thread text must contain 1-24,000 characters")
+        item = self.item(identity)
+        self.expect(item, rev)
+        if item.get("archived") or item.get("deleted"):
+            raise Problem("This record is read-only")
+        if mode == "comment":
+            return self.comment(identity, text, rev, actor)
+        patch = {}
+        if mode in {"request", "question"}:
+            if item["kind"] == "note":
+                raise Problem("Use a task or question for follow-up work")
+            patch = {"status": "todo" if item["kind"] == "task" else "open",
+                     "owner_review": False, "blocked_reason": "", "thread_waiting_for": ""}
+            if item["kind"] == "question":
+                patch["answer"] = ""
+            if mode == "question" and item["kind"] == "task":
+                patch.update(status="waiting", blocked_reason=text,
+                             thread_waiting_for="user" if actor == "assistant" else "assistant")
+        elif mode == "answer":
+            if item["kind"] == "question":
+                patch = {"answer": text, "status": "answered"}
+            elif item["kind"] == "task" and item.get("thread_waiting_for") == actor:
+                patch = {"status": "todo", "blocked_reason": "", "thread_waiting_for": ""}
+            else:
+                raise Problem("This thread is not awaiting your answer")
+        return self.update(identity, patch, rev, actor, {"text": text, "mode": mode})
+
+    def checkpoint(self, rev, label, actor):
+        if not isinstance(label, str) or not label.strip():
+            raise Problem("A checkpoint label is required")
+        project = self.project()
+        self.expect(project, rev)
+        if project["progress_label"] == label and project["progress_since"]:
+            return project
+        return self.update_project({"progress_since": now(), "progress_label": label}, rev, actor)
 
     def history(self, identity=None, limit=50, before=None, after=None):
         conditions, params = [], []
@@ -332,7 +388,7 @@ class Store:
         where = " AND ".join(conditions)
         total = self.db.execute("SELECT count(*) FROM items WHERE " + where, params).fetchone()[0]
         order = "updated_at DESC,id" if view in {"history", "archive", "all", "trash"} else (
-            "CASE status WHEN 'doing' THEN 0 WHEN 'waiting' THEN 1 WHEN 'blocked' THEN 2 "
+            "CASE status WHEN 'doing' THEN 0 WHEN 'review' THEN 1 WHEN 'waiting' THEN 2 WHEN 'blocked' THEN 2 "
             "WHEN 'open' THEN 0 WHEN 'answered' THEN 1 WHEN 'todo' THEN 3 ELSE 4 END,updated_at DESC,id")
         columns = ("id,kind,title,status,scope,rev,created_at,updated_at,closed_at,"
                    "json_extract(data,'$.next_action') AS next_action,"
@@ -352,14 +408,17 @@ class Store:
         overall = {r["status"]: r["n"] for r in self.db.execute(
             "SELECT status,count(*) AS n FROM items WHERE kind='task' "
             "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0 GROUP BY status")}
-        progress = {"done": overall.get("done", 0),
-                    "total": sum(n for status, n in overall.items() if status not in {"inbox", "canceled"})}
+        completed = self.db.execute("SELECT count(*) FROM items WHERE kind='task' AND status='done' AND closed_at>=? "
+                    "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0",
+                    (project["progress_since"],)).fetchone()[0]
+        progress = {"done": completed, "total": completed + sum(n for status, n in overall.items()
+                    if status not in {"inbox", "canceled", "done"})}
         open_questions = self.db.execute("SELECT count(*) FROM items WHERE kind='question' AND status='open' "
                          "AND COALESCE(json_extract(data,'$.archived'),0)=0 AND COALESCE(json_extract(data,'$.deleted'),0)=0").fetchone()[0]
         questions = self.query("questions", limit=10)
         active = self.query("tasks", project["current_scope"], limit=20)
         for item in active["items"]:
-            item["gates"] = self.gates(self.item(item["id"]))
+            item["gates"] = self.gates(self.item(item["id"]), require_confirmed=False)
         return {"project": project, "counts": counts, "overall_counts": overall, "progress": progress,
                 "open_questions": open_questions, "active": active, "questions": questions,
                 "scopes": [r[0] for r in self.db.execute("SELECT DISTINCT scope FROM items ORDER BY scope")],
@@ -392,7 +451,7 @@ def restore(path, payload):
         with store.transaction():
             project = payload["project"]
             store.db.execute("UPDATE project SET rev=?,updated_at=?,data=?", (
-                project["rev"], project["updated_at"], encode({k: project[k] for k in PROJECT_FIELDS})))
+                project["rev"], project["updated_at"], encode({k: project.get(k, "") for k in PROJECT_FIELDS})))
             for item in payload["items"]:
                 store.db.execute("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
                     item["id"], item["kind"], item["title"], item["status"], item["scope"], item["body"],
@@ -426,6 +485,10 @@ def mutate(store, request, actor):
         return store.comment(request.get("id"), request.get("text"), request.get("rev"), actor)
     if action == "confirm":
         return store.confirm(request.get("id"), request.get("rev"), actor)
+    if action == "thread":
+        return store.thread(request.get("id"), request.get("rev"), request.get("mode"), request.get("text"), actor)
+    if action == "checkpoint":
+        return store.checkpoint(request.get("rev"), request.get("label"), actor)
     if action in {"delete", "restore-item"}:
         return store.set_deleted(request.get("id"), request.get("rev"), action == "delete", actor)
     if action == "project":
@@ -538,6 +601,8 @@ def main():
     apply.add_argument("--file", type=Path, help="UTF-8 operation JSON; omit to read stdin")
     apply.add_argument("--actor", choices=sorted(ACTORS), default="assistant")
     commands.add_parser("backup")
+    checkpoint = commands.add_parser("checkpoint")
+    checkpoint.add_argument("--label", required=True, help="Verified push commit or explicit milestone")
     export = commands.add_parser("export-json")
     export.add_argument("--output", type=Path, required=True)
     recovery = commands.add_parser("restore")
@@ -570,6 +635,8 @@ def main():
                 result = mutate(store, json.loads(text), args.actor)
             elif args.command == "backup":
                 result = {"backup": store.backup()}
+            elif args.command == "checkpoint":
+                result = store.checkpoint(store.project()["rev"], args.label, "assistant")
             elif args.command == "export-json":
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 with args.output.open("x", encoding="utf-8", newline="\n") as output:

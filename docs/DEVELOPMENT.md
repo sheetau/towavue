@@ -312,7 +312,7 @@ The probe measures the actual draw_timeline UI and egui tessellation in 72 width
 
 ## Documentation maintenance
 
-The local dashboard is the current-work/handoff record. Start with `python .dashboard/app.py brief`, then fetch relevant tasks/questions or search archived evidence. Record state, decisions and useful validation on the corresponding item, including commit/test references and limits. STATUS is generated from the explicitly curated public summary; do not edit it or append private records there. See [dashboard operations](../.dashboard/README.md) for migration, backups, privacy and verification. Missing private data is not an empty backlog.
+The local dashboard is the current-work/handoff record. Start with `python .dashboard/app.py brief`, then fetch relevant tasks/questions or search archived evidence. Manage ordinary tasks by state; AI completion awaits owner confirmation. Keep corrections and further questions in the same item thread. Add useful decisions or shared validation once, with references and limits only when needed. STATUS is generated from the explicitly curated public summary; do not edit it or append private records there. See [dashboard operations](../.dashboard/README.md) for migration, backups, privacy and verification. Missing private data is not an empty backlog.
 
 ARCHITECTURE describes current durable contracts, not every implementation step. DEVELOPMENT describes repeatable procedures, not dated trial reports. Source/license records retain their own exact provenance; do not refresh them for unrelated UX work.
 

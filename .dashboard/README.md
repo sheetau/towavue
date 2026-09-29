@@ -1,61 +1,72 @@
 # Local project dashboard
 
-Python 3.11+ and a browser are sufficient; no package installation or build step is required. This development tool is independent of the product, release pipeline, and application dependencies.
+Python 3.11+ and a browser are sufficient. This standard-library tool is independent of the product and launches no AI. Run `powershell -NoProfile -File .dashboard/open.ps1`: it reuses or starts a hidden loopback server and opens the browser. Closing the browser leaves the server running; its matching PID/URL are in ignored `runtime.json`.
 
-Open it on Windows with `powershell -NoProfile -File .dashboard/open.ps1`. The launcher reuses the project's local server or starts a hidden process, then opens the browser. The server listens only on `127.0.0.1`; the page updates from the ledger without being regenerated. Closing the browser does not stop the server. Its owned PID and URL are in the ignored `runtime.json`; stop only that matching process when needed. A server restart creates a consistent SQLite backup. No AI is launched by this tool.
+## Records and workflow
 
-## Private records and public structure
+The private `state.sqlite` ledger is authoritative. New tasks default to **todo** (planned); use **inbox** explicitly for uncommitted ideas. Scope and state are separate: a planned task is not authorization to start it.
 
-`state.sqlite` is the authoritative local record. The folder's allowlist `.gitignore` excludes databases, SQLite sidecars, exports, backups, archives, logs, screenshots and migration scripts. Only the HTML, Python backend/tests, launcher and this guide are tracked. Never force-add a private artifact.
+Ordinary tasks need only a title, request and state. `next_action`, `acceptance`, `verification`, `resolution`, checklists and relationships are optional advanced fields for useful conditions, caveats or interrupted work. Do not fill them as a completion ritual. Record shared validation once in a note or short thread entry instead of copying it to every task.
 
-After a fresh clone, recover the private ledger from backup. A missing ledger does **not** mean the project has no pending work. Only a genuinely new project should run `python .dashboard/app.py init --name "Project name"`. Without a private ledger, use the public STATUS checkpoint and relevant Git history; do not fabricate or automatically reset tasks.
+Task flow: **todo → doing → review → done**. `review` means implementation finished, awaiting owner confirmation. AI attempts to set `done` are converted to `review`, including record creation; no evidence paragraph is required. Only actual owner confirmation makes a task done. Confirmation preserves revision/prerequisite checks and records actor/time automatically. Legacy waiting + `owner_review` records remain supported.
 
-The UI provides tasks, questions, history and an archive; clicking a row opens its detail without replacing the list. New ideas default to inbox. Scope is separate from status: planned work in another release is not authorization to start it. A waiting/blocked task needs a reason. Tasks may link dependencies, prerequisite questions and acceptance checks. Starting/completing rejects unmet prerequisite questions/dependencies; completion also requires its checklist. An answer unlocks a gate but never starts a task. A recommended option is not consent; optional defaults must be explicit. Reopening a prerequisite does not erase historical completion evidence.
+Corrections and questions stay on the **same ID**:
 
-Overview progress covers all task scopes and excludes inbox, canceled and archived records; questions and notes are not tasks. Filters and the current work scope never change this denominator. The dense layout uses a sticky header and normal document scrolling, with 12 list entries per page and content-height detail panels.
+- `thread` / `request`: append a correction/additional requirement and reopen the task to todo.
+- `thread` / `question`: reopen a question, or put a task into waiting for the other participant's answer.
+- `thread` / `answer`: preserve the answer; a task returns to todo, a question becomes answered. Only the requested participant can answer a task's pending question.
+- `thread` / `comment`: append a note without changing state.
 
-Set `owner_review: true` only when human behavior/appearance confirmation is the remaining step. A waiting task then offers a one-button completion action if its prerequisites and acceptance checklist are satisfied. The `confirm` operation requires a user actor and current revision, records owner confirmation separately from prior automated evidence, and never answers questions or silently completes unfinished checks. Do not infer review eligibility merely from a waiting status or title.
+Original requirements and earlier replies remain. Use separate records only for independent work, not each review round. Agents ask in chat, attribute actual answers correctly, and check edits at work boundaries. Browser saves do not wake an idle agent.
 
-Delete moves any record to Trash, excluding it from ordinary lists and progress. Restore returns it with its original status, content, links and history. This is reversible removal, not permanent erasure. Use `{"action":"delete","id":"T-example","rev":1}` or `{"action":"restore-item","id":"T-example","rev":2}`; browse with `list --view trash`. Deleted records are read-only until restored. Deleting a prerequisite task/question never satisfies it or silently removes its links; restore it or explicitly revise the dependent task. Exports and backups retain deleted records and their events.
+Explicit dependencies/checklists still apply. Implementation can proceed after a prerequisite reaches review; final confirmation requires its confirmation. Unanswered mandatory questions, including those in the same thread, block work/completion. Recommendations are not consent; optional defaults must be explicit. Answers do not start execution automatically.
 
-Question threads can link follow-up questions and implementation tasks. Humans may answer in the browser or chat. The main agent records chat answers with their provenance; it asks questions in chat, never through terminal prompts. Browser editing does not wake a stopped agent. Poll for updates at meaningful work boundaries and on session resumption.
+Delete moves records to **Trash**, excluding them from ordinary lists/progress. Restore retains original state, links and history. Deleted records are read-only; deleting a prerequisite never satisfies it or silently removes links. Exports/backups retain deleted records.
 
-All write paths use transactions and revision checks. A stale form receives a conflict and retains its input. Reload/reconcile deliberately; do not retry blindly with a newer revision. Saved events use the actual UTC clock; the UI displays Japan time. Imported source dates remain separate, and absent original timestamps stay unknown. Imports preserve original requirements rather than treating old suggestions as new instructions.
+## Progress periods
+
+Progress covers all scopes, regardless of filters: unfinished tasks plus owner-confirmed completions since the last checkpoint. Inbox, canceled, deleted and archived records, questions and notes are excluded. Review tasks remain unfinished.
+
+After a successful push **and verification of its required checks/CI**, run:
+
+```powershell
+python .dashboard/app.py checkpoint --label <pushed-commit>
+```
+
+This timestamps the boundary and excludes older confirmed completions; it changes no item state and deletes no history. Unfinished/review tasks carry over. Repeating the same label is a no-op. Reopening an old item brings it back into progress. Local commits and failed pushes do not reset progress. This is an agent workflow step, not a Git hook or network monitor. Project settings also offer a manual checkpoint for another milestone.
 
 ## Agent interface
 
-Run from the repository root. Commands emit UTF-8 JSON. Prefer `brief`, then read relevant IDs or search instead of dumping the ledger.
+Run from the repository root; output is UTF-8 JSON. Use bounded reads:
 
 ```powershell
 python .dashboard/app.py brief
 python .dashboard/app.py list --scope v1.0.3
-python .dashboard/app.py list --view questions
-python .dashboard/app.py list --view archive --search "AAC"
+python .dashboard/app.py list --view archive --search AAC
 python .dashboard/app.py get T-example
 python .dashboard/app.py events --after 42 --limit 20
 ```
 
-`brief` includes current scope, handoff, next action, scoped tasks with gates, outstanding questions and an event cursor. Lists exclude bodies and are paginated (`--limit`, `--offset`). `get` truncates large bodies at 6,000 characters unless `--full` is requested. `events` supports `--id`, `--before`, `--after` and `--limit`; page until the requested interval has been read. Archive records are searchable but excluded from normal task/history views.
+Lists omit bodies and support `--limit`/`--offset`. `get` truncates at 6,000 characters unless `--full` is supplied. Events support `--id`, `--before`, `--after` and `--limit`; page the requested interval completely. `brief` includes handoff, scoped active records, questions, progress and cursor. Archives are evidence, not current instructions.
 
-Write an operation as a private UTF-8 JSON file, or pass JSON on stdin. Do not interpolate long user text into a shell command.
-
-```powershell
-python .dashboard/app.py apply --file .dashboard/operation.json --actor assistant
-```
-
-Examples (IDs and revisions are illustrative):
+Write a private UTF-8 operation file (or JSON on stdin), then run `python .dashboard/app.py apply --file .dashboard/operation.json --actor assistant`. Illustrative operations:
 
 ```json
-{"action":"create","data":{"kind":"task","title":"Investigate the issue","scope":"current","status":"inbox","body":"Requirement and constraints"}}
-{"action":"update","id":"T-example","rev":1,"data":{"status":"waiting","blocked_reason":"Owner appearance review","next_action":"Apply the review before release"}}
-{"action":"comment","id":"T-example","rev":2,"text":"Automated controls passed; physical input remains unverified."}
-{"action":"update","id":"Q-example","rev":1,"data":{"answer":"Keep the existing behavior","status":"answered"}}
-{"action":"project","rev":1,"data":{"current_scope":"current","handoff":"Current facts and limits","next_action":"Next concrete action"}}
+{"action":"create","data":{"title":"Adjust spacing","scope":"current"}}
+{"action":"update","id":"T-example","rev":1,"data":{"status":"review"}}
+{"action":"thread","id":"T-example","rev":2,"mode":"question","text":"Which spacing should change?"}
+{"action":"thread","id":"T-example","rev":3,"mode":"answer","text":"The toolbar spacing."}
+{"action":"thread","id":"T-example","rev":4,"mode":"request","text":"Use a smaller gap."}
+{"action":"confirm","id":"T-example","rev":5}
+{"action":"delete","id":"T-example","rev":6}
+{"action":"restore-item","id":"T-example","rev":7}
 ```
 
-Use `--actor user` only when recording an actual owner action/answer, not an AI's interpretation. Browser writes are attributed to the user; test browser mutations against a disposable ledger. Record evidence and caveats on the task or a note. No need to record every command or micro-edit. Structured task extras include `checks: [{"text":"Verify output","done":false}]`, `depends_on: ["T-id"]`, `required_questions: ["Q-id"]`, `parent_id`, `verification` and `commit`. Questions support `asked_by`, `answer_by`, `recommended`, `default_action`, `requires_answer` and `answer`. Unknown fields and kind changes are rejected.
+Use `--actor user` only for actual owner actions/answers; `confirm` requires it. Writes are revision-checked, and conflicts retain browser input. Reconcile instead of retrying blindly. Timestamps use the real UTC clock; the UI displays Japan time. Imported source dates remain separate; unknown dates are not invented.
 
-## Backup and recovery
+## Privacy, backup and recovery
+
+The `.gitignore` allowlist tracks structure, not databases, exports, backups, archives, logs, screenshots or migration scripts. Never force-add private data. A missing ledger after cloning is not an empty backlog: recover a backup, using STATUS/Git as limited fallback. `init` is for genuinely new projects only.
 
 ```powershell
 python .dashboard/app.py backup
@@ -63,26 +74,14 @@ python .dashboard/app.py export-json --output .dashboard/exports/checkpoint.json
 python .dashboard/app.py --db .dashboard/recovered.sqlite restore --input .dashboard/exports/checkpoint.json
 ```
 
-Backups use SQLite's consistent backup API. Exports include project data, all records, revisions and events. JSON export refuses to overwrite an existing file. Restore validates into a temporary database and publishes only to a **new** destination. Verify recovered records before replacing the live database, and stop its server before any deliberate file replacement. Backups under this folder are recovery points, not protection against losing the drive; copy a completed backup/export to your normal private backup destination. The tool does not delete older backups.
+Startup and Backup create consistent SQLite snapshots in `.dashboard/backups/`; normal Save already persists edits. Use snapshots before bulk changes. They are local recovery points, not drive-loss protection; copy a completed backup to private backup storage. Export/restore preserve revisions, threads and periods, and refuse overwriting existing destinations. Verify recovery and stop the matching server before replacing a live ledger. Older backups are not automatically deleted.
 
-The header's Backup button creates another recovery snapshot under `.dashboard/backups/`. Edits already persist when saved; the button is useful before a bulk reorganization or import, not after every edit. Server startup also creates a snapshot. Copies remain on the same drive until you move a completed backup to your own backup storage.
+Review `public_summary`, then explicitly run `python .dashboard/app.py export-status` to generate `docs/STATUS.md`. No tasks, questions, private handoff or counts are automatically exported. Review the diff; STATUS is a public checkpoint, not a second task queue.
 
-## Public checkpoint
+## UI and verification
 
-Edit and review the project's `public_summary` field, then run:
+Use a compact single HTML page, sticky single-line header, content-height split panels and 12-row pagination. Escape user text and preserve dirty forms during polling. Test browser mutations against disposable ledgers, since browser writes are attributed to the user.
 
-```powershell
-python .dashboard/app.py export-status
-```
+Run `python -m unittest discover -s .dashboard -p test_app.py -v`; UI changes also need headless browser checks. Cover review/confirmation, same-record follow-ups, periods, conflicts, deletion/recovery and narrow layouts. No product Rust rebuild is needed for this tool.
 
-Only that explicitly curated field is exported to `docs/STATUS.md`; private tasks, comments, handoff and counts are not included automatically. Inspect the generated diff before committing. STATUS is a public checkpoint, not a second editable task queue. Keep durable product contracts in ARCHITECTURE and repeatable commands in DEVELOPMENT. A public export is explicit, not an automatic consequence of answering a question.
-
-## Verification and HTTP interface
-
-```powershell
-python -m unittest discover -s .dashboard -p test_app.py -v
-```
-
-Tests use disposable ledgers for concurrent writers, question/dependency gates, cycles, completion checks, private export boundaries, backup/restore, history cursors and HTTP origin/token enforcement. UI changes additionally need headless browser checks for navigation, edits, conflicts, polling, narrow viewports and script errors. No product Rust rebuild is needed for this isolated tool.
-
-The single HTML document uses these endpoints: `GET /api/brief`, `/api/items?view=&scope=&search=&limit=&offset=`, `/api/item?id=`, and `/api/events?id=&before=&after=&limit=`. JSON mutations go to `POST /api` with the same operations as the CLI; `backup` is also available. The server substitutes `__DASHBOARD_TOKEN__` in HTML, and requests send it as `X-Dashboard-Token`. Host validation, same-origin writes and fixed API routes prevent arbitrary file serving or shell execution. User text must be escaped, never inserted as raw HTML. The service is local and is not a remote hosting solution.
+GET: `/api/brief`, `/api/items?view=&scope=&search=&limit=&offset=`, `/api/item?id=`, `/api/events?id=&before=&after=&limit=`. POST `/api` accepts CLI operations, `backup`, and `checkpoint` with project revision and label. Item responses include `can_confirm`. The server substitutes `__DASHBOARD_TOKEN__` in HTML; send it as `X-Dashboard-Token`. Host/origin checks and fixed routes restrict this loopback-only service; it is not for remote hosting.

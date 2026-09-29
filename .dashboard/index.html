@@ -337,6 +337,8 @@
       background: #263c32;
       color: var(--accent);
     }
+    .badge.todo { background: #23364b; color: #9bcaff; }
+    .badge.review,
     .badge.waiting,
     .badge.open {
       background: #3b3429;
@@ -611,8 +613,8 @@
         <p class="caption" id="next-action">—</p>
       </div>
       <div class="metric">
-        <div class="caption" title="全範囲のタスク。未整理・取り下げ・アーカイブ・質問・ノートは対象外です。">全体の完了 / 対象</div>
-        <strong id="progress">—</strong>
+        <div class="caption" title="全範囲の未完了タスクと、区切り以降に確認済みになったタスク。未整理・取り下げ等は対象外です。">全体の完了 / 対象</div>
+        <strong id="progress">—</strong><div class="caption" id="progress-period"></div>
         <div class="progress-track"><span id="progress-bar"></span></div>
       </div>
       <div class="metric">
@@ -690,7 +692,8 @@
         inbox: "未整理",
         todo: "予定",
         doing: "作業中",
-        waiting: "回答・確認待ち",
+        waiting: "回答待ち",
+        review: "作業完了・確認待ち",
         deleted: "削除済み",
         blocked: "行き詰まり",
         done: "完了",
@@ -703,11 +706,12 @@
       const kinds = { task: "タスク", question: "質問", note: "ノート" },
         states = {
           task: [
-            "inbox",
             "todo",
+            "inbox",
             "doing",
             "waiting",
             "blocked",
+            "review",
             "done",
             "canceled",
           ],
@@ -817,9 +821,11 @@
             done = brief.progress.done,
             n = brief.progress.total;
           $("#progress").textContent = done + " / " + n;
+          $("#progress-period").textContent = project.progress_since ? "区切り: " + stamp(project.progress_since) : "区切り未設定";
+          $("#progress-period").title = project.progress_label;
           $("#progress-bar").style.width = (n ? (100 * done) / n : 0) + "%";
           $("#waiting").textContent =
-            brief.open_questions + (counts.waiting || 0);
+            brief.open_questions + (counts.waiting || 0) + (counts.review || 0);
           $("#doing").textContent =
             (counts.doing || 0) + " / " + (counts.blocked || 0);
           $("#connection").textContent =
@@ -917,8 +923,26 @@
         const i = data.item;
         $("#detail").oninput = null;
         $("#detail").onchange = null;
-        $("#detail").innerHTML =
-          `${top()}<div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.deleted ? "deleted" : i.status)}${data.can_confirm ? '<button id="confirm-review" class="primary">確認できたので完了</button>' : ""}${i.deleted ? '<button id="restore-item">元に戻す</button>' : (i.archived ? '<span class="readonly">移行元の記録</span>' : '<button id="edit">編集</button>') + '<button id="delete-item" title="削除済みへ移します。後から戻せます。">削除</button>'}</div><h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}${i.source_date ? " · 元記録 " + esc(i.source_date) : ""}</p>${i.blocked_reason ? `<div class="section"><h3>待機・障害の理由</h3><p class="body-text">${esc(i.blocked_reason)}</p></div>` : ""}<div class="body-text">${esc(i.body || "説明はありません。")}</div>${["next_action", "acceptance", "verification", "recommended", "default_action", "answer", "resolution"].map((k) => (i[k] ? `<div class="section"><h3>${{ next_action: "次にすること", acceptance: "完了条件", verification: "検証・根拠", recommended: "推奨案", default_action: "未回答でも実行してよい内容", answer: "回答", resolution: "結論" }[k]}</h3><div class="body-text">${esc(i[k])}</div></div>` : "")).join("")}${i.kind === "question" ? `<p class="hint">${i.requires_answer !== false ? "回答が来るまで実行しません。" : "任意の質問です。既定動作の記載だけで実行範囲は拡張されません。"} 回答先: ${esc(i.answer_by || "未設定")}</p>` : ""}${i.checks?.length ? "<h3>完了チェック</h3>" + i.checks.map((c) => `<p class="body-text">${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("") : ""}${relations(i, data.children)}${i.source ? `<details class="advanced"><summary>出典</summary><div class="body-text">${esc(i.source)}</div></details>` : ""}${!i.archived && !i.deleted ? `<div class="actions"><button id="follow-question">関連する質問を追加</button>${i.kind === "question" ? '<button id="make-task">回答からタスクを作る</button>' : ""}</div>` : ""}<h3>会話・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}${!i.archived && !i.deleted ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・追記" : "コメント・検証メモ", "", 3)}<div class="actions"><button type="submit">追記する</button>${i.kind === "question" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div><p class="hint">保存してもAIは自動起動しません。作業中のAIか、次のセッションで確認されます。</p></form>` : ""}`;
+        const editable = !i.archived && !i.deleted;
+        const extra = ["next_action", "acceptance", "verification", "resolution", "recommended", "default_action"]
+          .filter(k => i[k]).map(k => `<h3>${{next_action:"次にすること",acceptance:"完了条件",verification:"検証・根拠",resolution:"結論",recommended:"推奨案",default_action:"既定動作"}[k]}</h3><div class="body-text">${esc(i[k])}</div>`).join("");
+        $("#detail").innerHTML = `${top()}
+          <div class="detail-top"><span class="id">${esc(i.id)} · ${kinds[i.kind]}</span>${badge(i.deleted ? "deleted" : i.status)}
+          ${data.can_confirm ? '<button id="confirm-review" class="primary">確認できたので完了</button>' : ""}
+          ${i.deleted ? '<button id="restore-item">元に戻す</button>' : (editable ? '<button id="edit">編集</button>' : '<span class="readonly">移行元の記録</span>') + '<button id="delete-item">削除</button>'}</div>
+          <h2>${esc(i.title)}</h2><p class="note-preview">${esc(i.scope)} · 更新 ${stamp(i.updated_at)}</p>
+          <div class="body-text">${esc(i.body || "説明はありません。")}</div>
+          ${i.blocked_reason ? `<div class="section"><h3>回答・作業待ち</h3><div class="body-text">${esc(i.blocked_reason)}</div></div>` : ""}
+          ${i.kind === "question" && i.answer ? `<div class="section"><h3>回答</h3><div class="body-text">${esc(i.answer)}</div></div>` : ""}
+          ${extra || i.checks?.length || i.source ? `<details class="advanced"><summary>補足・既存の記録（任意）</summary>${extra}${(i.checks || []).map(c => `<p>${c.done ? "☑" : "☐"} ${esc(c.text)}</p>`).join("")}<div class="body-text">${esc(i.source || "")}</div></details>` : ""}
+          ${relations(i, data.children)}
+          ${editable ? `<form id="reply-form">${area("reply", i.kind === "question" ? "回答・再質問" : "追記・修正依頼・質問", "", 3)}
+          <div class="actions"><button type="submit">追記する</button>
+          ${i.kind === "task" ? '<button type="button" id="request-change">修正・追加を依頼</button>' : ""}
+          ${i.kind !== "note" ? '<button type="button" id="ask-thread">' + (i.kind === "question" ? '再質問する' : '質問する') + '</button>' : ""}
+          ${i.kind === "question" || i.thread_waiting_for === "user" ? '<button type="button" id="answer" class="primary">回答として保存</button>' : ""}</div>
+          <p class="hint">修正依頼・再質問はこの項目を再開します。AIは自動起動しません。</p></form>` : ""}
+          <h3>スレッド・変更履歴</h3><div id="thread">${eventsHtml(data.events)}</div>${data.events.length === 50 ? '<button id="older">さらに前の履歴</button>' : ""}`;
         bindBack();
         $("#edit")?.addEventListener("click", () => edit(i));
         $("#delete-item")?.addEventListener("click", () => moveToTrash(i, true));
@@ -937,18 +961,14 @@
             tell(error.message, true);
           }
         });
-        $("#follow-question")?.addEventListener("click", () =>
-          newItem("question", i.id, i.scope),
-        );
-        $("#make-task")?.addEventListener("click", () =>
-          newItem("task", i.id, i.scope, i.answer || ""),
-        );
+        $("#request-change")?.addEventListener("click", () => reply("request"));
+        $("#ask-thread")?.addEventListener("click", () => reply("question"));
         $("#reply-form")?.addEventListener("input", () => (dirty = true));
         $("#reply-form")?.addEventListener("submit", async (e) => {
           e.preventDefault();
-          await reply(false);
+          await reply("comment");
         });
-        $("#answer")?.addEventListener("click", () => reply(true));
+        $("#answer")?.addEventListener("click", () => reply("answer"));
         $("#older")?.addEventListener("click", async () => {
           try {
             const events = await api(
@@ -1011,25 +1031,15 @@
         return events
           .map(
             (e) =>
-              `<div class="thread-entry"><small>${esc({ user: "あなた", assistant: "AI", system: "システム" }[e.actor])} · ${stamp(e.at)}</small>${e.action === "comment" ? `<div class="body-text">${esc(e.data.text)}</div>` : `<details><summary>${esc({ created: "項目を作成", updated: "項目を更新", project: "引き継ぎを更新", deleted: "項目を削除", restored: "項目を復元" }[e.action] || e.action)}</summary><pre>${esc(JSON.stringify(e.data, null, 2))}</pre></details>`}</div>`,
+              `<div class="thread-entry"><small>${esc({ user: "あなた", assistant: "AI", system: "システム" }[e.actor])} · ${stamp(e.at)}</small>${["comment", "thread"].includes(e.action) ? `<div class="body-text">${esc(e.data.text)}</div>${e.data.mode ? `<small>${esc({request:"修正・追加依頼",question:"質問",answer:"回答"}[e.data.mode] || "追記")}</small>` : ""}` : `<details><summary>${esc({ created: "項目を作成", updated: "項目を更新", project: "引き継ぎを更新", deleted: "項目を削除", restored: "項目を復元" }[e.action] || e.action)}</summary><pre>${esc(JSON.stringify(e.data, null, 2))}</pre></details>`}</div>`,
           )
           .join("");
       }
-      async function reply(answer) {
+      async function reply(mode) {
         const text = $("#f-reply").value;
         if (!text.trim()) return;
         try {
-          await api(
-            "/api",
-            answer
-              ? {
-                  action: "update",
-                  id: current.id,
-                  rev: current.rev,
-                  data: { answer: text, status: "answered" },
-                }
-              : { action: "comment", id: current.id, rev: current.rev, text },
-          );
+          await api("/api", {action: "thread", id: current.id, rev: current.rev, mode, text});
           dirty = false;
           await select(current.id, false);
           await refresh(true);
@@ -1045,8 +1055,17 @@
         projectEditing = false;
         current = i;
         $("#split").classList.add("show-detail");
-        $("#detail").innerHTML =
-          `${top()}<div class="detail-top"><span class="id">${isNew ? "NEW RECORD" : esc(i.id)}</span><button id="cancel-edit">キャンセル</button></div><h2>${isNew ? "新しい項目" : "項目を編集"}</h2><form id="item-form"><div class="field-grid"><div><label for="f-kind">種類</label><select id="f-kind" name="kind" ${!isNew ? "disabled" : ""}>${options(Object.keys(kinds), i.kind, kinds)}</select></div><div><label for="f-status">状態</label><select id="f-status" name="status">${options(states[i.kind], i.status, labels)}</select></div></div>${input("title", "タイトル", i.title)}${input("scope", "範囲（今回・リリース・将来検討など）", i.scope)}${area("body", "説明・要望", i.body, 6)}${i.kind === "task" ? area("next_action", "次にすること", i.next_action, 2) + area("acceptance", "完了条件", i.acceptance, 2) + area("blocked_reason", "待機・障害の理由（待ち状態では必須）", i.blocked_reason, 2) + area("verification", "検証結果・根拠（自動／実機などを区別）", i.verification, 3) + `<label class="check"><input name="owner_review" type="checkbox" ${i.owner_review ? "checked" : ""}>動作・見た目の確認だけが残っている</label><p class="hint">確認待ち状態で、前提条件とチェック項目を満たすと完了ボタンが出ます。</p>` + area("checks", "完了チェック：1行につき [ ] または [x] 項目", (i.checks || []).map((c) => `[${c.done ? "x" : " "}] ${c.text}`).join("\n"), 3) : ""}${i.kind === "question" ? input("asked_by", "質問者", i.asked_by || "user") + input("answer_by", "回答者", i.answer_by || "assistant") + area("recommended", "推奨案", i.recommended, 2) + area("default_action", "未回答でも実行してよい内容（推奨案とは別）", i.default_action, 2) + `<label class="check"><input name="requires_answer" type="checkbox" ${i.requires_answer !== false ? "checked" : ""}>回答が来るまで関連作業を実行しない</label>` + area("answer", "回答", i.answer, 4) : ""}<details class="advanced"><summary>関連付け・根拠</summary>${input("parent_id", "親の項目ID", i.parent_id)}${i.kind === "task" ? input("depends_on", "先に完了が必要なタスクID（カンマ区切り）", (i.depends_on || []).join(", ")) + input("required_questions", "実行前に必要な質問ID（カンマ区切り）", (i.required_questions || []).join(", ")) + input("commit", "関連コミット", i.commit) : ""}${input("source", "出典・参照", i.source)}${area("resolution", "結論", i.resolution, 2)}</details><div class="actions"><button type="submit" class="primary">保存する</button><span class="hint">${isNew ? "新しいタスクは既定で未整理です。" : "同時更新があれば上書きせず通知します。"}</span></div></form>`;
+        $("#detail").innerHTML = `${top()}<div class="detail-top"><span class="id">${isNew ? "NEW RECORD" : esc(i.id)}</span><button id="cancel-edit">キャンセル</button></div>
+          <h2>${isNew ? "新しい項目" : "項目を編集"}</h2><form id="item-form">
+          <div class="field-grid"><div><label for="f-kind">種類</label><select id="f-kind" name="kind" ${!isNew ? "disabled" : ""}>${options(Object.keys(kinds), i.kind, kinds)}</select></div>
+          <div><label for="f-status">状態</label><select id="f-status" name="status">${options(states[i.kind], i.status, labels)}</select></div></div>
+          ${input("title", "タイトル", i.title)}${input("scope", "範囲", i.scope)}${area("body", "説明・要望", i.body, 4)}
+          ${i.kind === "task" ? `<div id="wait-field" ${["waiting","blocked"].includes(i.status) ? "" : "hidden"}>${area("blocked_reason", "回答・作業待ちの理由", i.blocked_reason, 2)}</div>` : ""}
+          <details class="advanced"><summary>補足・条件・関連付け（必要な場合だけ）</summary>
+          ${i.kind === "task" ? area("next_action", "次にすること（中断時など）", i.next_action, 2) + area("acceptance", "完了条件（特別な条件がある場合）", i.acceptance, 2) + area("verification", "検証・根拠（任意）", i.verification, 2) + area("checks", "任意のチェック：[ ] または [x] 項目", (i.checks || []).map(c => `[${c.done ? "x" : " "}] ${c.text}`).join("\n"), 2) + input("depends_on", "前提タスクID", (i.depends_on || []).join(", ")) + input("required_questions", "前提質問ID", (i.required_questions || []).join(", ")) + input("commit", "関連コミット", i.commit) : ""}
+          ${i.kind === "question" ? input("asked_by", "質問者", i.asked_by || "user") + input("answer_by", "回答者", i.answer_by || "assistant") + area("answer", "回答", i.answer, 3) + area("recommended", "推奨案", i.recommended, 2) + area("default_action", "任意質問の既定動作", i.default_action, 2) + `<label class="check"><input name="requires_answer" type="checkbox" ${i.requires_answer !== false ? "checked" : ""}>回答が来るまで関連作業を実行しない</label>` : ""}
+          ${input("parent_id", "別項目への参照ID（独立した案件のみ）", i.parent_id)}${input("source", "出典・参照", i.source)}${area("resolution", "結論（任意）", i.resolution, 2)}</details>
+          <div class="actions"><button type="submit" class="primary">保存する</button><span class="hint">${isNew ? "新しいタスクは予定として登録します。" : "AIの作業完了後、人の確認を経て完了します。"}</span></div></form>`;
         bindBack();
         trackForm();
         $("#cancel-edit").onclick = () => {
@@ -1060,6 +1079,7 @@
             }
           }
         };
+        $("#f-status").onchange = () => { if ($("#wait-field")) $("#wait-field").hidden = !["waiting","blocked"].includes($("#f-status").value); };
         $("#f-kind").onchange = () => {
           const f = new FormData($("#item-form"));
           const kind = f.get("kind");
@@ -1119,7 +1139,6 @@
               }));
           if (i.kind === "question")
             data.requires_answer = f.has("requires_answer");
-          if (i.kind === "task") data.owner_review = f.has("owner_review");
           if (isNew) data.kind = f.get("kind");
           try {
             const saved = await api(
@@ -1163,9 +1182,19 @@
         editing = false;
         $("#split").classList.add("show-detail");
         $("#detail").innerHTML =
-          `${top()}<h2>プロジェクトと引き継ぎ</h2><form id="project-form">${input("name", "プロジェクト名", project.name)}${input("current_scope", "今回の作業範囲", project.current_scope)}${area("handoff", "現在の状況・引き継ぎ", project.handoff, 5)}${area("next_action", "次にすること", project.next_action, 2)}<details class="advanced"><summary>Git向けの公開サマリー</summary><p class="hint">個人情報を含めない内容を明示的に記入します。保存だけではGit用ファイルへ書き出しません。</p>${area("public_summary", "公開してよいサマリー（Markdown）", project.public_summary, 8)}</details><div class="actions"><button type="submit" class="primary">保存する</button><button id="close-project" type="button">閉じる</button></div></form>`;
+          `${top()}<h2>プロジェクトと引き継ぎ</h2><div class="section"><h3>完了率の区切り</h3><p class="hint">${esc(project.progress_label)} · ${stamp(project.progress_since)}</p><p class="hint">push・CI確認後に確認済みの完了分を集計から外します。未完了・確認待ちは持ち越します。</p><button id="checkpoint">確認済みの完了分を区切る</button></div><form id="project-form">${input("name", "プロジェクト名", project.name)}${input("current_scope", "今回の作業範囲", project.current_scope)}${area("handoff", "現在の状況・引き継ぎ", project.handoff, 5)}${area("next_action", "次にすること", project.next_action, 2)}<details class="advanced"><summary>Git向けの公開サマリー</summary><p class="hint">個人情報を含めない内容を明示的に記入します。保存だけではGit用ファイルへ書き出しません。</p>${area("public_summary", "公開してよいサマリー（Markdown）", project.public_summary, 8)}</details><div class="actions"><button type="submit" class="primary">保存する</button><button id="close-project" type="button">閉じる</button></div></form>`;
         bindBack();
         trackForm();
+        $("#checkpoint").onclick = async () => {
+          if (!canLeave()) return;
+          try {
+            await api("/api", {action: "checkpoint", rev: original.rev, label: "手動の区切り · " + new Date().toISOString()});
+            dirty = false;
+            await refresh(true);
+            projectForm();
+            tell("確認済みの完了分を区切りました。履歴は残っています。");
+          } catch (error) { tell(error.message, true); }
+        };
         $("#close-project").onclick = () => {
           if (canLeave()) {
             dirty = false;

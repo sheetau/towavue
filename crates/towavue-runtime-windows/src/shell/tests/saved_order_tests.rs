@@ -37,8 +37,7 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
                 true,
             )
             .expect("saved directory order fixture");
-            assert_eq!(snapshot.folder_path, folder.join(target));
-            assert_eq!(snapshot.items.len(), 1);
+            assert_eq!(snapshot.target, Some(folder.join(target)));
         }
     })
     .join()

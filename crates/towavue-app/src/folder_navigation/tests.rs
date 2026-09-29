@@ -68,12 +68,76 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&b), "empty immediate parent stays");
     assert!(app.pending_guard.is_none());
+    assert_eq!(
+        app.status_message.as_ref().expect("empty-folder notice").0,
+        towavue_core::localization::formatted::no_folder_media(
+            app.language(),
+            &root.display().to_string()
+        ),
+    );
 
     app.dispatch(CommandId::NextFolder);
     app.activate_tab(app.tabs.gallery().expect("Gallery"));
     settle(&mut app);
     assert!(app.path.is_none(), "late lookup cannot replace another tab");
     assert!(app.pending_guard.is_none());
+}
+
+#[test]
+fn related_folder_discovery_reuses_open_folder_and_handles_a_destination_becoming_empty() {
+    let Some(root) = tests::isolated_test_root(
+        "folder_navigation::tests::related_folder_discovery_reuses_open_folder_and_handles_a_destination_becoming_empty",
+    ) else {
+        return;
+    };
+    let source = root.join("a").join("source.bmp");
+    let target = root.join("b").join("target.bmp");
+    for path in [&source, &target] {
+        std::fs::create_dir(path.parent().expect("fixture parent")).expect("folder");
+        tab_transfer::tests::bitmap(path);
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    let tab = tab_transfer::tests::install(
+        &mut app,
+        source.clone(),
+        tab_transfer::tests::decoded(false),
+    );
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    let edits = app.edits[&tab].clone();
+    app.dispatch(CommandId::NextFolder);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let result = loop {
+        if let Some(result) = app.folder_order.take_navigation() {
+            break result;
+        }
+        assert!(Instant::now() < deadline, "path-only delivery");
+        std::thread::sleep(Duration::from_millis(2));
+    };
+    assert_eq!(result.target.as_deref(), target.parent());
+    assert!(
+        app.folder_order.take_completed().is_none(),
+        "no duplicate media listing"
+    );
+    std::fs::remove_file(&target).expect("remove owned media after discovery");
+    app.finish_folder_navigation(result);
+    assert!(
+        matches!(app.pending_folder, Some((_, FolderIntent::OpenReplacing(Some(owner), _))) if owner == tab)
+    );
+    settle(&mut app);
+    assert_eq!(app.path.as_ref(), Some(&source));
+    assert_eq!(app.edits[&tab], edits);
+    assert!(app.pending_guard.is_none());
+    assert_eq!(
+        app.status_message
+            .as_ref()
+            .expect("ordinary empty-folder notice")
+            .0,
+        towavue_core::localization::formatted::no_folder_media(
+            app.language(),
+            &root.join("b").display().to_string()
+        ),
+    );
 }
 
 #[test]

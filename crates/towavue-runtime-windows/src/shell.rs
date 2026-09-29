@@ -41,6 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Interface, PCWSTR, w};
 
 mod navigation;
+pub use navigation::FolderNavigationResult;
 mod refresh;
 pub(crate) use refresh::notify_published_file;
 mod shutdown;
@@ -134,12 +135,17 @@ struct Request {
     reply: Option<mpsc::Sender<FolderSnapshot>>,
 }
 
+enum Completion {
+    Snapshot(FolderSnapshot),
+    Navigation(FolderNavigationResult),
+}
+
 #[derive(Default)]
 struct Mailbox {
     generation: u64,
     pending: Option<Request>,
     refresh_folder: Option<PathBuf>,
-    completed: Option<FolderSnapshot>,
+    completed: Option<Completion>,
     closed: bool,
 }
 
@@ -257,12 +263,26 @@ impl FolderOrderProvider {
     }
 
     pub fn take_completed(&self) -> Option<FolderSnapshot> {
-        self.shared
-            .0
-            .lock()
-            .expect("Shell mailbox")
-            .completed
-            .take()
+        let mut mailbox = self.shared.0.lock().expect("Shell mailbox");
+        if !matches!(mailbox.completed, Some(Completion::Snapshot(_))) {
+            return None;
+        }
+        match mailbox.completed.take()? {
+            Completion::Snapshot(snapshot) => Some(snapshot),
+            Completion::Navigation(_) => unreachable!("checked under mailbox lock"),
+        }
+    }
+
+    /// Consume a path-only navigation result without constructing a media listing.
+    pub fn take_navigation(&self) -> Option<FolderNavigationResult> {
+        let mut mailbox = self.shared.0.lock().expect("Shell mailbox");
+        if !matches!(mailbox.completed, Some(Completion::Navigation(_))) {
+            return None;
+        }
+        match mailbox.completed.take()? {
+            Completion::Navigation(result) => Some(result),
+            Completion::Snapshot(_) => unreachable!("checked under mailbox lock"),
+        }
     }
 }
 
@@ -281,7 +301,7 @@ impl Drop for FolderOrderProvider {
 fn run_requests(
     shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
-    mut resolve: impl FnMut(&Path, u64, bool, Option<FolderNavigation>) -> Option<FolderSnapshot>,
+    mut resolve: impl FnMut(&Path, u64, bool, Option<FolderNavigation>) -> Option<Completion>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
@@ -302,7 +322,7 @@ fn run_requests(
             ready.wait();
             continue;
         };
-        let Some(snapshot) = resolve(
+        let Some(result) = resolve(
             &request.folder,
             request.generation,
             request.refresh,
@@ -319,12 +339,15 @@ fn run_requests(
                 false
             } else {
                 mailbox.refresh_folder = None;
-                if let Some(reply) = request.reply {
-                    let _ = reply.send(snapshot);
-                    false
-                } else {
-                    mailbox.completed = Some(snapshot);
-                    true
+                match (request.reply, result) {
+                    (Some(reply), Completion::Snapshot(snapshot)) => {
+                        let _ = reply.send(snapshot);
+                        false
+                    }
+                    (_, result) => {
+                        mailbox.completed = Some(result);
+                        true
+                    }
                 }
             }
         };
@@ -354,13 +377,14 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
                 &mut last_live_window,
                 &current,
                 shell_ready,
-            );
+            )
+            .map(Completion::Navigation);
         }
         if shell_ready {
             if let Some(snapshot) =
                 shell_snapshot(folder, generation, &mut last_live_window, &current, refresh)
             {
-                return Some(snapshot);
+                return Some(Completion::Snapshot(snapshot));
             }
             if !current() {
                 return None;
@@ -375,7 +399,7 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
                 folder.display()
             );
         }
-        fallback_snapshot(folder, generation, &current)
+        fallback_snapshot(folder, generation, &current).map(Completion::Snapshot)
     });
 }
 
@@ -885,6 +909,12 @@ unsafe fn capture_view(
             let Some(kind) = MediaKind::from_path(&path) else {
                 continue;
             };
+            // A directory can have a media extension. Reuse Shell attributes instead
+            // of issuing a filesystem metadata query for every supported row.
+            let folders = windows::Win32::System::SystemServices::SFGAO_FOLDER;
+            if item.GetAttributes(folders).ok()?.0 & folders.0 != 0 {
+                continue;
+            }
             let absolute_pidl = OwnedPidl(SHGetIDListFromObject(&item).ok()?);
             items.push(FolderMediaItem {
                 identity: absolute_pidl.identity(),
@@ -960,6 +990,12 @@ fn fallback_snapshot(
         let Some(kind) = MediaKind::from_path(&path) else {
             continue;
         };
+        if !entry
+            .file_type()
+            .is_ok_and(|kind| kind.is_file() || (kind.is_symlink() && path.is_file()))
+        {
+            continue;
+        }
         let identity = parse_path(&path)
             .map(|pidl| pidl.identity())
             .unwrap_or_else(|| path_identity(&path));
@@ -1517,7 +1553,7 @@ mod tests {
                                 return None;
                             }
                         }
-                        Some(FolderSnapshot {
+                        Some(Completion::Snapshot(FolderSnapshot {
                             folder_identity: ShellIdentity::new(Vec::new()),
                             folder_path: path.to_owned(),
                             items: Vec::new(),
@@ -1525,7 +1561,7 @@ mod tests {
                             source: FolderSnapshotSource::PersistedShellView,
                             generation,
                             captured_at: SystemTime::now(),
-                        })
+                        }))
                     },
                 )
             });
@@ -1589,7 +1625,7 @@ mod tests {
                     resume_rx
                         .recv_timeout(Duration::from_secs(5))
                         .expect("release after close");
-                    Some(FolderSnapshot {
+                    Some(Completion::Snapshot(FolderSnapshot {
                         folder_identity: ShellIdentity::new(Vec::new()),
                         folder_path: path.to_owned(),
                         items: Vec::new(),
@@ -1597,7 +1633,7 @@ mod tests {
                         source: FolderSnapshotSource::PersistedShellView,
                         generation,
                         captured_at: SystemTime::now(),
-                    })
+                    }))
                 },
             )
         });

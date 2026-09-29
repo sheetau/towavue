@@ -1,5 +1,14 @@
 use super::*;
 
+/// The destination of a related-folder lookup, before opening or enumerating its media.
+#[derive(Debug)]
+pub struct FolderNavigationResult {
+    pub generation: u64,
+    pub target: Option<PathBuf>,
+    /// Parent/child search scope for the ordinary empty-folder message when no target exists.
+    pub searched_folder: PathBuf,
+}
+
 pub(super) fn resolve(
     origin: &Path,
     direction: FolderNavigation,
@@ -7,8 +16,12 @@ pub(super) fn resolve(
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
     shell_ready: bool,
-) -> Option<FolderSnapshot> {
+) -> Option<FolderNavigationResult> {
     let origin = canonical_shell_path(origin).unwrap_or_else(|_| origin.to_owned());
+    let searched_folder = match direction {
+        FolderNavigation::FirstChild => origin.clone(),
+        _ => origin.parent().unwrap_or(&origin).to_owned(),
+    };
     let listing = match direction {
         FolderNavigation::Parent => origin.parent().map(|path| vec![path.to_owned()]),
         FolderNavigation::FirstChild => {
@@ -19,22 +32,20 @@ pub(super) fn resolve(
                 .map(|paths| siblings(&paths, &origin, direction == FolderNavigation::Next))
         }),
     };
-    choose(listing.unwrap_or_default(), generation, current, |path| {
-        shell_ready
-            .then(|| shell_snapshot(path, generation, last_live_window, current, false))
-            .flatten()
-            .or_else(|| fallback_snapshot(path, generation, current))
-    })
-    .or_else(|| {
-        current().then(|| FolderSnapshot {
-            folder_identity: ShellIdentity::new(Vec::new()),
-            folder_path: origin,
-            items: Vec::new(),
-            sort_columns: Vec::new(),
-            source: FolderSnapshotSource::NaturalNameFallback,
-            generation,
-            captured_at: SystemTime::now(),
-        })
+    let mut target = None;
+    for folder in listing.unwrap_or_default() {
+        if !current() {
+            return None;
+        }
+        if has_media(&folder, current) {
+            target = Some(folder);
+            break;
+        }
+    }
+    current().then_some(FolderNavigationResult {
+        generation,
+        target,
+        searched_folder,
     })
 }
 
@@ -54,46 +65,26 @@ fn siblings(paths: &[PathBuf], origin: &Path, forward: bool) -> Vec<PathBuf> {
         .collect()
 }
 
-fn choose(
-    candidates: Vec<PathBuf>,
-    generation: u64,
-    current: &impl Fn() -> bool,
-    mut snapshot: impl FnMut(&Path) -> Option<FolderSnapshot>,
-) -> Option<FolderSnapshot> {
-    for folder in candidates {
-        if !current() {
-            return None;
-        }
-        if !has_media(&folder, current) {
-            continue;
-        }
-        if let Some(mut result) = snapshot(&folder) {
-            // Enumeration may race deletion or a folder named like a media file.
-            // Keep only direct files that still exist before handing off to the app.
-            result.items.retain(|item| current() && item.path.is_file());
-            if !current() {
-                return None;
-            }
-            if !result.items.is_empty() {
-                result.generation = generation;
-                return Some(result);
-            }
-        }
-    }
-    None
-}
-
 fn has_media(folder: &Path, current: &impl Fn() -> bool) -> bool {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return false;
     };
+    has_media_entries(entries, current)
+}
+
+fn has_media_entries(
+    entries: impl IntoIterator<Item = std::io::Result<std::fs::DirEntry>>,
+    current: &impl Fn() -> bool,
+) -> bool {
     for entry in entries {
         if !current() {
             return false;
         }
         if let Ok(entry) = entry
             && MediaKind::from_path(&entry.path()).is_some()
-            && entry.path().is_file()
+            && entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
         {
             return true;
         }
@@ -125,6 +116,12 @@ fn directories(
                             return None;
                         }
                         let item = array.GetItemAt(index).ok()?;
+                        // Most rows may be media files. Use Shell's folder bit before
+                        // resolving a filesystem path or issuing a per-path directory query.
+                        let folders = windows::Win32::System::SystemServices::SFGAO_FOLDER;
+                        if item.GetAttributes(folders).ok()?.0 & folders.0 == 0 {
+                            continue;
+                        }
                         if let Some(path) = shell_item_path(&item)
                             && path.is_dir()
                         {
@@ -147,7 +144,9 @@ fn directories(
             return None;
         }
         if let Ok(entry) = entry
-            && entry.path().is_dir()
+            && entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_dir() || (kind.is_symlink() && entry.path().is_dir()))
         {
             paths.push(entry.path());
         }
@@ -160,6 +159,39 @@ fn directories(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn ordinary_folder_open_excludes_directories_with_media_extensions() {
+        let root = super::super::tests::test_directory("media-directory-names");
+        fs::create_dir_all(root.join("directory.jpg")).expect("owned directory");
+        let file = root.join("real.png");
+        fs::write(&file, b"extension only").expect("owned media");
+        let fixture = root.clone();
+        thread::spawn(move || {
+            let apartment = ShellApartment::new();
+            assert!(apartment.0, "owned STA");
+            let mut live = None;
+            for expected in [1, 0] {
+                let deadline = Instant::now() + Duration::from_secs(30);
+                let current = || Instant::now() < deadline;
+                let native = shell_snapshot(&fixture, 1, &mut live, &current, false)
+                    .expect("ordinary folder open");
+                let fallback = fallback_snapshot(&fixture, 1, &current).expect("fallback open");
+                for result in [native, fallback] {
+                    assert_eq!(result.items.len(), expected);
+                    if let Some(item) = result.items.first() {
+                        assert_eq!(item.path, file);
+                    }
+                }
+                if expected == 1 {
+                    fs::remove_file(&file).expect("remove owned media");
+                }
+            }
+        })
+        .join()
+        .expect("STA test");
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
 
     #[test]
     fn sibling_candidates_follow_input_order_once_and_wrap_in_both_directions() {
@@ -175,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_candidates_skip_empty_nested_only_and_vanished_media_without_decoding() {
+    fn folder_candidates_stop_at_first_file_and_skip_empty_nested_only_and_missing_paths() {
         let root = super::super::tests::test_directory("related-folders");
         for name in ["empty", "nested/child", "named.jpg", "good", "vanished"] {
             fs::create_dir_all(root.join(name)).expect("owned folder");
@@ -193,32 +225,16 @@ mod tests {
         assert!(!has_media(&root.join("named.jpg"), &|| true));
         assert!(!has_media(&root.join("absent"), &|| true));
         assert!(!has_media(&root.join("good"), &|| false));
-        let mut visited = Vec::new();
-        let result = choose(
-            ["empty", "nested", "named.jpg", "vanished", "good"]
-                .map(|p| root.join(p))
-                .into(),
-            71,
-            &|| true,
-            |folder| {
-                visited.push(folder.to_owned());
-                let result = fallback_snapshot(folder, 1, &|| true);
-                if folder == root.join("vanished") {
-                    fs::remove_file(&vanished).expect("folder navigation fixture");
-                }
-                result
-            },
-        )
-        .expect("folder navigation fixture");
-        assert_eq!(result.folder_path, root.join("good"));
-        assert_eq!(result.generation, 71);
-        assert_eq!(visited, [root.join("vanished"), root.join("good")]);
-        assert!(
-            choose(vec![root.join("good")], 1, &|| false, |_| panic!(
-                "cancelled"
-            ))
-            .is_none()
-        );
+        let first = fs::read_dir(root.join("good"))
+            .expect("fixture listing")
+            .next()
+            .expect("one file");
+        let entries = std::iter::once(first).chain(std::iter::from_fn(|| {
+            panic!("discovery must stop before reading the next entry");
+        }));
+        assert!(has_media_entries(entries, &|| true));
+        fs::remove_file(&vanished).expect("remove owned media before discovery");
+        assert!(!has_media(&root.join("vanished"), &|| true));
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 
@@ -239,7 +255,7 @@ mod tests {
         let wait = |generation| {
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
-                if let Some(snapshot) = provider.take_completed() {
+                if let Some(snapshot) = provider.take_navigation() {
                     assert_eq!(snapshot.generation, generation);
                     return snapshot;
                 }
@@ -255,14 +271,18 @@ mod tests {
         ] {
             let generation = provider.request_navigation(root.join(origin), direction);
             let result = wait(generation);
-            assert_eq!(result.folder_path, root.join(target));
-            assert_eq!(result.items.len(), 1);
-            assert_ne!(result.source, FolderSnapshotSource::NaturalNameFallback);
+            assert_eq!(result.target, Some(root.join(target)));
+            assert!(
+                provider.take_completed().is_none(),
+                "discovery returns no media listing"
+            );
         }
         provider.request_navigation(root.join("a"), FolderNavigation::Next);
         provider.request(None);
         let generation = provider.request_navigation(root.join("a"), FolderNavigation::FirstChild);
-        assert!(wait(generation).items.is_empty(), "no child keeps origin");
+        let empty = wait(generation);
+        assert!(empty.target.is_none(), "no child keeps origin");
+        assert_eq!(empty.searched_folder, root.join("a"));
         drop(provider);
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }

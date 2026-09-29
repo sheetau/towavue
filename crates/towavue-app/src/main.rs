@@ -2637,7 +2637,10 @@ where
     }
 
     fn finish_folder_load(&mut self) {
-        let language = self.language();
+        if let Some(result) = self.folder_order.take_navigation() {
+            self.finish_folder_navigation(result);
+            return;
+        }
         let Some(snapshot) = self.folder_order.take_completed() else {
             return;
         };
@@ -2658,11 +2661,8 @@ where
         }
         let (_, intent) = self.pending_folder.take().expect("current folder request");
         match intent {
-            FolderIntent::Open
-            | FolderIntent::OpenReplacing(_, _)
-            | FolderIntent::Related(_, _) => {
-                if let FolderIntent::OpenReplacing(tab, generation)
-                | FolderIntent::Related(tab, generation) = &intent
+            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
+                if let FolderIntent::OpenReplacing(tab, generation) = &intent
                     && (*tab != self.tabs.active_id() || *generation != self.media_generation)
                 {
                     self.refresh_folder_snapshot();
@@ -2671,10 +2671,8 @@ where
                 }
                 if let Some(first) = snapshot.items.first() {
                     let path = first.path.clone();
-                    let replacing = matches!(
-                        intent,
-                        FolderIntent::OpenReplacing(_, _) | FolderIntent::Related(_, _)
-                    ) && self.can_replace_active_tab();
+                    let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _))
+                        && self.can_replace_active_tab();
                     if replacing {
                         self.request_guarded(GuardedAction::NavigateFromFolder(
                             path.clone(),
@@ -2691,26 +2689,28 @@ where
                         self.pending_folder = None;
                         self.apply_folder_snapshot(snapshot);
                     }
-                } else if matches!(intent, FolderIntent::Related(_, _)) {
-                    // No eligible neighbor is a no-op. Resume ordinary folder updates.
-                    self.refresh_folder_snapshot();
                 } else {
-                    if self.tabs.is_empty() && !self.exit_requested {
-                        self.tabs.open_gallery();
-                    }
-                    self.set_status(towavue_core::localization::formatted::no_folder_media(
-                        language,
-                        &snapshot.folder_path.display().to_string(),
-                    ));
-                    self.refresh_folder_snapshot();
+                    self.finish_empty_folder(&snapshot.folder_path);
                 }
             }
+            FolderIntent::Related(_, _) => unreachable!("navigation returns paths, not snapshots"),
             FolderIntent::Refresh(path) if self.path.as_ref() == Some(&path) => {
                 self.apply_folder_snapshot(snapshot);
             }
             FolderIntent::Refresh(_) => {}
         }
         self.request_redraw();
+    }
+
+    fn finish_empty_folder(&mut self, folder: &Path) {
+        if self.tabs.is_empty() && !self.exit_requested {
+            self.tabs.open_gallery();
+        }
+        self.set_status(towavue_core::localization::formatted::no_folder_media(
+            self.language(),
+            &folder.display().to_string(),
+        ));
+        self.refresh_folder_snapshot();
     }
 
     fn apply_folder_snapshot(&mut self, snapshot: FolderSnapshot) {

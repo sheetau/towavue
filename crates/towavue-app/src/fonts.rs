@@ -36,9 +36,8 @@ fn definitions(
 ) -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
-        "ui-primary".into(),
-        egui::FontData::from_static(include_bytes!(concat!(env!("OUT_DIR"), "/ui-font.ttf")))
-            .into(),
+        "figtree".into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/Figtree-Tabular.ttf")).into(),
     );
     fonts.font_data.insert(
         "codicon".into(),
@@ -69,7 +68,7 @@ fn definitions(
         .families
         .entry(egui::FontFamily::Proportional)
         .or_default()
-        .insert(0, "ui-primary".into());
+        .insert(0, "figtree".into());
     // A Japanese fallback may supply only U+2194, leaving U+2195 to the
     // heavier emoji fallback. Keep both reading arrows in one symbol face.
     let mut arrows = vec!["Hack".into()];
@@ -202,7 +201,7 @@ mod tests {
         let fonts = definitions(None, None);
         assert_eq!(
             fonts.families[&egui::FontFamily::Proportional][0],
-            "ui-primary"
+            "figtree"
         );
         assert!(
             !fonts.families[&egui::FontFamily::Proportional]
@@ -356,6 +355,3 @@ mod fallback_tests {
         );
     }
 }
-
-#[cfg(test)]
-mod review;

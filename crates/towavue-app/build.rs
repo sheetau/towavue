@@ -1,5 +1,4 @@
 fn main() {
-    prepare_ui_font();
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rerun-if-changed=assets/windows.rc");
         for icon in ["towavue", "image", "video", "audio"] {
@@ -48,17 +47,4 @@ fn main() {
             "cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'"
         );
     }
-}
-
-// A local trial is explicit and does not add a runtime font-setting surface.
-// Clean builds continue to use the licensed, reproducible bundled Figtree face.
-fn prepare_ui_font() {
-    println!("cargo:rerun-if-env-changed=TOWAVUE_UI_FONT_TRIAL");
-    let source = std::env::var_os("TOWAVUE_UI_FONT_TRIAL")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("assets/fonts/Figtree-Tabular.ttf"));
-    println!("cargo:rerun-if-changed={}", source.display());
-    let destination = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output"))
-        .join("ui-font.ttf");
-    std::fs::copy(&source, destination).expect("copy selected UI font into build output");
 }

@@ -38,14 +38,14 @@ pub fn volume_deltas(
                 phase: egui::TouchPhase::Move,
             } if position.is_some_and(|pos| {
                 let in_list = audio_list.is_some_and(|rect| rect.contains(pos));
-                let allowed = if modifiers.is_none() {
-                    !in_list
-                } else {
+                let allowed = if audio_list.is_some() {
                     in_list
                         && modifiers.ctrl
                         && !modifiers.shift
                         && !modifiers.alt
                         && !modifiers.mac_cmd
+                } else {
+                    modifiers.is_none()
                 };
                 allowed
                     && targets.iter().any(|target| {
@@ -843,7 +843,7 @@ mod tests {
         );
         assert_eq!(
             frame(vec![wheel(-50.0, egui::Modifiers::NONE)]),
-            (vec![-1.0], egui::Vec2::ZERO)
+            (vec![], egui::Vec2::ZERO)
         );
         assert_eq!(
             frame(vec![

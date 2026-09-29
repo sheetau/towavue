@@ -4939,6 +4939,9 @@ where
         let audio_list = (self.media_kind == Some(MediaKind::Audio))
             .then_some(self.playlist.scroll_rect)
             .flatten();
+        if self.media_kind == Some(MediaKind::Audio) && audio_list.is_none() {
+            return;
+        }
         let before = self.playback_volume();
         // Preserve reversals at either limit, but publish only the final setting.
         let volume = wheel_input::volume_deltas(context, targets, audio_list)
@@ -18667,9 +18670,9 @@ mod tests {
     }
 
     #[test]
-    fn audio_volume_wheel_accepts_list_exterior_and_preserves_list_scroll() {
+    fn audio_volume_wheel_requires_ctrl_in_list_and_ignores_status_and_timeline() {
         let Some(root) = isolated_test_root(
-            "tests::audio_volume_wheel_accepts_list_exterior_and_preserves_list_scroll",
+            "tests::audio_volume_wheel_requires_ctrl_in_list_and_ignores_status_and_timeline",
         ) else {
             return;
         };
@@ -18740,7 +18743,7 @@ mod tests {
                         wheel.clone(),
                         egui::Event::PointerMoved(outside),
                     ],
-                    true,
+                    false,
                 ),
                 (
                     vec![
@@ -18749,7 +18752,7 @@ mod tests {
                         egui::Event::PointerMoved(label.center()),
                         wheel.clone(),
                     ],
-                    true,
+                    false,
                 ),
             ] {
                 let actions = frame(events).1;
@@ -18800,12 +18803,12 @@ mod tests {
                 );
             }
             for (pos, expected) in [
-                (label.center(), true),
+                (label.center(), false),
                 (egui::pos2(100.0, 100.0), false),
                 (egui::pos2(width - 10.0, 100.0), false),
-                (egui::pos2(2.0, 100.0), true),
+                (egui::pos2(2.0, 100.0), false),
                 (egui::pos2(100.0, 225.0), false),
-                (egui::pos2(100.0, 280.0), true),
+                (egui::pos2(100.0, 280.0), false),
                 (egui::pos2(100.0, 10.0), false),
             ] {
                 let actions = frame(vec![
@@ -19018,9 +19021,17 @@ mod tests {
             modifiers,
             phase,
         };
-        let normal = |delta| wheel(delta, egui::Modifiers::NONE, egui::TouchPhase::Move);
         for kind in [MediaKind::Audio, MediaKind::Video] {
             app.media_kind = Some(kind);
+            app.playlist.scroll_rect = (kind == MediaKind::Audio).then_some(
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 160.0)),
+            );
+            let (allowed, rejected) = if kind == MediaKind::Audio {
+                (egui::Modifiers::CTRL, egui::Modifiers::NONE)
+            } else {
+                (egui::Modifiers::NONE, egui::Modifiers::CTRL)
+            };
+            let normal = |delta| wheel(delta, allowed, egui::TouchPhase::Move);
             app.set_playback_volume(1.0);
             for focused in [true, false] {
                 for _ in 0..3 {
@@ -19043,20 +19054,14 @@ mod tests {
                         Some(0.1),
                     ),
                     (vec![normal(1.0), normal(-1.0)], egui::Modifiers::NONE, None),
-                    // Ctrl can be pressed after the unmodified wheel, within one frame.
+                    // Final frame modifiers must not reinterpret earlier wheel events.
                     (
-                        vec![
-                            normal(-1.0),
-                            wheel(10.0, egui::Modifiers::CTRL, egui::TouchPhase::Move),
-                        ],
+                        vec![normal(-1.0), wheel(10.0, rejected, egui::TouchPhase::Move)],
                         egui::Modifiers::CTRL,
                         Some(0.9),
                     ),
                     (
-                        vec![
-                            wheel(10.0, egui::Modifiers::CTRL, egui::TouchPhase::Move),
-                            normal(-1.0),
-                        ],
+                        vec![wheel(10.0, rejected, egui::TouchPhase::Move), normal(-1.0)],
                         egui::Modifiers::NONE,
                         Some(0.9),
                     ),
@@ -19070,9 +19075,9 @@ mod tests {
                     ),
                     (
                         vec![
-                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::Start),
-                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::End),
-                            wheel(10.0, egui::Modifiers::NONE, egui::TouchPhase::Cancel),
+                            wheel(10.0, allowed, egui::TouchPhase::Start),
+                            wheel(10.0, allowed, egui::TouchPhase::End),
+                            wheel(10.0, allowed, egui::TouchPhase::Cancel),
                         ],
                         egui::Modifiers::NONE,
                         None,
@@ -19148,15 +19153,19 @@ mod tests {
         }
         for kind in [MediaKind::Audio, MediaKind::Video] {
             app.media_kind = Some(kind);
+            app.playlist.scroll_rect = (kind == MediaKind::Audio).then_some(
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 160.0)),
+            );
+            let allowed = if kind == MediaKind::Audio {
+                egui::Modifiers::CTRL
+            } else {
+                egui::Modifiers::NONE
+            };
             let actions = frame(
                 &mut app,
                 vec![
                     egui::Event::PointerMoved(point),
-                    wheel(
-                        egui::MouseWheelUnit::Line,
-                        egui::vec2(0.0, -1.0),
-                        egui::Modifiers::NONE,
-                    ),
+                    wheel(egui::MouseWheelUnit::Line, egui::vec2(0.0, -1.0), allowed),
                 ],
                 false,
                 0.1,
@@ -19173,7 +19182,7 @@ mod tests {
                 for dt in [1.0 / 30.0, 1.0 / 120.0] {
                     let actions = frame(
                         &mut app,
-                        vec![wheel(unit, egui::vec2(0.0, delta), egui::Modifiers::NONE)],
+                        vec![wheel(unit, egui::vec2(0.0, delta), allowed)],
                         true,
                         dt,
                     );
@@ -19217,6 +19226,10 @@ mod tests {
         app.dispatch(CommandId::Undo);
         assert_eq!(app.edit_state().volume, 1.0);
         assert!((app.playback_volume() - 0.7).abs() < 0.0001);
+        app.playlist.scroll_rect = Some(egui::Rect::from_min_size(
+            egui::pos2(20.0, 20.0),
+            egui::vec2(200.0, 160.0),
+        ));
         for blocked in (0..11).filter(|&blocked| blocked != 3) {
             if blocked == 10 {
                 egui::Popup::open_id(&context, egui::Id::new("volume-test-menu"));
@@ -19237,9 +19250,9 @@ mod tests {
             };
             frame(&mut app, vec![egui::Event::PointerMoved(pos)], true, 0.1);
             let modifiers = if blocked == 8 {
-                egui::Modifiers::CTRL
+                egui::Modifiers::CTRL | egui::Modifiers::SHIFT
             } else {
-                egui::Modifiers::NONE
+                egui::Modifiers::CTRL
             };
             let mut events = vec![wheel(
                 egui::MouseWheelUnit::Line,
@@ -19280,7 +19293,10 @@ mod tests {
         app.pending_dialog = None;
         app.pending_guard = None;
         egui::Popup::close_all(&context);
-        for modifiers in [egui::Modifiers::SHIFT, egui::Modifiers::ALT] {
+        for modifiers in [
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+            egui::Modifiers::CTRL | egui::Modifiers::ALT,
+        ] {
             assert!(
                 frame(
                     &mut app,
@@ -19301,7 +19317,7 @@ mod tests {
                 vec![wheel(
                     egui::MouseWheelUnit::Line,
                     egui::vec2(1.0, 0.0),
-                    egui::Modifiers::NONE
+                    egui::Modifiers::CTRL
                 )],
                 true,
                 0.1
@@ -19317,7 +19333,7 @@ mod tests {
                     vec![wheel(
                         egui::MouseWheelUnit::Line,
                         egui::vec2(0.0, delta),
-                        egui::Modifiers::NONE
+                        egui::Modifiers::CTRL
                     )],
                     true,
                     0.1

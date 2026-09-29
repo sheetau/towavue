@@ -4,25 +4,21 @@ use crate::scroll_style::ScrollAreaStyle;
 pub(crate) fn held(context: &egui::Context) -> bool {
     context
         .data(|data| data.get_temp::<State>(state_id()))
-        .and_then(|state| state.drag)
-        .is_some_and(|drag| drag.section.is_some())
+        .is_some_and(|state| state.drag.is_some() && state.section.is_some())
+}
+
+pub(crate) fn captured(context: &egui::Context) -> bool {
+    context
+        .data(|data| data.get_temp::<State>(state_id()))
+        .is_some_and(|state| {
+            state.drag.is_some() || state.release == Some(context.cumulative_frame_nr())
+        })
 }
 
 fn hit(response: &egui::Response, position: egui::Pos2) -> bool {
     response.enabled()
         && response.interact_rect.contains(position)
         && response.ctx.layer_id_at(position) == Some(response.layer_id)
-}
-
-pub(crate) fn released(response: &egui::Response) -> bool {
-    response
-        .ctx
-        .data(|data| data.get_temp::<State>(state_id()))
-        .filter(|state| state.section.is_some())
-        .and_then(|state| state.release)
-        .is_some_and(|(frame, position)| {
-            frame == response.ctx.cumulative_frame_nr() && hit(response, position)
-        })
 }
 
 fn hovered(response: &egui::Response) -> bool {
@@ -40,7 +36,7 @@ pub(crate) fn clicked(response: &egui::Response) -> bool {
             response.ctx.request_repaint();
         }
     }
-    response.clicked() || released(response)
+    response.clicked() && !captured(&response.ctx)
 }
 
 pub(crate) fn submenu(ui: &egui::Ui, id: egui::Id) -> bool {
@@ -56,13 +52,6 @@ struct ScrollView {
     offset: f32,
     maximum: f32,
 }
-#[derive(Clone)]
-struct Edge {
-    direction: i8,
-    entered: f64,
-    frame: u64,
-    offset: f32,
-}
 
 pub(crate) fn scroll<R>(
     ui: &mut egui::Ui,
@@ -71,64 +60,42 @@ pub(crate) fn scroll<R>(
     content: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::scroll_area::ScrollAreaOutput<R> {
     let key = ui.id().with(("logo-drag-scroll", salt));
-    let edge_key = key.with("edge");
     let context = ui.ctx().clone();
     let frame = context.cumulative_frame_nr();
     let mut area = egui::ScrollArea::vertical()
         .id_salt(salt)
         .max_height(height);
-    let previous = context
-        .data(|data| data.get_temp::<ScrollView>(key))
-        .filter(|view| view.frame == frame || view.frame.checked_add(1) == Some(frame));
-    let pointer = context.input(|input| input.pointer.hover_pos());
-    let mut at_edge = false;
+    // egui blocks wheel scrolling while another widget owns a drag. Consume its
+    // already normalized/smoothed wheel delta without releasing the logo owner.
     if held(&context)
-        && let Some(view) = previous
-        && let Some(pointer) = pointer
-        && view.bounds.contains(pointer)
-        && context.layer_id_at(pointer) == Some(ui.layer_id())
+        && let Some(view) = context.data(|data| data.get_temp::<ScrollView>(key))
+        && (view.frame == frame || view.frame.checked_add(1) == Some(frame))
+        && context
+            .input(|input| input.pointer.hover_pos())
+            .is_some_and(|point| {
+                view.bounds.contains(point) && context.layer_id_at(point) == Some(ui.layer_id())
+            })
     {
-        let depth = 20.0_f32.min(view.bounds.height() / 4.0);
-        let top = ((view.bounds.top() + depth - pointer.y) / depth).clamp(0.0, 1.0);
-        let bottom = ((pointer.y - view.bounds.bottom() + depth) / depth).clamp(0.0, 1.0);
-        let speed = if top > 0.0 && view.offset > 0.0 {
-            -top
-        } else if view.offset < view.maximum {
-            bottom
-        } else {
-            0.0
-        };
-        if speed != 0.0 {
-            at_edge = true;
-            let direction = if speed < 0.0 { -1 } else { 1 };
-            let (now, dt) = context.input(|input| (input.time, input.stable_dt.min(0.05)));
-            let mut edge = context
-                .data(|data| data.get_temp::<Edge>(edge_key))
-                .filter(|edge| edge.direction == direction)
-                .unwrap_or(Edge {
-                    direction,
-                    entered: now,
-                    frame: u64::MAX,
-                    offset: view.offset,
-                });
-            let remaining = 0.3 - (now - edge.entered);
-            if remaining > 0.0 {
-                // A brief dwell lets the first/last visible row be selected before
-                // scrolling begins. Release never moves content under the pointer.
-                context.request_repaint_after(Duration::from_secs_f64(remaining));
+        let only_direction = ui.style().always_scroll_the_only_direction;
+        let delta = context.input(|input| {
+            let delta = input.smooth_scroll_delta();
+            if only_direction {
+                delta.x + delta.y
             } else {
-                if edge.frame != frame {
-                    edge.frame = frame;
-                    edge.offset = (view.offset + speed * 420.0 * dt).clamp(0.0, view.maximum);
-                }
-                area = area.vertical_scroll_offset(edge.offset);
-                context.request_repaint();
+                delta.y
             }
-            context.data_mut(|data| data.insert_temp(edge_key, edge));
+        });
+        if (delta > 0.0 && view.offset > 0.0) || (delta < 0.0 && view.offset < view.maximum) {
+            area = area.vertical_scroll_offset((view.offset - delta).clamp(0.0, view.maximum));
+            context.input_mut(|input| {
+                if only_direction {
+                    input.smooth_scroll_delta = egui::Vec2::ZERO;
+                } else {
+                    input.smooth_scroll_delta.y = 0.0;
+                }
+            });
+            context.request_repaint();
         }
-    }
-    if !at_edge {
-        context.data_mut(|data| data.remove::<Edge>(edge_key));
     }
     let output = area.show_styled(ui, content);
     context.data_mut(|data| {
@@ -136,7 +103,7 @@ pub(crate) fn scroll<R>(
             key,
             ScrollView {
                 frame,
-                bounds: output.inner_rect,
+                bounds: output.inner_rect.intersect(ui.clip_rect()),
                 offset: output.state.offset.y,
                 maximum: (output.content_size.y - output.inner_rect.height()).max(0.0),
             },
@@ -150,98 +117,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn edge_scroll_waits_scales_with_distance_and_stops_before_release_hit_testing() {
+    fn held_menu_allows_hover_and_wheel_without_edge_scroll_or_release_selection() {
         for density in [1.0, 1.25, 2.0] {
             let context = fonts::test_context();
             context.set_pixels_per_point(density);
             let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
-            let mut bounds = egui::Rect::NOTHING;
-            let mut offset = 0.0;
-            let mut hit_row = None;
-            let mut now = 0.0;
-            let mut render = |position: Option<egui::Pos2>, release: bool, step: f64| {
-                now += step;
-                let at = context.cumulative_frame_nr();
-                context.data_mut(|data| {
-                    data.insert_temp(
-                        state_id(),
-                        State {
-                            section: Some(Section::View),
-                            drag: (!release).then_some(Drag {
-                                id: egui::Id::new("owner"),
-                                popup: egui::Id::new("popup"),
-                                origin: egui::Pos2::ZERO,
-                                source: (None, 0, 0),
-                                screen,
-                                density,
-                                crossed: true,
-                                left_button: true,
-                                section: Some(Section::View),
-                            }),
-                            release: release.then(|| (at, position.expect("release point"))),
-                            ..Default::default()
-                        },
-                    )
-                });
-                let mut selected = None;
-                let _ = context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(screen),
-                        time: Some(now),
-                        events: position
-                            .map(egui::Event::PointerMoved)
-                            .into_iter()
-                            .collect(),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let output = scroll(ui, egui::Id::new("test"), 180.0, |ui| {
-                            for row in 0..50 {
-                                let response = ui.button(format!("Item {row}"));
-                                if position.is_some_and(|pos| response.interact_rect.contains(pos))
-                                {
-                                    hit_row = Some(row);
-                                }
-                                if clicked(&response) {
-                                    selected = Some(row);
-                                }
-                            }
+            let mut time = 0.0;
+            let mut render = |events: Vec<egui::Event>| {
+                time += 0.05;
+                let mut result = (egui::Rect::NOTHING, 0.0, false, false);
+                let mut input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                };
+                wheel_input::prepare_native_input(&context, &mut input);
+                let _ = context.run_ui(input, |ui| {
+                    let opener = ui.button("Opener");
+                    if ui.input(|input| input.pointer.primary_down()) {
+                        context.set_dragged_id(opener.id);
+                        context.data_mut(|data| {
+                            data.insert_temp(
+                                state_id(),
+                                State {
+                                    drag: Some(Drag {
+                                        id: opener.id,
+                                        popup: opener.id.with("popup"),
+                                        origin: opener.rect.center(),
+                                        source: (None, 0, 0),
+                                        screen,
+                                        density,
+                                        crossed: true,
+                                    }),
+                                    section: Some(Section::View),
+                                    ..Default::default()
+                                },
+                            )
                         });
-                        bounds = output.inner_rect;
-                        offset = output.state.offset.y;
-                    },
-                );
-                (bounds, offset, hit_row, selected)
+                    }
+                    let output = scroll(ui, egui::Id::new("test-menu"), 180.0, |ui| {
+                        for index in 0..50 {
+                            let response = ui.button(format!("Item {index}"));
+                            result.2 |= hovered(&response);
+                            result.3 |= clicked(&response);
+                        }
+                    });
+                    result.0 = output.inner_rect;
+                    result.1 = output.state.offset.y;
+                });
+                result
             };
-            let (bounds, _, _, _) = render(None, false, 0.016);
-            render(None, false, 0.016);
-            let edge = egui::pos2(bounds.left() + 20.0, bounds.bottom() - 1.0);
-            for _ in 0..10 {
-                assert_eq!(
-                    render(Some(edge), false, 0.016).1,
-                    0.0,
-                    "dwell protects edge rows"
-                );
+            for _ in 0..3 {
+                render(vec![]);
             }
-            for _ in 0..25 {
-                render(Some(edge), false, 0.016);
+            let origin = egui::pos2(20.0, 15.0);
+            let press = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let bounds = render(vec![egui::Event::PointerMoved(origin), press(origin, true)]).0;
+            let edge = egui::pos2(bounds.left() + 15.0, bounds.bottom() - 4.0);
+            render(vec![egui::Event::PointerMoved(edge)]);
+            for _ in 0..40 {
+                let result = render(vec![]);
+                assert_eq!(result.1, 0.0, "stationary edge must not scroll");
+                assert!(!result.3);
             }
-            let (_, moved, row, _) = render(Some(edge), false, 0.016);
-            assert!(moved > 50.0, "stationary edge scrolls: {moved}");
-            let (_, released_offset, _, selected) = render(Some(edge), true, 0.016);
-            assert_eq!(released_offset, moved, "release cannot move the target");
-            assert_eq!(selected, row, "select the visible row on release");
-            let center = bounds.center();
-            assert_eq!(render(Some(center), false, 0.016).1, moved);
-            let near = egui::pos2(edge.x, bounds.bottom() - 15.0);
-            for _ in 0..22 {
-                render(Some(near), false, 0.016);
+            let center = egui::pos2(bounds.left() + 15.0, bounds.top() + 10.0);
+            let hovered = render(vec![egui::Event::PointerMoved(center)]);
+            assert!(hovered.2, "menu row hover remains available during capture");
+            render(vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -80.0),
+                modifiers: egui::Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            }]);
+            let mut offset = 0.0;
+            for _ in 0..30 {
+                offset = render(vec![]).1;
             }
-            let slow = render(Some(near), false, 0.016).1;
-            let slow_step = render(Some(near), false, 0.016).1 - slow;
-            let fast = render(Some(edge), false, 0.016).1;
-            let fast_step = render(Some(edge), false, 0.016).1 - fast;
-            assert!(fast_step > slow_step * 2.0, "speed follows edge distance");
+            assert!(
+                offset > 50.0,
+                "ordinary wheel scrolls during capture: {offset}"
+            );
+            let result = render(vec![press(center, false)]);
+            assert!(!result.3, "release is not a menu click");
         }
     }
 }

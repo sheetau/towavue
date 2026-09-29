@@ -32,7 +32,6 @@ Helper lookup is deliberate: colocated ffmpeg.exe/ffprobe.exe take precedence; o
 
 The Release app is a GUI executable and does not open a console. Session warnings/errors are retained under `%LOCALAPPDATA%\towavue\logs` (up to 1 MiB per session, newest five closed/current sessions subject to active-file retention). Debug keeps stderr diagnostics. For logging changes, run the runtime `diagnostics::` filter: it covers bounded UTF-8 messages, saturation, session retention, shutdown drain and a separate native FFmpeg callback process. Check the Release PE subsystem separately; tests use the console subsystem.
 
-For an explicitly requested local font trial, set `TOWAVUE_UI_FONT_TRIAL` to an absolute TTF path before building the app. The build script embeds that face; unset the variable to restore the bundled Figtree on the next build. Keep trial font copies and binaries under ignored `target/`, independently of distribution materials. The supplied face must already map decimal digits to tabular glyphs: egui does not enable OpenType `tnum` automatically. Run the app `fonts::` controls for tabular metrics, icon separation and installed language fallback, then inspect actual UI layout. A successful local trial does not change the font inputs of clean release builds.
 
 ## Verification by impact
 

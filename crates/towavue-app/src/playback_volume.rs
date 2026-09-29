@@ -340,6 +340,9 @@ mod tests {
 
                 let context = crate::fonts::test_context();
                 let point = egui::pos2(80.0, 80.0);
+                app.playlist.scroll_rect = (kind == MediaKind::Audio).then_some(
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0)),
+                );
                 let frame = |app: &Application<_>, deltas: Vec<(egui::MouseWheelUnit, f32)>| {
                     let mut actions = Vec::new();
                     let mut events = vec![egui::Event::PointerMoved(point)];
@@ -348,7 +351,11 @@ mod tests {
                             unit,
                             delta: egui::vec2(0.0, delta),
                             phase: egui::TouchPhase::Move,
-                            modifiers: egui::Modifiers::NONE,
+                            modifiers: if kind == MediaKind::Audio {
+                                egui::Modifiers::CTRL
+                            } else {
+                                egui::Modifiers::NONE
+                            },
                         }
                     }));
                     let _ = context.run_ui(

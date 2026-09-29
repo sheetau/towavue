@@ -67,9 +67,9 @@ fn row_center(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
 }
 
 #[test]
-fn held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry() {
+fn held_direction_opens_immediately_and_tracks_the_original_press() {
     let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry",
+        "logo_menu::tests::held_direction_opens_immediately_and_tracks_the_original_press",
     ) else {
         return;
     };
@@ -92,6 +92,7 @@ fn held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry() {
             (egui::vec2(24.0, -12.0), Section::File, "Open file "),
             (egui::vec2(24.0, 24.0), Section::Edit, "Undo "),
             (egui::vec2(-12.0, 24.0), Section::View, "Toggle fullscreen "),
+            (egui::vec2(24.0, -12.0), Section::File, "Open file "),
         ] {
             frame(
                 &mut app,
@@ -100,34 +101,28 @@ fn held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry() {
             );
             assert!(
                 egui::Popup::is_any_open(&context),
-                "opens on direction frame"
-            );
-            for _ in 0..3 {
-                frame(&mut app, size, vec![]);
-            }
-            let output = frame(&mut app, size, vec![]);
-            row_center(&output, label);
-            frame(
-                &mut app,
-                size,
-                vec![egui::Event::PointerMoved(egui::pos2(600.0, 420.0))],
+                "opens on the direction frame"
             );
             assert_eq!(
                 context
                     .data(|data| data.get_temp::<State>(state_id()))
-                    .expect("state")
+                    .expect("gesture state")
                     .section,
                 Some(section)
             );
-            frame(&mut app, size, vec![egui::Event::PointerMoved(origin)]);
-            assert!(!egui::Popup::is_any_open(&context), "reentry rearms");
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            row_center(&frame(&mut app, size, vec![]), label);
         }
-        frame(&mut app, size, vec![pointer(origin, false)]);
+        let target = origin + egui::vec2(24.0, -12.0);
+        frame(&mut app, size, vec![pointer(target, false)]);
         assert!(
-            !egui::Popup::is_any_open(&context),
-            "reentry release does not replay a click"
+            egui::Popup::is_any_open(&context),
+            "release keeps the menu open"
         );
         assert!(app.pending_dialog.is_none() && app.edits.is_empty());
+        frame(&mut app, size, vec![key(egui::Key::Escape)]);
         for departed in [false, true] {
             let mut events = vec![
                 pointer(origin, true),
@@ -141,10 +136,13 @@ fn held_direction_opens_immediately_stays_fixed_and_rearms_on_button_reentry() {
             frame(&mut app, size, events);
             assert!(
                 !egui::Popup::is_any_open(&context),
-                "cancelled opening cannot be replayed in one batch"
+                "no direction means no menu"
             );
             frame(&mut app, size, vec![pointer(origin, false)]);
-            assert!(!egui::Popup::is_any_open(&context));
+            assert!(
+                !egui::Popup::is_any_open(&context),
+                "returning does not replay a click"
+            );
         }
     }
 }
@@ -363,9 +361,9 @@ fn logo_direction_threshold_and_sector_boundaries_match_the_three_arrows() {
 }
 
 #[test]
-fn held_leaf_release_dispatches_once_and_pointer_exit_preserves_event_order() {
+fn held_leaf_release_never_dispatches_and_pointer_exit_preserves_event_order() {
     let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::held_leaf_release_dispatches_once_and_pointer_exit_preserves_event_order",
+        "logo_menu::tests::held_leaf_release_never_dispatches_and_pointer_exit_preserves_event_order",
     ) else {
         return;
     };
@@ -412,11 +410,8 @@ fn held_leaf_release_dispatches_once_and_pointer_exit_preserves_event_order() {
             for _ in 0..4 {
                 frame(&mut app, size, vec![]);
             }
-            assert_eq!(
-                app.edits[&tab].operations().len(),
-                if exit_before_release { 2 } else { 1 }
-            );
-            assert!(!egui::Popup::is_any_open(&context));
+            assert_eq!(app.edits[&tab].operations().len(), 2);
+            assert_eq!(egui::Popup::is_any_open(&context), !exit_before_release);
             assert!(context.dragged_id().is_none());
         }
     }
@@ -488,7 +483,7 @@ fn logo_keeps_its_owned_press_when_batched_motion_hits_loaded_media_or_a_tab() {
             size,
             vec![pointer(egui::pos2(900.0, 550.0), false)],
         );
-        assert!(!egui::Popup::is_any_open(&context));
+        assert!(egui::Popup::is_any_open(&context));
         assert!(context.dragged_id().is_none());
         frame(&mut app, size, vec![key(egui::Key::Escape)]);
         frame(
@@ -651,10 +646,7 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
     for guard in [false, true] {
         let (mut app, origin) = setup(&root);
         let tab = app.tabs.active().expect("tab").id;
-        let size = egui::vec2(640.0, 1100.0);
-        for _ in 0..3 {
-            frame(&mut app, size, vec![]);
-        }
+        let size = egui::vec2(640.0, 480.0);
         let history = app.edits.entry(tab).or_default();
         for _ in 0..2 {
             history.push(EditOperation::RotateClockwise, MediaKind::Image);
@@ -668,7 +660,13 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
         frame(
             &mut app,
             size,
-            vec![pointer(origin, true), egui::Event::PointerMoved(target)],
+            vec![
+                egui::Event::PointerMoved(egui::pos2(600.0, 400.0)),
+                pointer(origin, true),
+                pointer(target, false),
+                pointer(origin, true),
+                pointer(origin + egui::vec2(-12.0, 24.0), false),
+            ],
         );
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
@@ -691,18 +689,8 @@ fn logo_drag_uses_the_first_owned_press_and_release_and_dispatches_menu_commands
                         .collect::<Vec<_>>()
                 )
             })
-            .1
-            .bounds()
-            .expect("bounds");
-        let target = egui::pos2(
-            (target.x0 + target.x1) as f32 * 0.5,
-            (target.y0 + target.y1) as f32 * 0.5,
-        );
-        frame(
-            &mut app,
-            size,
-            vec![egui::Event::PointerMoved(target), pointer(target, false)],
-        );
+            .0;
+        frame(&mut app, size, vec![access(target, None)]);
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
@@ -1297,54 +1285,5 @@ fn keyboard_logo_entry_restores_focus_after_escape() {
             .accesskit_update
             .expect("returned tree");
         assert_eq!(tree.focus, logo);
-    }
-}
-
-#[test]
-fn held_drag_enters_a_choice_submenu_and_applies_the_release_once() {
-    let Some(root) = crate::tests::isolated_test_root(
-        "logo_menu::tests::held_drag_enters_a_choice_submenu_and_applies_the_release_once",
-    ) else {
-        return;
-    };
-    for density in [1.0, 1.25, 2.0] {
-        let (mut app, origin) = setup(&root);
-        let context = app.ui_context.clone().expect("context");
-        context.set_pixels_per_point(density);
-        let size = egui::vec2(960.0, 1100.0);
-        for _ in 0..3 {
-            frame(&mut app, size, vec![]);
-        }
-        frame(
-            &mut app,
-            size,
-            vec![
-                pointer(origin, true),
-                egui::Event::PointerMoved(origin + egui::vec2(-12.0, 24.0)),
-            ],
-        );
-        for _ in 0..3 {
-            frame(&mut app, size, vec![]);
-        }
-        let output = frame(&mut app, size, vec![]);
-        let target = row_center(&output, "Image interpolation");
-        frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
-        for _ in 0..4 {
-            frame(&mut app, size, vec![]);
-        }
-        let output = frame(&mut app, size, vec![]);
-        let target = row_center(&output, "Nearest");
-        frame(&mut app, size, vec![egui::Event::PointerMoved(target)]);
-        for _ in 0..3 {
-            frame(&mut app, size, vec![]);
-        }
-        assert!(!app.nearest_images);
-        frame(&mut app, size, vec![pointer(target, false)]);
-        for _ in 0..3 {
-            frame(&mut app, size, vec![]);
-        }
-        assert!(app.nearest_images);
-        assert!(!egui::Popup::is_any_open(&context));
-        assert!(context.dragged_id().is_none());
     }
 }

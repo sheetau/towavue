@@ -92,6 +92,7 @@ pub(super) fn submenu(
                             command = Some(LoadSubtitles);
                             ui.close();
                         }
+                        let previous_visible = data.subtitle_settings.visible;
                         let response = ui
                             .checkbox(
                                 &mut data.subtitle_settings.visible,
@@ -99,10 +100,9 @@ pub(super) fn submenu(
                             )
                             .on_hover_text(text(ui.ctx(), Text::SubtitleExportHelp));
                         items.push(response.id);
-                        if crate::logo_menu::drag::released(&response) {
-                            data.subtitle_settings.visible = !data.subtitle_settings.visible;
-                        }
-                        if response.changed() || crate::logo_menu::drag::released(&response) {
+                        if crate::logo_menu::drag::captured(ui.ctx()) {
+                            data.subtitle_settings.visible = previous_visible;
+                        } else if response.changed() {
                             data.subtitle_action =
                                 Some(Action::Show(data.subtitle_settings.visible));
                         }

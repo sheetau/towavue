@@ -14,8 +14,6 @@ struct Drag {
     screen: egui::Rect,
     density: f32,
     crossed: bool,
-    left_button: bool,
-    section: Option<Section>,
 }
 
 #[derive(Clone, Default)]
@@ -23,7 +21,7 @@ struct State {
     drag: Option<Drag>,
     claimed: Option<u64>,
     processed: Option<u64>,
-    release: Option<(u64, egui::Pos2)>,
+    release: Option<u64>,
     click_frame: Option<u64>,
     last_frame: u64,
     suppress: bool,
@@ -171,8 +169,6 @@ pub(super) fn show_with_recent(
                         screen: context.content_rect(),
                         density: context.pixels_per_point(),
                         crossed: false,
-                        left_button: false,
-                        section: None,
                     });
                     state.keyboard_origin = false;
                     state.claimed = Some(frame);
@@ -188,35 +184,20 @@ pub(super) fn show_with_recent(
                 } => {
                     let released = matches!(event, egui::Event::PointerButton { .. });
                     if let Some(owned) = &mut state.drag {
-                        if !response.interact_rect.contains(*pos) {
-                            owned.left_button = true;
-                        }
-                        if owned.section.is_some()
-                            && owned.left_button
-                            && response.interact_rect.contains(*pos)
-                        {
-                            // Reentering the opener re-arms directional selection, without
-                            // reinterpreting ordinary movement among menu rows.
-                            owned.section = None;
-                            owned.left_button = false;
-                            owned.origin = *pos;
-                            state.section = None;
-                            open = None;
-                            egui::Popup::close_id(context, popup);
-                        } else if owned.section.is_none()
-                            && let Some(section) = direction(*pos - owned.origin)
-                            && context.content_rect().contains(*pos)
-                        {
-                            owned.crossed = true;
-                            owned.section = Some(section);
-                            state.section = Some(section);
-                            open = Some(section);
+                        let selected = direction(*pos - owned.origin)
+                            .filter(|_| context.content_rect().contains(*pos));
+                        if selected != state.section {
+                            state.section = selected;
+                            open = selected;
+                            if selected.is_none() {
+                                egui::Popup::close_id(context, popup);
+                            }
                         }
                         owned.crossed |= (*pos - owned.origin).length_sq() >= 64.0;
                         state.suppress |= owned.crossed;
                         if released {
                             if owned.crossed {
-                                state.release = Some((frame, *pos));
+                                state.release = Some(frame);
                             } else if response.interact_rect.contains(*pos) {
                                 state.click_frame = Some(frame);
                             }
@@ -228,7 +209,7 @@ pub(super) fn show_with_recent(
             }
         }
     }
-    let selected = state.drag.and_then(|drag| drag.section);
+    let selected = state.drag.and(state.section);
     if state.drag.is_some() {
         if !down || pointer.is_none() {
             state.drag = None;
@@ -236,7 +217,7 @@ pub(super) fn show_with_recent(
             egui::Popup::close_id(context, popup);
         } else {
             // Keep the original owner even when egui sees only the final point
-            // of a batched press/move; leaves receive the release explicitly.
+            // of a batched press/move. Release never activates a menu row.
             context.set_dragged_id(response.id);
         }
     }
@@ -273,8 +254,8 @@ pub(super) fn show_with_recent(
     };
     context.data_mut(|data| data.insert_temp(state_id(), state.clone()));
     let mut popup_ui = egui::Popup::menu(&response).open_memory(set_open);
-    if state.drag.is_some() || state.release.is_some_and(|(at, _)| at == frame) {
-        // The captured release belongs to the hit-tested leaf, not popup click dismissal.
+    if state.drag.is_some() || state.release == Some(frame) {
+        // The opener owns this release; keep the chosen menu available for a later click.
         let config = egui::containers::menu::MenuConfig::new()
             .close_behavior(egui::PopupCloseBehavior::IgnoreClicks);
         popup_ui = popup_ui
@@ -299,9 +280,7 @@ pub(super) fn show_with_recent(
         })
         .inner
     });
-    if state.release.is_some_and(|(at, _)| at == frame) {
-        egui::Popup::close_id(context, popup);
-        state.section = None;
+    if state.release == Some(frame) {
         context.stop_dragging();
         response.surrender_focus();
     }

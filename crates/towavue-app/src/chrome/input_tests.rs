@@ -174,3 +174,84 @@ fn text_inputs_share_height_and_corners_without_collapsing_multiline_editors() {
         }
     }
 }
+
+#[test]
+fn flat_buttons_and_combo_keep_corners_through_hover_press_and_open() {
+    for density in [1.0, 1.25, 2.0] {
+        for target in [0, 1] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(style);
+            let mut rects = [Rect::NOTHING; 2];
+            let mut open = false;
+            let mut frame = |events| {
+                let mut input = egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 240.0))),
+                    events,
+                    ..Default::default()
+                };
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("viewport")
+                    .native_pixels_per_point = Some(density);
+                let output = context.run_ui(input, |ui| {
+                    ui.horizontal(|ui| {
+                        flat_buttons(ui);
+                        rects[0] = ui.button("Apply").rect;
+                        let combo = combo_box(
+                            ui,
+                            egui::ComboBox::from_id_salt("filter").selected_text("Bicubic"),
+                            |ui| {
+                                let _ = ui.selectable_label(true, "Bicubic");
+                                let _ = ui.selectable_label(false, "Lanczos");
+                            },
+                        );
+                        rects[1] = combo.response.rect;
+                        open = combo.inner.is_some();
+                    });
+                });
+                for rect in rects {
+                    let shape = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(shape)
+                                if shape.rect.min.distance(rect.min) <= 1.0 / density
+                                    && shape.rect.max.distance(rect.max) <= 1.0 / density =>
+                            {
+                                Some(shape)
+                            }
+                            _ => None,
+                        })
+                        .expect("painted control background");
+                    assert_eq!(shape.corner_radius, egui::CornerRadius::same(3));
+                    assert_eq!(shape.stroke, Stroke::NONE);
+                }
+                (rects, open)
+            };
+            frame(vec![]);
+            let initial = frame(vec![]).0;
+            let position = initial[target].center();
+            frame(vec![egui::Event::PointerMoved(position)]);
+            frame(vec![]);
+            frame(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            frame(vec![]);
+            frame(vec![egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            let (final_rects, open) = frame(vec![]);
+            assert_eq!(initial, final_rects, "interaction must not resize controls");
+            assert_eq!(open, target == 1, "combo opens after activation");
+            frame(vec![egui::Event::PointerMoved(egui::pos2(390.0, 230.0))]);
+            frame(vec![]);
+        }
+    }
+}

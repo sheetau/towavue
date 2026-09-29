@@ -237,6 +237,7 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
         &mut widgets.noninteractive,
     ] {
         visuals.bg_stroke = egui::Stroke::NONE;
+        visuals.corner_radius = egui::CornerRadius::same(3);
         visuals.expansion = 0.0;
     }
 }

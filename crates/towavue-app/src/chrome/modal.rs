@@ -67,6 +67,10 @@ pub fn modal_body<R>(
     ui.set_max_height((bounds.height() - FRAME_SPACE).max(1.0));
     if bounds.height() < 200.0 {
         ui.spacing_mut().item_spacing.y = 2.0;
+        if bounds.height() < 112.0 {
+            // Keep a wrapped footer inside very short media areas with its full gap.
+            ui.spacing_mut().button_padding.y = 2.0;
+        }
     }
     ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
         node.set_role(egui::accesskit::Role::Dialog);
@@ -98,7 +102,12 @@ pub fn modal_body<R>(
             ui.spacing().item_spacing.x + width
         };
     }
-    let footer = rows as f32 * (row_height + ui.spacing().item_spacing.y);
+    let footer_gap = if actions.is_empty() {
+        0.0
+    } else {
+        (MARGIN - ui.spacing().item_spacing.y).max(0.0)
+    };
+    let footer = rows as f32 * (row_height + ui.spacing().item_spacing.y) + footer_gap;
     let height = (bounds.height()
         - FRAME_SPACE
         - heading.rect.height()
@@ -114,6 +123,7 @@ pub fn modal_body<R>(
         .min_scrolled_height(1.0)
         .show_styled(ui, content);
     ui.visuals_mut().clip_rect_margin = clip_margin;
+    ui.add_space(footer_gap);
     body.inner
 }
 
@@ -185,6 +195,10 @@ mod tests {
                         assert!(
                             clip.contains_rect(content),
                             "settled content is fully visible: density={density}, preview={preview}, width={width}, viewport={viewport_width}, clip={clip:?}, content={content:?}"
+                        );
+                        assert!(
+                            (buttons[0].top() - content.bottom() - MARGIN).abs() <= 1.0 / density,
+                            "footer gap matches the inner margin"
                         );
                         assert!(buttons.iter().all(|button| outer.contains_rect(*button)
                             && button.top() >= content.bottom()));

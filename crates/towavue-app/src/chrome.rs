@@ -10,7 +10,9 @@ mod modal;
 pub use modal::{modal, modal_body, set_modal_bounds};
 
 mod reading_icon;
+mod tab_audio_fade;
 mod tab_fade;
+pub use tab_audio_fade::tab_audio_visibility;
 pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade, tab_title_with_volume};
 
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
@@ -239,6 +241,40 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
     }
 }
 
+/// Shared menu geometry, also used by combo popups and context menus.
+pub fn menu_style(style: &mut egui::Style) {
+    egui::containers::menu::menu_style(style);
+    style.spacing.interact_size.y = 18.0;
+    style.spacing.item_spacing.y = 0.0;
+    for visual in [
+        &mut style.visuals.widgets.noninteractive,
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.open,
+    ] {
+        visual.bg_stroke = Stroke::NONE;
+        visual.corner_radius = egui::CornerRadius::same(3);
+        visual.expansion = 0.0;
+    }
+}
+
+pub fn menu(ui: &mut Ui) {
+    menu_style(ui.style_mut());
+}
+
+pub fn combo_box<R>(
+    ui: &mut Ui,
+    combo: egui::ComboBox,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    ui.scope(|ui| {
+        flat_buttons(ui);
+        combo.popup_style(menu_style.into()).show_ui(ui, contents)
+    })
+    .inner
+}
+
 /// Frameless controls painted directly over the black content surface.
 pub fn surface_hover(ui: &mut Ui) {
     let widgets = &mut ui.visuals_mut().widgets;
@@ -305,6 +341,7 @@ pub fn tab_audio_button(
     active: bool,
     muted: bool,
     name: &str,
+    opacity: f32,
 ) -> egui::Response {
     let language = crate::localization::language(ui.ctx());
     let label = if muted {
@@ -325,11 +362,12 @@ pub fn tab_audio_button(
         egui::Align2::CENTER_CENTER,
         icon.text(),
         egui::FontId::new(14.0, crate::fonts::icon_font().family),
-        if active || response.hovered() {
+        (if active || response.hovered() {
             FOREGROUND
         } else {
             MUTED
-        },
+        })
+        .gamma_multiply(opacity),
     );
     response
 }
@@ -865,7 +903,7 @@ mod tests {
                         audio_rect.set_width(super::TAB_AUDIO_WIDTH);
                         label_rect.min.x = audio_rect.right();
                         let audio =
-                            super::tab_audio_button(ui, audio_rect, true, muted, "Tab label");
+                            super::tab_audio_button(ui, audio_rect, true, muted, "Tab label", 1.0);
                         assert!(row.contains_rect(audio.rect));
                         assert!(!audio.rect.intersects(close_rect));
                     }

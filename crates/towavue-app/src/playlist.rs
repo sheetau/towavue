@@ -273,12 +273,37 @@ impl Playlist {
                                         egui::vec2(ui.available_width(), 32.0),
                                         egui::Button::selectable(
                                             false,
-                                            (text, egui::Atom::grow(), duration),
+                                            egui::Atoms::default(),
                                         )
                                         .fill(egui::Color32::TRANSPARENT)
                                         .stroke(egui::Stroke::NONE)
                                         .truncate(),
                                     );
+                                    if ui.is_rect_visible(response.rect) {
+                                        let color = ui.style().interact(&response).fg_stroke.color;
+                                        let duration = egui::WidgetText::from(duration).into_galley(
+                                            ui, Some(egui::TextWrapMode::Extend),
+                                            f32::INFINITY, egui::TextStyle::Button,
+                                        );
+                                        let padding = ui.spacing().button_padding.x;
+                                        let text = egui::WidgetText::from(text).into_galley(
+                                            ui, Some(egui::TextWrapMode::Truncate),
+                                            (response.rect.width() - padding * 2.0
+                                                - duration.size().x - ui.spacing().item_spacing.x).max(0.0),
+                                            egui::TextStyle::Button,
+                                        );
+                                        // Optical centering: raise both captions by one physical pixel.
+                                        let y = response.rect.center().y - 1.0 / ui.ctx().pixels_per_point();
+                                        let painter = ui.painter();
+                                        painter.galley(
+                                            egui::pos2(response.rect.left() + padding, y - text.size().y * 0.5),
+                                            text, color,
+                                        );
+                                        painter.galley(
+                                            egui::pos2(response.rect.right() - padding - duration.size().x, y - duration.size().y * 0.5),
+                                            duration, color,
+                                        );
+                                    }
                                     if response.hovered() {
                                         ui.painter().set(
                                             background,

@@ -349,7 +349,7 @@ fn show_items(
     recent: &mut MenuData<'_>,
     ancestor: Option<egui::Rect>,
 ) -> (Option<CommandId>, bool) {
-    crate::chrome::flat_buttons(ui);
+    crate::chrome::menu(ui);
     let groups = MENUS
         .iter()
         .find(|(name, _)| *name == title)
@@ -594,7 +594,7 @@ fn language_menu(
 }
 
 fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f32) -> bool {
-    crate::chrome::flat_buttons(ui);
+    crate::chrome::menu(ui);
     use crate::hover_help::HoverHelp;
     use towavue_runtime_windows::RecentKind;
     let keyboard = MenuKeyboard::begin(ui);

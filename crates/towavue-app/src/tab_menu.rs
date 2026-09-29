@@ -152,7 +152,7 @@ pub fn show(
     shortcuts: &ShortcutBindings,
     muted: Option<bool>,
 ) -> Option<CommandId> {
-    crate::chrome::flat_buttons(ui);
+    crate::chrome::menu(ui);
     let keyboard = crate::menu::MenuKeyboard::begin(ui);
     let mut items = Vec::new();
     let mut chosen = None;

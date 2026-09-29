@@ -232,7 +232,7 @@ impl KeyboardSettings {
                             self.begin_edit(row.command.id, row.slot, bindings);
                         }
                         response.context_menu(|ui| {
-                            chrome::flat_buttons(ui);
+                            chrome::menu(ui);
                             if ui
                                 .button(Text::EditKeybinding.in_language(display_language))
                                 .clicked()

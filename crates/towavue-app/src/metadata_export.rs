@@ -140,9 +140,12 @@ impl MetadataDialog {
                 ],
                 |ui| {
                     ui.label(Text::MetadataField.in_language(display_language));
-                    let response = egui::ComboBox::from_id_salt("metadata-field")
-                        .selected_text(MetadataField::ALL[self.selected].label_in(display_language))
-                        .show_ui(ui, |ui| {
+                    let response = chrome::combo_box(
+                        ui,
+                        egui::ComboBox::from_id_salt("metadata-field").selected_text(
+                            MetadataField::ALL[self.selected].label_in(display_language),
+                        ),
+                        |ui| {
                             for (index, field) in MetadataField::ALL.into_iter().enumerate() {
                                 if !fields.contains(&field) {
                                     continue;
@@ -158,9 +161,10 @@ impl MetadataDialog {
                                     ui.close();
                                 }
                             }
-                        })
-                        .response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        },
+                    )
+                    .response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                     if self.first_frame {
                         response.request_focus();
                         self.first_frame = false;

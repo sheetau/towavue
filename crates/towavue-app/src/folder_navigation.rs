@@ -57,6 +57,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             generation,
             FolderIntent::Related(self.tabs.active_id(), self.media_generation),
         ));
+        self.clear_status();
         self.request_redraw();
     }
 }

@@ -112,28 +112,30 @@ impl ResizeDialog {
         {
             self.height = self.round(f64::from(value) / self.ratio);
         }
-        let filter =
+        let filter = chrome::combo_box(
+            ui,
             egui::ComboBox::from_label(Text::ResamplingFilter.in_language(display_language))
-                .selected_text(filter_name(self.filter, display_language))
-                .show_ui(ui, |ui| {
-                    for filter in [
-                        ResampleFilter::Nearest,
-                        ResampleFilter::Bilinear,
-                        ResampleFilter::Bicubic,
-                        ResampleFilter::Lanczos,
-                    ] {
-                        if ui
-                            .selectable_value(
-                                &mut self.filter,
-                                filter,
-                                filter_name(filter, display_language),
-                            )
-                            .clicked()
-                        {
-                            ui.close();
-                        }
+                .selected_text(filter_name(self.filter, display_language)),
+            |ui| {
+                for filter in [
+                    ResampleFilter::Nearest,
+                    ResampleFilter::Bilinear,
+                    ResampleFilter::Bicubic,
+                    ResampleFilter::Lanczos,
+                ] {
+                    if ui
+                        .selectable_value(
+                            &mut self.filter,
+                            filter,
+                            filter_name(filter, display_language),
+                        )
+                        .clicked()
+                    {
+                        ui.close();
                     }
-                });
+                }
+            },
+        );
         self.reveal_focus(
             filter
                 .response
@@ -332,7 +334,7 @@ fn text_input_rows_with_id(
     let mut response = ui
         .scope(|ui| {
             ui.visuals_mut().weak_text_color = Some(if framed {
-                crate::chrome::BORDER
+                crate::chrome::HOVER
             } else {
                 ui.visuals()
                     .widgets
@@ -584,7 +586,7 @@ pub(crate) mod tests {
                         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                             egui::Shape::Text(text) if text.galley.text() == "Placeholder"
                                 && text.galley.job.sections.iter().all(|section|
-                                    section.format.color == crate::chrome::BORDER))));
+                                    section.format.color == crate::chrome::HOVER))));
                     }
                 }
             }

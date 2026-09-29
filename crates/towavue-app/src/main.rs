@@ -1891,6 +1891,7 @@ where
     fn open_folder_path(&mut self, folder: PathBuf) {
         let generation = self.folder_order.request(Some(folder));
         self.pending_folder = Some((generation, FolderIntent::Open));
+        self.clear_status();
         self.request_redraw();
     }
 
@@ -5831,7 +5832,23 @@ where
                                         .current_path()
                                         .map(display_name)
                                         .unwrap_or_else(|| image_paste::DEFAULT_NAME.into());
-                                    let audio = self.tab_audio_indicator(tab);
+                                    let audio = chrome::tab_audio_visibility(
+                                        ui.ctx(),
+                                        ui.id().with((
+                                            "tab-audio-fade",
+                                            tab.id,
+                                            tab.target.current_path(),
+                                        )),
+                                        self.tab_audio_indicator(tab),
+                                        Instant::now(),
+                                    )
+                                    .and_then(
+                                        |(_, opacity)| {
+                                            // The held button still reflects mute changes while paused.
+                                            self.tab_mute_state(tab.id)
+                                                .map(|muted| (muted, opacity))
+                                        },
+                                    );
                                     let audio_rect = audio.map(|_| {
                                         let mut bounds = label_rect;
                                         bounds.set_width(chrome::TAB_AUDIO_WIDTH);
@@ -5903,7 +5920,7 @@ where
                                             &label,
                                         )
                                     });
-                                    if let Some(muted) = audio {
+                                    if let Some(muted) = self.tab_audio_indicator(tab) {
                                         tab_ui.ctx().accesskit_node_builder(response.id, |node| {
                                             node.set_description(if muted {
                                                 localization::Text::TabPlayingMuted
@@ -5935,9 +5952,9 @@ where
                                     }
                                     drag_layout.register(tab.id, &response);
                                     let audio_button =
-                                        audio.zip(audio_rect).map(|(muted, rect)| {
+                                        audio.zip(audio_rect).map(|((muted, opacity), rect)| {
                                             let button = chrome::tab_audio_button(
-                                                &tab_ui, rect, active, muted, &label,
+                                                &tab_ui, rect, active, muted, &label, opacity,
                                             );
                                             tab_focus::release_pointer_focus(&button);
                                             if button.clicked() {
@@ -11360,9 +11377,14 @@ where
         self.refresh_title();
     }
 
-    fn set_status(&mut self, message: String) {
+    fn clear_status(&mut self) {
+        self.status_message = None;
         self.export_notice = None;
         self.relative_seek_notice = None;
+    }
+
+    fn set_status(&mut self, message: String) {
+        self.clear_status();
         self.status_message = Some((message, Instant::now()));
         self.request_redraw();
     }

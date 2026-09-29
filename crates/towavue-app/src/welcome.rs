@@ -304,33 +304,35 @@ fn search_field(
         )
     });
     if ui.is_enabled() {
-        egui::Popup::menu(&filter_button).show(|ui| {
-            for (kind, label) in [
-                (None, Text::GalleryAll.in_language(language)),
-                (
-                    Some(MediaKind::Image),
-                    Text::GalleryImages.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Video),
-                    Text::GalleryVideos.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Audio),
-                    Text::GalleryAudio.in_language(language),
-                ),
-            ] {
-                let available =
-                    kind.is_none() || paths.iter().any(|path| MediaKind::from_path(path) == kind);
-                if ui
-                    .add_enabled(available, egui::Button::selectable(*filter == kind, label))
-                    .clicked()
-                {
-                    *filter = kind;
-                    ui.close();
+        egui::Popup::menu(&filter_button)
+            .style(chrome::menu_style)
+            .show(|ui| {
+                for (kind, label) in [
+                    (None, Text::GalleryAll.in_language(language)),
+                    (
+                        Some(MediaKind::Image),
+                        Text::GalleryImages.in_language(language),
+                    ),
+                    (
+                        Some(MediaKind::Video),
+                        Text::GalleryVideos.in_language(language),
+                    ),
+                    (
+                        Some(MediaKind::Audio),
+                        Text::GalleryAudio.in_language(language),
+                    ),
+                ] {
+                    let available = kind.is_none()
+                        || paths.iter().any(|path| MediaKind::from_path(path) == kind);
+                    if ui
+                        .add_enabled(available, egui::Button::selectable(*filter == kind, label))
+                        .clicked()
+                    {
+                        *filter = kind;
+                        ui.close();
+                    }
                 }
-            }
-        });
+            });
     }
     let clear = ui
         .add_enabled_ui(!query.is_empty(), |ui| {

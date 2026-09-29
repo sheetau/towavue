@@ -57,7 +57,7 @@ pub(crate) fn show(
         return;
     }
     let chosen = tab_menu::popup(ui, response, response, |ui| {
-        chrome::flat_buttons(ui);
+        chrome::menu(ui);
         ui.set_min_width(170.0);
         let keyboard = menu::MenuKeyboard::begin(ui);
         let mut items = Vec::new();

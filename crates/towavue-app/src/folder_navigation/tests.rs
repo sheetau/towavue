@@ -342,3 +342,39 @@ fn related_folder_shortcuts_require_file_backed_media() {
         assert!(!definition.is_enabled(CommandContext::default()));
     }
 }
+
+#[test]
+fn opening_folder_replaces_old_notices_and_new_notices_replace_loading() {
+    let Some(root) = tests::isolated_test_root(
+        "folder_navigation::tests::opening_folder_replaces_old_notices_and_new_notices_replace_loading",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    app.set_status("Earlier notice".into());
+    app.set_status("Latest notice".into());
+    assert_eq!(app.status_notice().as_deref(), Some("Latest notice"));
+    app.open_folder_path(root.clone());
+    let opening = localization::Text::OpeningFolderNotice.in_language(app.language());
+    assert_eq!(app.status_notice().as_deref(), Some(opening));
+    app.set_status("Newer notice".into());
+    assert_eq!(app.status_notice().as_deref(), Some("Newer notice"));
+    settle(&mut app);
+    assert_eq!(
+        app.status_notice(),
+        Some(towavue_core::localization::formatted::no_folder_media(
+            app.language(),
+            &folder_name(&root)
+        ))
+    );
+
+    let path = root.join("first.bmp");
+    tab_transfer::tests::bitmap(&path);
+    tab_transfer::tests::install(&mut app, path, tab_transfer::tests::decoded(false));
+    app.set_status("Old notice before navigation".into());
+    app.navigate_folder(towavue_core::FolderNavigation::FirstChild);
+    assert_eq!(app.status_notice().as_deref(), Some(opening));
+    settle(&mut app);
+    assert_ne!(app.status_notice().as_deref(), Some(opening));
+}

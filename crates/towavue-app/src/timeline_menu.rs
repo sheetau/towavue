@@ -115,7 +115,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     && (layer == Some(ui.layer_id()) || closed_popup)
             });
         let chosen = tab_menu::popup_with_pointer(ui, response, response, pointer_pressed, |ui| {
-            chrome::flat_buttons(ui);
+            chrome::menu(ui);
             ui.set_min_width(170.0);
             let keyboard = menu::MenuKeyboard::begin(ui);
             let mut items = Vec::new();

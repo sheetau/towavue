@@ -169,8 +169,8 @@ pub use selection_outline::{paint_selection_outline, paint_time_selection};
 #[cfg(feature = "shell-lifecycle-verification")]
 pub use shell::verification::ShellLifetimeTrial;
 pub use shell::{
-    FolderNavigationResult, FolderOrderError, FolderOrderProvider, canonical_shell_path,
-    reveal_file, reveal_license_guide, shell_workers_pending,
+    FolderNavigationFailure, FolderNavigationResult, FolderOrderError, FolderOrderProvider,
+    canonical_shell_path, reveal_file, reveal_license_guide, shell_workers_pending,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
 pub use waveform::{timeline_audio_track_waveform, timeline_waveform};

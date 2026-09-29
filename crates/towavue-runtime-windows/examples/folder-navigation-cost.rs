@@ -37,7 +37,7 @@ fn main() {
         if let Some(result) = provider.take_navigation() {
             assert_eq!(result.generation, generation, "current destination");
             discovery_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
-            if let Some(target) = result.target {
+            if let Ok(target) = result.target {
                 // The app passes the selected path to its ordinary Open folder route.
                 generation = provider.request(Some(target));
                 continue;

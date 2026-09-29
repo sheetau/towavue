@@ -2708,7 +2708,7 @@ where
         }
         self.set_status(towavue_core::localization::formatted::no_folder_media(
             self.language(),
-            &folder.display().to_string(),
+            &folder_navigation::folder_name(folder),
         ));
         self.refresh_folder_snapshot();
     }

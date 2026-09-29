@@ -4,9 +4,20 @@ use super::*;
 #[derive(Debug)]
 pub struct FolderNavigationResult {
     pub generation: u64,
-    pub target: Option<PathBuf>,
-    /// Parent/child search scope for the ordinary empty-folder message when no target exists.
+    pub target: Result<PathBuf, FolderNavigationFailure>,
+    /// The folder whose contents were searched, for a contextual failure notice.
     pub searched_folder: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderNavigationFailure {
+    NoParent,
+    NoChild,
+    NoSibling,
+    NoMedia,
+    NoChildMedia,
+    NoSiblingMedia,
+    Unavailable,
 }
 
 pub(super) fn resolve(
@@ -22,26 +33,48 @@ pub(super) fn resolve(
         FolderNavigation::FirstChild => origin.clone(),
         _ => origin.parent().unwrap_or(&origin).to_owned(),
     };
-    let listing = match direction {
-        FolderNavigation::Parent => origin.parent().map(|path| vec![path.to_owned()]),
-        FolderNavigation::FirstChild => {
-            directories(&origin, last_live_window, current, shell_ready)
+    use FolderNavigationFailure::*;
+    let target = (|| {
+        let (listing, no_folder, no_media) = match direction {
+            FolderNavigation::Parent => {
+                let parent = origin.parent().ok_or(NoParent)?;
+                (vec![parent.to_owned()], NoParent, NoMedia)
+            }
+            FolderNavigation::FirstChild => (
+                directories(&origin, last_live_window, current, shell_ready).ok_or(Unavailable)?,
+                NoChild,
+                NoChildMedia,
+            ),
+            FolderNavigation::Previous | FolderNavigation::Next => {
+                let parent = origin.parent().ok_or(NoSibling)?;
+                let paths = directories(parent, last_live_window, current, shell_ready)
+                    .ok_or(Unavailable)?;
+                if !paths.contains(&origin) {
+                    return Err(Unavailable);
+                }
+                (
+                    siblings(&paths, &origin, direction == FolderNavigation::Next),
+                    NoSibling,
+                    NoSiblingMedia,
+                )
+            }
+        };
+        if listing.is_empty() {
+            return Err(no_folder);
         }
-        FolderNavigation::Previous | FolderNavigation::Next => origin.parent().and_then(|parent| {
-            directories(parent, last_live_window, current, shell_ready)
-                .map(|paths| siblings(&paths, &origin, direction == FolderNavigation::Next))
-        }),
-    };
-    let mut target = None;
-    for folder in listing.unwrap_or_default() {
-        if !current() {
-            return None;
+        let mut failure = no_media;
+        for folder in listing {
+            if !current() {
+                return Err(Unavailable);
+            }
+            match has_media(&folder, current) {
+                Ok(true) => return Ok(folder),
+                Ok(false) => {}
+                Err(_) => failure = Unavailable,
+            }
         }
-        if has_media(&folder, current) {
-            target = Some(folder);
-            break;
-        }
-    }
+        Err(failure)
+    })();
     current().then_some(FolderNavigationResult {
         generation,
         target,
@@ -65,31 +98,28 @@ fn siblings(paths: &[PathBuf], origin: &Path, forward: bool) -> Vec<PathBuf> {
         .collect()
 }
 
-fn has_media(folder: &Path, current: &impl Fn() -> bool) -> bool {
-    let Ok(entries) = std::fs::read_dir(folder) else {
-        return false;
-    };
+fn has_media(folder: &Path, current: &impl Fn() -> bool) -> std::io::Result<bool> {
+    let entries = std::fs::read_dir(folder)?;
     has_media_entries(entries, current)
 }
 
 fn has_media_entries(
     entries: impl IntoIterator<Item = std::io::Result<std::fs::DirEntry>>,
     current: &impl Fn() -> bool,
-) -> bool {
+) -> std::io::Result<bool> {
     for entry in entries {
         if !current() {
-            return false;
+            return Ok(false);
         }
-        if let Ok(entry) = entry
-            && MediaKind::from_path(&entry.path()).is_some()
-            && entry
-                .file_type()
-                .is_ok_and(|kind| kind.is_file() || (kind.is_symlink() && entry.path().is_file()))
-        {
-            return true;
+        let entry = entry?;
+        if MediaKind::from_path(&entry.path()).is_some() {
+            let kind = entry.file_type()?;
+            if kind.is_file() || (kind.is_symlink() && entry.path().is_file()) {
+                return Ok(true);
+            }
         }
     }
-    false
+    Ok(false)
 }
 
 fn directories(
@@ -220,11 +250,11 @@ mod tests {
             .expect("folder navigation fixture");
         let vanished = root.join("vanished/test.png");
         fs::write(&vanished, b"extension only").expect("folder navigation fixture");
-        assert!(!has_media(&root.join("empty"), &|| true));
-        assert!(!has_media(&root.join("nested"), &|| true));
-        assert!(!has_media(&root.join("named.jpg"), &|| true));
-        assert!(!has_media(&root.join("absent"), &|| true));
-        assert!(!has_media(&root.join("good"), &|| false));
+        assert!(!has_media(&root.join("empty"), &|| true).expect("read fixture"));
+        assert!(!has_media(&root.join("nested"), &|| true).expect("read fixture"));
+        assert!(!has_media(&root.join("named.jpg"), &|| true).expect("read fixture"));
+        assert!(has_media(&root.join("absent"), &|| true).is_err());
+        assert!(!has_media(&root.join("good"), &|| false).expect("read fixture"));
         let first = fs::read_dir(root.join("good"))
             .expect("fixture listing")
             .next()
@@ -232,9 +262,64 @@ mod tests {
         let entries = std::iter::once(first).chain(std::iter::from_fn(|| {
             panic!("discovery must stop before reading the next entry");
         }));
-        assert!(has_media_entries(entries, &|| true));
+        assert!(has_media_entries(entries, &|| true).expect("read fixture"));
         fs::remove_file(&vanished).expect("remove owned media before discovery");
-        assert!(!has_media(&root.join("vanished"), &|| true));
+        assert!(!has_media(&root.join("vanished"), &|| true).expect("read fixture"));
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn navigation_failures_distinguish_missing_levels_empty_media_and_unavailable_folders() {
+        let root = super::super::tests::test_directory("navigation-failures");
+        fs::create_dir_all(root.join("only")).expect("fixture");
+        fs::write(root.join("only/current.jpg"), b"extension only").expect("fixture");
+        let resolve_failure = |origin: &Path, direction| {
+            resolve(origin, direction, 1, &mut None, &|| true, false)
+                .expect("current request")
+                .target
+                .expect_err("no destination")
+        };
+        use FolderNavigationFailure::*;
+        assert_eq!(
+            resolve_failure(&root.join("only"), FolderNavigation::FirstChild),
+            NoChild
+        );
+        assert_eq!(
+            resolve_failure(&root.join("only"), FolderNavigation::Next),
+            NoSibling
+        );
+        assert_eq!(
+            resolve_failure(&root.join("only"), FolderNavigation::Parent),
+            NoMedia
+        );
+        fs::create_dir(root.join("empty")).expect("fixture");
+        assert_eq!(
+            resolve_failure(&root.join("only"), FolderNavigation::Next),
+            NoSiblingMedia
+        );
+        fs::create_dir(root.join("only/empty")).expect("fixture");
+        assert_eq!(
+            resolve_failure(&root.join("only"), FolderNavigation::FirstChild),
+            NoChildMedia
+        );
+        assert_eq!(
+            resolve_failure(&root.join("absent"), FolderNavigation::FirstChild),
+            Unavailable
+        );
+        let drive = root.ancestors().last().expect("root");
+        assert_eq!(resolve_failure(drive, FolderNavigation::Parent), NoParent);
+        assert_eq!(resolve_failure(drive, FolderNavigation::Next), NoSibling);
+        assert!(
+            resolve(
+                &root,
+                FolderNavigation::FirstChild,
+                2,
+                &mut None,
+                &|| false,
+                false
+            )
+            .is_none()
+        );
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }
 
@@ -271,7 +356,7 @@ mod tests {
         ] {
             let generation = provider.request_navigation(root.join(origin), direction);
             let result = wait(generation);
-            assert_eq!(result.target, Some(root.join(target)));
+            assert_eq!(result.target, Ok(root.join(target)));
             assert!(
                 provider.take_completed().is_none(),
                 "discovery returns no media listing"
@@ -281,7 +366,7 @@ mod tests {
         provider.request(None);
         let generation = provider.request_navigation(root.join("a"), FolderNavigation::FirstChild);
         let empty = wait(generation);
-        assert!(empty.target.is_none(), "no child keeps origin");
+        assert_eq!(empty.target, Err(FolderNavigationFailure::NoChild));
         assert_eq!(empty.searched_folder, root.join("a"));
         drop(provider);
         fs::remove_dir_all(root).expect("owned fixture cleanup");

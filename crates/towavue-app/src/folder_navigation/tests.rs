@@ -1,3 +1,4 @@
+use super::folder_name;
 use crate::*;
 
 fn settle<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
@@ -70,10 +71,7 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
     assert!(app.pending_guard.is_none());
     assert_eq!(
         app.status_message.as_ref().expect("empty-folder notice").0,
-        towavue_core::localization::formatted::no_folder_media(
-            app.language(),
-            &root.display().to_string()
-        ),
+        towavue_core::localization::formatted::no_folder_media(app.language(), &folder_name(&root)),
     );
 
     app.dispatch(CommandId::NextFolder);
@@ -114,7 +112,7 @@ fn related_folder_discovery_reuses_open_folder_and_handles_a_destination_becomin
         assert!(Instant::now() < deadline, "path-only delivery");
         std::thread::sleep(Duration::from_millis(2));
     };
-    assert_eq!(result.target.as_deref(), target.parent());
+    assert_eq!(result.target.as_deref().ok(), target.parent());
     assert!(
         app.folder_order.take_completed().is_none(),
         "no duplicate media listing"
@@ -133,11 +131,123 @@ fn related_folder_discovery_reuses_open_folder_and_handles_a_destination_becomin
             .as_ref()
             .expect("ordinary empty-folder notice")
             .0,
-        towavue_core::localization::formatted::no_folder_media(
-            app.language(),
-            &root.join("b").display().to_string()
-        ),
+        towavue_core::localization::formatted::no_folder_media(app.language(), "b"),
     );
+}
+
+#[test]
+fn folder_notices_use_names_and_distinguish_missing_children_from_empty_children() {
+    let Some(root) = tests::isolated_test_root(
+        "folder_navigation::tests::folder_notices_use_names_and_distinguish_missing_children_from_empty_children",
+    ) else {
+        return;
+    };
+    let folder = root.join("album");
+    std::fs::create_dir(&folder).expect("fixture");
+    let file = folder.join("first.bmp");
+    tab_transfer::tests::bitmap(&file);
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    tab_transfer::tests::install(&mut app, file.clone(), tab_transfer::tests::decoded(false));
+    for language in [
+        localization::Language::English,
+        localization::Language::Japanese,
+    ] {
+        // Verify both localized templates through the same failure mapping.
+        app.language_settings.display = language;
+        localization::set_language(app.ui_context.as_ref().expect("context"), language);
+        app.dispatch(CommandId::FirstChildFolder);
+        settle(&mut app);
+        assert_eq!(app.path.as_ref(), Some(&file));
+        assert_eq!(
+            app.status_message.as_ref().expect("boundary notice").0,
+            towavue_core::localization::formatted::no_child_folder(language, "album")
+        );
+    }
+    let empty = folder.join("empty");
+    std::fs::create_dir(&empty).expect("fixture");
+    app.dispatch(CommandId::FirstChildFolder);
+    settle(&mut app);
+    assert_eq!(
+        app.status_message.as_ref().expect("empty children").0,
+        towavue_core::localization::formatted::no_child_folder_media(app.language(), "album")
+    );
+    app.open_folder_path(empty);
+    settle(&mut app);
+    assert_eq!(app.path.as_ref(), Some(&file));
+    assert_eq!(
+        app.status_message.as_ref().expect("empty folder").0,
+        towavue_core::localization::formatted::no_folder_media(app.language(), "empty")
+    );
+}
+
+#[test]
+fn folder_open_and_navigation_start_at_shell_first_after_visiting_a_later_item() {
+    let Some(root) = tests::isolated_test_root(
+        "folder_navigation::tests::folder_open_and_navigation_start_at_shell_first_after_visiting_a_later_item",
+    ) else {
+        return;
+    };
+    let a = root.join("a");
+    let b = root.join("b");
+    for folder in [&a, &b] {
+        std::fs::create_dir(folder).expect("fixture");
+        for name in ["page10.bmp", "page2.bmp", "page1.bmp"] {
+            tab_transfer::tests::bitmap(&folder.join(name));
+        }
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.open_folder_path(a.clone());
+    settle(&mut app);
+    let first = app.folder_snapshot.as_ref().expect("order").items[0]
+        .path
+        .clone();
+    assert_eq!(app.path.as_ref(), Some(&first));
+    let later = app.folder_snapshot.as_ref().expect("order").items[2]
+        .path
+        .clone();
+    app.navigate_to_unchecked(later.clone());
+    settle(&mut app);
+    assert_eq!(app.path.as_ref(), Some(&later));
+    app.dispatch(CommandId::NextFolder);
+    settle(&mut app);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&app.folder_snapshot.as_ref().expect("order").items[0].path)
+    );
+    assert_eq!(
+        app.path.as_deref().and_then(Path::parent),
+        Some(b.as_path())
+    );
+    app.dispatch(CommandId::PreviousFolder);
+    settle(&mut app);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&first),
+        "no folder-position restoration"
+    );
+    app.navigate_to_unchecked(later);
+    settle(&mut app);
+    app.open_folder_path(a);
+    settle(&mut app);
+    assert_eq!(
+        app.path.as_ref(),
+        Some(&first),
+        "Open folder also starts at the Shell head"
+    );
+}
+
+#[test]
+fn folder_notice_names_handle_drive_and_share_roots() {
+    for (path, expected) in [
+        (r"C:\private\album\", "album"),
+        (r"C:\", "C:"),
+        (r"\\server\share\", "share"),
+        (r"\\?\UNC\server\share\", "share"),
+        (r"\\?\C:\", "C:"),
+    ] {
+        assert_eq!(folder_name(Path::new(path)), expected);
+    }
 }
 
 #[test]

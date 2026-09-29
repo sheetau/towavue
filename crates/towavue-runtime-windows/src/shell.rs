@@ -41,7 +41,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Interface, PCWSTR, w};
 
 mod navigation;
-pub use navigation::FolderNavigationResult;
+pub use navigation::{FolderNavigationFailure, FolderNavigationResult};
 mod refresh;
 pub(crate) use refresh::notify_published_file;
 mod shutdown;

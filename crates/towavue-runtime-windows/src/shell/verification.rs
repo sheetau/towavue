@@ -59,7 +59,7 @@ impl ShellLifetimeTrial {
                     run_requests(
                         shared,
                         || {},
-                        |_, _, _| unreachable!("anchor has no requests"),
+                        |_, _, _, _| unreachable!("anchor has no requests"),
                     );
                     drop(apartment);
                     let _ = finished.send(());

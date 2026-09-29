@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn related_folder_navigation_uses_saved_shell_directory_order() {
+    let root = test_directory("saved-directory-order");
+    for name in ["folder1", "folder2", "folder10"] {
+        fs::create_dir_all(root.join(name)).expect("saved directory order fixture");
+        fs::write(root.join(name).join("media.jpg"), b"extension only")
+            .expect("saved directory order fixture");
+    }
+    fs::write(root.join("sentinel.png"), b"extension only").expect("saved directory order fixture");
+    let fixture = root.clone();
+    thread::spawn(move || {
+        let apartment = ShellApartment::new();
+        assert!(apartment.0);
+        let folder = canonical_shell_path(&fixture).expect("saved directory order fixture");
+        let pidl = parse_path(&folder).expect("saved directory order fixture");
+        // SAFETY: only this generated folder's view settings are persisted, on its owning STA.
+        unsafe {
+            save_fixture_sort(&folder, &pidl, &[native_column(NAME, SORT_DESCENDING)], 1);
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let current = || Instant::now() < deadline;
+        let mut live = None;
+        for (origin, direction, target) in [
+            ("", FolderNavigation::FirstChild, "folder10"),
+            ("folder10", FolderNavigation::Next, "folder2"),
+            ("folder1", FolderNavigation::Next, "folder10"),
+            ("folder10", FolderNavigation::Previous, "folder1"),
+        ] {
+            let snapshot = navigation::resolve(
+                &folder.join(origin),
+                direction,
+                1,
+                &mut live,
+                &current,
+                true,
+            )
+            .expect("saved directory order fixture");
+            assert_eq!(snapshot.folder_path, folder.join(target));
+            assert_eq!(snapshot.items.len(), 1);
+        }
+    })
+    .join()
+    .expect("STA test");
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
+}
+
+#[test]
 fn hidden_views_read_saved_shell_sort_without_overwriting_it() {
     let root = test_directory("saved-sort");
     fs::create_dir(&root).expect("owned fixture");

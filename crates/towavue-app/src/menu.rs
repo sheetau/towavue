@@ -167,6 +167,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 FolderNavigationStop,
                 ReloadFolderOrder,
             ],
+            &[PreviousFolder, NextFolder, ParentFolder, FirstChildFolder],
             &[PreviousImage, NextImage, FirstImage, LastImage],
             &[PreviousTab, NextTab],
             &[

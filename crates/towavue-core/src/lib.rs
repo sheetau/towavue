@@ -42,8 +42,8 @@ pub use image::{
 };
 pub use media::MediaKind;
 pub use navigation::{
-    FolderMediaItem, FolderSnapshot, FolderSnapshotSource, PropertyKey, ShellIdentity, SortColumn,
-    SortDirection,
+    FolderMediaItem, FolderNavigation, FolderSnapshot, FolderSnapshotSource, PropertyKey,
+    ShellIdentity, SortColumn, SortDirection,
 };
 pub use rotation_sequence::compose_rotations;
 pub use subtitles::{SubtitleCue, SubtitleDelay, SubtitleTimeline, SubtitleTrack, SubtitleTrackId};

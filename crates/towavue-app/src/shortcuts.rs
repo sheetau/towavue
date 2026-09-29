@@ -83,6 +83,10 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::LastImage, "End"),
         (CommandId::PreviousSameKind, "Ctrl+Left"),
         (CommandId::NextSameKind, "Ctrl+Right"),
+        (CommandId::PreviousFolder, "Ctrl+Alt+Left"),
+        (CommandId::NextFolder, "Ctrl+Alt+Right"),
+        (CommandId::ParentFolder, "Ctrl+Alt+Up"),
+        (CommandId::FirstChildFolder, "Ctrl+Alt+Down"),
         (CommandId::PreviousMedia, "Alt+Left"),
         (CommandId::NextMedia, "Alt+Right"),
         (CommandId::ToggleFilmstrip, "F"),
@@ -489,6 +493,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::DeleteFile
                         | CommandId::RenameFile
                         | CommandId::MoveFile
+                        | CommandId::PreviousFolder
+                        | CommandId::NextFolder
+                        | CommandId::ParentFolder
+                        | CommandId::FirstChildFolder
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
@@ -597,6 +605,37 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn related_folder_defaults_yield_to_explicit_keys_prefixes_and_removal() {
+        for header in ["# towavue shortcuts v7", "# towavue shortcuts v12"] {
+            for suffix in ["", " Ctrl+K"] {
+                let text =
+                    format!("{header}\nopen_file = Ctrl+Alt+Right{suffix}\nparent_folder =\n");
+                let bindings =
+                    super::parse(&text, super::defaults()).expect("custom folder shortcut fixture");
+                assert!(bindings.all(towavue_core::CommandId::NextFolder).is_empty());
+                assert!(
+                    bindings
+                        .all(towavue_core::CommandId::ParentFolder)
+                        .is_empty()
+                );
+                assert_eq!(
+                    bindings
+                        .get(towavue_core::CommandId::PreviousFolder)
+                        .expect("custom folder shortcut fixture")
+                        .to_string(),
+                    "Ctrl+Alt+Left"
+                );
+                assert_eq!(
+                    bindings
+                        .get(towavue_core::CommandId::OpenFile)
+                        .expect("custom folder shortcut fixture")
+                        .to_string(),
+                    format!("Ctrl+Alt+Right{suffix}")
+                );
+            }
+        }
+    }
     #[test]
     fn retired_grid_binding_is_ignored_without_reclaiming_custom_g_or_other_keys() {
         assert!("toggle_grid_menu".parse::<CommandId>().is_err());

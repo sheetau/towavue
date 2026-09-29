@@ -10,8 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use thiserror::Error;
 use towavue_core::{
-    FolderMediaItem, FolderSnapshot, FolderSnapshotSource, MediaKind, PropertyKey, ShellIdentity,
-    SortColumn, SortDirection,
+    FolderMediaItem, FolderNavigation, FolderSnapshot, FolderSnapshotSource, MediaKind,
+    PropertyKey, ShellIdentity, SortColumn, SortDirection,
 };
 use windows::Win32::Foundation::{HANDLE, HWND, PROPERTYKEY, RECT, WAIT_FAILED};
 use windows::Win32::System::Com::{
@@ -40,6 +40,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{Interface, PCWSTR, w};
 
+mod navigation;
 mod refresh;
 pub(crate) use refresh::notify_published_file;
 mod shutdown;
@@ -128,6 +129,7 @@ fn license_guide(executable: &Path) -> std::io::Result<PathBuf> {
 struct Request {
     folder: PathBuf,
     refresh: bool,
+    navigation: Option<FolderNavigation>,
     generation: u64,
     reply: Option<mpsc::Sender<FolderSnapshot>>,
 }
@@ -212,11 +214,16 @@ impl FolderOrderProvider {
     /// Notify Shell after a disk change, then enumerate current files.
     /// Every request uses fresh rows with the live view's sort/group settings.
     pub fn request_refreshed(&self, folder: PathBuf) -> u64 {
-        self.enqueue_mode(Some(folder), None, true)
+        self.enqueue_mode(Some(folder), None, true, None)
+    }
+
+    /// Resolve a related folder on the same cancellable STA. An empty result means stay.
+    pub fn request_navigation(&self, folder: PathBuf, direction: FolderNavigation) -> u64 {
+        self.enqueue_mode(Some(folder), None, false, Some(direction))
     }
 
     fn enqueue(&self, folder: Option<PathBuf>, reply: Option<mpsc::Sender<FolderSnapshot>>) -> u64 {
-        self.enqueue_mode(folder, reply, false)
+        self.enqueue_mode(folder, reply, false, None)
     }
 
     fn enqueue_mode(
@@ -224,6 +231,7 @@ impl FolderOrderProvider {
         folder: Option<PathBuf>,
         reply: Option<mpsc::Sender<FolderSnapshot>>,
         refresh: bool,
+        navigation: Option<FolderNavigation>,
     ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("Shell mailbox");
@@ -239,6 +247,7 @@ impl FolderOrderProvider {
         mailbox.pending = folder.map(|folder| Request {
             folder,
             refresh,
+            navigation,
             generation: mailbox.generation,
             reply,
         });
@@ -272,7 +281,7 @@ impl Drop for FolderOrderProvider {
 fn run_requests(
     shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
-    mut resolve: impl FnMut(&Path, u64, bool) -> Option<FolderSnapshot>,
+    mut resolve: impl FnMut(&Path, u64, bool, Option<FolderNavigation>) -> Option<FolderSnapshot>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
@@ -293,7 +302,12 @@ fn run_requests(
             ready.wait();
             continue;
         };
-        let Some(snapshot) = resolve(&request.folder, request.generation, request.refresh) else {
+        let Some(snapshot) = resolve(
+            &request.folder,
+            request.generation,
+            request.refresh,
+            request.navigation,
+        ) else {
             continue;
         };
         let publish = {
@@ -326,12 +340,23 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
     let mut apartment = None;
     let mut last_live_window = None;
     let current_shared = Arc::clone(&shared);
-    run_requests(shared, notify, |folder, generation, refresh| {
+    run_requests(shared, notify, |folder, generation, refresh, direction| {
         let current = || request_is_current(&current_shared, generation);
         if !current() {
             return None;
         }
-        if apartment.get_or_insert_with(ShellApartment::new).0 {
+        let shell_ready = apartment.get_or_insert_with(ShellApartment::new).0;
+        if let Some(direction) = direction {
+            return navigation::resolve(
+                folder,
+                direction,
+                generation,
+                &mut last_live_window,
+                &current,
+                shell_ready,
+            );
+        }
+        if shell_ready {
             if let Some(snapshot) =
                 shell_snapshot(folder, generation, &mut last_live_window, &current, refresh)
             {
@@ -428,6 +453,58 @@ fn shell_snapshot(
     current: &impl Fn() -> bool,
     refresh: bool,
 ) -> Option<FolderSnapshot> {
+    shell_listing(
+        folder,
+        last_live_window,
+        current,
+        refresh,
+        &|view, folder, pidl, source| {
+            // SAFETY: the listing callback is synchronous on the owning initialized STA.
+            unsafe { capture_view(view, folder, pidl, source, generation, current) }
+        },
+    )
+}
+
+#[cfg(test)]
+unsafe fn hidden_snapshot(
+    folder: &Path,
+    folder_pidl: &OwnedPidl,
+    generation: u64,
+    current: &impl Fn() -> bool,
+) -> Option<FolderSnapshot> {
+    // SAFETY: forward the caller's initialized STA and owned PIDL invariants.
+    unsafe { hidden_snapshot_with_order(folder, folder_pidl, generation, current, None) }
+}
+
+#[cfg(test)]
+unsafe fn hidden_snapshot_with_order(
+    folder: &Path,
+    folder_pidl: &OwnedPidl,
+    generation: u64,
+    current: &impl Fn() -> bool,
+    order: Option<&refresh::ViewOrder>,
+) -> Option<FolderSnapshot> {
+    // SAFETY: tests retain the same initialized STA and PIDL ownership contract.
+    unsafe {
+        hidden_listing(
+            folder,
+            folder_pidl,
+            current,
+            order,
+            &|view, folder, pidl, source| {
+                capture_view(view, folder, pidl, source, generation, current)
+            },
+        )
+    }
+}
+
+fn shell_listing<T>(
+    folder: &Path,
+    last_live_window: &mut Option<HWND>,
+    current: &impl Fn() -> bool,
+    refresh: bool,
+    capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
+) -> Option<T> {
     if !current() {
         return None;
     }
@@ -450,13 +527,8 @@ fn shell_snapshot(
             // even after an earlier publication refresh. Borrow their settings,
             // never their row cache, for every request including ordinary opens.
             if let Some(order) = refresh::ViewOrder::read(&view)
-                && let Some(snapshot) = hidden_snapshot_with_order(
-                    &folder,
-                    &folder_pidl,
-                    generation,
-                    current,
-                    Some(&order),
-                )
+                && let Some(snapshot) =
+                    hidden_listing(&folder, &folder_pidl, current, Some(&order), capture)
             {
                 return Some(snapshot);
             }
@@ -464,31 +536,19 @@ fn shell_snapshot(
             // Never recover by copying the stale rows that prompted this request.
         }
 
-        hidden_snapshot(&folder, &folder_pidl, generation, current)
+        hidden_listing(&folder, &folder_pidl, current, None, capture)
     }
 }
 
-// SAFETY: callers own an initialized STA; the browser, view and callback never
-// leave it. Readiness is separate from successful navigation/view creation.
-unsafe fn hidden_snapshot(
-    folder: &Path,
-    folder_pidl: &OwnedPidl,
-    generation: u64,
-    current: &impl Fn() -> bool,
-) -> Option<FolderSnapshot> {
-    // SAFETY: forward the caller's STA and owned PIDL invariants.
-    unsafe { hidden_snapshot_with_order(folder, folder_pidl, generation, current, None) }
-}
-
-// SAFETY: same STA ownership as hidden_snapshot. Settings are copied only to a
+// SAFETY: all callers own an initialized STA; callbacks are synchronous and never escape it. Settings are copied only to a
 // private, non-persisting view; the caller's live view is never rearranged.
-unsafe fn hidden_snapshot_with_order(
+unsafe fn hidden_listing<T>(
     folder: &Path,
     folder_pidl: &OwnedPidl,
-    generation: u64,
     current: &impl Fn() -> bool,
     order: Option<&refresh::ViewOrder>,
-) -> Option<FolderSnapshot> {
+    capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
+) -> Option<T> {
     unsafe {
         if !current() {
             return None;
@@ -521,7 +581,7 @@ unsafe fn hidden_snapshot_with_order(
             pump_messages();
             if let Ok(view) = browser.browser.GetCurrentView::<IFolderView2>()
                 && view_matches(&view, folder_pidl.as_ptr())
-                && let Some(snapshot) = capture_view(
+                && let Some(snapshot) = capture(
                     &view,
                     folder,
                     folder_pidl,
@@ -530,8 +590,6 @@ unsafe fn hidden_snapshot_with_order(
                     } else {
                         FolderSnapshotSource::PersistedShellView
                     },
-                    generation,
-                    current,
                 )
             {
                 return Some(snapshot);
@@ -1297,7 +1355,7 @@ mod tests {
             window_tx
                 .send(window.0 as usize)
                 .expect("test window identity");
-            run_requests(shared, || {}, |_, _, _| panic!("no folder requests"));
+            run_requests(shared, || {}, |_, _, _, _| panic!("no folder requests"));
             // SAFETY: the request loop has stopped; destroy this thread's retained window.
             unsafe { DestroyWindow(window).expect("destroy test window") };
         });
@@ -1448,7 +1506,7 @@ mod tests {
                     || {
                         ready_tx.send(()).expect("completion notification");
                     },
-                    |path, generation, refresh| {
+                    |path, generation, refresh, _| {
                         assert_eq!(refresh, path == Path::new("last"));
                         started_tx.send(path.to_owned()).expect("started request");
                         if path == Path::new("first") {
@@ -1526,7 +1584,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("completion notification");
                 },
-                |path, generation, _| {
+                |path, generation, _, _| {
                     started_tx.send(()).expect("started request");
                     resume_rx
                         .recv_timeout(Duration::from_secs(5))
@@ -1717,7 +1775,7 @@ mod tests {
         Size(u64),
     }
 
-    fn test_directory(label: &str) -> PathBuf {
+    pub(super) fn test_directory(label: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "towavue-shell-{label}-{}-{}",
             std::process::id(),

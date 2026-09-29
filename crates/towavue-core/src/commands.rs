@@ -30,6 +30,10 @@ pub enum CommandId {
     SeekVideo70,
     SeekVideo80,
     SeekVideo90,
+    PreviousFolder,
+    NextFolder,
+    ParentFolder,
+    FirstChildFolder,
     PreviousMedia,
     NextMedia,
     PreviousSameKind,
@@ -209,6 +213,10 @@ impl CommandId {
             Self::SeekVideo70 => "seek_video_70",
             Self::SeekVideo80 => "seek_video_80",
             Self::SeekVideo90 => "seek_video_90",
+            Self::PreviousFolder => "previous_folder",
+            Self::NextFolder => "next_folder",
+            Self::ParentFolder => "parent_folder",
+            Self::FirstChildFolder => "first_child_folder",
             Self::PreviousMedia => "previous_media",
             Self::NextMedia => "next_media",
             Self::PreviousSameKind => "previous_same_kind",
@@ -560,6 +568,10 @@ impl CommandDefinition {
                     | CommandId::ReloadFolderOrder
                     | CommandId::GoToFile
                     | CommandId::ToggleReadingMode
+                    | CommandId::PreviousFolder
+                    | CommandId::NextFolder
+                    | CommandId::ParentFolder
+                    | CommandId::FirstChildFolder
                     | CommandId::PreviousMedia
                     | CommandId::NextMedia
                     | CommandId::PreviousSameKind
@@ -784,6 +796,10 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::SeekVideo70, &[MediaKind::Video]),
     command(CommandId::SeekVideo80, &[MediaKind::Video]),
     command(CommandId::SeekVideo90, &[MediaKind::Video]),
+    command(CommandId::PreviousFolder, ANY_MEDIA),
+    command(CommandId::NextFolder, ANY_MEDIA),
+    command(CommandId::ParentFolder, ANY_MEDIA),
+    command(CommandId::FirstChildFolder, ANY_MEDIA),
     command(CommandId::PreviousMedia, ANY_MEDIA),
     command(CommandId::NextMedia, ANY_MEDIA),
     command(CommandId::PreviousSameKind, ANY_MEDIA),

@@ -331,3 +331,12 @@ mod tests {
         }
     }
 }
+
+/// Relative folder traversal, independent of in-folder media repeat preferences.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FolderNavigation {
+    Previous,
+    Next,
+    Parent,
+    FirstChild,
+}

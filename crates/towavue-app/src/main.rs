@@ -25,6 +25,7 @@ mod export_progress;
 mod file_drop;
 mod file_operations;
 mod filmstrip;
+mod folder_navigation;
 mod fonts;
 mod frame_export;
 mod frame_step;
@@ -535,6 +536,7 @@ fn keep_accessibility_focus_live(context: &egui::Context, output: &mut egui::Pla
 enum FolderIntent {
     Open,
     OpenReplacing(Option<TabId>, u64),
+    Related(Option<TabId>, u64),
     Refresh(PathBuf),
 }
 
@@ -2605,7 +2607,12 @@ where
     fn refresh_folder_snapshot_mode(&mut self, refresh: bool) {
         if matches!(
             self.pending_folder,
-            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+            Some((
+                _,
+                FolderIntent::Open
+                    | FolderIntent::OpenReplacing(_, _)
+                    | FolderIntent::Related(_, _)
+            ))
         ) {
             return;
         }
@@ -2651,8 +2658,11 @@ where
         }
         let (_, intent) = self.pending_folder.take().expect("current folder request");
         match intent {
-            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
-                if let FolderIntent::OpenReplacing(tab, generation) = &intent
+            FolderIntent::Open
+            | FolderIntent::OpenReplacing(_, _)
+            | FolderIntent::Related(_, _) => {
+                if let FolderIntent::OpenReplacing(tab, generation)
+                | FolderIntent::Related(tab, generation) = &intent
                     && (*tab != self.tabs.active_id() || *generation != self.media_generation)
                 {
                     self.refresh_folder_snapshot();
@@ -2661,8 +2671,10 @@ where
                 }
                 if let Some(first) = snapshot.items.first() {
                     let path = first.path.clone();
-                    let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _))
-                        && self.can_replace_active_tab();
+                    let replacing = matches!(
+                        intent,
+                        FolderIntent::OpenReplacing(_, _) | FolderIntent::Related(_, _)
+                    ) && self.can_replace_active_tab();
                     if replacing {
                         self.request_guarded(GuardedAction::NavigateFromFolder(
                             path.clone(),
@@ -2679,6 +2691,9 @@ where
                         self.pending_folder = None;
                         self.apply_folder_snapshot(snapshot);
                     }
+                } else if matches!(intent, FolderIntent::Related(_, _)) {
+                    // No eligible neighbor is a no-op. Resume ordinary folder updates.
+                    self.refresh_folder_snapshot();
                 } else {
                     if self.tabs.is_empty() && !self.exit_requested {
                         self.tabs.open_gallery();
@@ -7987,6 +8002,14 @@ where
                         .expect("video percentage command"),
                 );
             }
+            CommandId::PreviousFolder => {
+                self.navigate_folder(towavue_core::FolderNavigation::Previous)
+            }
+            CommandId::NextFolder => self.navigate_folder(towavue_core::FolderNavigation::Next),
+            CommandId::ParentFolder => self.navigate_folder(towavue_core::FolderNavigation::Parent),
+            CommandId::FirstChildFolder => {
+                self.navigate_folder(towavue_core::FolderNavigation::FirstChild)
+            }
             CommandId::PreviousMedia => self.navigate(false, false),
             CommandId::NextMedia => self.navigate(true, false),
             CommandId::PreviousSameKind => self.navigate(false, true),
@@ -9068,7 +9091,12 @@ where
         };
         if matches!(
             self.pending_folder,
-            Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+            Some((
+                _,
+                FolderIntent::Open
+                    | FolderIntent::OpenReplacing(_, _)
+                    | FolderIntent::Related(_, _)
+            ))
         ) {
             self.folder_order.request(None);
             self.pending_folder = None;
@@ -9800,7 +9828,12 @@ where
         if !background_image
             && matches!(
                 self.pending_folder,
-                Some((_, FolderIntent::Open | FolderIntent::OpenReplacing(_, _)))
+                Some((
+                    _,
+                    FolderIntent::Open
+                        | FolderIntent::OpenReplacing(_, _)
+                        | FolderIntent::Related(_, _)
+                ))
             )
         {
             self.folder_order.request(None);
@@ -11461,7 +11494,9 @@ where
         self.pending_folder
             .as_ref()
             .and_then(|(_, intent)| match intent {
-                FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => Some(
+                FolderIntent::Open
+                | FolderIntent::OpenReplacing(_, _)
+                | FolderIntent::Related(_, _) => Some(
                     localization::Text::OpeningFolderNotice
                         .in_language(language)
                         .into(),

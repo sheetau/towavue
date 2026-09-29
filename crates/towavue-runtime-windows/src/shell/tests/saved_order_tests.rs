@@ -57,7 +57,8 @@ fn order_requests_retry_transient_reads_before_explicit_name_fallback() {
         );
         assert_eq!(
             snapshot.items[0].path,
-            root.join(if fallback { "a.jpg" } else { "z.jpg" })
+            canonical_shell_path(&root.join(if fallback { "a.jpg" } else { "z.jpg" }))
+                .expect("canonical ordered media")
         );
         drop(provider);
         worker.join().expect("STA shutdown");

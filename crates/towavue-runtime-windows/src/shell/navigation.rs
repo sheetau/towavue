@@ -218,6 +218,7 @@ mod tests {
         fs::create_dir_all(root.join("directory.jpg")).expect("owned directory");
         let file = root.join("real.png");
         fs::write(&file, b"extension only").expect("owned media");
+        let expected_file = canonical_shell_path(&file).expect("canonical fixture media");
         let fixture = root.clone();
         thread::spawn(move || {
             let apartment = ShellApartment::new();
@@ -232,7 +233,7 @@ mod tests {
                 for result in [native, fallback] {
                     assert_eq!(result.items.len(), expected);
                     if let Some(item) = result.items.first() {
-                        assert_eq!(item.path, file);
+                        assert_eq!(item.path, expected_file);
                     }
                 }
                 if expected == 1 {
@@ -378,7 +379,9 @@ mod tests {
         ] {
             let generation = provider.request_navigation(root.join(origin), direction);
             let result = wait(generation);
-            assert_eq!(result.target, Ok(root.join(target)));
+            // TEMP can use an 8.3 alias while Shell returns the long path.
+            let expected = canonical_shell_path(&root.join(target)).expect("canonical target");
+            assert_eq!(result.target, Ok(expected));
             assert!(
                 provider.take_completed().is_none(),
                 "discovery returns no media listing"
@@ -389,7 +392,10 @@ mod tests {
         let generation = provider.request_navigation(root.join("a"), FolderNavigation::FirstChild);
         let empty = wait(generation);
         assert_eq!(empty.target, Err(FolderNavigationFailure::NoChild));
-        assert_eq!(empty.searched_folder, root.join("a"));
+        assert_eq!(
+            empty.searched_folder,
+            canonical_shell_path(&root.join("a")).expect("canonical searched folder")
+        );
         drop(provider);
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }

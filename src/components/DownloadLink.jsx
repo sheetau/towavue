@@ -1,16 +1,13 @@
-import { useState } from "react";
 import { getInstaller, releaseFallback } from "../site/download.mjs";
-import { Icon } from "./Icons";
 
-export function DownloadLink({ content, compact = false }) {
-  const [status, setStatus] = useState("idle");
+export function DownloadLink({ content, compact = false, status, onStatusChange }) {
 
   async function download(event) {
     // Keep the release-page fallback available for ordinary modified link clicks.
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     if (status === "loading") return;
-    setStatus("loading");
+    onStatusChange("loading");
     try {
       const url = await getInstaller();
       const link = document.createElement("a");
@@ -19,22 +16,24 @@ export function DownloadLink({ content, compact = false }) {
       document.body.append(link);
       link.click();
       link.remove();
-      setStatus("success");
+      onStatusChange("success");
     } catch {
-      setStatus("error");
+      onStatusChange("error");
     }
   }
 
   return (
-    <div className={`download-control${compact ? " download-control-compact" : ""}`}>
-      <a className={`button app-download${compact ? " button-sm" : ""}`} href={releaseFallback} onClick={download} aria-disabled={status === "loading"} aria-busy={status === "loading"}>
-        {status === "loading" ? content.downloading : compact ? content.download : content.downloadWindows}
-        {!compact && <Icon name="download" />}
-      </a>
-      <div className={`download-status${status === "error" ? " is-error" : ""}`} role="status">
-        {status === "success" && <span className="sr-only">{content.downloadStarted}</span>}
-        {status === "error" && <>{content.downloadError} <a href={releaseFallback} target="_blank" rel="noreferrer">{content.releases} <Icon name="arrow" /></a></>}
-      </div>
-    </div>
+    <a className={`button app-download${compact ? " button-sm" : ""}`} href={releaseFallback} onClick={download} aria-disabled={status === "loading"} aria-busy={status === "loading"}>
+      {compact ? content.download : content.downloadWindows}
+    </a>
   );
+}
+
+export function DownloadStatus({ content, status }) {
+  return <span className={`download-status${status === "error" ? " is-error" : ""}`} role="status" aria-atomic="true">
+    {status !== "idle" && <span aria-hidden="true"> · </span>}
+    {status === "loading" && content.downloading}
+    {status === "success" && content.downloadStarted}
+    {status === "error" && <>{content.downloadError} <a href={releaseFallback} target="_blank" rel="noreferrer">{content.releases}</a></>}
+  </span>;
 }

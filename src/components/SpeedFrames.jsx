@@ -34,7 +34,6 @@ export function SpeedFrames({ label }) {
           style={{
             "--frame-position": `${(index / (layers - 1)) * (100 / scaleY)}%`,
             "--frame-order": layers - 1 - index,
-            "--frame-brightness": 1 - (index / (layers - 1)) * 0.75,
             "--frame-opacity": 1 - (index / (layers - 1)) * 0.5,
             zIndex: layers - index,
           }}

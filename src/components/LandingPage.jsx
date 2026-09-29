@@ -1,14 +1,16 @@
 import Head from "next/head";
+import { useState } from "react";
 import { asset, localePath, repository, siteUrl } from "../site/config.mjs";
 import { languages, locales } from "../site/locales";
 import { Logo, Icon } from "./Icons";
-import { DownloadLink } from "./DownloadLink";
+import { DownloadLink, DownloadStatus } from "./DownloadLink";
 import { HeroDemo } from "./HeroDemo";
 import { FeatureShowcase } from "./FeatureShowcase";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { SourceArtwork } from "./SourceArtwork";
 
 export function LandingPage({ locale = "en" }) {
+  const [downloadStatus, setDownloadStatus] = useState("idle");
   const content = locales[locale] ?? locales.en;
   const canonical = `${siteUrl}/${locale === "en" ? "" : `${locale}/`}`;
   const structuredData = {
@@ -65,7 +67,7 @@ export function LandingPage({ locale = "en" }) {
             <a className="site-logo" href={localePath(locale)} aria-label={content.home}>
               <Logo />
             </a>
-            <DownloadLink content={content} compact />
+            <DownloadLink content={content} compact status={downloadStatus} onStatusChange={setDownloadStatus} />
           </div>
         </header>
         <main id="main">
@@ -78,8 +80,11 @@ export function LandingPage({ locale = "en" }) {
                 </h1>
                 <p>{content.heroDescription}</p>
                 <div className="hero-buttons">
-                  <DownloadLink content={content} />
-                  <span className="platform-note">{content.platform}</span>
+                  <div className="hero-actions">
+                    <DownloadLink content={content} status={downloadStatus} onStatusChange={setDownloadStatus} />
+                    <a className="button github-star" href={repository} target="_blank" rel="noreferrer">Star on GitHub</a>
+                  </div>
+                  <div className="platform-note">{content.platform}<DownloadStatus content={content} status={downloadStatus} /></div>
                 </div>
               </div>
               <HeroDemo content={content.demo} />

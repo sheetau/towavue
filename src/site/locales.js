@@ -28,7 +28,7 @@ export const locales = {
         id: "workspace",
         title: "All your media, together",
         description: "Transition between images, video, and audio inside a single cohesive window.",
-        images: ["workspace.webp", "video.webp", "audio.webp"],
+        images: ["image2.webp", "video.webp", "audio.webp"],
         alt: "The image, video, and audio viewers in towavue",
       },
       {
@@ -59,8 +59,8 @@ export const locales = {
         title: "Find your next frame",
         description:
           "Browse in Explorer order, jump through thumbnail filmstrips, or pick up a recent file from the gallery.",
-        images: ["filmstrip.webp", "gallery.webp"],
-        alt: "The thumbnail filmstrip and recent-file gallery in towavue",
+        images: ["gallery.webp"],
+        alt: "The recent-file gallery in towavue",
       },
     ],
     closingTitle: "Make yourself at home",
@@ -152,7 +152,7 @@ export const locales = {
         id: "workspace",
         title: "必要なのは、これだけです",
         description: "画像、動画、音声を単一のウィンドウ内でなめらかに行き来できます。",
-        images: ["workspace.webp", "video.webp", "audio.webp"],
+        images: ["image2.webp", "video.webp", "audio.webp"],
         alt: "towavueの画像・動画・音声ビューアー",
       },
       {
@@ -185,8 +185,8 @@ export const locales = {
         title: "次の一枚が、すぐ見つかる",
         description:
           "エクスプローラー順の閲覧、サムネイルのフィルムストリップ表示、ギャラリーからのアクセスなど、直感的なファイル探索が可能です。",
-        images: ["filmstrip.webp", "gallery.webp"],
-        alt: "画像のフィルムストリップと最近のファイルを表示したギャラリー",
+        images: ["gallery.webp"],
+        alt: "最近のファイルを表示したtowavueのギャラリー",
       },
     ],
     closingTitle: "いつもの場所に、したくなる",

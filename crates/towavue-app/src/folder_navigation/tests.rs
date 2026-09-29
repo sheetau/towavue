@@ -40,7 +40,7 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
     );
     settle(&mut app);
     assert!(
-        matches!(&app.pending_guard, Some(GuardedAction::NavigateFromFolder(path, _)) if path == &a)
+        matches!(&app.pending_guard, Some(GuardedAction::NavigateFromFolder(path, _, _)) if path == &a)
     );
     app.resolve_guard(GuardDecision::Cancel);
     assert_eq!(app.path.as_ref(), Some(&b));
@@ -120,7 +120,7 @@ fn related_folder_discovery_reuses_open_folder_and_handles_a_destination_becomin
     std::fs::remove_file(&target).expect("remove owned media after discovery");
     app.finish_folder_navigation(result);
     assert!(
-        matches!(app.pending_folder, Some((_, FolderIntent::OpenReplacing(Some(owner), _))) if owner == tab)
+        matches!(app.pending_folder, Some((_, FolderIntent::OpenReplacing(Some(owner), _, _))) if owner == tab)
     );
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&source));
@@ -234,6 +234,64 @@ fn folder_open_and_navigation_start_at_shell_first_after_visiting_a_later_item()
         app.path.as_ref(),
         Some(&first),
         "Open folder also starts at the Shell head"
+    );
+}
+
+#[test]
+fn name_fallback_notice_survives_folder_replacement_guard() {
+    let Some(root) = tests::isolated_test_root(
+        "folder_navigation::tests::name_fallback_notice_survives_folder_replacement_guard",
+    ) else {
+        return;
+    };
+    let a = root.join("a");
+    let b = root.join("b");
+    for folder in [&a, &b] {
+        std::fs::create_dir(folder).expect("fixture");
+        tab_transfer::tests::bitmap(&folder.join("image.bmp"));
+    }
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(fonts::test_context());
+    tab_transfer::tests::install(
+        &mut app,
+        a.join("image.bmp"),
+        tab_transfer::tests::decoded(false),
+    );
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    // Deliver an already resolved directory fallback; the destination's media
+    // enumeration succeeds natively, so only the guarded intent retains notice.
+    app.pending_folder = Some((
+        77,
+        FolderIntent::Related(app.tabs.active_id(), app.media_generation),
+    ));
+    app.finish_folder_navigation(towavue_runtime_windows::FolderNavigationResult {
+        generation: 77,
+        target: Ok(b.clone()),
+        searched_folder: root,
+        used_name_fallback: true,
+    });
+    settle(&mut app);
+    assert!(matches!(
+        app.pending_guard,
+        Some(GuardedAction::NavigateFromFolder(_, _, true))
+    ));
+    app.resolve_guard(GuardDecision::Discard);
+    settle(&mut app);
+    assert_eq!(app.path.as_deref(), Some(b.join("image.bmp").as_path()));
+    assert_eq!(
+        app.status_message.as_ref().expect("fallback notice").0,
+        localization::Text::FolderOrderFallback.in_language(app.language())
+    );
+    let mut snapshot = app.folder_snapshot.clone().expect("folder order");
+    snapshot.source = FolderSnapshotSource::NaturalNameFallback;
+    app.status_message = None;
+    app.apply_folder_snapshot(snapshot);
+    assert_eq!(
+        app.status_message
+            .as_ref()
+            .expect("ordinary open/refresh fallback notice")
+            .0,
+        localization::Text::FolderOrderFallback.in_language(app.language())
     );
 }
 

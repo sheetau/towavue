@@ -383,7 +383,7 @@ fn recent_targets_preserve_tabs_and_guard_file_and_folder_replacement() {
             std::thread::sleep(Duration::from_millis(2));
         }
         assert!(
-            matches!(&app.pending_guard, Some(GuardedAction::NavigateFromFolder(path, origin))
+            matches!(&app.pending_guard, Some(GuardedAction::NavigateFromFolder(path, origin, _))
             if path == &third && origin == &folder)
         );
         app.resolve_guard(if discard {

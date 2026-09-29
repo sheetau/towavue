@@ -21,7 +21,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             // Discovery has already stopped at one supported file; it never builds a listing.
             self.open_folder_path(folder);
             if let Some((_, intent)) = &mut self.pending_folder {
-                *intent = FolderIntent::OpenReplacing(owner.0, owner.1);
+                *intent = FolderIntent::OpenReplacing(owner.0, owner.1, result.used_name_fallback);
             }
         } else {
             use towavue_core::localization::formatted;

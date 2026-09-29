@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn order_requests_retry_transient_reads_before_explicit_name_fallback() {
+    let root = test_directory("retry-native-order");
+    fs::create_dir(&root).expect("fixture");
+    for name in ["a.jpg", "z.jpg"] {
+        fs::write(root.join(name), []).expect("fixture");
+    }
+    let fixture = root.clone();
+    thread::spawn(move || {
+        let apartment = ShellApartment::new();
+        assert!(apartment.0);
+        let pidl = parse_path(&fixture).expect("PIDL");
+        // SAFETY: write only this generated fixture's sort on its owning STA.
+        unsafe {
+            save_fixture_sort(&fixture, &pidl, &[native_column(NAME, SORT_DESCENDING)], 2);
+        }
+    })
+    .join()
+    .expect("fixture writer");
+    for (mode, failures) in [(0, 2), (0, 3), (1, 2), (1, 3), (2, 2), (2, 3)] {
+        let shared = Arc::new((
+            Mutex::new(Mailbox::default()),
+            ShellWake::new().expect("wake"),
+        ));
+        let mut provider = FolderOrderProvider {
+            shared: Arc::clone(&shared),
+        };
+        let (sent, ready) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            retry::FAIL_READS.set(failures);
+            shell_worker(shared, || {
+                let _ = sent.send(());
+            });
+        });
+        let snapshot = if mode == 0 {
+            provider.snapshot(&root).expect("blocking order")
+        } else {
+            let generation = if mode == 1 {
+                provider.request(Some(root.clone()))
+            } else {
+                provider.request_refreshed(root.clone())
+            };
+            ready
+                .recv_timeout(Duration::from_secs(30))
+                .expect("async order");
+            let result = provider.take_completed().expect("snapshot");
+            assert_eq!(result.generation, generation);
+            result
+        };
+        assert_eq!(snapshot.items.len(), 2);
+        let fallback = failures == 3;
+        assert_eq!(
+            snapshot.source == FolderSnapshotSource::NaturalNameFallback,
+            fallback
+        );
+        assert_eq!(
+            snapshot.items[0].path,
+            root.join(if fallback { "a.jpg" } else { "z.jpg" })
+        );
+        drop(provider);
+        worker.join().expect("STA shutdown");
+    }
+    fs::remove_dir_all(root).expect("owned cleanup");
+}
+
+#[test]
 fn related_folder_navigation_uses_saved_shell_directory_order() {
     let root = test_directory("saved-directory-order");
     for name in ["folder1", "folder2", "folder10"] {
@@ -28,6 +93,7 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
             ("folder1", FolderNavigation::Next, "folder10"),
             ("folder10", FolderNavigation::Previous, "folder1"),
         ] {
+            retry::FAIL_READS.set(2);
             let snapshot = navigation::resolve(
                 &folder.join(origin),
                 direction,
@@ -38,7 +104,20 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
             )
             .expect("saved directory order fixture");
             assert_eq!(snapshot.target, Ok(folder.join(target)));
+            assert!(!snapshot.used_name_fallback);
         }
+        retry::FAIL_READS.set(3);
+        let fallback = navigation::resolve(
+            &folder,
+            FolderNavigation::FirstChild,
+            2,
+            &mut live,
+            &current,
+            true,
+        )
+        .expect("fallback directory order");
+        assert_eq!(fallback.target, Ok(folder.join("folder1")));
+        assert!(fallback.used_name_fallback);
     })
     .join()
     .expect("STA test");
@@ -355,9 +434,11 @@ fn refreshed_views_use_current_files_and_live_sort_group_without_persisting() {
                     FolderSnapshotSource::LiveExplorerView,
                     4,
                     &current,
-                )
-                .expect("live capture");
-                if names(&live) == names(&grouped) {
+                );
+                if live
+                    .as_ref()
+                    .is_some_and(|live| names(live) == names(&grouped))
+                {
                     break;
                 }
                 thread::sleep(Duration::from_millis(10));

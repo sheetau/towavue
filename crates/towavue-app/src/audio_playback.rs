@@ -212,15 +212,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn finish_audio_folder_loads(&mut self) {
-        for queue in self.audio_queues.values_mut() {
+        let active = self.tabs.active_id();
+        let fallback_notice = localization::Text::FolderOrderFallback
+            .in_language(self.language())
+            .to_owned();
+        let mut active_fallback = false;
+        for (id, queue) in &mut self.audio_queues {
             if let Some(snapshot) = queue
                 .provider
                 .as_ref()
                 .and_then(FolderOrderProvider::take_completed)
             {
+                if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
+                    if Some(*id) == active {
+                        active_fallback = true;
+                    } else if let Some(saved) = self.retained_playback.get_mut(id) {
+                        saved.status = Some((fallback_notice.clone(), Instant::now()));
+                    }
+                }
                 queue.accept_snapshot(snapshot);
                 queue.refreshing = false;
             }
+        }
+        if active_fallback {
+            self.set_status(fallback_notice);
         }
     }
 

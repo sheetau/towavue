@@ -5,6 +5,7 @@ use super::*;
 pub struct FolderNavigationResult {
     pub generation: u64,
     pub target: Result<PathBuf, FolderNavigationFailure>,
+    pub used_name_fallback: bool,
     /// The folder whose contents were searched, for a contextual failure notice.
     pub searched_folder: PathBuf,
 }
@@ -34,6 +35,7 @@ pub(super) fn resolve(
         _ => origin.parent().unwrap_or(&origin).to_owned(),
     };
     use FolderNavigationFailure::*;
+    let mut used_name_fallback = false;
     let target = (|| {
         let (listing, no_folder, no_media) = match direction {
             FolderNavigation::Parent => {
@@ -41,14 +43,27 @@ pub(super) fn resolve(
                 (vec![parent.to_owned()], NoParent, NoMedia)
             }
             FolderNavigation::FirstChild => (
-                directories(&origin, last_live_window, current, shell_ready).ok_or(Unavailable)?,
+                directories(
+                    &origin,
+                    last_live_window,
+                    current,
+                    shell_ready,
+                    &mut used_name_fallback,
+                )
+                .ok_or(Unavailable)?,
                 NoChild,
                 NoChildMedia,
             ),
             FolderNavigation::Previous | FolderNavigation::Next => {
                 let parent = origin.parent().ok_or(NoSibling)?;
-                let paths = directories(parent, last_live_window, current, shell_ready)
-                    .ok_or(Unavailable)?;
+                let paths = directories(
+                    parent,
+                    last_live_window,
+                    current,
+                    shell_ready,
+                    &mut used_name_fallback,
+                )
+                .ok_or(Unavailable)?;
                 if !paths.contains(&origin) {
                     return Err(Unavailable);
                 }
@@ -78,6 +93,7 @@ pub(super) fn resolve(
     current().then_some(FolderNavigationResult {
         generation,
         target,
+        used_name_fallback,
         searched_folder,
     })
 }
@@ -127,6 +143,7 @@ fn directories(
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
     shell_ready: bool,
+    used_name_fallback: &mut bool,
 ) -> Option<Vec<PathBuf>> {
     if shell_ready
         && let Some(paths) = shell_listing(
@@ -138,8 +155,9 @@ fn directories(
                 // SAFETY: Shell invokes this callback synchronously on the owning STA.
                 // Interfaces never leave it; only owned filesystem paths are returned.
                 unsafe {
-                    let array: IShellItemArray =
-                        view.Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER).ok()?;
+                    let Some(array) = view_order_array(view, folder)? else {
+                        return Some(Vec::new());
+                    };
                     let mut paths = Vec::new();
                     for index in 0..array.GetCount().ok()? {
                         if !current() {
@@ -168,6 +186,10 @@ fn directories(
     if !current() {
         return None;
     }
+    *used_name_fallback = true;
+    crate::diagnostic!(
+        "towavue: Shell directory order unavailable after retries; using natural-name order"
+    );
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(folder).ok()? {
         if !current() {

@@ -535,7 +535,7 @@ fn keep_accessibility_focus_live(context: &egui::Context, output: &mut egui::Pla
 
 enum FolderIntent {
     Open,
-    OpenReplacing(Option<TabId>, u64),
+    OpenReplacing(Option<TabId>, u64, bool),
     Related(Option<TabId>, u64),
     Refresh(PathBuf),
 }
@@ -563,7 +563,7 @@ enum GuardedAction {
     DetachTab(TabId),
     Navigate(PathBuf),
     View(PathBuf),
-    NavigateFromFolder(PathBuf, PathBuf),
+    NavigateFromFolder(PathBuf, PathBuf, bool),
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
     Exit,
@@ -1972,6 +1972,7 @@ where
                             *intent = FolderIntent::OpenReplacing(
                                 self.tabs.active_id(),
                                 self.media_generation,
+                                false,
                             );
                         }
                     }
@@ -2610,7 +2611,7 @@ where
             Some((
                 _,
                 FolderIntent::Open
-                    | FolderIntent::OpenReplacing(_, _)
+                    | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
             ))
         ) {
@@ -2661,8 +2662,8 @@ where
         }
         let (_, intent) = self.pending_folder.take().expect("current folder request");
         match intent {
-            FolderIntent::Open | FolderIntent::OpenReplacing(_, _) => {
-                if let FolderIntent::OpenReplacing(tab, generation) = &intent
+            FolderIntent::Open | FolderIntent::OpenReplacing(_, _, _) => {
+                if let FolderIntent::OpenReplacing(tab, generation, _) = &intent
                     && (*tab != self.tabs.active_id() || *generation != self.media_generation)
                 {
                     self.refresh_folder_snapshot();
@@ -2671,12 +2672,16 @@ where
                 }
                 if let Some(first) = snapshot.items.first() {
                     let path = first.path.clone();
-                    let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _))
+                    let used_name_fallback = snapshot.source
+                        == FolderSnapshotSource::NaturalNameFallback
+                        || matches!(intent, FolderIntent::OpenReplacing(_, _, true));
+                    let replacing = matches!(intent, FolderIntent::OpenReplacing(_, _, _))
                         && self.can_replace_active_tab();
                     if replacing {
                         self.request_guarded(GuardedAction::NavigateFromFolder(
                             path.clone(),
                             snapshot.folder_path.clone(),
+                            used_name_fallback,
                         ));
                     } else {
                         self.open_external(path.clone(), false);
@@ -2688,6 +2693,13 @@ where
                         self.folder_order.request(None);
                         self.pending_folder = None;
                         self.apply_folder_snapshot(snapshot);
+                        if used_name_fallback {
+                            self.set_status(
+                                localization::Text::FolderOrderFallback
+                                    .in_language(self.language())
+                                    .into(),
+                            );
+                        }
                     }
                 } else {
                     self.finish_empty_folder(&snapshot.folder_path);
@@ -9094,7 +9106,7 @@ where
             Some((
                 _,
                 FolderIntent::Open
-                    | FolderIntent::OpenReplacing(_, _)
+                    | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
             ))
         ) {
@@ -9831,7 +9843,7 @@ where
                 Some((
                     _,
                     FolderIntent::Open
-                        | FolderIntent::OpenReplacing(_, _)
+                        | FolderIntent::OpenReplacing(_, _, _)
                         | FolderIntent::Related(_, _)
                 ))
             )
@@ -9848,7 +9860,7 @@ where
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_)
                 | GuardedAction::View(_)
-                | GuardedAction::NavigateFromFolder(_, _) => {
+                | GuardedAction::NavigateFromFolder(_, _, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
                 GuardedAction::Exit | GuardedAction::CoordinatedExit(_) => true,
@@ -9884,7 +9896,7 @@ where
                 .then_some(id),
             GuardedAction::Navigate(_)
             | GuardedAction::View(_)
-            | GuardedAction::NavigateFromFolder(_, _) => self.tabs.active().and_then(|tab| {
+            | GuardedAction::NavigateFromFolder(_, _, _) => self.tabs.active().and_then(|tab| {
                 self.edits
                     .get(&tab.id)
                     .is_some_and(EditHistory::is_dirty)
@@ -9978,9 +9990,16 @@ where
             GuardedAction::NavigateImageTab(id, instance, source, path) => {
                 self.navigate_image_tab(id, instance, source, path);
             }
-            GuardedAction::NavigateFromFolder(path, folder) => {
+            GuardedAction::NavigateFromFolder(path, folder, used_name_fallback) => {
                 self.navigate_to_unchecked(path);
                 self.qualify_current_history();
+                if used_name_fallback {
+                    self.set_status(
+                        localization::Text::FolderOrderFallback
+                            .in_language(self.language())
+                            .into(),
+                    );
+                }
                 if let Some(recent) = &self.recent_files {
                     recent.record_folder(folder);
                 }
@@ -11495,7 +11514,7 @@ where
             .as_ref()
             .and_then(|(_, intent)| match intent {
                 FolderIntent::Open
-                | FolderIntent::OpenReplacing(_, _)
+                | FolderIntent::OpenReplacing(_, _, _)
                 | FolderIntent::Related(_, _) => Some(
                     localization::Text::OpeningFolderNotice
                         .in_language(language)

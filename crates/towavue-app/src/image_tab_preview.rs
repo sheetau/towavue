@@ -203,6 +203,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn finish_image_tab_preparation(&mut self) {
+        let language = self.language();
         let preparation = &mut self.image_tab_preparation;
         let Some(snapshot) = preparation
             .provider
@@ -227,6 +228,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .iter()
                 .any(|tab| tab.id == *id && tab.target.current_path() == Some(path.as_ref()))
         {
+            if snapshot.source == FolderSnapshotSource::NaturalNameFallback {
+                saved.status_message = Some((
+                    localization::Text::FolderOrderFallback
+                        .in_language(language)
+                        .into(),
+                    Instant::now(),
+                ));
+            }
             saved.folder_snapshot = Some(snapshot);
         }
         preparation.pending = None;

@@ -33,7 +33,7 @@ fn main() {
         None => provider.request(Some(origin)),
     };
     let mut discovery_ms = None;
-    let (folder, found) = loop {
+    let (folder, found, source) = loop {
         if let Some(result) = provider.take_navigation() {
             assert_eq!(result.generation, generation, "current destination");
             discovery_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
@@ -42,11 +42,31 @@ fn main() {
                 generation = provider.request(Some(target));
                 continue;
             }
-            break (result.searched_folder, false);
+            break (result.searched_folder, false, None);
         }
         if let Some(result) = provider.take_completed() {
             assert_eq!(result.generation, generation, "current listing");
-            break (result.folder_path, !result.items.is_empty());
+            if let Some(expected) = std::env::var_os("TOWAVUE_SHELL_EXPECTED_FIRST") {
+                eprintln!(
+                    "FIRST_CHECK source={:?} columns={:?} expected_index={:?}",
+                    result.source,
+                    result.sort_columns,
+                    result
+                        .items
+                        .iter()
+                        .position(|item| item.path.file_name() == Some(expected.as_os_str()))
+                );
+                assert!(
+                    result.items.first().and_then(|item| item.path.file_name())
+                        == Some(expected.as_os_str()),
+                    "the supplied first item is not first in the captured Shell view"
+                );
+            }
+            break (
+                result.folder_path,
+                !result.items.is_empty(),
+                Some(result.source),
+            );
         }
         receive
             .recv_timeout(Duration::from_secs(120))
@@ -56,7 +76,7 @@ fn main() {
     let mut digest = std::hash::DefaultHasher::new();
     folder.hash(&mut digest);
     println!(
-        "direction={direction:?} ms={elapsed:.3} discovery_ms={discovery_ms:?} found={found} folder={:016x}",
+        "direction={direction:?} ms={elapsed:.3} discovery_ms={discovery_ms:?} found={found} folder={:016x} source={source:?}",
         digest.finish()
     );
 }

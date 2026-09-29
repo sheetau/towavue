@@ -319,12 +319,12 @@ fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
         }
         thread::spawn(move || {
             if count == 0 {
-                // Preserve the established empty-folder fallback: Shell may not
-                // expose an IShellItemArray for an empty view. A labelled empty
-                // result is safe; it must not leave the request waiting forever.
+                // Shell may not expose an IShellItemArray for an empty view.
+                // Confirm filesystem emptiness without substituting name order.
                 let mut provider = FolderOrderProvider::new().expect("empty provider");
                 let snapshot = provider.snapshot(&folder).expect("empty folder result");
                 assert!(snapshot.items.is_empty());
+                assert_ne!(snapshot.source, FolderSnapshotSource::NaturalNameFallback);
                 return;
             }
             let apartment = ShellApartment::new();
@@ -457,6 +457,8 @@ fn hidden_snapshots_wait_for_complete_mixed_and_empty_folders() {
 fn browser_enumeration_sink_does_not_advertise_agility() {
     let events: IExplorerBrowserEvents = EnumerationEvents {
         state: Arc::new(AtomicU8::new(0)),
+        sorts: Arc::new(AtomicU64::new(0)),
+        enumerations: Arc::new(AtomicU64::new(0)),
         view: std::rc::Rc::new(std::cell::RefCell::new(None)),
     }
     .into();

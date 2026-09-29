@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
@@ -24,8 +24,8 @@ use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
-    DISPID_FILELISTENUMDONE, DShellFolderViewEvents, DShellFolderViewEvents_Impl, EBO_NOBORDER,
-    EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, FWF_NOBROWSERVIEWSTATE,
+    DISPID_FILELISTENUMDONE, DISPID_SORTDONE, DShellFolderViewEvents, DShellFolderViewEvents_Impl,
+    EBO_NOBORDER, EBO_NOPERSISTVIEWSTATE, EBO_NOTRAVELLOG, ExplorerBrowser, FWF_NOBROWSERVIEWSTATE,
     IExplorerBrowser, IExplorerBrowserEvents, IExplorerBrowserEvents_Impl, IFolderView2,
     IPersistFolder2, IShellBrowser, IShellItem, IShellItemArray, IShellView, IShellWindows,
     IWebBrowserApp, SBSP_ABSOLUTE, SHCreateItemFromIDList, SHGetIDListFromObject,
@@ -43,6 +43,7 @@ use windows::core::{Interface, PCWSTR, w};
 mod navigation;
 pub use navigation::{FolderNavigationFailure, FolderNavigationResult};
 mod refresh;
+mod retry;
 pub(crate) use refresh::notify_published_file;
 mod shutdown;
 pub use shutdown::shell_workers_pending;
@@ -368,7 +369,22 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
         if !current() {
             return None;
         }
-        let shell_ready = apartment.get_or_insert_with(ShellApartment::new).0;
+        let shell_ready = retry::read(&current, |_| {
+            if !apartment
+                .as_ref()
+                .is_some_and(|apartment: &ShellApartment| apartment.0)
+            {
+                apartment = Some(ShellApartment::new());
+            }
+            apartment
+                .as_ref()
+                .is_some_and(|apartment| apartment.0)
+                .then_some(())
+        })
+        .is_some();
+        if !current() {
+            return None;
+        }
         if let Some(direction) = direction {
             return navigation::resolve(
                 folder,
@@ -389,12 +405,12 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
             if !current() {
                 return None;
             }
-            eprintln!(
+            crate::diagnostic!(
                 "towavue: Shell view unavailable for {}; using natural-name order",
                 folder.display()
             );
         } else {
-            eprintln!(
+            crate::diagnostic!(
                 "towavue: Shell STA initialization failed for {}; using natural-name order",
                 folder.display()
             );
@@ -529,6 +545,28 @@ fn shell_listing<T>(
     refresh: bool,
     capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
 ) -> Option<T> {
+    retry::read(current, |deadline| {
+        shell_listing_once(
+            folder,
+            last_live_window,
+            &|| current() && Instant::now() < deadline,
+            refresh,
+            capture,
+        )
+    })
+}
+
+fn shell_listing_once<T>(
+    folder: &Path,
+    last_live_window: &mut Option<HWND>,
+    current: &impl Fn() -> bool,
+    refresh: bool,
+    capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
+) -> Option<T> {
+    #[cfg(test)]
+    if retry::fail_read() {
+        return None;
+    }
     if !current() {
         return None;
     }
@@ -550,14 +588,10 @@ fn shell_listing<T>(
             // Live views can append newly created items or retain old properties,
             // even after an earlier publication refresh. Borrow their settings,
             // never their row cache, for every request including ordinary opens.
-            if let Some(order) = refresh::ViewOrder::read(&view)
-                && let Some(snapshot) =
-                    hidden_listing(&folder, &folder_pidl, current, Some(&order), capture)
-            {
-                return Some(snapshot);
-            }
-            // A vanished/unavailable live view falls back to saved Shell settings.
-            // Never recover by copying the stale rows that prompted this request.
+            let order = refresh::ViewOrder::read(&view)?;
+            // Retry failed live-order reads rather than silently substituting a
+            // different persisted order while that live view is still available.
+            return hidden_listing(&folder, &folder_pidl, current, Some(&order), capture);
         }
 
         hidden_listing(&folder, &folder_pidl, current, None, capture)
@@ -590,13 +624,18 @@ unsafe fn hidden_listing<T>(
             return None;
         }
         enumeration.wait(current)?;
-        if let Some(order) = order {
-            let view = browser.browser.GetCurrentView::<IFolderView2>().ok()?;
-            if !current() || !view_matches(&view, folder_pidl.as_ptr()) {
-                return None;
-            }
-            order.apply(&view)?;
+        let view = browser.browser.GetCurrentView::<IFolderView2>().ok()?;
+        if !current() || !view_matches(&view, folder_pidl.as_ptr()) {
+            return None;
         }
+        let saved_order;
+        let requested_order = if let Some(order) = order {
+            order
+        } else {
+            saved_order = refresh::ViewOrder::read(&view)?;
+            &saved_order
+        };
+        requested_order.apply_ready(&view, folder, &enumeration, current)?;
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if !current() {
@@ -627,11 +666,11 @@ unsafe fn hidden_listing<T>(
 }
 
 // State 0: pending; 1: enumeration complete; 2: navigation/subscription failed.
-// The view sink owns only this atomic. The browser sink also owns a thread-bound
+// The view sink owns only atomic readiness/event counters. The browser sink owns a thread-bound
 // subscription slot, explicitly disconnected before browser teardown. No stack
 // storage is borrowed by either callback.
 #[windows::core::implement(DShellFolderViewEvents)]
-struct EnumerationReady(Arc<AtomicU8>);
+struct EnumerationReady(Arc<AtomicU8>, Arc<AtomicU64>, Arc<AtomicU64>);
 
 impl DShellFolderViewEvents_Impl for EnumerationReady_Impl {}
 impl IDispatch_Impl for EnumerationReady_Impl {
@@ -664,6 +703,10 @@ impl IDispatch_Impl for EnumerationReady_Impl {
     ) -> windows::core::Result<()> {
         if id == DISPID_FILELISTENUMDONE as i32 {
             self.0.store(1, AtomicOrdering::Release);
+            self.2.fetch_add(1, AtomicOrdering::Release);
+        }
+        if id == DISPID_SORTDONE as i32 {
+            self.1.fetch_add(1, AtomicOrdering::Release);
         }
         if !result.is_null() {
             // SAFETY: IDispatch supplies writable output storage. Unobserved
@@ -693,7 +736,9 @@ impl Drop for ViewSubscription {
 // agility: COM must marshal callbacks back to the creating apartment.
 #[windows::core::implement(IExplorerBrowserEvents, Agile = false)]
 struct EnumerationEvents {
+    enumerations: Arc<AtomicU64>,
     state: Arc<AtomicU8>,
+    sorts: Arc<AtomicU64>,
     view: std::rc::Rc<std::cell::RefCell<Option<ViewSubscription>>>,
 }
 
@@ -721,7 +766,12 @@ impl IExplorerBrowserEvents_Impl for EnumerationEvents_Impl {
                     view.GetItemObject(windows::Win32::UI::Shell::SVGIO_BACKGROUND)?;
                 let points: IConnectionPointContainer = dispatch.cast()?;
                 let point = points.FindConnectionPoint(&DShellFolderViewEvents::IID)?;
-                let callback: DShellFolderViewEvents = EnumerationReady(self.state.clone()).into();
+                let callback: DShellFolderViewEvents = EnumerationReady(
+                    self.state.clone(),
+                    self.sorts.clone(),
+                    self.enumerations.clone(),
+                )
+                .into();
                 let cookie = point.Advise(&callback)?;
                 ViewSubscription { point, cookie }
             };
@@ -736,6 +786,8 @@ impl IExplorerBrowserEvents_Impl for EnumerationEvents_Impl {
 }
 
 struct HiddenEnumeration {
+    enumerations: Arc<AtomicU64>,
+    sorts: Arc<AtomicU64>,
     browser: IExplorerBrowser,
     cookie: u32,
     state: Arc<AtomicU8>,
@@ -745,9 +797,13 @@ struct HiddenEnumeration {
 impl HiddenEnumeration {
     unsafe fn new(browser: &IExplorerBrowser) -> Option<Self> {
         let state = Arc::new(AtomicU8::new(0));
+        let sorts = Arc::new(AtomicU64::new(0));
+        let enumerations = Arc::new(AtomicU64::new(0));
         let view = std::rc::Rc::new(std::cell::RefCell::new(None));
         let events: IExplorerBrowserEvents = EnumerationEvents {
             state: state.clone(),
+            sorts: sorts.clone(),
+            enumerations: enumerations.clone(),
             view: view.clone(),
         }
         .into();
@@ -756,10 +812,43 @@ impl HiddenEnumeration {
         let cookie = unsafe { browser.Advise(&events) }.ok()?;
         Some(Self {
             browser: browser.clone(),
+            sorts,
+            enumerations,
             cookie,
             state,
             view,
         })
+    }
+
+    fn sort_serial(&self) -> u64 {
+        self.sorts.load(AtomicOrdering::Acquire)
+    }
+
+    unsafe fn wait_sort_after(&self, serial: u64, current: &impl Fn() -> bool) -> Option<()> {
+        unsafe { self.wait_serial(&self.sorts, serial, current) }
+    }
+
+    unsafe fn wait_serial(
+        &self,
+        counter: &AtomicU64,
+        serial: u64,
+        current: &impl Fn() -> bool,
+    ) -> Option<()> {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if !current() || Instant::now() >= deadline {
+                return None;
+            }
+            // SAFETY: subscription and view belong to this STA. No locks or
+            // RefCell borrows are held across reentrant Shell message dispatch.
+            unsafe { pump_messages() };
+            if counter.load(AtomicOrdering::Acquire) != serial {
+                return Some(());
+            }
+            unsafe {
+                MsgWaitForMultipleObjectsEx(None, 10, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            }
+        }
     }
 
     unsafe fn wait(&self, current: &impl Fn() -> bool) -> Option<()> {
@@ -896,13 +985,16 @@ unsafe fn capture_view(
         if !current() {
             return None;
         }
-        let array: IShellItemArray = view.Items(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER).ok()?;
+        let array = view_order_array(view, folder)?;
         let mut items = Vec::new();
-        for index in 0..array.GetCount().ok()? {
+        for index in 0..array
+            .as_ref()
+            .map_or(Some(0), |array| array.GetCount().ok())?
+        {
             if !current() {
                 return None;
             }
-            let item = array.GetItemAt(index).ok()?;
+            let item = array.as_ref()?.GetItemAt(index).ok()?;
             let Some(path) = shell_item_path(&item) else {
                 continue;
             };
@@ -963,6 +1055,29 @@ fn property_key(key: PROPERTYKEY) -> PropertyKey {
         format_id: key.fmtid.to_u128(),
         property_id: key.pid,
     }
+}
+
+// SAFETY: the caller owns this enumerated view on its STA. Shell can publish an
+// item array before the row population is available. Counts only establish
+// membership readiness; hidden_listing separately waits for native SortDone.
+unsafe fn view_order_array(view: &IFolderView2, folder: &Path) -> Option<Option<IShellItemArray>> {
+    unsafe {
+        match view.Items::<IShellItemArray>(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER) {
+            Ok(array) => {
+                let count = array.GetCount().ok()?;
+                if u32::try_from(view.ItemCount(SVGIO_ALLVIEW).ok()?).ok()? != count {
+                    return None;
+                }
+                Some(Some(array))
+            }
+            Err(_) if empty_directory(folder) => Some(None),
+            Err(_) => None,
+        }
+    }
+}
+
+fn empty_directory(folder: &Path) -> bool {
+    std::fs::read_dir(folder).is_ok_and(|mut entries| entries.next().is_none())
 }
 
 fn fallback_snapshot(

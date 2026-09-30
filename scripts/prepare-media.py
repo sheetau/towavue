@@ -61,6 +61,7 @@ for source, destination in screenshots.items():
 
 (DEST / "favicon.ico").write_bytes((SOURCE / "favicon.ico").read_bytes())
 (DEST / "image2.png").write_bytes((SOURCE / "image2.png").read_bytes())
+(DEST / "towavue-product-preview.png").write_bytes((SOURCE / "towavue-product-preview.png").read_bytes())
 
 subprocess.run([
     "ffmpeg", "-y", "-loglevel", "error", "-i",

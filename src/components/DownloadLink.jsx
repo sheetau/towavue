@@ -7,6 +7,15 @@ export function DownloadLink({ content, compact = false, status, onStatusChange 
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     if (status === "loading") return;
+    // Match monapad's click event; analytics must never block the download.
+    try {
+      if (typeof window.gtag === "function") {
+        window.gtag("event", "download_click", {
+          event_category: "Download",
+          event_label: "Windows Setup",
+        });
+      }
+    } catch { /* Continue if a browser extension or tag blocks analytics. */ }
     onStatusChange("loading");
     try {
       const url = await getInstaller();

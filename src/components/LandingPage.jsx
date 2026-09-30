@@ -1,6 +1,7 @@
 import Head from "next/head";
+import Script from "next/script";
 import { useState } from "react";
-import { asset, localePath, repository, siteUrl } from "../site/config.mjs";
+import { analyticsId, asset, localePath, repository, siteUrl } from "../site/config.mjs";
 import { languages, locales } from "../site/locales";
 import { Logo, Icon } from "./Icons";
 import { DownloadLink, DownloadStatus } from "./DownloadLink";
@@ -44,13 +45,14 @@ export function LandingPage({ locale = "en" }) {
         <meta property="og:description" content={content.description} />
         <meta property="og:url" content={canonical} />
         <meta property="og:locale" content={content.ogLocale} />
-        <meta property="og:image" content={`${siteUrl}/media/image2.png`} />
+        <meta property="og:image" content={`${siteUrl}/media/towavue-product-preview.png`} />
+        <meta property="og:image:secure_url" content={`${siteUrl}/media/towavue-product-preview.png`} />
         <meta property="og:image:type" content="image/png" />
         <meta property="og:image:width" content="997" />
         <meta property="og:image:height" content="622" />
         <meta property="og:image:alt" content={content.shareImageAlt} />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:image" content={`${siteUrl}/media/image2.png`} />
+        <meta name="twitter:image" content={`${siteUrl}/media/towavue-product-preview.png`} />
         <meta name="twitter:image:alt" content={content.shareImageAlt} />
         <meta name="google-site-verification" content="CbYcYiYRBtqbBzRcFrgow4wD0aZR5AceysXb3puyV5M" />
         <script
@@ -58,6 +60,15 @@ export function LandingPage({ locale = "en" }) {
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\\u003c") }}
         />
       </Head>
+      <Script id="google-analytics" strategy="afterInteractive">
+        {`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){window.dataLayer.push(arguments);}
+          gtag("js", new Date());
+          gtag("config", ${JSON.stringify(analyticsId)});
+        `}
+      </Script>
+      <Script src={`https://www.googletagmanager.com/gtag/js?id=${analyticsId}`} strategy="afterInteractive" />
       <div className="site-shell">
         <a className="skip-link" href="#main">
           {content.skip}

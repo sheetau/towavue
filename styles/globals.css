@@ -1091,9 +1091,6 @@ html[lang="ja"] p {
   .site-shell::before {
     width: calc(100% - 40px);
   }
-  .header-inner {
-    padding-inline: 8px;
-  }
   .hero {
     padding-top: 56px;
     padding-bottom: 42px;

@@ -6,7 +6,7 @@ export const locales = {
     description:
       "Images, video, and audio in one fast, beautifully minimal Windows app. Browse, play, and edit with towavue. Free and open source.",
     ogLocale: "en_US",
-    shareImageAlt: "A white magnolia in the towavue image viewer",
+    shareImageAlt: "towavue product preview with its logo and a white magnolia in the image viewer",
     skip: "Skip to content",
     home: "towavue home",
     download: "Download",
@@ -129,7 +129,7 @@ export const locales = {
     description:
       "画像・動画・音声を閲覧から編集までこなす、高速で美しいWindows用メディアビューワー。towavue（トワビュー）は無料のオープンソースアプリです。",
     ogLocale: "ja_JP",
-    shareImageAlt: "towavue（トワビュー）の画像ビューアーに表示された白いモクレン",
+    shareImageAlt: "towavueのロゴと、白いモクレンを表示した画像ビューアーの製品プレビュー",
     skip: "本文へ移動",
     home: "towavue ホーム",
     download: "ダウンロード",

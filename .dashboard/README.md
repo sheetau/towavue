@@ -1,5 +1,7 @@
 # Local project dashboard
 
+The browser UI in `index.html` is local-only and ignored by Git; the CLI, launcher and recovery tools remain tracked. Before using the browser in a fresh checkout, restore the HTML from a private backup or the repository history.
+
 Python 3.11+ and a browser are sufficient. This standard-library tool is independent of the product and launches no AI. Run `powershell -NoProfile -File .dashboard/open.ps1`: it reuses or starts a hidden loopback server and opens the browser. Closing the browser leaves the server running; its matching PID/URL are in ignored `runtime.json`.
 
 ## Records and workflow

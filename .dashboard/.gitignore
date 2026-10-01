@@ -2,7 +2,6 @@
 *
 !.gitignore
 !app.py
-!index.html
 !open.ps1
 !README.md
 !test_app.py

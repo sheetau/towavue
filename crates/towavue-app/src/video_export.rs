@@ -23,7 +23,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn set_video_export_quality(&mut self, quality: VideoExportQuality) {
         let display_language = self.language();
-        // All hosted windows share this session setting. Workers own copied
+        // All hosted windows share this persisted setting. Workers own copied
         // ExportOptions so changing it never retunes an in-flight export.
         *self
             .video_export_quality
@@ -34,5 +34,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             display_language,
             quality.label_in(display_language),
         ));
+        self.remember_view_choice(CommandId::ExportQualityHigh);
     }
 }

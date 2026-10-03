@@ -111,6 +111,7 @@ templates! {
     frame_step_failed(error: &str) => ("Frame step: {error}", "コマ送り: {error}"),
     hold_speed_progress(progress: u8, target: &str, hint: &str) => ("2× · {progress}% to lock {target}{hint}", "2× · {target}への固定まで{progress}%{hint}"),
     image_paste_failed(error: &str) => ("Could not paste image: {error}", "画像を貼り付けられませんでした: {error}"),
+    view_preference_failed(error: &str) => ("Could not restore or save settings: {error}", "設定を復元または保存できませんでした: {error}"),
     playback_volume_save_failed(error: &str) => ("Could not save playback volume: {error}", "再生音量を保存できませんでした: {error}"),
     video_resume_failed(error: &str) => ("Video resume unavailable: {error}", "動画の再生位置を復元できません: {error}"),
     video_position_save_failed(error: &str) => ("Could not save video position: {error}", "動画の再生位置を保存できませんでした: {error}"),

@@ -123,6 +123,7 @@ mod video_rotation;
 mod video_scrub;
 mod video_sheets;
 mod video_view;
+mod view_preferences;
 mod view_resize;
 mod volume_hud;
 mod waveform_detail;
@@ -1113,6 +1114,7 @@ struct Application<N> {
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
+    view_preferences: Option<Arc<towavue_runtime_windows::ViewPreferences>>,
     volume_step_percent: u8,
     folder_navigation_loop: bool,
     graphics_epoch: u64,
@@ -1419,6 +1421,7 @@ where
             last_playback_volume: Arc::default(),
             playback_volume_preferences: None,
             video_export_quality: Arc::default(),
+            view_preferences: None,
             volume_step_percent: 2,
             folder_navigation_loop: true,
             graphics_epoch: 0,
@@ -8564,6 +8567,14 @@ where
                 });
             }
         }
+        if !matches!(
+            command,
+            CommandId::ExportQualityHigh
+                | CommandId::ExportQualityBalanced
+                | CommandId::ExportQualitySmaller
+        ) {
+            self.remember_view_choice(command);
+        }
     }
 
     fn image_copy_request(&self) -> Option<towavue_runtime_windows::ImageCopyRequest> {
@@ -10577,6 +10588,14 @@ where
             }
             if self.reading_mode {
                 self.set_status(self.reading_status());
+            }
+            if self.reading_settings.page_count != drag.before.page_count
+                || self.reading_settings.first_page_count != drag.before.first_page_count
+            {
+                self.remember_view_choice(CommandId::IncreaseReadingPages);
+            }
+            if self.reading_settings.reversed != drag.before.reversed {
+                self.remember_view_choice(CommandId::ReverseReadingOrder);
             }
         }
         self.request_redraw();

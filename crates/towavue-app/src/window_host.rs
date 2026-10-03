@@ -29,6 +29,8 @@ mod launch_tests;
 
 mod file_operations;
 mod idle_graphics;
+#[cfg(test)]
+mod preference_tests;
 
 #[cfg(feature = "presentation-verification")]
 #[path = "seek_verification.rs"]
@@ -54,6 +56,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 pub(crate) enum Event {
     Launch(towavue_runtime_windows::LaunchRequest),
     Update(u64, towavue_runtime_windows::update::UpdateEvent),
+    ViewPreferenceFailed(std::io::Error),
     PlaybackVolumePreferenceFailed(std::io::Error),
     LanguageSaved(Result<localization::Language, towavue_runtime_windows::LanguagePreferenceError>),
     Window(WindowKey, AppEvent),
@@ -87,6 +90,7 @@ pub(crate) struct WindowHost {
     preview_cache: PreviewCache,
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
+    view_preferences: Option<Arc<towavue_runtime_windows::ViewPreferences>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
@@ -108,6 +112,7 @@ impl WindowHost {
         let (volume, playback_volume_preferences) =
             playback_volume::open_preferences(proxy.clone());
         let language = language::State::open(proxy.clone());
+        let view_preferences = view_preferences::open(proxy.clone());
         let mut host = Self {
             language,
             updates: updates::Updates::default(),
@@ -124,6 +129,7 @@ impl WindowHost {
             preview_cache: PreviewCache::local()?,
             last_playback_volume: Arc::new(std::sync::Mutex::new(volume)),
             playback_volume_preferences,
+            view_preferences,
             video_export_quality: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
@@ -181,6 +187,7 @@ impl WindowHost {
         app.last_playback_volume = Arc::clone(&self.last_playback_volume);
         app.playback_volume_preferences = self.playback_volume_preferences.clone();
         app.video_export_quality = Arc::clone(&self.video_export_quality);
+        app.restore_view_preferences(self.view_preferences.clone());
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;
@@ -529,6 +536,17 @@ impl WindowHost {
                 self.begin_language_restart(origin, language)
             }
             Event::LanguageSaved(result) => self.finish_language_save(result),
+            Event::ViewPreferenceFailed(error) => {
+                if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
+                    app.set_status(
+                        towavue_core::localization::formatted::view_preference_failed(
+                            display_language,
+                            &towavue_runtime_windows::io_error_message(&error, display_language),
+                        ),
+                    );
+                    app.request_redraw();
+                }
+            }
             Event::PlaybackVolumePreferenceFailed(error) => {
                 if let Some(app) = self.windows.values_mut().find(|app| !app.exit_requested) {
                     app.set_status(

@@ -70,6 +70,8 @@ mod playback;
 mod playback_failure;
 pub use language_preferences::{LanguagePreferenceError, LanguagePreferences};
 pub use playback_failure::PlaybackFailure;
+mod view_preferences;
+pub use view_preferences::{ViewPreference, ViewPreferences};
 mod playback_preferences;
 pub use playback_preferences::PlaybackVolumePreferences;
 #[cfg(feature = "presentation-verification")]

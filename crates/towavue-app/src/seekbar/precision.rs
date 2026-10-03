@@ -4,13 +4,6 @@ use egui::{Context, Id, Pos2, Rect, Response};
 // The slowest band begins 240 logical points above the seek bar.
 const BAND_HEIGHT: f32 = 80.0;
 const SPEEDS: [f32; 4] = [1.0, 0.5, 0.25, 0.1];
-const LABELS: [&str; 4] = [
-    "Seeking · Normal speed",
-    "Seeking · 1/2 speed",
-    "Seeking · 1/4 speed",
-    "Seeking · 1/10 speed",
-];
-
 #[derive(Clone)]
 struct State {
     owner: Id,
@@ -53,16 +46,20 @@ fn scaled_delta(rect: Rect, from: Pos2, to: Pos2) -> f32 {
             .sum::<f32>()
 }
 
-pub(super) fn status(context: &Context) -> Option<&'static str> {
-    let state = context.data(|data| data.get_temp::<State>(state_id()))?;
-    let response = context.read_response(state.owner)?;
-    (state.dragging && timeline_input::is_dragging(&response))
-        .then(|| LABELS[stage(state.rect, state.raw.y)])
+fn active(context: &Context) -> bool {
+    context
+        .data(|data| data.get_temp::<State>(state_id()))
+        .is_some_and(|state| {
+            state.dragging
+                && context
+                    .read_response(state.owner)
+                    .is_some_and(|response| timeline_input::is_dragging(&response))
+        })
 }
 
 pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> timeline_input::Drag {
     let context = &response.ctx;
-    let before = status(context);
+    let before = active(context);
     let mut state = context.data(|data| data.get_temp::<State>(state_id()));
     if drag.started
         && let Some(origin) = drag.origin
@@ -135,8 +132,8 @@ pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> tim
             data.remove::<State>(state_id());
         }
     });
-    if before != status(context) || drag.released {
-        // The status bar is laid out before the seek control.
+    if before != active(context) || drag.released {
+        // Refresh the control when its drag begins or ends.
         context.request_repaint();
     }
     drag

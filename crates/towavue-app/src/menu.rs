@@ -146,7 +146,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
     (
         Text::MenuView,
         &[
-            &[ToggleFullscreen],
+            &[ToggleFullscreen, ResizeViewFit],
             &[ToggleImageInterpolation, ToggleImageMinification],
             &[TogglePause, SeekBackward, SeekForward],
             &[RateDown, RateUp, ResetRate],
@@ -1613,7 +1613,7 @@ mod tests {
             (
                 "View",
                 2,
-                7,
+                8,
                 "step_audio_",
                 StepAudioForward,
                 towavue_core::MediaKind::Audio,

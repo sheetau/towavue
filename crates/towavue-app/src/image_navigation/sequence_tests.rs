@@ -1380,7 +1380,10 @@ fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_pa
         }
         assert_eq!(app.path.as_ref(), Some(&paths[target]));
         assert!(timeline_input::is_active(&context));
-        assert_eq!(app.status_notice().as_deref(), Some("Seeking · 1/2 speed"));
+        assert!(
+            app.status_notice()
+                .is_none_or(|text| !text.starts_with("Seeking"))
+        );
         let output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1393,8 +1396,8 @@ fn precision_image_scrub_retains_its_offset_across_live_navigation_and_status_pa
                 app.draw_status_bar(ui, &mut Vec::new(), &mut Vec::new());
             },
         );
-        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Text(text) if text.galley.text() == "Seeking · 1/2 speed")));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text().starts_with("Seeking"))));
         // Resume drawing the owner before it retires from egui's response cache.
         scrub_frame(&mut app, 1.0, vec![]);
     }

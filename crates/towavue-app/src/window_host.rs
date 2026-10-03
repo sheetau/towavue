@@ -258,6 +258,7 @@ impl WindowHost {
                 visible,
                 display_language,
                 |app, device| {
+                    app.initial_history_immediate = false;
                     app.start_on_device(event_loop, device, false)
                         .map_err(|error| {
                             localization::window_start_error(error.as_ref(), display_language)
@@ -304,16 +305,28 @@ impl WindowHost {
         path: Option<PathBuf>,
         visible: bool,
     ) -> Result<WindowKey, String> {
-        let key = self
-            .last_active_window
-            .filter(|key| self.windows.get(key).is_some_and(|app| !app.exit_requested))
-            .or_else(|| {
-                self.windows
-                    .iter()
-                    .rev()
-                    .find(|(_, app)| !app.exit_requested)
-                    .map(|(key, _)| *key)
-            })
+        let path = path
+            .map(|path| canonical_shell_path(&path).map_err(|error| error.to_string()))
+            .transpose()?;
+        let reusable = path.as_deref().and_then(|path| {
+            self.windows
+                .iter()
+                .filter(|(_, app)| !app.exit_requested && !app.modal_input_blocked())
+                .filter(|(_, app)| app.reusable_external_tab(path).is_some())
+                .min_by_key(|(key, _)| (Some(**key) != self.last_active_window, **key))
+                .map(|(key, _)| *key)
+        });
+        let key = reusable
+            .or(self
+                .last_active_window
+                .filter(|key| self.windows.get(key).is_some_and(|app| !app.exit_requested))
+                .or_else(|| {
+                    self.windows
+                        .iter()
+                        .rev()
+                        .find(|(_, app)| !app.exit_requested)
+                        .map(|(key, _)| *key)
+                }))
             .ok_or("No open window can accept the file")?;
         let app = self.windows.get_mut(&key).expect("selected window");
         if app.modal_input_blocked() || app.pending_guard.is_some() {
@@ -323,7 +336,9 @@ impl WindowHost {
             if MediaKind::from_path(&path).is_none() {
                 return Err(format!("Unsupported media: {}", path.display()));
             }
-            app.open_external(path, true);
+            if !app.reuse_external_tab(&path) {
+                app.open_external(path, true);
+            }
             app.request_redraw();
         }
         if visible && let Some(window) = &app.window {
@@ -666,7 +681,7 @@ impl WindowHost {
         }
         let app = self.windows.get_mut(&target).expect("destination");
         let count = app.tabs.tabs().len();
-        app.open_external(path, true);
+        app.open_viewed(path, true);
         if app.tabs.tabs().len() == count {
             return Err(localization::Text::TransferMediaOpenFailed
                 .in_language(self.language.settings.display)
@@ -732,7 +747,7 @@ impl WindowHost {
         let app = self.windows.get_mut(&destination).expect("new window");
         let opened = start(app, device).and_then(|()| {
             app.position_window_at_drop(position, request.anchor)?;
-            app.open_external(path, true);
+            app.open_viewed(path, true);
             if app.path.is_none() {
                 return Err(app.status_message.as_ref().map_or_else(
                     || {

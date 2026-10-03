@@ -18,6 +18,10 @@ macro_rules! messages {
 }
 
 messages! {
+    ViewResizeBehavior => ("On window resize", "ウィンドウリサイズ時"),
+    ResizeViewFit => ("Reset to fit", "Fitへリセット"),
+    ResizeViewKeepArea => ("Keep visible area", "表示範囲を維持"),
+    ResizeViewKeepScale => ("Keep zoom", "拡大率を維持"),
     UpdateEventProxyMissing => ("Missing update event proxy", "更新通知の送信先を利用できません"),
     PlaybackVolumePreferenceInvalid => ("Invalid playback volume preference", "再生音量の設定が不正です"),
     SaveWorkerStopped => ("source-save preparation worker stopped unexpectedly", "上書き保存の準備処理が予期せず停止しました"),

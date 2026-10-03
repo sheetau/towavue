@@ -148,7 +148,7 @@ pub(super) fn show(
             painter.galley(origin, label, chrome::MUTED);
             last_label_bottom = bottom + 2.0;
         } else {
-            painter.circle_filled(band.center(), 1.5, chrome::MUTED);
+            painter.circle_filled(egui::pos2(*line_x.end(), bottom), 1.5, chrome::MUTED);
         }
         if response.hovered() || (hover.is_none() && response.has_focus()) {
             hover = Some(

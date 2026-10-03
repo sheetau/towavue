@@ -22,6 +22,7 @@ mod configuration;
 mod cursor;
 mod export_notice;
 mod export_progress;
+mod external_open;
 mod file_drop;
 mod file_operations;
 mod filmstrip;
@@ -94,6 +95,7 @@ mod speed_edit;
 mod status_file_details;
 mod status_info;
 mod subtitles;
+mod tab_close_layout;
 mod tab_drag;
 mod tab_focus;
 mod tab_menu;
@@ -121,6 +123,7 @@ mod video_rotation;
 mod video_scrub;
 mod video_sheets;
 mod video_view;
+mod view_resize;
 mod volume_hud;
 mod waveform_detail;
 mod welcome;
@@ -1059,6 +1062,7 @@ impl ImageTransform {
 
 struct Application<N> {
     initial_path: Option<PathBuf>,
+    initial_history_immediate: bool,
     notify: Arc<N>,
     event_loop_proxy: Option<EventLoopProxy<window_host::Event>>,
     window_key: Option<window_host::WindowKey>,
@@ -1201,6 +1205,10 @@ struct Application<N> {
     playback_error: Option<String>,
     image_view: ImageViewState,
     image_viewport: egui::Vec2,
+    tab_close_layout: tab_close_layout::Layout,
+    image_view_density: f32,
+    view_resize_mode: view_resize::Mode,
+    pending_view_resize: Option<view_resize::Snapshot>,
     view_drag: Option<ViewDrag>,
     reading_mode: bool,
     reading_drag: Option<reading_input::ReadingDrag>,
@@ -1358,6 +1366,7 @@ where
         }
         Ok(Self {
             initial_path,
+            initial_history_immediate: true,
             notify,
             event_loop_proxy: None,
             window_key: None,
@@ -1505,6 +1514,10 @@ where
             playback_error: None,
             image_view: ImageViewState::default(),
             image_viewport: egui::Vec2::ZERO,
+            tab_close_layout: tab_close_layout::Layout::default(),
+            image_view_density: 1.0,
+            view_resize_mode: view_resize::Mode::default(),
+            pending_view_resize: None,
             view_drag: None,
             reading_mode: false,
             reading_drag: None,
@@ -1741,8 +1754,10 @@ where
         if let Some(path) = self.initial_path.take() {
             if path.is_dir() {
                 self.open_folder_path(path);
-            } else {
+            } else if self.initial_history_immediate {
                 self.open_external(path, false);
+            } else {
+                self.open_viewed(path, false);
             }
             if self.tabs.is_empty() && self.pending_folder.is_none() {
                 self.tabs.open_gallery();
@@ -1799,6 +1814,14 @@ where
     }
 
     fn open_external(&mut self, path: PathBuf, force_new_tab: bool) {
+        self.open_path(path, force_new_tab, true);
+    }
+
+    fn open_viewed(&mut self, path: PathBuf, force_new_tab: bool) {
+        self.open_path(path, force_new_tab, false);
+    }
+
+    fn open_path(&mut self, path: PathBuf, force_new_tab: bool, immediate_history: bool) {
         let language = self.language();
         let path = match canonical_shell_path(&path) {
             Ok(path) => path,
@@ -1845,7 +1868,11 @@ where
             self.tabs.open_external(path.clone(), kind)
         };
         self.seed_playback_volume(id);
-        self.qualify_history(id, &path);
+        if immediate_history {
+            self.qualify_history(id, &path);
+        } else {
+            self.begin_history_visit(id, &path);
+        }
         if kind == MediaKind::Audio
             && self.displayed_tab == Some(id)
             && self.path.as_ref() == Some(&path)
@@ -1949,7 +1976,7 @@ where
                 {
                     // Loaded tabs remain usable even after their source is moved or removed.
                     self.activate_tab(id);
-                    self.qualify_history(id, &path);
+                    self.begin_history_visit(id, &path);
                     return;
                 }
                 let path = match canonical_shell_path(&path) {
@@ -1989,9 +2016,9 @@ where
                             .map(|tab| tab.id);
                         if let Some(id) = existing {
                             self.activate_tab(id);
-                            self.qualify_history(id, &path);
+                            self.begin_history_visit(id, &path);
                         } else {
-                            self.open_external(path, false);
+                            self.open_viewed(path, false);
                         }
                     }
                 }
@@ -2685,7 +2712,7 @@ where
                             used_name_fallback,
                         ));
                     } else {
-                        self.open_external(path.clone(), false);
+                        self.open_viewed(path.clone(), false);
                     }
                     if self.path.as_ref() == Some(&path) {
                         if !replacing && let Some(recent) = &self.recent_files {
@@ -4607,6 +4634,7 @@ where
         let transform = self.visual_transform(image.dimensions());
         let viewport = ui.max_rect();
         let image_size = (transform.size.0 as u32, transform.size.1 as u32);
+        self.apply_view_resize(viewport.size(), ui.ctx().pixels_per_point());
         self.image_viewport = viewport.size();
         let pixels_per_point = ui.ctx().pixels_per_point();
         let physical_viewport = viewport.size() * pixels_per_point;
@@ -4795,6 +4823,7 @@ where
         let transform = self.visual_transform((width, height));
         let size = (transform.size.0 as u32, transform.size.1 as u32);
         let viewport = ui.max_rect();
+        self.apply_view_resize(viewport.size(), ui.ctx().pixels_per_point());
         self.image_viewport = viewport.size();
         let full = video_view::rect(
             viewport,
@@ -5581,6 +5610,7 @@ where
                         subtitle_settings: self.subtitle_settings(),
                         subtitle_action: None,
                         choices: menu::Choices {
+                            view_resize: self.view_resize_mode,
                             video_quality: self.video_export_quality(),
                             volume_step: self.volume_step_percent,
                             audio_repeat: self.audio_mode().0,
@@ -5642,11 +5672,7 @@ where
                         .help_text(localization::Text::MainMenuDragHelp.in_language(language));
 
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
-                    let width = chrome::tab_width(
-                        strip_width,
-                        self.tabs.len(),
-                        ui.spacing().item_spacing.x,
-                    );
+
                     ui.style_mut().always_scroll_the_only_direction = true;
                     ui.spacing_mut().scroll.bar_width = 3.0;
                     ui.spacing_mut().scroll.floating_width = 3.0;
@@ -5660,6 +5686,12 @@ where
                     let strip_rect = egui::Rect::from_min_size(
                         ui.available_rect_before_wrap().min,
                         egui::vec2(strip_width, layout.tab_height + 3.0),
+                    );
+                    let width = self.tab_close_layout.width(
+                        self.tabs.tab_ids().collect(),
+                        strip_rect,
+                        ui.spacing().item_spacing.x,
+                        ui.ctx().input(|input| input.pointer.hover_pos()),
                     );
                     let mut strip_ui = ui.new_child(
                         egui::UiBuilder::new()
@@ -7692,7 +7724,10 @@ where
                     self.push_edit(EditOperation::Timeline(edit));
                 }
             }
-            UiAction::CloseTab(id) => self.request_guarded(GuardedAction::CloseTab(id)),
+            UiAction::CloseTab(id) => {
+                self.tab_close_layout.request(id, self.ui_context.as_ref());
+                self.request_guarded(GuardedAction::CloseTab(id));
+            }
             UiAction::DropTab(id, point, anchor) => self.request_tab_drop(id, point, anchor),
             UiAction::OpenWindow(path, generation, point, anchor) => {
                 self.request_filmstrip_window(path, generation, point, anchor)
@@ -7702,7 +7737,7 @@ where
             }
             UiAction::OpenMedia(path, force_new) => {
                 if force_new {
-                    self.open_external(path, true);
+                    self.open_viewed(path, true);
                 } else {
                     self.request_guarded(GuardedAction::View(path));
                 }
@@ -7731,7 +7766,7 @@ where
             }
             UiAction::OpenExport(shown) => {
                 if let Some(path) = self.export_notice_open_target(shown).map(Path::to_path_buf) {
-                    self.open_external(path, true);
+                    self.open_viewed(path, true);
                 }
             }
             UiAction::OpenGalleryBackground(path) => {
@@ -7760,7 +7795,7 @@ where
                 // or activating media and without changing Gallery's view or focus.
                 let added = self.tabs.open_new(path.clone(), kind);
                 self.seed_playback_volume(added);
-                self.qualify_history(added, &path);
+                self.begin_history_visit(added, &path);
                 self.edits.entry(added).or_default();
                 self.tabs.activate(gallery);
                 self.request_redraw();
@@ -7786,7 +7821,7 @@ where
                     }
                     let added = self.tabs.open_new(path.clone(), kind);
                     self.seed_playback_volume(added);
-                    self.qualify_history(added, &path);
+                    self.begin_history_visit(added, &path);
                     self.edits.entry(added).or_default();
                     // Register only the path; activation loads it without interrupting this tab.
                     self.tabs.activate(active);
@@ -7796,7 +7831,7 @@ where
                     if self.path.as_ref() != Some(&path) {
                         self.request_guarded(GuardedAction::View(path));
                     } else {
-                        self.qualify_history(active, &path);
+                        self.begin_history_visit(active, &path);
                     }
                 }
             }
@@ -7961,6 +7996,12 @@ where
         self.file_search.update(None);
         match command {
             CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
+            CommandId::ResizeViewFit
+            | CommandId::ResizeViewKeepArea
+            | CommandId::ResizeViewKeepScale => {
+                self.view_resize_mode = view_resize::Mode::from_command(command);
+                self.request_redraw();
+            }
             CommandId::OpenFile => {
                 self.begin_dialog(FileDialogKind::OpenFile, DialogIntent::OpenFile);
             }
@@ -9723,7 +9764,7 @@ where
             CommandId::ToggleMute => self.toggle_tab_mute(id),
             CommandId::CopyFilePath => {
                 if let (Some(context), Some(path)) = (&self.ui_context, path) {
-                    context.copy_text(path.display().to_string());
+                    context.copy_text(format!("\"{}\"", path.display()));
                     self.set_status(
                         localization::Text::FilePathCopied
                             .in_language(language)
@@ -9838,7 +9879,7 @@ where
             if let GuardedAction::View(path) = action
                 && let Some(id) = self.displayed_tab
             {
-                self.qualify_history(id, &path);
+                self.begin_history_visit(id, &path);
             }
             return;
         }
@@ -9988,7 +10029,7 @@ where
             GuardedAction::View(path) => {
                 self.navigate_to_unchecked(path.clone());
                 if let Some(id) = self.displayed_tab {
-                    self.qualify_history(id, &path);
+                    self.begin_history_visit(id, &path);
                 }
             }
             GuardedAction::NavigateAudioTab(id, source, path) => {
@@ -10009,7 +10050,6 @@ where
             }
             GuardedAction::NavigateFromFolder(path, folder, used_name_fallback) => {
                 self.navigate_to_unchecked(path);
-                self.qualify_current_history();
                 if used_name_fallback {
                     self.set_status(
                         localization::Text::FolderOrderFallback
@@ -10571,7 +10611,7 @@ where
             // A replacement owns a fresh media tab even if the same source or audio
             // folder is already open elsewhere. Retire Gallery only after Open has
             // accepted a supported, existing source; invalid paths keep its state.
-            self.open_external(path, true);
+            self.open_viewed(path, true);
             if let Some(id) = self.tabs.active().map(|tab| tab.id) {
                 self.tabs.reorder(id, position);
                 self.remove_tab(gallery, false);
@@ -11409,14 +11449,6 @@ where
     }
 
     fn reading_adjustment_hint(&self) -> Option<reading_input::ReadingHint> {
-        if self
-            .ui_context
-            .as_ref()
-            .and_then(seekbar::precision_status)
-            .is_some()
-        {
-            return None;
-        }
         self.reading_drag.as_ref()?.adjustment_hint(self.language())
     }
 
@@ -11456,9 +11488,6 @@ where
 
     fn status_notice(&self) -> Option<String> {
         let language = self.language();
-        if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
-            return Some(message.into());
-        }
         if self.reading_drag.is_some() {
             return Some(self.reading_status());
         }
@@ -11723,7 +11752,7 @@ where
         if size.width != 0 && size.height != 0 {
             if changed {
                 self.cancel_view_drag();
-                self.image_view.fit();
+                self.prepare_view_resize();
             }
             self.window_size = Some(size);
         }
@@ -11765,9 +11794,9 @@ where
         }
         self.fullscreen = enabled;
         self.surface_resize_pending = true;
-        // Fit even when the transition does not produce a different client size.
+        // Apply the selected behavior even if the client size does not change.
         self.cancel_view_drag();
-        self.image_view.fit();
+        self.prepare_view_resize();
         if !self.visual_selection_enabled()
             && let Some(context) = &self.ui_context
         {

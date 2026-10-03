@@ -99,6 +99,11 @@ impl Views {
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn begin_history_visit(&mut self, id: TabId, path: &Path) {
+        self.viewed_media.visits.remove(&id);
+        self.viewed_media.begin(id, path);
+    }
+
     pub(super) fn qualify_history(&mut self, id: TabId, path: &Path) {
         if self.deleted_sources.contains_key(&id) {
             return;
@@ -309,7 +314,7 @@ mod tests {
         for (index, path) in paths.iter().enumerate() {
             assert_eq!(
                 persisted.contains(path.to_str().expect("path")),
-                matches!(index, 0 | 3 | 4 | 5 | 7),
+                matches!(index, 0 | 3 | 4 | 5),
                 "file {index}"
             );
         }
@@ -340,6 +345,11 @@ mod tests {
             towavue_runtime_windows::RecentKind::File,
             menu::OpenTarget::Tab,
         ));
+        assert!(!app.viewed_media.visits[&id].recorded);
+        app.history_presented(false);
+        let viewed = Instant::now();
+        app.observe_viewed_history(viewed);
+        app.observe_viewed_history(viewed + DWELL);
         assert!(app.viewed_media.visits[&id].recorded);
         app.handle_recent_action(menu::RecentAction::Clear);
         let now = Instant::now();
@@ -368,6 +378,10 @@ mod tests {
             menu::OpenTarget::Tab,
         ));
         assert!(!app.viewed_media.visits[&id].forgotten);
+        assert!(!app.viewed_media.visits[&id].recorded);
+        app.history_presented(false);
+        app.observe_viewed_history(now + DWELL * 11);
+        app.observe_viewed_history(now + DWELL * 12);
         drop(app.recent_files.take());
         let persisted = std::fs::read_to_string(history).expect("history");
         assert!(persisted.contains(path.to_str().expect("path")));
@@ -460,5 +474,54 @@ mod tests {
         let persisted = std::fs::read_to_string(history).expect("history");
         assert!(!persisted.contains("card-"));
         assert!(persisted.contains("background.wav") && persisted.contains("background.mp4"));
+    }
+    #[test]
+    fn gallery_and_filmstrip_opens_wait_for_presentation_or_interaction() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "recent_views::tests::gallery_and_filmstrip_opens_wait_for_presentation_or_interaction",
+        ) else {
+            return;
+        };
+        for background in [false, true] {
+            let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+            app.ui_context = Some(fonts::test_context());
+            app.recent_files = Some(
+                towavue_runtime_windows::RecentFiles::new(
+                    root.join(format!("history-{background}.txt")),
+                    || {},
+                )
+                .expect("history"),
+            );
+            app.tabs.open_gallery();
+            let path = root.join(format!("gallery-{background}.bmp"));
+            tab_transfer::tests::bitmap(&path);
+            app.recent_paths.push(path.clone());
+            app.handle_ui_action(if background {
+                UiAction::OpenGalleryBackground(path.clone())
+            } else {
+                UiAction::OpenMedia(path.clone(), false)
+            });
+            let id = app
+                .tabs
+                .tabs()
+                .iter()
+                .find(|tab| tab.target.current_path() == Some(path.as_path()))
+                .expect("media")
+                .id;
+            assert!(!app.viewed_media.visits[&id].recorded);
+            let now = Instant::now();
+            app.observe_viewed_history(now);
+            app.observe_viewed_history(now + DWELL * 3);
+            assert!(
+                !app.viewed_media.visits[&id].recorded,
+                "unpresented or background tab is not viewed"
+            );
+            app.activate_tab(id);
+            ready(&mut app);
+            app.history_presented(false);
+            app.observe_viewed_history(now + DWELL * 4);
+            app.observe_viewed_history(now + DWELL * 5);
+            assert!(app.viewed_media.visits[&id].recorded);
+        }
     }
 }

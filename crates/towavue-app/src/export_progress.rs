@@ -32,9 +32,7 @@ pub(super) struct LoadingProgress {
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(super) fn export_gesture_hint(&self) -> Option<GestureHint> {
-        if let Some(message) = self.ui_context.as_ref().and_then(seekbar::precision_status) {
-            Some(GestureHint::Text(message.into()))
-        } else if self.reading_drag.is_some() {
+        if self.reading_drag.is_some() {
             Some(self.reading_adjustment_hint().map_or_else(
                 || GestureHint::Text(self.reading_status()),
                 GestureHint::Reading,

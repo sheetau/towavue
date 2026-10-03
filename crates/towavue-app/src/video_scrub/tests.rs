@@ -200,14 +200,11 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             );
             assert_eq!(app.state, PlaybackState::Paused);
             assert!(!app.timeline_open);
-            assert_eq!(
-                app.status_notice().as_deref(),
-                Some(if precise {
-                    "Seeking · 1/2 speed"
-                } else {
-                    "Seeking · Normal speed"
-                })
+            assert!(
+                app.status_notice()
+                    .is_none_or(|text| !text.starts_with("Seeking"))
             );
+            assert!(app.export_gesture_hint().is_none());
             let frozen = app.current_position();
             assert_eq!(app.generation, generation, "drag must not seek");
             assert!(

@@ -76,9 +76,6 @@ impl Trial {
                 if !result.released {
                     result = drag;
                 }
-                if let Some(hint) = status(&self.context) {
-                    ui.label(hint);
-                }
                 passes += 1;
                 if self.discard && passes == 1 {
                     self.context
@@ -112,15 +109,15 @@ fn four_speeds_reverse_without_jumping_and_keep_fractional_motion() {
                     expected += 0.5 * [1.0, 0.5, 0.25, 0.1][band];
                     let (drag, output) = trial.frame(vec![egui::Event::PointerMoved(raw)]);
                     assert!((drag.position.expect("subpixel position").x - expected).abs() < 0.001);
-                    assert_eq!(status(&trial.context), Some(LABELS[band]));
-                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text() == LABELS[band])));
+                    assert!(active(&trial.context));
+                    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::Shape::Text(text) if text.galley.text().starts_with("Seeking"))));
                 }
             }
             let (drag, _) = trial.frame(vec![button(raw, false)]);
             assert!(drag.released);
             assert!((drag.position.expect("commit").x - expected).abs() < 0.001);
-            assert!(status(&trial.context).is_none());
+            assert!(!active(&trial.context));
         }
     }
 }
@@ -164,7 +161,7 @@ fn precision_release_is_independent_of_batched_events_discard_and_reading_direct
             let ordinary = super::super::compact_ratio(rect, 188.0);
             assert!((ratio - if reversed { 1.0 - ordinary } else { ordinary }).abs() < 0.001);
             assert!(!trial.frame(vec![]).0.released);
-            assert!(status(&trial.context).is_none());
+            assert!(!active(&trial.context));
         }
     }
 }
@@ -180,7 +177,7 @@ fn precision_cancellation_geometry_and_new_press_do_not_reuse_old_offsets() {
         ]);
         let end = Pos2::new(300.0, 100.0);
         trial.frame(vec![egui::Event::PointerMoved(end)]);
-        assert!(status(&trial.context).is_some());
+        assert!(active(&trial.context));
         let events = match mode {
             0 => vec![egui::Event::Key {
                 key: egui::Key::Escape,
@@ -204,7 +201,7 @@ fn precision_cancellation_geometry_and_new_press_do_not_reuse_old_offsets() {
             }
         };
         assert!(!trial.frame(events).0.released);
-        assert!(status(&trial.context).is_none());
+        assert!(!active(&trial.context));
         trial.enabled = true;
         assert!(
             !trial

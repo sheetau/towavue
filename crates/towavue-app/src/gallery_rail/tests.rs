@@ -166,6 +166,18 @@ fn month_labels_in_language(language: Language) {
                     .get(index + 1)
                     .is_some_and(|next| next.date.map(|date| date.0) == year)
                 {
+                    let boundary = point((index + 1) as f32 / months.len() as f32).y;
+                    let x = rail().right() - rail().width() * 0.075;
+                    assert!(
+                        output.output.shapes.iter().any(|shape| matches!(
+                            &shape.shape,
+                            egui::Shape::Circle(circle)
+                                if circle.radius == 1.5
+                                    && (circle.center.x - x).abs() < 0.01
+                                    && (circle.center.y - boundary).abs() < 0.01
+                        )),
+                        "month dot must mark the tooltip boundary at the right edge"
+                    );
                     continue;
                 }
                 let text = year.map_or_else(|| "?".into(), |year| year.to_string());

@@ -3,10 +3,6 @@ use egui::{Context, Rect, Response};
 
 mod precision;
 
-pub(super) fn precision_status(context: &Context) -> Option<&'static str> {
-    precision::status(context)
-}
-
 pub(crate) const HIT_HEIGHT: f32 = 14.0;
 const HOVER_ABOVE: f32 = 4.0;
 

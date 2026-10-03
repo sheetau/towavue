@@ -55,17 +55,26 @@ fn explorer_tabs_preserve_existing_tabs_and_respect_active_window_guards() {
     );
     let retained = host.windows[&first].tabs.active().expect("first tab").id;
     host.open_launched_tab(Some(source.clone()), false)
-        .expect("duplicate path in fresh tab");
+        .expect("activate existing clean tab");
     assert_eq!(host.windows.len(), 2);
-    assert_eq!(host.windows[&first].tabs.tabs().len(), 2);
-    assert_ne!(
-        host.windows[&first].tabs.active().expect("new tab").id,
+    assert_eq!(host.windows[&first].tabs.tabs().len(), 1);
+    assert_eq!(
+        host.windows[&first].tabs.active().expect("reused tab").id,
         retained
     );
     assert!(host.windows[&second].tabs.tabs().is_empty());
+    host.last_active_window = Some(second);
+    assert_eq!(
+        host.open_launched_tab(Some(source.clone()), false)
+            .expect("existing tab in another window"),
+        first
+    );
+    assert_eq!(host.windows[&first].tabs.active_id(), Some(retained));
+    assert!(host.windows[&second].tabs.tabs().is_empty());
+    host.last_active_window = Some(first);
     host.windows.get_mut(&first).expect("first").about_open = true;
     assert!(host.open_launched_tab(Some(source.clone()), false).is_err());
-    assert_eq!(host.windows[&first].tabs.tabs().len(), 2);
+    assert_eq!(host.windows[&first].tabs.tabs().len(), 1);
     host.last_active_window = Some(second);
     assert_eq!(
         host.open_launched_tab(None, false).expect("activate"),

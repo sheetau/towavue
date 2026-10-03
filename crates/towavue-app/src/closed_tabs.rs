@@ -31,7 +31,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
             Some(ClosedTab::Media(path, position)) => {
                 let previous = self.tabs.active_id();
-                self.open_external(path, true);
+                self.open_viewed(path, true);
                 self.tabs
                     .active_id()
                     .filter(|id| Some(*id) != previous)

@@ -3,6 +3,7 @@ use towavue_core::RepeatMode;
 use towavue_runtime_windows::VideoExportQuality;
 
 pub(crate) struct Choices {
+    pub view_resize: crate::view_resize::Mode,
     pub volume_step: u8,
     pub video_quality: VideoExportQuality,
     pub audio_repeat: RepeatMode,
@@ -14,6 +15,7 @@ pub(crate) struct Choices {
 impl Default for Choices {
     fn default() -> Self {
         Self {
+            view_resize: crate::view_resize::Mode::default(),
             volume_step: 2,
             video_quality: VideoExportQuality::High,
             audio_repeat: RepeatMode::Off,
@@ -28,6 +30,14 @@ type Options = (Text, &'static [(CommandId, Text)]);
 
 pub(super) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
+        ResizeViewFit => (
+            Text::ViewResizeBehavior,
+            &[
+                (ResizeViewFit, Text::ResizeViewFit),
+                (ResizeViewKeepArea, Text::ResizeViewKeepArea),
+                (ResizeViewKeepScale, Text::ResizeViewKeepScale),
+            ],
+        ),
         // Both display states keep the existing configurable toggle command.
         // The checked state is a no-op; only its alternative dispatches it.
         ToggleImageInterpolation => (
@@ -143,6 +153,7 @@ pub(super) fn submenu(
 ) -> Option<(egui::Response, Option<CommandId>)> {
     let (title, rows) = options(command)?;
     let selected = match command {
+        ResizeViewFit => choices.view_resize.command(),
         ExportQualityHigh => match choices.video_quality {
             VideoExportQuality::High => ExportQualityHigh,
             VideoExportQuality::Balanced => ExportQualityBalanced,
@@ -347,6 +358,15 @@ mod tests {
             for width in [480.0, 1200.0] {
                 for (nested, right_edge) in [(false, false), (false, true), (true, false)] {
                     for (section, title, labels, selected, target, expected, kind) in [
+                        (
+                            Section::View,
+                            "On window resize",
+                            vec!["Reset to fit", "Keep visible area", "Keep zoom"],
+                            "Reset to fit",
+                            "Keep zoom",
+                            ResizeViewKeepScale,
+                            towavue_core::MediaKind::Image,
+                        ),
                         (
                             Section::View,
                             "Image interpolation",

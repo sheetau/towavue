@@ -424,7 +424,7 @@ mod tests {
         });
         assert!(
             output.platform_output.commands.iter().any(
-                |command| matches!(command, egui::OutputCommand::CopyText(text) if text == path)
+                |command| matches!(command, egui::OutputCommand::CopyText(text) if text == &format!("\"{path}\""))
             )
         );
         assert_eq!(app.tabs.active().expect("active").id, b);

@@ -236,8 +236,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
+    pub(super) fn reading_resize_scale(&self, density: f32) -> Option<f32> {
+        let pages = self.reading_page_views();
+        if pages.is_empty() {
+            return None;
+        }
+        Some(
+            scale(
+                self.image_view,
+                self.reading_extent(&pages),
+                self.image_viewport,
+                density,
+            ) * density,
+        )
+    }
+
     pub(super) fn draw_reading_pages(&mut self, ui: &mut egui::Ui) {
         let viewport = ui.max_rect();
+        self.apply_view_resize(viewport.size(), ui.ctx().pixels_per_point());
         self.image_viewport = viewport.size();
         let pages = self.reading_page_views();
         if pages.is_empty() || viewport.size().min_elem() <= 0.0 {

@@ -46,6 +46,9 @@ pub enum CommandId {
     ZoomOut,
     ActualSize,
     FitToWindow,
+    ResizeViewFit,
+    ResizeViewKeepArea,
+    ResizeViewKeepScale,
     ClearSelection,
     SelectAll,
     ZoomSelection,
@@ -229,6 +232,9 @@ impl CommandId {
             Self::ZoomOut => "zoom_out",
             Self::ActualSize => "actual_size",
             Self::FitToWindow => "fit_to_window",
+            Self::ResizeViewFit => "resize_view_fit",
+            Self::ResizeViewKeepArea => "resize_view_keep_area",
+            Self::ResizeViewKeepScale => "resize_view_keep_scale",
             Self::CoverWindow => "cover_window",
             Self::ClearSelection => "clear_selection",
             Self::SelectAll => "select_all",
@@ -951,6 +957,9 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ResizeVideo, &[MediaKind::Video]),
     command(CommandId::StepAudioBackward, &[MediaKind::Audio]),
     command(CommandId::StepAudioForward, &[MediaKind::Audio]),
+    command(CommandId::ResizeViewFit, &[]),
+    command(CommandId::ResizeViewKeepArea, &[]),
+    command(CommandId::ResizeViewKeepScale, &[]),
 ];
 
 const fn command(id: CommandId, media_kinds: &'static [MediaKind]) -> CommandDefinition {

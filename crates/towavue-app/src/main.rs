@@ -1070,6 +1070,7 @@ struct Application<N> {
     pending_window_open: Option<window_open::Request>,
     pending_tab_drop: Option<(tab_transfer::DetachRequest, egui::Pos2, egui::Vec2)>,
     incoming_tab_pointer: Option<egui::Pos2>,
+    file_drop: file_drop::State,
     hosted_graphics: bool,
     graphics_recovery_request: Option<window_host::GraphicsRecoveryRequest>,
     window: Option<Arc<Window>>,
@@ -1209,6 +1210,7 @@ struct Application<N> {
     image_view_density: f32,
     view_resize_mode: view_resize::Mode,
     pending_view_resize: Option<view_resize::Snapshot>,
+    view_resize_anchor: Option<view_resize::Snapshot>,
     view_drag: Option<ViewDrag>,
     reading_mode: bool,
     reading_drag: Option<reading_input::ReadingDrag>,
@@ -1374,6 +1376,7 @@ where
             pending_window_open: None,
             pending_tab_drop: None,
             incoming_tab_pointer: None,
+            file_drop: file_drop::State::default(),
             hosted_graphics: false,
             graphics_recovery_request: None,
             window: None,
@@ -1518,6 +1521,7 @@ where
             image_view_density: 1.0,
             view_resize_mode: view_resize::Mode::default(),
             pending_view_resize: None,
+            view_resize_anchor: None,
             view_drag: None,
             reading_mode: false,
             reading_drag: None,
@@ -2688,6 +2692,10 @@ where
         {
             return;
         }
+        let drop_placement = self
+            .file_drop
+            .take_folder(snapshot.generation)
+            .map(|insertion| (insertion, self.tabs.tab_ids().collect::<Vec<_>>()));
         let (_, intent) = self.pending_folder.take().expect("current folder request");
         match intent {
             FolderIntent::Open | FolderIntent::OpenReplacing(_, _, _) => {
@@ -2739,6 +2747,10 @@ where
             }
             FolderIntent::Refresh(_) => {}
         }
+        if let Some((insertion, previous)) = drop_placement {
+            insertion.place_new(&mut self.tabs, &previous);
+        }
+        self.process_dropped_paths();
         self.request_redraw();
     }
 
@@ -3879,6 +3891,11 @@ where
     }
 
     fn render_frame(&mut self) {
+        self.process_dropped_paths();
+        if self.file_drop.hovering {
+            self.refresh_pointer_position();
+        }
+        self.file_drop.batch = None;
         #[cfg(feature = "presentation-verification")]
         let trace_frame = towavue_runtime_windows::burst_enabled()
             && (self.verification_trace_idle_frames
@@ -5537,7 +5554,13 @@ where
         }
         let incoming_pointer = self
             .incoming_tab_pointer
-            .filter(|_| self.accepts_tab_drop());
+            .filter(|_| self.accepts_tab_drop())
+            .or_else(|| {
+                file_drop::insertion_pointer(
+                    root.ctx(),
+                    self.modal_input_blocked() || self.fullscreen,
+                )
+            });
         let mut preview_target = None;
         let mut image_preparation_target = None;
         let mut playback_preparation_target = None;
@@ -8000,6 +8023,8 @@ where
             | CommandId::ResizeViewKeepArea
             | CommandId::ResizeViewKeepScale => {
                 self.view_resize_mode = view_resize::Mode::from_command(command);
+                self.view_resize_anchor = None;
+                self.pending_view_resize = None;
                 self.request_redraw();
             }
             CommandId::OpenFile => {
@@ -13303,7 +13328,20 @@ where
                 self.refresh_pointer_position();
                 self.request_redraw();
             }
-            WindowEvent::DroppedFile(path) => self.open_dropped_path(path),
+            WindowEvent::HoveredFile(_) => {
+                if !self.file_drop.hovering {
+                    self.file_drop.batch = None;
+                }
+                self.file_drop.hovering = true;
+                self.refresh_pointer_position();
+                self.request_redraw();
+            }
+            WindowEvent::HoveredFileCancelled => {
+                self.file_drop.hovering = false;
+                self.file_drop.batch = None;
+                self.request_redraw();
+            }
+            WindowEvent::DroppedFile(path) => self.enqueue_dropped_path(path),
             WindowEvent::Resized(size) => self.resize_window(size),
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();

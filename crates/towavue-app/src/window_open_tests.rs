@@ -746,13 +746,13 @@ pub(super) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
     app.folder_snapshot = old_snapshot;
     app.close_filmstrip();
     exercise_edge_placement(host, event_loop);
-    exercise_gallery_drops(host, event_loop, source, &image_path);
+    exercise_gallery_scroll_without_transfer(host, event_loop, source, &image_path);
     eprintln!(
         "PASS hosted filmstrip windows: normal action opens/loads image, silent video and corrupt media independently; silent audio playback verified={audio_verified}; same-device cross-draw; source tabs/edits/export/clock/session unchanged; startup/post-start/missing-file failures preserve filmstrip and leave no child"
     );
 }
 
-fn exercise_gallery_drops(
+fn exercise_gallery_scroll_without_transfer(
     host: &mut WindowHost,
     event_loop: &ActiveEventLoop,
     source: WindowKey,
@@ -779,35 +779,41 @@ fn exercise_gallery_drops(
     app.gallery_search.clear();
     app.gallery_filter = None;
     app.gallery_listing.invalidate();
+    // Gallery drag-out is disabled while its primary gestures scroll the grid.
+    // Keep the native harness aligned with that contract instead of expecting
+    // the retained (but inactive) transfer implementation to receive a request.
     for destination in [Some(source), Some(other), None] {
-        let previous = destination.map(|key| host.windows[&key].tabs.clone());
         let app = host.windows.get_mut(&source).expect("Gallery source");
         app.activate_tab(gallery);
         for _ in 0..3 {
             drag_frame(app, vec![]);
         }
+        let expected_tabs = app.tabs.clone();
         let tree = drag_frame(app, vec![]);
         let name = display_name(path);
         let rect = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some(&name))
-            .expect("Gallery thumbnail")
+            .find(|(_, node)| {
+                node.label() == Some(&name)
+                    && node.role() == egui::accesskit::Role::Button
+                    && node.description() == path.to_str()
+            })
+            .expect("Gallery thumbnail, excluding the same file's tab")
             .1
             .bounds()
             .expect("bounds");
-        let origin = egui::pos2(((rect.x0 + rect.x1) / 2.0) as f32, rect.y0 as f32 + 20.0);
+        // Its center stays inside both the placeholder and the loaded thumbnail.
+        let origin = egui::pos2(
+            ((rect.x0 + rect.x1) / 2.0) as f32,
+            ((rect.y0 + rect.y1) / 2.0) as f32,
+        );
         let drop = egui::pos2(rect.x1 as f32 + 35.0, origin.y);
         let end = if destination == Some(source) {
             drop
         } else {
             egui::pos2(-40.0, 160.0)
         };
-        if destination == Some(other) {
-            for _ in 0..3 {
-                drag_frame(host.windows.get_mut(&other).expect("target"), vec![]);
-            }
-        }
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -815,70 +821,28 @@ fn exercise_gallery_drops(
             modifiers: egui::Modifiers::NONE,
         };
         drag_frame(
-            host.windows.get_mut(&source).expect("source"),
+            app,
             vec![egui::Event::PointerMoved(origin), button(origin, true)],
         );
-        drag_frame(
-            host.windows.get_mut(&source).expect("source"),
-            vec![egui::Event::PointerMoved(end)],
+        drag_frame(app, vec![egui::Event::PointerMoved(end)]);
+        assert!(
+            app.filmstrip
+                .active_recent_drag(app.ui_context.as_ref().expect("context"))
+                .is_none()
         );
         host.update_tab_drops_with(event_loop, false, |_, _, _| {
             destination.map(|key| (key, drop))
         });
-        dropping::tests::assert_thumbnail_feedback(
-            host,
-            destination.map(|key| (key, drop)),
-            egui::CursorIcon::Move,
-        );
-        assert!(host.tab_badge.is_some() && !host.tab_badge_failed);
-        assert_eq!(host.windows[&source].tabs.active_id(), Some(gallery));
-        assert!(host.windows[&source].pending_window_open.is_none());
-        drag_frame(
-            host.windows.get_mut(&source).expect("source"),
-            vec![button(end, false)],
-        );
-        assert!(host.windows[&source].pending_window_open.is_some());
-        let keys: Vec<_> = host.windows.keys().copied().collect();
+        assert!(host.tab_badge.is_none());
+        let app = host.windows.get_mut(&source).expect("source");
+        drag_frame(app, vec![button(end, false)]);
+        assert!(app.pending_window_open.is_none());
+        assert_eq!(app.tabs, expected_tabs);
+        assert_eq!(app.edits, history);
         host.open_pending_windows_with(event_loop, false, |_, _, _| {
-            destination.map(|key| (key, drop))
+            panic!("Gallery scrolling cannot open a window")
         });
-        host.update_tab_drops_with(event_loop, false, |_, _, _| None);
-        assert!(host.tab_badge.is_none() && host.tab_cursor_owner.is_none());
-        let target = destination.unwrap_or_else(|| {
-            *host
-                .windows
-                .keys()
-                .find(|key| !keys.contains(key))
-                .expect("new Gallery destination")
-        });
-        let app = finish_child(host, target);
-        assert_eq!(app.image.as_ref().expect("image").dimensions(), (2, 1));
-        assert_eq!(app.path.as_deref(), Some(path));
-        assert!(!app.filmstrip_open);
-        let added = app.tabs.active_id().expect("opened tab");
-        assert!(!app.edits[&added].is_dirty());
-        if let Some(previous) = previous {
-            assert_eq!(app.tabs.tabs().len(), previous.tabs().len() + 1);
-            app.close_tab_unchecked(added);
-            app.activate_tab(previous.active_id().expect("previous"));
-            assert_eq!(app.tabs.tabs(), previous.tabs());
-            assert_eq!(
-                app.tabs.tab_ids().collect::<Vec<_>>(),
-                previous.tab_ids().collect::<Vec<_>>()
-            );
-            assert_eq!(app.tabs.active_id(), previous.active_id());
-        } else {
-            assert_eq!(app.tabs.len(), 1);
-            assert!(app.tabs.gallery().is_none());
-            app.exit_requested = true;
-            host.remove_closed();
-        }
         assert_eq!(host.windows.len(), count);
-        assert_eq!(host.windows[&source].tabs.active_id(), Some(gallery));
-        assert_eq!(host.windows[&source].edits, history);
-        host.open_pending_windows_with(event_loop, false, |_, _, _| {
-            panic!("Gallery release replay")
-        });
     }
     let app = host.windows.get_mut(&source).expect("source");
     app.activate_tab(before.active_id().expect("original active"));
@@ -899,6 +863,6 @@ fn exercise_gallery_drops(
     assert_eq!(app.edits, history);
     assert_eq!(std::fs::read(path).expect("original bitmap"), source_bytes);
     eprintln!(
-        "PASS Gallery thumbnail transfer: real UI press/hold/release opens original in local/other/new hidden hosts; shared badge and release cleanup; source Gallery, media edits and bytes preserved; scripted destination picking"
+        "PASS Gallery scroll gesture: native UI press/hold/release cannot create tabs or windows; no transfer badge or pending request; source Gallery, media edits and bytes preserved"
     );
 }

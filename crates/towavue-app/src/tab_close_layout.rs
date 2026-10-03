@@ -56,8 +56,9 @@ impl Layout {
                 if self.ids.last() == Some(&closed) {
                     let total = self.width * self.ids.len() as f32
                         + gap * self.ids.len().saturating_sub(1) as f32;
-                    self.width =
-                        (total - gap * ids.len().saturating_sub(1) as f32) / ids.len() as f32;
+                    self.width = ((total - gap * ids.len().saturating_sub(1) as f32)
+                        / ids.len() as f32)
+                        .min(chrome::tab_width(f32::MAX, 1, gap));
                 }
                 self.frozen = true;
             } else {
@@ -108,6 +109,15 @@ mod tests {
         assert!(!layout.frozen, "canceled close cannot freeze width");
         assert!(layout.pending.is_none());
         layout.width(ids.clone(), rect, 4.0, pointer);
+        for count in (1..ids.len()).rev() {
+            layout.pending = Some(ids[count]);
+            let width = layout.width(ids[..count].to_vec(), rect, 4.0, pointer);
+            assert!(
+                width <= 160.0,
+                "trailing closes must respect the ordinary maximum"
+            );
+        }
+        layout.width(ids.clone(), rect, 4.0, pointer);
         assert!(!layout.frozen, "new or reordered tabs reset closing state");
         layout.width(vec![ids[0]], rect, 4.0, pointer);
         assert!(!layout.frozen, "keyboard close has no pointer request");
@@ -140,7 +150,7 @@ mod tests {
                         egui::RawInput {
                             screen_rect: Some(egui::Rect::from_min_size(
                                 egui::Pos2::ZERO,
-                                egui::vec2(960.0, 576.0),
+                                egui::vec2(720.0, 576.0),
                             )),
                             events,
                             ..Default::default()

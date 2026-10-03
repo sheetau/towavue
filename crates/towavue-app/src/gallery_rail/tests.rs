@@ -173,7 +173,7 @@ fn month_labels_in_language(language: Language) {
                             &shape.shape,
                             egui::Shape::Circle(circle)
                                 if circle.radius == 1.5
-                                    && (circle.center.x - x).abs() < 0.01
+                                    && (circle.center.x + circle.radius - x).abs() < 0.01
                                     && (circle.center.y - boundary).abs() < 0.01
                         )),
                         "month dot must mark the tooltip boundary at the right edge"

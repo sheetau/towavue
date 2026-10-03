@@ -38,7 +38,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             // A clean audio folder changes tracks through the existing navigation route.
             self.navigate_to_unchecked(path.to_owned());
         }
-        self.qualify_history(id, path);
+        // Reusing an existing tab is activation, not a new explicit history visit.
         self.request_redraw();
         true
     }

@@ -666,7 +666,7 @@ messages! {
     DropGuideBlocked => ("Close the dialog before dropping files", "ファイルをドロップする前にダイアログを閉じてください"),
     DropGuideOpen => ("Open with towavue", "towavueで開く"),
     DropGuideBlockedHelp => ("Dropping is unavailable while a dialog is open", "ダイアログを開いている間はドロップできません"),
-    DropGuideHelp => ("Drop media files or a folder anywhere in the window; the outline is a visual guide", "ウィンドウ内のどこにでもメディアファイルやフォルダーをドロップできます。枠は表示上の目印です"),
+    DropGuideHelp => ("Drop media files or folders anywhere in the window; move horizontally to choose the tab insertion position", "ウィンドウ内にメディアファイルやフォルダーをドロップできます。左右に動かすとタブの挿入位置を選べます"),
     SelectionLeftPixels => ("Selection left (pixels)", "選択範囲の左端（ピクセル）"),
     SelectionRightPixels => ("Selection right (pixels)", "選択範囲の右端（ピクセル）"),
     SelectionTopPixels => ("Selection top (pixels)", "選択範囲の上端（ピクセル）"),

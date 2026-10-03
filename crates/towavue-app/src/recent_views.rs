@@ -346,6 +346,11 @@ mod tests {
             menu::OpenTarget::Tab,
         ));
         assert!(!app.viewed_media.visits[&id].recorded);
+        assert!(app.reuse_external_tab(&path));
+        assert!(
+            !app.viewed_media.visits[&id].recorded,
+            "external activation must still wait for viewing"
+        );
         app.history_presented(false);
         let viewed = Instant::now();
         app.observe_viewed_history(viewed);
@@ -372,6 +377,11 @@ mod tests {
             towavue_runtime_windows::RecentKind::File,
         ));
         assert!(app.viewed_media.visits[&id].forgotten);
+        assert!(app.reuse_external_tab(&path));
+        assert!(
+            app.viewed_media.visits[&id].forgotten,
+            "external activation cannot undo history removal"
+        );
         app.handle_recent_action(menu::RecentAction::Open(
             path.clone(),
             towavue_runtime_windows::RecentKind::File,

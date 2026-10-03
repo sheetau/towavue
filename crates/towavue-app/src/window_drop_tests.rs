@@ -27,6 +27,76 @@ pub(crate) fn assert_thumbnail_feedback(
 }
 
 #[test]
+fn gallery_drag_reorders_locally_but_rejects_external_targets_and_detach_fallback() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "window_host::dropping::tests::gallery_drag_reorders_locally_but_rejects_external_targets_and_detach_fallback",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let source = *host.windows.keys().next().expect("source");
+    let target = host.add_application(None).expect("target");
+    let app = host.windows.get_mut(&source).expect("app");
+    let gallery = app.tabs.gallery().expect("Gallery");
+    let media = app.tabs.open_new(root.join("media.png"), MediaKind::Image);
+    let context = fonts::test_context();
+    app.ui_context = Some(context.clone());
+    let render = |app: &mut WindowApplication, events| {
+        let mut actions = vec![];
+        let _ = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(960.0, 576.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.draw_top_bar(ui, &mut actions),
+        );
+        for action in actions {
+            app.handle_ui_action(action);
+        }
+    };
+    for _ in 0..3 {
+        render(app, vec![]);
+    }
+    let start = tab_drag::tests::label_center(app, gallery);
+    render(
+        app,
+        vec![egui::Event::PointerMoved(start), pointer(start, true)],
+    );
+    let outside = egui::pos2(-40.0, 90.0);
+    render(app, vec![egui::Event::PointerMoved(outside)]);
+    for destination in [None, Some((target, egui::pos2(100.0, 100.0)))] {
+        let feedback = host
+            .tab_drag_feedback(|_, _, _| destination)
+            .expect("feedback");
+        assert_eq!(feedback.badge, Some(tab_drag::badge::Kind::Forbidden));
+        assert!(feedback.target.is_none());
+    }
+    let app = host.windows.get_mut(&source).expect("app");
+    let end = tab_drag::tests::drop_point(&context, 2);
+    render(app, vec![egui::Event::PointerMoved(end)]);
+    assert_eq!(
+        host.tab_drag_feedback(|_, _, _| None)
+            .expect("local")
+            .cursor,
+        egui::CursorIcon::Move
+    );
+    let app = host.windows.get_mut(&source).expect("app");
+    render(app, vec![pointer(end, false)]);
+    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), vec![media, gallery]);
+    for hosted in [false, true] {
+        app.hosted_graphics = hosted;
+        app.request_tab_drop(gallery, outside, egui::Vec2::ZERO);
+        assert!(app.pending_tab_drop.is_none());
+        assert!(app.pending_guard.is_none());
+        assert!(!app.exit_requested);
+    }
+}
+
+#[test]
 fn drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel() {
     let Some(root) = crate::tests::isolated_test_root(
         "window_host::dropping::tests::drag_feedback_tracks_local_ownership_and_restores_after_release_or_cancel",
@@ -252,6 +322,45 @@ pub(crate) fn exercise(host: &mut WindowHost, event_loop: &ActiveEventLoop) {
                 vec![],
             );
         }
+    }
+    // A fully prepared native Gallery could transfer through utility commands,
+    // but external drag admission and stale queued drops must both reject it.
+    let app = host.windows.get_mut(&source).expect("source");
+    let gallery = app.tabs.gallery().expect("Gallery");
+    let request = app
+        .tab_detach_request(gallery)
+        .expect("otherwise transferable native Gallery");
+    let start = tab_drag::tests::label_center(app, gallery);
+    let outside_gallery = egui::pos2(-40.0, 90.0);
+    frame(
+        app,
+        true,
+        vec![egui::Event::PointerMoved(start), pointer(start, true)],
+    );
+    frame(app, true, vec![egui::Event::PointerMoved(outside_gallery)]);
+    let destination = tab_drag::tests::drop_point(
+        host.windows[&target].ui_context.as_ref().expect("context"),
+        1,
+    );
+    for pick in [None, Some((target, destination))] {
+        let feedback = host
+            .tab_drag_feedback(|_, _, _| pick)
+            .expect("Gallery drag");
+        assert_eq!(feedback.badge, Some(tab_drag::badge::Kind::Forbidden));
+        assert!(feedback.target.is_none());
+    }
+    let app = host.windows.get_mut(&source).expect("source");
+    frame(app, true, vec![pointer(outside_gallery, false)]);
+    assert!(app.pending_tab_drop.is_none());
+    app.pending_tab_drop = Some((request, outside_gallery, egui::Vec2::ZERO));
+    host.update_tab_drops_with(event_loop, false, |_, _, _| Some((target, destination)));
+    assert_eq!(host.windows[&source].tabs.gallery(), Some(gallery));
+    assert_eq!(host.windows[&target].tabs, target_tabs);
+    assert_eq!(host.windows.len(), original_count);
+    let app = host.windows.get_mut(&source).expect("source");
+    app.activate_tab(tab);
+    for _ in 0..3 {
+        frame(app, true, vec![]);
     }
     let point = tab_drag::tests::drop_point(
         host.windows[&target].ui_context.as_ref().expect("context"),

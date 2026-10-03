@@ -94,7 +94,7 @@ impl Badge {
 // The reference SVG coordinates and CSS are from Monapad's cursor.html:
 // Tabler arrow-right, browser-plus and ban. See assets/drag-badge/README.md.
 // Transform geometry before stroking to retain CSS non-scaling-stroke (1 DIP).
-fn render(kind: Kind, size: u32) -> Option<Pixmap> {
+pub(crate) fn render(kind: Kind, size: u32) -> Option<Pixmap> {
     let mut image = Pixmap::new(size, size)?;
     let density = size as f32 / 23.0;
     let transform = Transform::from_scale(density, density);

@@ -26,6 +26,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(crate) fn request_tab_drop(&mut self, id: TabId, point: egui::Pos2, anchor: egui::Vec2) {
+        if self.tabs.gallery() == Some(id) {
+            return;
+        }
         let display_language = self.language();
         if !self.hosted_graphics {
             self.request_guarded(GuardedAction::DetachTab(id));
@@ -86,40 +89,42 @@ impl WindowHost {
                     app.graphics_epoch,
                 ),
             );
-            let (point, local_drop, can_detach, thumbnail) =
-                if let Some((tab, point, local_drop)) = tab {
-                    if !app.accepts_tab_drop() {
+            let (point, local_drop, can_detach, thumbnail) = if let Some((tab, point, local_drop)) =
+                tab
+            {
+                if !app.accepts_tab_drop() {
+                    return None;
+                }
+                (
+                    point,
+                    local_drop,
+                    local_drop
+                        || (app.tabs.gallery() != Some(tab) && app.tab_detach_request(tab).is_ok()),
+                    false,
+                )
+            } else {
+                let point = if let Some((path, revision, point)) =
+                    app.filmstrip.active_recent_drag(context)
+                {
+                    if !app.can_open_gallery_window(path, revision) {
                         return None;
                     }
-                    (
-                        point,
-                        local_drop,
-                        local_drop || app.tab_detach_request(tab).is_ok(),
-                        false,
-                    )
+                    point
                 } else {
-                    let point = if let Some((path, revision, point)) =
-                        app.filmstrip.active_recent_drag(context)
-                    {
-                        if !app.can_open_gallery_window(path, revision) {
-                            return None;
-                        }
-                        point
-                    } else {
-                        let (path, generation, point) =
-                            app.filmstrip.active_drag(context, app.path.as_deref())?;
-                        if !app.can_open_filmstrip_window(path, generation) {
-                            return None;
-                        }
-                        point
-                    };
-                    (
-                        point,
-                        tab_drag::over_incoming_client(context, point),
-                        app.validate_transfer_window().is_ok(),
-                        true,
-                    )
+                    let (path, generation, point) =
+                        app.filmstrip.active_drag(context, app.path.as_deref())?;
+                    if !app.can_open_filmstrip_window(path, generation) {
+                        return None;
+                    }
+                    point
                 };
+                (
+                    point,
+                    tab_drag::over_incoming_client(context, point),
+                    app.validate_transfer_window().is_ok(),
+                    true,
+                )
+            };
             let mut feedback = DragFeedback {
                 source: *key,
                 target: None,
@@ -339,6 +344,13 @@ impl WindowHost {
             self.tab_badge = None;
         }
         for (source, (request, point, anchor)) in pending {
+            if self
+                .windows
+                .get(&source)
+                .is_none_or(|app| app.tabs.gallery() == Some(request.tab))
+            {
+                continue;
+            }
             // Native picking already excludes obscured client regions and the
             // source window. A picked but unavailable target must reject the drop,
             // not fall through to an unintended new window.

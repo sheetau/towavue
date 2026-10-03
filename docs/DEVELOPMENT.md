@@ -20,6 +20,17 @@ cargo run -p towavue-app -- 'path/to/media.mp4'
 
 For normal-speed use or performance comparisons, add `--release`: `cargo run -p towavue-app --release -- 'path/to/media.mp4'` (omit the final `--` and path to open Welcome). Plain `cargo run` uses unoptimized Debug code, including Rust image decoding and UI processing; Debug latency is not representative of the Release application.
 
+To test external-launch tab reuse in a development build without changing file associations, start the same executable twice with the same existing media path (wait for the first image to appear before the second invocation):
+
+```powershell
+$null = & .\scripts\setup-ffmpeg.ps1
+$viewerExe = (Resolve-Path .\target\release\towavue.exe).Path
+& $viewerExe -- 'path/to/media.jpg'
+& $viewerExe -- 'path/to/media.jpg'
+```
+
+The second launch should select the existing clean tab without adding one or immediately registering another Gallery visit. A different track in the same clean audio-folder tab should reuse that tab. Forwarding is scoped to the same user/session/executable, so double-clicking an associated file normally targets the installed executable instead. Do not pass `--new-window` for this check. Automated equivalents cover acknowledged cross-process forwarding in runtime `launch::` and receiving-window reuse/guards in app `window_host::launch_tests::`, `external_open::` and `recent_views::`.
+
 The setup script retrieves a checksum-pinned BtbN month-end development build (upstream keeps monthly builds for two years, daily builds for only 14 days). Its cache is separated by upstream release tag so identical asset names from different builds cannot collide. **This is not a distribution input:** the historical September 3 development runtime was rejected for transitive FFTW linkage, and the current CI pin has no distribution approval. Product assembly uses the separately retained native Windows build and scoped ZVBI materials; see the packaging references below. Do not introduce WSL.
 
 To use an already prepared compatible FFmpeg prefix, set `FFMPEG_DIR` to its root and add its `bin` to this shell's PATH instead. Use `CARGO_TARGET_DIR` to isolate incompatible native build variants; do not put personal absolute paths in tracked documentation.

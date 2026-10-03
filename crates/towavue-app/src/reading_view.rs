@@ -236,19 +236,16 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.request_redraw();
     }
 
-    pub(super) fn reading_resize_scale(&self, density: f32) -> Option<f32> {
+    pub(super) fn reading_resize_geometry(&self, density: f32) -> Option<(egui::Vec2, f32)> {
         let pages = self.reading_page_views();
         if pages.is_empty() {
             return None;
         }
-        Some(
-            scale(
-                self.image_view,
-                self.reading_extent(&pages),
-                self.image_viewport,
-                density,
-            ) * density,
-        )
+        let extent = self.reading_extent(&pages);
+        Some((
+            extent,
+            scale(self.image_view, extent, self.image_viewport, density) * density,
+        ))
     }
 
     pub(super) fn draw_reading_pages(&mut self, ui: &mut egui::Ui) {

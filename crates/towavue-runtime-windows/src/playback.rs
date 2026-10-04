@@ -433,17 +433,8 @@ impl PlaybackSession {
         } else {
             self.current_video.take()
         };
-        self.stop_pipeline();
-        self.current_video = held;
-        #[cfg(feature = "presentation-verification")]
-        crate::record_burst(
-            crate::BurstEvent::PlaybackSeekStage,
-            self.generation.next().value(),
-            Some(&self.path),
-            [1, target.as_nanoseconds() as u64, 0],
-        );
-        self.generation = self.generation.next();
-        self.target = self
+        let next_generation = self.generation.next();
+        let next_target = self
             .timeline
             .as_ref()
             .map_or(target, |plan| {
@@ -452,6 +443,22 @@ impl PlaybackSession {
                     .max(self.range.start)
             })
             .max(MediaTime::ZERO);
+        let reprime = self
+            .timeline
+            .as_ref()
+            .is_none_or(|plan| !plan.spans().is_empty())
+            .then_some((next_target, next_generation));
+        self.stop_pipeline_for_seek(reprime);
+        self.current_video = held;
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::PlaybackSeekStage,
+            self.generation.next().value(),
+            Some(&self.path),
+            [1, target.as_nanoseconds() as u64, 0],
+        );
+        self.generation = next_generation;
+        self.target = next_target;
         self.metrics.reset();
         self.start_pipeline()?;
         #[cfg(feature = "presentation-verification")]
@@ -693,27 +700,30 @@ impl PlaybackSession {
             (self.notify)(PlaybackEvent::DecodeFinished(self.generation));
             return Ok(());
         }
-        let audio = self
-            .audio_format
-            .map(|format| {
-                let notify = Arc::clone(&self.notify);
-                let generation = self.generation;
-                AudioOutput::start_queued_with_rates(
-                    format,
-                    self.target,
-                    self.volume,
-                    self.rate,
-                    if self.timeline.is_some() {
-                        1.0
-                    } else {
-                        self.rate
-                    },
-                    move || {
-                        notify(PlaybackEvent::AudioReady(generation));
-                    },
-                )
-            })
-            .transpose()?;
+        let audio = if let Some(audio) = self.audio.take() {
+            Some(audio)
+        } else {
+            self.audio_format
+                .map(|format| {
+                    let notify = Arc::clone(&self.notify);
+                    let generation = self.generation;
+                    AudioOutput::start_queued_with_rates(
+                        format,
+                        self.target,
+                        self.volume,
+                        self.rate,
+                        if self.timeline.is_some() {
+                            1.0
+                        } else {
+                            self.rate
+                        },
+                        move || {
+                            notify(PlaybackEvent::AudioReady(generation));
+                        },
+                    )
+                })
+                .transpose()?
+        };
         if self.paused
             && let Some(audio) = &audio
         {
@@ -959,6 +969,10 @@ impl PlaybackSession {
     }
 
     fn stop_pipeline(&mut self) {
+        self.stop_pipeline_for_seek(None);
+    }
+
+    fn stop_pipeline_for_seek(&mut self, reprime: Option<(MediaTime, PlaybackGeneration)>) {
         #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         self.recovery_frame = None;
@@ -967,8 +981,35 @@ impl PlaybackSession {
         // video receiver releases a blocked sender while WASAPI shuts down.
         self.video_cancel.store(true, Ordering::Relaxed);
         self.video_rx.take();
-        // Release the bounded audio receiver before joining its producer.
-        self.audio.take();
+        // A live same-format seek can reset on the existing native owner.
+        // The acknowledgement includes old receiver release before producer
+        // join. Other stops and every rejected reset keep shutdown/recreate.
+        let reused =
+            reprime
+                .zip(self.audio_format)
+                .is_some_and(|((target, generation), format)| {
+                    let notify = Arc::clone(&self.notify);
+                    self.audio.as_mut().is_some_and(|audio| {
+                        audio
+                            .reprime(
+                                format,
+                                target,
+                                self.volume,
+                                self.rate,
+                                if self.timeline.is_some() {
+                                    1.0
+                                } else {
+                                    self.rate
+                                },
+                                self.paused,
+                                move || notify(PlaybackEvent::AudioReady(generation)),
+                            )
+                            .is_ok()
+                    })
+                });
+        if !reused {
+            self.audio.take();
+        }
         #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[0] = stage.elapsed().as_secs_f64() * 1000.0;

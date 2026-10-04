@@ -22,6 +22,7 @@ const EVENT_WAIT_MILLISECONDS: u32 = 20;
 const BUFFERED_AUDIO_SECONDS: usize = 2;
 
 mod control_wake;
+mod reprime;
 use control_wake::ControlWake;
 
 #[cfg(test)]
@@ -68,7 +69,24 @@ enum AudioMessage {
 enum AudioControl {
     InitialAudioQueued,
     SetPaused(bool),
+    Reprime(Box<AudioRun>),
     Shutdown,
+}
+
+/// One playback generation's queues, clock and notifications. Native WASAPI
+/// interfaces stay on the existing owning thread when a run is replaced.
+struct AudioRun {
+    audio_rx: Receiver<AudioMessage>,
+    media_anchor: MediaTime,
+    rate: f32,
+    tempo_rate: f32,
+    paused: bool,
+    position_nanoseconds: Arc<AtomicI64>,
+    volume: Arc<AtomicU32>,
+    drained: Arc<AtomicBool>,
+    event_tx: mpsc::Sender<AudioOutputEvent>,
+    ready_tx: SyncSender<Result<(), AudioOutputError>>,
+    notify: Box<dyn Fn() + Send>,
 }
 
 /// Safe command handle for the runtime-owned event-driven WASAPI thread.
@@ -209,13 +227,23 @@ impl AudioOutput {
         let (event_tx, event_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
         let position_nanoseconds = Arc::new(AtomicI64::new(media_anchor.as_nanoseconds()));
-        let thread_position = Arc::clone(&position_nanoseconds);
         let volume = Arc::new(AtomicU32::new(normalized_volume(volume).to_bits()));
-        let thread_volume = Arc::clone(&volume);
         let drained = Arc::new(AtomicBool::new(false));
-        let thread_drained = Arc::clone(&drained);
         let control_wake = Arc::new(ControlWake::default());
         let thread_wake = Arc::clone(&control_wake);
+        let mut run = AudioRun {
+            audio_rx,
+            media_anchor,
+            rate,
+            tempo_rate,
+            paused: false,
+            position_nanoseconds: Arc::clone(&position_nanoseconds),
+            volume: Arc::clone(&volume),
+            drained: Arc::clone(&drained),
+            event_tx,
+            ready_tx,
+            notify: Box::new(notify),
+        };
         #[cfg(test)]
         let startup_hook = STARTUP_TEST_HOOK.take();
         let thread = thread::Builder::new()
@@ -225,24 +253,18 @@ impl AudioOutput {
                     .ok()
                     .map_err(|error| AudioOutputError::Wasapi(error.to_string()));
                 if let Err(error) = initialization {
-                    let _ = ready_tx.send(Err(error.clone()));
-                    let _ = event_tx.send(AudioOutputEvent::Failed(error.into()));
-                    notify();
+                    let _ = run.ready_tx.send(Err(error.clone()));
+                    let _ = run.event_tx.send(AudioOutputEvent::Failed(error.into()));
+                    (run.notify)();
                     return;
                 }
 
                 let mut initialized = false;
                 let result = run_audio_thread(
                     format,
-                    media_anchor,
-                    &thread_position,
-                    &thread_volume,
-                    rate,
-                    tempo_rate,
-                    audio_rx,
+                    &mut run,
                     &control_rx,
                     &thread_wake,
-                    &ready_tx,
                     &mut initialized,
                     #[cfg(test)]
                     startup_hook,
@@ -252,17 +274,17 @@ impl AudioOutput {
                     Ok(()) => {
                         // Publish normal completion before the retained control
                         // receiver closes, so a racing pause cannot report failure.
-                        thread_drained.store(true, Ordering::Release);
-                        let _ = event_tx.send(AudioOutputEvent::Drained);
+                        run.drained.store(true, Ordering::Release);
+                        let _ = run.event_tx.send(AudioOutputEvent::Drained);
                     }
                     Err(AudioOutputError::EndpointChanged) if initialized => {
-                        let _ = event_tx.send(AudioOutputEvent::EndpointChanged);
+                        let _ = run.event_tx.send(AudioOutputEvent::EndpointChanged);
                     }
                     Err(error) => {
-                        let _ = event_tx.send(AudioOutputEvent::Failed(error.into()));
+                        let _ = run.event_tx.send(AudioOutputEvent::Failed(error.into()));
                     }
                 }
-                notify();
+                (run.notify)();
             })
             .map_err(|error| AudioOutputError::Wasapi(error.to_string()))?;
 
@@ -359,15 +381,9 @@ impl Drop for AudioOutput {
 #[allow(clippy::too_many_arguments)]
 fn run_audio_thread(
     format: AudioFormat,
-    media_anchor: MediaTime,
-    position_nanoseconds: &AtomicI64,
-    volume: &AtomicU32,
-    rate: f32,
-    tempo_rate: f32,
-    audio_rx: Receiver<AudioMessage>,
+    run: &mut AudioRun,
     control_rx: &Receiver<AudioControl>,
     control_wake: &ControlWake,
-    ready_tx: &SyncSender<Result<(), AudioOutputError>>,
     initialized: &mut bool,
     #[cfg(test)] startup_hook: Option<StartupTestHook>,
 ) -> Result<(), AudioOutputError> {
@@ -377,7 +393,7 @@ fn run_audio_thread(
         crate::BurstEvent::AudioOutputStage,
         0,
         None,
-        [1, media_anchor.as_nanoseconds() as u64, 0],
+        [1, run.media_anchor.as_nanoseconds() as u64, 0],
     );
     let setup = (|| {
         #[cfg(test)]
@@ -440,7 +456,6 @@ fn run_audio_thread(
         }
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
         let clock = client.get_audioclock().map_err(wasapi_error)?;
-        let tempo = crate::tempo::AudioTempo::new(format.sample_rate, tempo_rate)?;
         Ok::<_, AudioOutputError>((
             client,
             event,
@@ -448,50 +463,90 @@ fn run_audio_thread(
             clock,
             registration,
             session_registration,
-            tempo,
         ))
     })();
-    let (client, event, render_client, clock, _registration, _session_registration, tempo) =
-        match setup {
-            Ok(resources) => resources,
+    let (client, event, render_client, clock, _registration, _session_registration) = match setup {
+        Ok(resources) => resources,
+        Err(error) => {
+            let _ = run.ready_tx.send(Err(error.clone()));
+            return Err(error);
+        }
+    };
+    let mut reset = false;
+    loop {
+        let prepare = (|| {
+            if reset {
+                #[cfg(feature = "presentation-verification")]
+                crate::record_burst(
+                    crate::BurstEvent::AudioOutputStage,
+                    0,
+                    None,
+                    [1, run.media_anchor.as_nanoseconds() as u64, 1],
+                );
+                // The previous loop stopped the stream and released every
+                // render buffer before returning. Reset flushes device PCM and
+                // its clock; no interface changes its owning MTA thread.
+                client.reset_stream().map_err(wasapi_error)?;
+                if endpoint_rx.try_recv().is_ok() {
+                    return Err(AudioOutputError::EndpointChanged);
+                }
+            }
+            crate::tempo::AudioTempo::new(format.sample_rate, run.tempo_rate)
+                .map_err(AudioOutputError::from)
+        })();
+        let tempo = match prepare {
+            Ok(tempo) => tempo,
             Err(error) => {
-                let _ = ready_tx.send(Err(error.clone()));
+                let _ = run.ready_tx.send(Err(error.clone()));
                 return Err(error);
             }
         };
-    // Queued startup deliberately drops the synchronous handshake receiver.
-    // Shutdown still arrives through control_rx and is joined by AudioOutput.
-    *initialized = true;
-    #[cfg(feature = "presentation-verification")]
-    crate::record_burst(
-        crate::BurstEvent::AudioOutputStage,
-        0,
-        None,
-        [2, media_anchor.as_nanoseconds() as u64, 0],
-    );
-    let _ = ready_tx.send(Ok(()));
-
-    render_audio_loop(
-        format,
-        audio_rx,
-        control_rx,
-        &client,
-        &render_client,
-        &event,
-        &clock,
-        media_anchor,
-        position_nanoseconds,
-        &endpoint_rx,
-        volume,
-        rate,
-        tempo,
-    )
+        *initialized = true;
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::AudioOutputStage,
+            0,
+            None,
+            [
+                2,
+                run.media_anchor.as_nanoseconds() as u64,
+                u64::from(reset),
+            ],
+        );
+        let _ = run.ready_tx.send(Ok(()));
+        let next = render_audio_loop(
+            format,
+            &run.audio_rx,
+            control_rx,
+            &client,
+            &render_client,
+            &event,
+            &clock,
+            run.media_anchor,
+            &run.position_nanoseconds,
+            &endpoint_rx,
+            &run.volume,
+            run.rate,
+            tempo,
+            run.paused,
+        )?;
+        match next {
+            Some(next) => {
+                // Drop the old bounded receiver before acknowledging reset, so
+                // blocked old producers retire before the session joins them.
+                // Queues, atomics and notifications are generation-local.
+                *run = *next;
+                reset = true;
+            }
+            None => return Ok(()),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn render_audio_loop(
     format: AudioFormat,
-    audio_rx: Receiver<AudioMessage>,
+    audio_rx: &Receiver<AudioMessage>,
     control_rx: &Receiver<AudioControl>,
     client: &AudioClient,
     render_client: &AudioRenderClient,
@@ -503,7 +558,8 @@ fn render_audio_loop(
     volume: &AtomicU32,
     rate: f32,
     mut tempo: crate::tempo::AudioTempo,
-) -> Result<(), AudioOutputError> {
+    mut paused: bool,
+) -> Result<Option<Box<AudioRun>>, AudioOutputError> {
     let bytes_per_frame = format.channels as usize * size_of::<f32>();
     let queue_limit = format.sample_rate as usize * bytes_per_frame * BUFFERED_AUDIO_SECONDS;
     let mut queue = VecDeque::new();
@@ -513,7 +569,6 @@ fn render_audio_loop(
         format.sample_rate,
     );
     let mut input_ended = false;
-    let mut paused = false;
     let mut running = false;
     let mut wall_elapsed = Duration::ZERO;
     let mut wall_started_at: Option<Instant> = None;
@@ -545,6 +600,12 @@ fn render_audio_loop(
                         client.stop_stream().map_err(wasapi_error)?;
                     }
                     return Err(AudioOutputError::Closed);
+                }
+                AudioControl::Reprime(next) => {
+                    if running {
+                        client.stop_stream().map_err(wasapi_error)?;
+                    }
+                    return Ok(Some(next));
                 }
             }
         }
@@ -598,7 +659,7 @@ fn render_audio_loop(
                         wall_elapsed += started_at.elapsed();
                     }
                 }
-                return Ok(());
+                return Ok(None);
             }
         }
 
@@ -621,6 +682,7 @@ fn render_audio_loop(
                 Ok(AudioControl::InitialAudioQueued) => {}
                 Ok(AudioControl::SetPaused(value)) => paused = value,
                 Ok(AudioControl::Shutdown) => return Err(AudioOutputError::Closed),
+                Ok(AudioControl::Reprime(next)) => return Ok(Some(next)),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     return Err(AudioOutputError::Closed);

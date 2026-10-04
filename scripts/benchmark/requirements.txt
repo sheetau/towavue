@@ -1,0 +1,6 @@
+numpy==2.4.6
+Pillow==12.3.0
+scipy==1.17.1
+SoundCard==0.4.6
+cffi==2.1.1
+matplotlib==3.11.2

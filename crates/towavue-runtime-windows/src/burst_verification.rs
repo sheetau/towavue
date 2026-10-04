@@ -51,6 +51,43 @@ pub enum BurstEvent {
     NonblockingPresentReturned = 38,
     ProbePlaybackState = 39,
     HardwareDecodeStep = 40,
+    InputProbe = 41,
+    AudioOutputStage = 42,
+    PlaybackSeekStage = 43,
+    VideoFrameAdvanced = 44,
+}
+
+/// Correlates one complete input open/probe, including failure, without logging
+/// on the measured thread. Different worker inputs have independent identities.
+pub(crate) struct InputProbeTrace {
+    id: u64,
+    source: std::path::PathBuf,
+}
+
+impl InputProbeTrace {
+    pub(crate) fn start(source: &Path) -> Option<Self> {
+        if !burst_enabled() {
+            return None;
+        }
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        record_burst(BurstEvent::InputProbe, id, Some(source), [0, 0, 0]);
+        Some(Self {
+            id,
+            source: source.to_owned(),
+        })
+    }
+}
+
+impl Drop for InputProbeTrace {
+    fn drop(&mut self) {
+        record_burst(
+            BurstEvent::InputProbe,
+            self.id,
+            Some(&self.source),
+            [1, 0, 0],
+        );
+    }
 }
 
 /// Eight u64 words: committed sequence, QPC tick, kind, generation, source ID, a/b/c.

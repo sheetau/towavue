@@ -112,6 +112,8 @@ impl AudioOutputSender {
         // the initial wake across cloned producers, so steady playback does not
         // enqueue a control per packet. Paused/resumed output keeps its controls.
         if !self.initial_audio_queued.swap(true, Ordering::Relaxed) {
+            #[cfg(feature = "presentation-verification")]
+            crate::record_burst(crate::BurstEvent::AudioOutputStage, 0, None, [3, 0, 0]);
             let _ = self.control_tx.send(AudioControl::InitialAudioQueued);
         }
         Ok(())
@@ -354,6 +356,13 @@ fn run_audio_thread(
     #[cfg(test)] startup_hook: Option<StartupTestHook>,
 ) -> Result<(), AudioOutputError> {
     let (endpoint_tx, endpoint_rx) = mpsc::channel();
+    #[cfg(feature = "presentation-verification")]
+    crate::record_burst(
+        crate::BurstEvent::AudioOutputStage,
+        0,
+        None,
+        [1, media_anchor.as_nanoseconds() as u64, 0],
+    );
     let setup = (|| {
         #[cfg(test)]
         if let Some(hook) = startup_hook {
@@ -430,6 +439,13 @@ fn run_audio_thread(
     // Queued startup deliberately drops the synchronous handshake receiver.
     // Shutdown still arrives through control_rx and is joined by AudioOutput.
     *initialized = true;
+    #[cfg(feature = "presentation-verification")]
+    crate::record_burst(
+        crate::BurstEvent::AudioOutputStage,
+        0,
+        None,
+        [2, media_anchor.as_nanoseconds() as u64, 0],
+    );
     let _ = ready_tx.send(Ok(()));
 
     render_audio_loop(
@@ -538,6 +554,13 @@ fn render_audio_loop(
                 && (write_frames > 0 || client.get_current_padding().map_err(wasapi_error)? > 0)
             {
                 client.start_stream().map_err(wasapi_error)?;
+                #[cfg(feature = "presentation-verification")]
+                crate::record_burst(
+                    crate::BurstEvent::AudioOutputStage,
+                    0,
+                    None,
+                    [4, media_anchor.as_nanoseconds() as u64, 0],
+                );
                 wall_started_at = Some(Instant::now());
                 running = true;
             }

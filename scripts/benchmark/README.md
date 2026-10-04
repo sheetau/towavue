@@ -148,6 +148,16 @@ whose results must not be assumed to represent the same decoder selection.
   loopback port (Windows quiet RC does not consume stdin). This is native command
   response, not physical input latency. The common 1080p master is upscaled for
   4K encodes; it is a controlled seek fixture, not representative cinema.
+  The aligned runner requests each percentage plus 1/60 second, inside its tone
+  interval and halfway between 30 fps frame boundaries. Map towavue's click
+  through the 5-DIP endpoint inset using the owned window's DPI and the manifest
+  container duration (subtract Matroska start time, matching the product).
+  Record the estimated clicked timestamp and half-pixel bound; reject geometry
+  that can select a different next frame. Numeric APIs receive the common target.
+  Native clicks remain quantized, so timestamps are not bit-identical. Results
+  use `seek_aligned` and must not be merged with historical `seek`: the old runner
+  used the full client width and sometimes sought before the detector's tone or
+  frame target, adding subsequent playback time to the reported latency.
 - **Settled viewport:** the startup runner separately reports recognizable
   identity and convergence to the same app's eventual displayed pixels. It checks
   stability and keeps pixel error scores. This is not proof that every original

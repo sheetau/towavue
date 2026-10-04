@@ -142,7 +142,9 @@ pub use file_operation::{
 pub use file_search::{
     FILE_SEARCH_LIMIT, FileSearch, FileSearchFailure, FileSearchRequest, FileSearchResult,
 };
-pub use fonts::{UiFontFallback, japanese_ui_font, ui_font_fallbacks, ui_symbol_font};
+pub use fonts::{
+    UiFontFallback, UiFontPreparation, UiFonts, japanese_ui_font, ui_font_fallbacks, ui_symbol_font,
+};
 pub use image::{DecodedImage, DecodedImageFrame, ImageDecodeError, decode_image};
 pub use image_clipboard::{ImageCopyJob, ImageCopyRequest};
 pub use image_color::{premultiplied_color_image, premultiplied_rgba_image};

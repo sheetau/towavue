@@ -1620,6 +1620,7 @@ where
         visible: bool,
     ) -> Result<(), Box<dyn Error>> {
         self.prefetch_initial_image();
+        let prepared_fonts = fonts::prepare();
         let attributes = Window::default_attributes()
             .with_title(self.title())
             .with_inner_size(LogicalSize::new(960, 576))
@@ -1683,7 +1684,7 @@ where
         localization::set_language(&context, self.language_settings.display);
         chrome::configure_input(&context);
         context.set_visuals(egui::Visuals::dark());
-        fonts::install(&context);
+        fonts::install_prepared(&context, prepared_fonts);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(13);
         context.style_mut_of(egui::Theme::Dark, chrome::style);

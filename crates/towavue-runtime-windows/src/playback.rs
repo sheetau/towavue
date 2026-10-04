@@ -412,6 +412,13 @@ impl PlaybackSession {
     }
 
     pub fn seek(&mut self, target: MediaTime) -> Result<PlaybackGeneration, PlaybackError> {
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::PlaybackSeekStage,
+            self.generation.next().value(),
+            Some(&self.path),
+            [0, target.as_nanoseconds() as u64, 0],
+        );
         // A same-device re-prime keeps only the displayed frame until advance_pending.
         // Its owned AVFrame/texture or RGBA buffer remains valid while the worker stops;
         // do not copy pixels or treat this old frame as the new generation's seek result.
@@ -426,6 +433,13 @@ impl PlaybackSession {
         };
         self.stop_pipeline();
         self.current_video = held;
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::PlaybackSeekStage,
+            self.generation.next().value(),
+            Some(&self.path),
+            [1, target.as_nanoseconds() as u64, 0],
+        );
         self.generation = self.generation.next();
         self.target = self
             .timeline
@@ -438,6 +452,13 @@ impl PlaybackSession {
             .max(MediaTime::ZERO);
         self.metrics.reset();
         self.start_pipeline()?;
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::PlaybackSeekStage,
+            self.generation.value(),
+            Some(&self.path),
+            [2, self.target.as_nanoseconds() as u64, 0],
+        );
         Ok(self.generation)
     }
 
@@ -1020,6 +1041,17 @@ impl PlaybackSession {
         let Some(queued) = self.pending_video.take() else {
             return false;
         };
+        #[cfg(feature = "presentation-verification")]
+        crate::record_burst(
+            crate::BurstEvent::VideoFrameAdvanced,
+            self.generation.value(),
+            Some(&self.path),
+            [
+                queued.frame.presentation_time().as_nanoseconds() as u64,
+                self.target.as_nanoseconds() as u64,
+                self.video_generation.value(),
+            ],
+        );
         self.current_video = Some(queued.frame);
         self.current_video_source_time = queued.source_time;
         self.current_video_source = queued.source;

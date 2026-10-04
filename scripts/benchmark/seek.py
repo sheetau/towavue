@@ -6,12 +6,13 @@ import random
 import socket
 import threading
 import time
+import math
 import numpy as np
 import soundcard as sc
 from scipy import ndimage
 from audio import packet
 from interaction import Session, U, geometry
-from playback_control import MpcReceiver, seek
+from playback_control import MpcReceiver, seek, seek_target_seconds
 from visual import prepare_apps, sha, W, normalize
 
 
@@ -52,14 +53,14 @@ def tone_match(data,frequency):
     return float(np.sqrt(energy)),max(0.,1-float(np.mean((mono-fit)**2))/energy)
 
 
-def trial(s,percent,receiver,recorder,video,retain=None):
+def trial(s,percent,receiver,recorder,video,retain=None,duration_seconds=12.0):
     # Clear queued pre-seek loopback data; the target frequency differs from the old segment.
     end=time.monotonic()+.06
     while time.monotonic()<end:packet(recorder)
     shared={};stop=threading.Event()
     # Consume audio on the recorder's owning thread; capture video separately.
     start=time.perf_counter_ns()
-    seek(s,percent,receiver)
+    requested=seek(s,percent,receiver,duration_seconds)
     dispatch_return=time.perf_counter_ns()
     def video_observe():
         lower=start;rows=[]
@@ -72,9 +73,7 @@ def trial(s,percent,receiver,recorder,video,retain=None):
             result=frame_number(image)
             frame=result[0] if result else None
             rows.append(dict(begin_ns=begin,end_ns=end,frame=frame))
-            # Integer percentages avoid accepting frame 251 for 70% of 360
-            # because binary floating-point rounded 251.999... down.
-            target=percent*360//100
+            target=math.ceil(seek_target_seconds(percent)*30)
             if frame is not None and target<=frame<target+30:
                 _,_,origin=geometry(s.hwnd);marker=result[1]
                 point=W.POINT(origin.x+marker[0]+marker[2]//2,origin.y+marker[1]+marker[3]//2)
@@ -101,7 +100,8 @@ def trial(s,percent,receiver,recorder,video,retain=None):
     if worker:worker.join(4)
     shared['audio_samples']=rows
     row=dict(start_ns=start,dispatch_return_ns=dispatch_return,target_percent=percent,
-             target_frame=percent*360//100,target_frequency=600+137*(percent//10),**shared)
+             target_frame=math.ceil(seek_target_seconds(percent)*30),target_frequency=600+137*(percent//10),
+             scenario='seek_aligned',request=requested,**shared)
     row['audio_status']='ok' if 'audio_end_ns' in shared else 'timeout'
     row['video_status']=('ok' if 'video_end_ns' in shared else shared.get('video_error','timeout')) if video else 'not_applicable'
     for endpoint in ('audio','video'):
@@ -134,9 +134,12 @@ def main():
               'apps':{name:{'exe':str(apps[name]['exe']),'sha256':sha(apps[name]['exe'])} for name in names},
               'settings':'isolated profiles; application volume knobs 20%; no acoustic level calibration; default video decoding',
               'endpoint':'first desktop observation at/after requested frame, within 1 s; two target-frequency loopback packets',
-              'input':'towavue compact seekbar click in normalized client; MPC-HC documented slave API; VLC RC on an ephemeral IPv4 loopback port',
+              'input':'towavue DPI-scaled compact travel (5 DIP endpoint inset); MPC-HC documented slave API; VLC RC on an ephemeral IPv4 loopback port',
+              'target_policy':'12 s percentage plus 1/60 s; native click uses manifest container duration; common next 30 fps frame and interior tone interval',
+              'supersedes':'historical seek runner clicked full client width and could seek before the detector target; do not merge those results',
               'limitations':['No acoustic or physical-input timestamp','Frame-accurate first output is not guaranteed by desktop sampling',
-                             'Audio confidence window and packet buffering included','Different command transports; dispatch duration retained']}
+                             'Audio confidence window and packet buffering included','Different command transports; dispatch duration retained',
+                             'Native pixel rounding remains bounded and is recorded per request; target timestamps are not bit-identical']}
     (root/'run.json').write_text(json.dumps(metadata,indent=2)+'\n',encoding='utf-8')
     try:
         with (root/'samples.jsonl').open('w',encoding='utf-8') as out:
@@ -158,7 +161,11 @@ def main():
                         if name=='vlc':
                             s.rc_socket=socket.create_connection(('127.0.0.1',port),timeout=3)
                         for step,percent in enumerate([70,20,80,30,60,10]):
-                            row=trial(s,percent,receiver,loopback_recorder,f['kind']=='video',folder/f'{step}.png' if block==0 else None)
+                            source_format=f['probe']['format']
+                            duration=float(source_format['duration'])
+                            if 'matroska' in source_format.get('format_name','').split(','):
+                                duration-=float(source_format.get('start_time',0))
+                            row=trial(s,percent,receiver,loopback_recorder,f['kind']=='video',folder/f'{step}.png' if block==0 else None,duration)
                             row.update(app=name,case=f['id'],kind=f['kind'],block=block,step=step,phase='warmup' if block<0 else 'measurement')
                             out.write(json.dumps(row)+'\n');out.flush()
                             print(block,name,f['id'],percent,row['video_status'],row['audio_status'],flush=True)

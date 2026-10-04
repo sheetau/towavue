@@ -923,7 +923,11 @@ impl ParallelInput {
     ) -> Result<Self, DecodeError> {
         check_cancelled(cancelled)?;
         ffmpeg::init()?;
+        #[cfg(feature = "presentation-verification")]
+        let probe = crate::burst_verification::InputProbeTrace::start(path);
         let input = format::input(path)?;
+        #[cfg(feature = "presentation-verification")]
+        drop(probe);
         check_cancelled(cancelled)?;
         Ok(Self {
             input,

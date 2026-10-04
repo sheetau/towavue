@@ -1,5 +1,54 @@
 use std::path::{Path, PathBuf};
 
+/// Owned font bytes prepared without any window, graphics device or UI context.
+pub struct UiFonts {
+    pub japanese: Option<(Vec<u8>, u32)>,
+    pub symbols: Option<Vec<u8>>,
+    pub fallbacks: Vec<UiFontFallback>,
+}
+
+impl UiFonts {
+    pub fn read() -> Self {
+        Self {
+            japanese: japanese_ui_font(),
+            symbols: ui_symbol_font(),
+            fallbacks: ui_font_fallbacks(),
+        }
+    }
+}
+
+/// One startup read, overlapped with native window/device initialization.
+/// Join on consumption or early initialization failure; only owned bytes cross
+/// the worker boundary. Font selection and missing-font fallbacks are unchanged.
+pub struct UiFontPreparation(Option<std::thread::JoinHandle<UiFonts>>);
+
+impl UiFontPreparation {
+    pub fn start() -> std::io::Result<Self> {
+        std::thread::Builder::new()
+            .name("towavue-fonts".into())
+            .spawn(UiFonts::read)
+            .map(|worker| Self(Some(worker)))
+    }
+
+    pub fn finish(mut self) -> UiFonts {
+        match self.0.take().expect("owned font worker").join() {
+            Ok(fonts) => fonts,
+            Err(_) => {
+                crate::diagnostic!("Font preparation failed; retrying on the window thread");
+                UiFonts::read()
+            }
+        }
+    }
+}
+
+impl Drop for UiFontPreparation {
+    fn drop(&mut self) {
+        if let Some(worker) = self.0.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 /// Detached installed font bytes. No native font handle survives the read.
 pub struct UiFontFallback {
     pub name: &'static str,
@@ -73,6 +122,37 @@ pub fn ui_symbol_font() -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_preserves_installed_bytes_face_indices_and_fallback_order() {
+        let prepared = UiFontPreparation::start().expect("font worker").finish();
+        let serial = UiFonts::read();
+        assert_eq!(prepared.japanese, serial.japanese);
+        assert_eq!(prepared.symbols, serial.symbols);
+        assert_eq!(prepared.fallbacks.len(), serial.fallbacks.len());
+        for (prepared, serial) in prepared.fallbacks.iter().zip(&serial.fallbacks) {
+            assert_eq!(prepared.name, serial.name);
+            assert_eq!(prepared.index, serial.index);
+            assert_eq!(prepared.data, serial.data);
+        }
+    }
+
+    #[test]
+    fn abandoned_preparation_joins_its_worker() {
+        let (finished, completion) = std::sync::mpsc::channel();
+        let preparation = UiFontPreparation(Some(std::thread::spawn(move || {
+            finished.send(()).expect("completion receiver");
+            UiFonts {
+                japanese: None,
+                symbols: None,
+                fallbacks: Vec::new(),
+            }
+        })));
+        drop(preparation);
+        completion
+            .try_recv()
+            .expect("worker completed before drop returned");
+    }
 
     #[test]
     fn installed_fallback_candidates_skip_missing_empty_and_unreadable_files() {

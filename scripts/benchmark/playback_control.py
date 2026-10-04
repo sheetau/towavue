@@ -3,6 +3,7 @@ import ctypes as C
 from ctypes import wintypes as W
 import threading
 import time
+import math
 from interaction import U, geometry
 
 
@@ -62,9 +63,38 @@ def vlc(session,command):
     session.rc_socket.sendall((command+'\n').encode('utf-8'))
 
 
-def seek(session,percent,receiver=None):
+def seek_target_seconds(percent):
+    # Stay inside the tone interval and halfway between 30 fps frame boundaries.
+    # Native pixel rounding must not add a whole frame or wait for the next tone.
+    return 12*percent/100 + 1/60
+
+
+def towavue_seek_point(width,height,dpi,target_seconds,duration_seconds):
+    radius=5*dpi/96
+    travel=width-2*radius
+    if not (travel>0 and math.isfinite(duration_seconds) and 0<target_seconds<duration_seconds):
+        raise ValueError('Invalid native seek geometry or duration')
+    bound=duration_seconds/(2*travel)
+    if bound>=1/60:
+        raise ValueError('Seekbar is too narrow for a common 30 fps target frame')
+    x=round(radius+travel*target_seconds/duration_seconds)
+    actual=(x-radius)/travel*duration_seconds
+    if math.ceil(actual*30)!=math.ceil(target_seconds*30):
+        raise ValueError('Native pixel rounding crosses the common target frame')
+    return x,round(height-30*dpi/96),actual,bound
+
+
+def seek(session,percent,receiver=None,duration_seconds=12.0):
+    seconds=seek_target_seconds(percent)
+    details=dict(requested_seconds=seconds)
     if session.name=='towavue':
         client,_,_=geometry(session.hwnd)
-        session.click(round(client.right*percent/100),client.bottom-30)
-    elif session.name=='mpc-hc':receiver.send(session,0xA0002000,f'{12*percent/100:.3f}')
-    elif session.name=='vlc':vlc(session,f'seek {12*percent/100:.3f}')
+        U.GetDpiForWindow.argtypes=[W.HWND];U.GetDpiForWindow.restype=W.UINT
+        dpi=U.GetDpiForWindow(session.hwnd)
+        if not dpi:raise RuntimeError('Cannot read fixture window DPI')
+        x,y,actual,bound=towavue_seek_point(client.right,client.bottom,dpi,seconds,duration_seconds)
+        details.update(click_x=x,click_y=y,dpi=dpi,estimated_seconds=actual,pixel_rounding_bound_seconds=bound,duration_seconds=duration_seconds)
+        session.click(x,y)
+    elif session.name=='mpc-hc':receiver.send(session,0xA0002000,f'{seconds:.6f}')
+    elif session.name=='vlc':vlc(session,f'seek {seconds:.6f}')
+    return details

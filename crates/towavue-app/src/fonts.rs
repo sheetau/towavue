@@ -2,15 +2,36 @@
 // happen once per process, never while laying out a filename or painting a frame.
 static INSTALLED: std::sync::OnceLock<(egui::FontDefinitions, bool)> = std::sync::OnceLock::new();
 
+#[cfg(any(test, feature = "presentation-verification"))]
 pub fn install(context: &egui::Context) -> bool {
+    install_prepared(context, None)
+}
+
+pub fn prepare() -> Option<towavue_runtime_windows::UiFontPreparation> {
+    if INSTALLED.get().is_some() {
+        return None;
+    }
+    towavue_runtime_windows::UiFontPreparation::start()
+        .inspect_err(|error| {
+            towavue_runtime_windows::diagnostic!("Could not prepare fonts in background: {error}");
+        })
+        .ok()
+}
+
+pub fn install_prepared(
+    context: &egui::Context,
+    prepared: Option<towavue_runtime_windows::UiFontPreparation>,
+) -> bool {
     let (fonts, available) = INSTALLED.get_or_init(|| {
-        let japanese = towavue_runtime_windows::japanese_ui_font();
+        let towavue_runtime_windows::UiFonts { japanese, symbols, fallbacks } = prepared
+            .map(towavue_runtime_windows::UiFontPreparation::finish)
+            .unwrap_or_else(towavue_runtime_windows::UiFonts::read);
         let available = japanese.is_some();
         if !available {
             towavue_runtime_windows::diagnostic!("towavue: no installed Japanese UI font was found; using available system and bundled fallback fonts");
         }
-        let mut fonts = definitions(japanese, towavue_runtime_windows::ui_symbol_font());
-        for fallback in towavue_runtime_windows::ui_font_fallbacks() {
+        let mut fonts = definitions(japanese, symbols);
+        for fallback in fallbacks {
             let mut data = egui::FontData::from_owned(fallback.data);
             data.index = fallback.index;
             fonts.font_data.insert(fallback.name.into(), data.into());
@@ -145,7 +166,7 @@ mod tests {
             original =
                 ui.fonts_mut(|fonts| fonts.glyph_width(&egui::FontId::proportional(14.0), 'A'));
         });
-        if !install(&context) {
+        if !install_prepared(&context, prepare()) {
             eprintln!("SKIP Japanese glyph coverage: no Japanese Windows font is installed");
             return;
         }

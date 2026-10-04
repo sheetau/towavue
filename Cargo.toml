@@ -27,6 +27,11 @@ dbg_macro = "deny"
 todo = "deny"
 unwrap_used = "deny"
 
+# Keep the baseline target CPU while optimizing across crate boundaries.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
 # The app's large native test binary exceeds MSVC's PDB limit with full type
 # debug data. Keep source locations without affecting ordinary product builds.
 [profile.test]

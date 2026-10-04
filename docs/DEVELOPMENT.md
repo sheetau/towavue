@@ -2,7 +2,7 @@
 
 Use this guide for setup and checks, [the local dashboard](../.dashboard/README.md) to resume work ([STATUS](STATUS.md) is the public checkpoint), and the relevant [ARCHITECTURE](ARCHITECTURE.md) section for design constraints. Product usage belongs in [README](../README.md).
 
-The test profile keeps line-table debug information: full native app-test type information exceeds the MSVC PDB size limit (LNK1140). Ordinary development and Release product profiles are unchanged. Use the standard test command below; avoid restarting a live compiler merely because it has not produced output.
+The test profile keeps line-table debug information: full native app-test type information exceeds the MSVC PDB size limit (LNK1140). The Release profile uses thin LTO and one codegen unit, with the default target CPU and optimization level. Ordinary development builds are unchanged. Use the standard test command below; avoid restarting a live compiler merely because it has not produced output.
 
 The external media benchmark runners and their observation boundaries are documented in [scripts/benchmark/README](../scripts/benchmark/README.md). Keep fixture profiles and results private. Their native-input, desktop-capture and loopback timings are separate from the internal diagnostic clocks below.
 

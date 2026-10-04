@@ -55,6 +55,9 @@ pub enum BurstEvent {
     AudioOutputStage = 42,
     PlaybackSeekStage = 43,
     VideoFrameAdvanced = 44,
+    CaptionInfoCacheHit = 45,
+    CaptionInfoQueryStarted = 46,
+    CaptionInfoQueryFinished = 47,
 }
 
 /// Correlates one complete input open/probe, including failure, without logging

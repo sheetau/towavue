@@ -27,6 +27,7 @@ const SUBCLASS_ID: usize = 0x7476_6361;
 const MOVE_SIZE_TIMER_ID: usize = 0x7476_6d73;
 const MOVE_SIZE_FRAME_MS: u32 = 10;
 
+mod info;
 mod placement;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -46,6 +47,7 @@ pub struct CaptionButton {
 
 struct CaptionState {
     window: std::sync::Weak<Window>,
+    info: info::InfoCache,
     fullscreen: Cell<bool>,
     sizing: Cell<bool>,
     move_size_timer: Cell<bool>,
@@ -189,6 +191,7 @@ impl NativeCaption {
         }
         let state = Rc::new(CaptionState {
             window: Arc::downgrade(&window),
+            info: info::InfoCache::default(),
             fullscreen: Cell::new(false),
             sizing: Cell::new(false),
             move_size_timer: Cell::new(false),
@@ -301,6 +304,7 @@ impl NativeCaption {
         if fullscreen == self.state.fullscreen.get() {
             return;
         }
+        self.state.info.invalidate();
         #[cfg(test)]
         let started = std::time::Instant::now();
         if fullscreen {
@@ -341,7 +345,7 @@ impl NativeCaption {
 
     /// Reserved native caption area in physical client coordinates.
     pub fn controls_bounds(&self) -> egui::Rect {
-        let bounds = caption_bounds(self.handle);
+        let bounds = caption_bounds(self.handle, &self.state);
         egui::Rect::from_min_max(
             egui::pos2(bounds.left as f32, bounds.top as f32),
             egui::pos2(bounds.right as f32, bounds.bottom as f32),
@@ -353,7 +357,7 @@ impl NativeCaption {
         if self.state.fullscreen.get() {
             return buttons;
         }
-        let Some((info, origin)) = titlebar_info(self.handle) else {
+        let Some((info, origin)) = self.state.info.read(self.handle) else {
             return buttons;
         };
         // SAFETY: scalar query on the retained UI-thread window.
@@ -456,6 +460,8 @@ impl NativeCaption {
 }
 
 fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
+    #[cfg(feature = "presentation-verification")]
+    crate::record_burst(crate::BurstEvent::CaptionInfoQueryStarted, 0, None, [0; 3]);
     let mut info = TITLEBARINFOEX {
         cbSize: size_of::<TITLEBARINFOEX>() as u32,
         ..Default::default()
@@ -463,7 +469,7 @@ fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
     let mut origin = POINT::default();
     // SAFETY: callers retain this UI-thread window. Windows writes only initialized
     // stack outputs and does not retain their addresses across the synchronous call.
-    unsafe {
+    let result = unsafe {
         SendMessageW(
             handle,
             WM_GETTITLEBARINFOEX,
@@ -473,10 +479,13 @@ fn titlebar_info(handle: HWND) -> Option<(TITLEBARINFOEX, POINT)> {
         ClientToScreen(handle, &mut origin)
             .as_bool()
             .then_some((info, origin))
-    }
+    };
+    #[cfg(feature = "presentation-verification")]
+    crate::record_burst(crate::BurstEvent::CaptionInfoQueryFinished, 0, None, [0; 3]);
+    result
 }
 
-fn caption_bounds(handle: HWND) -> RECT {
+fn caption_bounds(handle: HWND, state: &CaptionState) -> RECT {
     let mut client = RECT::default();
     // SAFETY: stack output for this UI-thread window; failure leaves an empty rect.
     unsafe {
@@ -498,7 +507,7 @@ fn caption_bounds(handle: HWND) -> RECT {
     if unsafe { !IsWindowVisible(handle).as_bool() || IsIconic(handle).as_bool() } {
         return fallback();
     }
-    if let Some((info, origin)) = titlebar_info(handle) {
+    if let Some((info, origin)) = state.info.read(handle) {
         let mut left = client.right;
         let mut bottom = 0;
         for index in [2, 3, 5] {
@@ -599,6 +608,9 @@ unsafe extern "system" fn caption_proc(
     // SAFETY: registration holds this Rc until same-thread subclass removal.
     // Only Cell accesses cross reentrant Windows calls; no mutable borrow is retained.
     let state = unsafe { &*(data as *const CaptionState) };
+    if info::invalidates(message) {
+        state.info.invalidate();
+    }
     #[cfg(test)]
     if message == WM_SIZE
         && let Some(mut trace) = state.resize_trace.take()
@@ -741,7 +753,7 @@ unsafe extern "system" fn caption_proc(
             let dc = GetDC(Some(handle));
             if !dc.is_invalid() {
                 // Only the exposed caption strip uses GDI, never the media surface.
-                let bounds = caption_bounds(handle);
+                let bounds = caption_bounds(handle, state);
                 FillRect(dc, &bounds, HBRUSH(GetStockObject(BLACK_BRUSH).0));
                 ReleaseDC(Some(handle), dc);
             }
@@ -813,7 +825,8 @@ pub(crate) struct CaptionSurface {
 
 impl CaptionSurface {
     pub(crate) fn refresh_clip(&self, width: u32, height: u32) -> windows::core::Result<()> {
-        let cutout = (!self.state.fullscreen.get()).then(|| caption_bounds(self.parent_handle));
+        let cutout =
+            (!self.state.fullscreen.get()).then(|| caption_bounds(self.parent_handle, &self.state));
         self.update_clip(width, height, cutout)
     }
 
@@ -1853,7 +1866,7 @@ mod tests {
                                     right: client.right,
                                     bottom: 32 * dpi / 96,
                                 };
-                                assert_eq!(caption_bounds(handle), expected);
+                                assert_eq!(caption_bounds(handle, &caption.state), expected);
                                 surface
                                     .refresh_clip(client.right as u32, client.bottom as u32)
                                     .expect("hidden/minimized clip");

@@ -1343,7 +1343,14 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     native_frame(app, vec![]);
     native_frame(app, vec![]);
     let original = app.tabs.clone();
-    let dragged = original.tabs()[0].id;
+    // Pressing an inactive tab activates it. Keep this native reorder control
+    // on the loaded tab so its transport/session invariants remain meaningful.
+    // Inactive press activation is covered by the dedicated input regression.
+    let dragged = active;
+    let original_index = original
+        .tab_ids()
+        .position(|id| id == dragged)
+        .expect("loaded tab");
     for returning in [false, true] {
         let widgets = state(app).widgets;
         let start = widgets
@@ -1353,7 +1360,7 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
             .2
             .center();
         let target = if returning {
-            egui::pos2(widgets[0].2.left() + 2.0, start.y)
+            egui::pos2(widgets[original_index].2.left() + 2.0, start.y)
         } else {
             egui::pos2(widgets.last().expect("last").2.right() + 10.0, start.y)
         };
@@ -1367,17 +1374,23 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
         native_frame(app, vec![pointer(target, false)]);
         native_frame(app, vec![]);
         assert_eq!(
-            app.tabs.tabs()[if returning {
-                0
+            app.tabs.tab_ids().nth(if returning {
+                original_index
             } else {
-                app.tabs.tabs().len() - 1
-            }]
-            .id,
-            dragged
+                app.tabs.len() - 1
+            }),
+            Some(dragged),
+            "returning={returning}: full tab order includes utility tabs"
         );
     }
     assert_eq!(app.tabs, original);
-    let start = state(app).widgets[0].2.center();
+    let start = state(app)
+        .widgets
+        .iter()
+        .find(|(id, _, _)| *id == dragged)
+        .expect("loaded tab")
+        .2
+        .center();
     let over_media = start + egui::vec2(60.0, 100.0);
     native_frame(
         app,

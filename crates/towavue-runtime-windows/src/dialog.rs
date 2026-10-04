@@ -471,6 +471,8 @@ fn start_dialog_worker<T: Send + 'static>(
                 choose()
             }))
             .unwrap_or(Err(DialogError::ThreadStopped));
+            #[cfg(feature = "presentation-verification")]
+            trace_dialog_stage("worker_notify");
             notify(result);
         })?;
     Ok(())
@@ -503,10 +505,23 @@ pub fn cursor_position_in_window(owner: &impl HasWindowHandle) -> Option<(i32, i
 
 struct DialogApartment;
 
+#[cfg(feature = "presentation-verification")]
+fn trace_dialog_stage(stage: &str) {
+    let mut tick = 0;
+    // SAFETY: QPC writes one local scalar; no borrowed native state escapes.
+    if unsafe { windows::Win32::System::Performance::QueryPerformanceCounter(&mut tick) }.is_ok() {
+        println!("DIALOG_STAGE stage={stage} qpc={tick}");
+    }
+}
+
 impl Drop for DialogApartment {
     fn drop(&mut self) {
+        #[cfg(feature = "presentation-verification")]
+        trace_dialog_stage("apartment_release_begin");
         // SAFETY: created only after successful OleInitialize, and dropped on that same STA.
         unsafe { OleUninitialize() };
+        #[cfg(feature = "presentation-verification")]
+        trace_dialog_stage("apartment_release_end");
     }
 }
 
@@ -673,10 +688,19 @@ unsafe fn show_initialized_open_dialog(
             }
             return Err(error.into());
         }
+        #[cfg(feature = "presentation-verification")]
+        trace_dialog_stage("show_returned");
         let item = dialog.GetResult()?;
         let value = item.GetDisplayName(SIGDN_FILESYSPATH)?;
         let path = value.to_string().map(PathBuf::from);
         CoTaskMemFree(Some(value.0.cast()));
+        #[cfg(feature = "presentation-verification")]
+        {
+            trace_dialog_stage("selection_ready");
+            drop(item);
+            drop(dialog);
+            trace_dialog_stage("dialog_released");
+        }
         Ok(Some(path?))
     }
 }

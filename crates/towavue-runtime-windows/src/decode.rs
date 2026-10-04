@@ -2222,14 +2222,14 @@ fn create_hardware_video_pipeline_from(
 ) -> Result<HardwareVideoPipeline, DecodeError> {
     let orientation = VideoOrientation::from_bytes(config.display_matrix.as_deref())?;
     let mut context = codec::context::Context::from_parameters(config.parameters)?;
-    if !codec_supports_d3d11va(&context) {
-        return Err(DecodeError::HardwareUnavailable(format!(
+    let decoder = d3d11va_decoder(context.id()).ok_or_else(|| {
+        DecodeError::HardwareUnavailable(format!(
             "codec {:?} does not expose a D3D11VA configuration",
             context.id()
-        )));
-    }
+        ))
+    })?;
     configure_d3d11va(&mut context, device)?;
-    let decoder = context.decoder().video()?;
+    let decoder = context.decoder().open_as(decoder)?.video()?;
     let transfer =
         classify_transfer(decoder.color_transfer_characteristic()).unwrap_or(VideoTransfer::Sdr);
     Ok(HardwareVideoPipeline {
@@ -2240,10 +2240,34 @@ fn create_hardware_video_pipeline_from(
     })
 }
 
-fn codec_supports_d3d11va(context: &codec::context::Context) -> bool {
-    let Some(decoder) = codec::decoder::find(context.id()) else {
-        return false;
-    };
+fn d3d11va_decoder(id: codec::Id) -> Option<ffmpeg::Codec> {
+    if let Some(decoder) = codec::decoder::find(id)
+        && codec_supports_d3d11va(decoder)
+    {
+        return Some(decoder);
+    }
+    // FFmpeg's preferred software decoder may have no hardware configurations
+    // (for example libdav1d for AV1). Search the same codec's implementations;
+    // software fallback still uses the unmodified preferred decoder.
+    // SAFETY: the iterator returns immutable, process-lifetime codec metadata.
+    // Its local opaque cursor is used only on this thread. Codec borrows that
+    // static metadata; it neither frees it nor owns a decoder instance.
+    unsafe {
+        let mut cursor = std::ptr::null_mut();
+        loop {
+            let raw = ffmpeg::ffi::av_codec_iterate(&mut cursor);
+            if raw.is_null() {
+                return None;
+            }
+            let decoder = ffmpeg::Codec::wrap(raw);
+            if decoder.is_decoder() && decoder.id() == id && codec_supports_d3d11va(decoder) {
+                return Some(decoder);
+            }
+        }
+    }
+}
+
+fn codec_supports_d3d11va(decoder: ffmpeg::Codec) -> bool {
     // AVCodecHWConfig entries are immutable codec metadata terminated by null.
     unsafe {
         let mut index = 0;
@@ -2264,6 +2288,130 @@ fn codec_supports_d3d11va(context: &codec::context::Context) -> bool {
             }
             index += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod hardware_decoder_selection_tests {
+    use super::*;
+
+    #[test]
+    fn av1_hardware_selection_is_independent_of_the_software_default() {
+        ffmpeg::init().expect("FFmpeg");
+        let software = codec::decoder::find(codec::Id::AV1).expect("bundled AV1 decoder");
+        let hardware = d3d11va_decoder(codec::Id::AV1).expect("bundled AV1 D3D11VA decoder");
+        assert_eq!(hardware.id(), codec::Id::AV1);
+        assert!(hardware.is_decoder() && codec_supports_d3d11va(hardware));
+        assert!(codec::decoder::find(codec::Id::AV1) == Some(software));
+        assert!(d3d11va_decoder(codec::Id::PCM_S16LE).is_none());
+    }
+
+    #[test]
+    #[ignore = "Explicit AV1 reference and physical D3D11VA device; GPU readback only for pixel verification"]
+    fn reference_av1_hardware_seeks_match_software_pixels() {
+        let path = std::path::PathBuf::from(
+            std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit AV1 reference"),
+        );
+        let stamp = || {
+            let metadata = std::fs::metadata(&path).expect("reference metadata");
+            (metadata.len(), metadata.modified().expect("mtime"))
+        };
+        let before = stamp();
+        ffmpeg::init().expect("FFmpeg");
+        let probe = format::input(&path).expect("reference probe");
+        assert_eq!(
+            probe
+                .streams()
+                .best(Type::Video)
+                .expect("video")
+                .parameters()
+                .id(),
+            codec::Id::AV1
+        );
+        let duration = probe.duration();
+        assert!(duration > 0);
+        drop(probe);
+        let device = GraphicsDevice::hardware_for_test().expect("hardware device");
+        for fraction in [0, 7, 2, 8, 3, 1] {
+            let target = MediaTime::from_nanoseconds(duration * 1000 * fraction / 10);
+            let mut hardware = None;
+            let mut input = ParallelInput::open(&path, &|| false).expect("hardware input");
+            let result = input.decode_hardware(&device, target, None, &|| false, |item| {
+                if let ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) = item {
+                    let HardwareFrameBacking::Decoded(native) = &frame.backing else {
+                        panic!("fresh decoder surface");
+                    };
+                    let mut transferred = frame::Video::empty();
+                    // SAFETY: both AVFrames are live exclusive/immutable borrows.
+                    // The decoded frame retains its device/surface throughout the
+                    // synchronous transfer; the test owns the output allocation.
+                    let result = unsafe {
+                        ffmpeg::ffi::av_hwframe_transfer_data(
+                            transferred.as_mut_ptr(),
+                            native.as_ptr(),
+                            0,
+                        )
+                    };
+                    assert!(result >= 0, "hardware frame readback: {result}");
+                    let mut scaler = scaling::Context::get(
+                        transferred.format(),
+                        frame.width,
+                        frame.height,
+                        Pixel::RGBA,
+                        frame.width,
+                        frame.height,
+                        Flags::BILINEAR,
+                    )
+                    .expect("reference conversion");
+                    let mut rgba = frame::Video::empty();
+                    scaler.run(&transferred, &mut rgba).expect("reference RGBA");
+                    let pixels: Vec<u8> = rgba
+                        .data(0)
+                        .chunks_exact(rgba.stride(0))
+                        .take(frame.height as usize)
+                        .flat_map(|row| row[..frame.width as usize * 4].iter().copied())
+                        .collect();
+                    hardware = Some((frame.presentation_time, frame.width, frame.height, pixels));
+                    false
+                } else {
+                    true
+                }
+            });
+            assert!(
+                matches!(result, Err(DecodeError::ConsumerClosed)),
+                "hardware decode: {result:?}"
+            );
+            drop(input);
+            let (time, width, height, pixels) = hardware.expect("actual hardware frame");
+            let mut software = None;
+            let result =
+                decode_file_parallel(&path, target, None, Some(DecodeStream::Video), |item| {
+                    if let ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(frame)) = item {
+                        software = Some(frame);
+                        false
+                    } else {
+                        true
+                    }
+                });
+            assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+            let software = software.expect("software frame");
+            assert_eq!(
+                (time, width, height),
+                (software.presentation_time, software.width, software.height)
+            );
+            assert_eq!(pixels.len(), software.rgba.len());
+            let maximum = pixels
+                .iter()
+                .zip(&software.rgba)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap_or(0);
+            assert!(maximum <= 2, "RGBA rounding bound exceeded: {maximum}");
+            println!(
+                "AV1_HARDWARE_PIXELS fraction={fraction}/10 max_channel_error={maximum} size={width}x{height}"
+            );
+        }
+        assert_eq!(stamp(), before, "reference changed");
     }
 }
 

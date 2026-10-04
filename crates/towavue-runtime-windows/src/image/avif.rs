@@ -37,6 +37,20 @@ pub(super) fn decode(
         .map(|(frames, _, plays)| (frames, plays))
 }
 
+pub(super) fn decode_static(
+    path: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<DecodedImageFrame>, ImageDecodeError> {
+    // Item-based AVIF contains one composited image. Timed tracks remain on
+    // the animation path so speculation cannot retain an entire sequence.
+    if select(path, current)?.0.timing.is_some() {
+        return Ok(None);
+    }
+    let (mut frames, _) = decode(path, byte_limit, current, &mut |_, _, _| {}, false)?;
+    Ok(frames.pop())
+}
+
 pub(crate) fn validate(
     path: &Path,
     byte_limit: usize,
@@ -64,9 +78,21 @@ fn decode_frames(
     first_only: bool,
     validation_progress: Option<&dyn Fn(Duration)>,
 ) -> Result<(Vec<DecodedImageFrame>, usize, u32), ImageDecodeError> {
+    #[cfg(feature = "presentation-verification")]
+    let diagnostic_started = std::time::Instant::now();
     let (color, alpha, premultiplied) = select(path, current)?;
+    #[cfg(feature = "presentation-verification")]
+    println!(
+        "AVIF_STAGE stage=selected first_only={first_only} elapsed_ms={:.3}",
+        diagnostic_started.elapsed().as_secs_f64() * 1000.0
+    );
     ffmpeg::init().map_err(ffmpeg_error)?;
     let mut color_decoder = Plane::new(path, &color, Pixel::RGBA, byte_limit, current)?;
+    #[cfg(feature = "presentation-verification")]
+    println!(
+        "AVIF_STAGE stage=color_opened first_only={first_only} elapsed_ms={:.3}",
+        diagnostic_started.elapsed().as_secs_f64() * 1000.0
+    );
     let mut alpha_decoder = alpha
         .map(|alpha| Plane::new(path, &alpha, Pixel::GRAY8, byte_limit, current))
         .transpose()?;
@@ -83,6 +109,13 @@ fn decode_frames(
     let mut previous_time = None;
     let mut count = 0;
     while let Some(mut color_frame) = color_decoder.next(current)? {
+        #[cfg(feature = "presentation-verification")]
+        if count == 0 {
+            println!(
+                "AVIF_STAGE stage=first_color first_only={first_only} elapsed_ms={:.3}",
+                diagnostic_started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         check_current(current)?;
         if validation_progress.is_none() {
             remaining = remaining
@@ -309,11 +342,77 @@ impl PlaneFrame {
 }
 
 fn open_input(path: &Path) -> Result<ffmpeg::format::context::Input, ImageDecodeError> {
+    #[cfg(feature = "presentation-verification")]
+    let started = std::time::Instant::now();
     // AVIF holds may use the full unsigned stts range, unlike legacy MOV.
     let mut options = ffmpeg::Dictionary::new();
     options.set("max_stts_delta", &u32::MAX.to_string());
     options.set("err_detect", "explode");
-    ffmpeg::format::input_with_dictionary(path, options).map_err(ffmpeg_error)
+    let result = open_header(path, options);
+    #[cfg(feature = "presentation-verification")]
+    println!(
+        "AVIF_STAGE stage=demux_open_and_probe elapsed_ms={:.3}",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
+    result
+}
+
+fn open_header(
+    path: &Path,
+    options: ffmpeg::Dictionary<'_>,
+) -> Result<ffmpeg::format::context::Input, ImageDecodeError> {
+    let path = path.to_str().ok_or_else(|| {
+        ImageDecodeError::Open(IoError::new(
+            std::io::ErrorKind::InvalidInput,
+            "AVIF path is not valid UTF-8",
+        ))
+    })?;
+    let path = std::ffi::CString::new(path).map_err(|error| {
+        ImageDecodeError::Open(IoError::new(std::io::ErrorKind::InvalidInput, error))
+    })?;
+    // AVIF supplies codec configuration and geometry in its container header.
+    // Generic stream probing can decode the full image merely to rediscover
+    // these values. Retain that fallback only for an incomplete header.
+    // SAFETY: FFmpeg owns the allocated input until wrap transfers it to the
+    // RAII Input. open_input frees it on failure. Unconsumed dictionary entries
+    // are reclaimed exactly once; path/options outlive the synchronous call.
+    let mut input = unsafe {
+        let mut raw = std::ptr::null_mut();
+        let mut options = options.disown();
+        let result = ffmpeg::ffi::avformat_open_input(
+            &mut raw,
+            path.as_ptr(),
+            std::ptr::null(),
+            &mut options,
+        );
+        drop(ffmpeg::Dictionary::own(options));
+        if result < 0 {
+            return Err(ffmpeg_error(ffmpeg::Error::from(result)));
+        }
+        ffmpeg::format::context::Input::wrap(raw)
+    };
+    let mut av1_streams = 0;
+    let complete = input.streams().all(|stream| {
+        let parameters = stream.parameters();
+        if parameters.id() != ffmpeg::codec::Id::AV1 {
+            return true;
+        }
+        av1_streams += 1;
+        // SAFETY: parameters is borrowed from the live input and is read only.
+        let parameters = unsafe { &*parameters.as_ptr() };
+        parameters.width > 0 && parameters.height > 0 && parameters.extradata_size > 0
+    });
+    if !complete || av1_streams == 0 {
+        // SAFETY: input exclusively owns this live context; its Drop closes it
+        // on both probe failure and the caller's normal completion.
+        let result = unsafe {
+            ffmpeg::ffi::avformat_find_stream_info(input.as_mut_ptr(), std::ptr::null_mut())
+        };
+        if result < 0 {
+            return Err(ffmpeg_error(ffmpeg::Error::from(result)));
+        }
+    }
+    Ok(input)
 }
 
 enum Plane {
@@ -432,11 +531,19 @@ impl PlaneDecoder {
         options.set("err_detect", "explode");
         let codec = ffmpeg::codec::decoder::find(ffmpeg::codec::Id::AV1)
             .ok_or_else(|| invalid(Text::AvifValidationAv1DecoderUnavailable))?;
+        #[cfg(feature = "presentation-verification")]
+        let decoder_started = std::time::Instant::now();
         let decoder = context
             .decoder()
             .open_as_with(codec, options)
             .and_then(|opened| opened.video())
             .map_err(ffmpeg_error)?;
+        #[cfg(feature = "presentation-verification")]
+        println!(
+            "AVIF_STAGE stage=decoder_open codec={} elapsed_ms={:.3}",
+            codec.name(),
+            decoder_started.elapsed().as_secs_f64() * 1000.0
+        );
         check_size((decoder.width(), decoder.height()), byte_limit)?;
         Ok(Self {
             input,

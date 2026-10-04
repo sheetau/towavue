@@ -6,6 +6,85 @@ const FORMAT: AudioFormat = AudioFormat {
 };
 
 #[test]
+fn cloned_producers_wake_initial_output_once_without_changing_pcm() {
+    let (audio_tx, audio_rx) = mpsc::sync_channel(4);
+    let (control_tx, control_rx) = mpsc::channel();
+    let sender = AudioOutputSender {
+        format: FORMAT,
+        audio_tx,
+        control_tx,
+        initial_audio_queued: Arc::new(AtomicBool::new(false)),
+    };
+    let producers: Vec<_> = (0..4)
+        .map(|index| {
+            let sender = sender.clone();
+            thread::spawn(move || {
+                sender.push(AudioChunk {
+                    format: FORMAT,
+                    frames: 1,
+                    bytes: vec![index; 8],
+                    presentation_time: MediaTime::from_nanoseconds(i64::from(index)),
+                })
+            })
+        })
+        .collect();
+    for producer in producers {
+        producer.join().expect("producer").expect("queued PCM");
+    }
+    assert!(matches!(
+        control_rx.try_recv(),
+        Ok(AudioControl::InitialAudioQueued)
+    ));
+    assert!(matches!(control_rx.try_recv(), Err(TryRecvError::Empty)));
+    let mut received = Vec::new();
+    for _ in 0..4 {
+        let AudioMessage::Chunk(chunk) = audio_rx.try_recv().expect("published PCM") else {
+            panic!("PCM payload");
+        };
+        assert_eq!(chunk.format, FORMAT);
+        assert_eq!(chunk.frames, 1);
+        assert_eq!(
+            chunk.bytes,
+            vec![chunk.presentation_time.as_nanoseconds() as u8; 8]
+        );
+        received.push(chunk.presentation_time.as_nanoseconds());
+    }
+    received.sort_unstable();
+    assert_eq!(received, [0, 1, 2, 3]);
+    sender.finish().expect("end marker");
+    assert!(matches!(audio_rx.try_recv(), Ok(AudioMessage::End)));
+    assert!(matches!(control_rx.try_recv(), Err(TryRecvError::Empty)));
+}
+
+#[test]
+fn empty_audio_wakes_output_but_failed_publication_does_not() {
+    for receiver_open in [true, false] {
+        let (audio_tx, audio_rx) = mpsc::sync_channel(1);
+        let audio_rx = receiver_open.then_some(audio_rx);
+        let (control_tx, control_rx) = mpsc::channel();
+        let sender = AudioOutputSender {
+            format: FORMAT,
+            audio_tx,
+            control_tx,
+            initial_audio_queued: Arc::new(AtomicBool::new(false)),
+        };
+        assert_eq!(sender.finish().is_ok(), receiver_open);
+        if receiver_open {
+            assert!(matches!(
+                control_rx.try_recv(),
+                Ok(AudioControl::InitialAudioQueued)
+            ));
+            assert!(matches!(
+                audio_rx.expect("live receiver").try_recv(),
+                Ok(AudioMessage::End)
+            ));
+        } else {
+            assert!(matches!(control_rx.try_recv(), Err(TryRecvError::Empty)));
+        }
+    }
+}
+
+#[test]
 fn queued_startup_returns_before_setup_and_reports_its_failure_once() {
     let (release, gate) = mpsc::channel();
     STARTUP_TEST_HOOK.set(Some(Box::new(move || {

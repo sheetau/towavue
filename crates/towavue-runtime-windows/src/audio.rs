@@ -62,6 +62,7 @@ enum AudioMessage {
 }
 
 enum AudioControl {
+    InitialAudioQueued,
     SetPaused(bool),
     Shutdown,
 }
@@ -71,6 +72,7 @@ pub struct AudioOutput {
     format: AudioFormat,
     audio_tx: SyncSender<AudioMessage>,
     control_tx: mpsc::Sender<AudioControl>,
+    initial_audio_queued: Arc<AtomicBool>,
     event_rx: Receiver<AudioOutputEvent>,
     position_nanoseconds: Arc<AtomicI64>,
     volume: Arc<AtomicU32>,
@@ -83,6 +85,8 @@ pub struct AudioOutput {
 pub(crate) struct AudioOutputSender {
     format: AudioFormat,
     audio_tx: SyncSender<AudioMessage>,
+    control_tx: mpsc::Sender<AudioControl>,
+    initial_audio_queued: Arc<AtomicBool>,
 }
 
 impl AudioOutputSender {
@@ -93,15 +97,24 @@ impl AudioOutputSender {
                 chunk.format.channels,
             ));
         }
-        self.audio_tx
-            .send(AudioMessage::Chunk(chunk))
-            .map_err(|_| AudioOutputError::Closed)
+        self.send(AudioMessage::Chunk(chunk))
     }
 
     pub(crate) fn finish(&self) -> Result<(), AudioOutputError> {
+        self.send(AudioMessage::End)
+    }
+
+    fn send(&self, message: AudioMessage) -> Result<(), AudioOutputError> {
         self.audio_tx
-            .send(AudioMessage::End)
-            .map_err(|_| AudioOutputError::Closed)
+            .send(message)
+            .map_err(|_| AudioOutputError::Closed)?;
+        // The bounded channel publishes PCM. This relaxed flag only coalesces
+        // the initial wake across cloned producers, so steady playback does not
+        // enqueue a control per packet. Paused/resumed output keeps its controls.
+        if !self.initial_audio_queued.swap(true, Ordering::Relaxed) {
+            let _ = self.control_tx.send(AudioControl::InitialAudioQueued);
+        }
+        Ok(())
     }
 }
 
@@ -260,6 +273,7 @@ impl AudioOutput {
             format,
             audio_tx,
             control_tx,
+            initial_audio_queued: Arc::new(AtomicBool::new(false)),
             event_rx,
             position_nanoseconds,
             volume,
@@ -310,6 +324,8 @@ impl AudioOutput {
         AudioOutputSender {
             format: self.format,
             audio_tx: self.audio_tx.clone(),
+            control_tx: self.control_tx.clone(),
+            initial_audio_queued: Arc::clone(&self.initial_audio_queued),
         }
     }
 }
@@ -474,6 +490,7 @@ fn render_audio_loop(
         }
         while let Ok(control) = control_rx.try_recv() {
             match control {
+                AudioControl::InitialAudioQueued => {}
                 AudioControl::SetPaused(value) => {
                     paused = value;
                     if paused && running {
@@ -555,6 +572,7 @@ fn render_audio_loop(
             );
         } else {
             match control_rx.recv_timeout(CONTROL_POLL_INTERVAL) {
+                Ok(AudioControl::InitialAudioQueued) => {}
                 Ok(AudioControl::SetPaused(value)) => paused = value,
                 Ok(AudioControl::Shutdown) => return Err(AudioOutputError::Closed),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -677,6 +695,7 @@ mod tests {
             control_tx,
             event_rx,
             position_nanoseconds: Arc::new(AtomicI64::new(123)),
+            initial_audio_queued: Arc::new(AtomicBool::new(false)),
             volume: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             drained: Arc::new(AtomicBool::new(false)),
             thread: None,

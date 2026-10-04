@@ -169,7 +169,13 @@ pub(crate) fn decode_image_for_prefetch(
             .map_err(ImageDecodeError::Open)?;
         let format = reader.format().ok_or(ImageDecodeError::UnknownFormat)?;
         let frame = match format {
-            ImageFormat::Gif | ImageFormat::Avif => return Ok(None),
+            ImageFormat::Gif => return Ok(None),
+            ImageFormat::Avif => {
+                let Some(frame) = avif::decode_static(path, byte_limit, is_current)? else {
+                    return Ok(None);
+                };
+                frame
+            }
             ImageFormat::Jpeg => jpeg_static::decode(reader.into_inner(), byte_limit, is_current)?,
             ImageFormat::Png => {
                 let Some(frame) = png_static::decode(reader.into_inner(), byte_limit, is_current)?
@@ -738,6 +744,12 @@ mod tests {
             );
             let reference = decode_image(&path).expect("reference decode");
             assert_eq!(reference.frames.len(), 2, "{extension}");
+            assert!(
+                decode_image_for_prefetch(&path, 0, &|| true)
+                    .expect("skip timed originals")
+                    .is_none(),
+                "{extension} speculation must not retain animation frames"
+            );
             assert!(
                 reference
                     .frames

@@ -563,6 +563,22 @@ fn avif_still_rotation_and_mirror_reach_display_preview_and_saved_pixels() {
                 orient_still(&source, angle, mirror, alpha_properties);
                 let expected = transformed(&original.frames[0], angle, mirror).into_rgba8();
                 let decoded = crate::decode_image(&source).expect("oriented display");
+                let prefetched =
+                    crate::image::decode_image_for_prefetch(&source, 7 * 5 * 4, &|| true)
+                        .expect("static AVIF prefetch")
+                        .expect("retained original");
+                assert_eq!(
+                    prefetched, decoded,
+                    "prefetch preserves alpha and orientation"
+                );
+                assert!(matches!(
+                    crate::image::decode_image_for_prefetch(&source, 7 * 5 * 4 - 1, &|| true),
+                    Err(crate::image::ImageDecodeError::TooLarge)
+                ));
+                assert!(matches!(
+                    crate::image::decode_image_for_prefetch(&source, 7 * 5 * 4, &|| false),
+                    Err(crate::image::ImageDecodeError::Cancelled)
+                ));
                 assert_eq!(
                     decoded.dimensions(),
                     expected.dimensions(),

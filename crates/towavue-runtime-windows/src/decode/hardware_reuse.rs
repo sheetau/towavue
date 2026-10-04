@@ -9,6 +9,20 @@ pub(super) struct Retained {
     pub(super) device: GraphicsDevice,
 }
 
+pub(super) fn reset_for_reuse(pipeline: &mut HardwareVideoPipeline) -> bool {
+    pipeline.decoder.flush();
+    // No new packet has been submitted. Only EAGAIN establishes an empty
+    // output queue: some native decoders can retain an old frame after flush.
+    // Probe once, without draining or publishing it. Any output, EOF or error
+    // retires this owner and uses a fresh decoder on the same device instead.
+    // Previously displayed frames keep their independent surface references.
+    let mut residual = frame::Video::empty();
+    matches!(
+        pipeline.decoder.receive_frame(&mut residual),
+        Err(ffmpeg::Error::Other { errno }) if errno == ffmpeg::error::EAGAIN
+    )
+}
+
 pub(super) fn requested() -> bool {
     #[cfg(test)]
     if let Some(value) = ENABLED.with(std::cell::Cell::get) {

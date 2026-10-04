@@ -50,6 +50,8 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
+For hardware decoder reuse, run the native `decode::hardware_reuse::tests::` controls explicitly and serially. `native_backward_seek_after_gop_boundary_rejects_residual_output` takes one 12-second HEVC long-GOP fixture through `TOWAVUE_HW_REUSE_FIXTURES`; use the generated `benchmark-seek-v1/hevc-4k10.mp4`. It interrupts receive at a GOP boundary, seeks backward, and compares target timestamps, full source sample planes and the held frame with fresh decoding. Supply the broader fixed/configuration-change corpus separately to `native_full_source_reuse_preserves_pixels_cancel_eof_and_invalidation`. These hidden native controls do not certify physical presentation. Check ordinary Release seeks after reset-policy changes.
+
 | Change | Expected checks |
 |---|---|
 | Documentation only | Review diff, local links/anchors and claims; no Rust build, codec fixtures, installer tests, or native UI session |

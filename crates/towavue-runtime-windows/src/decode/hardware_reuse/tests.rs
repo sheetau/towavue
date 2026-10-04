@@ -128,6 +128,79 @@ fn reference(path: &Path, device: &GraphicsDevice, target: MediaTime) -> Pixels 
 }
 
 #[test]
+#[ignore = "explicit HEVC fixture and native D3D11 residual-output regression; run alone"]
+fn native_backward_seek_after_gop_boundary_rejects_residual_output() {
+    let path = std::env::split_paths(
+        &std::env::var_os("TOWAVUE_HW_REUSE_FIXTURES").expect("explicit HEVC fixture"),
+    )
+    .next()
+    .expect("one HEVC fixture");
+    let _policy = Policy::set(true);
+    let _pacing = Pacing::set(8);
+    let device = GraphicsDevice::hardware_for_test().expect("native shared device");
+    let target = MediaTime::from_nanoseconds(1_215_189_904);
+    let expected = reference(&path, &device, target);
+    for _ in 0..4 {
+        let mut input =
+            ParallelInput::open_tracked_video(&path, &|| false).expect("owned playback input");
+        let config = best_stream_config(&input.input, Type::Video).expect("video stream");
+        assert_eq!(config.parameters.id(), codec::Id::HEVC);
+        let index = config.index;
+        let key = Signature::new(&config);
+        let mut pipeline = create_hardware_video_pipeline_from(config, &device)
+            .expect("owned native HEVC decoder");
+        seek_input_with_audio_track(
+            &mut input.input,
+            MediaTime::from_nanoseconds(7_215_189_904),
+            true,
+            input.audio_track,
+            &|| false,
+        )
+        .expect("seek to preceding GOP");
+        let mut held = None;
+        let mut summary = DecodeSummary::default();
+        // Stop inside receive, without a worker queue racing ahead and draining
+        // the second output from the packet crossing this GOP boundary.
+        for (stream, packet) in input.input.packets() {
+            if stream.index() != index {
+                continue;
+            }
+            pipeline
+                .decoder
+                .send_packet(&packet)
+                .expect("native packet");
+            let result = pipeline.receive(
+                &mut |output| {
+                    let RuntimeDecodeOutput::Video(frame) = output;
+                    if frame.presentation_time >= MediaTime::from_nanoseconds(7_933_333_333) {
+                        held = Some(frame);
+                        return false;
+                    }
+                    true
+                },
+                &mut summary,
+            );
+            if held.is_some() {
+                assert!(matches!(result, Err(DecodeError::ConsumerClosed)));
+                break;
+            }
+            result.expect("preroll decode");
+        }
+        let held = held.expect("boundary output");
+        input.started = true;
+        input.retained_hardware = Some(Retained {
+            pipeline,
+            key,
+            device: device.clone(),
+        });
+        let held_pixels = pixels(&held);
+        let selected = select(&mut input, &device, target);
+        equal(&pixels(&selected), &expected);
+        equal(&pixels(&held), &held_pixels);
+    }
+}
+
+#[test]
 fn source_stamp_rejects_modified_replaced_missing_and_unleased_files() {
     let root = std::env::temp_dir().join(format!(
         "towavue-reuse-source-{}-{}",

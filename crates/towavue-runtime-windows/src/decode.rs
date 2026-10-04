@@ -1774,6 +1774,9 @@ fn run_parallel_video_worker(
         _ => None,
     };
     let mut paced_packets = 0_u64;
+    let previous = previous.and_then(|mut previous| {
+        hardware_reuse::reset_for_reuse(&mut previous.pipeline).then_some(previous)
+    });
     #[cfg(feature = "presentation-verification")]
     let reused = previous.is_some();
     let mut pipeline = match config {
@@ -1781,8 +1784,7 @@ fn run_parallel_video_worker(
             ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
         }
         ParallelVideoConfig::Hardware(config, device) => {
-            let hardware = if let Some(mut previous) = previous {
-                previous.pipeline.decoder.flush();
+            let hardware = if let Some(previous) = previous {
                 previous.pipeline
             } else {
                 create_hardware_video_pipeline_from(config, &device)?

@@ -158,6 +158,13 @@ whose results must not be assumed to represent the same decoder selection.
   use `seek_aligned` and must not be merged with historical `seek`: the old runner
   used the full client width and sometimes sought before the detector's tone or
   frame target, adding subsequent playback time to the reported latency.
+  Before timed input, require real foreground ownership. SetForegroundWindow
+  may be denied to a command-launched process; if needed, activate only the
+  disposable fixture's verified, unobscured caption with one native click and
+  restore the cursor. Reject held input/modifiers, occlusion or failed activation
+  as setup errors. Record this preparation separately; topmost visibility alone
+  does not permit towavue's deliberately focus-guarded seek gestures. Timed seek
+  delivery remains the same posted mouse command or player API as above.
 - **Settled viewport:** the startup runner separately reports recognizable
   identity and convergence to the same app's eventual displayed pixels. It checks
   stability and keeps pixel error scores. This is not proof that every original

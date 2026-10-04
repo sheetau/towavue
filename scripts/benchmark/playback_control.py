@@ -7,6 +7,63 @@ import math
 from interaction import U, geometry
 
 
+def prepare_seek_input(session):
+    """Establish real foreground ownership before timed input, or reject setup."""
+    session.check()
+    U.GetForegroundWindow.restype=W.HWND
+    U.SetForegroundWindow(session.hwnd)
+    if U.GetForegroundWindow()==session.hwnd:
+        return dict(foreground=True,activation='SetForegroundWindow')
+    # Posted mouse messages do not activate a window. The app deliberately
+    # cancels seek gestures without focus; topmost visibility is insufficient.
+    # Activate only the disposable fixture's verified caption, outside timing.
+    client,outer,origin=geometry(session.hwnd)
+    U.GetDpiForWindow.argtypes=[W.HWND];U.GetDpiForWindow.restype=W.UINT
+    dpi=U.GetDpiForWindow(session.hwnd)
+    if not dpi:raise RuntimeError('Cannot read fixture window DPI')
+    x=(outer.left+outer.right)//2;y=outer.top+round(15*dpi/96)
+    if U.GetAncestor(U.WindowFromPoint(W.POINT(x,y)),2)!=session.hwnd:
+        raise RuntimeError('Owned activation caption is occluded')
+    if U.SendMessageW(session.hwnd,0x84,0,((y&0xffff)<<16)|(x&0xffff))!=2:
+        raise RuntimeError('Owned activation point is not a caption')
+    U.GetAsyncKeyState.argtypes=[C.c_int];U.GetAsyncKeyState.restype=C.c_short
+    if any(U.GetAsyncKeyState(key)&0x8000 for key in (1,2,4,0x10,0x11,0x12,0x5b,0x5c)):
+        raise RuntimeError('Input button or modifier is already held during setup')
+    class MouseInput(C.Structure):
+        _fields_=[('dx',W.LONG),('dy',W.LONG),('data',W.DWORD),('flags',W.DWORD),
+                  ('time',W.DWORD),('extra',C.c_size_t)]
+    class InputData(C.Union):
+        _fields_=[('mouse',MouseInput)]
+    class Input(C.Structure):
+        _fields_=[('kind',W.DWORD),('data',InputData)]
+    U.SendInput.argtypes=[W.UINT,C.POINTER(Input),C.c_int];U.SendInput.restype=W.UINT
+    U.GetCursorPos.argtypes=[C.POINTER(W.POINT)];U.SetCursorPos.argtypes=[C.c_int,C.c_int]
+    previous=W.POINT()
+    if not U.GetCursorPos(C.byref(previous)):raise C.WinError(C.get_last_error())
+    try:
+        if not U.SetCursorPos(x,y):raise C.WinError(C.get_last_error())
+        if U.GetAncestor(U.WindowFromPoint(W.POINT(x,y)),2)!=session.hwnd:
+            raise RuntimeError('Owned activation caption became occluded')
+        events=(Input*2)(Input(0,InputData(mouse=MouseInput(0,0,0,2,0,0))),
+                         Input(0,InputData(mouse=MouseInput(0,0,0,4,0,0))))
+        delivered=U.SendInput(2,events,C.sizeof(Input))
+        if delivered!=2:
+            if delivered==1:
+                # Do not leave our injected press held after partial delivery.
+                U.mouse_event.argtypes=[W.DWORD,W.DWORD,W.DWORD,W.DWORD,C.c_size_t]
+                U.mouse_event.restype=None
+                U.mouse_event(4,0,0,0,0)
+            raise RuntimeError('Owned caption activation was not delivered')
+        time.sleep(.05)
+    finally:
+        current=W.POINT()
+        if U.GetCursorPos(C.byref(current)) and (current.x,current.y)==(x,y):
+            U.SetCursorPos(previous.x,previous.y)
+    if U.GetForegroundWindow()!=session.hwnd:
+        raise RuntimeError('Native foreground activation was not granted')
+    return dict(foreground=True,activation='owned-caption-click-before-timing')
+
+
 class CopyData(C.Structure):
     _fields_=[('data',C.c_size_t),('length',W.DWORD),('pointer',C.c_void_p)]
 

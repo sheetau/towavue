@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::os::windows::io::{AsRawHandle, BorrowedHandle};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
@@ -19,6 +20,9 @@ const AUDIO_CHANNEL_CAPACITY: usize = 32;
 const CONTROL_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const EVENT_WAIT_MILLISECONDS: u32 = 20;
 const BUFFERED_AUDIO_SECONDS: usize = 2;
+
+mod control_wake;
+use control_wake::ControlWake;
 
 #[cfg(test)]
 type StartupTestHook = Box<dyn FnOnce() -> Result<(), AudioOutputError> + Send>;
@@ -72,6 +76,7 @@ pub struct AudioOutput {
     format: AudioFormat,
     audio_tx: SyncSender<AudioMessage>,
     control_tx: mpsc::Sender<AudioControl>,
+    control_wake: Arc<ControlWake>,
     initial_audio_queued: Arc<AtomicBool>,
     event_rx: Receiver<AudioOutputEvent>,
     position_nanoseconds: Arc<AtomicI64>,
@@ -209,6 +214,8 @@ impl AudioOutput {
         let thread_volume = Arc::clone(&volume);
         let drained = Arc::new(AtomicBool::new(false));
         let thread_drained = Arc::clone(&drained);
+        let control_wake = Arc::new(ControlWake::default());
+        let thread_wake = Arc::clone(&control_wake);
         #[cfg(test)]
         let startup_hook = STARTUP_TEST_HOOK.take();
         let thread = thread::Builder::new()
@@ -234,6 +241,7 @@ impl AudioOutput {
                     tempo_rate,
                     audio_rx,
                     &control_rx,
+                    &thread_wake,
                     &ready_tx,
                     &mut initialized,
                     #[cfg(test)]
@@ -275,6 +283,7 @@ impl AudioOutput {
             format,
             audio_tx,
             control_tx,
+            control_wake,
             initial_audio_queued: Arc::new(AtomicBool::new(false)),
             event_rx,
             position_nanoseconds,
@@ -289,7 +298,8 @@ impl AudioOutput {
     }
 
     pub fn set_paused(&self, paused: bool) -> Result<(), AudioOutputError> {
-        self.control_tx
+        let result = self
+            .control_tx
             .send(AudioControl::SetPaused(paused))
             .or_else(|_| {
                 if self.drained.load(Ordering::Acquire) {
@@ -297,7 +307,11 @@ impl AudioOutput {
                 } else {
                     Err(AudioOutputError::Closed)
                 }
-            })
+            });
+        // Publish the command before waking the native wait. Before event
+        // installation the worker will read this queue before its first wait.
+        self.control_wake.signal();
+        result
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -335,6 +349,7 @@ impl AudioOutput {
 impl Drop for AudioOutput {
     fn drop(&mut self) {
         let _ = self.control_tx.send(AudioControl::Shutdown);
+        self.control_wake.signal();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -351,6 +366,7 @@ fn run_audio_thread(
     tempo_rate: f32,
     audio_rx: Receiver<AudioMessage>,
     control_rx: &Receiver<AudioControl>,
+    control_wake: &ControlWake,
     ready_tx: &SyncSender<Result<(), AudioOutputError>>,
     initialized: &mut bool,
     #[cfg(test)] startup_hook: Option<StartupTestHook>,
@@ -415,6 +431,13 @@ fn run_audio_thread(
             .register_session_notification(session_callbacks)
             .map_err(wasapi_error)?;
         let event = client.set_get_eventhandle().map_err(wasapi_error)?;
+        // SAFETY: event owns a live WASAPI event throughout this borrow. The
+        // wake helper duplicates it before sharing; it never retains the borrow.
+        let borrowed = unsafe { BorrowedHandle::borrow_raw(event.as_raw_handle()) };
+        if let Err(error) = control_wake.install(borrowed) {
+            // Waking is optional: preserve the existing bounded wait on failure.
+            crate::diagnostic!("Audio control event duplication unavailable: {error}");
+        }
         let render_client = client.get_audiorenderclient().map_err(wasapi_error)?;
         let clock = client.get_audioclock().map_err(wasapi_error)?;
         let tempo = crate::tempo::AudioTempo::new(format.sample_rate, tempo_rate)?;
@@ -716,6 +739,7 @@ mod tests {
             },
             audio_tx,
             control_tx,
+            control_wake: Arc::new(ControlWake::default()),
             event_rx,
             position_nanoseconds: Arc::new(AtomicI64::new(123)),
             initial_audio_queued: Arc::new(AtomicBool::new(false)),

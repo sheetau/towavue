@@ -16,3 +16,6 @@ vendor/egui-directx11/LICENSE-* whitespace=-blank-at-eof
 vendor/egui-directx11/shaders/*.hlsl whitespace=-blank-at-eof
 # Unified-diff context preserves upstream whitespace.
 third-party/patches/zvbi-no-program-id.patch whitespace=-trailing-space,-space-before-tab
+# Preserve the published wasapi source bytes and license inventory hashes.
+vendor/wasapi/** -text whitespace=cr-at-eol
+vendor/wasapi/README.md whitespace=cr-at-eol,-trailing-space

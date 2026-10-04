@@ -12,7 +12,7 @@ import soundcard as sc
 from scipy import ndimage
 from audio import packet
 from interaction import Session, U, geometry
-from playback_control import MpcReceiver, seek, seek_target_seconds
+from playback_control import MpcReceiver, prepare_seek_input, seek, seek_target_seconds
 from visual import prepare_apps, sha, W, normalize
 
 
@@ -136,6 +136,7 @@ def main():
               'endpoint':'first desktop observation at/after requested frame, within 1 s; two target-frequency loopback packets',
               'input':'towavue DPI-scaled compact travel (5 DIP endpoint inset); MPC-HC documented slave API; VLC RC on an ephemeral IPv4 loopback port',
               'target_policy':'12 s percentage plus 1/60 s; native click uses manifest container duration; common next 30 fps frame and interior tone interval',
+              'preparation':'real foreground ownership is required before timing; an owned-caption activation click may be used and is recorded per session',
               'supersedes':'historical seek runner clicked full client width and could seek before the detector target; do not merge those results',
               'limitations':['No acoustic or physical-input timestamp','Frame-accurate first output is not guaranteed by desktop sampling',
                              'Audio confidence window and packet buffering included','Different command transports; dispatch duration retained',
@@ -157,6 +158,7 @@ def main():
                     s.seek_kind=f['kind']
                     try:
                         s.ready(None);time.sleep(1);normalize(s.hwnd);time.sleep(.2)
+                        preparation=prepare_seek_input(s)
                         if block==0:s.capture().save(folder/'initial.png')
                         if name=='vlc':
                             s.rc_socket=socket.create_connection(('127.0.0.1',port),timeout=3)
@@ -166,7 +168,7 @@ def main():
                             if 'matroska' in source_format.get('format_name','').split(','):
                                 duration-=float(source_format.get('start_time',0))
                             row=trial(s,percent,receiver,loopback_recorder,f['kind']=='video',folder/f'{step}.png' if block==0 else None,duration)
-                            row.update(app=name,case=f['id'],kind=f['kind'],block=block,step=step,phase='warmup' if block<0 else 'measurement')
+                            row.update(app=name,case=f['id'],kind=f['kind'],block=block,step=step,phase='warmup' if block<0 else 'measurement',input_preparation=preparation)
                             out.write(json.dumps(row)+'\n');out.flush()
                             print(block,name,f['id'],percent,row['video_status'],row['audio_status'],flush=True)
                             if row['audio_status']!='ok' or row['video_status'] not in ('ok','not_applicable'):

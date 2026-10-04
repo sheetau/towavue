@@ -835,12 +835,14 @@ impl PlaybackSession {
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
                     if cancelled.load(Ordering::Relaxed) {
                         // Only an interrupted, otherwise valid feed hands its
-                        // input back. EOF/errors keep the old file-release behavior.
+                        // input back. Natural completion closes the file below;
+                        // errors discard both the input and its probe proof.
                         return match result {
                             Ok(()) | Err(decode::DecodeError::ConsumerClosed) => input,
                             Err(_) => None,
                         };
                     }
+                    let completed = result.is_ok();
                     match result {
                         Ok(()) if completion.finish(DecodeCompletion::AUDIO) => {
                             notify(PlaybackEvent::DecodeFinished(generation));
@@ -848,7 +850,11 @@ impl PlaybackSession {
                         Ok(()) | Err(decode::DecodeError::ConsumerClosed) => {}
                         Err(error) => notify(PlaybackEvent::Failed(generation, error.into())),
                     }
-                    None
+                    if completed {
+                        input.and_then(decode::PlaybackAudioInput::release_completed)
+                    } else {
+                        None
+                    }
                 }) {
                 Ok(thread) => self.audio_thread = Some(thread),
                 Err(error) => {

@@ -34,11 +34,312 @@ fn collect(input: &mut PlaybackAudioInput, target: MediaTime, policy: AudioSeekP
 fn policies(input: &PlaybackAudioInput) -> Vec<ffmpeg::ffi::AVDiscard> {
     // SAFETY: the input owns these streams, with no live decode workers.
     input
-        .0
+        .input
+        .as_ref()
+        .expect("active input")
         .input
         .streams()
         .map(|s| unsafe { (*s.as_ptr()).discard })
         .collect()
+}
+
+#[test]
+fn verified_pcm_reopens_match_fresh_and_release_file_locks() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("towavue-pcm-reopen-{unique}"));
+    fs::create_dir(&root).expect("exclusive fixture");
+    let ffmpeg = crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg");
+    let generate = |path: &Path, codec: &str, seed: &str| {
+        let status = crate::hidden_test_command(&ffmpeg)
+            .args([
+                "-v",
+                "error",
+                "-n",
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("anoisesrc=sample_rate=48000:duration=2.2:seed={seed}"),
+                "-ac",
+                "2",
+                "-c:a",
+                codec,
+            ])
+            .arg(path)
+            .status()
+            .expect("fixture generation");
+        assert!(status.success());
+    };
+    for codec in ["pcm_s16le", "pcm_s24le", "pcm_f32le", "adpcm_ima_wav"] {
+        let path = root.join(format!("{codec}.wav"));
+        generate(&path, codec, "175");
+        for track in [None, Some(AudioTrackId::from_index(0))] {
+            let mut reused = PlaybackAudioInput::open(&path, track, &|| false).expect("full probe");
+            assert_eq!(reused.verified.is_some(), codec == "pcm_s16le");
+            if codec != "pcm_s16le" {
+                assert!(reused.release_completed().is_none());
+                continue;
+            }
+            assert!(!reused.verified.as_ref().expect("verified PCM proof").reused);
+            for policy in [AudioSeekPolicy::Playback, AudioSeekPolicy::Exact] {
+                for ms in [1751, 0, 2500, 637, 213] {
+                    reused = reused.release_completed().expect("scalar proof retained");
+                    assert!(reused.input.is_none());
+                    // A completed run must not extend the old reader's lifetime.
+                    drop(
+                        fs::OpenOptions::new()
+                            .read(true)
+                            .write(true)
+                            .share_mode(0)
+                            .open(&path)
+                            .expect("no remaining native or lease handle"),
+                    );
+                    let target = MediaTime::from_nanoseconds(ms * 1_000_000);
+                    let mut fresh =
+                        PlaybackAudioInput::open(&path, track, &|| false).expect("fresh");
+                    assert_eq!(
+                        collect(&mut reused, target, policy),
+                        collect(&mut fresh, target, policy)
+                    );
+                    assert!(
+                        reused.verified.as_ref().expect("verified PCM proof").reused,
+                        "bounded repeat probe was used"
+                    );
+                }
+            }
+        }
+    }
+    let path = root.join("pcm_s16le.wav");
+    let original_stamp = path
+        .metadata()
+        .expect("fixture metadata")
+        .modified()
+        .expect("fixture write time");
+    let input = PlaybackAudioInput::open(&path, None, &|| false).expect("open PCM fixture");
+    let mut dormant = input.release_completed().expect("completed PCM proof");
+    let replacement = root.join("replacement.wav");
+    generate(&replacement, "pcm_s16le", "276");
+    assert_eq!(
+        path.metadata().expect("fixture metadata").len(),
+        replacement.metadata().expect("fixture metadata").len()
+    );
+    fs::File::options()
+        .write(true)
+        .open(&replacement)
+        .expect("open replacement for timestamp")
+        .set_times(fs::FileTimes::new().set_modified(original_stamp))
+        .expect("restore replacement write time");
+    fs::rename(&path, root.join("original.wav")).expect("rename after completion");
+    fs::rename(&replacement, &path).expect("replace same path");
+    let target = MediaTime::from_nanoseconds(637_000_000);
+    let mut fresh = PlaybackAudioInput::open(&path, None, &|| false).expect("open PCM fixture");
+    assert_eq!(
+        collect(&mut dormant, target, AudioSeekPolicy::Exact),
+        collect(&mut fresh, target, AudioSeekPolicy::Exact)
+    );
+    assert!(
+        !dormant
+            .verified
+            .as_ref()
+            .expect("verified PCM proof")
+            .reused,
+        "new identity needs full probe"
+    );
+    drop(fresh);
+    dormant = dormant.release_completed().expect("completed PCM proof");
+    let same_file_stamp = path
+        .metadata()
+        .expect("fixture metadata")
+        .modified()
+        .expect("fixture write time");
+    let modified = root.join("modified.wav");
+    generate(&modified, "pcm_s16le", "377");
+    fs::write(&path, fs::read(&modified).expect("read PCM fixture"))
+        .expect("modify same file identity");
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("open changed file for timestamp")
+        .set_times(fs::FileTimes::new().set_modified(same_file_stamp))
+        .expect("restore changed file write time");
+    let mut fresh = PlaybackAudioInput::open(&path, None, &|| false).expect("open PCM fixture");
+    assert_eq!(
+        collect(&mut dormant, target, AudioSeekPolicy::Exact),
+        collect(&mut fresh, target, AudioSeekPolicy::Exact)
+    );
+    assert!(
+        !dormant
+            .verified
+            .as_ref()
+            .expect("verified PCM proof")
+            .reused,
+        "change time survives restored write time"
+    );
+    drop((dormant, fresh));
+
+    let input = PlaybackAudioInput::open(&path, None, &|| false).expect("full probe before writer");
+    let mut dormant = input
+        .release_completed()
+        .expect("completed proof before writer");
+    let writer = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .expect("existing shared writer");
+    let mut fresh = PlaybackAudioInput::open(&path, None, &|| false).expect("ordinary shared read");
+    assert_eq!(
+        collect(&mut dormant, target, AudioSeekPolicy::Exact),
+        collect(&mut fresh, target, AudioSeekPolicy::Exact)
+    );
+    assert!(
+        dormant.verified.is_none(),
+        "lease denial uses ordinary probing without proof"
+    );
+    drop((dormant, fresh, writer));
+
+    let input =
+        PlaybackAudioInput::open(&path, None, &|| false).expect("probe before cancellation");
+    let mut dormant = input
+        .release_completed()
+        .expect("completed proof before cancellation");
+    assert!(matches!(
+        dormant.decode(
+            MediaTime::ZERO,
+            None,
+            AudioSeekPolicy::Exact,
+            &|| true,
+            |_| panic!("cancelled reopen must not emit")
+        ),
+        Err(DecodeError::ConsumerClosed)
+    ));
+    assert!(dormant.input.is_none());
+    let mut fresh =
+        PlaybackAudioInput::open(&path, None, &|| false).expect("fresh after cancelled reopen");
+    assert_eq!(
+        collect(&mut dormant, target, AudioSeekPolicy::Exact),
+        collect(&mut fresh, target, AudioSeekPolicy::Exact)
+    );
+    assert!(!dormant.verified.as_ref().expect("new proof").reused);
+    drop((dormant, fresh));
+
+    // A PCM declaration does not prove that the payload is PCM. Preserve the
+    // original full probe's detection of a compressed DTS-in-WAV payload.
+    let dts = root.join("hidden.dts");
+    let status = crate::hidden_test_command(&ffmpeg)
+        .args([
+            "-v",
+            "error",
+            "-n",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=sample_rate=48000:duration=2.2",
+            "-ac",
+            "2",
+            "-c:a",
+            "dca",
+            "-strict",
+            "-2",
+            "-b:a",
+            "768k",
+            "-f",
+            "dts",
+        ])
+        .arg(&dts)
+        .status()
+        .expect("generate DTS fixture");
+    assert!(status.success());
+    let payload = fs::read(&dts).expect("read DTS payload");
+    let mut wave = Vec::new();
+    wave.extend_from_slice(b"RIFF");
+    wave.extend_from_slice(&(36 + payload.len() as u32).to_le_bytes());
+    wave.extend_from_slice(b"WAVEfmt ");
+    wave.extend_from_slice(&16_u32.to_le_bytes());
+    wave.extend_from_slice(&1_u16.to_le_bytes());
+    wave.extend_from_slice(&2_u16.to_le_bytes());
+    wave.extend_from_slice(&48000_u32.to_le_bytes());
+    wave.extend_from_slice(&192000_u32.to_le_bytes());
+    wave.extend_from_slice(&4_u16.to_le_bytes());
+    wave.extend_from_slice(&16_u16.to_le_bytes());
+    wave.extend_from_slice(b"data");
+    wave.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    wave.extend_from_slice(&payload);
+    let hidden = root.join("hidden.wav");
+    fs::write(&hidden, wave).expect("write disguised WAV");
+    let compressed =
+        PlaybackAudioInput::open(&hidden, None, &|| false).expect("probe disguised DTS");
+    assert_eq!(
+        compressed
+            .input
+            .as_ref()
+            .expect("active compressed input")
+            .input
+            .stream(0)
+            .expect("compressed audio stream")
+            .parameters()
+            .id(),
+        ffmpeg::codec::Id::DTS
+    );
+    assert!(compressed.verified.is_none());
+    assert!(compressed.release_completed().is_none());
+
+    // Preserve existing demux semantics for metadata and multiple data chunks,
+    // including seeks beyond a short first chunk. Compare against full probing;
+    // do not assume a canonical 44-byte WAV header or a single data payload.
+    let encoded = fs::read(&modified).expect("read PCM fixture");
+    let mut chunks = Vec::new();
+    let mut offset = 12;
+    let mut audio = Vec::new();
+    while offset + 8 <= encoded.len() {
+        let size = u32::from_le_bytes(
+            encoded[offset + 4..offset + 8]
+                .try_into()
+                .expect("four-byte RIFF size"),
+        ) as usize;
+        if &encoded[offset..offset + 4] == b"data" {
+            audio = encoded[offset + 8..offset + 8 + size].to_vec();
+        } else {
+            chunks.extend_from_slice(&encoded[offset..offset + 8 + size + (size & 1)]);
+        }
+        offset += 8 + size + (size & 1);
+    }
+    assert!(audio.len() > 4000);
+    for (name, split) in [("metadata", false), ("multiple-data", true)] {
+        let mut body = chunks.clone();
+        let split_at = if split { 4000 } else { audio.len() };
+        body.extend_from_slice(b"data");
+        body.extend_from_slice(&(split_at as u32).to_le_bytes());
+        body.extend_from_slice(&audio[..split_at]);
+        body.extend_from_slice(b"JUNK\x07\x00\x00\x00padding\x00");
+        if split {
+            body.extend_from_slice(b"data");
+            body.extend_from_slice(&((audio.len() - split_at) as u32).to_le_bytes());
+            body.extend_from_slice(&audio[split_at..]);
+        }
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&((body.len() + 4) as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(&body);
+        let path = root.join(format!("{name}.wav"));
+        fs::write(&path, bytes).expect("write chunked WAV");
+        let mut reused =
+            PlaybackAudioInput::open(&path, None, &|| false).expect("open PCM fixture");
+        for ms in [0, 637, 1751, 213] {
+            reused = reused.release_completed().expect("PCM proof");
+            let mut fresh =
+                PlaybackAudioInput::open(&path, None, &|| false).expect("open PCM fixture");
+            let target = MediaTime::from_nanoseconds(ms * 1_000_000);
+            assert_eq!(
+                collect(&mut reused, target, AudioSeekPolicy::Exact),
+                collect(&mut fresh, target, AudioSeekPolicy::Exact),
+                "{name} at {ms}"
+            );
+        }
+    }
+    fs::remove_dir_all(root).expect("remove generated fixtures");
 }
 
 #[test]

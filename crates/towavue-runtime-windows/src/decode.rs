@@ -21,6 +21,7 @@ use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
 mod audio_tracks;
+mod verified_pcm;
 pub use audio_tracks::probe_audio_tracks;
 mod frame_png;
 #[cfg(test)]
@@ -893,10 +894,15 @@ pub(crate) struct ParallelInput {
 }
 
 /// A single track's demux input handed back only after its decode workers join.
-/// Decoders, resamplers and PCM queues remain per-run. Playback drops this input
-/// after natural completion, an error or a track/path change; it is not a cache
-/// of decoded audio. No stream borrow or native frame escapes the worker.
-pub(crate) struct PlaybackAudioInput(ParallelInput);
+/// Decoders, resamplers and PCM queues remain per-run. Natural completion closes
+/// the demux input; only verified PCM identity/parameters may survive to reopen.
+/// No stream borrow, file handle or sample payload survives in that proof.
+pub(crate) struct PlaybackAudioInput {
+    input: Option<ParallelInput>,
+    verified: Option<verified_pcm::VerifiedPcm>,
+    path: std::path::PathBuf,
+    track: Option<AudioTrackId>,
+}
 
 impl PlaybackAudioInput {
     pub(crate) fn open(
@@ -904,11 +910,34 @@ impl PlaybackAudioInput {
         track: Option<AudioTrackId>,
         cancelled: &(dyn Fn() -> bool + Sync),
     ) -> Result<Self, DecodeError> {
-        ParallelInput::open_audio_track(path, track, cancelled).map(Self)
+        let mut owner = Self {
+            input: None,
+            verified: None,
+            path: path.to_owned(),
+            track,
+        };
+        owner.reopen(cancelled)?;
+        Ok(owner)
     }
 
     pub(crate) fn matches_track(&self, track: Option<AudioTrackId>) -> bool {
-        self.0.audio_track == track
+        self.track == track
+    }
+
+    fn reopen(&mut self, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeError> {
+        let (input, verified) = verified_pcm::open(&self.path, self.verified.take(), cancelled)?;
+        audio_tracks::selected_config(&input, self.track)?;
+        let mut input = ParallelInput::from_input(&self.path, input);
+        input.audio_track = self.track;
+        self.input = Some(input);
+        self.verified = verified;
+        Ok(())
+    }
+
+    pub(crate) fn release_completed(mut self) -> Option<Self> {
+        self.input = None;
+        self.verified.as_ref()?;
+        Some(self)
     }
 
     pub(crate) fn decode(
@@ -919,18 +948,21 @@ impl PlaybackAudioInput {
         cancelled: &(dyn Fn() -> bool + Sync),
         emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
+        if self.input.is_none() {
+            self.reopen(cancelled)?;
+        }
+        let input = self.input.as_mut().expect("opened playback input");
         // Preserve the fresh input's seek-anchor policy on every run. Discarding
         // video before the next seek can change the demuxer's chosen anchor.
         // SAFETY: this input exclusively owns its streams, and no workers exist
         // until decode starts. Its scoped workers are joined before restoration.
-        let discard: Vec<_> = self
-            .0
+        let discard: Vec<_> = input
             .input
             .streams()
             .map(|stream| unsafe { (*stream.as_ptr()).discard })
             .collect();
-        self.0.single_use_audio = true;
-        let result = self.0.decode_software_with_policy(
+        input.single_use_audio = true;
+        let result = input.decode_software_with_policy(
             minimum_time,
             maximum_time,
             Some(DecodeStream::Audio),
@@ -938,8 +970,8 @@ impl PlaybackAudioInput {
             cancelled,
             emit,
         );
-        self.0.single_use_audio = false;
-        for (mut stream, policy) in self.0.input.streams_mut().zip(discard) {
+        input.single_use_audio = false;
+        for (mut stream, policy) in input.input.streams_mut().zip(discard) {
             // SAFETY: all per-run workers have joined; the owning input and its
             // stable stream indices remain live. The owner discards us on panic.
             unsafe { (*stream.as_mut_ptr()).discard = policy };
@@ -987,14 +1019,18 @@ impl ParallelInput {
         #[cfg(feature = "presentation-verification")]
         drop(probe);
         check_cancelled(cancelled)?;
-        Ok(Self {
+        Ok(Self::from_input(path, input))
+    }
+
+    fn from_input(path: &Path, input: format::context::Input) -> Self {
+        Self {
             input,
             audio_track: None,
             frame_source: None,
             started: false,
             single_use_audio: false,
             audio_checkpoints: AudioCheckpoints::new(path),
-        })
+        }
     }
 
     pub(crate) fn decode_software(

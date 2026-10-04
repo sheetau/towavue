@@ -42,6 +42,8 @@ pub(crate) mod audio_seek_comparison;
 #[cfg(test)]
 mod audio_seek_tests;
 #[cfg(test)]
+mod playback_audio_input_tests;
+#[cfg(test)]
 mod preroll_pacing_tests;
 #[cfg(test)]
 mod seek_contention_tests;
@@ -211,7 +213,7 @@ enum ParallelVideoPipeline {
     Hardware(HardwareVideoPipeline),
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AudioSeekPolicy {
     Exact,
     Playback,
@@ -884,10 +886,66 @@ pub(crate) struct ParallelInput {
     audio_track: Option<AudioTrackId>,
     pub(crate) frame_source: Option<std::sync::Arc<crate::export::frame::FrameSource>>,
     started: bool,
-    // Only fresh path wrappers set this and drop the input after their one run.
-    // Reusable inputs must preserve every stream's discard policy for later video.
+    // Fresh path wrappers drop the input after their run. PlaybackAudioInput also
+    // enables this within a run, restoring stream policies after workers join.
     single_use_audio: bool,
     audio_checkpoints: AudioCheckpoints,
+}
+
+/// A single track's demux input handed back only after its decode workers join.
+/// Decoders, resamplers and PCM queues remain per-run. Playback drops this input
+/// after natural completion, an error or a track/path change; it is not a cache
+/// of decoded audio. No stream borrow or native frame escapes the worker.
+pub(crate) struct PlaybackAudioInput(ParallelInput);
+
+impl PlaybackAudioInput {
+    pub(crate) fn open(
+        path: &Path,
+        track: Option<AudioTrackId>,
+        cancelled: &(dyn Fn() -> bool + Sync),
+    ) -> Result<Self, DecodeError> {
+        ParallelInput::open_audio_track(path, track, cancelled).map(Self)
+    }
+
+    pub(crate) fn matches_track(&self, track: Option<AudioTrackId>) -> bool {
+        self.0.audio_track == track
+    }
+
+    pub(crate) fn decode(
+        &mut self,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        policy: AudioSeekPolicy,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
+    ) -> Result<DecodeSummary, DecodeError> {
+        // Preserve the fresh input's seek-anchor policy on every run. Discarding
+        // video before the next seek can change the demuxer's chosen anchor.
+        // SAFETY: this input exclusively owns its streams, and no workers exist
+        // until decode starts. Its scoped workers are joined before restoration.
+        let discard: Vec<_> = self
+            .0
+            .input
+            .streams()
+            .map(|stream| unsafe { (*stream.as_ptr()).discard })
+            .collect();
+        self.0.single_use_audio = true;
+        let result = self.0.decode_software_with_policy(
+            minimum_time,
+            maximum_time,
+            Some(DecodeStream::Audio),
+            policy,
+            cancelled,
+            emit,
+        );
+        self.0.single_use_audio = false;
+        for (mut stream, policy) in self.0.input.streams_mut().zip(discard) {
+            // SAFETY: all per-run workers have joined; the owning input and its
+            // stable stream indices remain live. The owner discards us on panic.
+            unsafe { (*stream.as_mut_ptr()).discard = policy };
+        }
+        result
+    }
 }
 
 impl ParallelInput {
@@ -1150,12 +1208,15 @@ impl ParallelInput {
                         .name()
                         .split(',')
                         .any(|name| matches!(name, "mov" | "mp4" | "matroska" | "webm"))
-                    && let Some(audio) = audio
-                        .as_ref()
-                        .filter(|audio| audio.parameters.id() == codec::Id::AAC)
+                    && let Some(audio) = audio.as_ref().filter(|audio| {
+                        matches!(
+                            audio.parameters.id(),
+                            codec::Id::AAC | codec::Id::OPUS | codec::Id::VORBIS
+                        )
+                    })
                 {
                     // A default video/other-audio anchor can skip this track's
-                    // negative-time AAC priming packet on rewind. Restore the
+                    // negative-time priming packet on rewind. Restore the
                     // selected audio's own index before creating its new decoder.
                     // Keep other demuxers' bounded seek path: raw MP3, for
                     // example, rejects the negative av_seek_frame timestamp.
@@ -1183,7 +1244,8 @@ impl ParallelInput {
         if (self.single_use_audio || !audio_intervals.is_empty())
             && let Some(audio) = &audio
         {
-            // These runs own a fresh audio-only input, never reused for video.
+            // These runs are exclusively audio; retained playback restores the
+            // original policies after all workers join.
             // Preserve the existing seek anchor before discarding:
             // demuxers can choose a different anchor when video is disabled.
             discard_other_streams(input, audio.index);

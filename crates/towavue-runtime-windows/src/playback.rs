@@ -166,7 +166,8 @@ pub struct PlaybackSession {
     audio: Option<AudioOutput>,
     video_thread: Option<JoinHandle<Option<decode::ParallelInput>>>,
     video_input: Option<decode::ParallelInput>,
-    audio_thread: Option<JoinHandle<()>>,
+    audio_thread: Option<JoinHandle<Option<decode::PlaybackAudioInput>>>,
+    audio_input: Option<decode::PlaybackAudioInput>,
     decode_cancel: Arc<AtomicBool>,
     video_cancel: Arc<AtomicBool>,
     completion: Arc<DecodeCompletion>,
@@ -354,6 +355,7 @@ impl PlaybackSession {
             video_thread: None,
             video_input: None,
             audio_thread: None,
+            audio_input: None,
             decode_cancel: Arc::new(AtomicBool::new(false)),
             video_cancel: Arc::new(AtomicBool::new(false)),
             completion: Arc::new(DecodeCompletion::default()),
@@ -653,11 +655,12 @@ impl PlaybackSession {
         self.recovery_frame = recovery_frame;
     }
 
-    /// Release all file readers, including the reusable software decode input,
+    /// Release all file readers, including reusable video and audio demux inputs,
     /// before an accepted filesystem mutation. The device and transport settings stay.
     pub fn suspend_for_file_operation(&mut self, position: MediaTime) {
         self.suspend_for_graphics_recovery(position);
         self.video_input = None;
+        self.audio_input = None;
         self.current_video_source = None;
     }
 
@@ -670,6 +673,7 @@ impl PlaybackSession {
     ) -> Result<PlaybackGeneration, PlaybackError> {
         self.path = path.to_owned();
         self.video_input = None;
+        self.audio_input = None;
         self.replace_graphics_device(self.graphics_device.clone(), position)
     }
 
@@ -681,6 +685,7 @@ impl PlaybackSession {
             .as_ref()
             .is_some_and(|plan| plan.spans().is_empty())
         {
+            self.audio_input = None;
             self.completion = Arc::new(DecodeCompletion::default());
             self.completion.finish(DecodeCompletion::VIDEO);
             self.completion.finish(DecodeCompletion::AUDIO);
@@ -715,6 +720,9 @@ impl PlaybackSession {
             audio.set_paused(true)?;
         }
         self.audio = audio;
+        if self.audio.is_none() {
+            self.audio_input = None;
+        }
         #[cfg(any(test, feature = "presentation-verification"))]
         {
             self.seek_stage_ms[3] = stage.elapsed().as_secs_f64() * 1000.0;
@@ -754,6 +762,14 @@ impl PlaybackSession {
             let completion = Arc::clone(&self.completion);
             let notify = Arc::clone(&self.notify);
             let generation = self.generation;
+            let mut input = self.audio_input.take().filter(|input| {
+                timeline.is_none()
+                    && match selection {
+                        AudioTrackSelection::Default => input.matches_track(None),
+                        AudioTrackSelection::Track(track) => input.matches_track(Some(track)),
+                        AudioTrackSelection::All => false,
+                    }
+            });
             match thread::Builder::new()
                 .name("towavue-audio-feed".into())
                 .spawn(move || {
@@ -782,7 +798,20 @@ impl PlaybackSession {
                                 .finish()
                                 .map_err(|_| decode::DecodeError::ConsumerClosed)
                         } else if let timeline::AudioSource::Track(track) = source {
-                            run_audio_decode(&path, track, &audio, target, end, rate, &cancelled)
+                            if input.is_none() {
+                                input =
+                                    Some(decode::PlaybackAudioInput::open(&path, track, &|| {
+                                        cancelled.load(Ordering::Relaxed)
+                                    })?);
+                            }
+                            run_audio_decode(
+                                input.as_mut().expect("opened audio input"),
+                                &audio,
+                                target,
+                                end,
+                                rate,
+                                &cancelled,
+                            )
                         } else {
                             audio_mix::decode(
                                 &path,
@@ -805,7 +834,12 @@ impl PlaybackSession {
                     }))
                     .unwrap_or(Err(decode::DecodeError::WorkerPanicked));
                     if cancelled.load(Ordering::Relaxed) {
-                        return;
+                        // Only an interrupted, otherwise valid feed hands its
+                        // input back. EOF/errors keep the old file-release behavior.
+                        return match result {
+                            Ok(()) | Err(decode::DecodeError::ConsumerClosed) => input,
+                            Err(_) => None,
+                        };
                     }
                     match result {
                         Ok(()) if completion.finish(DecodeCompletion::AUDIO) => {
@@ -814,6 +848,7 @@ impl PlaybackSession {
                         Ok(()) | Err(decode::DecodeError::ConsumerClosed) => {}
                         Err(error) => notify(PlaybackEvent::Failed(generation, error.into())),
                     }
+                    None
                 }) {
                 Ok(thread) => self.audio_thread = Some(thread),
                 Err(error) => {
@@ -942,7 +977,7 @@ impl PlaybackSession {
         #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         if let Some(thread) = self.audio_thread.take() {
-            let _ = thread.join();
+            self.audio_input = thread.join().ok().flatten();
         }
         #[cfg(any(test, feature = "presentation-verification"))]
         {
@@ -1251,8 +1286,7 @@ impl Drop for PlaybackSession {
 
 #[allow(clippy::too_many_arguments)]
 fn run_audio_decode(
-    path: &Path,
-    track: Option<AudioTrackId>,
+    input: &mut decode::PlaybackAudioInput,
     audio: &AudioOutputSender,
     target: MediaTime,
     end: Option<MediaTime>,
@@ -1265,12 +1299,19 @@ fn run_audio_decode(
         ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
         _ => unreachable!("audio-only decoder emitted video"),
     };
-    if rate == 1.0 {
-        decode::decode_playback_audio_track_cancellable(path, track, target, end, &cancelled, emit)
-    } else {
-        decode::decode_audio_track_cancellable(path, track, target, end, &cancelled, emit)
-    }
-    .map(|_| ())
+    input
+        .decode(
+            target,
+            end,
+            if rate == 1.0 {
+                decode::AudioSeekPolicy::Playback
+            } else {
+                decode::AudioSeekPolicy::Exact
+            },
+            &cancelled,
+            emit,
+        )
+        .map(|_| ())
 }
 
 #[allow(clippy::too_many_arguments)]

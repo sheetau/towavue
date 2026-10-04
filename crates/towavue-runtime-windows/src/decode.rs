@@ -21,6 +21,7 @@ use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
 mod audio_tracks;
+mod hardware_reuse;
 mod verified_pcm;
 pub use audio_tracks::probe_audio_tracks;
 mod frame_png;
@@ -338,6 +339,8 @@ struct VideoPipeline {
 }
 
 struct HardwareVideoPipeline {
+    #[cfg(test)]
+    creation_id: u64,
     time_base: Rational,
     decoder: codec::decoder::Video,
     transfer: VideoTransfer,
@@ -879,7 +882,9 @@ pub(crate) fn discard_other_streams(input: &mut format::context::Input, selected
 }
 
 /// An exclusively owned demux input, moved back to its session after workers join.
-/// Decoders and packet queues are per run; no stream borrow escapes a run.
+/// Packet queues and software decoders are per run. Interrupted H.264/HEVC/VP9/
+/// AV1 hardware playback may return one decoder after every worker has joined;
+/// source, stream and device guards restrict it to the next compatible run.
 pub(crate) struct ParallelInput {
     input: format::context::Input,
     // Immutable for this input's lifetime, so scalar audio checkpoints can never
@@ -891,6 +896,7 @@ pub(crate) struct ParallelInput {
     // enables this within a run, restoring stream policies after workers join.
     single_use_audio: bool,
     audio_checkpoints: AudioCheckpoints,
+    retained_hardware: Option<hardware_reuse::Retained>,
 }
 
 /// A single track's demux input handed back only after its decode workers join.
@@ -1030,6 +1036,7 @@ impl ParallelInput {
             started: false,
             single_use_audio: false,
             audio_checkpoints: AudioCheckpoints::new(path),
+            retained_hardware: None,
         }
     }
 
@@ -1153,6 +1160,19 @@ impl ParallelInput {
         cancelled: &(dyn Fn() -> bool + Sync),
         mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
+        // Taking first ensures every early error drops the previous run's owner.
+        let mut retained = self.retained_hardware.take();
+        let mut allow_reuse = hardware_reuse::requested()
+            && hardware_device.is_some()
+            && stream == Some(DecodeStream::Video)
+            && maximum_time.is_none()
+            && self
+                .frame_source
+                .as_ref()
+                .is_some_and(|source| source.matches_current());
+        if !allow_reuse {
+            retained = None;
+        }
         check_cancelled(cancelled)?;
         if stream != Some(DecodeStream::Video) {
             self.audio_checkpoints.begin_run();
@@ -1161,6 +1181,12 @@ impl ParallelInput {
         let video_config = (stream != Some(DecodeStream::Audio))
             .then(|| best_stream_config(input, Type::Video))
             .flatten();
+        allow_reuse &= video_config
+            .as_ref()
+            .is_some_and(|config| hardware_reuse::supports(config.parameters.id()));
+        if !allow_reuse {
+            retained = None;
+        }
         let video = match (hardware_device, video_config) {
             (Some(device), Some(config)) => {
                 Some(ParallelVideoConfig::Hardware(config, device.clone()))
@@ -1286,7 +1312,21 @@ impl ParallelInput {
             // demuxers can choose a different anchor when video is disabled.
             discard_other_streams(input, audio.index);
         }
-        run_parallel_workers(
+        retained = retained.filter(|previous| match video.as_ref() {
+            Some(ParallelVideoConfig::Hardware(config, device)) => {
+                previous.key == hardware_reuse::Signature::new(config)
+                    && previous.device.same_device(device)
+                    && device.device_removed_reason().is_none()
+            }
+            _ => false,
+        });
+        let attempting_retained = retained.is_some();
+        let mut emitted_hardware = false;
+        let mut guarded_emit = |output| {
+            emitted_hardware |= matches!(&output, ParallelDecodeOutput::HardwareVideo(_));
+            emit(output)
+        };
+        let result = run_parallel_workers(
             (input, &mut self.audio_checkpoints, resume, audio_intervals),
             video,
             audio,
@@ -1294,8 +1334,47 @@ impl ParallelInput {
             minimum_time,
             maximum_time,
             cancelled,
-            &mut emit,
-        )
+            &mut guarded_emit,
+            (allow_reuse, &mut retained),
+        );
+        if attempting_retained
+            && !emitted_hardware
+            && matches!(result, Err(DecodeError::HardwareUnavailable(_)))
+            && !cancelled()
+            && hardware_device.is_some_and(|device| device.device_removed_reason().is_none())
+        {
+            // A retained native pool may reject an in-band configuration change.
+            // The owner has forwarded no selected frame to its consumer. Do not
+            // infer that from the error variant: pixel-format rejection can also
+            // occur after earlier hardware frames. All workers have joined;
+            // discard the failed owner, seek again, and retry once
+            // with a fresh hardware decoder before ordinary software fallback.
+            // The empty slot makes the recursive call ineligible for another retry.
+            drop(retained);
+            #[cfg(feature = "presentation-verification")]
+            if crate::burst_enabled() {
+                crate::record_burst(
+                    crate::BurstEvent::HardwareDecodeStep,
+                    0,
+                    None,
+                    [9, 0, minimum_time.as_nanoseconds() as u64],
+                );
+            }
+            return self.decode(
+                hardware_device,
+                minimum_time,
+                maximum_time,
+                stream,
+                audio_intervals,
+                audio_seek,
+                cancelled,
+                emit,
+            );
+        }
+        if matches!(result, Err(DecodeError::ConsumerClosed)) && cancelled() {
+            self.retained_hardware = retained;
+        }
+        result
     }
 }
 
@@ -1314,6 +1393,7 @@ fn run_parallel_workers(
     maximum_time: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
+    reuse: (bool, &mut Option<hardware_reuse::Retained>),
 ) -> Result<DecodeSummary, DecodeError> {
     let (input, audio_checkpoints, resume, audio_intervals) = input;
     let origin = input_origin(input);
@@ -1374,6 +1454,8 @@ fn run_parallel_workers(
                 }
             })?;
 
+        let (allow_reuse, reuse_slot) = reuse;
+        let mut retained = reuse_slot.take();
         let video_handle = video.map(|video| {
             let video_output_tx = output_tx.clone();
             thread::Builder::new()
@@ -1385,11 +1467,13 @@ fn run_parallel_workers(
                         &video_output_tx,
                         preroll_before,
                         cancelled,
+                        (allow_reuse, &mut retained),
                     ) {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
                     } else {
                         let _ = video_output_tx.send(ParallelDecodeOutput::VideoFinished);
                     }
+                    retained
                 })
         });
 
@@ -1522,8 +1606,15 @@ fn run_parallel_workers(
         }
 
         let demux_joined = demux_handle.join().is_ok();
+        let mut recovered = None;
         let video_joined = match video_handle {
-            Some(Ok(handle)) => handle.join().is_ok(),
+            Some(Ok(handle)) => match handle.join() {
+                Ok(owner) => {
+                    recovered = owner;
+                    true
+                }
+                Err(_) => false,
+            },
             Some(Err(error)) => return Err(error.into()),
             None => true,
         };
@@ -1534,6 +1625,11 @@ fn run_parallel_workers(
         };
         if !demux_joined || !video_joined || !audio_joined {
             return Err(DecodeError::WorkerPanicked);
+        }
+        // Reclaim only after every worker has joined. No packet queue, stream
+        // borrow or concurrently used decoder crosses the run boundary.
+        if matches!(result, Ok(()) | Err(DecodeError::ConsumerClosed)) && cancelled() {
+            *reuse_slot = recovered;
         }
         check_cancelled(cancelled)?;
         result.map(|()| summary)
@@ -1629,7 +1725,22 @@ fn run_parallel_video_worker(
     output: &SyncSender<ParallelDecodeOutput>,
     preroll_before: Option<MediaTime>,
     cancelled: &dyn Fn() -> bool,
+    reuse: (bool, &mut Option<hardware_reuse::Retained>),
 ) -> Result<(), DecodeError> {
+    let (allow_reuse, reuse_slot) = reuse;
+    let reuse_key = match &config {
+        ParallelVideoConfig::Hardware(config, device) if allow_reuse => {
+            Some((hardware_reuse::Signature::new(config), device.clone()))
+        }
+        _ => None,
+    };
+    let previous = reuse_slot.take().filter(|previous| {
+        reuse_key.as_ref().is_some_and(|(key, device)| {
+            previous.key == *key
+                && previous.device.same_device(device)
+                && device.device_removed_reason().is_none()
+        })
+    });
     #[cfg(feature = "presentation-verification")]
     let trace_id = if matches!(&config, ParallelVideoConfig::Hardware(..)) && crate::burst_enabled()
     {
@@ -1663,109 +1774,137 @@ fn run_parallel_video_worker(
         _ => None,
     };
     let mut paced_packets = 0_u64;
+    #[cfg(feature = "presentation-verification")]
+    let reused = previous.is_some();
     let mut pipeline = match config {
         ParallelVideoConfig::Software(config) => {
             ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
         }
         ParallelVideoConfig::Hardware(config, device) => {
-            ParallelVideoPipeline::Hardware(create_hardware_video_pipeline_from(config, &device)?)
+            let hardware = if let Some(mut previous) = previous {
+                previous.pipeline.decoder.flush();
+                previous.pipeline
+            } else {
+                create_hardware_video_pipeline_from(config, &device)?
+            };
+            ParallelVideoPipeline::Hardware(hardware)
         }
     };
     #[cfg(feature = "presentation-verification")]
-    trace(1, 0);
+    trace(1, u64::from(reused));
     #[cfg(feature = "presentation-verification")]
     let mut packet_index = 0;
-    let mut summary = DecodeSummary::default();
-    for packet in packets {
+    let mut draining = false;
+    let result = (|| {
+        let mut summary = DecodeSummary::default();
+        for packet in packets {
+            match &mut pipeline {
+                ParallelVideoPipeline::Software(pipeline) => {
+                    pipeline.decoder.send_packet(&packet)?;
+                    pipeline.receive_parallel(output, &mut summary, preroll_before)?;
+                }
+                ParallelVideoPipeline::Hardware(pipeline) => {
+                    #[cfg(feature = "presentation-verification")]
+                    trace(2, packet_index);
+                    let sent = pipeline.decoder.send_packet(&packet);
+                    #[cfg(feature = "presentation-verification")]
+                    trace(3, packet_index);
+                    if let Err(error) = sent {
+                        if summary.video_frames == 0 {
+                            return Err(DecodeError::HardwareUnavailable(error.to_string()));
+                        }
+                        return Err(error.into());
+                    }
+                    let received = pipeline.receive(
+                        &mut |output_frame| match output_frame {
+                            RuntimeDecodeOutput::Video(frame) => {
+                                // Steady playback no longer needs preroll pacing. Keep the
+                                // selected frame and all downstream timestamp/EOF rules intact.
+                                if pacing.is_some()
+                                    && preroll_before
+                                        .is_none_or(|target| frame.presentation_time >= target)
+                                {
+                                    pacing = None;
+                                }
+                                output
+                                    .send(ParallelDecodeOutput::HardwareVideo(frame))
+                                    .is_ok()
+                            }
+                        },
+                        &mut summary,
+                    );
+                    #[cfg(feature = "presentation-verification")]
+                    {
+                        trace(4, packet_index);
+                        packet_index += 1;
+                    }
+                    received?;
+                    if let Some(completion) = &pacing {
+                        paced_packets += 1;
+                        if paced_packets.is_multiple_of(batch_size) {
+                            #[cfg(feature = "presentation-verification")]
+                            trace(5, packet_index - 1);
+                            let result = completion.wait(cancelled);
+                            #[cfg(feature = "presentation-verification")]
+                            trace(6, packet_index - 1);
+                            match result {
+                                crate::renderer::preroll_pacing::Completion::Ready => {}
+                                crate::renderer::preroll_pacing::Completion::Cancelled => {
+                                    return Err(DecodeError::ConsumerClosed);
+                                }
+                                crate::renderer::preroll_pacing::Completion::Unavailable => {
+                                    // Pacing is optional. Never reuse an unfinished/failed query;
+                                    // continue exact decoding with ordinary error/recovery handling.
+                                    pacing = None;
+                                    #[cfg(feature = "presentation-verification")]
+                                    trace(7, packet_index - 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        draining = true;
         match &mut pipeline {
             ParallelVideoPipeline::Software(pipeline) => {
-                pipeline.decoder.send_packet(&packet)?;
-                pipeline.receive_parallel(output, &mut summary, preroll_before)?;
+                pipeline.decoder.send_eof()?;
+                pipeline.receive_parallel(output, &mut summary, preroll_before)
             }
             ParallelVideoPipeline::Hardware(pipeline) => {
-                #[cfg(feature = "presentation-verification")]
-                trace(2, packet_index);
-                let sent = pipeline.decoder.send_packet(&packet);
-                #[cfg(feature = "presentation-verification")]
-                trace(3, packet_index);
-                if let Err(error) = sent {
+                if let Err(error) = pipeline.decoder.send_eof() {
                     if summary.video_frames == 0 {
                         return Err(DecodeError::HardwareUnavailable(error.to_string()));
                     }
                     return Err(error.into());
                 }
-                let received = pipeline.receive(
+                pipeline.receive(
                     &mut |output_frame| match output_frame {
-                        RuntimeDecodeOutput::Video(frame) => {
-                            // Steady playback no longer needs preroll pacing. Keep the
-                            // selected frame and all downstream timestamp/EOF rules intact.
-                            if pacing.is_some()
-                                && preroll_before
-                                    .is_none_or(|target| frame.presentation_time >= target)
-                            {
-                                pacing = None;
-                            }
-                            output
-                                .send(ParallelDecodeOutput::HardwareVideo(frame))
-                                .is_ok()
-                        }
+                        RuntimeDecodeOutput::Video(frame) => output
+                            .send(ParallelDecodeOutput::HardwareVideo(frame))
+                            .is_ok(),
                     },
                     &mut summary,
-                );
-                #[cfg(feature = "presentation-verification")]
-                {
-                    trace(4, packet_index);
-                    packet_index += 1;
-                }
-                received?;
-                if let Some(completion) = &pacing {
-                    paced_packets += 1;
-                    if paced_packets.is_multiple_of(batch_size) {
-                        #[cfg(feature = "presentation-verification")]
-                        trace(5, packet_index - 1);
-                        let result = completion.wait(cancelled);
-                        #[cfg(feature = "presentation-verification")]
-                        trace(6, packet_index - 1);
-                        match result {
-                            crate::renderer::preroll_pacing::Completion::Ready => {}
-                            crate::renderer::preroll_pacing::Completion::Cancelled => {
-                                return Err(DecodeError::ConsumerClosed);
-                            }
-                            crate::renderer::preroll_pacing::Completion::Unavailable => {
-                                // Pacing is optional. Never reuse an unfinished/failed query;
-                                // continue exact decoding with ordinary error/recovery handling.
-                                pacing = None;
-                                #[cfg(feature = "presentation-verification")]
-                                trace(7, packet_index - 1);
-                            }
-                        }
-                    }
-                }
+                )
             }
         }
+    })();
+    if !draining
+        && cancelled()
+        && matches!(result, Err(DecodeError::ConsumerClosed))
+        && let Some((key, device)) = reuse_key
+        && device.device_removed_reason().is_none()
+        && let ParallelVideoPipeline::Hardware(pipeline) = pipeline
+    {
+        *reuse_slot = Some(hardware_reuse::Retained {
+            pipeline,
+            key,
+            device,
+        });
+        #[cfg(feature = "presentation-verification")]
+        trace(8, 0);
     }
-    match &mut pipeline {
-        ParallelVideoPipeline::Software(pipeline) => {
-            pipeline.decoder.send_eof()?;
-            pipeline.receive_parallel(output, &mut summary, preroll_before)
-        }
-        ParallelVideoPipeline::Hardware(pipeline) => {
-            if let Err(error) = pipeline.decoder.send_eof() {
-                if summary.video_frames == 0 {
-                    return Err(DecodeError::HardwareUnavailable(error.to_string()));
-                }
-                return Err(error.into());
-            }
-            pipeline.receive(
-                &mut |output_frame| match output_frame {
-                    RuntimeDecodeOutput::Video(frame) => output
-                        .send(ParallelDecodeOutput::HardwareVideo(frame))
-                        .is_ok(),
-                },
-                &mut summary,
-            )
-        }
-    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2335,6 +2474,8 @@ fn create_hardware_video_pipeline_from(
     let transfer =
         classify_transfer(decoder.color_transfer_characteristic()).unwrap_or(VideoTransfer::Sdr);
     Ok(HardwareVideoPipeline {
+        #[cfg(test)]
+        creation_id: hardware_reuse::next_creation_id(),
         time_base: config.time_base,
         decoder,
         transfer,
@@ -2620,11 +2761,14 @@ fn best_stream_config(input: &format::context::Input, media_type: Type) -> Optio
 }
 
 fn stream_config(stream: ffmpeg::Stream<'_>) -> StreamConfig {
+    // Parameters returned by Stream retain their native owner, not an immutable
+    // copy. Freeze the signature/config before the demux worker starts reading.
+    let parameters = stream.parameters().clone();
     StreamConfig {
         quantized_audio_timestamps: crate::audio_timestamps::quantized_aac(&stream),
         index: stream.index(),
         time_base: stream.time_base(),
-        parameters: stream.parameters(),
+        parameters,
         display_matrix: stream
             .side_data()
             .find(|data| data.kind() == ffmpeg::codec::packet::side_data::Type::DisplayMatrix)

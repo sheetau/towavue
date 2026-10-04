@@ -32,6 +32,14 @@ pub(crate) struct FrameSource {
     stamp: Stamp,
 }
 
+impl FrameSource {
+    /// Revalidate a source without retaining a file lock between decode runs.
+    pub(crate) fn matches_current(&self) -> bool {
+        SourceLease::open(&self.path)
+            .is_ok_and(|lease| lease.source.as_ref() == self && lease.verify_path().is_ok())
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct Stamp {
     volume: u64,

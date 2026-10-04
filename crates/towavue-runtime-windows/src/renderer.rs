@@ -244,6 +244,10 @@ impl GraphicsDevice {
         })
     }
 
+    pub(crate) fn same_device(&self, other: &Self) -> bool {
+        self.device == other.device
+    }
+
     pub fn adapter_luid(&self) -> AdapterLuid {
         self.adapter_luid
     }

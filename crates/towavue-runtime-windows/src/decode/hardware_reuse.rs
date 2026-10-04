@@ -17,8 +17,7 @@ pub(super) fn requested() -> bool {
     #[cfg(feature = "presentation-verification")]
     {
         static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        return *ENABLED
-            .get_or_init(|| std::env::var("TOWAVUE_VERIFY_DECODER_REUSE").as_deref() != Ok("0"));
+        *ENABLED.get_or_init(|| std::env::var("TOWAVUE_VERIFY_DECODER_REUSE").as_deref() != Ok("0"))
     }
     #[cfg(not(feature = "presentation-verification"))]
     true

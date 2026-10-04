@@ -64,9 +64,13 @@ def geometry(hwnd):
 def normalize(hwnd):
     client, outer, origin = geometry(hwnd)
     if client.right != 800 or client.bottom != 650 or origin.x < 0 or origin.y < 0:
-        return bool(U.SetWindowPos(hwnd, 0, 70, 70,
+        return bool(U.SetWindowPos(hwnd, -1, 70, 70,
             800 + outer.right - outer.left - client.right,
             650 + outer.bottom - outer.top - client.bottom, 0x0010 | 0x0040))
+    # Foreground activation can be denied to a command-launched process. Keep
+    # only this disposable fixture topmost without taking keyboard focus. The
+    # retained process is closed after the trial; no owner window is changed.
+    U.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010)
     return False
 
 
@@ -105,6 +109,10 @@ def sha(path):
 
 
 def prepare_apps(root, repo):
+    provenance = root / "provenance"
+    provenance.mkdir(exist_ok=True)
+    for script in Path(__file__).parent.glob("*.py"):
+        shutil.copy2(script, provenance / script.name)
     profiles = root / "profiles"
     profiles.mkdir(exist_ok=True)
     irfan = profiles / "irfanview"
@@ -119,11 +127,17 @@ def prepare_apps(root, repo):
             destination = portable / file.name
             if not destination.exists():
                 shutil.copy2(file, destination)
+    # The K-Lite build loads its bundled decoders from this subdirectory.
+    # Copying only top-level DLLs can silently select different system filters.
+    for directory in ("LAVFilters64", "MPCVR"):
+        component = installed / directory
+        if component.is_dir():
+            shutil.copytree(component, portable / directory, dirs_exist_ok=True)
     ini = portable / "mpc-hc64.ini"
     if not ini.exists():
         # Presence of an INI next to the executable selects MPC's portable store.
-        ini.write_text("[Settings]\nUpdaterAutoCheck=0\nRememberFilePos=0\nRememberPosForAudioFiles=0\n", encoding="utf-8")
-    return {
+        ini.write_text("[Settings]\nUpdaterAutoCheck=0\nRememberFilePos=0\nRememberPosForAudioFiles=0\nAutoZoom=0\nRememberWindowSize=1\n", encoding="utf-8")
+    apps = {
         "towavue": {"exe": repo / "target/release/towavue.exe", "kind": ["image", "animation", "video"],
                     "args": ["--"], "after": []},
         "irfanview": {"exe": Path(os.environ["ProgramFiles"]) / "IrfanView/i_view64.exe", "kind": ["image", "animation"],
@@ -133,6 +147,13 @@ def prepare_apps(root, repo):
         "vlc": {"exe": Path(os.environ["ProgramFiles"]) / "VideoLAN/VLC/vlc.exe", "kind": ["video"],
                 "args": ["--no-one-instance", f"--config={vlc / 'vlcrc'}", "--no-qt-privacy-ask", "--no-qt-video-autoresize", "--no-video-title-show", "--qt-continue=0", "--gain=0"], "after": []},
     }
+    # Record the shared inputs even for runners with scenario-specific metadata.
+    # Per-run overrides (including baseline executables) remain in run.json.
+    inventory = {name: {'exe': str(app['exe']), 'sha256': sha(app['exe'])}
+                 for name, app in apps.items()}
+    (root / 'prepared-apps.json').write_text(json.dumps(inventory, indent=2)+'\n', encoding='utf-8')
+    return apps
+
 
 
 def trial(app_name, app, case, corpus, root, trial_id, timeout, retain):
@@ -153,7 +174,7 @@ def trial(app_name, app, case, corpus, root, trial_id, timeout, retain):
         # This private fixture profile has no live process between trials.
         # Clear only its resume file, so repeated startup always begins at zero.
         (settings / "video-resume.txt").unlink(missing_ok=True)
-        (settings / "window-placement.conf").write_text("towavue window placement v1\n70\n70\n886\n760\n96\nnormal\n", encoding="utf-8")
+        (settings / "window-placement.conf").write_text("towavue window placement v1\n70\n70\n886\n728\n96\nnormal\n", encoding="utf-8")
         (settings / "playback-volume.conf").write_text("towavue playback volume v1\n1\n0\n0.5\n", encoding="utf-8")
         # The normal uninstrumented Release requires its development DLL directory.
         candidates = list((Path(__file__).resolve().parents[2] / "vendor/ffmpeg/autobuild-2026-08-31-13-27").glob("*/bin"))
@@ -192,6 +213,16 @@ def trial(app_name, app, case, corpus, root, trial_id, timeout, retain):
             hwnd = available[0]
             normalization += normalize(hwnd)
             client, _, origin = geometry(hwnd)
+            unobscured = True
+            for x, y in ((8, 8), (client.right-8, 8), (8, client.bottom-8),
+                         (client.right-8, client.bottom-8), (client.right//2, client.bottom//2)):
+                owner = W.DWORD()
+                U.GetWindowThreadProcessId(U.WindowFromPoint(W.POINT(origin.x+x, origin.y+y)), C.byref(owner))
+                unobscured &= owner.value == process.pid
+            if not unobscured:
+                visibility_samples[-1]['owned_client_unobscured'] = False
+                time.sleep(.003)
+                continue
             begin = time.perf_counter_ns()
             latest_image = ImageGrab.grab(bbox=(origin.x, origin.y, origin.x + client.right, origin.y + client.bottom))
             end = time.perf_counter_ns()

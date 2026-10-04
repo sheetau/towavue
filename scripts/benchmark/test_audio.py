@@ -18,6 +18,13 @@ class ToneTests(unittest.TestCase):
         tone = .01 * np.sin(2 * np.pi * 440 * np.arange(960) / 48000)
         self.assertFalse(matches(*tone_score(np.column_stack((tone, tone)))))
 
+    def test_manifest_frequency_identifies_another_file(self):
+        for frequency in (701, 880, 1059, 1238, 1417):
+            tone = .01 * np.sin(2 * np.pi * frequency * np.arange(960) / 48000)
+            data = np.column_stack((tone, tone))
+            self.assertTrue(matches(*tone_score(data, frequency=frequency)))
+            self.assertFalse(matches(*tone_score(data, frequency=frequency + 179)))
+
 
 if __name__ == "__main__":
     unittest.main()

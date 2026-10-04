@@ -1,4 +1,4 @@
-"""CLI launch to a matching 997 Hz tone delivered by WASAPI loopback.
+"""CLI launch to the fixture's matching tone delivered by WASAPI loopback.
 
 This observes software loopback delivery, not acoustic onset. No microphone is
 opened and no audio recording is written. Only tone scores and timestamps remain.
@@ -18,7 +18,7 @@ import soundcard as sc
 from visual import U, prepare_apps, sha, windows
 
 
-def tone_score(data, rate=48000):
+def tone_score(data, rate=48000, frequency=997):
     if len(data) < 240:
         return 0., 0.
     mono = np.mean(data, axis=1).astype(float)
@@ -28,7 +28,7 @@ def tone_score(data, rate=48000):
         return 0., 0.
     t = np.arange(len(mono)) / rate
     # Least-squares quadrature handles non-integral periods and packet lengths.
-    basis = np.column_stack((np.sin(2 * np.pi * 997 * t), np.cos(2 * np.pi * 997 * t)))
+    basis = np.column_stack((np.sin(2 * np.pi * frequency * t), np.cos(2 * np.pi * frequency * t)))
     fit = basis @ np.linalg.lstsq(basis, mono, rcond=None)[0]
     fraction = max(0., 1. - float(np.mean((mono - fit) ** 2)) / energy)
     return float(np.sqrt(energy)), fraction
@@ -63,7 +63,7 @@ def trial(name, app, case, corpus, root, identifier, timeout, recorder):
         directory = root / "profiles" / name / key
         directory.mkdir(parents=True, exist_ok=True)
         env[key] = str(directory)
-    if name == "towavue":
+    if name in ("towavue", "towavue-before"):
         settings = Path(env["APPDATA"]) / "towavue"
         settings.mkdir(exist_ok=True)
         (settings / "video-resume.txt").unlink(missing_ok=True)
@@ -72,7 +72,7 @@ def trial(name, app, case, corpus, root, identifier, timeout, recorder):
         env["FFMPEG_DIR"] = str(candidates[0].parent)
         env["PATH"] = str(candidates[0]) + os.pathsep + env["PATH"]
     command = [str(app["exe"]), *app["args"], str(path), *app["after"]]
-    row = dict(trial_id=identifier, app=name, case=case["id"], kind="audio",
+    row = dict(trial_id=identifier, app=name, case=case["id"], kind=case["kind"],
                scenario="warm_filesystem_new_process_loopback", endpoint="loopback_detector_completion",
                status="timeout", latency_lower_ms="", latency_upper_ms="", command=command)
     # Reject contaminated trials, rather than attributing an already playing tone.
@@ -80,7 +80,7 @@ def trial(name, app, case, corpus, root, identifier, timeout, recorder):
     contaminated = False
     while time.perf_counter() < baseline_until:
         data, _ = packet(recorder)
-        contaminated |= matches(*tone_score(data))
+        contaminated |= matches(*tone_score(data, frequency=case.get("frequency", 997)))
     if contaminated:
         row["status"] = "baseline_contaminated"
         return row
@@ -96,7 +96,7 @@ def trial(name, app, case, corpus, root, identifier, timeout, recorder):
                 begin = time.perf_counter_ns()
                 data, issues = packet(recorder)
                 received = time.perf_counter_ns()
-                rms, fraction = tone_score(data)
+                rms, fraction = tone_score(data, frequency=case.get("frequency", 997))
                 completed = time.perf_counter_ns()
                 match = matches(rms, fraction)
                 samples.append(dict(begin_ns=begin, received_ns=received, completed_ns=completed,
@@ -137,6 +137,10 @@ def main():
     parser.add_argument("--repeats", type=int, default=30)
     parser.add_argument("--warmup-blocks", type=int, default=1)
     parser.add_argument("--timeout", type=float, default=8)
+    parser.add_argument("--cases", default="")
+    parser.add_argument("--kinds", default="audio", help="Comma-separated audio/video manifest kinds")
+    parser.add_argument("--apps", default="towavue,mpc-hc,vlc")
+    parser.add_argument("--towavue-baseline", type=Path)
     args = parser.parse_args()
     root, corpus = args.root.resolve(), args.corpus.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -144,7 +148,14 @@ def main():
         raise SystemExit("Use a new output directory")
     (root / "logs").mkdir(exist_ok=True)
     apps = audio_apps(root, Path(__file__).resolve().parents[2])
-    cases = [case for case in json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))["files"] if case["kind"] == "audio"]
+    apps = {name: app for name, app in apps.items() if name in args.apps.split(',')}
+    if args.towavue_baseline:
+        apps['towavue-before'] = dict(apps['towavue'], exe=args.towavue_baseline.resolve())
+    cases = [case for case in json.loads((corpus / "manifest.json").read_text(encoding="utf-8"))["files"] if case["kind"] in args.kinds.split(',')]
+    if args.cases:
+        cases = [case for case in cases if case['id'] in args.cases.split(',')]
+    if not cases:
+        parser.error("No eligible tone fixtures")
     speaker = sc.default_speaker()
     loopback = sc.get_microphone(id=speaker.id, include_loopback=True)
     if not loopback.isloopback:
@@ -155,7 +166,7 @@ def main():
                     script_sha256=sha(Path(__file__)), helper_sha256=sha(Path(__file__).with_name("visual.py")),
                     corpus_sha256=sha(corpus / "manifest.json"),
                     apps={name: dict(exe=str(app["exe"]), sha256=sha(app["exe"]), args=app["args"], after=app["after"]) for name, app in apps.items()},
-                    endpoint="Second consecutive loopback packet matching the 997 Hz fixture tone, after detector completes",
+                    endpoint="Second consecutive loopback packet matching the manifest fixture frequency (default 997 Hz), after detector completes",
                     limitations=["Software receipt/detection, not acoustic onset or native WASAPI sample timestamps", "Latency bounds are equal for this measured callback endpoint; they do not bound true sound onset", "WASAPI buffering and detector confirmation are included", "Master endpoint volume is unchanged; app volume configured to 20 percent", "No microphone and no retained audio", "Synthetic warm-filesystem new-process pilot"])
     (root / "run.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
     rng = random.Random(10405)

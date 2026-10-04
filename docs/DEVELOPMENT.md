@@ -4,6 +4,10 @@ Use this guide for setup and checks, [the local dashboard](../.dashboard/README.
 
 The test profile keeps line-table debug information: full native app-test type information exceeds the MSVC PDB size limit (LNK1140). Ordinary development and Release product profiles are unchanged. Use the standard test command below; avoid restarting a live compiler merely because it has not produced output.
 
+The external media benchmark runners and their observation boundaries are documented in [scripts/benchmark/README](../scripts/benchmark/README.md). Keep fixture profiles and results private. Their native-input, desktop-capture and loopback timings are separate from the internal diagnostic clocks below.
+
+With `presentation-verification`, native Open file/folder dialogs also emit `DIALOG_STAGE stage=<name> qpc=<tick>`. Stages bracket `Show` return, copied path availability, dialog release, STA apartment cleanup and worker notification. Correlate these with the owned harness's QPC and frequency to distinguish selection/cleanup latency from image request-to-submission latency. Normal builds have no stage output. These markers do not identify physical input time or compositor completion.
+
 ## Build and run
 
 Windows x64, Visual Studio's Desktop development with C++ workload, Windows SDK, LLVM/libclang, Git, and PowerShell are required. Rust and components are pinned by [rust-toolchain.toml](../rust-toolchain.toml); dependencies by [Cargo.lock](../Cargo.lock).

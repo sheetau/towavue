@@ -95,7 +95,8 @@ def plot(path, summaries, prefix, title):
     ax.set_yticks(range(len(cases)), [LABELS.get(case, case) for case in cases])
     ax.invert_yaxis()
     ax.set_xlabel("Milliseconds from command launch (smaller is faster)")
-    detail = ("Bar: median loopback detector completion; tick: p95" if prefix == "audio" else
+    loopback = all(row['endpoint'] == 'loopback_detector_completion' for row in selected)
+    detail = ("Bar: median loopback detector completion; tick: p95" if loopback else
               "Bar: median capture upper bound; black segment: median bounds; tick: p95 upper bound")
     ax.set_title(title + "\n" + detail, fontsize=11)
     ax.grid(axis="x", alpha=.2)
@@ -120,7 +121,9 @@ def main():
     write_csv(args.root / "trials.csv", flat)
     (args.root / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n", encoding="utf-8")
     plot(args.root / "images", summaries, "image", "Synthetic images: warm-file new-process recognizable content")
-    plot(args.root / "videos", summaries, "video", "Synthetic video: warm-file new-process first recognizable frame")
+    video_audio = all(row['endpoint'] == 'loopback_detector_completion' for row in summaries)
+    plot(args.root / "videos", summaries, "video", "Synthetic video: warm-file new-process " +
+         ("embedded audio loopback detection" if video_audio else "first recognizable frame"))
     plot(args.root / "audio", summaries, "audio", "Synthetic audio: warm-file new-process loopback detection")
     print(json.dumps({"groups": len(summaries), "attempts": sum(row["attempts"] for row in summaries),
                       "successes": sum(row["successes"] for row in summaries)}))

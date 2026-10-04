@@ -33,6 +33,55 @@ fn generate(ffmpeg: &Path, path: &Path, codec: &str, seconds: u32) -> Result<(),
     Ok(())
 }
 
+fn reference_detail(ffmpeg: &Path, path: &Path, seconds: u32) -> Result<Vec<f32>, Box<dyn Error>> {
+    // Decode independently of the runtime's timeline/envelope implementation.
+    // Lossy AAC can overshoot the source sine's peak; compare decoded columns
+    // instead of assuming an amplitude bound from the uncompressed generator.
+    // This verification is outside all timers, and uses only our 1/180 s inputs.
+    let output = Command::new(ffmpeg)
+        .creation_flags(0x0800_0000)
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args([
+            "-t",
+            &seconds.to_string(),
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            "-f",
+            "f32le",
+            "pipe:1",
+        ])
+        .output()?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned().into());
+    }
+    let frames = seconds as usize * 48_000;
+    assert_eq!(
+        output.stdout.len(),
+        frames * 8,
+        "reference stereo frame count"
+    );
+    assert_eq!(frames % 960, 0, "fixture has whole samples per column");
+    Ok(output
+        .stdout
+        .chunks_exact(frames / 960 * 8)
+        .map(|column| {
+            column
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|bytes| {
+                    let value = f32::from_le_bytes(*bytes);
+                    assert!(value.is_finite(), "reference PCM must be finite");
+                    value.abs()
+                })
+                .fold(0.0, f32::max)
+        })
+        .collect())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     if cfg!(debug_assertions) {
         return Err("run this cost comparison with --release".into());
@@ -57,6 +106,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 &[],
             )
             .ok_or("fixture timeline")?;
+            let reference_detail = reference_detail(&ffmpeg, &path, seconds)?;
+            assert!(reference_detail.iter().all(|value| *value > 0.05));
             let mut expected_overview = None;
             let mut expected_detail = None;
             for round in 0..3 {
@@ -94,11 +145,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 assert_eq!(cached, overview.0);
                 assert_eq!((overview.0.width, overview.0.height), (640, 96));
                 assert_eq!(detail.0.len(), 960);
+                let maximum_error = detail
+                    .0
+                    .iter()
+                    .zip(&reference_detail)
+                    .map(|(actual, expected)| {
+                        assert!(actual.is_finite(), "runtime envelope must be finite");
+                        (actual - expected).abs()
+                    })
+                    .fold(0.0, f32::max);
                 assert!(
-                    detail
-                        .0
-                        .iter()
-                        .all(|value| value.is_finite() && *value > 0.05 && *value < 0.4)
+                    maximum_error <= 0.000001,
+                    "runtime and independent CLI detail differ: {maximum_error}"
                 );
                 if let Some(expected) = &expected_overview {
                     assert_eq!(&overview.0, expected);

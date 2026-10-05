@@ -1769,7 +1769,7 @@ fn run_parallel_video_worker(
     let batch_size = crate::renderer::preroll_pacing::batch_size();
     let mut pacing = match &config {
         ParallelVideoConfig::Hardware(_, device) if batch_size > 0 && preroll_before.is_some() => {
-            crate::renderer::preroll_pacing::PrerollPacing::new(device)
+            crate::renderer::preroll_pacing::PrerollPacing::new(device, batch_size)
         }
         _ => None,
     };
@@ -1841,9 +1841,9 @@ fn run_parallel_video_worker(
                         packet_index += 1;
                     }
                     received?;
-                    if let Some(completion) = &pacing {
+                    if let Some(completion) = &mut pacing {
                         paced_packets += 1;
-                        if paced_packets.is_multiple_of(batch_size) {
+                        if paced_packets.is_multiple_of(completion.packet_interval()) {
                             #[cfg(feature = "presentation-verification")]
                             trace(5, packet_index - 1);
                             let result = completion.wait(cancelled);
@@ -1855,7 +1855,7 @@ fn run_parallel_video_worker(
                                     return Err(DecodeError::ConsumerClosed);
                                 }
                                 crate::renderer::preroll_pacing::Completion::Unavailable => {
-                                    // Pacing is optional. Never reuse an unfinished/failed query;
+                                    // Pacing is optional. Never reuse an unfinished/failed marker;
                                     // continue exact decoding with ordinary error/recovery handling.
                                     pacing = None;
                                     #[cfg(feature = "presentation-verification")]

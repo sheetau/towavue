@@ -453,3 +453,58 @@ fn native_recovery_device_cannot_receive_an_old_decoder() {
     assert!(retained.device.same_device(&recovered_device));
     equal(&pixels(&held), &expected);
 }
+
+#[test]
+#[ignore = "explicit video corpus and real D3D11 fence/query pixel comparison; run alone"]
+fn native_overlapping_fence_and_query_preserve_source_planes_and_held_frames() {
+    use crate::renderer::preroll_pacing::{FENCE_SUBMITTED, FORCE_QUERY, SUBMITTED};
+    struct QueryPolicy(bool);
+    impl Drop for QueryPolicy {
+        fn drop(&mut self) {
+            FORCE_QUERY.store(self.0, Ordering::Relaxed);
+        }
+    }
+    let _query_policy = QueryPolicy(FORCE_QUERY.load(Ordering::Relaxed));
+    let _pacing = Pacing::set(0);
+    let _reuse = Policy::set(false);
+    let paths: Vec<_> = std::env::split_paths(
+        &std::env::var_os("TOWAVUE_HW_REUSE_FIXTURES").expect("explicit video fixtures"),
+    )
+    .collect();
+    assert!(!paths.is_empty());
+    let device = GraphicsDevice::hardware_for_test().expect("native hardware device");
+    let before_fence = FENCE_SUBMITTED.load(Ordering::Relaxed);
+    let before_all = SUBMITTED.load(Ordering::Relaxed);
+    for (case, path) in paths.iter().enumerate() {
+        let original = std::fs::read(path).expect("read-only source");
+        for target_ms in [1215, 3615, 7215, 9615] {
+            let target = MediaTime::from_nanoseconds(target_ms * 1_000_000);
+            let mut expected = None;
+            for mode in 0..3 {
+                crate::renderer::preroll_pacing::BATCH_OVERRIDE
+                    .store(if mode == 0 { 0 } else { 8 }, Ordering::Relaxed);
+                FORCE_QUERY.store(mode == 1, Ordering::Relaxed);
+                let mut input = ParallelInput::open_tracked_video(path, &|| false).expect("input");
+                let held = select(&mut input, &device, target);
+                let observed = pixels(&held);
+                if let Some(reference) = &expected {
+                    equal(&observed, reference);
+                } else {
+                    expected = Some(observed);
+                }
+                let _next = select(&mut input, &device, MediaTime::ZERO);
+                equal(&pixels(&held), expected.as_ref().expect("reference"));
+            }
+        }
+        assert_eq!(std::fs::read(path).expect("unchanged source"), original);
+        eprintln!("PACING_PLANES case={case} modes=3 targets=4 held=verified");
+    }
+    let fences = FENCE_SUBMITTED.load(Ordering::Relaxed) - before_fence;
+    let all = SUBMITTED.load(Ordering::Relaxed) - before_all;
+    assert!(
+        fences > 0,
+        "real fence markers required on this explicit test host"
+    );
+    assert!(all > fences, "real query fallback markers required");
+    eprintln!("PACING_MARKERS fence={fences} query={}", all - fences);
+}

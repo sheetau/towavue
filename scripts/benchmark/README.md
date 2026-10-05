@@ -133,7 +133,10 @@ whose results must not be assumed to represent the same decoder selection.
   that HWND visibility measures COM return or compositor fade completion.
   Keep the full confirmation-to-content result alongside this narrower metric.
 - **Display settings:** towavue keeps default HQ/Fit; IrfanView uses explicit
-  Fit-to-window and Resample, verified by its native menu state. These labels
+  Fit-to-window and Resample, verified by its native menu state. The startup
+  runner refreshes lazy check states with WM_INITMENU after timing, retains the
+  menu audit, and rejects a settings mismatch. Unrefreshed menu flags do not
+  establish that a setting is disabled. These labels
   do not certify identical filters or color processing. Actual marker dimensions
   and representative viewport screenshots remain evidence.
 - **Folder Open:** towavue's native folder picker is compared descriptively with

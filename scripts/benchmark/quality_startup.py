@@ -9,7 +9,7 @@ from pathlib import Path
 import random
 import time
 import numpy as np
-from interaction import Session, CaptureUnavailable
+from interaction import Session, CaptureUnavailable, menu_items
 from visual import prepare_apps,detect,normalize,windows,geometry,U,W,sha
 
 
@@ -36,7 +36,7 @@ def main():
     schedule=[(n,f) for n in names for f in files]
     (root/'run.json').write_text(json.dumps({'repeats':args.repeats,'seed':104065,
         'corpus_sha256':sha(corpus/'manifest.json'),'kinds':args.kinds,
-        'settings':'towavue default HQ and Fit; Irfan fit-to-window and UseResample=1',
+        'settings':'towavue default HQ and Fit; Irfan Fit/Resample audited after timing via refreshed native menu state',
         'apps':{name:{'exe':str(apps[name]['exe']),'sha256':sha(apps[name]['exe'])} for name in names},
         'recognizable_endpoint':'all 24 target cells visible in owned 800x650 client',
         'convergence_endpoint':'first target capture with mean absolute RGB error <= 0.5 and <=1% pixels above max-channel error 8 against settled same-app viewport',
@@ -95,6 +95,14 @@ def main():
                                     if block==0:image.save(folder/'settled.png')
                                     break
                         else:absent=begin
+                    if row['status']=='ok' and name=='irfanview':
+                        # Refresh lazy native check states after every timed endpoint.
+                        # Reading an unopened menu without WM_INITMENU reports stale flags.
+                        U.SendMessageW(s.hwnd,0x116,U.GetMenu(s.hwnd),0)
+                        menus=menu_items(U.GetMenu(s.hwnd))
+                        (folder/'menus-after-timing.json').write_text(json.dumps(menus,indent=2),encoding='utf-8')
+                        row['fit_resample_checked']=all(next(m for m in menus if m['id']==i)['state']&8 for i in (28,1091))
+                        if not row['fit_resample_checked']:row['status']='settings_mismatch'
                     row.update(start_ns=s.started,samples=samples,command=s.command,normalization_count=normalizations)
                 except Exception as error:
                     row.update(status='setup_error',detail=str(error))

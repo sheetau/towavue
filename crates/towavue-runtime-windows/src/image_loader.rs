@@ -58,6 +58,7 @@ impl ImageStamp {
 
 struct ImageCache {
     entries: VecDeque<(PathBuf, ImageStamp, Arc<DecodedImage>)>,
+    recent_foreground: VecDeque<(PathBuf, ImageStamp)>,
     byte_limit: usize,
     bytes: usize,
     #[cfg(test)]
@@ -74,6 +75,7 @@ impl ImageCache {
     fn new(byte_limit: usize) -> Self {
         Self {
             entries: VecDeque::new(),
+            recent_foreground: VecDeque::new(),
             byte_limit,
             bytes: 0,
             #[cfg(test)]
@@ -107,6 +109,57 @@ impl ImageCache {
     }
 
     fn insert(&mut self, path: PathBuf, stamp: ImageStamp, image: Arc<DecodedImage>) {
+        self.insert_with_priority(path, stamp, image, false);
+    }
+
+    fn insert_foreground(&mut self, path: PathBuf, stamp: ImageStamp, image: Arc<DecodedImage>) {
+        self.insert_with_priority(path.clone(), stamp, image, true);
+        self.recent_foreground.retain(|entry| entry.0 != path);
+        self.recent_foreground.push_back((path, stamp));
+        while self.recent_foreground.len() > 2 {
+            self.recent_foreground.pop_front();
+        }
+    }
+
+    fn preferred(&self, entry: &(PathBuf, ImageStamp, Arc<DecodedImage>)) -> bool {
+        // At most two quarter-budget originals receive speculative eviction
+        // preference. Large originals keep their old admission policy.
+        entry.2.retained_bytes() <= self.byte_limit / 4
+            && self
+                .recent_foreground
+                .iter()
+                .any(|recent| recent.0 == entry.0 && recent.1 == entry.1)
+    }
+
+    fn prefetch_allocation(&self) -> (usize, Vec<(PathBuf, ImageStamp)>) {
+        // Reserve every preferred original up front, even if it is at the end
+        // of a plan that cannot reach it. Charge matching cache hits only once.
+        let preferred: Vec<_> = self
+            .entries
+            .iter()
+            .filter(|entry| self.preferred(entry))
+            .collect();
+        let bytes: usize = preferred.iter().map(|entry| entry.2.retained_bytes()).sum();
+        (
+            self.byte_limit - bytes,
+            preferred
+                .into_iter()
+                .map(|entry| (entry.0.clone(), entry.1))
+                .collect(),
+        )
+    }
+
+    fn insert_prefetched(&mut self, path: PathBuf, stamp: ImageStamp, image: Arc<DecodedImage>) {
+        self.insert_with_priority(path, stamp, image, true);
+    }
+
+    fn insert_with_priority(
+        &mut self,
+        path: PathBuf,
+        stamp: ImageStamp,
+        image: Arc<DecodedImage>,
+        prefer_history: bool,
+    ) {
         if let Some(index) = self.entries.iter().position(|entry| entry.0 == path) {
             let (_, _, removed) = self.entries.remove(index).expect("existing entry");
             self.bytes -= removed.retained_bytes();
@@ -118,7 +171,15 @@ impl ImageCache {
             return;
         }
         while self.entries.len() >= CACHE_ENTRY_LIMIT || self.bytes + bytes > self.byte_limit {
-            let (_, _, removed) = self.entries.pop_front().expect("cached image to evict");
+            let index = if prefer_history {
+                self.entries
+                    .iter()
+                    .position(|entry| !self.preferred(entry))
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            let (_, _, removed) = self.entries.remove(index).expect("cached image to evict");
             self.bytes -= removed.retained_bytes();
         }
         self.bytes += bytes;
@@ -507,11 +568,11 @@ impl ImageLoader {
                 .parallel_decode
                 .clone();
             let mut lookahead: Option<parallel::Ahead> = None;
-            let byte_limit = cache.lock().expect("image cache").byte_limit;
-            let mut remaining = byte_limit;
+            let mut paths: VecDeque<_> = unique.into();
+            let (mut remaining, mut reserved) =
+                cache.lock().expect("image cache").prefetch_allocation();
             #[cfg(any(test, feature = "render-verification"))]
             let mut preceding_cached_bytes = 0;
-            let mut paths: VecDeque<_> = unique.into();
             loop {
                 let path = {
                     let mut mailbox = shared.0.lock().expect("image mailbox");
@@ -533,7 +594,8 @@ impl ImageLoader {
                     if let Some(pending) = work.pending_paths.take() {
                         paths = pending;
                         generation = next_generation;
-                        remaining = byte_limit;
+                        (remaining, reserved) =
+                            cache.lock().expect("image cache").prefetch_allocation();
                         #[cfg(any(test, feature = "render-verification"))]
                         {
                             preceding_cached_bytes = 0;
@@ -579,6 +641,10 @@ impl ImageLoader {
                     .iter()
                     .find(|entry| entry.0 == path && entry.1 == stamp)
                     .map(|entry| Arc::clone(&entry.2));
+                let reserved_hit = cached.is_some()
+                    && reserved
+                        .iter()
+                        .any(|entry| entry.0 == path && entry.1 == stamp);
                 if lookahead.as_ref().is_some_and(|ahead| {
                     (ahead.path == path && cached.is_some())
                         || (ahead.path != path
@@ -681,10 +747,12 @@ impl ImageLoader {
                     }
                     Arc::new(image)
                 };
-                if image.retained_bytes() > remaining || !current() {
+                if (!reserved_hit && image.retained_bytes() > remaining) || !current() {
                     continue;
                 }
-                remaining -= image.retained_bytes();
+                if !reserved_hit {
+                    remaining -= image.retained_bytes();
+                }
                 #[cfg(any(test, feature = "render-verification"))]
                 if was_cached {
                     preceding_cached_bytes += image.retained_bytes();
@@ -694,7 +762,7 @@ impl ImageLoader {
                     if cancellation.is_cancelled() || work_cancellation.is_cancelled() {
                         return;
                     }
-                    cache.insert(path.clone(), stamp, Arc::clone(&image));
+                    cache.insert_prefetched(path.clone(), stamp, Arc::clone(&image));
                 }
                 {
                     let mut mailbox = shared.0.lock().expect("image mailbox");
@@ -792,11 +860,16 @@ fn run_worker(
         if clear_cache {
             let mut cache = cache.lock().expect("image cache");
             cache.entries.clear();
+            cache.recent_foreground.clear();
             cache.bytes = 0;
         }
         let Some((paths, mut remaining, allow_preview)) = pending else {
             continue;
         };
+        if paths.len() != 1 {
+            // Reading spreads retain their existing page-order cache policy.
+            cache.lock().expect("image cache").recent_foreground.clear();
+        }
         // A missing early page can evict later pages of this same spread. Borrow
         // their immutable originals for this request, without copying pixels or
         // changing cache limits. Single-image navigation needs no lookahead.
@@ -971,11 +1044,12 @@ fn run_worker(
                     && let Some(stamp) = stamp
                     && ImageStamp::read(&path) == Some(stamp)
                 {
-                    cache.lock().expect("image cache").insert(
-                        path.clone(),
-                        stamp,
-                        Arc::clone(image),
-                    );
+                    let mut cache = cache.lock().expect("image cache");
+                    if total == 1 {
+                        cache.insert_foreground(path.clone(), stamp, Arc::clone(image));
+                    } else {
+                        cache.insert(path.clone(), stamp, Arc::clone(image));
+                    }
                 }
             }
             let source = (index == 0 && result.is_ok())
@@ -1035,6 +1109,7 @@ fn run_worker(
 
 #[cfg(test)]
 mod tests {
+    mod history;
     mod neighbors;
     mod parallel;
     mod pressure;

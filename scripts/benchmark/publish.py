@@ -175,28 +175,28 @@ def style_axis(ax):
 
 def overview_chart(items, destination, updated):
     plt = plotting()
-    fig, axes = plt.subplots(len(items), 1, figsize=(14, 26.5))
+    fig, axes = plt.subplots(len(items), 1, figsize=(14, 21.5))
     for ax, item in zip(axes, items):
         values = item["values_ms"]
         best, maximum = min(values.values()), max(values.values())
         for i, (app, value) in enumerate(values.items()):
             leader = math.isclose(value, best, abs_tol=1e-9)
-            ax.barh(i, value, height=.60, color=COLORS[app], alpha=.95 if leader else .23)
-            ax.text(value + maximum * .015, i, f"{value:.1f} ms", va="center", fontsize=13,
+            ax.barh(i, value, height=.52, color=COLORS[app], alpha=.95 if leader else .23)
+            ax.text(value + maximum * .015, i, f"{value:.1f} ms", va="center", fontsize=11.5,
                     weight="bold" if leader else "normal", color="#17212f")
-        ax.set_yticks(range(len(values)), [app_label(a, item["workload"] == "Image startup") for a in values], fontsize=13)
+        ax.set_yticks(range(len(values)), [app_label(a, item["workload"] == "Image startup") for a in values], fontsize=11.5)
         ax.invert_yaxis()
         ax.set_xlim(0, maximum * 1.16)
-        ax.set_title(item["workload"], loc="left", fontsize=17, weight="bold", pad=12)
+        ax.set_title(item["workload"], loc="left", fontsize=15, weight="bold", pad=8)
         ax.set_xlabel(f"ms · {item['fixtures']} fixtures", fontsize=11, color="#526071")
         style_axis(ax)
-    fig.suptitle("towavue · media benchmark", fontsize=25, weight="bold", x=.12, ha="left", y=.989)
-    fig.text(.12, .966, "Median across fixtures, after taking each fixture's median across actions. Lower is faster.", fontsize=12)
-    fig.text(.12, .034, "Shorter bars are faster. Solid: fastest observed value; faded: other apps.", fontsize=12)
+    fig.suptitle("towavue · media benchmark", fontsize=22, weight="bold", x=.12, ha="left", y=.989)
+    fig.text(.12, .966, "Median across fixtures, after taking each fixture's median across actions. Lower is faster.", fontsize=11)
+    fig.text(.12, .034, "Shorter bars are faster. Solid: fastest observed value; faded: other apps.", fontsize=11)
     fig.text(.12, .024, "Each panel has its own scale; compare apps within a panel. Descriptive values, not a significance test.", fontsize=11)
     fig.text(.12, .014, f"{updated} · Windows 11 · Ryzen 9 9900X · RTX 5070 Ti · Development builds.", fontsize=11)
-    fig.text(.12, .004, "* Photos startup uses URI activation with a different process boundary. See the detailed benchmark for navigation conditions.", fontsize=10)
-    fig.subplots_adjust(left=.12, right=.98, top=.938, bottom=.068, hspace=1.05)
+    fig.text(.12, .004, "* Photos startup uses URI activation with a different process boundary. See the detailed benchmark for navigation conditions.", fontsize=9)
+    fig.subplots_adjust(left=.12, right=.98, top=.938, bottom=.068, hspace=.90)
     save_figure(fig, destination / "overview")
     plt.close(fig)
 

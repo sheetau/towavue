@@ -307,14 +307,17 @@ fn search_field(
         .frame_when_inactive(false),
     )
     .help_text(Text::GalleryFilter.in_language(language));
-    if *filter == Some(MediaKind::Image) {
-        let galley = ui.painter().layout_no_wrap(
-            "\u{e04c}".into(),
-            crate::fonts::image_icon_font(),
+    if let Some(kind) = *filter {
+        crate::fluent::paint(
+            ui,
+            filter_button.rect,
+            match kind {
+                MediaKind::Image => crate::fluent::Kind::Image,
+                MediaKind::Video => crate::fluent::Kind::Video,
+                MediaKind::Audio => crate::fluent::Kind::Audio,
+            },
             chrome::FOREGROUND,
         );
-        let origin = filter_button.rect.center() - galley.mesh_bounds.center().to_vec2();
-        ui.painter().galley(origin, galley, chrome::FOREGROUND);
     }
     filter_button.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -854,41 +857,48 @@ mod tests {
                     );
                     assert!(border.right() - clear.right() >= 1.0);
                     assert!(border.contains_rect(node_rect(&output, "Open File…")));
-                    let icon = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text)
-                                if text.galley.text()
-                                    == match filter {
-                                        None => "\u{eaf1}",
-                                        Some(MediaKind::Image) => "\u{e04c}",
-                                        Some(MediaKind::Video) => "\u{ead9}",
-                                        Some(MediaKind::Audio) => "\u{ec1b}",
-                                    } =>
-                            {
-                                Some(text)
-                            }
-                            _ => None,
-                        })
-                        .expect("filter icon");
-                    if filter == Some(MediaKind::Image) {
-                        let ink = icon.galley.mesh_bounds.translate(icon.pos.to_vec2());
-                        assert!(filter_rect.contains_rect(ink));
-                        assert!((ink.center() - filter_rect.center()).length() <= 1.0 / density);
-                    }
-                    let expected = if filter.is_some() {
-                        chrome::FOREGROUND
-                    } else {
-                        chrome::MUTED
-                    };
-                    assert!(
-                        icon.galley
-                            .job
-                            .sections
+                    if filter.is_some() {
+                        let mesh = output
+                            .shapes
                             .iter()
-                            .all(|section| section.format.color == expected)
-                    );
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Mesh(mesh)
+                                    if filter_rect.contains_rect(mesh.calc_bounds()) =>
+                                {
+                                    Some(mesh)
+                                }
+                                _ => None,
+                            })
+                            .expect("Fluent filter icon");
+                        assert!(
+                            (mesh.calc_bounds().center() - filter_rect.center()).length()
+                                <= 1.0 / density
+                        );
+                        assert!((mesh.calc_bounds().width() - 16.0).abs() <= 1.0 / density);
+                        assert!(
+                            mesh.vertices
+                                .iter()
+                                .all(|vertex| vertex.color == chrome::FOREGROUND)
+                        );
+                    } else {
+                        let icon = output
+                            .shapes
+                            .iter()
+                            .find_map(|shape| match &shape.shape {
+                                egui::Shape::Text(text) if text.galley.text() == "\u{eaf1}" => {
+                                    Some(text)
+                                }
+                                _ => None,
+                            })
+                            .expect("unfiltered icon");
+                        assert!(
+                            icon.galley
+                                .job
+                                .sections
+                                .iter()
+                                .all(|s| s.format.color == chrome::MUTED)
+                        );
+                    }
                 }
             }
         }

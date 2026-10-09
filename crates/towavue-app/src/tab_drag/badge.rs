@@ -1,4 +1,4 @@
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
+use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Kind {
@@ -91,9 +91,7 @@ impl Badge {
     }
 }
 
-// The reference SVG coordinates and CSS are from Monapad's cursor.html:
-// Tabler arrow-right, browser-plus and ban. See assets/drag-badge/README.md.
-// Transform geometry before stroking to retain CSS non-scaling-stroke (1 DIP).
+// Preserve the Monapad badge decoration and use the shared Fluent symbols.
 pub(crate) fn render(kind: Kind, size: u32) -> Option<Pixmap> {
     let mut image = Pixmap::new(size, size)?;
     let density = size as f32 / 23.0;
@@ -121,57 +119,18 @@ pub(crate) fn render(kind: Kind, size: u32) -> Option<Pixmap> {
     } else {
         paint.set_color_rgba8(0, 0, 0, 255);
     }
-    let mut builder = PathBuilder::new();
-    match kind {
-        Kind::Move => {
-            builder.move_to(5.0, 12.0);
-            builder.line_to(19.0, 12.0);
-            builder.move_to(13.0, 18.0);
-            builder.line_to(19.0, 12.0);
-            builder.move_to(13.0, 6.0);
-            builder.line_to(19.0, 12.0);
-        }
-        Kind::New => {
-            builder.move_to(4.0, 8.0);
-            builder.line_to(20.0, 8.0);
-            builder.move_to(12.0, 20.0);
-            builder.line_to(6.0, 20.0);
-            let k = 2.0 * (1.0 - 0.552_284_8);
-            builder.cubic_to(4.0 + k, 20.0, 4.0, 20.0 - k, 4.0, 18.0);
-            builder.line_to(4.0, 6.0);
-            builder.cubic_to(4.0, 4.0 + k, 4.0 + k, 4.0, 6.0, 4.0);
-            builder.line_to(18.0, 4.0);
-            builder.cubic_to(20.0 - k, 4.0, 20.0, 4.0 + k, 20.0, 6.0);
-            builder.line_to(20.0, 12.0);
-            builder.move_to(8.0, 4.0);
-            builder.line_to(8.0, 8.0);
-            builder.move_to(16.0, 19.0);
-            builder.line_to(22.0, 19.0);
-            builder.move_to(19.0, 16.0);
-            builder.line_to(19.0, 22.0);
-        }
-        Kind::Forbidden => {
-            builder.push_circle(12.0, 12.0, 9.0);
-            builder.move_to(5.7, 5.7);
-            builder.line_to(18.3, 18.3);
-        }
-    }
-    let scale = density * 17.0 / 24.0;
-    let path = builder.finish()?.transform(Transform::from_row(
-        scale,
-        0.0,
-        0.0,
-        scale,
-        3.0 * density,
-        2.5 * density,
-    ))?;
-    let stroke = Stroke {
-        width: density,
-        line_cap: LineCap::Round,
-        line_join: LineJoin::Round,
-        ..Default::default()
+    let icon = match kind {
+        Kind::Move => crate::fluent::Kind::Move,
+        Kind::New => crate::fluent::Kind::New,
+        Kind::Forbidden => crate::fluent::Kind::Forbidden,
     };
-    image.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+    let scale = density * 17.0 / 16.0;
+    crate::fluent::fill(
+        &mut image,
+        icon,
+        &paint,
+        Transform::from_row(scale, 0.0, 0.0, scale, 3.0 * density, 2.5 * density),
+    );
     Some(image)
 }
 

@@ -1766,9 +1766,12 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     assert_eq!(title.galley.rows.len(), 4);
     assert!(title.galley.elided);
     let thumbnail = card(&output, &name);
-    assert!((title.pos.x - thumbnail.left()).abs() <= 1.0 / density);
-    assert!(title.pos.y >= thumbnail.bottom() + 3.0);
-    assert!(title.galley.size().x <= thumbnail.width() + 1.0 / density);
+    assert!((title.pos.x - thumbnail.center().x).abs() <= 1.0 / density);
+    assert!(
+        (title.pos.y - thumbnail.center().y - layout::DIAMETER * 0.5 - 12.0).abs() <= 1.0 / density
+    );
+    assert_eq!(title.galley.job.halign, egui::Align::Center);
+    assert_eq!(title.galley.job.wrap.max_width, layout::DIAMETER);
     let third_id = output
         .platform_output
         .accesskit_update

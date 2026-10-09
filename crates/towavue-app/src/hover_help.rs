@@ -3,6 +3,9 @@ use egui::{Response, Tooltip, Ui, WidgetText};
 pub const TEXT_SIZE: f32 = 12.0;
 pub const PADDING: i8 = 4;
 
+#[cfg(test)]
+mod visual_tests;
+
 pub fn shortcut(label: &str, keys: &str) -> String {
     if keys.is_empty() {
         label.to_owned()
@@ -13,6 +16,37 @@ pub fn shortcut(label: &str, keys: &str) -> String {
 
 pub fn style(ui: &mut Ui) {
     ui.style_mut().override_font_id = Some(egui::FontId::proportional(TEXT_SIZE));
+}
+
+/// Use one cap-height reference so descenders never move a help label's baseline.
+pub fn text_offset(ui: &Ui) -> f32 {
+    let reference = ui.painter().layout_no_wrap(
+        "H".into(),
+        egui::FontId::proportional(TEXT_SIZE),
+        ui.visuals().text_color(),
+    );
+    reference.size().y * 0.5 - reference.mesh_bounds.center().y
+}
+
+pub fn content<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    style(ui);
+    let offset = text_offset(ui);
+    let layer = ui.layer_id();
+    let start = ui
+        .ctx()
+        .graphics_mut(|graphics| graphics.entry(layer).next_idx());
+    let result = add(ui);
+    ui.ctx().graphics_mut(|graphics| {
+        let list = graphics.entry(layer);
+        for index in start.0..list.next_idx().0 {
+            list.mutate_shape(egui::layers::ShapeIdx(index), |shape| {
+                if let egui::Shape::Text(text) = &mut shape.shape {
+                    text.pos.y += offset;
+                }
+            });
+        }
+    });
+    result
 }
 
 pub fn frame(style: &egui::Style) -> egui::Frame {
@@ -97,8 +131,7 @@ fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
         let mut tooltip = Tooltip::for_widget(response);
         tooltip.popup = tooltip.popup.frame(frame(&response.ctx.global_style()));
         let content = |ui: &mut Ui| {
-            style(ui);
-            content(ui);
+            self::content(ui, content);
         };
         if above {
             // A bottom-bar label can be much narrower than its full-path help.
@@ -128,6 +161,50 @@ fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn help_and_caption_baselines_use_cap_height_independent_of_descenders() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let mut labels = Vec::new();
+            let output = context.run_ui(Default::default(), |ui| {
+                for text in ["H", "May 2026", "September 2026", "2026年9月"] {
+                    labels.push(
+                        frame(ui.style())
+                            .show(ui, |ui| content(ui, |ui| ui.label(text)))
+                            .inner
+                            .rect,
+                    );
+                    labels.push(crate::media_preview::caption(ui, |ui| ui.label(text)).rect);
+                }
+            });
+            let reference = context.fonts_mut(|fonts| {
+                fonts.layout_no_wrap(
+                    "H".into(),
+                    egui::FontId::proportional(TEXT_SIZE),
+                    egui::Color32::WHITE,
+                )
+            });
+            let text: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) => Some(text),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(text.len(), 8);
+            // Every line has the same cap offset from its logical layout center;
+            // a descender or CJK fallback must not recenter its individual ink box.
+            for (text, label) in text.iter().zip(labels) {
+                assert!(
+                    (text.pos.y + reference.mesh_bounds.center().y - label.center().y).abs()
+                        <= 1.0 / density
+                );
+            }
+        }
+    }
 
     #[test]
     fn long_filenames_wrap_to_four_rows_and_elide_at_status_text_size() {

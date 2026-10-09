@@ -273,9 +273,18 @@ fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == name => {
-                        Some(text.visual_bounding_rect())
-                    }
+                    egui::Shape::Text(text) if text.galley.text() == name => Some(
+                        context
+                            .fonts_mut(|fonts| {
+                                fonts.layout_no_wrap(
+                                    "H".into(),
+                                    egui::FontId::proportional(12.0),
+                                    chrome::FOREGROUND,
+                                )
+                            })
+                            .mesh_bounds
+                            .translate(text.pos.to_vec2()),
+                    ),
                     _ => None,
                 })
                 .expect("visible month label");
@@ -308,6 +317,16 @@ fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
             true,
             vec![egui::Event::PointerMoved(start), button(start, true)],
         );
+        // A one-pixel move stays inside the original month band and below
+        // egui's drag threshold, but must already move the scrollbar thumb.
+        let tiny_move = start + egui::vec2(0.0, 1.0 / density);
+        let immediate = frame(
+            &context,
+            &offsets,
+            true,
+            vec![egui::Event::PointerMoved(tiny_move)],
+        );
+        assert!((marker(&immediate, chrome::FOREGROUND)[0].y - tiny_move.y).abs() < 0.01);
         let end = point(0.6) + egui::vec2(-80.0, 0.0);
         let dragged = frame(
             &context,
@@ -320,9 +339,18 @@ fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "October 2026" => {
-                    Some(text.visual_bounding_rect())
-                }
+                egui::Shape::Text(text) if text.galley.text() == "October 2026" => Some(
+                    context
+                        .fonts_mut(|fonts| {
+                            fonts.layout_no_wrap(
+                                "H".into(),
+                                egui::FontId::proportional(12.0),
+                                chrome::FOREGROUND,
+                            )
+                        })
+                        .mesh_bounds
+                        .translate(text.pos.to_vec2()),
+                ),
                 _ => None,
             })
             .expect("visible dragged month label");
@@ -435,9 +463,16 @@ fn paint_only_month_help_does_not_intercept_underlying_clicks() {
                 _ => None,
             })
             .expect("month label");
+        let reference = context.fonts_mut(|fonts| {
+            fonts.layout_no_wrap(
+                "H".into(),
+                egui::FontId::proportional(12.0),
+                chrome::FOREGROUND,
+            )
+        });
         assert!(
-            (text.visual_bounding_rect().center().y - position.y).abs() < 0.01,
-            "visible glyphs are vertically centered"
+            (text.pos.y + reference.mesh_bounds.center().y - position.y).abs() < 0.01,
+            "capital height, not the descender in September, defines the baseline"
         );
         assert!(
             output.shapes.iter().any(|shape| matches!(&shape.shape,

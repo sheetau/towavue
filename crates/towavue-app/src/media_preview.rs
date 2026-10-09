@@ -72,10 +72,7 @@ pub fn tab_hovered(response: &Response) -> bool {
 pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::NONE
         .inner_margin(crate::hover_help::PADDING)
-        .show(ui, |ui| {
-            crate::hover_help::style(ui);
-            content(ui)
-        })
+        .show(ui, |ui| crate::hover_help::content(ui, content))
         .inner
 }
 

@@ -327,10 +327,7 @@ impl Icon {
     pub fn text(self) -> egui::RichText {
         let glyph = match self {
             Self::Filter => '\u{eaf1}',
-            // Gallery centers the smaller Seti outline inside the fixed icon box.
-            Self::Image => return egui::RichText::new(""),
-            Self::Video => '\u{ead9}',
-            Self::Audio => '\u{ec1b}',
+            Self::Image | Self::Video | Self::Audio => return egui::RichText::new(""),
             Self::OpenFile => '\u{ea94}',
             Self::OpenFolder => '\u{eaf7}',
             Self::Pause | Self::Play | Self::PreviousTrack | Self::NextTrack => {
@@ -432,14 +429,14 @@ fn button_with_sense(
         .inner
         .help_text(label);
     let artwork = match icon {
-        Icon::Play => Some(crate::lucide::Kind::Play),
-        Icon::Pause => Some(crate::lucide::Kind::Pause),
-        Icon::PreviousTrack => Some(crate::lucide::Kind::Previous),
-        Icon::NextTrack => Some(crate::lucide::Kind::Next),
+        Icon::Play => Some(crate::fluent::Kind::Play),
+        Icon::Pause => Some(crate::fluent::Kind::Pause),
+        Icon::PreviousTrack => Some(crate::fluent::Kind::Previous),
+        Icon::NextTrack => Some(crate::fluent::Kind::Next),
         _ => None,
     };
     if let Some(kind) = artwork {
-        crate::lucide::paint(
+        crate::fluent::paint(
             ui,
             response.rect,
             kind,
@@ -478,11 +475,11 @@ pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -
     );
     let color = if selected { FOREGROUND } else { MUTED };
     let kind = match icon {
-        AudioIcon::Repeat => crate::lucide::Kind::Repeat,
-        AudioIcon::RepeatOne => crate::lucide::Kind::RepeatOne,
-        AudioIcon::Shuffle => crate::lucide::Kind::Shuffle,
+        AudioIcon::Repeat => crate::fluent::Kind::Repeat,
+        AudioIcon::RepeatOne => crate::fluent::Kind::RepeatOne,
+        AudioIcon::Shuffle => crate::fluent::Kind::Shuffle,
     };
-    crate::lucide::paint(ui, response.rect, kind, color);
+    crate::fluent::paint(ui, response.rect, kind, color);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
@@ -761,7 +758,7 @@ mod tests {
                             egui::Shape::Mesh(mesh) if mesh.vertices.len() == 4 => Some(mesh),
                             _ => None,
                         })
-                        .expect("Lucide texture mesh");
+                        .expect("Fluent texture mesh");
                     for vertex in &image.vertices {
                         assert!(bounds.contains(vertex.pos));
                         let physical = vertex.pos * density;

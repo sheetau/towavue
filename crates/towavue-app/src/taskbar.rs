@@ -97,7 +97,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 }
 
 fn icon_pixels(size: u32) -> [Vec<u8>; 4] {
-    use crate::lucide::{Kind, render};
+    use crate::fluent::{Kind, render};
     [Kind::Previous, Kind::Play, Kind::Pause, Kind::Next].map(|kind| {
         let mut pixels = render(kind, size, 32.0)
             .expect("bounded taskbar icon")

@@ -132,7 +132,7 @@ fn bundled_transport_icons_keep_alpha_contrast_and_distinct_shapes_at_each_densi
                 assert_ne!(pixels, other);
             }
         }
-        if let Some(directory) = std::env::var_os("TOWAVUE_LUCIDE_ARTIFACTS") {
+        if let Some(directory) = std::env::var_os("TOWAVUE_FLUENT_ARTIFACTS") {
             let directory = PathBuf::from(directory);
             std::fs::create_dir_all(&directory).expect("artifact directory");
             for (index, pixels) in images.iter().enumerate() {

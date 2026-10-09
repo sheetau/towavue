@@ -1085,7 +1085,24 @@ impl Filmstrip {
                         indices.truncate(VISIBLE_PREVIEW_LIMIT - 1);
                         indices.push(target);
                     }
-                    let card_rect = |index| self.layout.rect(index, origin, viewport.size());
+                    let row_height = ui.fonts_mut(|fonts| {
+                        fonts.row_height(&FontId::proportional(crate::hover_help::TEXT_SIZE))
+                    });
+                    // Reserve four filename rows even before focus changes. Compact
+                    // windows shift the whole strip once, never individual thumbnails.
+                    let center_y = (origin.y + viewport.height() * 0.5).min(
+                        ui.clip_rect().bottom()
+                            - layout::DIAMETER * 0.5
+                            - 12.0
+                            - row_height * 4.0
+                            - 2.0,
+                    );
+                    let offset_y = center_y - (origin.y + viewport.height() * 0.5);
+                    let card_rect = |index| {
+                        self.layout
+                            .rect(index, origin, viewport.size())
+                            .translate(egui::vec2(0.0, offset_y))
+                    };
                     // Set the shared target before creating any button so queued
                     // pointer or Tab navigation + Enter cannot activate the old target.
                     let pointer_target =
@@ -1278,15 +1295,23 @@ impl Filmstrip {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
                         if response.has_focus() {
-                            let text = crate::hover_help::filename(
-                                ui,
-                                display_name(&item.path),
-                                rect.width(),
+                            let bounds = Rect::from_center_size(
+                                card_rect(index).center(),
+                                Vec2::splat(layout::DIAMETER),
                             );
+                            let mut job = egui::text::LayoutJob::simple(
+                                display_name(&item.path),
+                                FontId::proportional(crate::hover_help::TEXT_SIZE),
+                                crate::chrome::FOREGROUND,
+                                bounds.width(),
+                            );
+                            job.wrap.max_rows = 4;
+                            job.halign = egui::Align::Center;
+                            let text = ui.painter().layout_job(job);
                             ui.painter().galley(
-                                egui::pos2(rect.left(), rect.bottom() + 4.0),
+                                egui::pos2(bounds.center().x, bounds.bottom() + 12.0),
                                 text,
-                                crate::chrome::MUTED,
+                                crate::chrome::FOREGROUND,
                             );
                         }
                         response.help_text(item.path.display().to_string());
@@ -4375,9 +4400,28 @@ mod tests {
                             .iter()
                             .all(|section| section.format.font_id.size == 12.0)
                     );
-                    assert!((title.pos.x - bounds.x0 as f32).abs() <= 1.0 / density);
-                    assert!(title.pos.y >= bounds.y1 as f32 + 3.0);
-                    assert!(clip.contains(title.pos + title.galley.size()));
+                    assert!(
+                        (title.pos.x - (bounds.x0 + bounds.x1) as f32 * 0.5).abs() <= 1.0 / density
+                    );
+                    assert_eq!(title.galley.job.halign, egui::Align::Center);
+                    assert_eq!(title.galley.job.wrap.max_width, layout::DIAMETER);
+                    assert!(
+                        title
+                            .galley
+                            .job
+                            .sections
+                            .iter()
+                            .all(|s| s.format.color == crate::chrome::FOREGROUND)
+                    );
+                    assert!(
+                        (title.pos.y
+                            - (bounds.y0 + bounds.y1) as f32 * 0.5
+                            - layout::DIAMETER * 0.5
+                            - 12.0)
+                            .abs()
+                            <= 1.0 / density
+                    );
+                    assert!(clip.contains_rect(title.visual_bounding_rect()));
                     if let Some(y) = thumbnail_y {
                         assert_eq!(
                             (bounds.y0 + bounds.y1) * 0.5,

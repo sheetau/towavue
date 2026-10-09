@@ -288,11 +288,12 @@ pub(super) fn show_with_recent(
             .fixed_pos(response.rect.right_top() + egui::vec2(6.0, 0.0))
             .show(context, |ui| {
                 crate::hover_help::frame(ui.style()).show(ui, |ui| {
-                    crate::hover_help::style(ui);
-                    ui.add(
-                        egui::Label::new(localization::text(context, section.key()))
-                            .wrap_mode(egui::TextWrapMode::Extend),
-                    );
+                    crate::hover_help::content(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(localization::text(context, section.key()))
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        )
+                    });
                 });
             });
     }

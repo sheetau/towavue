@@ -118,7 +118,10 @@ pub(super) fn show(
             }
             target = Some(fraction);
         }
-        if (response.dragged() || response.drag_stopped())
+        // The rail is direct manipulation: do not wait for egui's click/drag
+        // distance threshold before following the owned primary pointer.
+        if (response.is_pointer_button_down_on() || response.dragged() || response.drag_stopped())
+            && ui.input(|input| input.pointer.primary_down() || input.pointer.primary_released())
             && let Some(pointer) = response.interact_pointer_pos()
         {
             target = Some(pointer_fraction(pointer));
@@ -284,6 +287,6 @@ fn show_label(ui: &egui::Ui, id: egui::Id, anchor: egui::Pos2, label: String) {
     );
     let content = outer - frame.total_margin();
     painter.add(frame.paint(content));
-    let text_origin = content.center() - galley.mesh_bounds.center().to_vec2();
+    let text_origin = content.min + egui::vec2(0.0, crate::hover_help::text_offset(ui));
     painter.galley(text_origin, galley, chrome::FOREGROUND);
 }

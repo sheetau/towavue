@@ -325,7 +325,8 @@ impl Icon {
     pub fn text(self) -> egui::RichText {
         let glyph = match self {
             Self::Filter => '\u{eaf1}',
-            Self::Image => '\u{eaea}',
+            // Gallery centers the smaller Seti outline inside the fixed icon box.
+            Self::Image => return egui::RichText::new(""),
             Self::Video => '\u{ead9}',
             Self::Audio => '\u{ec1b}',
             Self::OpenFile => '\u{ea94}',

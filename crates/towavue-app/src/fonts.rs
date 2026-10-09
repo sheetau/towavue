@@ -94,6 +94,13 @@ fn definitions_from_data(
         egui::FontFamily::Name("codicon".into()),
         vec!["codicon".into()],
     );
+    fonts.font_data.insert(
+        "seti".into(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/seti.ttf")).into(),
+    );
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("seti".into()), vec!["seti".into()]);
     if let Some(data) = japanese {
         fonts
             .font_data
@@ -167,6 +174,10 @@ pub fn append_reading_hint(
 
 pub fn icon_font() -> egui::FontId {
     egui::FontId::new(16.0, egui::FontFamily::Name("codicon".into()))
+}
+
+pub fn image_icon_font() -> egui::FontId {
+    egui::FontId::new(24.0, egui::FontFamily::Name("seti".into()))
 }
 
 #[cfg(test)]
@@ -250,7 +261,7 @@ mod tests {
         assert!(
             !fonts.families[&egui::FontFamily::Proportional]
                 .iter()
-                .any(|name| name == "codicon")
+                .any(|name| name == "codicon" || name == "seti")
         );
         context.set_fonts(fonts);
         let _ = context.run_ui(Default::default(), |ui| {
@@ -266,6 +277,7 @@ mod tests {
                     let wide = fonts.layout_no_wrap("88:88 / 8888".into(), font, egui::Color32::WHITE);
                     assert!((narrow.size().x - wide.size().x).abs() < 0.01);
                 }
+                assert!(fonts.has_glyphs(&image_icon_font(), "\u{e04c}"));
                 let text = "(\u{2195}) Reading 3 · (\u{2194}) first 3";
                 let job = reading_hint(text, 12.0, egui::Color32::WHITE);
                 assert_eq!(job.text, text);

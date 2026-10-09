@@ -56,6 +56,13 @@ pub(super) fn options(command: CommandId) -> Option<Options> {
                 (ToggleImageMinification, Text::MinificationFast),
             ],
         ),
+        ToggleReuseFolderTab => (
+            Text::CommandToggleReuseFolderTab,
+            &[
+                (ToggleReuseFolderTab, Text::ReuseFolderTabOff),
+                (ToggleReuseFolderTab, Text::ReuseFolderTabOn),
+            ],
+        ),
         ExportQualityHigh => (
             Text::ExportQuality,
             &[
@@ -178,15 +185,20 @@ pub(super) fn submenu(
                 FolderNavigationStop
             }
         }
-        ToggleImageInterpolation | ToggleImageMinification => command,
+        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab => command,
         _ => return None,
     };
-    let toggle = matches!(command, ToggleImageInterpolation | ToggleImageMinification);
+    let toggle = matches!(
+        command,
+        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab
+    );
     let selected = match command {
         ToggleImageInterpolation if choices.nearest_images => Text::StatusNearest,
         ToggleImageInterpolation => Text::StatusSmooth,
         ToggleImageMinification if choices.high_quality_minification => Text::QualityHigh,
         ToggleImageMinification => Text::MinificationFast,
+        ToggleReuseFolderTab if choices.reuse_folder_tab => Text::ReuseFolderTabOn,
+        ToggleReuseFolderTab => Text::ReuseFolderTabOff,
         _ => {
             rows.iter()
                 .find(|(id, _)| *id == selected)

@@ -113,7 +113,15 @@ fn held_direction_opens_immediately_and_tracks_the_original_press() {
             for _ in 0..3 {
                 frame(&mut app, size, vec![]);
             }
-            row_center(&frame(&mut app, size, vec![]), label);
+            let output = frame(&mut app, size, vec![]);
+            row_center(&output, label);
+            let name = localization::text(&context, section.key());
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == name
+                    && text.galley.rows.len() == 1 && !text.galley.elided)),
+                "drag label must remain on one line: {name}"
+            );
         }
         let target = origin + egui::vec2(24.0, -12.0);
         frame(&mut app, size, vec![pointer(target, false)]);
@@ -191,6 +199,47 @@ fn logo_menu_sizes_follow_content_and_pointer_opening_does_not_focus_the_first_i
     for density in [1.0, 1.25, 2.0] {
         for height in [300.0, 720.0] {
             check_menu_geometry(&root, density, egui::vec2(960.0, height));
+        }
+    }
+}
+
+#[test]
+fn japanese_drag_labels_remain_single_line_when_sections_change() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::japanese_drag_labels_remain_single_line_when_sections_change",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut app, origin) = setup(&root);
+        let context = app.ui_context.clone().expect("context");
+        localization::test_ui::configure_japanese(&context, density);
+        let size = egui::vec2(480.0, 480.0);
+        for _ in 0..3 {
+            frame(&mut app, size, vec![]);
+        }
+        frame(&mut app, size, vec![pointer(origin, true)]);
+        for (delta, section) in [
+            (egui::vec2(24.0, -12.0), Section::File),
+            (egui::vec2(24.0, 24.0), Section::Edit),
+            (egui::vec2(-12.0, 24.0), Section::View),
+        ] {
+            frame(
+                &mut app,
+                size,
+                vec![egui::Event::PointerMoved(origin + delta)],
+            );
+            for _ in 0..3 {
+                frame(&mut app, size, vec![]);
+            }
+            let output = frame(&mut app, size, vec![]);
+            let name = section.key().in_language(localization::Language::Japanese);
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == name
+                    && text.galley.rows.len() == 1 && !text.galley.elided)),
+                "single-line Japanese label: {name}"
+            );
         }
     }
 }

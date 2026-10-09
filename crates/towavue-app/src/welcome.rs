@@ -1,3 +1,5 @@
+mod filter_menu;
+
 use crate::scroll_style::ScrollAreaStyle;
 use egui::RichText;
 use towavue_core::{CommandId, MediaKind, ShortcutBindings};
@@ -305,6 +307,15 @@ fn search_field(
         .frame_when_inactive(false),
     )
     .help_text(Text::GalleryFilter.in_language(language));
+    if *filter == Some(MediaKind::Image) {
+        let galley = ui.painter().layout_no_wrap(
+            "\u{e04c}".into(),
+            crate::fonts::image_icon_font(),
+            chrome::FOREGROUND,
+        );
+        let origin = filter_button.rect.center() - galley.mesh_bounds.center().to_vec2();
+        ui.painter().galley(origin, galley, chrome::FOREGROUND);
+    }
     filter_button.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -313,35 +324,32 @@ fn search_field(
         )
     });
     if ui.is_enabled() {
-        egui::Popup::menu(&filter_button)
-            .style(chrome::menu_style)
-            .show(|ui| {
-                for (kind, label) in [
-                    (None, Text::GalleryAll.in_language(language)),
-                    (
-                        Some(MediaKind::Image),
-                        Text::GalleryImages.in_language(language),
-                    ),
-                    (
-                        Some(MediaKind::Video),
-                        Text::GalleryVideos.in_language(language),
-                    ),
-                    (
-                        Some(MediaKind::Audio),
-                        Text::GalleryAudio.in_language(language),
-                    ),
-                ] {
-                    let available = kind.is_none()
-                        || paths.iter().any(|path| MediaKind::from_path(path) == kind);
-                    if ui
-                        .add_enabled(available, egui::Button::selectable(*filter == kind, label))
-                        .clicked()
-                    {
-                        *filter = kind;
-                        ui.close();
-                    }
+        filter_menu::show(&filter_button, |ui, selected| {
+            for (kind, label) in [
+                (None, Text::GalleryAll.in_language(language)),
+                (
+                    Some(MediaKind::Image),
+                    Text::GalleryImages.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Video),
+                    Text::GalleryVideos.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Audio),
+                    Text::GalleryAudio.in_language(language),
+                ),
+            ] {
+                let available =
+                    kind.is_none() || paths.iter().any(|path| MediaKind::from_path(path) == kind);
+                let row =
+                    ui.add_enabled(available, egui::Button::selectable(*filter == kind, label));
+                if selected(&row) {
+                    *filter = kind;
+                    ui.close();
                 }
-            });
+            }
+        });
     }
     let clear = ui
         .add_enabled_ui(!query.is_empty(), |ui| {
@@ -851,7 +859,7 @@ mod tests {
                                 if text.galley.text()
                                     == match filter {
                                         None => "\u{eaf1}",
-                                        Some(MediaKind::Image) => "\u{eaea}",
+                                        Some(MediaKind::Image) => "\u{e04c}",
                                         Some(MediaKind::Video) => "\u{ead9}",
                                         Some(MediaKind::Audio) => "\u{ec1b}",
                                     } =>
@@ -861,6 +869,11 @@ mod tests {
                             _ => None,
                         })
                         .expect("filter icon");
+                    if filter == Some(MediaKind::Image) {
+                        let ink = icon.galley.mesh_bounds.translate(icon.pos.to_vec2());
+                        assert!(filter_rect.contains_rect(ink));
+                        assert!((ink.center() - filter_rect.center()).length() <= 1.0 / density);
+                    }
                     let expected = if filter.is_some() {
                         chrome::FOREGROUND
                     } else {

@@ -432,11 +432,8 @@ fn show_items(
                     .find(|definition| definition.id == *id)
                     .expect("menu command is registered");
                 let enabled = definition.is_enabled(context);
-                let mut button = egui::Button::new(definition.title_in(language(ui.ctx())))
+                let button = egui::Button::new(definition.title_in(language(ui.ctx())))
                     .shortcut_text(shortcut_text(ui, shortcuts.label(*id, context), enabled));
-                if *id == ToggleReuseFolderTab {
-                    button = button.selected(recent.choices.reuse_folder_tab);
-                }
                 let response = ui.add_enabled(enabled, button);
                 if response.enabled() {
                     items.push(response.id);
@@ -1832,11 +1829,16 @@ mod tests {
                             assert!(placed.insert(child), "duplicate subtitle command");
                         }
                     } else if let Some((_, rows)) = choices::options(*command) {
-                        if matches!(command, ToggleImageInterpolation | ToggleImageMinification) {
+                        if matches!(
+                            command,
+                            ToggleImageInterpolation
+                                | ToggleImageMinification
+                                | ToggleReuseFolderTab
+                        ) {
                             assert_eq!(rows.len(), 2);
                             assert_ne!(rows[0].1, rows[1].1);
                             assert!(rows.iter().all(|(child, _)| child == command));
-                            assert!(placed.insert(*command), "duplicate image toggle");
+                            assert!(placed.insert(*command), "duplicate toggle");
                         } else {
                             for (child, _) in rows {
                                 assert!(

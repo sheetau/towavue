@@ -32,6 +32,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                 for (command, title) in [
                     (ToggleImageInterpolation, Text::ImageInterpolation),
                     (ToggleImageMinification, Text::ImageMinification),
+                    (ToggleReuseFolderTab, Text::CommandToggleReuseFolderTab),
                 ] {
                     for current in [false, true] {
                         for same in [false, true] {
@@ -49,6 +50,11 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                                 ..Default::default()
                             };
                             let shortcut = bindings.label(command, commands);
+                            let section = if command == ToggleReuseFolderTab {
+                                Section::File
+                            } else {
+                                Section::View
+                            };
                             let frame = |events| {
                                 let mut chosen = Vec::new();
                                 let output = context.run_ui(
@@ -64,6 +70,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                                         ui.menu_button("Menu", |ui| {
                                             let mut data = MenuData {
                                                 choices: Choices {
+                                                    reuse_folder_tab: current,
                                                     nearest_images: current,
                                                     high_quality_minification: current,
                                                     ..Default::default()
@@ -74,7 +81,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                                                 ui,
                                                 commands,
                                                 &bindings,
-                                                (!nested).then_some(Section::View),
+                                                (!nested).then_some(section),
                                                 &mut data,
                                             ) {
                                                 chosen.push(command);
@@ -92,7 +99,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                             if nested {
                                 let output = frame(vec![]).0;
                                 frame(vec![access(
-                                    node(&output, Text::MenuView.in_language(language)).0,
+                                    node(&output, section.key().in_language(language)).0,
                                     Action::Click,
                                 )]);
                                 for _ in 0..4 {
@@ -158,6 +165,8 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                             let output = frame(vec![]).0;
                             let labels = if command == ToggleImageInterpolation {
                                 [Text::StatusSmooth, Text::StatusNearest]
+                            } else if command == ToggleReuseFolderTab {
+                                [Text::ReuseFolderTabOff, Text::ReuseFolderTabOn]
                             } else {
                                 [Text::MinificationFast, Text::QualityHigh]
                             };

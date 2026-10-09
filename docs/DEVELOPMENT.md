@@ -61,10 +61,16 @@ batched/discarded passes, matching-button release and cancellation. Folder-tab r
 uses `external_open::`, `window_host::launch_tests::` and
 `window_host::preference_tests::`; defaults, dirty-document guards and restart
 persistence must remain covered. Gallery/header and directional-menu changes use
-`welcome::` and `logo_menu::` controls. The runtime
-`renderer::startup::tests::empty_startup_surface_paints_black_before_the_first_frame`
-checks a hidden native surface against an owned memory DC. It verifies initial
-black pixels and subsequent frame replacement, not physical compositor continuity.
+`welcome::` and `logo_menu::` controls.
+
+Startup appearance requires visible desktop evidence in addition to hidden native
+controls. Capture from before process/window creation through the first complete
+frame, including ordinary launch, restored maximization and Gallery Ctrl-click
+into a new window. Retain each desktop-update image and its timestamp; reject
+missing updates during the transition. A memory-DC paint assertion alone cannot
+establish compositor continuity. Keep harness windows and profiles private and
+verify their cleanup. Run paired ordinary-Release startup measurements separately
+from compilation, tests and frame recording when changing this path.
 
 
 For the continuous audio clock and direct audio feed, run runtime `audio::`,

@@ -1123,6 +1123,7 @@ struct Application<N> {
     view_preferences: Option<Arc<towavue_runtime_windows::ViewPreferences>>,
     volume_step_percent: u8,
     folder_navigation_loop: bool,
+    reuse_folder_tab: bool,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
@@ -1433,6 +1434,7 @@ where
             view_preferences: None,
             volume_step_percent: 2,
             folder_navigation_loop: true,
+            reuse_folder_tab: false,
             graphics_epoch: 0,
             idle_graphics_frame: None,
             restored_reading_pages: false,
@@ -5662,6 +5664,7 @@ where
                             volume_step: self.volume_step_percent,
                             audio_repeat: self.audio_mode().0,
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
+                            reuse_folder_tab: self.reuses_folder_tabs(),
                             nearest_images: self.nearest_images,
                             high_quality_minification: self.high_quality_minification,
                         },
@@ -8141,6 +8144,9 @@ where
             CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
             CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
             CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
+            CommandId::ToggleReuseFolderTab => {
+                self.reuse_folder_tab = !self.reuses_folder_tabs();
+            }
             CommandId::FolderNavigationStop | CommandId::FolderNavigationLoop => {
                 self.folder_navigation_loop = command == CommandId::FolderNavigationLoop;
                 self.request_redraw();
@@ -15401,10 +15407,10 @@ mod tests {
     }
 
     #[test]
-    fn timeline_and_folder_seek_only_commit_primary_pointer_gestures() {
-        let Some(root) = isolated_test_root(
-            "tests::timeline_and_folder_seek_only_commit_primary_pointer_gestures",
-        ) else {
+    fn timeline_and_folder_seek_respect_button_and_drag_ownership() {
+        let Some(root) =
+            isolated_test_root("tests::timeline_and_folder_seek_respect_button_and_drag_ownership")
+        else {
             return;
         };
         let mut app = Application::new(None, |_| {}).expect("headless application");
@@ -15497,10 +15503,12 @@ mod tests {
                     } else {
                         assert!(press.is_empty());
                     }
+                    let relative = !timeline && drag && button == egui::PointerButton::Secondary;
+                    let expected_path = root.join(if relative { "1.png" } else { "2.png" });
                     let moved = frame(vec![egui::Event::PointerMoved(end)]);
-                    if !timeline && drag && button == egui::PointerButton::Primary {
+                    if !timeline && drag && (button == egui::PointerButton::Primary || relative) {
                         assert!(
-                            matches!(moved.as_slice(), [UiAction::ScrubImage(path, ..)] if *path == root.join("2.png"))
+                            matches!(moved.as_slice(), [UiAction::ScrubImage(path, ..)] if *path == expected_path)
                         );
                     } else {
                         assert!(moved.is_empty());
@@ -15509,7 +15517,7 @@ mod tests {
                         event(end, false),
                         egui::Event::PointerMoved(egui::pos2(50.0, end.y)),
                     ]);
-                    if button != egui::PointerButton::Primary {
+                    if button != egui::PointerButton::Primary && !relative {
                         assert!(
                             actions.is_empty(),
                             "timeline={timeline}, {button:?}, drag={drag}"
@@ -15524,7 +15532,7 @@ mod tests {
                         }
                     } else {
                         assert!(
-                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == root.join("2.png"))
+                            matches!(actions.as_slice(), [UiAction::OpenMedia(path, false)] if *path == expected_path)
                         );
                     }
                     assert!(frame(vec![]).is_empty(), "do not repeat the commit");

@@ -8,6 +8,7 @@ pub(crate) struct Choices {
     pub video_quality: VideoExportQuality,
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
+    pub reuse_folder_tab: bool,
     pub nearest_images: bool,
     pub high_quality_minification: bool,
 }
@@ -20,6 +21,7 @@ impl Default for Choices {
             video_quality: VideoExportQuality::High,
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
+            reuse_folder_tab: false,
             nearest_images: false,
             high_quality_minification: true,
         }

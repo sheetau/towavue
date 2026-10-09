@@ -7,7 +7,7 @@ use std::{
     thread::JoinHandle,
 };
 use windows::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+    Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
     Graphics::Gdi::*,
     UI::{
         Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass},
@@ -185,13 +185,23 @@ struct PaintState {
 }
 
 impl PaintState {
-    fn paint(&self, dc: HDC) {
+    fn paint(&self, dc: HDC, hwnd: HWND) {
         // The callback executes only on the owner UI thread. A reentrant native
         // callback must not unwind across FFI if a frame update is in progress.
         let Ok(borrow) = self.frame.try_borrow() else {
             return;
         };
         let Some(frame) = borrow.as_ref() else {
+            // The native child can paint before the first UI frame. Fill its
+            // borrowed DC without allocating a frame or waiting for graphics.
+            let mut bounds = RECT::default();
+            // SAFETY: hwnd and dc belong to this synchronous UI-thread callback.
+            // The stock brush is borrowed and must never be destroyed.
+            unsafe {
+                if GetClientRect(hwnd, &mut bounds).is_ok() {
+                    FillRect(dc, &bounds, HBRUSH(GetStockObject(BLACK_BRUSH).0));
+                }
+            }
             return;
         };
         let mut info = BITMAPINFO::default();
@@ -240,14 +250,14 @@ unsafe extern "system" fn paint_proc(
             unsafe {
                 let dc = BeginPaint(hwnd, &mut paint);
                 if !dc.is_invalid() {
-                    state.paint(dc);
+                    state.paint(dc, hwnd);
                 }
                 let _ = EndPaint(hwnd, &paint);
             }
             LRESULT(0)
         }
         WM_PRINTCLIENT => {
-            state.paint(HDC(wparam.0 as *mut _));
+            state.paint(HDC(wparam.0 as *mut _), hwnd);
             LRESULT(0)
         }
         WM_ERASEBKGND => LRESULT(1),

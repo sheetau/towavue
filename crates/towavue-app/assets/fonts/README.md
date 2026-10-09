@@ -35,7 +35,7 @@ Run from the repository root. Ordinary Cargo builds need no Python, font tooling
 - Package integrity: `sha512-pjgpzU5fMIuI3atUdpbWiaUxZtpTak57vjp1hIEvmmmd1dSOTB++5DoKeQCtRLapbB9DU24EHk31njP2ayPvmA==`.
 - Font SHA-256: `841d1c28fd2de5af86d42894cace161203525c0a903e6615a1fe2d354839e676` (139084 bytes).
 - The font has 596 glyphs and 604 mapped codepoints, replacing the former Monaco-derived font's 516 glyphs and 525 mappings. Both include Gallery's `clear-all` U+EABF and `filter` U+EAF1; the replacement follows the owner's request to prefer the reference's larger inventory. Removed legacy mappings are unused by the app. The package's license is byte-identical to the retained Codicons notice.
-- Codepoint names are verified against the pinned Codicons package's `dist/codicon.css`; the app's existing mappings retain their VS Code names.
+- Codepoint names are verified against the pinned Codicons package's `dist/codicon.css`; the app's existing mappings retain their VS Code names. Gallery's active type filters use `file-media` U+EAEA, `device-camera-video` U+EAD9 and `music` U+EC1B from that same package.
 - The tab's unsaved marker uses `close-dirty` / `circle-filled`, U+EA71, from the [matching VS Code mapping](https://github.com/microsoft/vscode/blob/86f5a62f058e3905f74a9fa65d04b2f3b533408e/src/vs/base/common/codiconsLibrary.ts). The existing U+EA76 close glyph replaces it on hover or keyboard focus.
 - Retain [Monaco's MIT notice](LICENSE-Monaco.txt) and the upstream [Codicons artwork license](LICENSE-Codicons.txt), CC BY 4.0, including its Git logo attribution and CC BY 3.0 link. The Codicons license was retrieved at commit `1c47ab36a4bb845c437866405c2fa67b8ca0fe36`.
 

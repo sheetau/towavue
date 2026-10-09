@@ -233,7 +233,17 @@ fn check_menu_geometry(root: &Path, density: f32, size: egui::Vec2) {
         }
         let output = frame(&mut app, size, vec![]);
         let bounds = popup_bounds(&output);
-        assert_eq!(bounds.len(), 1, "one menu frame: {bounds:?}");
+        assert_eq!(
+            bounds.len(),
+            if delta == egui::Vec2::ZERO { 1 } else { 2 },
+            "menu plus the held direction label: {bounds:?}"
+        );
+        if delta != egui::Vec2::ZERO {
+            assert!(
+                bounds[1].left() > origin.x && bounds[1].top() < bounds[0].top(),
+                "direction help stays beside the opener, above its menu: {bounds:?}"
+            );
+        }
         popup_sizes.push(bounds[0].size());
         let tree = output.platform_output.accesskit_update.expect("menu tree");
         let (id, node) = tree

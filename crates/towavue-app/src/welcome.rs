@@ -287,11 +287,20 @@ fn search_field(
     let filter_button = chrome::surface_icon_button_at(
         ui,
         filter_rect,
-        egui::Button::new(chrome::Icon::Filter.text().color(if filter.is_some() {
-            chrome::FOREGROUND
-        } else {
-            chrome::MUTED
-        }))
+        egui::Button::new(
+            match filter {
+                Some(MediaKind::Image) => chrome::Icon::Image,
+                Some(MediaKind::Video) => chrome::Icon::Video,
+                Some(MediaKind::Audio) => chrome::Icon::Audio,
+                None => chrome::Icon::Filter,
+            }
+            .text()
+            .color(if filter.is_some() {
+                chrome::FOREGROUND
+            } else {
+                chrome::MUTED
+            }),
+        )
         .stroke(egui::Stroke::NONE)
         .frame_when_inactive(false),
     )
@@ -747,7 +756,12 @@ mod tests {
     fn gallery_header_centers_square_buttons_and_highlights_the_active_filter() {
         for density in [1.0, 1.25, 2.0] {
             for width in [240.0, 480.0, 960.0] {
-                for filter in [None, Some(MediaKind::Video)] {
+                for filter in [
+                    None,
+                    Some(MediaKind::Image),
+                    Some(MediaKind::Video),
+                    Some(MediaKind::Audio),
+                ] {
                     let context = crate::fonts::test_context();
                     context.set_pixels_per_point(density);
                     context.global_style_mut(chrome::style);
@@ -833,7 +847,15 @@ mod tests {
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Text(text) if text.galley.text() == "\u{eaf1}" => {
+                            egui::Shape::Text(text)
+                                if text.galley.text()
+                                    == match filter {
+                                        None => "\u{eaf1}",
+                                        Some(MediaKind::Image) => "\u{eaea}",
+                                        Some(MediaKind::Video) => "\u{ead9}",
+                                        Some(MediaKind::Audio) => "\u{ec1b}",
+                                    } =>
+                            {
                                 Some(text)
                             }
                             _ => None,

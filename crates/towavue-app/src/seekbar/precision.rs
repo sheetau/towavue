@@ -12,6 +12,7 @@ struct State {
     x: f32,
     frame: Option<u64>,
     dragging: bool,
+    button: egui::PointerButton,
 }
 
 fn state_id() -> Id {
@@ -57,7 +58,11 @@ fn active(context: &Context) -> bool {
         })
 }
 
-pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> timeline_input::Drag {
+pub(super) fn adjust(
+    response: &Response,
+    mut drag: timeline_input::Drag,
+    progress: f32,
+) -> timeline_input::Drag {
     let context = &response.ctx;
     let before = active(context);
     let mut state = context.data(|data| data.get_temp::<State>(state_id()));
@@ -68,9 +73,21 @@ pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> tim
             owner: response.id,
             rect: response.rect,
             raw: origin,
-            x: origin.x,
+            x: if drag.secondary {
+                egui::lerp(
+                    super::compact_travel(response.rect).x_range(),
+                    progress.clamp(0.0, 1.0),
+                )
+            } else {
+                origin.x
+            },
             frame: None,
             dragging: false,
+            button: if drag.secondary {
+                egui::PointerButton::Secondary
+            } else {
+                egui::PointerButton::Primary
+            },
         });
     }
     if let Some(active) = &mut state
@@ -88,10 +105,11 @@ pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> tim
             let travel = super::compact_travel(response.rect);
             for event in events {
                 if let egui::Event::PointerButton {
-                    button: egui::PointerButton::Primary,
+                    button,
                     pressed: true,
                     ..
                 } = event
+                    && button == active.button
                 {
                     begun = true;
                     continue;
@@ -103,10 +121,10 @@ pub(super) fn adjust(response: &Response, mut drag: timeline_input::Drag) -> tim
                     egui::Event::PointerMoved(position) => (position, false),
                     egui::Event::PointerButton {
                         pos,
-                        button: egui::PointerButton::Primary,
+                        button,
                         pressed: false,
                         ..
-                    } => (pos, true),
+                    } if button == active.button => (pos, true),
                     _ => continue,
                 };
                 active.x = (active.x + scaled_delta(active.rect, active.raw, position))

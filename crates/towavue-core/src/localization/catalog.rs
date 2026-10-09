@@ -1200,6 +1200,7 @@ messages! {
     CommandPasteImage => ("Paste image", "画像を貼り付け"),
     CommandToggleFullscreen => ("Toggle fullscreen", "全画面表示を切り替え"),
     CommandOpenFolder => ("Open folder", "フォルダーを開く"),
+    CommandToggleReuseFolderTab => ("Reuse tabs for files in the same folder", "????????????????????"),
     CommandOpenGallery => ("Open Gallery", "ギャラリーを開く"),
     CommandGoToFile => ("Go to File", "ファイルへ移動"),
     CommandOpenRecentFolder => ("Open Recent Folder", "最近使ったフォルダーを開く"),

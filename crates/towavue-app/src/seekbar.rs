@@ -114,7 +114,11 @@ fn show_control(
     let drag = if allow_timeline {
         timeline_input::video_seek_drag(&response)
     } else {
-        precision::adjust(&response, timeline_input::seek_drag(&response))
+        precision::adjust(
+            &response,
+            timeline_input::compact_seek_drag(&response),
+            if reversed { 1.0 - progress } else { progress },
+        )
     };
     // The app applies the committed seek after painting. Keep its position
     // for every pass of this release frame, without replaying the action.

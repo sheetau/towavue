@@ -81,3 +81,64 @@ fn cpu_frame_size_rejects_overflow_before_allocating_or_casting() {
         assert!(cpu::frame_byte_len(size).is_err());
     }
 }
+
+#[test]
+fn empty_startup_surface_paints_black_before_the_first_frame() {
+    use windows::core::w;
+    // SAFETY: every native resource is owned by this test on this thread. The
+    // window stays hidden; the memory DC never targets the user's desktop.
+    unsafe {
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("STATIC"),
+            w!(""),
+            WS_POPUP,
+            0,
+            0,
+            8,
+            8,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("hidden window");
+        let dc = CreateCompatibleDC(None);
+        assert!(!dc.is_invalid());
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = 8;
+        info.bmiHeader.biHeight = -8;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        let mut bits = std::ptr::null_mut();
+        let bitmap =
+            CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).expect("DIB");
+        let old = SelectObject(dc, bitmap.into());
+        let bounds = RECT {
+            left: 0,
+            top: 0,
+            right: 8,
+            bottom: 8,
+        };
+        FillRect(dc, &bounds, HBRUSH(GetStockObject(WHITE_BRUSH).0));
+        let state = PaintState::default();
+        state.paint(dc, hwnd);
+        let empty = GetPixel(dc, 4, 4);
+        state.frame.replace(Some(Frame {
+            bgra: [0, 0, 255, 255].repeat(64),
+            width: 8,
+            height: 8,
+        }));
+        state.paint(dc, hwnd);
+        let ready = GetPixel(dc, 4, 4);
+        let hidden = !IsWindowVisible(hwnd).as_bool();
+        SelectObject(dc, old);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(dc);
+        DestroyWindow(hwnd).expect("retire hidden window");
+        assert!(hidden);
+        assert_eq!(empty.0, 0, "uninitialized surface is black");
+        assert_eq!(ready.0, 255, "complete frame replaces the black background");
+    }
+}

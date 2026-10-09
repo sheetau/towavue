@@ -1272,21 +1272,7 @@ impl Filmstrip {
                         if !deleted && response.middle_clicked() {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
-                        let mut tooltip = item.path.display().to_string();
-                        tooltip.push_str(if deleted {
-                            localization::text(ui.ctx(), Text::DeletedRetainedHelp)
-                        } else {
-                            localization::text(ui.ctx(), Text::ThumbnailDragHelp)
-                        });
-                        if let Some(Err(error)) = self.previews.get(&item.path) {
-                            tooltip.push_str(
-                                &towavue_core::localization::formatted::preview_unavailable(
-                                    localization::language(ui.ctx()),
-                                    error,
-                                ),
-                            );
-                        }
-                        response.help_text(tooltip);
+                        response.help_text(item.path.display().to_string());
                     }
                 });
                 self.scroll_offset = output.state.offset.x;

@@ -18,6 +18,7 @@ pub enum ViewPreference {
     Nearest,
     Minification,
     FolderLoop,
+    ReuseFolderTab,
     ReadingPages,
     ReadingAxis,
     ReadingReversed,
@@ -26,12 +27,13 @@ pub enum ViewPreference {
 }
 
 impl ViewPreference {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Resize,
         Self::VolumeStep,
         Self::Nearest,
         Self::Minification,
         Self::FolderLoop,
+        Self::ReuseFolderTab,
         Self::ReadingPages,
         Self::ReadingAxis,
         Self::ReadingReversed,
@@ -46,6 +48,7 @@ impl ViewPreference {
             Self::Nearest => "nearest",
             Self::Minification => "minification",
             Self::FolderLoop => "folder-loop",
+            Self::ReuseFolderTab => "reuse-folder-tab",
             Self::ReadingPages => "reading-pages",
             Self::ReadingAxis => "reading-axis",
             Self::ReadingReversed => "reading-reversed",

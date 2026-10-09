@@ -1,8 +1,17 @@
 use super::*;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
+    pub(super) fn reuses_folder_tabs(&self) -> bool {
+        self.view_preferences
+            .as_ref()
+            .map_or(self.reuse_folder_tab, |store| {
+                store.value(towavue_runtime_windows::ViewPreference::ReuseFolderTab) != 0
+            })
+    }
+
     pub(super) fn reusable_external_tab(&self, path: &Path) -> Option<TabId> {
         let kind = MediaKind::from_path(path)?;
+        let reuse_folder = self.reuses_folder_tabs();
         self.tabs
             .tabs()
             .iter()
@@ -11,9 +20,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     TabTarget::Media {
                         path: current,
                         kind: current_kind,
-                    } => *current_kind == kind && current == path,
+                    } => {
+                        (*current_kind == kind && current == path)
+                            || (reuse_folder
+                                && current.parent().is_some()
+                                && current.parent() == path.parent())
+                    }
                     TabTarget::AudioFolder { folder, .. } => {
-                        kind == MediaKind::Audio && Some(folder.as_path()) == path.parent()
+                        (kind == MediaKind::Audio || reuse_folder)
+                            && Some(folder.as_path()) == path.parent()
                     }
                     TabTarget::UntitledImage => false,
                 };
@@ -25,7 +40,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         .as_ref()
                         .is_some_and(|export| export.tab == tab.id)
             })
-            .min_by_key(|tab| (Some(tab.id) != self.tabs.active_id(), tab.id))
+            .min_by_key(|tab| {
+                (
+                    tab.target.current_path() != Some(path),
+                    Some(tab.id) != self.tabs.active_id(),
+                    tab.id,
+                )
+            })
             .map(|tab| tab.id)
     }
 
@@ -35,7 +56,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         };
         self.activate_tab(id);
         if self.path.as_deref() != Some(path) {
-            // A clean audio folder changes tracks through the existing navigation route.
+            // Change the source through the existing mixed-media navigation route.
             self.navigate_to_unchecked(path.to_owned());
         }
         // Reusing an existing tab is activation, not a new explicit history visit.
@@ -102,5 +123,52 @@ mod tests {
             .or_default()
             .push(EditOperation::SetVolume(0.5), MediaKind::Audio);
         assert!(app.reusable_external_tab(&next).is_none());
+    }
+    #[test]
+    fn folder_reuse_is_opt_in_cross_kind_and_preserves_dirty_documents() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "external_open::tests::folder_reuse_is_opt_in_cross_kind_and_preserves_dirty_documents",
+        ) else {
+            return;
+        };
+        let first = root.join("first.bmp");
+        let next = root.join("next.bmp");
+        tab_transfer::tests::bitmap(&first);
+        tab_transfer::tests::bitmap(&next);
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(fonts::test_context());
+        let id = tab_transfer::tests::install(
+            &mut app,
+            first.clone(),
+            tab_transfer::tests::decoded(false),
+        );
+        assert!(!app.reuses_folder_tabs());
+        assert!(app.reusable_external_tab(&next).is_none());
+        app.dispatch(CommandId::ToggleReuseFolderTab);
+        assert_eq!(app.reusable_external_tab(&next), Some(id));
+        assert_eq!(app.reusable_external_tab(&root.join("video.mp4")), Some(id));
+        assert_eq!(app.reusable_external_tab(&root.join("audio.wav")), Some(id));
+        assert!(
+            app.reusable_external_tab(&root.join("other/next.bmp"))
+                .is_none()
+        );
+        let exact = app.tabs.open_new(next.clone(), MediaKind::Image);
+        app.tabs.activate(id);
+        assert_eq!(app.reusable_external_tab(&next), Some(exact));
+        app.tabs.close(exact);
+        assert!(app.reuse_external_tab(&next));
+        assert_eq!(app.tabs.active_id(), Some(id));
+        assert_eq!(app.tabs.tabs().len(), 1);
+        assert_eq!(app.path.as_deref(), Some(next.as_path()));
+        app.edits
+            .entry(id)
+            .or_default()
+            .push(EditOperation::FlipHorizontal, MediaKind::Image);
+        assert!(app.reusable_external_tab(&first).is_none());
+        app.open_external(first, true);
+        assert_ne!(app.tabs.active_id(), Some(id));
+        assert!(app.edits[&id].is_dirty());
+        app.dispatch(CommandId::ToggleReuseFolderTab);
+        assert!(!app.reuses_folder_tabs());
     }
 }

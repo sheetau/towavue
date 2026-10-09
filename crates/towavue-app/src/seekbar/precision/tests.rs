@@ -15,6 +15,7 @@ struct Trial {
     reversed: bool,
     enabled: bool,
     discard: bool,
+    progress: f32,
     status: Rect,
 }
 
@@ -28,6 +29,7 @@ impl Trial {
             reversed,
             enabled: true,
             discard: false,
+            progress: 0.0,
             status: Rect::from_min_size(Pos2::new(0.0, 650.0), egui::vec2(800.0, 30.0)),
         };
         for _ in 0..3 {
@@ -56,7 +58,7 @@ impl Trial {
                                 egui::vec2(800.0, 14.0),
                             ),
                             Id::new("inline-test"),
-                            0.0,
+                            self.progress,
                             self.reversed,
                         )
                     })
@@ -65,7 +67,7 @@ impl Trial {
                     super::super::show_directed_drag(
                         &self.context,
                         self.status,
-                        0.0,
+                        self.progress,
                         None,
                         self.enabled,
                         self.reversed,
@@ -236,4 +238,97 @@ fn diagonal_band_crossings_are_stable_when_motion_events_are_coalesced() {
         assert!((total - split).abs() < 0.001);
         assert!((total.abs() - 176.0).abs() < 0.001);
     }
+}
+
+#[test]
+fn secondary_seek_starts_at_playhead_and_keeps_precision_across_passes() {
+    for inline in [false, true] {
+        for reversed in [false, true] {
+            for batched in [false, true] {
+                let mut trial = Trial::new(1.25, inline, reversed);
+                trial.progress = 0.4;
+                trial.discard = true;
+                let origin = Pos2::new(650.0, 650.0);
+                let slow = Pos2::new(650.0, 550.0);
+                let end = Pos2::new(730.0, 550.0);
+                let secondary = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Secondary,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let rect =
+                    Rect::from_center_size(trial.status.center_top(), egui::vec2(800.0, 14.0));
+                let start = egui::lerp(
+                    super::super::compact_travel(rect).x_range(),
+                    if reversed { 0.6 } else { 0.4 },
+                );
+                let drag = if batched {
+                    trial
+                        .frame(vec![
+                            secondary(origin, true),
+                            egui::Event::PointerMoved(slow),
+                            egui::Event::PointerMoved(end),
+                            secondary(end, false),
+                        ])
+                        .0
+                } else {
+                    let drag = trial
+                        .frame(vec![
+                            egui::Event::PointerMoved(origin),
+                            secondary(origin, true),
+                        ])
+                        .0;
+                    assert!(drag.secondary);
+                    assert!((drag.position.expect("playhead").x - start).abs() < 0.001);
+                    trial.frame(vec![egui::Event::PointerMoved(slow)]);
+                    trial.frame(vec![egui::Event::PointerMoved(end)]);
+                    // A different button release must not commit this gesture.
+                    assert!(!trial.frame(vec![button(end, false)]).0.released);
+                    trial.frame(vec![secondary(end, false)]).0
+                };
+                assert!(drag.secondary && drag.released);
+                assert!(
+                    (drag.position.expect("relative precision seek").x - start - 40.0).abs()
+                        < 0.001
+                );
+                assert!(!trial.frame(vec![]).0.released);
+                // The next primary press retains absolute positioning.
+                let fresh = Pos2::new(120.0, 650.0);
+                trial.frame(vec![egui::Event::PointerMoved(fresh), button(fresh, true)]);
+                assert_eq!(
+                    trial.frame(vec![button(fresh, false)]).0.position,
+                    Some(fresh)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn secondary_seek_cancels_without_a_late_commit() {
+    let trial = Trial::new(1.0, false, false);
+    let origin = Pos2::new(600.0, 650.0);
+    let secondary = |pressed| egui::Event::PointerButton {
+        pos: origin,
+        pressed,
+        button: egui::PointerButton::Secondary,
+        modifiers: egui::Modifiers::NONE,
+    };
+    trial.frame(vec![egui::Event::PointerMoved(origin), secondary(true)]);
+    trial.frame(vec![egui::Event::PointerMoved(
+        origin + egui::vec2(30.0, 0.0),
+    )]);
+    assert!(
+        !trial
+            .frame(vec![egui::Event::WindowFocused(false)])
+            .0
+            .released
+    );
+    assert!(
+        !trial
+            .frame(vec![egui::Event::WindowFocused(true), secondary(false)])
+            .0
+            .released
+    );
 }

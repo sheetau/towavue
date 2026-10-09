@@ -109,7 +109,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 CloseAllTabs,
                 ReopenClosedTab,
             ],
-            &[OpenKeyboardSettings, ReloadShortcuts],
+            &[ToggleReuseFolderTab, OpenKeyboardSettings, ReloadShortcuts],
         ],
     ),
     (
@@ -432,11 +432,12 @@ fn show_items(
                     .find(|definition| definition.id == *id)
                     .expect("menu command is registered");
                 let enabled = definition.is_enabled(context);
-                let response = ui.add_enabled(
-                    enabled,
-                    egui::Button::new(definition.title_in(language(ui.ctx())))
-                        .shortcut_text(shortcut_text(ui, shortcuts.label(*id, context), enabled)),
-                );
+                let mut button = egui::Button::new(definition.title_in(language(ui.ctx())))
+                    .shortcut_text(shortcut_text(ui, shortcuts.label(*id, context), enabled));
+                if *id == ToggleReuseFolderTab {
+                    button = button.selected(recent.choices.reuse_folder_tab);
+                }
+                let response = ui.add_enabled(enabled, button);
                 if response.enabled() {
                     items.push(response.id);
                 }
@@ -1361,6 +1362,11 @@ mod tests {
         navigate(egui::Key::ArrowDown, false, "Open Recent Folder");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
+        navigate(
+            egui::Key::ArrowDown,
+            false,
+            "Reuse tabs for files in the same folder",
+        );
         navigate(egui::Key::ArrowDown, false, "Keyboard Shortcuts");
         navigate(egui::Key::ArrowDown, false, "Reload keyboard shortcuts");
         navigate(egui::Key::Tab, false, "Open file");

@@ -280,6 +280,18 @@ pub(super) fn show_with_recent(
         })
         .inner
     });
+    if let Some(section) = state.drag.and(state.section) {
+        // This noninteractive label follows gesture ownership, without a hover delay.
+        egui::Area::new(response.id.with("drag-section-help"))
+            .order(egui::Order::Tooltip)
+            .interactable(false)
+            .fixed_pos(response.rect.right_top() + egui::vec2(6.0, 0.0))
+            .show(context, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(localization::text(context, section.key()));
+                });
+            });
+    }
     if state.release == Some(frame) {
         context.stop_dragging();
         response.surrender_focus();

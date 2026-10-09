@@ -85,6 +85,7 @@ fn preference_restart_child() {
             CommandId::ToggleImageInterpolation,
             CommandId::ToggleImageMinification,
             CommandId::FolderNavigationStop,
+            CommandId::ToggleReuseFolderTab,
             CommandId::ToggleReadingMode,
             CommandId::IncreaseReadingPages,
             CommandId::DecreaseReadingFirstPage,
@@ -164,6 +165,7 @@ fn verify(app: &WindowApplication) {
     assert!(app.nearest_images);
     assert!(!app.high_quality_minification);
     assert!(!app.folder_navigation_loop);
+    assert!(app.reuses_folder_tabs());
     assert_eq!(
         app.reading_settings,
         ReadingSettings {

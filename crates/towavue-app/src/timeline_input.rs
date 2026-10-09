@@ -3,6 +3,7 @@ use egui::{Context, Id, PointerButton, Pos2, Response};
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Seek,
+    CompactSeek,
     VideoSeek,
 }
 
@@ -10,6 +11,7 @@ enum Kind {
 struct Active {
     id: Id,
     kind: Kind,
+    button: PointerButton,
     origin: Pos2,
     modifiers: egui::Modifiers,
     direction: Option<egui::Vec2>,
@@ -40,6 +42,7 @@ struct State {
 #[derive(Default)]
 pub struct Drag {
     pub started: bool,
+    pub secondary: bool,
     pub origin: Option<Pos2>,
     pub modifiers: egui::Modifiers,
     pub direction: Option<egui::Vec2>,
@@ -101,10 +104,13 @@ impl SeekContinuation {
         let active = context
             .data(|data| data.get_temp::<State>(state_id()))?
             .active?;
-        (active.id == id && active.kind == Kind::Seek && active.dragging).then(|| Self {
-            active,
-            captured: context.dragged_id() == Some(id),
-        })
+        (active.id == id
+            && matches!(active.kind, Kind::Seek | Kind::CompactSeek)
+            && active.dragging)
+            .then(|| Self {
+                active,
+                captured: context.dragged_id() == Some(id),
+            })
     }
 
     pub fn resume(self, context: &Context) {
@@ -127,12 +133,20 @@ pub fn seek_drag(response: &Response) -> Drag {
     update(response, Kind::Seek)
 }
 
+pub fn compact_seek_drag(response: &Response) -> Drag {
+    update(response, Kind::CompactSeek)
+}
+
 pub fn video_seek_drag(response: &Response) -> Drag {
     update(response, Kind::VideoSeek)
 }
 
 fn update(response: &Response, kind: Kind) -> Drag {
     let context = &response.ctx;
+    let owned_button = context
+        .data(|data| data.get_temp::<State>(state_id()))
+        .and_then(|state| state.active)
+        .map(|active| active.button);
     let (events, pointer, decided_drag, interrupted) = context.input(|input| {
         let lost_focus = input.events.contains(&egui::Event::WindowFocused(false));
         // A later cancellation must not undo an already released gesture.
@@ -145,10 +159,12 @@ fn update(response: &Response, kind: Kind) -> Drag {
                     !matches!(
                         event,
                         egui::Event::PointerButton {
-                            button: PointerButton::Primary,
+                            button,
                             pressed: false,
                             ..
-                        }
+                        } if Some(*button) == owned_button ||
+                            (owned_button.is_none() && (*button == PointerButton::Primary ||
+                                (kind == Kind::CompactSeek && *button == PointerButton::Secondary)))
                     )
                 })
                 .any(|event| {
@@ -183,15 +199,20 @@ fn update(response: &Response, kind: Kind) -> Drag {
         .find_map(|(index, event)| match event {
             egui::Event::PointerButton {
                 pos,
-                button: PointerButton::Primary,
+                button,
                 pressed: true,
                 modifiers,
-            } => Some((index, *pos, *modifiers)),
+            } if owned_button.is_none_or(|owner| owner == *button)
+                && (*button == PointerButton::Primary
+                    || (kind == Kind::CompactSeek && *button == PointerButton::Secondary)) =>
+            {
+                Some((index, *pos, *modifiers, *button))
+            }
             _ => None,
         });
     let mut first_event = 0;
     let mut started = false;
-    if let Some((index, origin, modifiers)) = press
+    if let Some((index, origin, modifiers, button)) = press
         && state.claimed_frame != Some(frame)
         && response.interact_rect.contains(origin)
         && context.layer_id_at(origin) == Some(response.layer_id)
@@ -199,6 +220,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
         state.active = Some(Active {
             id: response.id,
             kind,
+            button,
             origin,
             modifiers,
             direction: None,
@@ -215,6 +237,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
     };
     if let Some(mut active) = state.active.filter(|active| active.id == response.id) {
         result.origin = Some(active.origin);
+        result.secondary = active.button == PointerButton::Secondary;
         result.modifiers = active.modifiers;
         let threshold = context.options(|options| options.input_options.max_click_dist);
         for event in &events[first_event..] {
@@ -222,10 +245,10 @@ fn update(response: &Response, kind: Kind) -> Drag {
                 egui::Event::PointerMoved(pos) => active.moved(*pos, threshold),
                 egui::Event::PointerButton {
                     pos,
-                    button: PointerButton::Primary,
+                    button,
                     pressed: false,
                     ..
-                } => {
+                } if *button == active.button => {
                     active.moved(*pos, threshold);
                     result.position = Some(*pos);
                     result.released = true;
@@ -249,11 +272,16 @@ fn update(response: &Response, kind: Kind) -> Drag {
             };
         } else if result.released {
             state.active = None;
+            if result.secondary && !result.dragging {
+                // A plain secondary click must not seek or restart playback.
+                result.released = false;
+                result.position = None;
+            }
         } else {
             result.position = pointer;
             state.active = Some(active);
         }
-    } else if matches!(kind, Kind::Seek | Kind::VideoSeek)
+    } else if matches!(kind, Kind::Seek | Kind::CompactSeek | Kind::VideoSeek)
         && response.clicked()
         && press.is_none()
         && !events.iter().any(|event| {
@@ -292,6 +320,7 @@ mod tests {
                 let mut active = Active {
                     id: Id::new("test"),
                     kind,
+                    button: PointerButton::Primary,
                     origin,
                     modifiers: egui::Modifiers::NONE,
                     direction: None,

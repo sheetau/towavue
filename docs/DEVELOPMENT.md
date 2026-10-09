@@ -54,6 +54,19 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
+For compact secondary-button seeking, run app `seekbar::precision::` and
+`timeline_input::` controls, plus the image-navigation and seek-preview regressions.
+They cover relative playhead anchoring, precision bands, reversed reading direction,
+batched/discarded passes, matching-button release and cancellation. Folder-tab reuse
+uses `external_open::`, `window_host::launch_tests::` and
+`window_host::preference_tests::`; defaults, dirty-document guards and restart
+persistence must remain covered. Gallery/header and directional-menu changes use
+`welcome::` and `logo_menu::` controls. The runtime
+`renderer::startup::tests::empty_startup_surface_paints_black_before_the_first_frame`
+checks a hidden native surface against an owned memory DC. It verifies initial
+black pixels and subsequent frame replacement, not physical compositor continuity.
+
+
 For the continuous audio clock and direct audio feed, run runtime `audio::`,
 `decode::audio_inline::` and `decode::playback_audio_input_tests::` controls,
 including the existing serial native pause/reprime/tab/device controls. Ogg's

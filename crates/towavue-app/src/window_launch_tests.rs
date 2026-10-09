@@ -226,11 +226,31 @@ fn ready_launch_image_submits_once_without_waiting_for_pending_or_failed_loads()
         host: WindowHost,
         root: PathBuf,
         completed: bool,
+        job: Arc<towavue_runtime_windows::StartupDevice>,
     }
     impl ApplicationHandler<Event> for Trial {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             self.host.start_pending(event_loop, false);
-            assert!(self.host.windows.values().all(|app| app.renderer.is_some()));
+            assert!(
+                self.host
+                    .windows
+                    .values()
+                    .all(|app| { app.renderer.is_none() && app.startup_surface.is_some() })
+            );
+            exercise_ready_launch(&mut self.host, event_loop, &self.root);
+            assert!(
+                self.job.get(false).is_none(),
+                "ready images never wait on the gated device"
+            );
+            self.job.release();
+            for app in self.host.windows.values_mut() {
+                app.finish_startup_graphics(true)
+                    .expect("same-device handoff");
+                assert!(
+                    self.job
+                        .matches(&app.renderer.as_ref().expect("renderer").graphics_device())
+                );
+            }
             exercise_ready_launch(&mut self.host, event_loop, &self.root);
             for app in self.host.windows.values_mut() {
                 app.exit_requested = true;
@@ -246,16 +266,23 @@ fn ready_launch_image_submits_once_without_waiting_for_pending_or_failed_loads()
     builder.with_any_thread(true);
     configure_mouse_input(&mut builder);
     let event_loop = builder.build().expect("event loop");
-    let host = WindowHost::new(None, Some(event_loop.create_proxy())).expect("host");
+    let mut host = WindowHost::new(None, Some(event_loop.create_proxy())).expect("host");
+    let job = Arc::new(towavue_runtime_windows::StartupDevice::controlled(|| {}));
+    host.startup_started = true;
+    host.startup_device = Some(Arc::clone(&job));
+    for app in host.windows.values_mut() {
+        app.startup_device = Some(Arc::clone(&job));
+    }
     let mut trial = Trial {
         host,
         root,
         completed: false,
+        job,
     };
     event_loop.run_app(&mut trial).expect("ready launch trial");
     assert!(trial.completed);
     eprintln!(
-        "PASS ready launch: hidden caller, pending/error/nonimage guards, exact original pixels, ordinary presentation gate and no duplicate frame"
+        "PASS ready launch: gated CPU and ready GPU paths, hidden caller, pending/error/nonimage guards, exact original pixels, ordinary presentation gate and no duplicate frame"
     );
 }
 

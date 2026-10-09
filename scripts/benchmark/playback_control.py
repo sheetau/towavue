@@ -5,6 +5,7 @@ import threading
 import time
 import math
 from interaction import U, geometry
+import native_input
 
 
 def prepare_seek_input(session):
@@ -151,7 +152,7 @@ def seek(session,percent,receiver=None,duration_seconds=12.0):
         if not dpi:raise RuntimeError('Cannot read fixture window DPI')
         x,y,actual,bound=towavue_seek_point(client.right,client.bottom,dpi,seconds,duration_seconds)
         details.update(click_x=x,click_y=y,dpi=dpi,estimated_seconds=actual,pixel_rounding_bound_seconds=bound,duration_seconds=duration_seconds)
-        session.click(x,y)
+        native_input.click(session,x,y)
     elif session.name=='mpc-hc':receiver.send(session,0xA0002000,f'{seconds:.6f}')
     elif session.name=='vlc':vlc(session,f'seek {seconds:.6f}')
     return details

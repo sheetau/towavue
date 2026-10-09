@@ -525,8 +525,10 @@ impl PlaneDecoder {
             .map_err(ffmpeg_error)?;
         let mut options = ffmpeg::Dictionary::new();
         options.set("max_pixels", &(IMAGE_BYTE_LIMIT / 4).to_string());
-        // Avoid frame-thread lookahead delaying a first-only preview; retain
-        // decoder-selected worker parallelism within a frame.
+        // AVCodecContext defaults to one worker. Select decoder-managed
+        // parallelism explicitly; low delay still prevents frame lookahead
+        // from holding a first-only preview.
+        options.set("threads", "0");
         options.set("flags", "+low_delay");
         options.set("err_detect", "explode");
         let codec = ffmpeg::codec::decoder::find(ffmpeg::codec::Id::AV1)

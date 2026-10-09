@@ -45,10 +45,61 @@ The app build uses the installed Windows SDK's `rc.exe` to embed `assets/towavue
 
 Helper lookup is deliberate: colocated ffmpeg.exe/ffprobe.exe take precedence; only a development layout with neither colocated helper uses FFMPEG_DIR/bin. A partially installed pair fails rather than borrowing another version from PATH.
 
+The x64 app build delays five FFmpeg DLL imports (codec, format, filter, scaling and resampling), retaining eager avutil loading for diagnostics. Set `FFMPEG_DIR` to a shared prefix with one versioned DLL per library in `bin`. The build uses the installed Visual Studio librarian to create MSVC import libraries in `OUT_DIR` from the prefix's versioned `.def` files in `lib` (or `lib/amd64`) or `bin`; native MSVC prefixes without these definitions retain their existing `.lib` files. Nothing is written into the prefix. An ignored delay import (LNK4199) is a linker error. These DLLs remain required runtime dependencies; delayed loading does not make an incomplete installation supported. See [MSVC delay imports](https://learn.microsoft.com/en-us/cpp/build/reference/linker-support-for-delay-loaded-dlls).
+
+Run `cargo test -p towavue-app --bin towavue native_import_tests` after changing this build path; it inspects the linked test host's actual eager and delayed PE imports. Also inspect the ordinary Release EXE, exercise native decode/export and diagnostic failures, and run the full workspace suite. The dependency crates' standalone tests retain their own linking; they do not substitute for testing the delayed app host. No delayed module is explicitly unloaded.
+
 The Release app is a GUI executable and does not open a console. Session warnings/errors are retained under `%LOCALAPPDATA%\towavue\logs` (up to 1 MiB per session, newest five closed/current sessions subject to active-file retention). Debug keeps stderr diagnostics. For logging changes, run the runtime `diagnostics::` filter: it covers bounded UTF-8 messages, saturation, session retention, shutdown drain and a separate native FFmpeg callback process. Check the Release PE subsystem separately; tests use the console subsystem.
 
 
 ## Verification by impact
+
+For the continuous audio clock and direct audio feed, run runtime `audio::`,
+`decode::audio_inline::` and `decode::playback_audio_input_tests::` controls,
+including the existing serial native pause/reprime/tab/device controls. Ogg's
+parallel path and negative-origin Matroska priming remain separate controls.
+For verified video probe proofs used by audio feeds, run
+`decode::verified_video_probe::tests::`: compare full PCM and timestamps,
+changed-source invalidation, metadata/signature bounds and ordinary fallback.
+These changes require the full workspace suite and an ordinary Release build.
+
+The optional native preroll source patch and its exact hash manifest are in
+[scripts/ffmpeg-preroll](../scripts/ffmpeg-preroll/README.md). Stock FFmpeg must
+continue to work. Run the ignored
+`decode::hardware_preroll::native_capability_matches_loaded_codec` control
+with `TOWAVUE_PREROLL_EXPECT_AVAILABLE=0` and
+`TOWAVUE_PREROLL_EXPECT_CODECS=0` for stock; use `1` and `5` for the patched
+library. On the patched library, explicitly run runtime
+`native_metadata_preroll_preserves_seek_preview_and_reuse`,
+`native_av1_preroll_preserves_seek_preview_cancel_and_reuse` and
+`native_metadata_preroll_preserves_continuation`, serially with the existing
+HEVC/AV1 fixtures supplied through `TOWAVUE_PREROLL_FIXTURE` and the native
+reuse fixture variables. Retain damaged-timestamp, cancellation, held-frame,
+residual-output, device and ordinary retry controls. Native readback and
+capability checks do not establish desktop speed or distribution approval.
+
+To reproduce the optimized native/helper closure, use
+`scripts/build-ffmpeg-native.ps1 -SeekOptimized` with the pinned native
+environment and all six source prefixes, including verified ZVBI. This
+explicit profile applies the checked source patch and static-preferred link
+policy while retaining configured features and shared FFmpeg libraries.
+It verifies the 29-module dependency graph before completing local staging.
+The default build profile remains unchanged. See the patch README for the
+complete invocation and native-build checks; never mix its DLLs with a stock
+prefix. No performance or distribution approval follows from build success.
+
+For the static WebP RGBA adapter, run runtime `image::webp_rgba::tests::`, the
+vendored codec's library tests, the image/animation/export regressions and
+`scripts/test-rust-notices.ps1`. Verify complete RGBA, source alpha and all
+EXIF orientations, metadata, budgets, non-Send readers and truncated inputs.
+The ignored corpus/component tests require explicit external fixtures and
+are not ordinary suite passes. After font-lane or CPU raster changes, also
+run runtime `fonts::`/renderer controls and the four hidden startup controls.
+
+
+For folder-monitor startup changes, run `cargo test -p towavue-runtime-windows --lib watch::tests:: -- --test-threads=1`. Native controls cover initial/rearmed notifications, changes before a delayed worker starts, pending-request drop without a worker, spawn failure, immediate shutdown and missing-folder errors. Exclusive reopen verifies directory handle release. Keep cancellation/drain ownership review alongside these tests; timing improvements still require ordinary Release startup comparisons. Changes affecting host initialization also require the hidden startup group and workspace checks below.
+
+For startup graphics changes, run the runtime `renderer::startup::` and `image_loader::startup_completion_tests::` filters, then the explicit app group `cargo test -p towavue-app --bin towavue --locked --offline window_host::startup_ -- --ignored --nocapture --test-threads=1`. These owned hidden-window controls cover full CPU/UI handoff, shared-device lifetime after the first window closes, pending moves/detaches/Filmstrip operations, minimized preparation, retained large originals, and device-failure Retry. The video part requires `tests/generated/benchmark-seek-v1/h264-1080.mp4` and fails if that fixture is missing. Run workspace checks and ordinary Release comparisons for changes spanning the host/runtime boundary. All source and regression modules must build without files under `target/benchmark`; preserve private benchmark data separately. Automated readback/native visibility checks do not certify physical handoff appearance, display continuity, or real user input.
 
 For hardware decoder reuse, run the native `decode::hardware_reuse::tests::` controls explicitly and serially. `native_backward_seek_after_gop_boundary_rejects_residual_output` takes one 12-second HEVC long-GOP fixture through `TOWAVUE_HW_REUSE_FIXTURES`; use the generated `benchmark-seek-v1/hevc-4k10.mp4`. It interrupts receive at a GOP boundary, seeks backward, and compares target timestamps, full source sample planes and the held frame with fresh decoding. Supply the broader fixed/configuration-change corpus separately to `native_full_source_reuse_preserves_pixels_cancel_eof_and_invalidation`. These hidden native controls do not certify physical presentation. Check ordinary Release seeks after reset-policy changes.
 
@@ -77,7 +128,7 @@ CI uses [test-ci.ps1](../scripts/test-ci.ps1) so hosted and local gates share co
 .\scripts\test-ci.ps1 -Phase Installer -NsisArchive '<verified NSIS archive>'
 ```
 
-Rust uses the pinned development FFmpeg, a separate `target/ci-cargo` directory, the ordinary line-table test profile, disabled incremental compilation and four test threads. It checks formatting and the vendored renderer/PNG before Clippy and the full workspace suite. Materials and installer checks run independently in CI, so a notice or packaging failure does not wait for the app build. Logs and elapsed times are retained in unique `target/tmp/ci-*` directories; a failed command stops its phase, with no automatic test retry. These controls remain separate from production artifact/signature checks.
+Rust uses the pinned development FFmpeg, a separate `target/ci-cargo` directory, the ordinary line-table test profile, disabled incremental compilation and four test threads. It checks formatting and the vendored renderer/PNG/WebP before Clippy and the full workspace suite. Materials and installer checks run independently in CI, so a notice or packaging failure does not wait for the app build. Logs and elapsed times are retained in unique `target/tmp/ci-*` directories; a failed command stops its phase, with no automatic test retry. These controls remain separate from production artifact/signature checks.
 
 CI caches Cargo downloads and development build outputs; compiled cache keys include the hosted image, toolchain/profile, native setup and lockfile inputs. Every test still executes on a cache hit. No media, signing material or release output is cached. Superseded runs on the same ref are cancelled. Changes limited to README, AGENTS, documentation Markdown or `docs/images` skip the heavy workflow; dependency/notice JSON, LICENSE/NOTICE, scripts, source and workflow edits still run every gate. Use CI's **Run workflow** action for a release commit that would otherwise be skipped. Local content/link/diff review is still required for documentation; skipping CI is not a test pass. A release requires a successful full run on its exact source commit.
 
@@ -152,6 +203,8 @@ For native About and update UI changes, run runtime `dialog::` and app `about::`
 For volume-HUD caps and timeline-head symmetry, run the explicit app `volume_hud::pixel_tests::native_hud_caps_and_cti_slopes_are_smooth_and_symmetric` opt-in with `--ignored --nocapture --test-threads=1`. It renders only generated shapes in a hidden hardware D3D11 window at 100/125/150/200% density, compares mirrored CTI pixels and monotone shadow-cap intensity, and requires the old raw-triangle and thin-rectangle-blur controls to detect their defects. Optionally set `TOWAVUE_CHROME_REFERENCE_DIR` to an existing owned output directory for RGBA readbacks; filenames include their square physical dimensions. This is GPU pixel evidence, not physical pointer or desktop appearance approval. Ordinary `volume_hud::`, `time_selection::` and `filmstrip::duration_tests::` controls cover fading/input ownership, polygon hit tests, discarded input passes and duration padding.
 
 For window placement, run runtime `window_placement::` persistence controls and explicitly opt into `caption::placement::tests::native_window_placement_preserves_normal_bounds_and_clamps_restore` with `--ignored --nocapture --test-threads=1`. The native control briefly shows owned windows on available monitors, covers repeated hidden restoration, maximize/minimize/fullscreen, synthetic DPI changes, visible edge alignment and offscreen/work-area clamping. The app opt-in `window_host::placement::tests::native_host_restores_only_initial_window_and_remembers_accepted_visible_closes` additionally starts owned D3D11 windows through the production initialization and close paths, using an isolated preference file. Ordinary app tests disable the owner's placement store. Run full workspace checks for host/lifecycle changes. `caption::geometry_tests::compare_native_reference_geometry_and_fullscreen_restore` separately compares native and custom edge hits and caption geometry; it also briefly shows owned windows. These are native API/GPU lifecycle controls, not physical drag, real DPI-setting changes, monitor hot-unplug or desktop appearance approval.
+
+The ordinary hidden `caption::tests::native_caption_owns_subclass_and_preserves_winit_close_delivery` control checks the native DPI after cross-monitor moves. If a hidden window receives no automatic DPI notification, it logs `CONTROLLED hidden fullscreen DPI notification` and sends the matching `WM_DPICHANGED` through the real subclass/winit path before checking scale, fullscreen bounds and restoration. This verifies controlled notification handling, not automatic OS delivery. Visible fixture modes retain the automatic-delivery requirement and never use this fallback.
 
 For caption information reuse, run the ordinary runtime `caption::` controls and explicitly opt into `caption::info::tests::native_cached_caption_matches_geometry_and_command_changes` with `--exact --ignored --nocapture --test-threads=1`. It briefly shows only its owned fixture and compares cached geometry/availability to fresh native queries across title changes, resize/move, monitor DPI changes, system-menu and window enable states, styles, maximize/minimize, fullscreen and settings notifications. It also rejects publication across reentrant invalidation and checks that stable/title-only reads avoid another query. Existing native geometry/placement and app graphics-recovery controls cover the shared caption surface. These are native API checks, not physical input or appearance approval. In a `presentation-verification` build only, `TOWAVUE_VERIFY_CAPTION_CACHE=0` selects fresh queries for comparison; default or `1` uses the ordinary cache. Complete builds before timed comparisons.
 
@@ -251,6 +304,7 @@ For waveform/foreground contention, run `waveform_jobs_report_foreground_image_a
 | Window, media, graphics, Shell, export | `crates/towavue-runtime-windows/src/` |
 | UI, workers, tab state | `crates/towavue-app/src/` |
 | Native image renderer patch | `vendor/egui-directx11/`, [patch notes](../vendor/egui-directx11/TOWAVUE-PATCH.md) |
+| WebP coefficient patch | `vendor/image-webp/`, [source, scope and checks](../vendor/image-webp/TOWAVUE-PATCH.md); retain the pinned version, checked fallback and upstream unsafe prohibition |
 | PNG row-hook patch | `vendor/png/`, [source, scope and checks](../vendor/png/TOWAVUE-PATCH.md); preserve the pinned version and upstream unsafe prohibition |
 | Generated media and specialized checks | `scripts/`, `tests/`; find the relevant test with rg |
 

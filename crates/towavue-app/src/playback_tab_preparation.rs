@@ -166,12 +166,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if saved.duration.is_none() || saved.recovery_position.is_some() {
             return false;
         }
+        let path = saved.path.clone();
+        let instance = saved.instance;
+        // Hover preparation remains nonblocking. Explicit transport obtains the
+        // same host device as an ordinary foreground playback request.
+        if self.finish_startup_graphics(true).is_err() {
+            return false;
+        }
         let Some(renderer) = &self.renderer else {
             return false;
         };
         let device = renderer.graphics_device();
-        let path = saved.path.clone();
-        let instance = saved.instance;
         let edit = self
             .edits
             .get(&id)

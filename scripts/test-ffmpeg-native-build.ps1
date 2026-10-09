@@ -16,7 +16,9 @@ if ($candidate -eq $ReferenceExecutable) { throw 'Use a distinct reference execu
 $inputs = Get-Content -LiteralPath (Join-Path $BuildDirectory 'build-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $runtime = Get-Content -LiteralPath (Join-Path $BuildDirectory 'runtime.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $complete = Get-Content -LiteralPath (Join-Path $BuildDirectory 'COMPLETE.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($complete.runtime_files -ne 94 -or $complete.distribution_approved -ne $false) { throw 'Unexpected native build completion record.' }
+$seekOptimized = $inputs.profile -eq 'seek-optimized-v1'
+$expectedCount = if ($seekOptimized) { 29 } else { 94 }
+if ($complete.runtime_files -ne $expectedCount -or $complete.distribution_approved -ne $false) { throw 'Unexpected native build completion record.' }
 $testDirectory = Join-Path $repositoryRoot ('target/tmp/native-ffmpeg-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testDirectory | Out-Null
 $savedPath = $env:PATH
@@ -24,7 +26,9 @@ $savedFfmpeg = $env:FFMPEG_DIR
 try {
     $env:PATH = Join-Path $env:SystemRoot 'System32'
     $env:FFMPEG_DIR = $null
-    $actual = @(& (Join-Path $PSScriptRoot 'get-native-runtime-dependencies.ps1') -EntryPoints $candidate, (Join-Path $prefix 'bin/ffprobe.exe') `
+    $entryPoints = @($candidate, (Join-Path $prefix 'bin/ffprobe.exe'))
+    if ($seekOptimized) { $entryPoints += Join-Path $prefix 'bin/ffplay.exe' }
+    $actual = @(& (Join-Path $PSScriptRoot 'get-native-runtime-dependencies.ps1') -EntryPoints $entryPoints `
         -SearchDirectories (Join-Path $prefix 'bin') -ObjdumpExecutable (Join-Path $MsysRoot 'mingw64/bin/objdump.exe'))
     if (($actual | ConvertTo-Json -Depth 8) -cne ($runtime | ConvertTo-Json -Depth 8)) { throw 'Staged native runtime differs from its build evidence.' }
     foreach ($inputPrefix in $inputs.source_prefixes) {
@@ -75,6 +79,7 @@ $arguments = @{
 }
 $zvbiInput = @($inputs.source_prefixes | Where-Object { $_.package -eq 'zvbi-0.2' })
 if ($zvbiInput.Count) { $arguments.ZvbiPrefix = $zvbiInput[0].prefix }
+if ($seekOptimized) { $arguments.SeekOptimized = $true }
 function Assert-Rejected([string]$Message) {
     $rejected = $false
     try { & $builder @arguments | Out-Null }

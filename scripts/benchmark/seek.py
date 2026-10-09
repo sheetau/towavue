@@ -14,6 +14,7 @@ from audio import packet
 from interaction import Session, U, geometry
 from playback_control import MpcReceiver, prepare_seek_input, seek, seek_target_seconds
 from visual import prepare_apps, sha, W, normalize
+import native_input
 
 
 FRAME_BITS={tuple(np.random.default_rng(831+3000+i).integers(0,2,(4,6)).ravel()):i for i in range(360)}
@@ -107,6 +108,11 @@ def trial(s,percent,receiver,recorder,video,retain=None,duration_seconds=12.0):
     for endpoint in ('audio','video'):
         if endpoint+'_end_ns' in shared:row[endpoint+'_upper_ms']=(shared[endpoint+'_end_ns']-start)/1e6
     if 'video_lower_ns' in shared:row['video_lower_ms']=max(0,(shared['video_lower_ns']-start)/1e6)
+    native_input.restore(s)
+    if hasattr(s,'native_input'):
+        row['native_input']=s.native_input
+        if not s.native_input.get('restored'):
+            row['status']='input_state_changed'
     return row
 
 
@@ -134,7 +140,8 @@ def main():
               'apps':{name:{'exe':str(apps[name]['exe']),'sha256':sha(apps[name]['exe'])} for name in names},
               'settings':'isolated profiles; application volume knobs 20%; no acoustic level calibration; default video decoding',
               'endpoint':'first desktop observation at/after requested frame, within 1 s; two target-frequency loopback packets',
-              'input':'towavue DPI-scaled compact travel (5 DIP endpoint inset); MPC-HC documented slave API; VLC RC on an ephemeral IPv4 loopback port',
+              'input_protocol':'owned-native-seek-v1',
+              'input':'towavue guarded SendInput move/down/up/neutral with no coalescing and DPI-scaled compact travel (5 DIP endpoint inset); MPC-HC documented slave API; VLC RC on an ephemeral IPv4 loopback port',
               'target_policy':'12 s percentage plus 1/60 s; native click uses manifest container duration; common next 30 fps frame and interior tone interval',
               'preparation':'real foreground ownership is required before timing; an owned-caption activation click may be used and is recorded per session',
               'supersedes':'historical seek runner clicked full client width and could seek before the detector target; do not merge those results',
@@ -171,7 +178,7 @@ def main():
                             row.update(app=name,case=f['id'],kind=f['kind'],block=block,step=step,phase='warmup' if block<0 else 'measurement',input_preparation=preparation)
                             out.write(json.dumps(row)+'\n');out.flush()
                             print(block,name,f['id'],percent,row['video_status'],row['audio_status'],flush=True)
-                            if row['audio_status']!='ok' or row['video_status'] not in ('ok','not_applicable'):
+                            if row.get('status','ok')!='ok' or row['audio_status']!='ok' or row['video_status'] not in ('ok','not_applicable'):
                                 # Later targets could otherwise be reached by natural playback
                                 # after an ignored input. Stop this sequence and retain failure.
                                 break
@@ -179,8 +186,12 @@ def main():
                     except Exception as error:
                         out.write(json.dumps({'app':name,'case':f['id'],'block':block,'status':'setup_error','detail':str(error)})+'\n');out.flush();print(name,str(error),flush=True)
                     finally:
+                        native_input.restore(s)
                         if hasattr(s,'rc_socket'):s.rc_socket.close()
-                        s.close()
+                        forced=s.close()
+                        (folder/'close.json').write_text(json.dumps(dict(forced_cleanup=forced,exit_code=s.process.returncode)),encoding='utf-8')
+                        if forced or s.process.returncode!=0:
+                            raise RuntimeError('Owned fixture did not exit normally')
     finally:receiver.close()
 
 

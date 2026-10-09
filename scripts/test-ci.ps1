@@ -74,6 +74,8 @@ switch ($Phase) {
         Invoke-Script 'generate-m1-fixtures'
         Invoke-Check 'renderer' 'cargo' 'test -p egui-directx11 --lib --locked -- --test-threads=4'
         Invoke-Check 'png' 'cargo' 'test --manifest-path vendor/png/Cargo.toml --lib row_filter_tests --features towavue-row-filter --locked -- --test-threads=4'
+        Invoke-Check 'webp' 'cargo' 'test --manifest-path vendor/image-webp/Cargo.toml --lib --locked -- --test-threads=4'
+        Invoke-Check 'webp-format' 'cargo' 'fmt --manifest-path vendor/image-webp/Cargo.toml --check'
         Invoke-Check 'clippy' 'cargo' 'clippy --workspace --all-targets --locked -- -D warnings'
         Invoke-Check 'workspace' 'cargo' 'test --workspace --all-targets --locked --no-fail-fast -- --nocapture --test-threads=4'
     }

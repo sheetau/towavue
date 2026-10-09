@@ -1,4 +1,10 @@
 use super::*;
+#[cfg(test)]
+mod startup_compat_tests;
+#[cfg(test)]
+mod startup_recovery_tests;
+#[cfg(test)]
+mod startup_tests;
 
 #[path = "window_drop.rs"]
 mod dropping;
@@ -54,6 +60,7 @@ pub(crate) struct GraphicsRecoveryRequest {
 }
 
 pub(crate) enum Event {
+    StartupGraphics,
     Launch(towavue_runtime_windows::LaunchRequest),
     Update(u64, towavue_runtime_windows::update::UpdateEvent),
     ViewPreferenceFailed(std::io::Error),
@@ -82,6 +89,8 @@ pub(crate) struct WindowHost {
     delete_confirmation_suppressed: bool,
     delete_preference_path: Option<PathBuf>,
     windows: BTreeMap<WindowKey, WindowApplication>,
+    startup_device: Option<Arc<towavue_runtime_windows::StartupDevice>>,
+    startup_started: bool,
     proxy: Option<EventLoopProxy<Event>>,
     next_key: u64,
     last_active_window: Option<WindowKey>,
@@ -121,6 +130,8 @@ impl WindowHost {
             file_operation: None,
             source_save: None,
             windows: BTreeMap::new(),
+            startup_device: None,
+            startup_started: false,
             last_active_window: None,
             window_placement: placement::open(),
             proxy,
@@ -191,6 +202,7 @@ impl WindowHost {
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;
+        app.startup_device = self.startup_device.clone();
         self.windows.insert(key, app);
         Ok(key)
     }
@@ -213,6 +225,26 @@ impl WindowHost {
             .windows
             .values()
             .find_map(|app| app.renderer.as_ref().map(FrameRenderer::graphics_device));
+        if !self.startup_started && device.is_none() {
+            self.startup_started = true;
+            let proxy = self.proxy.clone();
+            let job = Arc::new(towavue_runtime_windows::StartupDevice::spawn(move || {
+                if let Some(proxy) = &proxy {
+                    let _ = proxy.send_event(Event::StartupGraphics);
+                }
+            }));
+            for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
+                app.startup_device = Some(Arc::clone(&job));
+            }
+            self.startup_device = Some(job);
+        }
+        if self
+            .windows
+            .values()
+            .all(|app| app.startup_device.is_none())
+        {
+            self.startup_device = None;
+        }
         for app in self
             .windows
             .values_mut()
@@ -400,6 +432,20 @@ impl WindowHost {
         Ok(key)
     }
 
+    fn finish_transfer_startup(&mut self, key: WindowKey) -> Result<(), String> {
+        let app = self.windows.get_mut(&key).expect("validated window");
+        // Resolve the host's existing job before rebinding textures or moving
+        // native playback ownership. No tab state has been extracted yet.
+        app.finish_startup_graphics(true)
+            .map_err(|error| error.message(app.language()))?;
+        if app.renderer.is_none() {
+            return Err(localization::Text::TransferWaitGraphics
+                .in_language(app.language())
+                .into());
+        }
+        Ok(())
+    }
+
     fn move_tab(
         &mut self,
         source: WindowKey,
@@ -429,9 +475,14 @@ impl WindowHost {
                 .in_language(self.language.settings.display)
                 .into());
         }
+        self.finish_transfer_startup(source)?;
+        self.finish_transfer_startup(destination)?;
         let stage = self.windows[&source].prepare_image_transfer(
             request.tab,
-            target.ui_context.as_ref().expect("validated context"),
+            self.windows[&destination]
+                .ui_context
+                .as_ref()
+                .expect("validated context"),
         )?;
         // All fallible validation is complete before extracting any user state.
         let transfer = self
@@ -478,7 +529,8 @@ impl WindowHost {
             localization::Text::TransferSourceClosed.in_language(self.language.settings.display),
         )?;
         app.validate_tab_transfer(request)?;
-        let device = app
+        self.finish_transfer_startup(source)?;
+        let device = self.windows[&source]
             .renderer
             .as_ref()
             .expect("validated renderer")
@@ -514,6 +566,11 @@ impl WindowHost {
     fn route(&mut self, event: Event) {
         let display_language = self.language.settings.display;
         match event {
+            Event::StartupGraphics => {
+                for app in self.windows.values_mut().filter(|app| !app.exit_requested) {
+                    app.request_redraw();
+                }
+            }
             Event::Launch(request) => {
                 if self.update_committing() {
                     request.acknowledge(false);
@@ -754,7 +811,8 @@ impl WindowHost {
                 &path.display().to_string(),
             ));
         }
-        let device = app
+        self.finish_transfer_startup(source)?;
+        let device = self.windows[&source]
             .renderer
             .as_ref()
             .expect("validated renderer")
@@ -845,7 +903,10 @@ impl WindowHost {
         if requests.is_empty() {
             return;
         }
-        let lost = requests.values().any(|request| !request.retry)
+        let lost = requests
+            .keys()
+            .any(|key| self.windows[key].startup_surface.is_some())
+            || requests.values().any(|request| !request.retry)
             || self
                 .windows
                 .values()
@@ -857,7 +918,8 @@ impl WindowHost {
             .filter(|(key, app)| {
                 !app.exit_requested
                     && app.window.is_some()
-                    && (requests.contains_key(key) || (lost && app.renderer.is_some()))
+                    && (requests.contains_key(key)
+                        || (lost && (app.renderer.is_some() || app.startup_surface.is_some())))
             })
             .map(|(key, app)| {
                 (
@@ -884,6 +946,9 @@ impl WindowHost {
                 .filter(|(key, app)| !targets.contains_key(key) && !app.exit_requested)
                 .find_map(|(_, app)| app.renderer.as_ref().map(FrameRenderer::graphics_device))
         };
+        if lost {
+            self.startup_device = None;
+        }
         // Quiesce every affected session before allocating any replacement surface.
         for key in targets.keys() {
             self.windows

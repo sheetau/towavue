@@ -91,6 +91,7 @@ pub use video_resume::{
     VideoResume, VideoResumeError, VideoResumeEvent, VideoResumeHistory, VideoResumeSource,
 };
 mod renderer;
+pub use renderer::startup::{StartupDevice, StartupSurface};
 mod selection_outline;
 mod shell;
 mod taskbar;

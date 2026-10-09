@@ -118,7 +118,20 @@ fn select(
     selected.expect("selected hardware frame")
 }
 
+struct PrerollEnabled(bool);
+impl PrerollEnabled {
+    fn set(value: bool) -> Self {
+        Self(super::super::hardware_preroll::ENABLED.swap(value, Ordering::Relaxed))
+    }
+}
+impl Drop for PrerollEnabled {
+    fn drop(&mut self) {
+        super::super::hardware_preroll::ENABLED.store(self.0, Ordering::Relaxed);
+    }
+}
+
 fn reference(path: &Path, device: &GraphicsDevice, target: MediaTime) -> Pixels {
+    let _preroll = PrerollEnabled::set(false);
     let _policy = Policy::set(false);
     let mut input =
         ParallelInput::open_tracked_video(path, &|| false).expect("fresh reference input");
@@ -507,4 +520,353 @@ fn native_overlapping_fence_and_query_preserve_source_planes_and_held_frames() {
     );
     assert!(all > fences, "real query fallback markers required");
     eprintln!("PACING_MARKERS fence={fences} query={}", all - fences);
+}
+
+#[test]
+#[ignore = "explicit private FFmpeg policy and HEVC fixture; run alone"]
+fn native_metadata_preroll_preserves_seek_preview_and_reuse() {
+    use super::super::hardware_preroll as omission;
+    struct Flags;
+    impl Drop for Flags {
+        fn drop(&mut self) {
+            omission::ENABLED.store(true, Ordering::Relaxed);
+            omission::FORCE_SELECTED.store(false, Ordering::Relaxed);
+            omission::DAMAGE_PTS.store(false, Ordering::Relaxed);
+            omission::DAMAGE_REFERENCE.store(false, Ordering::Relaxed);
+        }
+    }
+    let _flags = Flags;
+    let _reuse = Policy::set(true);
+    let path =
+        std::path::PathBuf::from(std::env::var_os("TOWAVUE_PREROLL_FIXTURE").expect("fixture"));
+    let device = GraphicsDevice::hardware_for_test().expect("one native device");
+    let mut input = ParallelInput::open_tracked_video(&path, &|| false).expect("owned input");
+    let mut held = None;
+    let mut pairs = 0;
+    for damaged in [false, true] {
+        omission::DAMAGE_PTS.store(damaged, Ordering::Relaxed);
+        for forced in [false, true] {
+            omission::FORCE_SELECTED.store(forced, Ordering::Relaxed);
+            for percent in [70, 20, 80, 30, 60, 10] {
+                let target = MediaTime::from_nanoseconds(percent * 120_000_000 + 16_666_667);
+                omission::ENABLED.store(false, Ordering::Relaxed);
+                let expected = reference(&path, &device, target);
+                omission::ENABLED.store(true, Ordering::Relaxed);
+                let retries = omission::RETRIES.load(Ordering::Relaxed);
+                let omitted = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed);
+                let selected = select(&mut input, &device, target);
+                assert!(!selected.pixels_omitted());
+                equal(&pixels(&selected), &expected);
+                if let Some((previous, expected)) = &held {
+                    equal(&pixels(previous), expected);
+                }
+                if forced && percent == 70 {
+                    assert_eq!(
+                        omission::RETRIES.load(Ordering::Relaxed),
+                        retries + 1,
+                        "one ordinary retry before selection"
+                    );
+                }
+                let decoded = pixels(&selected);
+                held = Some((selected, decoded));
+                pairs += 1;
+                println!(
+                    "PREROLL_PAIR damaged={damaged} forced={forced} position={percent} omitted={} retries={} equal=1",
+                    omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) - omitted,
+                    omission::RETRIES.load(Ordering::Relaxed) - retries
+                );
+            }
+        }
+    }
+    omission::DAMAGE_PTS.store(false, Ordering::Relaxed);
+    omission::FORCE_SELECTED.store(false, Ordering::Relaxed);
+    for (name, target, end) in [
+        (
+            "bounded",
+            MediaTime::from_nanoseconds(8_433_398_438),
+            Some(MediaTime::from_nanoseconds(8_433_398_438)),
+        ),
+        ("eof", MediaTime::from_nanoseconds(13_000_000_000), None),
+    ] {
+        let mut reference_pixels = None;
+        for enabled in [false, true] {
+            omission::ENABLED.store(enabled, Ordering::Relaxed);
+            let retries = omission::RETRIES.load(Ordering::Relaxed);
+            let mut current =
+                ParallelInput::open_tracked_video(&path, &|| false).expect("preview input");
+            let mut outputs = Vec::new();
+            let mut finished = 0;
+            current
+                .decode_hardware(&device, target, end, &|| false, |output| {
+                    match output {
+                        ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                            assert!(!frame.pixels_omitted());
+                            outputs.push(pixels(&frame));
+                        }
+                        ParallelRuntimeDecodeOutput::VideoFinished => finished += 1,
+                    }
+                    true
+                })
+                .expect("preview completed");
+            assert_eq!(outputs.len(), 1);
+            assert_eq!(finished, 1, "once-only terminal publication");
+            if let Some(expected) = &reference_pixels {
+                equal(&outputs[0], expected);
+            } else {
+                reference_pixels = outputs.pop();
+            }
+            if enabled && name == "bounded" {
+                assert_eq!(omission::RETRIES.load(Ordering::Relaxed), retries + 1);
+            }
+            println!(
+                "PREROLL_PREVIEW kind={name} enabled={enabled} retries={} finished={finished}",
+                omission::RETRIES.load(Ordering::Relaxed) - retries
+            );
+        }
+    }
+    omission::ENABLED.store(true, Ordering::Relaxed);
+    let before = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed);
+    let retries = omission::RETRIES.load(Ordering::Relaxed);
+    let target = MediaTime::from_nanoseconds(2_416_666_667);
+    let result = input.decode_hardware(
+        &device,
+        target,
+        None,
+        &|| omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) > before,
+        |_| panic!("cancelled preroll must not publish a selected frame"),
+    );
+    assert!(
+        matches!(result, Err(DecodeError::ConsumerClosed)),
+        "{result:?}"
+    );
+    assert_eq!(
+        omission::RETRIES.load(Ordering::Relaxed),
+        retries,
+        "cancellation must not retry"
+    );
+    omission::ENABLED.store(false, Ordering::Relaxed);
+    let expected = reference(&path, &device, target);
+    omission::ENABLED.store(true, Ordering::Relaxed);
+    equal(&pixels(&select(&mut input, &device, target)), &expected);
+    if let Some((frame, expected)) = &held {
+        equal(&pixels(frame), expected);
+    }
+    assert!(omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) > 0);
+    omission::DAMAGE_REFERENCE.store(true, Ordering::Relaxed);
+    omission::ENABLED.store(false, Ordering::Relaxed);
+    let target = MediaTime::from_nanoseconds(8_416_666_667);
+    let expected = reference(&path, &device, target);
+    omission::ENABLED.store(true, Ordering::Relaxed);
+    let retries = omission::RETRIES.load(Ordering::Relaxed);
+    equal(&pixels(&select(&mut input, &device, target)), &expected);
+    assert_eq!(
+        omission::RETRIES.load(Ordering::Relaxed),
+        retries + 1,
+        "invalid omitted reference retries once"
+    );
+    omission::DAMAGE_REFERENCE.store(false, Ordering::Relaxed);
+    println!("PREROLL_COMPLETE pairs={pairs} previews=2 cancel=1 held=1 ordinary_retry=1");
+}
+
+#[test]
+#[ignore = "private native policy, one device, full-plane continuation pairs; run alone"]
+fn native_metadata_preroll_preserves_continuation() {
+    use super::super::hardware_preroll as omission;
+    let _enabled = PrerollEnabled::set(false);
+    let path =
+        std::path::PathBuf::from(std::env::var_os("TOWAVUE_PREROLL_FIXTURE").expect("fixture"));
+    let device = GraphicsDevice::hardware_for_test().expect("shared device");
+    let target = MediaTime::from_nanoseconds(2_416_666_667);
+    let end = MediaTime::from_nanoseconds(3_416_666_667);
+    std::thread::scope(|scope| {
+        let (baseline_tx, baseline_rx) = std::sync::mpsc::sync_channel(1);
+        let (candidate_tx, candidate_rx) = std::sync::mpsc::sync_channel(1);
+        let decode = |tx: std::sync::mpsc::SyncSender<HardwareVideoFrame>| {
+            let mut input = ParallelInput::open_tracked_video(&path, &|| false).expect("input");
+            let mut finished = 0;
+            input
+                .decode_hardware(
+                    &device,
+                    target,
+                    Some(end),
+                    &|| false,
+                    |output| match output {
+                        ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(frame)) => {
+                            tx.send(frame).is_ok()
+                        }
+                        ParallelRuntimeDecodeOutput::VideoFinished => {
+                            finished += 1;
+                            true
+                        }
+                    },
+                )
+                .expect("bounded continuation");
+            assert_eq!(finished, 1);
+        };
+        let baseline = scope.spawn(move || decode(baseline_tx));
+        // A first output proves the baseline captured its disabled run policy.
+        let mut previous = Some(baseline_rx.recv().expect("baseline first frame"));
+        omission::ENABLED.store(true, Ordering::Relaxed);
+        let omitted_before = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed);
+        let candidate = scope.spawn(move || decode(candidate_tx));
+        let mut count = 0;
+        let mut last_time = None;
+        while let Some(expected) = previous {
+            let actual = candidate_rx.recv().expect("matching continuation frame");
+            assert!(!actual.pixels_omitted());
+            equal(&pixels(&actual), &pixels(&expected));
+            assert!(last_time.is_none_or(|time| actual.presentation_time > time));
+            last_time = Some(actual.presentation_time);
+            count += 1;
+            previous = baseline_rx.recv().ok();
+        }
+        assert!(candidate_rx.recv().is_err(), "no duplicate or extra output");
+        baseline.join().expect("baseline joined");
+        candidate.join().expect("candidate joined");
+        assert!(count >= 20);
+        assert!(omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) > omitted_before);
+        println!("PREROLL_CONTINUATION frames={count} all_full_planes_equal=1 once_only=1");
+    });
+}
+
+#[test]
+#[ignore = "private AV1 native policy and fixed single-layer fixture; run alone"]
+fn native_av1_preroll_preserves_seek_preview_cancel_and_reuse() {
+    use super::super::hardware_preroll as omission;
+    struct Flags;
+    impl Drop for Flags {
+        fn drop(&mut self) {
+            omission::ENABLED.store(true, Ordering::Relaxed);
+            omission::FORCE_SELECTED.store(false, Ordering::Relaxed);
+            omission::DAMAGE_PTS.store(false, Ordering::Relaxed);
+        }
+    }
+    let _flags = Flags;
+    let _reuse = Policy::set(true);
+    let paths: Vec<_> = std::env::split_paths(
+        &std::env::var_os("TOWAVUE_AV1_PREROLL_FIXTURES").expect("fixed AV1 fixtures"),
+    )
+    .collect();
+    assert_eq!(paths.len(), 1);
+    let device = GraphicsDevice::hardware_for_test().expect("one native device");
+    for (case, path) in paths.iter().enumerate() {
+        let mut input = ParallelInput::open_tracked_video(path, &|| false).expect("input");
+        let mut held = None;
+        let mut forced_retries = 0;
+        let mut pairs = 0;
+        let mut ordinary_omitted = 0;
+        for damaged in [false, true] {
+            omission::DAMAGE_PTS.store(damaged, Ordering::Relaxed);
+            for forced in [false, true] {
+                omission::FORCE_SELECTED.store(forced, Ordering::Relaxed);
+                for percent in [70, 20, 80, 30, 60, 10] {
+                    let target = MediaTime::from_nanoseconds(percent * 120_000_000 + 16_666_667);
+                    let expected = reference(path, &device, target);
+                    let retries = omission::RETRIES.load(Ordering::Relaxed);
+                    let omitted = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed);
+                    let selected = select(&mut input, &device, target);
+                    assert!(!selected.pixels_omitted());
+                    equal(&pixels(&selected), &expected);
+                    if let Some((previous, expected)) = &held {
+                        equal(&pixels(previous), expected);
+                    }
+                    let retries = omission::RETRIES.load(Ordering::Relaxed) - retries;
+                    let omitted = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) - omitted;
+                    assert!(retries <= 1, "bounded ordinary reconstruction");
+                    if forced {
+                        forced_retries += retries;
+                    } else if !damaged {
+                        ordinary_omitted += omitted;
+                    }
+                    let decoded = pixels(&selected);
+                    held = Some((selected, decoded));
+                    pairs += 1;
+                    println!(
+                        "AV1_PREROLL_PAIR case={case} damaged={damaged} forced={forced} position={percent} omitted={omitted} retries={retries} equal=1"
+                    );
+                }
+            }
+        }
+        assert!(
+            ordinary_omitted > 0,
+            "actual nonreference submissions omitted"
+        );
+        assert!(
+            forced_retries > 0,
+            "actual selected/terminal reconstruction"
+        );
+        omission::DAMAGE_PTS.store(false, Ordering::Relaxed);
+        omission::FORCE_SELECTED.store(false, Ordering::Relaxed);
+        let mut preview_retries = 0;
+        for percent in [70, 20, 80, 30, 60, 10, 110] {
+            let target = MediaTime::from_nanoseconds(percent * 120_000_000 + 33_398_438);
+            let end = (percent < 100).then_some(target);
+            let mut expected = None;
+            for enabled in [false, true] {
+                omission::ENABLED.store(enabled, Ordering::Relaxed);
+                let retries = omission::RETRIES.load(Ordering::Relaxed);
+                let mut current =
+                    ParallelInput::open_tracked_video(path, &|| false).expect("preview");
+                let mut outputs = Vec::new();
+                let mut finished = 0;
+                current
+                    .decode_hardware(&device, target, end, &|| false, |output| {
+                        match output {
+                            ParallelRuntimeDecodeOutput::Item(RuntimeDecodeOutput::Video(
+                                frame,
+                            )) => {
+                                assert!(!frame.pixels_omitted());
+                                outputs.push(pixels(&frame));
+                            }
+                            ParallelRuntimeDecodeOutput::VideoFinished => finished += 1,
+                        }
+                        true
+                    })
+                    .expect("preview completed");
+                assert_eq!(outputs.len(), 1);
+                assert_eq!(finished, 1);
+                if let Some(reference) = &expected {
+                    equal(&outputs[0], reference);
+                } else {
+                    expected = outputs.pop();
+                }
+                let retries = omission::RETRIES.load(Ordering::Relaxed) - retries;
+                assert!(retries <= 1);
+                if enabled {
+                    preview_retries += retries;
+                }
+                println!(
+                    "AV1_PREROLL_PREVIEW case={case} position={percent} enabled={enabled} retries={retries} finished={finished}"
+                );
+            }
+        }
+        assert!(
+            preview_retries > 0,
+            "omitted bounded/EOF preview reconstruction"
+        );
+        omission::ENABLED.store(true, Ordering::Relaxed);
+        let before = omission::OMITTED_OUTPUTS.load(Ordering::Relaxed);
+        let retries = omission::RETRIES.load(Ordering::Relaxed);
+        let target = MediaTime::from_nanoseconds(2_416_666_667);
+        let result = input.decode_hardware(
+            &device,
+            target,
+            None,
+            &|| omission::OMITTED_OUTPUTS.load(Ordering::Relaxed) > before,
+            |_| panic!("cancelled preroll must not publish a selected frame"),
+        );
+        assert!(
+            matches!(result, Err(DecodeError::ConsumerClosed)),
+            "{result:?}"
+        );
+        assert_eq!(omission::RETRIES.load(Ordering::Relaxed), retries);
+        let expected = reference(path, &device, target);
+        equal(&pixels(&select(&mut input, &device, target)), &expected);
+        if let Some((frame, expected)) = &held {
+            equal(&pixels(frame), expected);
+        }
+        println!(
+            "AV1_PREROLL_COMPLETE case={case} pairs={pairs} previews=7 cancel=1 held=1 ordinary_omitted={ordinary_omitted} forced_retries={forced_retries} preview_retries={preview_retries}"
+        );
+    }
 }

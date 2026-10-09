@@ -1,5 +1,24 @@
+#[path = "build/ffmpeg.rs"]
+mod ffmpeg;
+
+fn run_hidden(command: &mut std::process::Command, operation: &str) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let output = command.output().expect(operation);
+    assert!(
+        output.status.success(),
+        "{operation}: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        ffmpeg::configure();
         println!("cargo:rerun-if-changed=assets/windows.rc");
         for icon in ["towavue", "image", "video", "audio"] {
             println!("cargo:rerun-if-changed=assets/{icon}.ico");
@@ -31,14 +50,13 @@ fn main() {
             .replace("@VERSION@", &version);
         let generated = resource.with_extension("rc");
         std::fs::write(&generated, source).expect("versioned resource");
-        let status = std::process::Command::new(compiler)
+        let mut command = std::process::Command::new(compiler);
+        command
             .arg("/nologo")
             .arg("/fo")
             .arg(&resource)
-            .arg(&generated)
-            .status()
-            .expect("run Windows resource compiler");
-        assert!(status.success(), "compile application icon resource");
+            .arg(&generated);
+        run_hidden(&mut command, "compile application icon resource");
         // Include test hosts so resource-loading checks exercise the same asset.
         println!("cargo:rustc-link-arg={}", resource.display());
         // TaskDialogIndirect requires Common Controls v6 in executables and test hosts.

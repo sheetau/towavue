@@ -10,7 +10,8 @@ import random
 import time
 import numpy as np
 from interaction import Session, CaptureUnavailable, menu_items
-from visual import prepare_apps,detect,normalize,windows,geometry,U,W,sha
+from async_observer import Normalizer
+from visual import prepare_apps,detect,windows,geometry,U,W,sha
 
 
 def main():
@@ -36,12 +37,13 @@ def main():
     schedule=[(n,f) for n in names for f in files]
     (root/'run.json').write_text(json.dumps({'repeats':args.repeats,'seed':104065,
         'corpus_sha256':sha(corpus/'manifest.json'),'kinds':args.kinds,
+        'normalization_protocol':'conditional-async-v1','capture_protocol':'primary-desktop-roi-v1',
         'settings':'towavue default HQ and Fit; Irfan Fit/Resample audited after timing via refreshed native menu state',
         'apps':{name:{'exe':str(apps[name]['exe']),'sha256':sha(apps[name]['exe'])} for name in names},
         'recognizable_endpoint':'all 24 target cells visible in owned 800x650 client',
         'convergence_endpoint':'first target capture with mean absolute RGB error <= 0.5 and <=1% pixels above max-channel error 8 against settled same-app viewport',
         'limitations':['Convergence of displayed pixels, not proof of full source-resolution decoding',
-                       'No cross-app color/filter equivalence claim','Window normalization included','OS cache warm','Animation excluded from convergence metric']},indent=2),encoding='utf-8')
+                       'No cross-app color/filter equivalence claim','Conditional async window normalization included from process creation; actual geometry/topmost verified before capture','OS cache warm','Animation excluded from convergence metric']},indent=2),encoding='utf-8')
     with (root/'samples.jsonl').open('w',encoding='utf-8') as out:
         for block in range(-1,args.repeats):
             rng.shuffle(schedule)
@@ -51,20 +53,30 @@ def main():
                 (corpus/f['path']).read_bytes()
                 s=Session('towavue' if name=='towavue-before' else name,apps[name],corpus/f['path'],folder)
                 row={'app':name,'case':f['id'],'block':block,'phase':'warmup' if block<0 else 'measurement','status':'timeout'}
-                captures=[];samples=[];first=None;absent=s.started;normalizations=0
+                captures=[];samples=[];first=None;absent=s.started;normalizations=0;slow_captures=0;normalizer=Normalizer()
                 try:
                     deadline=time.monotonic()+8
                     while time.monotonic()<deadline:
                         available=windows(s.process.pid)
                         if not available:
                             absent=time.perf_counter_ns();time.sleep(.003);continue
-                        s.hwnd=available[0];normalizations+=int(normalize(s.hwnd))
+                        s.hwnd=available[0]
+                        normalize_begin=time.perf_counter_ns()
+                        if not normalizer.step(s):
+                            samples.append({'begin_ns':normalize_begin,'end_ns':time.perf_counter_ns(),'unavailable':'Geometry/topmost normalization pending'})
+                            time.sleep(.003);continue
                         begin=time.perf_counter_ns()
-                        try:image=s.capture()
+                        try:image=normalizer.capture(s)
                         except CaptureUnavailable as error:
                             samples.append({'begin_ns':begin,'end_ns':time.perf_counter_ns(),'unavailable':str(error)})
                             time.sleep(.003);continue
                         end=time.perf_counter_ns()
+                        capture_ms=(end-begin)/1e6
+                        slow_captures=slow_captures+1 if capture_ms>80 else 0
+                        if capture_ms>150 or slow_captures>=2:
+                            samples.append({'begin_ns':begin,'end_ns':end,'capture_guard':True})
+                            row.update(status='capture_unusable',capture_ms=capture_ms)
+                            break
                         marker=detect(image,f['identity'])
                         samples.append({'begin_ns':begin,'end_ns':end,'match':bool(marker)})
                         if marker:
@@ -103,12 +115,16 @@ def main():
                         (folder/'menus-after-timing.json').write_text(json.dumps(menus,indent=2),encoding='utf-8')
                         row['fit_resample_checked']=all(next(m for m in menus if m['id']==i)['state']&8 for i in (28,1091))
                         if not row['fit_resample_checked']:row['status']='settings_mismatch'
-                    row.update(start_ns=s.started,samples=samples,command=s.command,normalization_count=normalizations)
+                    row.update(start_ns=s.started,samples=samples,command=s.command,normalization_count=sum(r["resize"] for r in normalizer.requests),normalization_requests=normalizer.requests)
                 except Exception as error:
                     row.update(status='setup_error',detail=str(error))
-                finally:row['forced_cleanup']=s.close()
+                finally:
+                    row['forced_cleanup']=s.close()
+                    row['exit_code']=s.process.returncode
                 out.write(json.dumps(row)+'\n');out.flush()
                 print(block,name,f['id'],row['status'],row.get('recognizable_upper_ms'),row.get('converged_upper_ms'),flush=True)
+                if row['status']!='ok' or row['forced_cleanup'] or row['exit_code']!=0:
+                    raise SystemExit('Entire run stopped: invalid observation or cleanup; retain partial data without performance claims')
 
 
 if __name__=='__main__':main()

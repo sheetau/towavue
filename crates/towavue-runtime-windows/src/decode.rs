@@ -20,9 +20,12 @@ use windows::core::Interface;
 use crate::{GraphicsDevice, VideoOrientation};
 
 mod audio_checkpoints;
+mod audio_inline;
 mod audio_tracks;
+mod hardware_preroll;
 mod hardware_reuse;
 mod verified_pcm;
+mod verified_video_probe;
 pub use audio_tracks::probe_audio_tracks;
 mod frame_png;
 #[cfg(test)]
@@ -94,7 +97,14 @@ pub(crate) enum VideoTransfer {
 }
 
 impl HardwareVideoFrame {
+    fn pixels_omitted(&self) -> bool {
+        matches!(&self.backing, HardwareFrameBacking::Decoded(frame) if hardware_preroll::omitted(frame))
+    }
+
     pub(crate) fn texture_and_slice(&self) -> Option<(*mut std::ffi::c_void, u32)> {
+        if self.pixels_omitted() {
+            return None;
+        }
         let frame = match &self.backing {
             HardwareFrameBacking::Decoded(frame) => frame,
             HardwareFrameBacking::Retained(texture) => return Some((texture.as_raw(), 0)),
@@ -194,6 +204,8 @@ pub enum DecodeError {
     ConsumerClosed,
     #[error("D3D11VA is unavailable: {0}")]
     HardwareUnavailable(String),
+    #[error("the selected video frame requires ordinary decoding")]
+    PrerollUnavailable,
     #[error("a decode worker could not start: {0}")]
     WorkerStart(#[from] std::io::Error),
     #[error("a decode worker panicked")]
@@ -339,6 +351,7 @@ struct VideoPipeline {
 }
 
 struct HardwareVideoPipeline {
+    preroll: Option<hardware_preroll::Policy>,
     #[cfg(test)]
     creation_id: u64,
     time_base: Rational,
@@ -362,6 +375,14 @@ impl HardwareVideoPipeline {
                             "decoder selected {:?} instead of D3D11",
                             decoded.format()
                         )));
+                    }
+                    if let Some(policy) = &mut self.preroll {
+                        policy.receive(
+                            &decoded,
+                            timestamp_to_media_time(decoded.timestamp(), self.time_base),
+                        )?;
+                    } else if hardware_preroll::omitted(&decoded) {
+                        return Err(DecodeError::PrerollUnavailable);
                     }
                     let output = HardwareVideoFrame {
                         presentation_time: timestamp_to_media_time(
@@ -906,6 +927,7 @@ pub(crate) struct ParallelInput {
 pub(crate) struct PlaybackAudioInput {
     input: Option<ParallelInput>,
     verified: Option<verified_pcm::VerifiedPcm>,
+    verified_video: Option<verified_video_probe::Proof>,
     path: std::path::PathBuf,
     track: Option<AudioTrackId>,
 }
@@ -919,6 +941,7 @@ impl PlaybackAudioInput {
         let mut owner = Self {
             input: None,
             verified: None,
+            verified_video: None,
             path: path.to_owned(),
             track,
         };
@@ -931,7 +954,14 @@ impl PlaybackAudioInput {
     }
 
     fn reopen(&mut self, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<(), DecodeError> {
-        let (input, verified) = verified_pcm::open(&self.path, self.verified.take(), cancelled)?;
+        let (input, verified) = if verified_video_probe::candidate(&self.path) {
+            let (input, proof) =
+                verified_video_probe::open(&self.path, self.verified_video.take(), cancelled)?;
+            self.verified_video = proof;
+            (input, None)
+        } else {
+            verified_pcm::open(&self.path, self.verified.take(), cancelled)?
+        };
         audio_tracks::selected_config(&input, self.track)?;
         let mut input = ParallelInput::from_input(&self.path, input);
         input.audio_track = self.track;
@@ -942,7 +972,9 @@ impl PlaybackAudioInput {
 
     pub(crate) fn release_completed(mut self) -> Option<Self> {
         self.input = None;
-        self.verified.as_ref()?;
+        if self.verified.is_none() && self.verified_video.is_none() {
+            return None;
+        }
         Some(self)
     }
 
@@ -954,6 +986,20 @@ impl PlaybackAudioInput {
         cancelled: &(dyn Fn() -> bool + Sync),
         emit: impl FnMut(ParallelSoftwareDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
+        // Matroska's indexed seek clamps requests to its first index timestamp.
+        // Negative-time packets before that point are available on initial read,
+        // but cannot be recovered by the retained input's rewind. Audio may need
+        // that prefix for sample-accurate seeks even at positive target times.
+        // Previous scoped workers are joined before this exclusive method runs.
+        // Close the old owner and recreate decoder/checkpoint state through the
+        // ordinary guarded open path; never synthesize or discard leading PCM.
+        if self.input.as_ref().is_some_and(|input| {
+            input.started
+                && input_origin(&input.input) < 0
+                && input.input.format().name() == "matroska,webm"
+        }) {
+            self.input = None;
+        }
         if self.input.is_none() {
             self.reopen(cancelled)?;
         }
@@ -1160,6 +1206,32 @@ impl ParallelInput {
         cancelled: &(dyn Fn() -> bool + Sync),
         mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
     ) -> Result<DecodeSummary, DecodeError> {
+        self.decode_attempt(
+            hardware_device,
+            minimum_time,
+            maximum_time,
+            stream,
+            audio_intervals,
+            audio_seek,
+            cancelled,
+            &mut emit,
+            hardware_preroll::requested(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn decode_attempt(
+        &mut self,
+        hardware_device: Option<&GraphicsDevice>,
+        minimum_time: MediaTime,
+        maximum_time: Option<MediaTime>,
+        stream: Option<DecodeStream>,
+        audio_intervals: &[TimeRange],
+        audio_seek: AudioSeekPolicy,
+        cancelled: &(dyn Fn() -> bool + Sync),
+        mut emit: impl FnMut(ParallelDecodeOutput) -> bool,
+        preroll_allowed: bool,
+    ) -> Result<DecodeSummary, DecodeError> {
         // Taking first ensures every early error drops the previous run's owner.
         let mut retained = self.retained_hardware.take();
         let mut allow_reuse = hardware_reuse::requested()
@@ -1187,6 +1259,15 @@ impl ParallelInput {
         if !allow_reuse {
             retained = None;
         }
+        // Playback's hardware entry point is video-only. Never retry an owner
+        // that could have forwarded audio or a selected frame.
+        let attempting_preroll = preroll_allowed
+            && hardware_device.is_some()
+            && stream == Some(DecodeStream::Video)
+            && minimum_time > MediaTime::ZERO
+            && video_config
+                .as_ref()
+                .is_some_and(|config| hardware_preroll::supports(config.parameters.id()));
         let video = match (hardware_device, video_config) {
             (Some(device), Some(config)) => {
                 Some(ParallelVideoConfig::Hardware(config, device.clone()))
@@ -1335,21 +1416,29 @@ impl ParallelInput {
             maximum_time,
             cancelled,
             &mut guarded_emit,
-            (allow_reuse, &mut retained),
+            (allow_reuse, attempting_preroll, &mut retained),
         );
-        if attempting_retained
+        let retry_preroll = attempting_preroll
+            && matches!(
+                result,
+                Err(DecodeError::PrerollUnavailable
+                    | DecodeError::HardwareUnavailable(_)
+                    | DecodeError::Ffmpeg(_))
+            );
+        if (retry_preroll
+            || (attempting_retained && matches!(result, Err(DecodeError::HardwareUnavailable(_)))))
             && !emitted_hardware
-            && matches!(result, Err(DecodeError::HardwareUnavailable(_)))
             && !cancelled()
             && hardware_device.is_some_and(|device| device.device_removed_reason().is_none())
         {
-            // A retained native pool may reject an in-band configuration change.
+            // A retained pool may reject an in-band configuration change, or an
+            // optional preroll attempt may require ordinary reconstruction.
             // The owner has forwarded no selected frame to its consumer. Do not
             // infer that from the error variant: pixel-format rejection can also
             // occur after earlier hardware frames. All workers have joined;
             // discard the failed owner, seek again, and retry once
             // with a fresh hardware decoder before ordinary software fallback.
-            // The empty slot makes the recursive call ineligible for another retry.
+            // The empty slot and disabled preroll prevent another retry.
             drop(retained);
             #[cfg(feature = "presentation-verification")]
             if crate::burst_enabled() {
@@ -1360,7 +1449,11 @@ impl ParallelInput {
                     [9, 0, minimum_time.as_nanoseconds() as u64],
                 );
             }
-            return self.decode(
+            #[cfg(test)]
+            if retry_preroll {
+                hardware_preroll::RETRIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+            return self.decode_attempt(
                 hardware_device,
                 minimum_time,
                 maximum_time,
@@ -1369,6 +1462,7 @@ impl ParallelInput {
                 audio_seek,
                 cancelled,
                 emit,
+                false,
             );
         }
         if matches!(result, Err(DecodeError::ConsumerClosed)) && cancelled() {
@@ -1393,9 +1487,26 @@ fn run_parallel_workers(
     maximum_time: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
     emit: &mut impl FnMut(ParallelDecodeOutput) -> bool,
-    reuse: (bool, &mut Option<hardware_reuse::Retained>),
+    reuse: (bool, bool, &mut Option<hardware_reuse::Retained>),
 ) -> Result<DecodeSummary, DecodeError> {
     let (input, audio_checkpoints, resume, audio_intervals) = input;
+    if video.is_none()
+        && audio_inline::enabled(input)
+        && let Some(audio) = audio
+    {
+        return audio_inline::run(
+            input,
+            audio,
+            sample_preroll,
+            audio_checkpoints,
+            resume,
+            audio_intervals,
+            minimum_time,
+            maximum_time,
+            cancelled,
+            emit,
+        );
+    }
     let origin = input_origin(input);
     let terminal_preview = maximum_time == Some(minimum_time) && audio.is_none();
     let video_stream_index = video.as_ref().map(|video| match video {
@@ -1454,7 +1565,7 @@ fn run_parallel_workers(
                 }
             })?;
 
-        let (allow_reuse, reuse_slot) = reuse;
+        let (allow_reuse, allow_preroll, reuse_slot) = reuse;
         let mut retained = reuse_slot.take();
         let video_handle = video.map(|video| {
             let video_output_tx = output_tx.clone();
@@ -1467,7 +1578,7 @@ fn run_parallel_workers(
                         &video_output_tx,
                         preroll_before,
                         cancelled,
-                        (allow_reuse, &mut retained),
+                        (allow_reuse, allow_preroll, &mut retained),
                     ) {
                         let _ = video_output_tx.send(ParallelDecodeOutput::Failed(error));
                     } else {
@@ -1557,6 +1668,11 @@ fn run_parallel_workers(
                     accepted = emit(output);
                 }
             } else if !finished && time.is_some_and(|time| time >= minimum_time) {
+                if matches!(&output, ParallelDecodeOutput::HardwareVideo(frame) if frame.pixels_omitted())
+                {
+                    result = Err(DecodeError::PrerollUnavailable);
+                    break;
+                }
                 emitted_video = true;
                 last_preroll_video = None;
                 accepted = emit(output);
@@ -1582,6 +1698,11 @@ fn run_parallel_workers(
                         },
                         other => other,
                     };
+                    if matches!(&frame, ParallelDecodeOutput::HardwareVideo(frame) if frame.pixels_omitted())
+                    {
+                        result = Err(DecodeError::PrerollUnavailable);
+                        break;
+                    }
                     accepted = emit(frame);
                 }
                 if is_video {
@@ -1725,9 +1846,9 @@ fn run_parallel_video_worker(
     output: &SyncSender<ParallelDecodeOutput>,
     preroll_before: Option<MediaTime>,
     cancelled: &dyn Fn() -> bool,
-    reuse: (bool, &mut Option<hardware_reuse::Retained>),
+    reuse: (bool, bool, &mut Option<hardware_reuse::Retained>),
 ) -> Result<(), DecodeError> {
-    let (allow_reuse, reuse_slot) = reuse;
+    let (allow_reuse, allow_preroll, reuse_slot) = reuse;
     let reuse_key = match &config {
         ParallelVideoConfig::Hardware(config, device) if allow_reuse => {
             Some((hardware_reuse::Signature::new(config), device.clone()))
@@ -1784,10 +1905,18 @@ fn run_parallel_video_worker(
             ParallelVideoPipeline::Software(create_video_pipeline_from(config)?)
         }
         ParallelVideoConfig::Hardware(config, device) => {
-            let hardware = if let Some(previous) = previous {
+            let mut hardware = if let Some(previous) = previous {
                 previous.pipeline
             } else {
                 create_hardware_video_pipeline_from(config, &device)?
+            };
+            // A fresh policy per run prevents old cancellation/flush references
+            // from contributing to this run's outstanding count.
+            hardware.preroll = if allow_preroll {
+                preroll_before
+                    .and_then(|target| hardware_preroll::Policy::new(hardware.time_base, target))
+            } else {
+                None
             };
             ParallelVideoPipeline::Hardware(hardware)
         }
@@ -1797,6 +1926,8 @@ fn run_parallel_video_worker(
     #[cfg(feature = "presentation-verification")]
     let mut packet_index = 0;
     let mut draining = false;
+    #[cfg(test)]
+    let mut damaged_reference = false;
     let result = (|| {
         let mut summary = DecodeSummary::default();
         for packet in packets {
@@ -1808,6 +1939,16 @@ fn run_parallel_video_worker(
                 ParallelVideoPipeline::Hardware(pipeline) => {
                     #[cfg(feature = "presentation-verification")]
                     trace(2, packet_index);
+                    let mut packet = packet;
+                    #[cfg(test)]
+                    hardware_preroll::damage_reference(&mut packet, &mut damaged_reference);
+                    #[cfg(test)]
+                    if hardware_preroll::DAMAGE_PTS.load(std::sync::atomic::Ordering::Relaxed) {
+                        packet.set_pts(Some(0));
+                    }
+                    if let Some(policy) = &pipeline.preroll {
+                        policy.attach(&mut packet)?;
+                    }
                     let sent = pipeline.decoder.send_packet(&packet);
                     #[cfg(feature = "presentation-verification")]
                     trace(3, packet_index);
@@ -1918,6 +2059,29 @@ fn run_parallel_audio_worker(
     checkpoints: &mut AudioCheckpoints,
     resume: Option<(i64, ffmpeg::Packet)>,
     trusted_axis: bool,
+    intervals: &[TimeRange],
+) -> Result<(), DecodeError> {
+    run_audio_packets(
+        config,
+        packets,
+        &mut |item| output.send(item).is_ok(),
+        sample_preroll,
+        checkpoints,
+        resume,
+        trusted_axis,
+        intervals,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_audio_packets(
+    config: StreamConfig,
+    packets: impl IntoIterator<Item = ffmpeg::Packet>,
+    output: &mut impl FnMut(ParallelDecodeOutput) -> bool,
+    sample_preroll: Option<(MediaTime, PrerollSamples)>,
+    checkpoints: &mut AudioCheckpoints,
+    resume: Option<(i64, ffmpeg::Packet)>,
+    trusted_axis: bool,
     mut intervals: &[TimeRange],
 ) -> Result<(), DecodeError> {
     // A video-GOP/direct seek may start with an approximate audio sample axis.
@@ -1942,7 +2106,7 @@ fn run_parallel_audio_worker(
     }
     let mut summary = DecodeSummary::default();
     let mut emit_audio = |decoded| match decoded {
-        DecodeOutput::Audio(chunk) => output.send(ParallelDecodeOutput::Audio(chunk)).is_ok(),
+        DecodeOutput::Audio(chunk) => output(ParallelDecodeOutput::Audio(chunk)),
         DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
     };
     let first_packet = resume.map(|(next_sample, packet)| {
@@ -2012,9 +2176,11 @@ fn run_parallel_audio_worker(
     pipeline.decoder.send_eof()?;
     pipeline.receive(&mut emit_audio, &mut summary)?;
     pipeline.flush_resampler(&mut emit_audio, &mut summary)?;
-    output
-        .send(ParallelDecodeOutput::AudioFinished)
-        .map_err(|_| DecodeError::ConsumerClosed)
+    if output(ParallelDecodeOutput::AudioFinished) {
+        Ok(())
+    } else {
+        Err(DecodeError::ConsumerClosed)
+    }
 }
 
 fn seek_input(
@@ -2476,6 +2642,7 @@ fn create_hardware_video_pipeline_from(
     let transfer =
         classify_transfer(decoder.color_transfer_characteristic()).unwrap_or(VideoTransfer::Sdr);
     Ok(HardwareVideoPipeline {
+        preroll: None,
         #[cfg(test)]
         creation_id: hardware_reuse::next_creation_id(),
         time_base: config.time_base,
@@ -2692,6 +2859,11 @@ fn configure_d3d11va(
         (*codec_context).hw_device_ctx = device_ref;
         (*codec_context).get_format = Some(select_d3d11_pixel_format);
         (*codec_context).extra_hw_frames = 4;
+        // Each packet carries an owned native policy reference, including across
+        // FFmpeg frame threads. No post-open private-option mutation is needed.
+        if hardware_preroll::supports(context.id()) {
+            (*codec_context).flags |= ffmpeg::ffi::AV_CODEC_FLAG_COPY_OPAQUE as i32;
+        }
     }
     Ok(())
 }

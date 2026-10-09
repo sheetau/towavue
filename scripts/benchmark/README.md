@@ -167,12 +167,48 @@ whose results must not be assumed to represent the same decoder selection.
   restore the cursor. Reject held input/modifiers, occlusion or failed activation
   as setup errors. Record this preparation separately; topmost visibility alone
   does not permit towavue's deliberately focus-guarded seek gestures. Timed seek
-  delivery remains the same posted mouse command or player API as above.
+  delivery uses `owned-native-seek-v1`: towavue receives one guarded
+  `SendInput` batch with an absolute target move, press, release and move to a
+  neutral owned client point. Moves use `MOVE_NOCOALESCE`; verify virtual-screen
+  coordinate rounding preserves the target pixel. The entire dispatch remains
+  inside the timed interval. Check actual geometry, foreground, held input and
+  ownership of both points before injection; reject partial delivery and release
+  a press if its matching release was not inserted. After the endpoint, restore
+  the previous cursor only if it is still at an injected point; record a changed
+  cursor as invalid input state. The neutral move keeps hover cards away from
+  the frame marker. MPC-HC and VLC retain their documented APIs.
+  Independent posted mouse messages can race a real `WM_MOUSELEAVE` when the
+  actual cursor is outside the client, leaving the UI without a pointer position
+  for button events. Keep old posted-input results separate from this protocol;
+  do not retry a failed timed gesture or pool its successful neighbors into a
+  replacement run. Native event order, exact application target time and worker
+  request controls verify delivery separately from desktop detection. Neither
+  injected events nor desktop capture measure physical human input latency.
+  See [SendInput](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput),
+  [mouse flags](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-mouseinput)
+  and [leave tracking](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-mouseleave).
 - **Settled viewport:** the startup runner separately reports recognizable
   identity and convergence to the same app's eventual displayed pixels. It checks
   stability and keeps pixel error scores. This is not proof that every original
   source pixel is decoded, nor a cross-app quality-equivalence test. Animation is
-  excluded from this convergence endpoint.
+  excluded from this convergence endpoint. `quality_startup.py` records the
+  `conditional-async-v1` normalization protocol: inspect actual client geometry
+  and topmost state, post at most one pending asynchronous repair, and capture
+  only after that state is observed. Already-ready windows receive no repeated
+  positioning call. Timing still starts before process creation and includes
+  pending normalization; PID, occlusion and identity guards remain active.
+  Keep this protocol separate from historical synchronous-normalization runs.
+  Startup capture uses `primary-desktop-roi-v1`: copy only the checked client
+  rectangle from the primary desktop DC with `BitBlt(SRCCOPY)`, then read all
+  rows as RGB. This observes the composed desktop, not an offscreen rendering
+  or a window-specific capture API. Refuse rectangles outside the primary
+  screen, restore thread DPI context, and release every owned DC/bitmap on
+  success or failure. PID, geometry and five-point occlusion checks run before
+  each copy. Other interaction runners retain their existing capture mode.
+  Keep ROI observations separate from earlier full-screen Pillow captures;
+  do not pool their endpoints or infer physical display continuity.
+  The runner stops on invalid observations, abnormal cleanup, a capture above
+  150ms or two consecutive captures above 80ms; retain the partial data.
 - **Mixed media and long audio:** the additional fixture generator copies the
   original ten image/animation and five video fixtures into separate folders,
   then generates identifiable 12-second and 180-second audio in five formats.

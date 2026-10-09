@@ -89,7 +89,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .in_language(self.language())
                 .into());
         }
-        if self.renderer.is_none()
+        if (self.renderer.is_none() && (self.startup_surface.is_none() || self.startup_failed))
             || self.ui_context.is_none()
             || self.graphics_recovery_request.is_some()
         {

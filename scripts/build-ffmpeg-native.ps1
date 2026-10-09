@@ -8,7 +8,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Uavs3dPrefix,
     [Parameter(Mandatory = $true)][string]$VvencPrefix,
     [string]$ZvbiPrefix,
-    [string]$SourceArchive
+    [string]$SourceArchive,
+    [switch]$SeekOptimized
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,10 @@ $features = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/ffmpeg-nat
 $baseline = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/native-runtime-package-audit.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $toolchain = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-toolchain-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $media = Get-Content -LiteralPath (Join-Path $repositoryRoot 'docs/msys2-media-inputs.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$staticProfile = if ($SeekOptimized) {
+    if (-not $ZvbiPrefix) { throw 'The seek-optimized profile requires the verified ZVBI prefix.' }
+    Get-Content -LiteralPath (Join-Path $PSScriptRoot 'ffmpeg-preroll/static-runtime.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+} else { $null }
 if (-not $SourceArchive) { $SourceArchive = Join-Path $repositoryRoot 'vendor/ffmpeg/source-e47273f4d9227152dcbf543cebaf9e2430ddbcc4.tar.gz' }
 if (-not (Test-Path -LiteralPath $SourceArchive -PathType Leaf)) { throw 'Missing pinned FFmpeg source archive.' }
 if ((Get-Item -LiteralPath $SourceArchive).Length -ne 17323649 -or
@@ -91,12 +96,21 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Pinned FFmpeg source extraction failed.' }
     $buildUnix = '/' + $BuildDirectory.Substring(0, 1).ToLowerInvariant() + $BuildDirectory.Substring(2)
     $sourceUnix = "$buildUnix/source/FFmpeg-$($features.ffmpeg_commit)"
+    $preroll = if ($SeekOptimized) {
+        & (Join-Path $PSScriptRoot 'apply-ffmpeg-preroll.ps1') `
+            -SourceDirectory "$BuildDirectory/source/FFmpeg-$($features.ffmpeg_commit)" -MsysRoot $MsysRoot
+    } else { $null }
     $prefix = "$BuildDirectory/prefix"
     $cflags = ($prefixes | ForEach-Object { "-I$_/include" }) -join ' '
     $ldflags = ($prefixes | ForEach-Object { "-L$_/lib" }) -join ' '
     $flags = @($features.configure_flags) + @('--target-os=mingw32', '--arch=x86_64', '--pkg-config-flags=--static',
         "--prefix=$buildUnix/prefix", "--extra-cflags='$cflags'", "--extra-ldflags='$ldflags'")
-    Write-Evidence 'build-inputs.json' ([ordered]@{ source_sha256 = (Get-FileHash -LiteralPath $SourceArchive).Hash.ToLowerInvariant(); configure_flags = $flags; packages = $installed; source_prefixes = $prefixInputs })
+    Write-Evidence 'build-inputs.json' ([ordered]@{
+        source_sha256 = (Get-FileHash -LiteralPath $SourceArchive).Hash.ToLowerInvariant()
+        configure_flags = $flags; packages = $installed; source_prefixes = $prefixInputs
+        profile = if ($SeekOptimized) { 'seek-optimized-v1' } else { 'standard' }
+        preroll = $preroll
+    })
     Write-Output "Configuring all 81 retained flags: $BuildDirectory/configure.log"
     Invoke-BuildCommand "cd $buildUnix/build; $sourceUnix/configure $($flags -join ' ')" 'configure.log'
     $config = Get-Content -LiteralPath "$BuildDirectory/build/config.h" -Raw -Encoding UTF8
@@ -111,6 +125,19 @@ try {
     $configMake = Get-Content -LiteralPath "$BuildDirectory/build/ffbuild/config.mak" -Raw -Encoding UTF8
     foreach ($entry in @(@{ key = 'CFLAGS'; first = $cflags }, @{ key = 'LDFLAGS'; first = $ldflags })) {
         if ($configMake -notmatch ('(?m)^' + $entry.key + '=[ \t]*' + [regex]::Escape($entry.first))) { throw "Native prefix order is wrong in $($entry.key)." }
+    }
+    if ($SeekOptimized) {
+        $featureHashes = @('config.h', 'config_components.h') | ForEach-Object {
+            [pscustomobject]@{ name = $_; sha256 = (Get-FileHash -LiteralPath "$BuildDirectory/build/$_").Hash }
+        }
+        Copy-Item -LiteralPath "$BuildDirectory/build/ffbuild/config.mak" -Destination "$BuildDirectory/config-before-static.mak"
+        & (Join-Path $PSScriptRoot 'set-ffmpeg-static-link.ps1') -ConfigPath "$BuildDirectory/build/ffbuild/config.mak" `
+            -MsysRoot $MsysRoot -EvidencePath "$BuildDirectory/static-link.json"
+        foreach ($featureHash in $featureHashes) {
+            if ((Get-FileHash -LiteralPath "$BuildDirectory/build/$($featureHash.name)").Hash -ne $featureHash.sha256) {
+                throw 'Static linking changed a configured feature.'
+            }
+        }
     }
     Write-Output "Building native FFmpeg (8 jobs): $BuildDirectory/build.log"
     Invoke-BuildCommand "cd $buildUnix/build; make -j8" 'build.log'
@@ -135,7 +162,8 @@ try {
     }
     $inspector = Join-Path $PSScriptRoot 'get-native-runtime-dependencies.ps1'
     # Stage the exact package list before inspection, so no duplicate ZVBI location is allowed.
-    foreach ($name in @($baseline.packages.runtime_dlls)) {
+    $externalDlls = if ($SeekOptimized) { @($staticProfile.external_dlls) } else { @($baseline.packages.runtime_dlls) }
+    foreach ($name in $externalDlls) {
         $original = $baseline.runtime | Where-Object { $_.name -eq $name }
         $runtimeInput = "$MsysRoot/mingw64/bin/$name"
         if ($ZvbiPrefix -and $name -eq 'libzvbi-0.dll') {
@@ -148,15 +176,31 @@ try {
         Copy-Item -LiteralPath $runtimeInput -Destination "$prefix/bin/$name"
         if ((Get-FileHash -LiteralPath "$prefix/bin/$name").Hash -ne $original.sha256) { throw 'Runtime DLL copy mismatch.' }
     }
-    $graph = @(& $inspector -EntryPoints "$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe" -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
-    if (@(Compare-Object ($baseline.runtime.name | Sort-Object) ($graph.name | Sort-Object)).Count) { throw 'Native runtime closure differs from the audited candidate.' }
-    foreach ($file in $graph) {
-        $original = $baseline.runtime | Where-Object { $_.name -eq $file.name }
-        $actualImports = @($file.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
-        $expectedImports = @($original.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
-        if (@(Compare-Object $expectedImports $actualImports).Count) { throw "Native runtime import edges changed: $($file.name)" }
+    $entryPoints = @("$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe")
+    if ($SeekOptimized) { $entryPoints += "$prefix/bin/ffplay.exe" }
+    $graph = @(& $inspector -EntryPoints $entryPoints -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
+    if ($SeekOptimized) {
+        if ($graph.Count -ne $staticProfile.runtime_files -or
+            @(Compare-Object ($staticProfile.modules.name | Sort-Object) ($graph.name | Sort-Object)).Count) {
+            throw 'Static-preferred runtime closure differs from its qualified profile.'
+        }
+        foreach ($file in $graph) {
+            $expectedModule = $staticProfile.modules | Where-Object { $_.name -eq $file.name }
+            $actualImports = @($file.imports | ForEach-Object { $_.name.ToLowerInvariant() } | Sort-Object)
+            if (@(Compare-Object @($expectedModule.imports | Sort-Object) $actualImports).Count) {
+                throw "Static-preferred runtime import edges changed: $($file.name)"
+            }
+        }
+    } else {
+        if (@(Compare-Object ($baseline.runtime.name | Sort-Object) ($graph.name | Sort-Object)).Count) { throw 'Native runtime closure differs from the audited candidate.' }
+        foreach ($file in $graph) {
+            $original = $baseline.runtime | Where-Object { $_.name -eq $file.name }
+            $actualImports = @($file.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
+            $expectedImports = @($original.imports | ForEach-Object { $_.kind + ':' + $_.name } | Sort-Object)
+            if (@(Compare-Object $expectedImports $actualImports).Count) { throw "Native runtime import edges changed: $($file.name)" }
+        }
     }
-    $staged = @(& $inspector -EntryPoints "$prefix/bin/ffmpeg.exe", "$prefix/bin/ffprobe.exe" -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
+    $staged = @(& $inspector -EntryPoints $entryPoints -SearchDirectories "$prefix/bin" -ObjdumpExecutable "$MsysRoot/mingw64/bin/objdump.exe")
     Write-Evidence 'runtime.json' $staged
     Write-Evidence 'COMPLETE.json' ([ordered]@{ status = 'native-build-and-developer-staging-verified'; runtime_files = $staged.Count; prefix = $prefix; distribution_approved = $false })
     Write-Output "Native FFmpeg developer prefix: $prefix"

@@ -1,0 +1,58 @@
+{
+  "ffmpeg_commit": "e47273f4d9227152dcbf543cebaf9e2430ddbcc4",
+  "archive_sha256": "6491dae95e3cf3cdbac02933b55860e782b0c4f0a6bd8f37cef30fded259283c",
+  "patch_sha256": "f5d380900512fd230ab3633de7c97b3fba28d33ccf1e42f9b20f7c24328977ba",
+  "codec_mask": 5,
+  "files": [
+    {
+      "path": "libavcodec/av1dec.c",
+      "before_sha256": "9b4d9031c734bbb5d5778c96dfdfaf101ca12dbf076bdeaf74134eb62fb1173c",
+      "after_sha256": "30ed32a21afe1c6ca207df4376726af4061eab5dca541dc79edcc96e9882cf38"
+    },
+    {
+      "path": "libavcodec/avcodec.h",
+      "before_sha256": "324452903f0d3b4bb4078652ca32c9ca29d7b3db5e005e1af04487409bd3090d",
+      "after_sha256": "06565e5ef0f62f8eb84e4be51757f4bf436ec255aaf0a720f89f14f24be6a568"
+    },
+    {
+      "path": "libavcodec/dxva2_av1.c",
+      "before_sha256": "f5659305f2e7ffbf05e5ee3378890307b96b02ba134dfe0827e1d56766823e0b",
+      "after_sha256": "6c33f0ec3750a5ff1ad6bb2dedce4c40ebd49e61cd8c632aef7afbf1e97dee98"
+    },
+    {
+      "path": "libavcodec/dxva2_hevc.c",
+      "before_sha256": "b970ff706fd1cc85b2090ae4d2fce46f4255416eb60057045e5f418b1272cf22",
+      "after_sha256": "514cdc2d31f2fdeb669519ff5db538c7e0fa868545d79f594052c6c9752dcc91"
+    },
+    {
+      "path": "libavcodec/Makefile",
+      "before_sha256": "4ac6f88ab0660089b9ede52fe276057ab2d2f0d7c4d784cfca51a11b5592e6bb",
+      "after_sha256": "b282fbb858e749406257cc24f11698ae414c108221391ab8c8bcb2252950d479"
+    },
+    {
+      "path": "libavcodec/towavue_preroll.c",
+      "before_sha256": null,
+      "after_sha256": "19fbe50c5e4f9d4978f960284c8bee06b4564c702d22893a8b624547bca107d7"
+    },
+    {
+      "path": "libavcodec/towavue_preroll.h",
+      "before_sha256": null,
+      "after_sha256": "154c095c71cdac994d720d664403483ce903c92d9bd3436a20967f46f5c03828"
+    },
+    {
+      "path": "libavutil/frame.h",
+      "before_sha256": "2eb83475589dbe72d9dbbb5367370b7c1384fbb20afffbcf482de0437b6eaf8e",
+      "after_sha256": "867e7a0753bb639bcbfa4c75cce36ab9e6eb8c3720d3672384e7cf1944e3e4d7"
+    },
+    {
+      "path": "libavcodec/hevc/hevcdec.c",
+      "before_sha256": "d4b5bb9e7690008ecf299cd24f7d7c1f0dfa188655fa51835add2a52da5eb297",
+      "after_sha256": "0f2e1fde10cf6611ea8e22cced9f84ea2f3a1d519178481337bd96a9b03d80cb"
+    },
+    {
+      "path": "libavcodec/hevc/hevcdec.h",
+      "before_sha256": "8702d174fc97001cfb38323ee34a2bb8e3a34eaceb0ff63c9ff4d0212d2d088d",
+      "after_sha256": "4e4bfef7ffcb81b4b74ed86ad8d09569a7dc89b5850367111a91f67f028559ec"
+    }
+  ]
+}

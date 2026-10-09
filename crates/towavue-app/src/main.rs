@@ -57,6 +57,8 @@ mod media_preview;
 mod menu;
 mod metadata_export;
 #[cfg(test)]
+mod native_import_tests;
+#[cfg(test)]
 mod native_input_tests;
 mod overlay_input;
 mod palette;
@@ -92,6 +94,7 @@ mod shortcuts;
 mod source_backing;
 mod source_save;
 mod speed_edit;
+mod startup_graphics;
 mod status_file_details;
 mod status_info;
 mod subtitles;
@@ -1091,6 +1094,9 @@ struct Application<N> {
     pending_dialog: Option<DialogIntent>,
     file_dialog_return_focus: Option<(u64, Option<TabId>, egui::Id)>,
     renderer: Option<FrameRenderer>,
+    startup_device: Option<Arc<towavue_runtime_windows::StartupDevice>>,
+    startup_surface: Option<towavue_runtime_windows::StartupSurface>,
+    startup_failed: bool,
     ui_context: Option<egui::Context>,
     ui_state: Option<egui_winit::State>,
     file_search: towavue_runtime_windows::FileSearch,
@@ -1398,6 +1404,9 @@ where
             pending_dialog: None,
             file_dialog_return_focus: None,
             renderer: None,
+            startup_device: None,
+            startup_surface: None,
+            startup_failed: false,
             ui_context: None,
             ui_state: None,
             file_search,
@@ -1670,13 +1679,28 @@ where
         };
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(11);
-        let mut renderer = if let Some(device) = graphics_device {
-            FrameRenderer::with_native_caption_on_device(&native_caption, device)?
-        } else {
-            FrameRenderer::with_native_caption(&native_caption)?
-        };
         let size = window.inner_size();
-        renderer.resize_surface(size.width, size.height)?;
+        let renderer = if graphics_device.is_none() && self.startup_device.is_some() {
+            self.startup_surface = Some(towavue_runtime_windows::StartupSurface::new(
+                &native_caption,
+                [size.width as usize, size.height as usize],
+            )?);
+            None
+        } else {
+            self.startup_device = None;
+            let mut renderer = if let Some(device) = graphics_device {
+                FrameRenderer::with_native_caption_on_device(&native_caption, device)?
+            } else {
+                FrameRenderer::with_native_caption(&native_caption)?
+            };
+            renderer.resize_surface(size.width, size.height)?;
+            Some(renderer)
+        };
+        // The software path advertises only the smallest existing device limit.
+        // Larger originals wait for this same job before ordinary validation.
+        let initial_texture_limit = renderer
+            .as_ref()
+            .map_or(2048, FrameRenderer::max_texture_side);
         self.window_size = Some(size);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(12);
@@ -1688,7 +1712,7 @@ where
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(13);
         context.style_mut_of(egui::Theme::Dark, chrome::style);
-        context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
+        context.input_mut(|input| input.max_texture_side = initial_texture_limit);
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(24);
         let mut state = egui_winit::State::new(
@@ -1697,7 +1721,7 @@ where
             &window,
             Some(window.scale_factor() as f32),
             window.theme(),
-            Some(renderer.max_texture_side()),
+            Some(initial_texture_limit),
         );
         #[cfg(feature = "presentation-verification")]
         towavue_runtime_windows::towavue_presentation_stage(25);
@@ -1726,7 +1750,7 @@ where
         self.window = Some(window);
         self.native_caption = Some(native_caption);
         self.native_taskbar = native_taskbar;
-        self.renderer = Some(renderer);
+        self.renderer = renderer;
         self.ui_context = Some(context);
         self.ui_state = Some(state);
         let recent_result = shortcuts::config_path().and_then(|path| {
@@ -2474,6 +2498,10 @@ where
             self.fail_text(localization::Text::RecoverBeforePlayback);
             return;
         }
+        if let Err(error) = self.finish_startup_graphics(true) {
+            self.fail_with_message(error.to_string(), error.message(self.language()));
+            return;
+        }
         let Some(renderer) = self.renderer.as_ref() else {
             self.fail_text(localization::Text::RendererUnavailable);
             return;
@@ -3109,7 +3137,7 @@ where
         if let Some(preview) = self.image_loader.take_preview() {
             self.finish_loaded_image_preview(preview);
         }
-        let Some(result) = self.image_loader.take_completed() else {
+        let Some(result) = self.take_startup_image_completion() else {
             return;
         };
         self.apply_loaded_images(result);
@@ -3131,6 +3159,15 @@ where
         decoded: Arc<DecodedImage>,
         options: TextureOptions,
     ) -> Result<ImagePresentation, ImagePresentationError> {
+        if self.startup_surface.is_some()
+            && decoded
+                .frames
+                .iter()
+                .any(|frame| frame.width > 2048 || frame.height > 2048)
+            && let Err(error) = self.finish_startup_graphics(true)
+        {
+            towavue_runtime_windows::diagnostic!("Startup graphics failed: {error}");
+        }
         // A reading reload can keep the same animated pages. Reuse their local clocks
         // and textures only when immutable decode ownership proves the source unchanged.
         if self.reading_mode
@@ -3914,8 +3951,19 @@ where
                 self.image_generation,
             );
         }
+        if let Err(error) = self.finish_startup_graphics(false) {
+            towavue_runtime_windows::diagnostic!("Startup graphics failed: {error}");
+        }
         self.advance_media();
-        if self.renderer.is_none() {
+        if self.startup_failed
+            && self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.is_visible() == Some(true))
+        {
+            self.show_native_fallback();
+        }
+        if self.renderer.is_none() && self.startup_surface.is_none() {
             self.finish_reading_drag(true);
             self.show_native_fallback();
             return;
@@ -3979,30 +4027,12 @@ where
                 self.image_generation,
             );
         }
-        let renderer = self.renderer.as_mut().expect("renderer exists");
-        if let Some(size) = surface_size
-            && let Err(error) = renderer.resize_surface(size.width, size.height)
-        {
-            self.handle_render_error(error);
-            return;
+        // Device completion may arrive while the ordinary UI prepares its frame.
+        // Stage the same device now; publish only after this frame's final Present.
+        if let Err(error) = self.finish_startup_graphics(false) {
+            towavue_runtime_windows::diagnostic!("Startup graphics failed: {error}");
         }
-        let media_result = renderer.clear([0.0, 0.0, 0.0, 1.0]).and_then(|()| {
-            if let (Some(session), Some(rect)) = (&mut self.session, self.video_rect) {
-                if let Some(operations) = &self.video_raster_operations {
-                    session.draw_current_edited(
-                        renderer,
-                        rect * context.pixels_per_point(),
-                        self.video_uv,
-                        operations,
-                    )
-                } else {
-                    session.draw_current(renderer, rect * context.pixels_per_point(), self.video_uv)
-                }
-            } else {
-                Ok(false)
-            }
-        });
-        let media_drawn = match media_result {
+        let media_drawn = match self.prepare_startup_or_gpu_media(&context, surface_size) {
             Ok(drawn) => drawn,
             Err(error) => {
                 self.handle_render_error(error);
@@ -4016,12 +4046,7 @@ where
                 self.image_generation,
             );
         }
-        let mut platform_output = match self
-            .renderer
-            .as_mut()
-            .expect("renderer exists")
-            .render_ui(&context, output)
-        {
+        let mut platform_output = match self.submit_startup_or_gpu_ui(&context, output) {
             Ok(output) => output,
             Err(error) => {
                 self.handle_render_error(error);
@@ -4068,12 +4093,7 @@ where
                 self.image_generation,
             );
         }
-        if let Err(error) = self
-            .renderer
-            .as_ref()
-            .expect("renderer exists")
-            .present_surface()
-        {
+        if let Err(error) = self.present_startup_or_gpu() {
             self.handle_render_error(error);
             return;
         }
@@ -9961,7 +9981,7 @@ where
                 GuardedAction::Exit | GuardedAction::CoordinatedExit(_) => true,
             };
             if affects_export {
-                if self.renderer.is_none() {
+                if self.renderer.is_none() && self.startup_surface.is_none() {
                     self.open_native_prompt(FallbackPrompt::ExportBusy);
                 }
                 self.set_status(
@@ -11146,7 +11166,7 @@ where
         if self.hosted_graphics {
             // A failed transaction already stopped this window's old device. Late
             // decoder loss events must not retry it without the user's Retry choice.
-            if retry || self.renderer.is_some() {
+            if retry || self.renderer.is_some() || self.startup_surface.is_some() {
                 self.graphics_recovery_request.get_or_insert(
                     window_host::GraphicsRecoveryRequest {
                         position,
@@ -11166,6 +11186,9 @@ where
     }
 
     fn prepare_graphics_recovery(&mut self) {
+        self.startup_surface = None;
+        self.startup_device = None;
+        self.startup_failed = false;
         self.subtitles.reset_graphics();
         self.cancel_video_scrub();
         self.video_sheets.clear();
@@ -11229,6 +11252,9 @@ where
         }
         if let Some(context) = &self.ui_context {
             context.input_mut(|input| input.max_texture_side = renderer.max_texture_side());
+        }
+        if let Some(input) = &mut self.ui_state {
+            input.set_max_texture_side(renderer.max_texture_side());
         }
         self.renderer = Some(renderer);
         self.restore_ui_textures = true;
@@ -11694,6 +11720,7 @@ where
             name.push_str(" *");
         }
         if self.renderer.is_none()
+            && self.startup_surface.is_none()
             && let Some(export) = &self.active_export
         {
             return format!(

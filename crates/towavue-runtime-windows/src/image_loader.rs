@@ -14,7 +14,11 @@ const CACHE_BYTE_LIMIT: usize = 384 * 1024 * 1024;
 const CACHE_ENTRY_LIMIT: usize = 30;
 const PREFETCH_ENTRY_LIMIT: usize = 10;
 
+#[cfg(test)]
+mod late_preview_tests;
 mod parallel;
+#[cfg(test)]
+mod startup_completion_tests;
 #[cfg(any(test, feature = "render-verification"))]
 pub(crate) mod verification;
 #[cfg(any(test, feature = "render-verification"))]
@@ -259,6 +263,22 @@ struct Mailbox {
 pub struct ImageLoader {
     shared: Arc<(Mutex<Mailbox>, Condvar)>,
     prefetch_worker: LatestTask,
+}
+
+impl Mailbox {
+    fn take_completed(&mut self) -> Option<LoadedImages> {
+        let completed = self.completed.take()?;
+        if self.preview_ready.as_ref().is_some_and(|preview| {
+            preview.generation == completed.generation
+                && completed
+                    .images
+                    .iter()
+                    .any(|(path, _)| *path == preview.path)
+        }) {
+            self.preview_ready = None;
+        }
+        Some(completed)
+    }
 }
 
 impl ImageLoader {
@@ -785,13 +805,37 @@ impl ImageLoader {
         });
     }
 
+    /// Take a completed batch only when all decoded frames fit the caller's
+    /// current texture limit. Err reports the required side and leaves the entire
+    /// batch, source version and request identity in the existing mailbox. Normal
+    /// request replacement, clear and drop still retire an unconsumed batch.
+    pub fn take_completed_with_texture_limit(
+        &self,
+        limit: usize,
+    ) -> Result<Option<LoadedImages>, usize> {
+        let mut mailbox = self.shared.0.lock().expect("image mailbox");
+        let required = mailbox.completed.as_ref().map_or(0, |result| {
+            result
+                .images
+                .iter()
+                .filter_map(|(_, image)| image.as_ref().ok())
+                .flat_map(|image| &image.frames)
+                .map(|frame| frame.width.max(frame.height) as usize)
+                .max()
+                .unwrap_or(0)
+        });
+        if required > limit {
+            return Err(required);
+        }
+        Ok(mailbox.take_completed())
+    }
+
     pub fn take_completed(&self) -> Option<LoadedImages> {
         self.shared
             .0
             .lock()
             .expect("image mailbox")
-            .completed
-            .take()
+            .take_completed()
     }
 
     pub fn take_preview(&self) -> Option<LoadedImagePreview> {
@@ -1093,6 +1137,43 @@ fn run_worker(
                 previews.remember_image(&path, &image, &|| {
                     is_current() && ImageStamp::read(&path) == stamp
                 });
+                // The UI may retain this original while awaiting a graphics
+                // texture limit. Its initial preview lookup can precede the
+                // thumbnail above, especially when it adopts active prefetch.
+                // Publish only an existing reduced thumbnail, never decode again
+                // or delay original publication. Recheck ownership under the
+                // mailbox lock so consumption/replacement cannot revive a preview.
+                if allow_preview
+                    && preview_current()
+                    && let Ok(Some(preview)) = previews.cached_image(&path)
+                    && (preview.source_size.0 > preview.image.width
+                        || preview.source_size.1 > preview.image.height)
+                {
+                    let published = {
+                        let mut mailbox = mutex.lock().expect("image mailbox");
+                        let retained = !mailbox.closed
+                            && mailbox.generation == generation
+                            && mailbox.completed.as_ref().is_some_and(|completed| {
+                                completed.images.iter().any(|(path, result)| {
+                                    path == logical
+                                        && result
+                                            .as_ref()
+                                            .is_ok_and(|original| Arc::ptr_eq(original, &image))
+                                })
+                            });
+                        if retained {
+                            mailbox.preview_ready = Some(LoadedImagePreview {
+                                generation,
+                                path: logical.to_owned(),
+                                preview,
+                            });
+                        }
+                        retained
+                    };
+                    if published {
+                        notify();
+                    }
+                }
             }
         }
         let idle_notify = {

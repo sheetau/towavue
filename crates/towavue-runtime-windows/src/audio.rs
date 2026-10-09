@@ -1,10 +1,13 @@
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::os::windows::io::{AsRawHandle, BorrowedHandle};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(test)]
+use std::time::Instant;
 
 use thiserror::Error;
 use wasapi::{
@@ -22,6 +25,8 @@ const EVENT_WAIT_MILLISECONDS: u32 = 20;
 const BUFFERED_AUDIO_SECONDS: usize = 2;
 
 mod control_wake;
+mod position_clock;
+use position_clock::PositionClock;
 mod reprime;
 use control_wake::ControlWake;
 
@@ -81,7 +86,7 @@ struct AudioRun {
     rate: f32,
     tempo_rate: f32,
     paused: bool,
-    position_nanoseconds: Arc<AtomicI64>,
+    position_clock: Arc<PositionClock>,
     volume: Arc<AtomicU32>,
     drained: Arc<AtomicBool>,
     event_tx: mpsc::Sender<AudioOutputEvent>,
@@ -97,7 +102,8 @@ pub struct AudioOutput {
     control_wake: Arc<ControlWake>,
     initial_audio_queued: Arc<AtomicBool>,
     event_rx: Receiver<AudioOutputEvent>,
-    position_nanoseconds: Arc<AtomicI64>,
+    position_clock: Arc<PositionClock>,
+    paused_position: Cell<Option<MediaTime>>,
     volume: Arc<AtomicU32>,
     drained: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -226,7 +232,7 @@ impl AudioOutput {
         let (control_tx, control_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let position_nanoseconds = Arc::new(AtomicI64::new(media_anchor.as_nanoseconds()));
+        let position_clock = Arc::new(PositionClock::new(media_anchor));
         let volume = Arc::new(AtomicU32::new(normalized_volume(volume).to_bits()));
         let drained = Arc::new(AtomicBool::new(false));
         let control_wake = Arc::new(ControlWake::default());
@@ -237,7 +243,7 @@ impl AudioOutput {
             rate,
             tempo_rate,
             paused: false,
-            position_nanoseconds: Arc::clone(&position_nanoseconds),
+            position_clock: Arc::clone(&position_clock),
             volume: Arc::clone(&volume),
             drained: Arc::clone(&drained),
             event_tx,
@@ -308,7 +314,8 @@ impl AudioOutput {
             control_wake,
             initial_audio_queued: Arc::new(AtomicBool::new(false)),
             event_rx,
-            position_nanoseconds,
+            position_clock,
+            paused_position: Cell::new(None),
             volume,
             drained,
             thread: Some(thread),
@@ -332,6 +339,12 @@ impl AudioOutput {
             });
         // Publish the command before waking the native wait. Before event
         // installation the worker will read this queue before its first wait.
+        if result.is_ok() {
+            // Command delivery is asynchronous, but callers enter the paused
+            // state as soon as this method succeeds. Freeze the public cursor
+            // now; the native owner's clock still follows actual Stop/Start.
+            self.paused_position.set(paused.then(|| self.position()));
+        }
         self.control_wake.signal();
         result
     }
@@ -355,7 +368,9 @@ impl AudioOutput {
     }
 
     pub fn position(&self) -> MediaTime {
-        MediaTime::from_nanoseconds(self.position_nanoseconds.load(Ordering::Relaxed))
+        self.paused_position
+            .get()
+            .unwrap_or_else(|| self.position_clock.position())
     }
 
     pub(crate) fn sender(&self) -> AudioOutputSender {
@@ -523,7 +538,7 @@ fn run_audio_thread(
             &event,
             &clock,
             run.media_anchor,
-            &run.position_nanoseconds,
+            &run.position_clock,
             &endpoint_rx,
             &run.volume,
             run.rate,
@@ -552,8 +567,8 @@ fn render_audio_loop(
     render_client: &AudioRenderClient,
     event: &Handle,
     clock: &AudioClock,
-    media_anchor: MediaTime,
-    position_nanoseconds: &AtomicI64,
+    _media_anchor: MediaTime,
+    position_clock: &PositionClock,
     endpoint_rx: &Receiver<()>,
     volume: &AtomicU32,
     rate: f32,
@@ -570,8 +585,7 @@ fn render_audio_loop(
     );
     let mut input_ended = false;
     let mut running = false;
-    let mut wall_elapsed = Duration::ZERO;
-    let mut wall_started_at: Option<Instant> = None;
+    let run_clock = position_clock.run(rate);
     let clock_frequency = clock.get_frequency().map_err(wasapi_error)?;
     if clock_frequency == 0 {
         return Err(AudioOutputError::ZeroClockFrequency);
@@ -589,9 +603,7 @@ fn render_audio_loop(
                     paused = value;
                     if paused && running {
                         client.stop_stream().map_err(wasapi_error)?;
-                        if let Some(started_at) = wall_started_at.take() {
-                            wall_elapsed += started_at.elapsed();
-                        }
+                        run_clock.pause();
                         running = false;
                     }
                 }
@@ -643,9 +655,9 @@ fn render_audio_loop(
                     crate::BurstEvent::AudioOutputStage,
                     0,
                     None,
-                    [4, media_anchor.as_nanoseconds() as u64, 0],
+                    [4, _media_anchor.as_nanoseconds() as u64, 0],
                 );
-                wall_started_at = Some(Instant::now());
+                run_clock.start();
                 running = true;
             }
 
@@ -655,9 +667,7 @@ fn render_audio_loop(
             {
                 if running {
                     client.stop_stream().map_err(wasapi_error)?;
-                    if let Some(started_at) = wall_started_at.take() {
-                        wall_elapsed += started_at.elapsed();
-                    }
+                    run_clock.pause();
                 }
                 return Ok(None);
             }
@@ -668,15 +678,7 @@ fn render_audio_loop(
             let (device_position, _) = clock.get_position().map_err(wasapi_error)?;
             let elapsed = device_position.saturating_sub(clock_origin) as u128 * 1_000_000_000u128
                 / u128::from(clock_frequency);
-            let wall_nanoseconds = wall_elapsed.as_nanos().saturating_add(
-                wall_started_at.map_or(0, |started_at| started_at.elapsed().as_nanos()),
-            );
-            let elapsed = elapsed.max(wall_nanoseconds).min(i64::MAX as u128) as i64;
-            let elapsed = (elapsed as f64 * f64::from(rate)).min(i64::MAX as f64) as i64;
-            position_nanoseconds.store(
-                media_anchor.as_nanoseconds().saturating_add(elapsed),
-                Ordering::Relaxed,
-            );
+            run_clock.publish_device(elapsed);
         } else {
             match control_rx.recv_timeout(CONTROL_POLL_INTERVAL) {
                 Ok(AudioControl::InitialAudioQueued) => {}
@@ -803,7 +805,8 @@ mod tests {
             control_tx,
             control_wake: Arc::new(ControlWake::default()),
             event_rx,
-            position_nanoseconds: Arc::new(AtomicI64::new(123)),
+            position_clock: Arc::new(PositionClock::new(MediaTime::from_nanoseconds(123))),
+            paused_position: Cell::new(None),
             initial_audio_queued: Arc::new(AtomicBool::new(false)),
             volume: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             drained: Arc::new(AtomicBool::new(false)),

@@ -86,6 +86,10 @@ impl DecodeError {
             Self::HardwareUnavailable(error) => {
                 formatted::hardware_decode_unavailable(language, error)
             }
+            Self::PrerollUnavailable => formatted::hardware_decode_unavailable(
+                language,
+                "selected frame requires ordinary decoding",
+            ),
             Self::WorkerStart(error) => {
                 formatted::decode_worker_start_failed(language, &error.to_string())
             }

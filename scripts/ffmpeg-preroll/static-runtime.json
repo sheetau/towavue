@@ -1,0 +1,383 @@
+{
+  "profile": "seek-optimized-v1",
+  "runtime_files": 29,
+  "external_dlls": [
+    "libaribcaption.dll",
+    "libdovi.dll",
+    "libgcc_s_seh-1.dll",
+    "libhwy.dll",
+    "liblcms2-2.dll",
+    "liblilv-0.dll",
+    "libplacebo-360.dll",
+    "libserd-0.dll",
+    "libshaderc_shared.dll",
+    "libsodium-26.dll",
+    "libsord-0.dll",
+    "libspirv-cross-c-shared.dll",
+    "libsratom-0.dll",
+    "libstdc++-6.dll",
+    "libwinpthread-1.dll",
+    "libzix-0.dll",
+    "libzmq.dll",
+    "opencl.dll",
+    "vulkan-1.dll"
+  ],
+  "modules": [
+    {
+      "name": "avcodec-63.dll",
+      "imports": [
+        "advapi32.dll",
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "avutil-61.dll",
+        "kernel32.dll",
+        "libaribcaption.dll",
+        "libgcc_s_seh-1.dll",
+        "libhwy.dll",
+        "msvcrt.dll",
+        "ntdll.dll",
+        "ole32.dll",
+        "swresample-7.dll"
+      ]
+    },
+    {
+      "name": "avdevice-63.dll",
+      "imports": [
+        "avcodec-63.dll",
+        "avfilter-12.dll",
+        "avformat-63.dll",
+        "avicap32.dll",
+        "avrt.dll",
+        "avutil-61.dll",
+        "gdi32.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "msvcrt.dll",
+        "ole32.dll",
+        "oleaut32.dll",
+        "shell32.dll",
+        "shlwapi.dll",
+        "user32.dll",
+        "winmm.dll"
+      ]
+    },
+    {
+      "name": "avfilter-12.dll",
+      "imports": [
+        "advapi32.dll",
+        "avcodec-63.dll",
+        "avformat-63.dll",
+        "avutil-61.dll",
+        "dwrite.dll",
+        "gdi32.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "liblilv-0.dll",
+        "libplacebo-360.dll",
+        "libzmq.dll",
+        "msvcrt.dll",
+        "ole32.dll",
+        "opencl.dll",
+        "rpcrt4.dll",
+        "swresample-7.dll",
+        "swscale-10.dll",
+        "user32.dll",
+        "usp10.dll"
+      ]
+    },
+    {
+      "name": "avformat-63.dll",
+      "imports": [
+        "advapi32.dll",
+        "avcodec-63.dll",
+        "avutil-61.dll",
+        "bcrypt.dll",
+        "crypt32.dll",
+        "dwrite.dll",
+        "gdi32.dll",
+        "iphlpapi.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libzmq.dll",
+        "msvcrt.dll",
+        "ncrypt.dll",
+        "rpcrt4.dll",
+        "secur32.dll",
+        "shell32.dll",
+        "shlwapi.dll",
+        "user32.dll",
+        "usp10.dll",
+        "ws2_32.dll"
+      ]
+    },
+    {
+      "name": "avutil-61.dll",
+      "imports": [
+        "advapi32.dll",
+        "bcrypt.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll",
+        "ole32.dll",
+        "opencl.dll",
+        "user32.dll"
+      ]
+    },
+    {
+      "name": "ffmpeg.exe",
+      "imports": [
+        "avcodec-63.dll",
+        "avdevice-63.dll",
+        "avfilter-12.dll",
+        "avformat-63.dll",
+        "avutil-61.dll",
+        "kernel32.dll",
+        "msvcrt.dll",
+        "shell32.dll",
+        "swresample-7.dll",
+        "swscale-10.dll"
+      ]
+    },
+    {
+      "name": "ffplay.exe",
+      "imports": [
+        "advapi32.dll",
+        "avcodec-63.dll",
+        "avdevice-63.dll",
+        "avfilter-12.dll",
+        "avformat-63.dll",
+        "avutil-61.dll",
+        "gdi32.dll",
+        "imm32.dll",
+        "kernel32.dll",
+        "libplacebo-360.dll",
+        "msvcrt.dll",
+        "ole32.dll",
+        "oleaut32.dll",
+        "setupapi.dll",
+        "shell32.dll",
+        "swresample-7.dll",
+        "swscale-10.dll",
+        "user32.dll",
+        "version.dll",
+        "winmm.dll"
+      ]
+    },
+    {
+      "name": "ffprobe.exe",
+      "imports": [
+        "avcodec-63.dll",
+        "avdevice-63.dll",
+        "avfilter-12.dll",
+        "avformat-63.dll",
+        "avutil-61.dll",
+        "kernel32.dll",
+        "msvcrt.dll",
+        "shell32.dll",
+        "swresample-7.dll",
+        "swscale-10.dll"
+      ]
+    },
+    {
+      "name": "libaribcaption.dll",
+      "imports": [
+        "d2d1.dll",
+        "dwrite.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libstdc++-6.dll",
+        "msvcrt.dll",
+        "ole32.dll"
+      ]
+    },
+    {
+      "name": "libdovi.dll",
+      "imports": [
+        "api-ms-win-core-synch-l1-2-0.dll",
+        "bcryptprimitives.dll",
+        "kernel32.dll",
+        "msvcrt.dll",
+        "ntdll.dll",
+        "userenv.dll",
+        "ws2_32.dll"
+      ]
+    },
+    {
+      "name": "libgcc_s_seh-1.dll",
+      "imports": [
+        "kernel32.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libhwy.dll",
+      "imports": [
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libstdc++-6.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "liblcms2-2.dll",
+      "imports": [
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "liblilv-0.dll",
+      "imports": [
+        "kernel32.dll",
+        "libserd-0.dll",
+        "libsord-0.dll",
+        "libsratom-0.dll",
+        "libzix-0.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libplacebo-360.dll",
+      "imports": [
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "kernel32.dll",
+        "libdovi.dll",
+        "libgcc_s_seh-1.dll",
+        "liblcms2-2.dll",
+        "libshaderc_shared.dll",
+        "libspirv-cross-c-shared.dll",
+        "libstdc++-6.dll",
+        "msvcrt.dll",
+        "shlwapi.dll",
+        "user32.dll",
+        "version.dll",
+        "vulkan-1.dll"
+      ]
+    },
+    {
+      "name": "libserd-0.dll",
+      "imports": [
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libshaderc_shared.dll",
+      "imports": [
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libsodium-26.dll",
+      "imports": [
+        "advapi32.dll",
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libsord-0.dll",
+      "imports": [
+        "kernel32.dll",
+        "libserd-0.dll",
+        "libzix-0.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libspirv-cross-c-shared.dll",
+      "imports": [
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libstdc++-6.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libsratom-0.dll",
+      "imports": [
+        "kernel32.dll",
+        "libserd-0.dll",
+        "libsord-0.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libstdc++-6.dll",
+      "imports": [
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libwinpthread-1.dll",
+      "imports": [
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libzix-0.dll",
+      "imports": [
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "libzmq.dll",
+      "imports": [
+        "advapi32.dll",
+        "iphlpapi.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libsodium-26.dll",
+        "libstdc++-6.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll",
+        "ws2_32.dll"
+      ]
+    },
+    {
+      "name": "opencl.dll",
+      "imports": [
+        "advapi32.dll",
+        "cfgmgr32.dll",
+        "kernel32.dll",
+        "msvcrt.dll",
+        "ole32.dll"
+      ]
+    },
+    {
+      "name": "swresample-7.dll",
+      "imports": [
+        "avutil-61.dll",
+        "kernel32.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "swscale-10.dll",
+      "imports": [
+        "avutil-61.dll",
+        "kernel32.dll",
+        "libgcc_s_seh-1.dll",
+        "libwinpthread-1.dll",
+        "msvcrt.dll"
+      ]
+    },
+    {
+      "name": "vulkan-1.dll",
+      "imports": [
+        "advapi32.dll",
+        "cfgmgr32.dll",
+        "kernel32.dll",
+        "msvcrt.dll"
+      ]
+    }
+  ]
+}

@@ -14,3 +14,4 @@
 *.ilk
 *.user
 *.suo
+/vendor/image-webp/target/

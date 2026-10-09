@@ -1,6 +1,10 @@
 // Share immutable font bytes across native windows. File reads and font selection
 // happen once per process, never while laying out a filename or painting a frame.
 static INSTALLED: std::sync::OnceLock<(egui::FontDefinitions, bool)> = std::sync::OnceLock::new();
+// epaint clones owned FontData bytes when constructing each context's font faces.
+// These process-lifetime buffers let every context borrow the same immutable bytes.
+static FONT_BYTES: std::sync::OnceLock<towavue_runtime_windows::UiFonts> =
+    std::sync::OnceLock::new();
 
 #[cfg(any(test, feature = "presentation-verification"))]
 pub fn install(context: &egui::Context) -> bool {
@@ -23,16 +27,23 @@ pub fn install_prepared(
     prepared: Option<towavue_runtime_windows::UiFontPreparation>,
 ) -> bool {
     let (fonts, available) = INSTALLED.get_or_init(|| {
-        let towavue_runtime_windows::UiFonts { japanese, symbols, fallbacks } = prepared
+        let towavue_runtime_windows::UiFonts { japanese, symbols, fallbacks } = FONT_BYTES.get_or_init(|| prepared
             .map(towavue_runtime_windows::UiFontPreparation::finish)
-            .unwrap_or_else(towavue_runtime_windows::UiFonts::read);
+            .unwrap_or_else(towavue_runtime_windows::UiFonts::read));
         let available = japanese.is_some();
         if !available {
             towavue_runtime_windows::diagnostic!("towavue: no installed Japanese UI font was found; using available system and bundled fallback fonts");
         }
-        let mut fonts = definitions(japanese, symbols);
+        let mut fonts = definitions_from_data(
+            japanese.as_ref().map(|(bytes, index)| {
+                let mut data = egui::FontData::from_static(bytes);
+                data.index = *index;
+                data
+            }),
+            symbols.as_ref().map(|bytes| egui::FontData::from_static(bytes)),
+        );
         for fallback in fallbacks {
-            let mut data = egui::FontData::from_owned(fallback.data);
+            let mut data = egui::FontData::from_static(&fallback.data);
             data.index = fallback.index;
             fonts.font_data.insert(fallback.name.into(), data.into());
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
@@ -51,9 +62,24 @@ pub fn install_prepared(
     *available
 }
 
+#[cfg(test)]
 fn definitions(
     japanese: Option<(Vec<u8>, u32)>,
     symbols: Option<Vec<u8>>,
+) -> egui::FontDefinitions {
+    definitions_from_data(
+        japanese.map(|(bytes, index)| {
+            let mut data = egui::FontData::from_owned(bytes);
+            data.index = index;
+            data
+        }),
+        symbols.map(egui::FontData::from_owned),
+    )
+}
+
+fn definitions_from_data(
+    japanese: Option<egui::FontData>,
+    symbols: Option<egui::FontData>,
 ) -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
@@ -68,9 +94,7 @@ fn definitions(
         egui::FontFamily::Name("codicon".into()),
         vec!["codicon".into()],
     );
-    if let Some((bytes, index)) = japanese {
-        let mut data = egui::FontData::from_owned(bytes);
-        data.index = index;
+    if let Some(data) = japanese {
         fonts
             .font_data
             .insert("japanese-fallback".into(), data.into());
@@ -93,11 +117,10 @@ fn definitions(
     // A Japanese fallback may supply only U+2194, leaving U+2195 to the
     // heavier emoji fallback. Keep both reading arrows in one symbol face.
     let mut arrows = vec!["Hack".into()];
-    if let Some(bytes) = symbols {
-        fonts.font_data.insert(
-            "windows-symbols".into(),
-            egui::FontData::from_owned(bytes).into(),
-        );
+    if let Some(data) = symbols {
+        fonts
+            .font_data
+            .insert("windows-symbols".into(), data.into());
         arrows.insert(0, "windows-symbols".into());
     }
     fonts
@@ -268,6 +291,98 @@ mod tests {
 #[cfg(test)]
 mod fallback_tests {
     use super::*;
+
+    #[test]
+    fn installed_system_font_data_borrows_process_lifetime_buffers() {
+        let context = egui::Context::default();
+        install_prepared(&context, prepare());
+        let bytes = FONT_BYTES.get().expect("prepared system fonts");
+        let definitions = &INSTALLED.get().expect("installed definitions").0;
+        let check = |name: &str, original: &[u8], index: u32| {
+            let data = &definitions.font_data[name];
+            let std::borrow::Cow::Borrowed(shared) = &data.font else {
+                panic!("system font {name} would be copied during face construction");
+            };
+            assert_eq!(shared.as_ptr(), original.as_ptr(), "{name}");
+            assert_eq!(shared.len(), original.len(), "{name}");
+            assert_eq!(data.index, index, "{name}");
+        };
+        if let Some((data, index)) = &bytes.japanese {
+            check("japanese-fallback", data, *index);
+        }
+        if let Some(data) = &bytes.symbols {
+            check("windows-symbols", data, 0);
+        }
+        for fallback in &bytes.fallbacks {
+            check(fallback.name, &fallback.data, fallback.index);
+        }
+        // A new context still uses the same definitions after the earlier one drops.
+        drop(context);
+        let later = egui::Context::default();
+        assert!(prepare().is_none());
+        install_prepared(&later, None);
+        let _ = later.run_ui(Default::default(), |ui| {
+            ui.label("A\u{65e5}\u{672c}\u{2194}\u{2195}");
+        });
+    }
+
+    #[test]
+    fn borrowed_font_bytes_preserve_owned_layout_and_atlas_across_density_changes() {
+        let shared = egui::Context::default();
+        install_prepared(&shared, prepare());
+        let mut owned_definitions = INSTALLED.get().expect("installed definitions").0.clone();
+        for data in owned_definitions.font_data.values_mut() {
+            let mut owned = (**data).clone();
+            owned.font = std::borrow::Cow::Owned(owned.font.into_owned());
+            *data = std::sync::Arc::new(owned);
+        }
+        let owned = egui::Context::default();
+        owned.set_fonts(owned_definitions);
+        let catalog: String = concat!(
+            include_str!("../../towavue-core/src/localization/catalog.rs"),
+            include_str!("../../towavue-core/src/localization/formatted.rs"),
+        )
+        .chars()
+        .filter(|chr| !chr.is_whitespace())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+        let samples = [
+            catalog.as_str(),
+            "龙鸟龜體龍鳥國點कকਕકକகకಕകකกขກកᨀကခဂሀߊⴰꔀᎠᐁཀཁꡀꡁ↔↕",
+            "0123456789 Aa ffi \u{eabf}\u{eaf1}\u{ea71}\u{10ffff}",
+        ];
+        for density in [1.0, 1.25, 1.5, 2.0, 1.0] {
+            let mut snapshots = Vec::new();
+            for context in [&owned, &shared] {
+                context.set_pixels_per_point(density);
+                let mut layouts = Vec::new();
+                let _ = context.run_ui(Default::default(), |ui| {
+                    ui.fonts_mut(|fonts| {
+                        for size in [11.0, 12.0, 14.0, 20.0] {
+                            for family in [
+                                egui::FontFamily::Proportional,
+                                egui::FontFamily::Monospace,
+                                egui::FontFamily::Name("codicon".into()),
+                                egui::FontFamily::Name("reading-arrows".into()),
+                            ] {
+                                for sample in samples {
+                                    layouts.push(fonts.layout_no_wrap(
+                                        sample.into(),
+                                        egui::FontId::new(size, family.clone()),
+                                        egui::Color32::WHITE,
+                                    ));
+                                }
+                            }
+                        }
+                    });
+                });
+                snapshots.push((layouts, context.fonts(|fonts| fonts.image())));
+            }
+            assert_eq!(snapshots[0], snapshots[1], "density {density}");
+            assert_eq!(owned.cumulative_frame_nr(), shared.cumulative_frame_nr());
+        }
+    }
 
     #[test]
     fn installed_windows_fallbacks_fill_missing_scripts_and_share_bytes_across_windows() {

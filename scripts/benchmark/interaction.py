@@ -12,6 +12,7 @@ import subprocess
 import time
 
 from PIL import ImageGrab
+from desktop_capture import grab as grab_desktop_roi
 from visual import U, windows, geometry, normalize, detect
 
 U.GetMenu.argtypes = [W.HWND]
@@ -126,7 +127,7 @@ class Session:
         if self.process.poll() is not None or owner.value != self.process.pid:
             raise RuntimeError("Owned window is no longer valid")
 
-    def capture(self):
+    def capture(self, *, desktop_roi=False):
         self.check()
         client, _, origin = geometry(self.hwnd)
         if (client.right, client.bottom) != (800, 650):
@@ -139,8 +140,10 @@ class Session:
             U.GetWindowThreadProcessId(window, C.byref(owner))
             if owner.value != self.process.pid:
                 raise CaptureUnavailable('Owned capture region is occluded')
-        image = ImageGrab.grab(bbox=(origin.x, origin.y, origin.x + client.right, origin.y + client.bottom))
-        return image
+        bounds = (origin.x, origin.y, origin.x + client.right, origin.y + client.bottom)
+        if desktop_roi:
+            return grab_desktop_roi(bounds)
+        return ImageGrab.grab(bbox=bounds)
 
     def key(self, vk):
         self.check()

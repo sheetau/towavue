@@ -19,3 +19,7 @@ third-party/patches/zvbi-no-program-id.patch whitespace=-trailing-space,-space-b
 # Preserve the published wasapi source bytes and license inventory hashes.
 vendor/wasapi/** -text whitespace=cr-at-eol
 vendor/wasapi/README.md whitespace=cr-at-eol,-trailing-space
+# Preserve unified-diff context required by the pinned native patch.
+scripts/ffmpeg-preroll/metadata-preroll.patch whitespace=-trailing-space,-space-before-tab
+# Preserve upstream rustfmt-skipped test vectors and their audited source hash.
+vendor/image-webp/src/yuv.rs whitespace=-blank-at-eol

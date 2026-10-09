@@ -1,0 +1,316 @@
+--- a/libavcodec/av1dec.c
++++ b/libavcodec/av1dec.c
+@@ -30,6 +30,7 @@
+ #include "avcodec.h"
+ #include "av1_parse.h"
+ #include "av1dec.h"
++#include "towavue_preroll.h"
+ #include "atsc_a53.h"
+ #include "bytestream.h"
+ #include "codec_internal.h"
+@@ -1290,6 +1291,12 @@
+                 s->raw_frame_header = &obu->obu.frame_header;
+ 
+             if (s->raw_frame_header->show_existing_frame) {
++                const AVFrame *reference = s->ref[s->raw_frame_header->frame_to_show_map_idx].f;
++                if (reference && (reference->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED)) {
++                    av_log(avctx, AV_LOG_ERROR, "Private AV1 preroll rejected an omitted display reference.\n");
++                    ret = AVERROR_EXTERNAL;
++                    goto end;
++                }
+                 av1_frame_replace(&s->cur_frame,
+                                   &s->ref[s->raw_frame_header->frame_to_show_map_idx]);
+ 
+@@ -1318,6 +1325,25 @@
+ 
+             s->cur_frame.spatial_id  = header->spatial_id;
+             s->cur_frame.temporal_id = header->temporal_id;
++
++            /* Keep packet parsing, header state, reference updates and output
++             * history. Admit only displayed inter pictures that update no slot;
++             * hidden/show-existing, layered and film-grain paths stay ordinary.
++             * Tag before any reference/output aliases or GPU submission. */
++            if (s->cur_frame.f) {
++                AVFrame *current = s->cur_frame.f;
++                current->flags &= ~AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED;
++                if (avctx->hwaccel && avctx->pix_fmt == AV_PIX_FMT_D3D11 &&
++                    !s->operating_point_idc && !header->spatial_id && !header->temporal_id &&
++                    !s->raw_seq->film_grain_params_present &&
++                    s->raw_frame_header->show_frame &&
++                    s->raw_frame_header->frame_type == AV1_FRAME_INTER &&
++                    !s->raw_frame_header->refresh_frame_flags &&
++                    !(current->flags & AV_FRAME_FLAG_CORRUPT) &&
++                    current->pts == s->pkt->pts &&
++                    ff_towavue_preroll_try_omit(current))
++                    current->flags |= AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED;
++            }
+ 
+             if (avctx->hwaccel && s->cur_frame.f) {
+                 ret = FF_HW_CALL(avctx, start_frame, s->pkt->buf,
+--- a/libavcodec/avcodec.h
++++ b/libavcodec/avcodec.h
+@@ -2958,4 +2958,14 @@
+  * @}
+  */
+ 
++/* Private pinned-build preroll API. Attach one owned reference to each packet's
++ * opaque_ref and enable COPY_OPAQUE before decoder creation. A flagged output has
++ * no pixels; acknowledge exactly once when receiving it. Stop before publishing
++ * the first selected frame. A nonzero outstanding count requires ordinary retry.
++ * The returned policy is owned with normal av_buffer_ref/unref semantics. */
++uint32_t avcodec_towavue_preroll_v1_codecs(void);
++AVBufferRef *avcodec_towavue_preroll_v1_alloc(int64_t threshold);
++int64_t avcodec_towavue_preroll_v1_stop(AVBufferRef *policy);
++int avcodec_towavue_preroll_v1_ack(const AVFrame *frame);
++
+ #endif /* AVCODEC_AVCODEC_H */
+--- a/libavcodec/dxva2_av1.c
++++ b/libavcodec/dxva2_av1.c
+@@ -284,6 +284,16 @@
+         return -1;
+     av_assert0(ctx_pic);
+ 
++    /* Pixel-invalid pictures cannot enter any native reference slot, including
++     * primary CDF or motion-field references. Errors propagate from receive. */
++    for (int i = 0; i < AV1_NUM_REF_FRAMES; ++i) {
++        if (h->ref[i].f &&
++            (h->ref[i].f->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED)) {
++            av_log(avctx, AV_LOG_ERROR, "Private AV1 preroll rejected an omitted decode reference.\n");
++            return AVERROR_EXTERNAL;
++        }
++    }
++
+     /* Fill up DXVA_PicParams_AV1 */
+     if (ff_dxva2_av1_fill_picture_parameters(avctx, ctx, &ctx_pic->pp) < 0)
+         return -1;
+@@ -442,6 +452,9 @@
+ 
+     if (ctx_pic->bitstream_size <= 0)
+         return -1;
++
++    if (h->cur_frame.f->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED)
++        return 0;
+ 
+     ret = ff_dxva2_common_end_frame(avctx, h->cur_frame.f,
+                                     &ctx_pic->pp, sizeof(ctx_pic->pp),
+--- a/libavcodec/dxva2_hevc.c
++++ b/libavcodec/dxva2_hevc.c
+@@ -420,6 +420,11 @@
+     if (ctx_pic->slice_count <= 0 || ctx_pic->bitstream_size <= 0)
+         return -1;
+ 
++    // The frame was tagged before output FIFO insertion. Preserve all
++    // ordinary metadata processing; omit only this non-reference GPU submission.
++    if (h->cur_frame->f->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED)
++        return 0;
++
+     ret = ff_dxva2_common_end_frame(avctx, h->cur_frame->f,
+                                     &ctx_pic->pp, sizeof(ctx_pic->pp),
+                                     scale ? &ctx_pic->qm : NULL, scale ? sizeof(ctx_pic->qm) : 0,
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -27,7 +27,8 @@
+           videotoolbox.h                                                \
+           vorbis_parser.h                                               \
+ 
+-OBJS = ac3_parser.o                                                     \
++OBJS = towavue_preroll.o                                                \
++       ac3_parser.o                                                     \
+        adts_parser.o                                                    \
+        allcodecs.o                                                      \
+        avcodec.o                                                        \
+--- /dev/null
++++ b/libavcodec/towavue_preroll.c
+@@ -0,0 +1,101 @@
++/* Private preroll policy shared across frame workers through packet opaque_ref.
++ * Stop and admission share one atomic word: once stop returns zero outstanding
++ * frames, no worker can subsequently admit an omitted frame for this policy.
++ * Dropped outputs conservatively remain outstanding and force ordinary retry.
++ * Reference counting owns the policy; no caller or codec context is borrowed. */
++#include <stdatomic.h>
++#include "config_components.h"
++#include "avcodec.h"
++#include "libavutil/mem.h"
++#include "towavue_preroll.h"
++
++typedef struct TowavuePrerollPolicy {
++    int64_t threshold;
++    atomic_uint_fast64_t state;
++} TowavuePrerollPolicy;
++
++static char policy_owner;
++
++uint32_t avcodec_towavue_preroll_v1_codecs(void)
++{
++    uint32_t mask = 0;
++#if CONFIG_HEVC_D3D11VA2_HWACCEL
++    mask |= 1;
++#endif
++#if CONFIG_AV1_D3D11VA2_HWACCEL
++    mask |= 4;
++#endif
++    return mask;
++}
++
++static void free_policy(void *opaque, uint8_t *data)
++{
++    av_free(data);
++}
++
++static TowavuePrerollPolicy *policy_from_ref(const AVBufferRef *ref)
++{
++    if (!ref || ref->size != sizeof(TowavuePrerollPolicy) ||
++        av_buffer_get_opaque(ref) != &policy_owner)
++        return NULL;
++    return (TowavuePrerollPolicy *)ref->data;
++}
++
++AVBufferRef *avcodec_towavue_preroll_v1_alloc(int64_t threshold)
++{
++    TowavuePrerollPolicy *policy;
++    AVBufferRef *ref;
++    if (threshold <= 0)
++        return NULL;
++    policy = av_mallocz(sizeof(*policy));
++    if (!policy)
++        return NULL;
++    policy->threshold = threshold;
++    atomic_init(&policy->state, 0);
++    ref = av_buffer_create((uint8_t *)policy, sizeof(*policy), free_policy,
++                           &policy_owner, 0);
++    if (!ref)
++        av_free(policy);
++    return ref;
++}
++
++int64_t avcodec_towavue_preroll_v1_stop(AVBufferRef *ref)
++{
++    TowavuePrerollPolicy *policy = policy_from_ref(ref);
++    if (!policy)
++        return AVERROR(EINVAL);
++    return atomic_fetch_or(&policy->state, 1) >> 1;
++}
++
++int ff_towavue_preroll_try_omit(const AVFrame *frame)
++{
++    TowavuePrerollPolicy *policy = policy_from_ref(frame->opaque_ref);
++    uint_fast64_t state;
++    if (!policy || frame->pts == AV_NOPTS_VALUE || frame->pts >= policy->threshold)
++        return 0;
++    state = atomic_load(&policy->state);
++    for (;;) {
++        if ((state & 1) || state >= INT64_MAX - 2)
++            return 0;
++        if (atomic_compare_exchange_weak(&policy->state, &state, state + 2))
++            return 1;
++    }
++}
++
++int avcodec_towavue_preroll_v1_ack(const AVFrame *frame)
++{
++    TowavuePrerollPolicy *policy;
++    uint_fast64_t state;
++    if (!(frame->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED))
++        return 0;
++    policy = policy_from_ref(frame->opaque_ref);
++    if (!policy)
++        return AVERROR(EINVAL);
++    state = atomic_load(&policy->state);
++    for (;;) {
++        if (state < 2)
++            return AVERROR(EINVAL);
++        if (atomic_compare_exchange_weak(&policy->state, &state, state - 2))
++            return 0;
++    }
++}
+--- /dev/null
++++ b/libavcodec/towavue_preroll.h
+@@ -0,0 +1,6 @@
++/* Private pinned-build protocol. No serialized media can create this policy. */
++#ifndef AVCODEC_TOWAVUE_PREROLL_H
++#define AVCODEC_TOWAVUE_PREROLL_H
++#include "libavutil/frame.h"
++int ff_towavue_preroll_try_omit(const AVFrame *frame);
++#endif
+--- a/libavutil/frame.h
++++ b/libavutil/frame.h
+@@ -674,6 +674,11 @@
+ /**
+  * The frame data may be corrupted, e.g. due to decoding errors.
+  */
++/* Private pinned-build extension. This frame contains metadata but no pixels.
++ * It must be discarded or retried with omission disabled before any pixel use.
++ * Packet metadata never sets this bit. Default decoding never sets this bit. */
++#define AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED (1 << 30)
++
+ #define AV_FRAME_FLAG_CORRUPT       (1 << 0)
+ /**
+  * A flag to mark frames that are keyframes.
+--- a/libavcodec/hevc/hevcdec.c
++++ b/libavcodec/hevc/hevcdec.c
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include "config_components.h"
++#include "libavcodec/towavue_preroll.h"
+ 
+ #include "libavutil/attributes.h"
+ #include "libavutil/avstring.h"
+@@ -3368,6 +3369,36 @@
+ 
+     s->cur_frame->f->pict_type = 3 - s->sh.slice_type;
+ 
++    // The FIFO can reference this very picture below, before end_frame runs.
++    // Decide and mark omission now so every output reference carries the tag.
++    // Keep all picture-order, DPB and timestamp processing on the ordinary path.
++    if (s->avctx->pix_fmt == AV_PIX_FMT_D3D11) {
++        for (int i = 0; i < FF_ARRAY_ELEMS(l->DPB); i++) {
++            const HEVCFrame *ref = &l->DPB[i];
++            if (ref != s->cur_frame &&
++                (ref->flags & (HEVC_FRAME_FLAG_LONG_REF | HEVC_FRAME_FLAG_SHORT_REF)) &&
++                (ref->f->flags & AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED)) {
++                // An invalid reference must never read an omitted surface.
++                // The feasibility caller retries ordinary decoding before output.
++                av_log(s->avctx, AV_LOG_ERROR, "Private preroll rejected an omitted reference.\n");
++                // INVALIDDATA is concealed by decode_nal_unit by default.
++                // This private protocol failure requires an ordinary-path retry.
++                ret = AVERROR_EXTERNAL;
++                goto fail;
++            }
++        }
++        if (s->vps && s->vps->vps_max_layers == 1 &&
++            s->layers_active_decode == 1 && s->layers_active_output == 1 &&
++            ff_hevc_nal_is_nonref(s->first_nal_type) &&
++            !(s->cur_frame->f->flags & AV_FRAME_FLAG_CORRUPT) &&
++            s->cur_frame->f->pts != AV_NOPTS_VALUE &&
++            ((s->towavue_preroll_before_pts > 0 &&
++              s->cur_frame->f->pts < s->towavue_preroll_before_pts) ||
++             ff_towavue_preroll_try_omit(s->cur_frame->f))) {
++            s->cur_frame->f->flags |= AV_FRAME_FLAG_TOWAVUE_PREROLL_OMITTED;
++        }
++    }
++
+     ret = ff_hevc_output_frames(s, s->layers_active_decode, s->layers_active_output,
+                                 sps->temporal_layer[sps->max_sub_layers - 1].num_reorder_pics,
+                                 sps->temporal_layer[sps->max_sub_layers - 1].max_dec_pic_buffering, 0);
+@@ -4201,6 +4232,8 @@
+ #define PAR (AV_OPT_FLAG_DECODING_PARAM | AV_OPT_FLAG_VIDEO_PARAM)
+ 
+ static const AVOption options[] = {
++    { "towavue_preroll_before_pts", "Private diagnostic: preserve metadata, omit eligible D3D11 pixels before this PTS",
++        OFFSET(towavue_preroll_before_pts), AV_OPT_TYPE_INT64, {.i64 = 0}, 0, INT64_MAX, PAR },
+     { "apply_defdispwin", "Apply default display window from VUI", OFFSET(apply_defdispwin),
+         AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, PAR },
+     { "strict-displaywin", "strictly apply default display window size", OFFSET(apply_defdispwin),
+--- a/libavcodec/hevc/hevcdec.h
++++ b/libavcodec/hevc/hevcdec.h
+@@ -560,6 +560,9 @@
+     int is_nalff;           ///< this flag is != 0 if bitstream is encapsulated
+                             ///< as a format defined in 14496-15
+     int apply_defdispwin;
++    // Private feasibility option: threshold in the stream's packet time base.
++    // Zero disables omission. Tagged outputs must never be consumed as pixels.
++    int64_t towavue_preroll_before_pts;
+ 
+     // multi-layer AVOptions
+     int         *view_ids;

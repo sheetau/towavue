@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use image::codecs::gif::GifDecoder;
 use image::codecs::png::PngDecoder;
-use image::codecs::webp::WebPDecoder;
 use image::{AnimationDecoder, DynamicImage, Frame, ImageDecoder, ImageError, ImageFormat};
 use thiserror::Error;
+use webp_rgba::WebPDecoder;
 
 use crate::decode::DecodeError;
 
@@ -23,6 +23,8 @@ mod png_preview;
 mod png_static;
 #[cfg(test)]
 mod reference_tests;
+mod tiff_static;
+mod webp_rgba;
 pub(crate) use jpeg_preview::jpeg_thumbnail;
 pub(crate) use png_preview::png_thumbnail;
 
@@ -177,6 +179,7 @@ pub(crate) fn decode_image_for_prefetch(
                 frame
             }
             ImageFormat::Jpeg => jpeg_static::decode(reader.into_inner(), byte_limit, is_current)?,
+            ImageFormat::Tiff => tiff_static::decode(reader.into_inner(), byte_limit, is_current)?,
             ImageFormat::Png => {
                 let Some(frame) = png_static::decode(reader.into_inner(), byte_limit, is_current)?
                 else {
@@ -234,6 +237,14 @@ pub(crate) fn decode_image_with_preview(
             ImageFormat::Avif => avif::decode(path, byte_limit, is_current, preview, false)?,
             ImageFormat::Jpeg => (
                 vec![jpeg_static::decode(
+                    reader.into_inner(),
+                    byte_limit,
+                    is_current,
+                )?],
+                1,
+            ),
+            ImageFormat::Tiff => (
+                vec![tiff_static::decode(
                     reader.into_inner(),
                     byte_limit,
                     is_current,

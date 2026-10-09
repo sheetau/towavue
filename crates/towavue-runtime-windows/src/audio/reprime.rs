@@ -29,7 +29,7 @@ impl AudioOutput {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_CHANNEL_CAPACITY);
         let (event_tx, event_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
-        let position = Arc::new(AtomicI64::new(media_anchor.as_nanoseconds()));
+        let position = Arc::new(PositionClock::new(media_anchor));
         let volume = Arc::new(AtomicU32::new(normalized_volume(volume).to_bits()));
         let drained = Arc::new(AtomicBool::new(false));
         let run = AudioRun {
@@ -38,7 +38,7 @@ impl AudioOutput {
             rate,
             tempo_rate,
             paused,
-            position_nanoseconds: Arc::clone(&position),
+            position_clock: Arc::clone(&position),
             volume: Arc::clone(&volume),
             drained: Arc::clone(&drained),
             event_tx,
@@ -58,7 +58,8 @@ impl AudioOutput {
         // event receiver also excludes queued old-generation notifications.
         self.audio_tx = audio_tx;
         self.event_rx = event_rx;
-        self.position_nanoseconds = position;
+        self.position_clock = position;
+        self.paused_position.set(paused.then_some(media_anchor));
         self.volume = volume;
         self.drained = drained;
         self.initial_audio_queued = Arc::new(AtomicBool::new(false));
@@ -88,7 +89,7 @@ mod tests {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_CHANNEL_CAPACITY);
         let (control_tx, control_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
-        let position = Arc::new(AtomicI64::new(100));
+        let position = Arc::new(PositionClock::new(MediaTime::from_nanoseconds(100)));
         let drained = Arc::new(AtomicBool::new(false));
         let old_position = Arc::clone(&position);
         let old_drained = Arc::clone(&drained);
@@ -108,7 +109,7 @@ mod tests {
             assert_eq!(run.rate, 2.0);
             assert_eq!(run.tempo_rate, 1.0);
             drop(audio_rx);
-            old_position.store(999, Ordering::Relaxed);
+            old_position.run(1.0).publish_device(899);
             old_drained.store(true, Ordering::Release);
             event_tx
                 .send(AudioOutputEvent::Drained)
@@ -145,7 +146,8 @@ mod tests {
             control_wake: Arc::new(ControlWake::default()),
             initial_audio_queued: Arc::new(AtomicBool::new(false)),
             event_rx,
-            position_nanoseconds: position,
+            position_clock: position,
+            paused_position: Cell::new(None),
             volume: Arc::new(AtomicU32::new(0)),
             drained,
             thread: Some(worker),
@@ -315,7 +317,8 @@ mod tests {
                 control_wake: Arc::new(ControlWake::default()),
                 initial_audio_queued: Arc::new(AtomicBool::new(false)),
                 event_rx,
-                position_nanoseconds: Arc::new(AtomicI64::new(100)),
+                position_clock: Arc::new(PositionClock::new(MediaTime::from_nanoseconds(100))),
+                paused_position: Cell::new(None),
                 volume: Arc::new(AtomicU32::new(0)),
                 drained: Arc::new(AtomicBool::new(false)),
                 thread: Some(worker),

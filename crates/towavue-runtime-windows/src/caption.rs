@@ -831,6 +831,14 @@ impl CaptionSurface {
     }
 
     pub(crate) fn new(caption: &NativeCaption) -> windows::core::Result<Self> {
+        Self::create(caption, true)
+    }
+
+    pub(crate) fn new_hidden(caption: &NativeCaption) -> windows::core::Result<Self> {
+        Self::create(caption, false)
+    }
+
+    fn create(caption: &NativeCaption, visible: bool) -> windows::core::Result<Self> {
         // SAFETY: standard window class; no borrowed creation data. The child is
         // owned below and remains on the parent's thread for its entire lifetime.
         let handle = unsafe {
@@ -838,7 +846,12 @@ impl CaptionSurface {
                 WINDOW_EX_STYLE::default(),
                 w!("STATIC"),
                 w!(""),
-                WS_CHILD | WS_VISIBLE,
+                WS_CHILD
+                    | if visible {
+                        WS_VISIBLE
+                    } else {
+                        WINDOW_STYLE::default()
+                    },
                 0,
                 0,
                 1,
@@ -1568,6 +1581,36 @@ mod tests {
                             monitor.size(),
                             "fullscreen monitor bounds"
                         );
+                        let native_dpi = GetDpiForWindow(handle);
+                        assert_eq!(f64::from(native_dpi) / 96.0, monitor.scale_factor());
+                        if !IsWindowVisible(handle).as_bool()
+                            && window.scale_factor() != monitor.scale_factor()
+                        {
+                            // Hidden cross-monitor moves can change the native DPI without
+                            // delivering WM_DPICHANGED. Exercise the real subclass/winit
+                            // notification path explicitly; visible trials still require
+                            // automatic OS delivery and must not use this fallback.
+                            eprintln!(
+                                "CONTROLLED hidden fullscreen DPI notification: {native_dpi}"
+                            );
+                            let mut suggested = RECT {
+                                left: position.x,
+                                top: position.y,
+                                right: position.x + size.width as i32,
+                                bottom: position.y + size.height as i32,
+                            };
+                            SendMessageW(
+                                handle,
+                                WM_DPICHANGED,
+                                Some(WPARAM((native_dpi | (native_dpi << 16)) as usize)),
+                                Some(LPARAM((&mut suggested as *mut RECT) as isize)),
+                            );
+                        }
+                        assert_eq!(
+                            window.outer_position().expect("DPI position"),
+                            monitor.position()
+                        );
+                        assert_eq!(window.inner_size(), monitor.size(), "DPI fullscreen bounds");
                         assert_eq!(window.scale_factor(), monitor.scale_factor());
                         assert!(caption.state.fullscreen_dpi_bounds.get().is_none());
                         eprintln!(

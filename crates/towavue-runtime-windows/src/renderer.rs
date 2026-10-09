@@ -2,6 +2,8 @@ use std::mem::ManuallyDrop;
 
 pub(crate) mod preroll_pacing;
 
+pub(crate) mod startup;
+
 #[cfg(feature = "render-verification")]
 mod verification;
 #[cfg(feature = "render-verification")]
@@ -75,7 +77,7 @@ pub fn video_edit_geometry(
 }
 
 /// A failure while creating or using the shared D3D11 renderer.
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum RenderError {
     #[error("the window is not backed by a Win32 HWND")]
     UnsupportedWindow,
@@ -175,11 +177,15 @@ impl GraphicsDevice {
 
     #[cfg(test)]
     pub(crate) fn hardware_for_test() -> Result<Self, RenderError> {
+        Self::hardware_for_startup()
+    }
+
+    fn hardware_for_startup() -> Result<Self, RenderError> {
         use windows::Win32::Graphics::Direct3D11::D3D11CreateDevice;
         let mut device = None;
         let mut context = None;
-        // The test owns this windowless device and enables the same context serialization
-        // as production before sharing it with FFmpeg's worker.
+        // This windowless device becomes the host's shared device. Enable context
+        // serialization before publishing it to UI and FFmpeg workers.
         unsafe {
             D3D11CreateDevice(
                 None,

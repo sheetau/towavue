@@ -69,7 +69,7 @@ fn read_fallbacks(directory: &Path) -> Vec<UiFontFallback> {
     // https://learn.microsoft.com/windows/apps/design/signature-experiences/typography#fonts-for-non-latin-languages
     // Keep only regular faces. Nirmala ships as separate TTFs or a collection;
     // index zero of the collection is the regular UI face.
-    [
+    let candidates = [
         ("windows-segoe-ui", &[("segoeui.ttf", 0)][..]),
         ("windows-malgun", &[("malgun.ttf", 0)][..]),
         ("windows-yahei", &[("msyh.ttc", 1), ("msyh.ttf", 0)][..]),
@@ -84,22 +84,71 @@ fn read_fallbacks(directory: &Path) -> Vec<UiFontFallback> {
         ("windows-gadugi", &[("gadugi.ttf", 0)][..]),
         ("windows-himalaya", &[("himalaya.ttf", 0)][..]),
         ("windows-phagspa", &[("phagspa.ttf", 0)][..]),
-    ]
-    .into_iter()
-    .filter_map(|(name, files)| {
-        files.iter().find_map(|(file, index)| {
-            std::fs::read(directory.join(file))
-                .ok()
-                .filter(|data| !data.is_empty())
-                .map(|data| UiFontFallback {
-                    name,
-                    data,
-                    index: *index,
+    ];
+    read_font_lanes(|lane| {
+        candidates
+            .iter()
+            .copied()
+            .enumerate()
+            .filter(|(ordinal, _)| ordinal % 3 == lane)
+            .filter_map(|(ordinal, (name, files))| {
+                files.iter().find_map(|(file, index)| {
+                    std::fs::read(directory.join(file))
+                        .ok()
+                        .filter(|data| !data.is_empty())
+                        .map(|data| {
+                            (
+                                ordinal,
+                                UiFontFallback {
+                                    name,
+                                    data,
+                                    index: *index,
+                                },
+                            )
+                        })
                 })
-        })
+            })
+            .collect::<Vec<_>>()
     })
-    .collect()
 }
+
+// Owned buffers cross these scoped workers. All workers join on success or
+// unwind; ordinal sorting preserves family precedence despite completion order.
+// The caller handles one lane, with at most two additional 256 KiB stacks.
+fn read_font_lanes<T: Send>(read_lane: impl Fn(usize) -> Vec<(usize, T)> + Sync) -> Vec<T> {
+    std::thread::scope(|scope| {
+        let read_lane = &read_lane;
+        let spawn = |lane| {
+            #[cfg(test)]
+            if parallel_tests::spawn_fails(lane) {
+                return Err(std::io::Error::other("Injected font worker spawn failure"));
+            }
+            std::thread::Builder::new()
+                .name(format!("font-read-{lane}"))
+                .stack_size(256 * 1024)
+                .spawn_scoped(scope, move || read_lane(lane))
+        };
+        let first = spawn(0);
+        let second = spawn(1);
+        let mut fonts = read_lane(2);
+        for (lane, worker) in [(0, first), (1, second)] {
+            match worker {
+                Ok(worker) => fonts.extend(
+                    worker
+                        .join()
+                        .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+                ),
+                Err(_) => fonts.extend(read_lane(lane)),
+            }
+        }
+        fonts.sort_unstable_by_key(|(ordinal, _)| *ordinal);
+        fonts.into_iter().map(|(_, font)| font).collect()
+    })
+}
+
+#[cfg(test)]
+#[path = "fonts/parallel_tests.rs"]
+mod parallel_tests;
 
 /// Reads one installed Japanese font; no font files are bundled or modified.
 pub fn japanese_ui_font() -> Option<(Vec<u8>, u32)> {

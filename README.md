@@ -24,6 +24,16 @@ Browse images, watch videos, and listen to music in a single, fluid workspace. B
 - **A comfortable reading view.** Connect images into pages, choose the layout and reading direction, and settle into fullscreen.
 - **Edit without leaving the viewer.** Crop, rotate, and resize images; trim video and audio, adjust speed and gain, or save a video frame. Work non-destructively, with undo available even after saving.
 
+## The fastest media viewer in our 11-workload benchmark
+
+From opening an image to seeking through video, towavue recorded the lowest representative completion time in all eleven workloads we tested against IrfanView, Photos and MPC-HC/VLC.
+
+![Media benchmark: image, video and audio startup, navigation, file open and seek](docs/benchmarks/overview.png)
+
+Shorter bars are faster. Each bar is the median across fixtures, after taking each fixture's median across shared actions; each panel has its own scale. These Windows 11 measurements use development builds as of October 9, 2026. Individual files can have different results, and this overview does not establish statistical superiority in every comparison. Photos startup uses a separate activation boundary; navigation coverage and its filmstrip setup are detailed below.
+
+[Explore the full benchmark, per-format results and measurement conditions →](docs/BENCHMARKS.md)
+
 ## Getting started
 
 Download the latest `windows-x64-setup.exe` from [Releases](https://github.com/sheetau/towavue/releases/latest) and run it. Setup installs for the current user and includes the Visual C++ prerequisite if needed. **Windows 11 x64** is required. The EXE and Setup are currently unsigned, so Windows may show an unknown-publisher warning.

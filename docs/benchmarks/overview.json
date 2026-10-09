@@ -1,0 +1,2045 @@
+[
+  {
+    "workload": "Image startup",
+    "values_ms": {
+      "towavue": 125.144825,
+      "irfanview": 173.776175,
+      "photos": 612.0087
+    },
+    "fixtures": 10,
+    "conditions": 10,
+    "matched_conditions": [
+      [
+        "image-startup",
+        "image01-jpeg-1080",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image02-jpeg-24mp",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image03-png-alpha-4k",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image04-webp-4k",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image05-avif-4k",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image06-tiff-4k",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image07-exif-portrait",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image08-icc-srgb",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image09-animation",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "image-startup",
+        "image10-animation",
+        "startup",
+        "recognizable"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "image-startup",
+          "case": "image01-jpeg-1080",
+          "median_ms": 125.5271
+        },
+        {
+          "category": "image-startup",
+          "case": "image02-jpeg-24mp",
+          "median_ms": 171.44755
+        },
+        {
+          "category": "image-startup",
+          "case": "image03-png-alpha-4k",
+          "median_ms": 124.0249
+        },
+        {
+          "category": "image-startup",
+          "case": "image04-webp-4k",
+          "median_ms": 208.59904999999998
+        },
+        {
+          "category": "image-startup",
+          "case": "image05-avif-4k",
+          "median_ms": 126.78909999999999
+        },
+        {
+          "category": "image-startup",
+          "case": "image06-tiff-4k",
+          "median_ms": 125.24215
+        },
+        {
+          "category": "image-startup",
+          "case": "image07-exif-portrait",
+          "median_ms": 123.11420000000001
+        },
+        {
+          "category": "image-startup",
+          "case": "image08-icc-srgb",
+          "median_ms": 125.0475
+        },
+        {
+          "category": "image-startup",
+          "case": "image09-animation",
+          "median_ms": 123.974
+        },
+        {
+          "category": "image-startup",
+          "case": "image10-animation",
+          "median_ms": 124.05085
+        }
+      ],
+      "irfanview": [
+        {
+          "category": "image-startup",
+          "case": "image01-jpeg-1080",
+          "median_ms": 133.13324999999998
+        },
+        {
+          "category": "image-startup",
+          "case": "image02-jpeg-24mp",
+          "median_ms": 221.45184999999998
+        },
+        {
+          "category": "image-startup",
+          "case": "image03-png-alpha-4k",
+          "median_ms": 186.2989
+        },
+        {
+          "category": "image-startup",
+          "case": "image04-webp-4k",
+          "median_ms": 246.84975
+        },
+        {
+          "category": "image-startup",
+          "case": "image05-avif-4k",
+          "median_ms": 202.02555
+        },
+        {
+          "category": "image-startup",
+          "case": "image06-tiff-4k",
+          "median_ms": 173.45445
+        },
+        {
+          "category": "image-startup",
+          "case": "image07-exif-portrait",
+          "median_ms": 130.36735
+        },
+        {
+          "category": "image-startup",
+          "case": "image08-icc-srgb",
+          "median_ms": 147.70049999999998
+        },
+        {
+          "category": "image-startup",
+          "case": "image09-animation",
+          "median_ms": 174.09789999999998
+        },
+        {
+          "category": "image-startup",
+          "case": "image10-animation",
+          "median_ms": 144.52715
+        }
+      ],
+      "photos": [
+        {
+          "category": "image-startup",
+          "case": "image01-jpeg-1080",
+          "median_ms": 655.7804
+        },
+        {
+          "category": "image-startup",
+          "case": "image02-jpeg-24mp",
+          "median_ms": 562.8748
+        },
+        {
+          "category": "image-startup",
+          "case": "image03-png-alpha-4k",
+          "median_ms": 607.2214
+        },
+        {
+          "category": "image-startup",
+          "case": "image04-webp-4k",
+          "median_ms": 591.0375
+        },
+        {
+          "category": "image-startup",
+          "case": "image05-avif-4k",
+          "median_ms": 613.8788
+        },
+        {
+          "category": "image-startup",
+          "case": "image06-tiff-4k",
+          "median_ms": 613.9237
+        },
+        {
+          "category": "image-startup",
+          "case": "image07-exif-portrait",
+          "median_ms": 650.2158
+        },
+        {
+          "category": "image-startup",
+          "case": "image08-icc-srgb",
+          "median_ms": 613.9149
+        },
+        {
+          "category": "image-startup",
+          "case": "image09-animation",
+          "median_ms": 577.8757
+        },
+        {
+          "category": "image-startup",
+          "case": "image10-animation",
+          "median_ms": 610.1386
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Image navigation",
+    "values_ms": {
+      "towavue": 27.848625,
+      "irfanview": 76.83915,
+      "photos": 38.10809999999999
+    },
+    "fixtures": 5,
+    "conditions": 18,
+    "matched_conditions": [
+      [
+        "mixed",
+        "mixed",
+        "distant_first",
+        "latency"
+      ],
+      [
+        "mixed",
+        "mixed",
+        "distant_last",
+        "latency"
+      ],
+      [
+        "mixed",
+        "mixed",
+        "next",
+        "latency"
+      ],
+      [
+        "mixed",
+        "mixed",
+        "previous",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg1080",
+        "distant_first",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg1080",
+        "distant_last",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg1080",
+        "next",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg1080",
+        "previous",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg24mp",
+        "distant_first",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg24mp",
+        "distant_last",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg24mp",
+        "next",
+        "latency"
+      ],
+      [
+        "navigation",
+        "jpeg24mp",
+        "previous",
+        "latency"
+      ],
+      [
+        "navigation",
+        "large1000",
+        "next",
+        "latency"
+      ],
+      [
+        "navigation",
+        "large1000",
+        "previous",
+        "latency"
+      ],
+      [
+        "navigation",
+        "png4k",
+        "distant_first",
+        "latency"
+      ],
+      [
+        "navigation",
+        "png4k",
+        "distant_last",
+        "latency"
+      ],
+      [
+        "navigation",
+        "png4k",
+        "next",
+        "latency"
+      ],
+      [
+        "navigation",
+        "png4k",
+        "previous",
+        "latency"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "mixed",
+          "case": "mixed",
+          "median_ms": 27.848625
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg1080",
+          "median_ms": 17.52055
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg24mp",
+          "median_ms": 48.027874999999995
+        },
+        {
+          "category": "navigation",
+          "case": "large1000",
+          "median_ms": 19.534125
+        },
+        {
+          "category": "navigation",
+          "case": "png4k",
+          "median_ms": 35.799324999999996
+        }
+      ],
+      "irfanview": [
+        {
+          "category": "mixed",
+          "case": "mixed",
+          "median_ms": 76.83915
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg1080",
+          "median_ms": 36.519
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg24mp",
+          "median_ms": 141.215275
+        },
+        {
+          "category": "navigation",
+          "case": "large1000",
+          "median_ms": 32.493775
+        },
+        {
+          "category": "navigation",
+          "case": "png4k",
+          "median_ms": 94.979275
+        }
+      ],
+      "photos": [
+        {
+          "category": "mixed",
+          "case": "mixed",
+          "median_ms": 38.124674999999996
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg1080",
+          "median_ms": 37.8263
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg24mp",
+          "median_ms": 38.154174999999995
+        },
+        {
+          "category": "navigation",
+          "case": "large1000",
+          "median_ms": 37.790525
+        },
+        {
+          "category": "navigation",
+          "case": "png4k",
+          "median_ms": 38.10809999999999
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Image file open",
+    "values_ms": {
+      "towavue": 37.88005,
+      "irfanview": 89.525475
+    },
+    "fixtures": 14,
+    "conditions": 14,
+    "matched_conditions": [
+      [
+        "direct-open",
+        "image01-jpeg-1080",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image02-jpeg-24mp",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image03-png-alpha-4k",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image04-webp-4k",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image05-avif-4k",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image06-tiff-4k",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image07-exif-portrait",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image08-icc-srgb",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image09-animation",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "image10-animation",
+        "direct_open_mixed",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "jpeg1080",
+        "direct_open_jpeg1080",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "jpeg24mp",
+        "direct_open_jpeg24mp",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "large1000",
+        "direct_open_large1000",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "png4k",
+        "direct_open_png4k",
+        "latency"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "direct-open",
+          "case": "image01-jpeg-1080",
+          "median_ms": 17.25235
+        },
+        {
+          "category": "direct-open",
+          "case": "image02-jpeg-24mp",
+          "median_ms": 58.30115
+        },
+        {
+          "category": "direct-open",
+          "case": "image03-png-alpha-4k",
+          "median_ms": 37.86225
+        },
+        {
+          "category": "direct-open",
+          "case": "image04-webp-4k",
+          "median_ms": 138.03615000000002
+        },
+        {
+          "category": "direct-open",
+          "case": "image05-avif-4k",
+          "median_ms": 71.3247
+        },
+        {
+          "category": "direct-open",
+          "case": "image06-tiff-4k",
+          "median_ms": 86.52225
+        },
+        {
+          "category": "direct-open",
+          "case": "image07-exif-portrait",
+          "median_ms": 35.832049999999995
+        },
+        {
+          "category": "direct-open",
+          "case": "image08-icc-srgb",
+          "median_ms": 37.89785
+        },
+        {
+          "category": "direct-open",
+          "case": "image09-animation",
+          "median_ms": 35.1796
+        },
+        {
+          "category": "direct-open",
+          "case": "image10-animation",
+          "median_ms": 34.149
+        },
+        {
+          "category": "direct-open",
+          "case": "jpeg1080",
+          "median_ms": 26.594700000000003
+        },
+        {
+          "category": "direct-open",
+          "case": "jpeg24mp",
+          "median_ms": 136.49955
+        },
+        {
+          "category": "direct-open",
+          "case": "large1000",
+          "median_ms": 18.2517
+        },
+        {
+          "category": "direct-open",
+          "case": "png4k",
+          "median_ms": 67.46995000000001
+        }
+      ],
+      "irfanview": [
+        {
+          "category": "direct-open",
+          "case": "image01-jpeg-1080",
+          "median_ms": 35.704049999999995
+        },
+        {
+          "category": "direct-open",
+          "case": "image02-jpeg-24mp",
+          "median_ms": 134.10755
+        },
+        {
+          "category": "direct-open",
+          "case": "image03-png-alpha-4k",
+          "median_ms": 95.0903
+        },
+        {
+          "category": "direct-open",
+          "case": "image04-webp-4k",
+          "median_ms": 161.638
+        },
+        {
+          "category": "direct-open",
+          "case": "image05-avif-4k",
+          "median_ms": 117.97285
+        },
+        {
+          "category": "direct-open",
+          "case": "image06-tiff-4k",
+          "median_ms": 89.55000000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "image07-exif-portrait",
+          "median_ms": 34.377449999999996
+        },
+        {
+          "category": "direct-open",
+          "case": "image08-icc-srgb",
+          "median_ms": 63.862849999999995
+        },
+        {
+          "category": "direct-open",
+          "case": "image09-animation",
+          "median_ms": 89.50094999999999
+        },
+        {
+          "category": "direct-open",
+          "case": "image10-animation",
+          "median_ms": 59.077799999999996
+        },
+        {
+          "category": "direct-open",
+          "case": "jpeg1080",
+          "median_ms": 31.85765
+        },
+        {
+          "category": "direct-open",
+          "case": "jpeg24mp",
+          "median_ms": 136.69145
+        },
+        {
+          "category": "direct-open",
+          "case": "large1000",
+          "median_ms": 30.344900000000003
+        },
+        {
+          "category": "direct-open",
+          "case": "png4k",
+          "median_ms": 91.49545
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Video startup",
+    "values_ms": {
+      "towavue": 249.0121,
+      "mpc-hc": 870.9269,
+      "vlc": 473.2515
+    },
+    "fixtures": 5,
+    "conditions": 5,
+    "matched_conditions": [
+      [
+        "video-startup",
+        "video11-h264-1080",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "video-startup",
+        "video12-hevc-4k10",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "video-startup",
+        "video13-vp9-1080",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "video-startup",
+        "video14-av1-4k10",
+        "startup",
+        "recognizable"
+      ],
+      [
+        "video-startup",
+        "video15-h264-long-gop",
+        "startup",
+        "recognizable"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "video-startup",
+          "case": "video11-h264-1080",
+          "median_ms": 243.8565
+        },
+        {
+          "category": "video-startup",
+          "case": "video12-hevc-4k10",
+          "median_ms": 239.4729
+        },
+        {
+          "category": "video-startup",
+          "case": "video13-vp9-1080",
+          "median_ms": 295.6228
+        },
+        {
+          "category": "video-startup",
+          "case": "video14-av1-4k10",
+          "median_ms": 258.9351
+        },
+        {
+          "category": "video-startup",
+          "case": "video15-h264-long-gop",
+          "median_ms": 249.0121
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "video-startup",
+          "case": "video11-h264-1080",
+          "median_ms": 864.3728
+        },
+        {
+          "category": "video-startup",
+          "case": "video12-hevc-4k10",
+          "median_ms": 862.3215
+        },
+        {
+          "category": "video-startup",
+          "case": "video13-vp9-1080",
+          "median_ms": 920.2094
+        },
+        {
+          "category": "video-startup",
+          "case": "video14-av1-4k10",
+          "median_ms": 962.8029
+        },
+        {
+          "category": "video-startup",
+          "case": "video15-h264-long-gop",
+          "median_ms": 870.9269
+        }
+      ],
+      "vlc": [
+        {
+          "category": "video-startup",
+          "case": "video11-h264-1080",
+          "median_ms": 435.405
+        },
+        {
+          "category": "video-startup",
+          "case": "video12-hevc-4k10",
+          "median_ms": 473.5262
+        },
+        {
+          "category": "video-startup",
+          "case": "video13-vp9-1080",
+          "median_ms": 477.979
+        },
+        {
+          "category": "video-startup",
+          "case": "video14-av1-4k10",
+          "median_ms": 473.2515
+        },
+        {
+          "category": "video-startup",
+          "case": "video15-h264-long-gop",
+          "median_ms": 452.445
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Video seek",
+    "values_ms": {
+      "towavue": 85.74940000000001,
+      "mpc-hc": 91.4558,
+      "vlc": 542.81995
+    },
+    "fixtures": 5,
+    "conditions": 5,
+    "matched_conditions": [
+      [
+        "seek",
+        "av1-4k10",
+        "seek_aligned",
+        "video"
+      ],
+      [
+        "seek",
+        "h264-1080",
+        "seek_aligned",
+        "video"
+      ],
+      [
+        "seek",
+        "h264-long-gop",
+        "seek_aligned",
+        "video"
+      ],
+      [
+        "seek",
+        "hevc-4k10",
+        "seek_aligned",
+        "video"
+      ],
+      [
+        "seek",
+        "vp9-1080",
+        "seek_aligned",
+        "video"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "seek",
+          "case": "av1-4k10",
+          "median_ms": 85.74940000000001
+        },
+        {
+          "category": "seek",
+          "case": "h264-1080",
+          "median_ms": 33.941900000000004
+        },
+        {
+          "category": "seek",
+          "case": "h264-long-gop",
+          "median_ms": 87.82820000000001
+        },
+        {
+          "category": "seek",
+          "case": "hevc-4k10",
+          "median_ms": 87.4297
+        },
+        {
+          "category": "seek",
+          "case": "vp9-1080",
+          "median_ms": 65.91669999999999
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "seek",
+          "case": "av1-4k10",
+          "median_ms": 115.66380000000001
+        },
+        {
+          "category": "seek",
+          "case": "h264-1080",
+          "median_ms": 39.37575
+        },
+        {
+          "category": "seek",
+          "case": "h264-long-gop",
+          "median_ms": 91.4558
+        },
+        {
+          "category": "seek",
+          "case": "hevc-4k10",
+          "median_ms": 129.76555
+        },
+        {
+          "category": "seek",
+          "case": "vp9-1080",
+          "median_ms": 68.27664999999999
+        }
+      ],
+      "vlc": [
+        {
+          "category": "seek",
+          "case": "av1-4k10",
+          "median_ms": 574.3561
+        },
+        {
+          "category": "seek",
+          "case": "h264-1080",
+          "median_ms": 516.6342500000001
+        },
+        {
+          "category": "seek",
+          "case": "h264-long-gop",
+          "median_ms": 566.0518
+        },
+        {
+          "category": "seek",
+          "case": "hevc-4k10",
+          "median_ms": 506.2574
+        },
+        {
+          "category": "seek",
+          "case": "vp9-1080",
+          "median_ms": 542.81995
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Video navigation",
+    "values_ms": {
+      "towavue": 97.4002,
+      "mpc-hc": 485.50059999999996,
+      "vlc": 247.4754
+    },
+    "fixtures": 5,
+    "conditions": 8,
+    "matched_conditions": [
+      [
+        "media",
+        "video11-h264-1080",
+        "previous",
+        "latency"
+      ],
+      [
+        "media",
+        "video12-hevc-4k10",
+        "next",
+        "latency"
+      ],
+      [
+        "media",
+        "video12-hevc-4k10",
+        "previous",
+        "latency"
+      ],
+      [
+        "media",
+        "video13-vp9-1080",
+        "next",
+        "latency"
+      ],
+      [
+        "media",
+        "video13-vp9-1080",
+        "previous",
+        "latency"
+      ],
+      [
+        "media",
+        "video14-av1-4k10",
+        "next",
+        "latency"
+      ],
+      [
+        "media",
+        "video14-av1-4k10",
+        "previous",
+        "latency"
+      ],
+      [
+        "media",
+        "video15-h264-long-gop",
+        "next",
+        "latency"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "media",
+          "case": "video11-h264-1080",
+          "median_ms": 97.5461
+        },
+        {
+          "category": "media",
+          "case": "video12-hevc-4k10",
+          "median_ms": 73.5427
+        },
+        {
+          "category": "media",
+          "case": "video13-vp9-1080",
+          "median_ms": 152.31394999999998
+        },
+        {
+          "category": "media",
+          "case": "video14-av1-4k10",
+          "median_ms": 97.4002
+        },
+        {
+          "category": "media",
+          "case": "video15-h264-long-gop",
+          "median_ms": 67.7564
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "media",
+          "case": "video11-h264-1080",
+          "median_ms": 466.6483
+        },
+        {
+          "category": "media",
+          "case": "video12-hevc-4k10",
+          "median_ms": 481.29560000000004
+        },
+        {
+          "category": "media",
+          "case": "video13-vp9-1080",
+          "median_ms": 486.82730000000004
+        },
+        {
+          "category": "media",
+          "case": "video14-av1-4k10",
+          "median_ms": 485.50059999999996
+        },
+        {
+          "category": "media",
+          "case": "video15-h264-long-gop",
+          "median_ms": 492.0905
+        }
+      ],
+      "vlc": [
+        {
+          "category": "media",
+          "case": "video11-h264-1080",
+          "median_ms": 247.4754
+        },
+        {
+          "category": "media",
+          "case": "video12-hevc-4k10",
+          "median_ms": 257.91610000000003
+        },
+        {
+          "category": "media",
+          "case": "video13-vp9-1080",
+          "median_ms": 236.92395
+        },
+        {
+          "category": "media",
+          "case": "video14-av1-4k10",
+          "median_ms": 272.66205
+        },
+        {
+          "category": "media",
+          "case": "video15-h264-long-gop",
+          "median_ms": 211.2698
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Video file open",
+    "values_ms": {
+      "towavue": 97.3357,
+      "mpc-hc": 456.10974999999996,
+      "vlc": 274.7609
+    },
+    "fixtures": 5,
+    "conditions": 5,
+    "matched_conditions": [
+      [
+        "direct-open",
+        "video11-h264-1080",
+        "direct_open_video",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "video12-hevc-4k10",
+        "direct_open_video",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "video13-vp9-1080",
+        "direct_open_video",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "video14-av1-4k10",
+        "direct_open_video",
+        "latency"
+      ],
+      [
+        "direct-open",
+        "video15-h264-long-gop",
+        "direct_open_video",
+        "latency"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "direct-open",
+          "case": "video11-h264-1080",
+          "median_ms": 97.3357
+        },
+        {
+          "category": "direct-open",
+          "case": "video12-hevc-4k10",
+          "median_ms": 81.14505
+        },
+        {
+          "category": "direct-open",
+          "case": "video13-vp9-1080",
+          "median_ms": 166.88855
+        },
+        {
+          "category": "direct-open",
+          "case": "video14-av1-4k10",
+          "median_ms": 111.9067
+        },
+        {
+          "category": "direct-open",
+          "case": "video15-h264-long-gop",
+          "median_ms": 66.14859999999999
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "direct-open",
+          "case": "video11-h264-1080",
+          "median_ms": 456.10974999999996
+        },
+        {
+          "category": "direct-open",
+          "case": "video12-hevc-4k10",
+          "median_ms": 455.09145
+        },
+        {
+          "category": "direct-open",
+          "case": "video13-vp9-1080",
+          "median_ms": 481.99744999999996
+        },
+        {
+          "category": "direct-open",
+          "case": "video14-av1-4k10",
+          "median_ms": 487.84835
+        },
+        {
+          "category": "direct-open",
+          "case": "video15-h264-long-gop",
+          "median_ms": 442.59615
+        }
+      ],
+      "vlc": [
+        {
+          "category": "direct-open",
+          "case": "video11-h264-1080",
+          "median_ms": 214.30835000000002
+        },
+        {
+          "category": "direct-open",
+          "case": "video12-hevc-4k10",
+          "median_ms": 305.5134
+        },
+        {
+          "category": "direct-open",
+          "case": "video13-vp9-1080",
+          "median_ms": 274.7609
+        },
+        {
+          "category": "direct-open",
+          "case": "video14-av1-4k10",
+          "median_ms": 318.61244999999997
+        },
+        {
+          "category": "direct-open",
+          "case": "video15-h264-long-gop",
+          "median_ms": 110.08940000000001
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Audio startup",
+    "values_ms": {
+      "towavue": 175.66985,
+      "mpc-hc": 437.86345,
+      "vlc": 251.35775
+    },
+    "fixtures": 10,
+    "conditions": 10,
+    "matched_conditions": [
+      [
+        "audio-startup",
+        "audio12-flac",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio12-m4a",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio12-mp3",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio12-opus",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio12-wav",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio180-flac",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio180-m4a",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio180-mp3",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio180-opus",
+        "startup",
+        "audio"
+      ],
+      [
+        "audio-startup",
+        "audio180-wav",
+        "startup",
+        "audio"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "audio-startup",
+          "case": "audio12-flac",
+          "median_ms": 174.5148
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-m4a",
+          "median_ms": 175.7043
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-mp3",
+          "median_ms": 178.2762
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-opus",
+          "median_ms": 175.2282
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-wav",
+          "median_ms": 196.6923
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-flac",
+          "median_ms": 175.6354
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-m4a",
+          "median_ms": 176.4623
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-mp3",
+          "median_ms": 174.4465
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-opus",
+          "median_ms": 173.4623
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-wav",
+          "median_ms": 189.2754
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "audio-startup",
+          "case": "audio12-flac",
+          "median_ms": 427.0242
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-m4a",
+          "median_ms": 418.8454
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-mp3",
+          "median_ms": 458.6147
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-opus",
+          "median_ms": 464.4567
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-wav",
+          "median_ms": 443.735
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-flac",
+          "median_ms": 420.1619
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-m4a",
+          "median_ms": 429.4535
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-mp3",
+          "median_ms": 464.5627
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-opus",
+          "median_ms": 432.4814
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-wav",
+          "median_ms": 443.2455
+        }
+      ],
+      "vlc": [
+        {
+          "category": "audio-startup",
+          "case": "audio12-flac",
+          "median_ms": 258.8914
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-m4a",
+          "median_ms": 251.0792
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-mp3",
+          "median_ms": 285.3198
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-opus",
+          "median_ms": 241.4964
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio12-wav",
+          "median_ms": 232.6641
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-flac",
+          "median_ms": 260.3682
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-m4a",
+          "median_ms": 251.6363
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-mp3",
+          "median_ms": 283.9425
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-opus",
+          "median_ms": 242.7105
+        },
+        {
+          "category": "audio-startup",
+          "case": "audio180-wav",
+          "median_ms": 234.8222
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Audio seek",
+    "values_ms": {
+      "towavue": 20.3313,
+      "mpc-hc": 59.9126,
+      "vlc": 449.90355
+    },
+    "fixtures": 5,
+    "conditions": 5,
+    "matched_conditions": [
+      [
+        "seek",
+        "seek-flac",
+        "seek_aligned",
+        "audio"
+      ],
+      [
+        "seek",
+        "seek-m4a",
+        "seek_aligned",
+        "audio"
+      ],
+      [
+        "seek",
+        "seek-mp3",
+        "seek_aligned",
+        "audio"
+      ],
+      [
+        "seek",
+        "seek-opus",
+        "seek_aligned",
+        "audio"
+      ],
+      [
+        "seek",
+        "seek-pcm",
+        "seek_aligned",
+        "audio"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "seek",
+          "case": "seek-flac",
+          "median_ms": 20.0116
+        },
+        {
+          "category": "seek",
+          "case": "seek-m4a",
+          "median_ms": 20.68105
+        },
+        {
+          "category": "seek",
+          "case": "seek-mp3",
+          "median_ms": 20.567
+        },
+        {
+          "category": "seek",
+          "case": "seek-opus",
+          "median_ms": 20.3313
+        },
+        {
+          "category": "seek",
+          "case": "seek-pcm",
+          "median_ms": 20.2408
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "seek",
+          "case": "seek-flac",
+          "median_ms": 85.44605
+        },
+        {
+          "category": "seek",
+          "case": "seek-m4a",
+          "median_ms": 50.4191
+        },
+        {
+          "category": "seek",
+          "case": "seek-mp3",
+          "median_ms": 59.9126
+        },
+        {
+          "category": "seek",
+          "case": "seek-opus",
+          "median_ms": 59.95505
+        },
+        {
+          "category": "seek",
+          "case": "seek-pcm",
+          "median_ms": 40.02095
+        }
+      ],
+      "vlc": [
+        {
+          "category": "seek",
+          "case": "seek-flac",
+          "median_ms": 475.712
+        },
+        {
+          "category": "seek",
+          "case": "seek-m4a",
+          "median_ms": 429.56245
+        },
+        {
+          "category": "seek",
+          "case": "seek-mp3",
+          "median_ms": 460.22339999999997
+        },
+        {
+          "category": "seek",
+          "case": "seek-opus",
+          "median_ms": 449.90355
+        },
+        {
+          "category": "seek",
+          "case": "seek-pcm",
+          "median_ms": 420.1432
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Audio navigation",
+    "values_ms": {
+      "towavue": 30.42545,
+      "mpc-hc": 112.750575,
+      "vlc": 59.9771
+    },
+    "fixtures": 10,
+    "conditions": 16,
+    "matched_conditions": [
+      [
+        "media",
+        "audio12-flac",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-flac",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-m4a",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-m4a",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-mp3",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-mp3",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-opus",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio12-wav",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-flac",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-flac",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-m4a",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-m4a",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-mp3",
+        "next",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-mp3",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-opus",
+        "previous",
+        "audio"
+      ],
+      [
+        "media",
+        "audio180-wav",
+        "next",
+        "audio"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "media",
+          "case": "audio12-flac",
+          "median_ms": 30.071350000000002
+        },
+        {
+          "category": "media",
+          "case": "audio12-m4a",
+          "median_ms": 30.3558
+        },
+        {
+          "category": "media",
+          "case": "audio12-mp3",
+          "median_ms": 30.50145
+        },
+        {
+          "category": "media",
+          "case": "audio12-opus",
+          "median_ms": 30.4534
+        },
+        {
+          "category": "media",
+          "case": "audio12-wav",
+          "median_ms": 40.7501
+        },
+        {
+          "category": "media",
+          "case": "audio180-flac",
+          "median_ms": 29.9458
+        },
+        {
+          "category": "media",
+          "case": "audio180-m4a",
+          "median_ms": 30.426000000000002
+        },
+        {
+          "category": "media",
+          "case": "audio180-mp3",
+          "median_ms": 30.14395
+        },
+        {
+          "category": "media",
+          "case": "audio180-opus",
+          "median_ms": 30.4249
+        },
+        {
+          "category": "media",
+          "case": "audio180-wav",
+          "median_ms": 40.6093
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "media",
+          "case": "audio12-flac",
+          "median_ms": 110.67065
+        },
+        {
+          "category": "media",
+          "case": "audio12-m4a",
+          "median_ms": 109.562
+        },
+        {
+          "category": "media",
+          "case": "audio12-mp3",
+          "median_ms": 139.64139999999998
+        },
+        {
+          "category": "media",
+          "case": "audio12-opus",
+          "median_ms": 109.8057
+        },
+        {
+          "category": "media",
+          "case": "audio12-wav",
+          "median_ms": 118.9273
+        },
+        {
+          "category": "media",
+          "case": "audio180-flac",
+          "median_ms": 114.8305
+        },
+        {
+          "category": "media",
+          "case": "audio180-m4a",
+          "median_ms": 110.10905
+        },
+        {
+          "category": "media",
+          "case": "audio180-mp3",
+          "median_ms": 139.9986
+        },
+        {
+          "category": "media",
+          "case": "audio180-opus",
+          "median_ms": 110.151
+        },
+        {
+          "category": "media",
+          "case": "audio180-wav",
+          "median_ms": 120.3216
+        }
+      ],
+      "vlc": [
+        {
+          "category": "media",
+          "case": "audio12-flac",
+          "median_ms": 59.9944
+        },
+        {
+          "category": "media",
+          "case": "audio12-m4a",
+          "median_ms": 60.01405
+        },
+        {
+          "category": "media",
+          "case": "audio12-mp3",
+          "median_ms": 90.16525
+        },
+        {
+          "category": "media",
+          "case": "audio12-opus",
+          "median_ms": 49.6334
+        },
+        {
+          "category": "media",
+          "case": "audio12-wav",
+          "median_ms": 40.3051
+        },
+        {
+          "category": "media",
+          "case": "audio180-flac",
+          "median_ms": 449.42235
+        },
+        {
+          "category": "media",
+          "case": "audio180-m4a",
+          "median_ms": 59.9598
+        },
+        {
+          "category": "media",
+          "case": "audio180-mp3",
+          "median_ms": 89.2986
+        },
+        {
+          "category": "media",
+          "case": "audio180-opus",
+          "median_ms": 50.7304
+        },
+        {
+          "category": "media",
+          "case": "audio180-wav",
+          "median_ms": 40.683
+        }
+      ]
+    }
+  },
+  {
+    "workload": "Audio file open",
+    "values_ms": {
+      "towavue": 20.739925,
+      "mpc-hc": 120.4555,
+      "vlc": 69.442925
+    },
+    "fixtures": 10,
+    "conditions": 10,
+    "matched_conditions": [
+      [
+        "direct-open",
+        "audio12-flac",
+        "direct_open_audio12",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio12-m4a",
+        "direct_open_audio12",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio12-mp3",
+        "direct_open_audio12",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio12-opus",
+        "direct_open_audio12",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio12-wav",
+        "direct_open_audio12",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio180-flac",
+        "direct_open_audio180",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio180-m4a",
+        "direct_open_audio180",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio180-mp3",
+        "direct_open_audio180",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio180-opus",
+        "direct_open_audio180",
+        "audio"
+      ],
+      [
+        "direct-open",
+        "audio180-wav",
+        "direct_open_audio180",
+        "audio"
+      ]
+    ],
+    "fixture_values": {
+      "towavue": [
+        {
+          "category": "direct-open",
+          "case": "audio12-flac",
+          "median_ms": 20.15025
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-m4a",
+          "median_ms": 24.76755
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-mp3",
+          "median_ms": 20.26915
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-opus",
+          "median_ms": 20.81035
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-wav",
+          "median_ms": 40.71685
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-flac",
+          "median_ms": 20.190849999999998
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-m4a",
+          "median_ms": 25.261400000000002
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-mp3",
+          "median_ms": 20.6695
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-opus",
+          "median_ms": 20.32695
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-wav",
+          "median_ms": 40.516000000000005
+        }
+      ],
+      "mpc-hc": [
+        {
+          "category": "direct-open",
+          "case": "audio12-flac",
+          "median_ms": 110.19030000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-m4a",
+          "median_ms": 110.5763
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-mp3",
+          "median_ms": 149.12015
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-opus",
+          "median_ms": 119.14410000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-wav",
+          "median_ms": 121.17975000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-flac",
+          "median_ms": 120.3857
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-m4a",
+          "median_ms": 120.5253
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-mp3",
+          "median_ms": 150.22075
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-opus",
+          "median_ms": 120.02935
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-wav",
+          "median_ms": 134.9034
+        }
+      ],
+      "vlc": [
+        {
+          "category": "direct-open",
+          "case": "audio12-flac",
+          "median_ms": 69.91935000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-m4a",
+          "median_ms": 60.0787
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-mp3",
+          "median_ms": 90.13245
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-opus",
+          "median_ms": 69.83035000000001
+        },
+        {
+          "category": "direct-open",
+          "case": "audio12-wav",
+          "median_ms": 40.7462
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-flac",
+          "median_ms": 70.726
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-m4a",
+          "median_ms": 60.5313
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-mp3",
+          "median_ms": 90.411
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-opus",
+          "median_ms": 69.0555
+        },
+        {
+          "category": "direct-open",
+          "case": "audio180-wav",
+          "median_ms": 40.261250000000004
+        }
+      ]
+    }
+  }
+]

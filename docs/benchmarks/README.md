@@ -58,6 +58,12 @@ The overview has no pooled p95, combined-workflow duration or aggregate
 significance claim. Photos activation has a different process boundary and is
 explicitly labeled. File-open and process-startup results are separate.
 
+Photos navigation uses the [dedicated filmstrip protocol](../../scripts/benchmark/README.md#photos-navigation).
+Keep its unavailable 1,000-file boundary jumps explicit unless a new validated
+protocol measures them. The current overview matches eighteen case/action
+conditions across all three apps; the full tables still retain the other apps'
+boundary-jump results. Do not substitute zeros for unavailable measurements.
+
 The chart palette is stable: towavue teal, IrfanView orange, MPC-HC purple, VLC
 rose and Photos blue. Completion charts use 95% opacity for the fastest observed
 value and 23% for other apps, with "Shorter bars are faster" below. Playback

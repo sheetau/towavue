@@ -2,9 +2,9 @@
 
 # Media benchmarks
 
-Updated **2026-10-09**. towavue has the lowest representative completion time in **11 of 11 workloads** below, compared with IrfanView for images and MPC-HC/VLC for video and audio. This describes these fixtures on this Windows PC; it does not mean every file or every individual comparison is a statistically established win.
+Updated **2026-10-09**. towavue has the lowest representative completion time in **11 of 11 workloads** below, compared with IrfanView/Photos for images and MPC-HC/VLC for video and audio. This describes these fixtures on this Windows PC; it does not mean every file or every individual comparison is a statistically established win.
 
-[Overview](#overview) · [Measurement method](#measurement-method) · [Image-open confidence](#image-open-confidence) · [Complete results](#complete-results) · [Environment and builds](#environment-and-builds) · [Data and updates](#data-and-updates)
+[Overview](#overview) · [Measurement method](#measurement-method) · [Photos navigation](#photos-navigation) · [Image-open confidence](#image-open-confidence) · [Complete results](#complete-results) · [Environment and builds](#environment-and-builds) · [Data and updates](#data-and-updates)
 
 ## Overview
 
@@ -14,10 +14,10 @@ Updated **2026-10-09**. towavue has the lowest representative completion time in
 
 **Shorter bars are faster.** Solid bars mark the lowest observed value; other apps are faded. Each overview panel has its own zero-based scale: compare apps within a panel. Ranking is descriptive, not an aggregate significance test.
 
-| Workload | Fixtures / conditions | towavue | IrfanView | MPC-HC | VLC | Photos* |
+| Workload | Fixtures / conditions | towavue | IrfanView | MPC-HC | VLC | Photos |
 |---|---:|---:|---:|---:|---:|---:|
 | Image startup | 10 / 10 | 125.14 | 173.78 | — | — | 612.01 |
-| Image navigation | 5 / 20 | 27.85 | 76.84 | — | — | — |
+| Image navigation | 5 / 18 | 27.85 | 76.84 | — | — | 38.11 |
 | Image file open | 14 / 14 | 37.88 | 89.53 | — | — | — |
 | Video startup | 5 / 5 | 249.01 | — | 870.93 | 473.25 | — |
 | Video seek | 5 / 5 | 85.75 | — | 91.46 | 542.82 | — |
@@ -46,6 +46,18 @@ Visual completion is desktop capture recognizing the expected fixture, including
 
 The broad refresh uses three measured blocks, the retained direct-open study ten, qualified image startup thirty, and the targeted image-open follow-up thirty new paired blocks. Other qualified navigation/seek counts are listed below. Small cohorts describe speed but give unstable tail estimates. Table p95 values retain their source method (nearest-rank in the broad refresh; linear interpolation in the retained direct-open study). No aggregate p95 or aggregate confidence interval is inferred from these summaries.
 
+## Photos navigation
+
+Photos 2026.11080.24002.0 was measured in ten viewer sessions per fixture, plus one excluded warmup session: **880/880 measured operations succeeded** (968 including warmup). No Computer Use or additional automation software was used. Windows UI Automation shows/focuses the filmstrip before timing; native keyboard input performs next, previous, Home and End. Every timed target must match both its encoded desktop identity and window title. The app keeps its installed default profile and natural spare process; these are fresh viewer sessions, not a promise of a new isolated process for every block.
+
+In this tested URI-activation route, Photos followed filename order rather than the original folders' saved Shell order. The measurement therefore uses byte-identical independent copies named by original Shell position, with their own name-ascending Shell order. This preserves the exact image identities and content sequence used by the historical comparisons. Original images and their Shell settings are unchanged. These are separate cohorts and input routes (Photos native keyboard versus the earlier posted messages/menu commands); no paired significance claim is made against the historical apps.
+
+The Photos filmstrip is visible, with Fit display in the same 800 × 650 client. UI Automation inspects small-folder membership and the realized prefix of the large folder before timing; setup is followed by one second idle, then 100 ms between observed targets. No folder pre-traversal or UI Automation query is inside the adopted navigation measurements. Next/previous have 80 observations per fixture, and each supported boundary jump has ten; these observations share ten session blocks. The p95 uses nearest rank and remains a noisy tail estimate.
+
+**1,000-file limitation:** next/previous are measured, but first/last jumps are unavailable for this activation/input route. Calibration displayed intermediate files instead of the requested complete-folder boundary, even after separate preparation experiments. Those calibration observations are excluded, and no intermediate endpoint is presented as a successful jump. Other apps' first/last results remain in the full tables. The overview matches the **18 conditions** shared by all three apps across five fixtures; it does not average Photos over fewer actions than its competitors. This observation does not establish a universal Photos folder-size limit.
+
+Photos records the shortest observed median for 24 MP JPEG next/previous and the mixed-folder last-file jump. The eleven-workload headline concerns the aggregated values, not a clean sweep of every fixture/action.
+
 ## Image-open confidence
 
 The latest six-condition follow-up used thirty new paired blocks per condition: all 540 measured operations succeeded; eighteen warmup operations and calibration are excluded. Earlier exploratory samples are not pooled. Mixed-folder targets in this follow-up are JPEG 1080p, AVIF and EXIF rotation only; they do not reproduce the entire older ten-format session.
@@ -69,7 +81,7 @@ Four conditions favor towavue in recorded completion timestamps; JPEG 24 MP and 
 
 ## Complete results
 
-All **366 comparison cells** are retained below, including settled viewport, video soundtrack and playback cadence observations that are not in the eleven-workload overview. No towavue-only or Windows-dialog comparisons are included.
+All **384 comparison cells** are retained below, including settled viewport, video soundtrack and playback cadence observations that are not in the eleven-workload overview. No towavue-only or Windows-dialog comparisons are included.
 
 **Table cells:** median / p95 in milliseconds; successful/attempted operations; process or session blocks; study ID. A lower–upper median is a capture-observation bound, not a confidence interval. Charts plot the upper observed median, with gray capture-bound segments where available. Build attribution is in the [study inventory](#study-inventory).
 
@@ -100,7 +112,7 @@ New process with a file path. Recognition is the overview endpoint; settled view
 
 #### Startup — recognizable content
 
-| Fixture | towavue | IrfanView | Photos* |
+| Fixture | towavue | IrfanView | Photos |
 |---|---:|---:|---:|
 | JPEG 1920 x 1080 | 94.63–125.53 / 134.39<br>30/30; 30 blocks; study-15 | 103.28–133.13 / 146.50<br>30/30; 30 blocks; study-15 | 621.25–655.78 / 672.47<br>5/5; 5 blocks; study-01 |
 | JPEG 24 MP | 140.24–171.45 / 201.37<br>30/30; 30 blocks; study-15 | 47.89–221.45 / 237.00<br>30/30; 30 blocks; study-15 | 538.00–562.87 / 573.56<br>5/5; 5 blocks; study-01 |
@@ -121,16 +133,16 @@ New process with a file path. Recognition is the overview endpoint; settled view
 
 ### Image folder navigation
 
-Next, previous, first and last file in homogeneous image folders. The large folder contains 1,000 small JPEGs. Three process blocks, except the qualified JPEG 24 MP study with ten blocks.
+Next, previous, first and last file in homogeneous image folders. The large folder contains 1,000 small JPEGs. towavue/IrfanView use three process blocks, except the qualified JPEG 24 MP study with ten. Photos uses ten viewer sessions with its filmstrip visible; its large-folder results cover next/previous only. See the Photos protocol below.
 
 #### Jump to first file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| JPEG 1080p | 0.00–13.61 / 16.93<br>3/3; 3 blocks; study-05 | 0.06–38.45 / 42.53<br>3/3; 3 blocks; study-05 |
-| JPEG 24 MP | 0.00–20.20 / 42.76<br>10/10; 10 blocks; study-13 | 103.39–141.96 / 153.16<br>10/10; 10 blocks; study-13 |
-| 1,000 small JPEGs | 0.00–20.82 / 22.78<br>3/3; 3 blocks; study-05 | 0.00–22.49 / 36.58<br>3/3; 3 blocks; study-05 |
-| PNG 4K | 0.00–14.84 / 15.19<br>3/3; 3 blocks; study-05 | 58.52–92.36 / 93.90<br>3/3; 3 blocks; study-05 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| JPEG 1080p | 0.00–13.61 / 16.93<br>3/3; 3 blocks; study-05 | 0.06–38.45 / 42.53<br>3/3; 3 blocks; study-05 | 1.35–37.79 / 39.86<br>10/10; 10 blocks; study-16 |
+| JPEG 24 MP | 0.00–20.20 / 42.76<br>10/10; 10 blocks; study-13 | 103.39–141.96 / 153.16<br>10/10; 10 blocks; study-13 | 1.28–38.00 / 38.45<br>10/10; 10 blocks; study-16 |
+| 1,000 small JPEGs | 0.00–20.82 / 22.78<br>3/3; 3 blocks; study-05 | 0.00–22.49 / 36.58<br>3/3; 3 blocks; study-05 | — |
+| PNG 4K | 0.00–14.84 / 15.19<br>3/3; 3 blocks; study-05 | 58.52–92.36 / 93.90<br>3/3; 3 blocks; study-05 | 1.27–37.70 / 43.00<br>10/10; 10 blocks; study-16 |
 
 ![Image folder navigation: Jump to first file, Visual completion](benchmarks/figures/navigation-distant_first-latency.png)
 
@@ -138,12 +150,12 @@ Next, previous, first and last file in homogeneous image folders. The large fold
 
 #### Jump to last file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| JPEG 1080p | 0.06–33.68 / 34.43<br>3/3; 3 blocks; study-05 | 0.05–36.67 / 40.62<br>3/3; 3 blocks; study-05 |
-| JPEG 24 MP | 10.43–49.42 / 68.14<br>10/10; 10 blocks; study-13 | 104.93–142.04 / 149.87<br>10/10; 10 blocks; study-13 |
-| 1,000 small JPEGs | 0.08–35.29 / 35.68<br>3/3; 3 blocks; study-05 | 0.05–33.70 / 34.06<br>3/3; 3 blocks; study-05 |
-| PNG 4K | 0.06–36.98 / 37.99<br>3/3; 3 blocks; study-05 | 61.22–96.01 / 101.79<br>3/3; 3 blocks; study-05 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| JPEG 1080p | 0.06–33.68 / 34.43<br>3/3; 3 blocks; study-05 | 0.05–36.67 / 40.62<br>3/3; 3 blocks; study-05 | 19.71–51.08 / 58.93<br>10/10; 10 blocks; study-16 |
+| JPEG 24 MP | 10.43–49.42 / 68.14<br>10/10; 10 blocks; study-13 | 104.93–142.04 / 149.87<br>10/10; 10 blocks; study-13 | 19.63–53.34 / 55.44<br>10/10; 10 blocks; study-16 |
+| 1,000 small JPEGs | 0.08–35.29 / 35.68<br>3/3; 3 blocks; study-05 | 0.05–33.70 / 34.06<br>3/3; 3 blocks; study-05 | — |
+| PNG 4K | 0.06–36.98 / 37.99<br>3/3; 3 blocks; study-05 | 61.22–96.01 / 101.79<br>3/3; 3 blocks; study-05 | 1.51–39.91 / 55.28<br>10/10; 10 blocks; study-16 |
 
 ![Image folder navigation: Jump to last file, Visual completion](benchmarks/figures/navigation-distant_last-latency.png)
 
@@ -151,12 +163,12 @@ Next, previous, first and last file in homogeneous image folders. The large fold
 
 #### Next file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| JPEG 1080p | 0.00–19.69 / 34.67<br>24/24; 3 blocks; study-05 | 0.06–34.05 / 37.60<br>24/24; 3 blocks; study-05 |
-| JPEG 24 MP | 9.91–54.89 / 65.47<br>80/80; 10 blocks; study-13 | 99.45–136.36 / 145.06<br>80/80; 10 blocks; study-13 |
-| 1,000 small JPEGs | 0.00–20.16 / 35.50<br>24/24; 3 blocks; study-05 | 0.06–32.75 / 37.71<br>24/24; 3 blocks; study-05 |
-| PNG 4K | 0.06–37.64 / 42.43<br>24/24; 3 blocks; study-05 | 58.68–93.94 / 99.94<br>24/24; 3 blocks; study-05 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| JPEG 1080p | 0.00–19.69 / 34.67<br>24/24; 3 blocks; study-05 | 0.06–34.05 / 37.60<br>24/24; 3 blocks; study-05 | 1.49–37.87 / 55.03<br>80/80; 10 blocks; study-16 |
+| JPEG 24 MP | 9.91–54.89 / 65.47<br>80/80; 10 blocks; study-13 | 99.45–136.36 / 145.06<br>80/80; 10 blocks; study-13 | 1.50–38.30 / 54.47<br>80/80; 10 blocks; study-16 |
+| 1,000 small JPEGs | 0.00–20.16 / 35.50<br>24/24; 3 blocks; study-05 | 0.06–32.75 / 37.71<br>24/24; 3 blocks; study-05 | 1.50–37.75 / 54.52<br>80/80; 10 blocks; study-16 |
+| PNG 4K | 0.06–37.64 / 42.43<br>24/24; 3 blocks; study-05 | 58.68–93.94 / 99.94<br>24/24; 3 blocks; study-05 | 1.44–38.52 / 54.15<br>80/80; 10 blocks; study-16 |
 
 ![Image folder navigation: Next file, Visual completion](benchmarks/figures/navigation-next-latency.png)
 
@@ -164,12 +176,12 @@ Next, previous, first and last file in homogeneous image folders. The large fold
 
 #### Previous file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| JPEG 1080p | 0.00–15.35 / 19.64<br>24/24; 3 blocks; study-05 | 0.07–36.37 / 43.20<br>24/24; 3 blocks; study-05 |
-| JPEG 24 MP | 0.06–46.64 / 62.91<br>80/80; 10 blocks; study-13 | 102.18–140.47 / 146.85<br>80/80; 10 blocks; study-13 |
-| 1,000 small JPEGs | 0.00–18.91 / 35.17<br>24/24; 3 blocks; study-05 | 0.06–32.24 / 37.73<br>24/24; 3 blocks; study-05 |
-| PNG 4K | 0.06–34.62 / 43.36<br>24/24; 3 blocks; study-05 | 60.16–96.30 / 104.26<br>24/24; 3 blocks; study-05 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| JPEG 1080p | 0.00–15.35 / 19.64<br>24/24; 3 blocks; study-05 | 0.07–36.37 / 43.20<br>24/24; 3 blocks; study-05 | 1.36–37.32 / 39.62<br>80/80; 10 blocks; study-16 |
+| JPEG 24 MP | 0.06–46.64 / 62.91<br>80/80; 10 blocks; study-13 | 102.18–140.47 / 146.85<br>80/80; 10 blocks; study-13 | 1.39–35.26 / 38.79<br>80/80; 10 blocks; study-16 |
+| 1,000 small JPEGs | 0.00–18.91 / 35.17<br>24/24; 3 blocks; study-05 | 0.06–32.24 / 37.73<br>24/24; 3 blocks; study-05 | 1.30–37.83 / 40.27<br>80/80; 10 blocks; study-16 |
+| PNG 4K | 0.06–34.62 / 43.36<br>24/24; 3 blocks; study-05 | 60.16–96.30 / 104.26<br>24/24; 3 blocks; study-05 | 1.34–37.69 / 40.06<br>80/80; 10 blocks; study-16 |
 
 ![Image folder navigation: Previous file, Visual completion](benchmarks/figures/navigation-previous-latency.png)
 
@@ -179,13 +191,13 @@ Next, previous, first and last file in homogeneous image folders. The large fold
 
 ### Mixed image and animation navigation
 
-The same four navigation commands in a Shell-ordered mixed-format folder; three process blocks.
+The same four navigation commands in a mixed-format folder; three towavue/IrfanView process blocks and ten Photos viewer sessions. Photos uses copies preserving the same encoded images and visited content sequence.
 
 #### Jump to first file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| Mixed images / animation | 0.00–19.40 / 20.55<br>3/3; 3 blocks; study-04 | 0.05–36.44 / 37.53<br>3/3; 3 blocks; study-04 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| Mixed images / animation | 0.00–19.40 / 20.55<br>3/3; 3 blocks; study-04 | 0.05–36.44 / 37.53<br>3/3; 3 blocks; study-04 | 1.34–37.99 / 40.45<br>10/10; 10 blocks; study-16 |
 
 ![Mixed image and animation navigation: Jump to first file, Visual completion](benchmarks/figures/mixed-distant_first-latency.png)
 
@@ -193,9 +205,9 @@ The same four navigation commands in a Shell-ordered mixed-format folder; three 
 
 #### Jump to last file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| Mixed images / animation | 18.03–50.80 / 51.88<br>3/3; 3 blocks; study-04 | 20.84–58.50 / 62.34<br>3/3; 3 blocks; study-04 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| Mixed images / animation | 18.03–50.80 / 51.88<br>3/3; 3 blocks; study-04 | 20.84–58.50 / 62.34<br>3/3; 3 blocks; study-04 | 9.57–47.10 / 59.16<br>10/10; 10 blocks; study-16 |
 
 ![Mixed image and animation navigation: Jump to last file, Visual completion](benchmarks/figures/mixed-distant_last-latency.png)
 
@@ -203,9 +215,9 @@ The same four navigation commands in a Shell-ordered mixed-format folder; three 
 
 #### Next file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| Mixed images / animation | 0.07–36.29 / 59.32<br>24/24; 3 blocks; study-04 | 65.36–95.18 / 162.55<br>24/24; 3 blocks; study-04 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| Mixed images / animation | 0.07–36.29 / 59.32<br>24/24; 3 blocks; study-04 | 65.36–95.18 / 162.55<br>24/24; 3 blocks; study-04 | 1.45–38.26 / 53.54<br>80/80; 10 blocks; study-16 |
 
 ![Mixed image and animation navigation: Next file, Visual completion](benchmarks/figures/mixed-next-latency.png)
 
@@ -213,9 +225,9 @@ The same four navigation commands in a Shell-ordered mixed-format folder; three 
 
 #### Previous file — visual completion
 
-| Fixture | towavue | IrfanView |
-|---|---:|---:|
-| Mixed images / animation | 0.00–15.52 / 41.27<br>24/24; 3 blocks; study-04 | 58.95–96.81 / 162.79<br>24/24; 3 blocks; study-04 |
+| Fixture | towavue | IrfanView | Photos |
+|---|---:|---:|---:|
+| Mixed images / animation | 0.00–15.52 / 41.27<br>24/24; 3 blocks; study-04 | 58.95–96.81 / 162.79<br>24/24; 3 blocks; study-04 | 1.35–36.92 / 39.48<br>80/80; 10 blocks; study-16 |
 
 ![Mixed image and animation navigation: Previous file, Visual completion](benchmarks/figures/mixed-previous-latency.png)
 
@@ -549,7 +561,7 @@ Desktop capture of a 30 fps video source. These intervals should match the sourc
 | IrfanView | 4.73 x64 |
 | MPC-HC | 2.5.6 with bundled LAV/MPC renderer |
 | VLC | 3.0.23 |
-| Photos* | 2026.11080.24002.0 |
+| Photos | 2026.11080.24002.0 |
 
 Product integration commit: [`34ee7fa`](https://github.com/sheetau/towavue/commit/34ee7fabec9594b4b67004a70201f0dffb449e9d). These are development-build measurements, not a claim that the latest published installer has identical performance. Improvements from qualified candidates are integrated, but not every historical cell was remeasured on the integrated executable.
 
@@ -583,6 +595,7 @@ Study IDs connect table cells to the public data. Evidence hashes identify the a
 | study-13 | b75fc | 10 | navigation |
 | study-14 | b75fc | 10 | seek |
 | study-15 | 5b91 | 30 | image-startup |
+| study-16 | Photos 2026.11080.24002.0 | 10 | navigation, mixed |
 
 ## Data and updates
 

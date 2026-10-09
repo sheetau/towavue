@@ -233,10 +233,11 @@
     "workload": "Image navigation",
     "values_ms": {
       "towavue": 27.848625,
-      "irfanview": 76.83915
+      "irfanview": 76.83915,
+      "photos": 38.10809999999999
     },
     "fixtures": 5,
-    "conditions": 20,
+    "conditions": 18,
     "matched_conditions": [
       [
         "mixed",
@@ -313,18 +314,6 @@
       [
         "navigation",
         "large1000",
-        "distant_first",
-        "latency"
-      ],
-      [
-        "navigation",
-        "large1000",
-        "distant_last",
-        "latency"
-      ],
-      [
-        "navigation",
-        "large1000",
         "next",
         "latency"
       ],
@@ -379,7 +368,7 @@
         {
           "category": "navigation",
           "case": "large1000",
-          "median_ms": 20.492325
+          "median_ms": 19.534125
         },
         {
           "category": "navigation",
@@ -412,6 +401,33 @@
           "category": "navigation",
           "case": "png4k",
           "median_ms": 94.979275
+        }
+      ],
+      "photos": [
+        {
+          "category": "mixed",
+          "case": "mixed",
+          "median_ms": 38.124674999999996
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg1080",
+          "median_ms": 37.8263
+        },
+        {
+          "category": "navigation",
+          "case": "jpeg24mp",
+          "median_ms": 38.154174999999995
+        },
+        {
+          "category": "navigation",
+          "case": "large1000",
+          "median_ms": 37.790525
+        },
+        {
+          "category": "navigation",
+          "case": "png4k",
+          "median_ms": 38.10809999999999
         }
       ]
     }

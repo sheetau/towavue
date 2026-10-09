@@ -26,11 +26,11 @@ Browse images, watch videos, and listen to music in a single, fluid workspace. B
 
 ## The fastest media viewer in our 11-workload benchmark
 
-From opening an image to seeking through video, towavue recorded the lowest representative completion time in all eleven workloads we tested against IrfanView and MPC-HC/VLC.
+From opening an image to seeking through video, towavue recorded the lowest representative completion time in all eleven workloads we tested against IrfanView, Photos and MPC-HC/VLC.
 
 ![Media benchmark: image, video and audio startup, navigation, file open and seek](docs/benchmarks/overview.png)
 
-Shorter bars are faster. Each bar is the median across fixtures, after taking each fixture's median across actions; each panel has its own scale. These Windows 11 measurements use development builds as of October 9, 2026. Individual files can have different results, and this overview does not establish statistical superiority in every comparison. Photos uses a separate activation boundary.
+Shorter bars are faster. Each bar is the median across fixtures, after taking each fixture's median across shared actions; each panel has its own scale. These Windows 11 measurements use development builds as of October 9, 2026. Individual files can have different results, and this overview does not establish statistical superiority in every comparison. Photos startup uses a separate activation boundary; navigation coverage and its filmstrip setup are detailed below.
 
 [Explore the full benchmark, per-format results and measurement conditions →](docs/BENCHMARKS.md)
 

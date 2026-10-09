@@ -97,6 +97,55 @@ and relevant limitations alongside the chart.
 
 ## Interaction suite
 
+### Photos navigation
+
+`photos_navigation.py` uses native keyboard input and Windows UI Automation,
+without Computer Use or Power Automate. It measures next/previous and supported
+first/last jumps in an existing Photos viewer. UI Automation shows and focuses
+the filmstrip before timing; it does not issue timed navigation commands.
+Startup, dialog handling and UI Automation setup are outside this endpoint.
+
+The tested URI activation route used filename order rather than the original
+folders' saved Shell order. Prepare independent byte-identical copies, naming
+them by their original Shell positions. Do not use hardlinks: the calibration
+did not enumerate their neighbors correctly. The preparer opens and closes only
+new fixture Explorer windows to set those new folders to name-ascending order;
+it does not change the original folders or existing Explorer windows. Keep both
+the source manifests and the generated manifest private.
+
+```powershell
+target/benchmark/venv/Scripts/python.exe scripts/benchmark/prepare_photos_navigation.py --root tests/generated/photos-navigation --navigation tests/generated/benchmark-navigation-v2 --interaction tests/generated/benchmark-interaction-v1
+target/benchmark/venv/Scripts/python.exe -m unittest discover -s scripts/benchmark -p test_photos_navigation.py -v
+target/benchmark/venv/Scripts/python.exe scripts/benchmark/photos_navigation.py --root target/benchmark/photos-navigation-calibration --corpus tests/generated/photos-navigation --repeats 1 --warmup-blocks 0
+target/benchmark/venv/Scripts/python.exe scripts/benchmark/photos_navigation.py --root target/benchmark/photos-navigation-run --corpus tests/generated/photos-navigation --repeats 10
+```
+
+Build the Shell-order probe below before preparation. Run calibration and timing
+sequentially, with the screen and input available. The runner refuses an existing
+Photos viewer, held physical input, foreign focus, changed cursor or occlusion.
+Every target requires the correct desktop identity and filename; only the owned
+viewer is closed. Background/spare Photos processes are retained naturally.
+The installed default profile is not isolated. These are viewer-session blocks,
+not guaranteed fresh processes. The 800 × 650 client, Fit display, visible
+filmstrip, one-second initial idle and 100 ms observation pacing are recorded.
+
+Photos may expose only a prefix of a large folder. Calibration could not make
+one Home/End command reach the complete 1,000-file boundary reliably. The adopted
+protocol therefore measures next/previous only in that folder; it never labels
+an intermediate file as the last file. Small folders retain all four operations.
+No preparatory traversal of the large folder is used in the adopted run.
+The ten-block publication has 880 measured operations and 88 excluded warmups,
+with ten observations per supported jump and eighty per next/previous condition.
+Steps within a session are correlated; compare descriptively with historical
+apps, whose command delivery and profiles differ. These recognition measurements
+are not a physical-input, full-resolution-quality or paired-significance claim.
+
+Publish missing Photos boundary results as unavailable, preserving other apps'
+existing values. The overview must match the same available case/action pairs
+for every app. See [Photos methods and results](../../docs/BENCHMARKS.md#photos-navigation).
+
+### Shared runners
+
 Build the read-only Shell-order probe before timing:
 
 ```powershell

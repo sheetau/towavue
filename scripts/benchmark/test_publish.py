@@ -39,6 +39,11 @@ class AggregationTests(unittest.TestCase):
         items = publish.overview(data)
         self.assertEqual([item["workload"] for item in items], list(publish.WORKLOADS))
         self.assertEqual([item["fixtures"] for item in items], [10, 5, 14, 5, 5, 5, 5, 10, 5, 10, 10])
+        navigation = next(item for item in items if item["workload"] == "Image navigation")
+        self.assertEqual(set(navigation["values_ms"]), {"towavue", "irfanview", "photos"})
+        self.assertEqual(navigation["conditions"], 18)
+        self.assertFalse(any(key[1] == "large1000" and key[2] in ("distant_first", "distant_last")
+                             for key in navigation["matched_conditions"]))
         for item in items:
             keys = item["matched_conditions"]
             self.assertTrue(all(key[0] != "pacing" for key in keys))

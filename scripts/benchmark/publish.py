@@ -12,7 +12,7 @@ import tempfile
 REPO = Path(__file__).resolve().parents[2]
 APPS = {
     "towavue": "towavue", "irfanview": "IrfanView", "mpc-hc": "MPC-HC",
-    "vlc": "VLC", "photos": "Photos*",
+    "vlc": "VLC", "photos": "Photos",
 }
 COLORS = {"towavue": "#087f8c", "irfanview": "#dd7a28", "mpc-hc": "#8055ad",
           "vlc": "#cc486c", "photos": "#5384b1"}
@@ -23,8 +23,8 @@ WORKLOADS = (
 )
 CATEGORIES = {
     "image-startup": ("Image and animation startup", "New process with a file path. Recognition is the overview endpoint; settled viewport is a separate observation. Photos uses URI activation with a potentially retained spare process, so its boundary differs."),
-    "navigation": ("Image folder navigation", "Next, previous, first and last file in homogeneous image folders. The large folder contains 1,000 small JPEGs. Three process blocks, except the qualified JPEG 24 MP study with ten blocks."),
-    "mixed": ("Mixed image and animation navigation", "The same four navigation commands in a Shell-ordered mixed-format folder; three process blocks."),
+    "navigation": ("Image folder navigation", "Next, previous, first and last file in homogeneous image folders. The large folder contains 1,000 small JPEGs. towavue/IrfanView use three process blocks, except the qualified JPEG 24 MP study with ten. Photos uses ten viewer sessions with its filmstrip visible; its large-folder results cover next/previous only. See the Photos protocol below."),
+    "mixed": ("Mixed image and animation navigation", "The same four navigation commands in a mixed-format folder; three towavue/IrfanView process blocks and ten Photos viewer sessions. Photos uses copies preserving the same encoded images and visited content sequence."),
     "video-startup": ("Video startup", "New process to recognition of the expected video frame; three measured blocks."),
     "audio-startup": ("Audio startup", "New process to loopback detection of the expected audio; 12-second and 180-second fixtures, three measured blocks."),
     "seek": ("Video and audio seek", "A running player seeks to aligned target positions. Video-frame recognition and audio detection remain separate endpoints. The overview uses video recognition for video seek and audio-only fixtures for audio seek. Qualified towavue/MPC-HC video observations use twelve blocks and PCM WAV ten; other observations use three."),
@@ -54,6 +54,10 @@ SCENARIOS = {
 
 def condition(row):
     return tuple(row[k] for k in ("category", "case", "scenario", "metric"))
+
+
+def app_label(app, startup=False):
+    return APPS[app] + ("*" if app == "photos" and startup else "")
 
 
 def selected(row, workload):
@@ -105,6 +109,9 @@ def overview(data):
         apps = (["towavue", "irfanview", "photos"] if workload == "Image startup" else
                 ["towavue", "irfanview"] if workload.startswith("Image") else
                 ["towavue", "mpc-hc", "vlc"])
+        if workload == "Image navigation" and any(
+                row["app"] == "photos" and selected(row, workload) for row in data["records"]):
+            apps.append("photos")
         result.append({"workload": workload, **aggregate(
             [row for row in data["records"] if selected(row, workload)], apps)})
     return result
@@ -177,7 +184,7 @@ def overview_chart(items, destination, updated):
             ax.barh(i, value, height=.60, color=COLORS[app], alpha=.95 if leader else .23)
             ax.text(value + maximum * .015, i, f"{value:.1f} ms", va="center", fontsize=13,
                     weight="bold" if leader else "normal", color="#17212f")
-        ax.set_yticks(range(len(values)), [APPS[a] for a in values], fontsize=13)
+        ax.set_yticks(range(len(values)), [app_label(a, item["workload"] == "Image startup") for a in values], fontsize=13)
         ax.invert_yaxis()
         ax.set_xlim(0, maximum * 1.16)
         ax.set_title(item["workload"], loc="left", fontsize=17, weight="bold", pad=12)
@@ -188,7 +195,7 @@ def overview_chart(items, destination, updated):
     fig.text(.12, .034, "Shorter bars are faster. Solid: fastest observed value; faded: other apps.", fontsize=12)
     fig.text(.12, .024, "Each panel has its own scale; compare apps within a panel. Descriptive values, not a significance test.", fontsize=11)
     fig.text(.12, .014, f"{updated} · Windows 11 · Ryzen 9 9900X · RTX 5070 Ti · Development builds.", fontsize=11)
-    fig.text(.12, .004, "* Photos uses URI activation; its process boundary differs. See the detailed benchmark for conditions and sample counts.", fontsize=10)
+    fig.text(.12, .004, "* Photos startup uses URI activation with a different process boundary. See the detailed benchmark for navigation conditions.", fontsize=10)
     fig.subplots_adjust(left=.12, right=.98, top=.938, bottom=.068, hspace=1.05)
     save_figure(fig, destination / "overview")
     plt.close(fig)
@@ -205,17 +212,19 @@ def detail_chart(data, rows, stem):
         group = [r for r in rows if r["case"] == case]
         best = min(r["median_ms"] for r in group)
         for j, app in enumerate(apps):
+            y = i * (len(apps) + 1) + j - (len(apps) - 1) / 2
             row = next((r for r in group if r["app"] == app), None)
             if row is None:
+                ax.text(maximum * .013, y, f"{APPS[app]} — unavailable", va="center",
+                        fontsize=9, style="italic", color="#64748b")
                 continue
             value = row["median_ms"]
             leader = pacing or math.isclose(value, best, abs_tol=1e-9)
-            y = i * (len(apps) + 1) + j - (len(apps) - 1) / 2
             ax.barh(y, value, .72, color=COLORS[app], alpha=.95 if leader else .23)
             lower = row.get("median_lower_ms", value)
             if lower < value:
                 ax.plot([lower, value], [y, y], color="#64748b", linewidth=2, alpha=.55)
-            ax.text(value + maximum * .013, y, f"{APPS[app]}  {value:.2f} ms", va="center", fontsize=9,
+            ax.text(value + maximum * .013, y, f"{app_label(app, rows[0]['category'] == 'image-startup')}  {value:.2f} ms", va="center", fontsize=9,
                     weight="bold" if leader else "normal", color="#17212f" if leader else "#64748b")
     ax.set_yticks([i * (len(apps) + 1) for i in range(len(cases))],
                   [data["labels"][case] for case in cases], fontsize=10)
@@ -274,12 +283,12 @@ def report(data, items, groups):
     leaders = sum(item["values_ms"]["towavue"] == min(item["values_ms"].values()) for item in items)
     doc = ["<!-- Generated by scripts/benchmark/publish.py; edit the data or generator. -->",
            "# Media benchmarks",
-           f"Updated **{data['updated']}**. towavue has the lowest representative completion time in **{leaders} of {len(items)} workloads** below, compared with IrfanView for images and MPC-HC/VLC for video and audio. This describes these fixtures on this Windows PC; it does not mean every file or every individual comparison is a statistically established win.",
-           "[Overview](#overview) · [Measurement method](#measurement-method) · [Image-open confidence](#image-open-confidence) · [Complete results](#complete-results) · [Environment and builds](#environment-and-builds) · [Data and updates](#data-and-updates)",
+           f"Updated **{data['updated']}**. towavue has the lowest representative completion time in **{leaders} of {len(items)} workloads** below, compared with IrfanView/Photos for images and MPC-HC/VLC for video and audio. This describes these fixtures on this Windows PC; it does not mean every file or every individual comparison is a statistically established win.",
+           "[Overview](#overview) · [Measurement method](#measurement-method) · [Photos navigation](#photos-navigation) · [Image-open confidence](#image-open-confidence) · [Complete results](#complete-results) · [Environment and builds](#environment-and-builds) · [Data and updates](#data-and-updates)",
            "## Overview", "![Eleven workloads, with one aggregate bar per application](benchmarks/overview.png)",
            "[Scalable overview](benchmarks/overview.svg)",
            "**Shorter bars are faster.** Solid bars mark the lowest observed value; other apps are faded. Each overview panel has its own zero-based scale: compare apps within a panel. Ranking is descriptive, not an aggregate significance test.",
-           "| Workload | Fixtures / conditions | towavue | IrfanView | MPC-HC | VLC | Photos* |",
+           "| Workload | Fixtures / conditions | towavue | IrfanView | MPC-HC | VLC | Photos |",
            "|---|---:|---:|---:|---:|---:|---:|"]
     for item in items:
         values = [f"{item['values_ms'][app]:.2f}" if app in item["values_ms"] else "—" for app in APPS]
@@ -293,6 +302,12 @@ def report(data, items, groups):
             "Files are warm and windows are normalized to an 800 × 650 client. Prepared profiles, fixture identity checks and owned-window checks are used; warmup/calibration observations are excluded. Measurements are sequential and operation order is randomized within blocks where the protocol permits. A fresh process block can contain several related operations: those operations are not independent samples. The tables preserve successful/attempted operations and block counts.",
             "Visual completion is desktop capture recognizing the expected fixture, including sampling/capture and window normalization overhead. It is not physical display onset. Audio completion detects the expected tone in two consecutive WASAPI loopback packets; it includes buffering and detector confirmation, and is not acoustic onset or sample-accurate timing. No microphone recording is used. Fit/resampling settings do not certify identical filtering or full-source image quality.",
             "The broad refresh uses three measured blocks, the retained direct-open study ten, qualified image startup thirty, and the targeted image-open follow-up thirty new paired blocks. Other qualified navigation/seek counts are listed below. Small cohorts describe speed but give unstable tail estimates. Table p95 values retain their source method (nearest-rank in the broad refresh; linear interpolation in the retained direct-open study). No aggregate p95 or aggregate confidence interval is inferred from these summaries.",
+            "## Photos navigation",
+            "Photos 2026.11080.24002.0 was measured in ten viewer sessions per fixture, plus one excluded warmup session: **880/880 measured operations succeeded** (968 including warmup). No Computer Use or additional automation software was used. Windows UI Automation shows/focuses the filmstrip before timing; native keyboard input performs next, previous, Home and End. Every timed target must match both its encoded desktop identity and window title. The app keeps its installed default profile and natural spare process; these are fresh viewer sessions, not a promise of a new isolated process for every block.",
+            "In this tested URI-activation route, Photos followed filename order rather than the original folders' saved Shell order. The measurement therefore uses byte-identical independent copies named by original Shell position, with their own name-ascending Shell order. This preserves the exact image identities and content sequence used by the historical comparisons. Original images and their Shell settings are unchanged. These are separate cohorts and input routes (Photos native keyboard versus the earlier posted messages/menu commands); no paired significance claim is made against the historical apps.",
+            "The Photos filmstrip is visible, with Fit display in the same 800 × 650 client. UI Automation inspects small-folder membership and the realized prefix of the large folder before timing; setup is followed by one second idle, then 100 ms between observed targets. No folder pre-traversal or UI Automation query is inside the adopted navigation measurements. Next/previous have 80 observations per fixture, and each supported boundary jump has ten; these observations share ten session blocks. The p95 uses nearest rank and remains a noisy tail estimate.",
+            "**1,000-file limitation:** next/previous are measured, but first/last jumps are unavailable for this activation/input route. Calibration displayed intermediate files instead of the requested complete-folder boundary, even after separate preparation experiments. Those calibration observations are excluded, and no intermediate endpoint is presented as a successful jump. Other apps' first/last results remain in the full tables. The overview matches the **18 conditions** shared by all three apps across five fixtures; it does not average Photos over fewer actions than its competitors. This observation does not establish a universal Photos folder-size limit.",
+            "Photos records the shortest observed median for 24 MP JPEG next/previous and the mixed-folder last-file jump. The eleven-workload headline concerns the aggregated values, not a clean sweep of every fixture/action.",
             "## Image-open confidence",
             "The latest six-condition follow-up used thirty new paired blocks per condition: all 540 measured operations succeeded; eighteen warmup operations and calibration are excluded. Earlier exploratory samples are not pooled. Mixed-folder targets in this follow-up are JPEG 1080p, AVIF and EXIF rotation only; they do not reproduce the entire older ten-format session.",
             "The gap is **towavue minus IrfanView**, computed within paired blocks. Its median is not the difference between the marginal medians in the bar charts. Exact order-statistic intervals use a six-comparison Bonferroni correction. Under independent, stable blocks, simultaneous family coverage is at least 95% (the discrete bound is 96.87%). An interval crossing zero is unresolved, not evidence of equivalent speed.",

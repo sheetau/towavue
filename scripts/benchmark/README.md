@@ -5,6 +5,10 @@ generated fixtures. They are separate from the product and its dependencies.
 No Computer Use connection is required. Only fixture processes started by the
 harness are closed or resized; existing application sessions are left alone.
 
+The maintained public comparison is [Media benchmarks](../../docs/BENCHMARKS.md).
+After auditing a measurement, follow the [publication workflow](../../docs/benchmarks/README.md)
+to update its data, full report and the README's eleven-workload overview together.
+
 The original command-launch pilot and the interaction suite below use separate
 corpora, output directories and measurement boundaries. Do not merge their
 latencies into one application ranking.

@@ -2253,7 +2253,7 @@ mod tests {
                 frame(vec![egui::Event::PointerMoved(pos)]);
             }
             let tooltip = frame(vec![]).0;
-            let label = format!("Open folder  {prefix}");
+            let label = format!("Open folder ({prefix})");
             let tooltip = tooltip
                 .shapes
                 .iter()

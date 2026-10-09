@@ -133,6 +133,7 @@ pub struct RecentGrid {
     columns: usize,
     row_height: f32,
     pub visible: Range<usize>,
+    pub hovered: Option<PathBuf>,
 }
 
 impl RecentGrid {
@@ -722,7 +723,11 @@ impl Filmstrip {
                 }
             }
             crate::media_preview::caption(ui, |ui| {
-                ui.add(egui::Label::new(caption).truncate());
+                ui.add(
+                    egui::Label::new(caption)
+                        .truncate()
+                        .show_tooltip_when_elided(false),
+                );
             });
         });
     }
@@ -1272,6 +1277,18 @@ impl Filmstrip {
                         if !deleted && response.middle_clicked() {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
+                        if response.has_focus() {
+                            let text = crate::hover_help::filename(
+                                ui,
+                                display_name(&item.path),
+                                rect.width(),
+                            );
+                            ui.painter().galley(
+                                egui::pos2(rect.left(), rect.bottom() + 4.0),
+                                text,
+                                crate::chrome::MUTED,
+                            );
+                        }
                         response.help_text(item.path.display().to_string());
                     }
                 });
@@ -1344,6 +1361,7 @@ impl Filmstrip {
         actions: &mut Vec<UiAction>,
         policy: PreparationPolicy,
     ) -> RecentGrid {
+        let mut hovered_path = None;
         self.recent_drag.begin_recent(
             ui.ctx(),
             revision,
@@ -1496,6 +1514,13 @@ impl Filmstrip {
                     if !ui.is_rect_visible(rect) {
                         continue;
                     }
+                    if enabled
+                        && response.hovered()
+                        && !egui::Popup::is_any_open(ui.ctx())
+                        && ui.input(|input| input.raw.hovered_files.is_empty())
+                    {
+                        hovered_path = Some(path.clone());
+                    }
                     if wanted.len() < VISIBLE_PREVIEW_LIMIT
                         && let Some(kind) = MediaKind::from_path(path)
                         && !wanted.iter().any(|(existing, _)| existing == path)
@@ -1623,6 +1648,7 @@ impl Filmstrip {
         RecentGrid {
             columns,
             row_height,
+            hovered: hovered_path,
             visible: if ui.clip_rect().is_positive() {
                 let start = ((ui.clip_rect().top() - origin + GAP) / row_height)
                     .floor()
@@ -4257,7 +4283,7 @@ mod tests {
     }
 
     #[test]
-    fn filmstrip_has_no_filename_caption_and_keeps_accessible_names() {
+    fn filmstrip_focused_filename_wraps_and_keeps_accessible_names() {
         let root =
             std::env::temp_dir().join(format!("towavue-filmstrip-title-{}", std::process::id()));
         let names = [
@@ -4292,6 +4318,7 @@ mod tests {
             for size in [egui::vec2(320.0, 240.0), egui::vec2(960.0, 576.0)] {
                 let mut thumbnail_y = None;
                 for (index, name) in names.iter().enumerate() {
+                    strip.focus_current();
                     let mut output = egui::FullOutput::default();
                     for _ in 0..3 {
                         output = context.run_ui(
@@ -4336,10 +4363,21 @@ mod tests {
                             _ => None,
                         })
                         .collect();
+                    assert_eq!(titles.len(), 1, "only the focused card has a filename");
+                    let (clip, title) = titles[0];
+                    assert_eq!(title.galley.text(), *name);
+                    assert!(title.galley.rows.len() <= 4);
                     assert!(
-                        titles.is_empty(),
-                        "filenames remain accessible without a painted caption"
+                        title
+                            .galley
+                            .job
+                            .sections
+                            .iter()
+                            .all(|section| section.format.font_id.size == 12.0)
                     );
+                    assert!((title.pos.x - bounds.x0 as f32).abs() <= 1.0 / density);
+                    assert!(title.pos.y >= bounds.y1 as f32 + 3.0);
+                    assert!(clip.contains(title.pos + title.galley.size()));
                     if let Some(y) = thumbnail_y {
                         assert_eq!(
                             (bounds.y0 + bounds.y1) * 0.5,
@@ -4647,7 +4685,7 @@ mod tests {
                         assert_eq!(
                             text.iter().any(|text| text.contains("fixture.png")),
                             mode == 1,
-                            "only seek retains captions: mode {mode}"
+                            "only seek retains captions without card focus: mode {mode}"
                         );
                         assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
                         assert_eq!(output.pixels_per_point, density);

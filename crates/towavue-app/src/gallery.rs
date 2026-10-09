@@ -22,9 +22,14 @@ pub(super) struct Listing {
     query: String,
     filter: Option<MediaKind>,
     visible_dates: Option<[Option<LocalDate>; 2]>,
+    hovered: Option<PathBuf>,
 }
 
 impl Listing {
+    pub fn status_name(&self) -> Option<String> {
+        self.hovered.as_deref().map(crate::display_name)
+    }
+
     pub fn status_date(&self, language: Language) -> Option<String> {
         self.visible_dates.map(|[first, last]| {
             let format = |date: Option<LocalDate>| {
@@ -66,6 +71,7 @@ impl Listing {
     pub fn invalidate(&mut self) {
         self.source_valid = false;
         self.visible_dates = None;
+        self.hovered = None;
     }
 }
 
@@ -153,6 +159,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             filter: old_filter,
             filter_valid,
             visible_dates,
+            hovered,
             ..
         } = listing;
         if let Some(command) = ui
@@ -227,6 +234,10 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                         if *visible_dates != dates {
                             *visible_dates = dates;
                             // Status is laid out before media input in this frame.
+                            ui.ctx().request_repaint();
+                        }
+                        if *hovered != grid.hovered {
+                            *hovered = grid.hovered.clone();
                             ui.ctx().request_repaint();
                         }
                         months

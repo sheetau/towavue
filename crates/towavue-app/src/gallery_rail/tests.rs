@@ -99,7 +99,10 @@ fn marker(frame: &Frame, color: egui::Color32) -> [egui::Pos2; 2] {
         .shapes
         .iter()
         .find_map(|shape| match &shape.shape {
-            egui::Shape::LineSegment { points, stroke } if stroke.color == color => Some(*points),
+            egui::Shape::Rect(shape) if shape.fill == color && shape.rect.height() == 3.0 => {
+                assert!(shape.corner_radius.nw >= 2);
+                Some([shape.rect.left_center(), shape.rect.right_center()])
+            }
             _ => None,
         })
         .expect("position line")

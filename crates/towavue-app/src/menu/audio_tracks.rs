@@ -1,4 +1,5 @@
 use super::*;
+use crate::hover_help::HoverHelp;
 use towavue_core::AudioTrackSelection;
 
 pub(super) fn submenu(
@@ -80,11 +81,9 @@ pub(super) fn submenu(
                 crate::logo_menu::drag::scroll(ui, egui::Id::new("audio-tracks"), height, |ui| {
                     for (selection, label) in rows {
                         let mut selected = selection == data.audio_selection;
-                        let response = ui
-                            .checkbox(&mut selected, label.clone())
-                            .on_hover_text(label);
+                        let response = ui.checkbox(&mut selected, label.clone()).help_text(label);
                         let response = if selection == AudioTrackSelection::All {
-                            response.on_hover_text(text(ui.ctx(), Text::AudioTrackAllWaveform))
+                            response.help_text(text(ui.ctx(), Text::AudioTrackAllWaveform))
                         } else {
                             response
                         };

@@ -195,13 +195,23 @@ pub(super) fn show(
     );
     let y = egui::lerp(travel.clone(), fraction);
     if let Some(hover) = hover.filter(|_| !dragging) {
-        painter.hline(
-            line_x.clone(),
-            egui::lerp(travel.clone(), hover),
-            (2.0, chrome::MUTED),
+        painter.rect_filled(
+            egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, egui::lerp(travel.clone(), hover)),
+                egui::vec2(line_x.end() - line_x.start(), 3.0),
+            ),
+            2.0,
+            chrome::MUTED,
         );
     }
-    painter.hline(line_x.clone(), y, (2.0, chrome::FOREGROUND));
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(rect.center().x, y),
+            egui::vec2(line_x.end() - line_x.start(), 3.0),
+        ),
+        2.0,
+        chrome::FOREGROUND,
+    );
     if ui.is_enabled()
         && !egui::Popup::is_any_open(ui.ctx())
         && ui.input(|input| input.raw.hovered_files.is_empty())
@@ -260,7 +270,7 @@ fn show_label(ui: &egui::Ui, id: egui::Id, anchor: egui::Pos2, label: String) {
         egui::Order::Tooltip,
         id.with("month-label"),
     ));
-    let frame = egui::Frame::popup(ui.style());
+    let frame = crate::hover_help::frame(ui.style());
     let galley =
         painter.layout_no_wrap(label, egui::FontId::proportional(12.0), chrome::FOREGROUND);
     let size = galley.size() + frame.total_margin().sum();

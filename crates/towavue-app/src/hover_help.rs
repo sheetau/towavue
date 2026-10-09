@@ -1,5 +1,35 @@
 use egui::{Response, Tooltip, Ui, WidgetText};
 
+pub const TEXT_SIZE: f32 = 12.0;
+pub const PADDING: i8 = 4;
+
+pub fn shortcut(label: &str, keys: &str) -> String {
+    if keys.is_empty() {
+        label.to_owned()
+    } else {
+        format!("{label} ({keys})")
+    }
+}
+
+pub fn style(ui: &mut Ui) {
+    ui.style_mut().override_font_id = Some(egui::FontId::proportional(TEXT_SIZE));
+}
+
+pub fn frame(style: &egui::Style) -> egui::Frame {
+    egui::Frame::popup(style).inner_margin(PADDING)
+}
+
+pub fn filename(ui: &Ui, text: String, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::simple(
+        text,
+        egui::FontId::proportional(TEXT_SIZE),
+        ui.visuals().text_color(),
+        width.max(1.0),
+    );
+    job.wrap.max_rows = 4;
+    ui.painter().layout_job(job)
+}
+
 pub trait HoverHelp {
     fn help_text(self, text: impl Into<WidgetText>) -> Self;
     fn disabled_help_text(self, text: impl Into<WidgetText>) -> Self;
@@ -65,6 +95,11 @@ fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
     }
     if Tooltip::should_show_tooltip(response, false) {
         let mut tooltip = Tooltip::for_widget(response);
+        tooltip.popup = tooltip.popup.frame(frame(&response.ctx.global_style()));
+        let content = |ui: &mut Ui| {
+            style(ui);
+            content(ui);
+        };
         if above {
             // A bottom-bar label can be much narrower than its full-path help.
             // Keep the popup above it instead of letting fallback placement cover the source.
@@ -93,6 +128,29 @@ fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn long_filenames_wrap_to_four_rows_and_elide_at_status_text_size() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let _ = context.run_ui(Default::default(), |ui| {
+                for text in ["A long file name ".repeat(50), "長いファイル名".repeat(50)] {
+                    let galley = filename(ui, text, 100.0);
+                    assert_eq!(galley.rows.len(), 4);
+                    assert!(galley.elided);
+                    assert!(galley.size().x <= 100.0 + 1.0 / density);
+                    assert!(
+                        galley
+                            .job
+                            .sections
+                            .iter()
+                            .all(|section| section.format.font_id.size == TEXT_SIZE)
+                    );
+                }
+            });
+        }
+    }
 
     #[test]
     fn explicitly_described_truncated_labels_show_only_one_tooltip() {

@@ -117,14 +117,16 @@ impl ResizeDialog {
             egui::ComboBox::from_label(Text::ResamplingFilter.in_language(display_language))
                 .selected_text(filter_name(self.filter, display_language)),
             |ui| {
+                let mut rows = chrome::Dropdown::new(ui);
                 for filter in [
                     ResampleFilter::Nearest,
                     ResampleFilter::Bilinear,
                     ResampleFilter::Bicubic,
                     ResampleFilter::Lanczos,
                 ] {
-                    if ui
-                        .selectable_value(
+                    if rows
+                        .value(
+                            ui,
                             &mut self.filter,
                             filter,
                             filter_name(filter, display_language),
@@ -134,6 +136,7 @@ impl ResizeDialog {
                         ui.close();
                     }
                 }
+                rows.finish(ui);
             },
         );
         self.reveal_focus(

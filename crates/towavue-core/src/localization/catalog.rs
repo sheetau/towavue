@@ -888,7 +888,7 @@ messages! {
     UpdateRestarting => ("Restarting to install the update…", "更新をインストールするため再起動中…"),
     UpdatePreparing => ("Preparing update. Complete any save prompts in the other windows.", "更新を準備中です。別のウィンドウに保存の確認が表示されている場合は、回答してください。"),
     UpdateCancel => ("Cancel update", "更新をキャンセル"),
-    UpdateCancelHelp => ("Cancel update · Escape", "更新をキャンセル · Escape"),
+    UpdateCancelHelp => ("Cancel update (Escape)", "更新をキャンセル（Escape）"),
     LoadingImages => ("Loading images", "画像を読み込み中"),
     LoadingMedia => ("Loading media", "メディアを読み込み中"),
     OpeningFolder => ("Opening folder", "フォルダーを開いています"),

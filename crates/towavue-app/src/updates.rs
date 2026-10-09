@@ -199,7 +199,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         egui::Label::new(
                             RichText::new(message).size(12.0).color(chrome::FOREGROUND),
                         )
-                        .truncate(),
+                        .truncate()
+                        .show_tooltip_when_elided(false),
                     )
                     .help_text(message);
                 });

@@ -117,10 +117,9 @@ impl CommandPalette {
                                 (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
                             );
                             ui.add(
-                                egui::Label::new(format!(
-                                    "{}  {}",
+                                egui::Label::new(crate::hover_help::shortcut(
                                     definition.title_in(language),
-                                    shortcut
+                                    &shortcut,
                                 ))
                                 .wrap(),
                             );

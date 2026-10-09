@@ -6,7 +6,9 @@ use crate::hover_help::HoverHelp;
 #[cfg(test)]
 mod input_tests;
 
+mod dropdown;
 mod modal;
+pub use dropdown::Dropdown;
 pub use modal::{modal, modal_body, set_modal_bounds};
 
 mod reading_icon;

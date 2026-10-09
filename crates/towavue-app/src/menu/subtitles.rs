@@ -1,4 +1,5 @@
 use super::*;
+use crate::hover_help::HoverHelp;
 use crate::subtitles::{Action, Selection};
 use towavue_core::SubtitleDelay;
 
@@ -98,7 +99,7 @@ pub(super) fn submenu(
                                 &mut data.subtitle_settings.visible,
                                 text(ui.ctx(), Text::CommandToggleSubtitles),
                             )
-                            .on_hover_text(text(ui.ctx(), Text::SubtitleExportHelp));
+                            .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
                         items.push(response.id);
                         if crate::logo_menu::drag::captured(ui.ctx()) {
                             data.subtitle_settings.visible = previous_visible;
@@ -110,7 +111,7 @@ pub(super) fn submenu(
                         for (selection, label) in rows {
                             let response = ui
                                 .radio(data.subtitle_settings.selection == selection, &label)
-                                .on_hover_text(label);
+                                .help_text(label);
                             items.push(response.id);
                             if crate::logo_menu::drag::clicked(&response) {
                                 data.subtitle_action = Some(Action::Select(selection));
@@ -142,7 +143,7 @@ pub(super) fn submenu(
                                     }),
                             )
                             .labelled_by(label.id)
-                            .on_hover_text(text(ui.ctx(), Text::SubtitleDelayHelp));
+                            .help_text(text(ui.ctx(), Text::SubtitleDelayHelp));
                         ui.data_mut(|data| data.insert_temp(delay_key, response.id));
                         items.push(response.id);
                         if response.changed() && delay.is_finite() {

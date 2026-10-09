@@ -141,6 +141,24 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
             );
             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                 egui::Shape::Text(text) if text.galley.text() == expected)));
+            let pointer = egui::pos2(
+                ((first.x0 + first.x1) * 0.5) as f32,
+                ((first.y0 + first.y1) * 0.5) as f32,
+            );
+            frame(&mut app, size, vec![egui::Event::PointerMoved(pointer)]);
+            let hovered = frame(&mut app, size, vec![]);
+            assert_eq!(
+                app.gallery_listing.status_name().as_deref(),
+                Some("tile-000.png")
+            );
+            assert!(hovered.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == format!("{expected} · tile-000.png"))));
+            frame(&mut app, size, vec![egui::Event::PointerGone]);
+            frame(&mut app, size, vec![]);
+            let departed = frame(&mut app, size, vec![]);
+            assert_eq!(app.gallery_listing.status_name(), None);
+            assert!(departed.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == expected)));
             frame(
                 &mut app,
                 size,

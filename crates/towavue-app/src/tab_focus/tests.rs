@@ -1141,14 +1141,27 @@ fn tab_focus_registers_image_video_audio_values_and_path_rows_without_dispatch()
             assert!(app.edits.is_empty() && app.pending_guard.is_none());
             assert_eq!(app.state, PlaybackState::Paused);
             assert_eq!(app.path.as_ref(), Some(&paths[0]));
+            if label == "second.png" {
+                app.close_filmstrip();
+                settle(&mut app);
+                app.tabs.activate(other);
+                settle(&mut app);
+                app.tabs.activate(active);
+                settle(&mut app);
+                assert!(context.memory(|memory| memory.focused()).is_none());
+                assert!(
+                    !context.egui_wants_keyboard_input(),
+                    "closed Filmstrip must not steal media shortcuts on tab return"
+                );
+            }
         }
     }
 }
 
 #[test]
-fn tab_focus_fullscreen_waits_for_hover_and_missing_controls_fall_back() {
+fn tab_focus_fullscreen_waits_for_hover_and_missing_controls_release_focus() {
     let Some(root) = tests::isolated_test_root(
-        "tab_focus::tests::tab_focus_fullscreen_waits_for_hover_and_missing_controls_fall_back",
+        "tab_focus::tests::tab_focus_fullscreen_waits_for_hover_and_missing_controls_release_focus",
     ) else {
         return;
     };
@@ -1206,7 +1219,8 @@ fn tab_focus_fullscreen_waits_for_hover_and_missing_controls_fall_back() {
     app.fullscreen = false;
     app.media_kind = Some(MediaKind::Image);
     let returned = settle(&mut app);
-    assert_eq!(returned.focus, node(&returned, "video.mp4"));
+    assert_ne!(returned.focus, node(&returned, "video.mp4"));
+    assert!(context.memory(|memory| memory.focused()).is_none());
     super::forget(&context, active);
     assert!(!context.data(|data| {
         data.get_temp::<super::State>(super::state_id())

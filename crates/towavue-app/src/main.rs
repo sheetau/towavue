@@ -5605,11 +5605,8 @@ where
                     })
                 })
                 .flatten();
-        let return_to_tab = root.ctx().data_mut(|data| {
-            data.remove_temp::<bool>("tab-focus-fallback".into())
-                .unwrap_or(false)
-        }) || tab_menu_focus
-            .is_some_and(|(target, _)| !self.tabs.tab_ids().any(|tab| tab == target));
+        let return_to_tab =
+            tab_menu_focus.is_some_and(|(target, _)| !self.tabs.tab_ids().any(|tab| tab == target));
         let density = root.ctx().pixels_per_point();
         let native = self
             .native_caption
@@ -6896,7 +6893,10 @@ where
                                 && let Some(date) = self.gallery_listing.status_date(language)
                             {
                                 (
-                                    date.clone(),
+                                    self.gallery_listing.status_name().map_or_else(
+                                        || date.clone(),
+                                        |name| format!("{date} · {name}"),
+                                    ),
                                     chrome::MUTED,
                                     towavue_core::localization::formatted::last_opened(
                                         language, &date,
@@ -6954,11 +6954,11 @@ where
                                 .help_ui_above(|ui| {
                                     ui.set_max_width(ui.spacing().tooltip_width);
                                     if let Some(hint) = &reading_adjustment {
-                                        ui.label(hint.layout(14.0));
+                                        ui.label(hint.layout(hover_help::TEXT_SIZE));
                                     } else if reading_hint {
                                         ui.label(fonts::reading_hint(
                                             &tooltip,
-                                            14.0,
+                                            hover_help::TEXT_SIZE,
                                             chrome::FOREGROUND,
                                         ));
                                     } else {
@@ -7287,7 +7287,11 @@ where
                 format_time(media_time(position))
             };
             media_preview::caption(ui, |ui| {
-                ui.add(egui::Label::new(caption).truncate());
+                ui.add(
+                    egui::Label::new(caption)
+                        .truncate()
+                        .show_tooltip_when_elided(false),
+                );
             });
         });
     }
@@ -11752,11 +11756,7 @@ where
 
     fn command_hint(&self, command: CommandId, title: &str) -> String {
         let keys = self.shortcuts.label(command, self.command_context());
-        if keys.is_empty() {
-            title.to_owned()
-        } else {
-            format!("{title} ({keys})")
-        }
+        hover_help::shortcut(title, &keys)
     }
 
     fn command_context(&self) -> CommandContext {
@@ -11971,6 +11971,9 @@ where
             .take()
             .filter(|(generation, _)| *generation == self.media_generation);
         if let Some(context) = &self.ui_context {
+            if let Some(tab) = self.tabs.active_id() {
+                tab_focus::forget(context, tab);
+            }
             if let Some((_, id)) = origin {
                 context.memory_mut(|memory| memory.request_focus(id));
             } else {

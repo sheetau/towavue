@@ -325,6 +325,7 @@ fn search_field(
     });
     if ui.is_enabled() {
         filter_menu::show(&filter_button, |ui, selected| {
+            let mut rows = chrome::Dropdown::new(ui);
             for (kind, label) in [
                 (None, Text::GalleryAll.in_language(language)),
                 (
@@ -342,13 +343,13 @@ fn search_field(
             ] {
                 let available =
                     kind.is_none() || paths.iter().any(|path| MediaKind::from_path(path) == kind);
-                let row =
-                    ui.add_enabled(available, egui::Button::selectable(*filter == kind, label));
+                let row = rows.row(ui, available, *filter == kind, label);
                 if selected(&row) {
                     *filter = kind;
                     ui.close();
                 }
             }
+            rows.finish(ui);
         });
     }
     let clear = ui
@@ -393,9 +394,9 @@ fn search_field(
                 .stroke(egui::Stroke::NONE)
                 .frame_when_inactive(false),
         )
-        .help_text(format!(
-            "{label}  {}",
-            shortcuts.label(command, Default::default())
+        .help_text(crate::hover_help::shortcut(
+            label,
+            &shortcuts.label(command, Default::default()),
         ));
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
@@ -652,10 +653,12 @@ mod tests {
                     .shapes
                     .iter()
                     .find_map(|shape| match &shape.shape {
-                        egui::Shape::LineSegment { points, stroke }
-                            if stroke.color == chrome::FOREGROUND && points[0].x > 400.0 =>
+                        egui::Shape::Rect(rect)
+                            if rect.fill == chrome::FOREGROUND
+                                && rect.rect.left() > 400.0
+                                && rect.rect.height() == 3.0 =>
                         {
-                            Some(points[0].y)
+                            Some(rect.rect.center().y)
                         }
                         _ => None,
                     })

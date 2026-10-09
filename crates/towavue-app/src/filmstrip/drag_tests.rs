@@ -1617,9 +1617,9 @@ fn gpu_filmstrip_refresh_completions_preserve_displayed_pixels() {
 }
 
 #[test]
-fn filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview() {
+fn filmstrip_highlights_one_target_and_wraps_four_line_names_below_the_preview() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_highlights_one_target_and_centers_two_line_names_above_the_preview",
+        "filmstrip::drag_tests::filmstrip_highlights_one_target_and_wraps_four_line_names_below_the_preview",
     ) else {
         return;
     };
@@ -1755,12 +1755,20 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
         .1,
         &snapshot.items[1].path,
     );
-    assert!(
-        !output.shapes.iter().any(
-            |shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == name)
-        ),
-        "filename stays accessibility-only"
-    );
+    let title = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == name => Some(text),
+            _ => None,
+        })
+        .expect("focused filename");
+    assert_eq!(title.galley.rows.len(), 4);
+    assert!(title.galley.elided);
+    let thumbnail = card(&output, &name);
+    assert!((title.pos.x - thumbnail.left()).abs() <= 1.0 / density);
+    assert!(title.pos.y >= thumbnail.bottom() + 3.0);
+    assert!(title.galley.size().x <= thumbnail.width() + 1.0 / density);
     let third_id = output
         .platform_output
         .accesskit_update

@@ -146,12 +146,14 @@ impl MetadataDialog {
                             MetadataField::ALL[self.selected].label_in(display_language),
                         ),
                         |ui| {
+                            let mut rows = chrome::Dropdown::new(ui);
                             for (index, field) in MetadataField::ALL.into_iter().enumerate() {
                                 if !fields.contains(&field) {
                                     continue;
                                 }
-                                if ui
-                                    .selectable_value(
+                                if rows
+                                    .value(
+                                        ui,
                                         &mut self.selected,
                                         index,
                                         field.label_in(display_language),
@@ -161,6 +163,7 @@ impl MetadataDialog {
                                     ui.close();
                                 }
                             }
+                            rows.finish(ui);
                         },
                     )
                     .response

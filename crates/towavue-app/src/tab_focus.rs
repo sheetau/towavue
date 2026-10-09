@@ -177,26 +177,27 @@ pub(super) fn observe(response: &Response, key: impl std::hash::Hash + std::fmt:
 #[cfg(test)]
 pub(crate) mod tests;
 
-pub(super) fn finish(context: &Context, loading: bool, tab_bar_visible: bool) {
-    let (waiting, fallback) = context.data_mut(|data| {
+pub(super) fn finish(context: &Context, loading: bool, _tab_bar_visible: bool) {
+    let waiting = context.data_mut(|data| {
         let state = data.get_temp_mut_or_default::<State>(state_id());
         if !state.enabled || loading || state.pending.is_none() {
-            return (false, false);
+            return false;
         }
         if state.settled {
             state.pending = None;
-            (false, true)
+            // A disappeared media control must not transfer focus to tab chrome:
+            // that would consume the media's keyboard shortcuts on a later return.
+            if let Some(tab) = state.active {
+                state.saved.remove(&tab);
+            }
+            false
         } else {
             // A newly visible Area first lays out disabled sizing widgets.
             state.settled = true;
-            (true, false)
+            true
         }
     });
     if waiting {
-        context.request_repaint();
-    }
-    if fallback && tab_bar_visible {
-        context.data_mut(|data| data.insert_temp("tab-focus-fallback".into(), true));
         context.request_repaint();
     }
 }

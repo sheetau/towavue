@@ -208,8 +208,7 @@ impl KeyboardSettings {
                                 rect.min + egui::vec2(left, 0.0),
                                 egui::vec2(width, 24.0),
                             );
-                            cell_label(ui, cell.shrink2(egui::vec2(4.0, 0.0)), text)
-                                .help_text(text);
+                            cell_label(ui, cell.shrink2(egui::vec2(4.0, 0.0)), text);
                         }
                         response.widget_info(|| {
                             egui::WidgetInfo::labeled(
@@ -507,7 +506,13 @@ fn cell_label(ui: &mut egui::Ui, rect: egui::Rect, text: &str) -> egui::Response
             .max_rect(rect)
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     )
-    .add(egui::Label::new(text).selectable(false).truncate())
+    .add(
+        egui::Label::new(text)
+            .selectable(false)
+            .truncate()
+            .show_tooltip_when_elided(false),
+    )
+    .help_text(text)
 }
 
 fn keycaps(ui: &mut egui::Ui, sequence: &KeySequence) {

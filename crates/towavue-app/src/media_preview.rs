@@ -70,7 +70,13 @@ pub fn tab_hovered(response: &Response) -> bool {
 }
 
 pub fn caption<R>(ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Frame::NONE.inner_margin(6).show(ui, content).inner
+    egui::Frame::NONE
+        .inner_margin(crate::hover_help::PADDING)
+        .show(ui, |ui| {
+            crate::hover_help::style(ui);
+            content(ui)
+        })
+        .inner
 }
 
 pub fn video(
@@ -593,9 +599,9 @@ mod tests {
                     if rect.rect == card && rect.stroke == border)),
                     "use the same border as ordinary tooltips"
                 );
-                assert!(label.top() >= pixels.bottom() + 5.0);
-                assert!(label.left() >= card.left() + 5.0);
-                assert!(card.bottom() >= label.bottom() + 5.0);
+                assert!((label.top() - pixels.bottom() - 4.0).abs() <= tolerance);
+                assert!(label.left() >= card.left() + 4.0);
+                assert!((card.bottom() - label.bottom() - border.width - 4.0).abs() <= tolerance);
                 let meshes: Vec<_> = output
                     .shapes
                     .iter()

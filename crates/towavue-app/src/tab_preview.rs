@@ -485,7 +485,9 @@ impl TabPreview {
                 if let Some(thumbnail) = retained.and_then(|preview| preview.show_reading(ui)) {
                     let action = folder.and_then(|folder| folder.show(ui, thumbnail));
                     crate::media_preview::caption(ui, |ui| {
-                        ui.add(egui::Label::new(&label).wrap());
+                        let text =
+                            crate::hover_help::filename(ui, label.clone(), ui.available_width());
+                        ui.add(egui::Label::new(text).show_tooltip_when_elided(false));
                     });
                     return action;
                 }
@@ -567,18 +569,24 @@ impl TabPreview {
                             .and_then(|(folder, thumbnail)| folder.show(ui, thumbnail))
                     });
                 crate::media_preview::caption(ui, |ui| {
+                    let mut caption = String::new();
                     if texture.is_some_and(|texture| texture.is_err()) {
-                        ui.label(crate::localization::Text::NoPreview.in_language(language));
+                        caption
+                            .push_str(crate::localization::Text::NoPreview.in_language(language));
+                        caption.push('\n');
                     }
                     if kind == MediaKind::Video {
-                        ui.label(towavue_core::localization::formatted::preview_near(
+                        caption.push_str(&towavue_core::localization::formatted::preview_near(
                             language,
                             &crate::format_time(crate::media_time(
                                 target.expect("video target").position,
                             )),
                         ));
+                        caption.push('\n');
                     }
-                    ui.add(egui::Label::new(&label).wrap());
+                    caption.push_str(&label);
+                    let text = crate::hover_help::filename(ui, caption, ui.available_width());
+                    ui.add(egui::Label::new(text).show_tooltip_when_elided(false));
                 });
                 if matches!(kind, MediaKind::Audio | MediaKind::Video) {
                     let surface = ui.interact(
@@ -1221,9 +1229,13 @@ mod tests {
                                 .shapes
                                 .iter()
                                 .filter_map(|shape| match &shape.shape {
-                                    egui::Shape::Text(text) => Some(text.galley.text()),
+                                    egui::Shape::Text(text) => {
+                                        assert!(text.galley.rows.len() <= 4);
+                                        Some(text.galley.text())
+                                    }
                                     _ => None,
                                 })
+                                .flat_map(str::lines)
                                 .collect();
                             assert!(
                                 !text

@@ -63,7 +63,20 @@ fn node(output: &egui::FullOutput, label: &str) -> Rect {
         .nodes
         .iter()
         .find(|(_, node)| node.label() == Some(label))
-        .unwrap_or_else(|| panic!("node {label}"));
+        .unwrap_or_else(|| {
+            panic!(
+                "node {label}; available: {:?}",
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree")
+                    .nodes
+                    .iter()
+                    .filter_map(|(_, node)| node.label())
+                    .collect::<Vec<_>>()
+            )
+        });
     let bounds = node.bounds().expect("bounds");
     Rect::from_min_max(
         egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
@@ -152,8 +165,235 @@ fn browser_projection_preserves_shell_identity_order_and_caches_between_paints()
     );
 }
 
+fn cached_listing(
+    browser: &mut Browser,
+    path: &Path,
+    folders: Vec<towavue_runtime_windows::BrowserFolder>,
+) {
+    browser.cache.push(Arc::new(FolderListing {
+        path: path.to_owned(),
+        folders,
+        truncated: false,
+        unavailable: false,
+    }));
+}
+
 #[test]
-fn browser_header_matches_gallery_geometry_and_address_selects_all_then_commits_or_cancels() {
+fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    let folder = Path::new("C:/Ancestor/Parent/Current");
+    browser.sync_folder(folder, &context);
+    browser.worker_failed = true;
+    cached_listing(&mut browser, folder, vec![]);
+    let size = egui::vec2(960.0, 600.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    assert!(
+        !output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("Subfolders: Current")),
+        "leaf breadcrumb has no arrow"
+    );
+    let opener = node(&output, "Subfolders: Parent");
+    let current = node(&output, "Current");
+    let address = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
+            _ => None,
+        })
+        .expect("address");
+    click(&context, &mut browser, size, opener.center());
+    for _ in 0..3 {
+        frame(&context, &mut browser, size, vec![]);
+    }
+    cached_listing(
+        &mut browser,
+        folder.parent().expect("parent"),
+        (0..30)
+            .map(|index| towavue_runtime_windows::BrowserFolder {
+                path: folder
+                    .parent()
+                    .expect("parent")
+                    .join(format!("folder{index:02}")),
+                has_children: index == 0,
+            })
+            .collect(),
+    );
+    for _ in 0..5 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let first = node(&output, "folder00");
+    let last = node(&output, "folder29");
+    assert!(
+        last.bottom() - first.top() > 500.0,
+        "loading height must not constrain the menu"
+    );
+    assert!(
+        last.width() < 160.0,
+        "short names produce a compact menu: {last:?}"
+    );
+    let text_x = |label: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == label => Some(text.pos.x),
+                _ => None,
+            })
+            .expect("menu text")
+    };
+    assert!(
+        (text_x("folder00") - text_x("folder01")).abs() < 0.1,
+        "branch and leaf text align left"
+    );
+    output = frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::PointerMoved(current.center())],
+    )
+    .0;
+    let current_node = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Current"))
+        .expect("current");
+    assert!(
+        current_node.1.is_disabled(),
+        "open menu blocks breadcrumb hover and clicks"
+    );
+    assert!(
+        click(&context, &mut browser, size, current.center())
+            .1
+            .is_none()
+    );
+    assert!(!browser.editing);
+    assert!(
+        !egui::Popup::is_any_open(&context),
+        "outside breadcrumb click dismisses the menu"
+    );
+    // The dismissing release is still owned by the popup. Let egui rebuild
+    // enabled hit regions before starting the next independent gesture.
+    for _ in 0..3 {
+        frame(&context, &mut browser, size, vec![]);
+    }
+    click(&context, &mut browser, size, opener.center());
+    frame(&context, &mut browser, size, vec![]);
+    assert!(
+        egui::Popup::is_any_open(&context),
+        "menu reopened before outside click"
+    );
+    assert!(
+        click(
+            &context,
+            &mut browser,
+            size,
+            address.right_center() - egui::vec2(8.0, 0.0)
+        )
+        .1
+        .is_none()
+    );
+    assert!(
+        !browser.editing,
+        "outside click closes the menu without entering path editing"
+    );
+    for _ in 0..3 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let filter = node(&output, localization::text(&context, Text::GalleryFilter));
+    click(&context, &mut browser, size, filter.center());
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let all = node(&output, localization::text(&context, Text::GalleryAll));
+    assert_eq!(
+        context.layer_id_at(all.center()).expect("menu layer").order,
+        egui::Order::Foreground
+    );
+    let dim = output
+        .shapes
+        .iter()
+        .position(|shape| {
+            matches!(&shape.shape,
+        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))
+        })
+        .expect("header dim");
+    let menu_text = output.shapes.iter().position(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.job.text == localization::text(&context, Text::GalleryAll))).expect("menu text");
+    assert!(
+        dim < menu_text,
+        "header dim must paint beneath the filter popup"
+    );
+}
+
+#[test]
+fn browser_elided_ancestors_are_ordered_menu_targets_and_gutters_change_continuously() {
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    let folder = Path::new("C:/very-long-ancestor/another-long-parent/near-parent/Current");
+    browser.sync_folder(folder, &context);
+    cached_listing(&mut browser, folder, vec![]);
+    let size = egui::vec2(480.0, 600.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    click(&context, &mut browser, size, node(&output, "…").center());
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let root = node(&output, "C:");
+    let ancestor = node(&output, "very-long-ancestor");
+    assert!(
+        ancestor.top() >= HEADER_HEIGHT - 8.0 && root.top() >= ancestor.bottom(),
+        "each parent appears below its child, with the root last"
+    );
+    assert_eq!(
+        click(&context, &mut browser, size, ancestor.center()).1,
+        Some(PathBuf::from("C:/very-long-ancestor"))
+    );
+    assert!(!egui::Popup::is_any_open(&context));
+    let mut previous: Option<Rect> = None;
+    for width in 280..1000 {
+        output = frame(
+            &context,
+            &mut browser,
+            egui::vec2(width as f32, 600.0),
+            vec![],
+        )
+        .0;
+        let address = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
+                _ => None,
+            })
+            .expect("address");
+        if let Some(previous) = previous {
+            assert!((address.left() - previous.left()).abs() <= 0.51);
+            assert!((address.width() - previous.width()).abs() <= 1.01);
+        }
+        previous = Some(address);
+    }
+}
+
+#[test]
+fn browser_header_uses_smooth_gallery_gutter_and_address_selects_all_then_commits_or_cancels() {
     for density in [1.0, 1.25, 2.0] {
         for width in [240.0, 480.0, 960.0] {
             let context = context(density);
@@ -171,23 +411,23 @@ fn browser_header_matches_gallery_geometry_and_address_selects_all_then_commits_
                 .shapes
                 .iter()
                 .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == BACKGROUND => Some(rect.rect),
+                    egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
                     _ => None,
                 })
                 .collect();
             assert_eq!(inputs.len(), 2);
             assert!((inputs[0].width() / inputs[1].width() - 2.5).abs() < 0.01);
             assert_eq!(inputs[0].top(), 8.0);
-            let expected_inset =
-                crate::filmstrip::gallery_side_inset(width).min(((width - 284.0) * 0.5).max(8.0));
+            let expected_inset = crate::filmstrip::gallery_minimum_inset(width)
+                .min(((width - 284.0) * 0.5).max(8.0));
             assert!((inputs[0].left() - expected_inset).abs() < 0.01);
             assert!(
                 inputs[1].width() > 2.0 * (chrome::SEARCH_BUTTON_SIZE + 2.0),
                 "compact search retains an editable text region"
             );
             assert!(
-                browser.worker.is_none(),
-                "opening Filmstrip does no filesystem work"
+                browser.worker.is_some(),
+                "opening Filmstrip asynchronously resolves the current folder arrow"
             );
             click(
                 &context,
@@ -245,6 +485,15 @@ fn browser_lazy_cascade_reaches_descendants_without_opening_empty_parent() {
     let size = egui::vec2(1160.0, 600.0);
     let mut output = egui::FullOutput::default();
     for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !browser.cache.iter().any(|listing| listing.path == root) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "initial arrow metadata"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
         output = frame(&context, &mut browser, size, vec![]).0;
     }
     let root_arrow = node(
@@ -417,7 +666,41 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                     let mut browser = Browser::default();
                     browser
                         .sync_folder(Path::new("C:/Users/Viewer/Pictures/Travel 2026"), &context);
-                    for mode in 0..5 {
+                    browser.cache.push(Arc::new(FolderListing {
+                        path: browser.folder.clone(),
+                        folders: vec![towavue_runtime_windows::BrowserFolder {
+                            path: browser.folder.join("Mountains"),
+                            has_children: false,
+                        }],
+                        truncated: false,
+                        unavailable: false,
+                    }));
+                    for mode in 0..8 {
+                        if mode == 5 {
+                            browser.cache.clear();
+                            let folder = browser.folder.clone();
+                            cached_listing(
+                                &mut browser,
+                                &folder,
+                                (0..30)
+                                    .map(|index| towavue_runtime_windows::BrowserFolder {
+                                        path: folder.join(format!("Folder {index:02}")),
+                                        has_children: index == 0,
+                                    })
+                                    .collect(),
+                            );
+                        } else if mode == 6 {
+                            browser.sync_folder(Path::new("C:/very-long-ancestor-with-an-extra-long-name/another-long-parent-with-an-extra-long-name/near-parent/Current"), &context);
+                            let folder = browser.folder.clone();
+                            cached_listing(&mut browser, &folder, vec![]);
+                        } else if mode == 7 {
+                            browser.sync_folder(
+                                Path::new("C:/Users/Viewer/Pictures/Travel 2026"),
+                                &context,
+                            );
+                            let folder = browser.folder.clone();
+                            cached_listing(&mut browser, &folder, vec![]);
+                        }
                         browser.editing = mode == 1;
                         browser.address = browser.folder.display().to_string();
                         browser.select_address = mode == 1;
@@ -430,8 +713,8 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         let initial =
                             frame(&context, &mut browser, size, vec![egui::Event::PointerGone]).0;
                         let hover = match mode {
-                            3 => Some(node(&initial, "Travel 2026").center() / density),
-                            4 => Some(node(&initial, "Subfolders: Travel 2026").center() / density),
+                            3 => Some(node(&initial, "Travel 2026").center()),
+                            4 => Some(node(&initial, "Subfolders: Travel 2026").center()),
                             _ => None,
                         };
                         renderer
@@ -440,6 +723,39 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         renderer
                             .render_ui(&context, initial)
                             .expect("initial UI textures");
+                        if mode >= 5 {
+                            let (output, _) = frame(&context, &mut browser, size, vec![]);
+                            let label = match mode {
+                                5 => "Subfolders: Travel 2026",
+                                6 => "…",
+                                _ => localization::text(&context, Text::GalleryFilter),
+                            };
+                            // AccessKit bounds and injected events both use
+                            // logical points; only the render target uses pixels.
+                            let pos = node(&output, label).center();
+                            renderer
+                                .render_ui(&context, output)
+                                .expect("menu anchor textures");
+                            // The filter opens on press, while breadcrumbs open
+                            // on release. Upload atlas deltas from both frames.
+                            for pressed in [true, false] {
+                                let (output, _) = frame(
+                                    &context,
+                                    &mut browser,
+                                    size,
+                                    vec![
+                                        egui::Event::PointerMoved(pos),
+                                        egui::Event::PointerButton {
+                                            pos,
+                                            button: egui::PointerButton::Primary,
+                                            pressed,
+                                            modifiers: egui::Modifiers::NONE,
+                                        },
+                                    ],
+                                );
+                                renderer.render_ui(&context, output).expect("menu textures");
+                            }
+                        }
                         for pass in 0..5 {
                             let output = frame(
                                 &context,
@@ -453,6 +769,12 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             renderer.clear([0.18, 0.25, 0.32, 1.0]).expect("background");
                             renderer.render_ui(&context, output).expect("UI");
                             if pass == 4 {
+                                if mode >= 5 {
+                                    assert!(
+                                        egui::Popup::is_any_open(&context),
+                                        "menu {mode} at density {density}/{width}"
+                                    );
+                                }
                                 let pixels =
                                     renderer.verification_surface_rgba().expect("readback");
                                 assert_eq!(pixels.len(), (pixels_w * pixels_h * 4) as usize);
@@ -535,6 +857,10 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
     for _ in 0..4 {
         output = draw(&mut app, vec![]);
     }
+    assert!(
+        (node(&output, "z10.bmp").center().y - size.y * 0.5).abs() < 1.0,
+        "header must not move the strip below the media center"
+    );
     let search = node(
         &output,
         &format!("Search {}", folder_navigation::folder_name(&root)),

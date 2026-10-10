@@ -69,13 +69,17 @@ pub(crate) const GALLERY_GAP: f32 = 32.0;
 const GALLERY_DIAMETER: f32 = 144.0;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
-    let minimum = (GALLERY_GAP * 2.0).min(((width - GALLERY_DIAMETER) / 2.0).max(8.0));
+    let minimum = gallery_minimum_inset(width);
     let available = (width - 2.0 * minimum).max(1.0);
     let columns = ((available + GALLERY_GAP) / (GALLERY_DIAMETER + GALLERY_GAP))
         .floor()
         .max(1.0);
     let grid = columns * GALLERY_DIAMETER.min(available) + (columns - 1.0) * GALLERY_GAP;
     (width - grid) / 2.0
+}
+
+pub(crate) fn gallery_minimum_inset(width: f32) -> f32 {
+    (GALLERY_GAP * 2.0).min(((width - GALLERY_DIAMETER) / 2.0).max(8.0))
 }
 
 fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {
@@ -774,6 +778,7 @@ impl Filmstrip {
         });
     }
 
+    #[cfg(test)]
     pub fn show(
         &mut self,
         context: &Context,
@@ -782,6 +787,22 @@ impl Filmstrip {
         current: Option<&Path>,
         enabled: bool,
         actions: &mut Vec<UiAction>,
+    ) {
+        self.show_with_header(
+            context, media_rect, snapshot, current, enabled, actions, 0.0,
+        );
+    }
+
+    #[expect(clippy::too_many_arguments)]
+    pub fn show_with_header(
+        &mut self,
+        context: &Context,
+        media_rect: Rect,
+        snapshot: Option<&FolderSnapshot>,
+        current: Option<&Path>,
+        enabled: bool,
+        actions: &mut Vec<UiAction>,
+        header_height: f32,
     ) {
         let language = localization::language(context);
         let screen = media_rect.intersect(context.content_rect());
@@ -1109,7 +1130,7 @@ impl Filmstrip {
                 ui.set_max_size(screen.size());
                 let Some(snapshot) = snapshot else {
                     ui.painter().text(
-                        screen.center(),
+                        screen.center() - egui::vec2(0.0, header_height * 0.5),
                         Align2::CENTER_CENTER,
                         localization::text(ui.ctx(), Text::LoadingFolderOrderEllipsis),
                         FontId::proportional(14.0),
@@ -1120,7 +1141,7 @@ impl Filmstrip {
                 if snapshot.items.is_empty() {
                     self.card_paths.clear();
                     ui.painter().text(
-                        screen.center(),
+                        screen.center() - egui::vec2(0.0, header_height * 0.5),
                         Align2::CENTER_CENTER,
                         localization::text(context, Text::NoMatchingFiles),
                         FontId::proportional(14.0),
@@ -1224,7 +1245,7 @@ impl Filmstrip {
                         / row_height)
                         .floor()
                         .clamp(1.0, 4.0) as usize;
-                    let center_y = (origin.y + viewport.height() * 0.5).min(
+                    let center_y = (origin.y + viewport.height() * 0.5 - header_height * 0.5).min(
                         ui.clip_rect().bottom()
                             - layout::DIAMETER * 0.5
                             - indicator::GAP

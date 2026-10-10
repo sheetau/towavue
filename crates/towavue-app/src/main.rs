@@ -11994,13 +11994,14 @@ where
         if changed {
             self.filmstrip.filter_changed();
         }
-        self.filmstrip.show(
+        self.filmstrip.show_with_header(
             context,
             body,
             projected.as_deref(),
             self.path.as_deref(),
             !self.palette_open,
             actions,
+            body.top() - rect.top(),
         );
     }
 

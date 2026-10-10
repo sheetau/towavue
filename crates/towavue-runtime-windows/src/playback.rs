@@ -1508,6 +1508,85 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    #[test]
+    #[ignore = "requires an explicit read-only audio reference, D3D11 and WASAPI"]
+    fn native_reference_audio_seeks_playing_and_paused_without_artwork_failures() {
+        let path = PathBuf::from(
+            std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("reference source"),
+        );
+        let device = GraphicsDevice::hardware_for_test().expect("windowless D3D11");
+        for paused in [true, false] {
+            let (sender, events) = mpsc::channel();
+            let mut session = PlaybackSession::open_with_pause(
+                &path,
+                device.clone(),
+                0.0,
+                1.0,
+                PlaybackRange::default(),
+                paused,
+                move |event| {
+                    let _ = sender.send(event);
+                },
+            )
+            .expect("muted reference session");
+            for milliseconds in [30_000, 10_000, 0] {
+                let target = MediaTime::from_nanoseconds(milliseconds * 1_000_000);
+                session.set_paused(paused).expect("transport state");
+                session.seek(target).expect("seek");
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut resumed = !paused;
+                loop {
+                    for event in events
+                        .try_iter()
+                        .filter(|event| session.accepts_event(event))
+                    {
+                        match event {
+                            PlaybackEvent::Failed(_, failure)
+                            | PlaybackEvent::VideoFailed(_, failure) => {
+                                panic!("reference seek failed: {failure:?}")
+                            }
+                            PlaybackEvent::DeviceRemoved(_, failure) => {
+                                panic!("reference device removed: {failure}")
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(AudioOutputEvent::Failed(failure)) = session.try_audio_event() {
+                        panic!("reference output failed: {failure:?}");
+                    }
+                    let video_finished =
+                        session.completion.0.load(Ordering::Acquire) & DecodeCompletion::VIDEO != 0;
+                    if video_finished && !resumed {
+                        assert_eq!(
+                            session.audio_position(),
+                            Some(target),
+                            "paused seek stays at target"
+                        );
+                        session.set_paused(false).expect("resume muted transport");
+                        resumed = true;
+                    }
+                    if video_finished
+                        && session.audio_position().is_some_and(|position| {
+                            position > target.saturating_add(Duration::from_millis(50))
+                        })
+                    {
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "PCM playback and video worker retirement"
+                    );
+                    thread::sleep(Duration::from_millis(5));
+                }
+                assert!(session.has_audio());
+                assert!(
+                    session.pending_video_time().is_none(),
+                    "album art never enters video queue"
+                );
+            }
+        }
+    }
+
     fn fixture() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/generated/m1/h264-aac.mp4")
     }

@@ -277,8 +277,15 @@ impl Preview {
                     .show(ui, |ui| {
                         ui.set_width(width);
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        ui.with_layout(egui::Layout::top_down(egui::Align::Center), content)
-                            .inner
+                        ui.with_layout(
+                            egui::Layout::top_down(if self.seek.is_some() {
+                                egui::Align::Center
+                            } else {
+                                egui::Align::Min
+                            }),
+                            content,
+                        )
+                        .inner
                     })
                     .inner
             });
@@ -597,7 +604,17 @@ mod tests {
                     "use the same border as ordinary tooltips"
                 );
                 assert!((label.top() - pixels.bottom() - 4.0).abs() <= tolerance);
-                assert!(label.left() >= card.left() + 4.0);
+                if seek {
+                    assert!(
+                        (label.center().x - pixels.center().x).abs() <= tolerance,
+                        "seek caption remains centered"
+                    );
+                } else {
+                    assert!(
+                        (label.left() - pixels.left() - 4.0).abs() <= tolerance,
+                        "tab caption starts at left padding"
+                    );
+                }
                 assert!((card.bottom() - label.bottom() - border.width - 4.0).abs() <= tolerance);
                 let meshes: Vec<_> = output
                     .shapes

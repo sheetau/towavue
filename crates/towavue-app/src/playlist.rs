@@ -243,6 +243,14 @@ impl Playlist {
                     scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
+            let font = egui::FontId::proportional(14.0);
+            let measure = |text: String| ui.painter().layout_no_wrap(text, font.clone(), egui::Color32::WHITE).size().x;
+            let number_width = measure(format!("{}.", items.len()));
+            let duration_width = self.durations.values().flatten()
+                .max()
+                .map(|duration| measure(crate::format_time(crate::media_time(*duration))))
+                .unwrap_or(0.0)
+                .max(measure("00:00".into()));
             let output =
                 scroll.show_rows_padded_styled(ui, 32.0, items.len(), [8.0, 8.0], |ui, rows| {
                     for index in rows {
@@ -250,7 +258,8 @@ impl Playlist {
                         self.visible.push(item.path.clone());
                         let selected = current == Some(item.path.as_path());
                         let name = crate::display_name(&item.path);
-                        let text = RichText::new(format!("{}. {name}", index + 1)).size(14.0);
+                        let text = RichText::new(&name).size(14.0);
+                        let number = RichText::new(format!("{}.", index + 1)).size(14.0);
                         let duration = self
                             .durations
                             .get(&item.path)
@@ -286,18 +295,26 @@ impl Playlist {
                                             f32::INFINITY, egui::TextStyle::Button,
                                         );
                                         let padding = ui.spacing().button_padding.x;
+                                        let gap = ui.spacing().item_spacing.x;
+                                        let number = egui::WidgetText::from(number).into_galley(
+                                            ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button,
+                                        );
                                         let text = egui::WidgetText::from(text).into_galley(
                                             ui, Some(egui::TextWrapMode::Truncate),
                                             (response.rect.width() - padding * 2.0
-                                                - duration.size().x - ui.spacing().item_spacing.x).max(0.0),
+                                                - duration_width - number_width - gap * 2.0).max(0.0),
                                             egui::TextStyle::Button,
                                         );
-                                        // Optical centering: raise both captions by one physical pixel.
+                                        // Optical centering: raise all columns by one physical pixel.
                                         let y = response.rect.center().y - 1.0 / ui.ctx().pixels_per_point();
                                         let painter = ui.painter();
                                         painter.galley(
-                                            egui::pos2(response.rect.left() + padding, y - text.size().y * 0.5),
+                                            egui::pos2(response.rect.left() + padding + number_width + gap, y - text.size().y * 0.5),
                                             text, color,
+                                        );
+                                        painter.galley(
+                                            egui::pos2(response.rect.left() + padding + number_width - number.size().x, y - number.size().y * 0.5),
+                                            number, color,
                                         );
                                         painter.galley(
                                             egui::pos2(response.rect.right() - padding - duration.size().x, y - duration.size().y * 0.5),
@@ -728,6 +745,70 @@ mod tests {
     }
 
     #[test]
+    fn number_name_and_duration_columns_align_across_digit_counts() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
+            context.set_pixels_per_point(density);
+            let snapshot = snapshot(24);
+            let mut playlist = Playlist::default();
+            let mut output = egui::FullOutput::default();
+            for _ in 0..3 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(420.0, 480.0))),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        playlist.show(ui, Some(&snapshot), None, true);
+                    },
+                );
+                for item in &snapshot.items {
+                    playlist
+                        .durations
+                        .insert(item.path.clone(), Some(Duration::from_secs(123)));
+                }
+            }
+            let painted: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    Shape::Text(text) => Some(text),
+                    _ => None,
+                })
+                .collect();
+            let numbers: Vec<_> = painted
+                .iter()
+                .filter(|text| text.galley.text().ends_with('.'))
+                .collect();
+            let names: Vec<_> = painted
+                .iter()
+                .filter(|text| text.galley.text().ends_with(".wav"))
+                .collect();
+            let durations: Vec<_> = painted
+                .iter()
+                .filter(|text| text.galley.text() == "02:03")
+                .collect();
+            assert!(numbers.iter().any(|text| text.galley.text() == "10."));
+            assert_eq!(numbers.len(), names.len());
+            assert_eq!(numbers.len(), durations.len());
+            let right = numbers[0].pos.x + numbers[0].galley.size().x;
+            for ((number, name), duration) in numbers.iter().zip(names).zip(&durations) {
+                assert!((number.pos.x + number.galley.size().x - right).abs() <= 1.0 / density);
+                assert_eq!(name.pos.x, right + 8.0);
+                assert!(
+                    (duration.pos.x + duration.galley.size().x
+                        - durations[0].pos.x
+                        - durations[0].galley.size().x)
+                        .abs()
+                        <= 1.0 / density
+                );
+                assert!(name.pos.x + name.galley.size().x < duration.pos.x);
+            }
+        }
+    }
+
+    #[test]
     fn keyboard_focus_reaches_virtualized_rows_without_selecting_them() {
         let context = egui::Context::default();
         context.enable_accesskit();
@@ -1092,7 +1173,7 @@ mod tests {
                             .into_iter()
                             .filter(|text| {
                                 row.contains(text.pos)
-                                    && (text.galley.text() == label
+                                    && (text.galley.text() == format!("track-{index}.wav")
                                         || text.galley.text() == "02:03")
                             })
                             .collect();
@@ -1177,15 +1258,15 @@ mod tests {
             assert!(chosen.is_none());
             let texts = texts(&output);
             assert!(texts.len() < 12, "only visible rows should be laid out");
-            assert_eq!(texts[0].galley.job.text, "1. z-first.wav");
-            assert_eq!(texts[1].galley.job.text, "2. a-current.wav");
+            assert_eq!(texts[0].galley.job.text, "z-first.wav");
+            assert_eq!(texts[1].galley.job.text, "a-current.wav");
             assert_eq!(texts[1].pos.y - texts[0].pos.y, 32.0);
             assert_eq!(texts[0].fallback_color, crate::chrome::MUTED);
             assert_eq!(texts[1].fallback_color, crate::chrome::FOREGROUND);
             assert_eq!(texts[2].galley.rows.len(), 1);
             assert!(texts[2].galley.elided);
             for text in &texts {
-                assert!(text.pos.x < 30.0, "left aligned");
+                assert_eq!(text.pos.x, texts[0].pos.x, "name column is left aligned");
                 assert!(text.pos.x + text.galley.size().x <= width - 8.0);
             }
             let first_row = output
@@ -1285,11 +1366,14 @@ mod tests {
                 .galley
                 .job
                 .text
+                .strip_prefix("track-")
+                .expect("track name")
                 .split('.')
                 .next()
                 .expect("row number prefix")
-                .parse()
-                .expect("numeric row prefix");
+                .parse::<usize>()
+                .expect("numeric row prefix")
+                + 1;
             assert!(number > 40, "scroll reaches later audio rows");
             let pos = egui::pos2(width - 32.0, row.pos.y + 7.0);
             frame(vec![Event::PointerMoved(pos)]);
@@ -1483,12 +1567,14 @@ mod tests {
                 .galley
                 .job
                 .text
+                .strip_prefix("track-")
+                .expect("track name")
                 .split('.')
                 .next()
                 .expect("row number")
                 .parse()
                 .expect("number");
-            (index - 1) as f32 * 32.0 + baseline - row.pos.y
+            index as f32 * 32.0 + baseline - row.pos.y
         };
         let inside = egui::pos2(300.0, 80.0);
         let outside = egui::pos2(300.0, 260.0);
@@ -1632,7 +1718,7 @@ mod tests {
         assert!(
             texts(&before)
                 .iter()
-                .any(|text| text.galley.job.text == "41. track-40.wav")
+                .any(|text| text.galley.job.text == "track-40.wav")
         );
         for _ in 0..3 {
             frame(&mut second);
@@ -1643,7 +1729,7 @@ mod tests {
         assert!(
             texts(&after)
                 .iter()
-                .any(|text| text.galley.job.text == "41. track-40.wav")
+                .any(|text| text.galley.job.text == "track-40.wav")
         );
         second.scroll_offset = 2560.0;
         frame(&mut second);
@@ -1658,8 +1744,17 @@ mod tests {
     fn texts(output: &egui::FullOutput) -> Vec<&egui::epaint::TextShape> {
         fn visit<'a>(shape: &'a Shape, result: &mut Vec<&'a egui::epaint::TextShape>) {
             match shape {
-                // These existing navigation assertions inspect names, not duration placeholders.
-                Shape::Text(text) if text.galley.text() != "—" => result.push(text),
+                // Navigation assertions inspect names and known durations, not number cells.
+                Shape::Text(text)
+                    if text.galley.text() != "—"
+                        && !text
+                            .galley
+                            .text()
+                            .strip_suffix('.')
+                            .is_some_and(|number| number.parse::<usize>().is_ok()) =>
+                {
+                    result.push(text)
+                }
                 Shape::Vec(shapes) => shapes.iter().for_each(|shape| visit(shape, result)),
                 _ => {}
             }

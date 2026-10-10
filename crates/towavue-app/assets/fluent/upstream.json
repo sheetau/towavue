@@ -10,11 +10,13 @@
     "RepeatOne": "assets/Arrow Repeat 1/SVG/ic_fluent_arrow_repeat_1_16_regular.svg",
     "Shuffle": "assets/Arrow Shuffle/SVG/ic_fluent_arrow_shuffle_16_regular.svg",
     "Image": "assets/Image/SVG/ic_fluent_image_16_regular.svg",
-    "Video": "assets/Video/SVG/ic_fluent_video_16_regular.svg",
+    "Video": "assets/Filmstrip Play/SVG/ic_fluent_filmstrip_play_16_regular.svg",
     "Audio": "assets/Music Note 2/SVG/ic_fluent_music_note_2_16_regular.svg",
     "Move": "assets/Arrow Right/SVG/ic_fluent_arrow_right_16_regular.svg",
     "New": "assets/Window New/SVG/ic_fluent_window_new_16_regular.svg",
-    "Forbidden": "assets/Prohibited/SVG/ic_fluent_prohibited_16_regular.svg"
+    "Forbidden": "assets/Prohibited/SVG/ic_fluent_prohibited_16_regular.svg",
+    "RepeatOff": "assets/Arrow Repeat All Off/SVG/ic_fluent_arrow_repeat_all_off_16_regular.svg",
+    "ShuffleOff": "assets/Arrow Shuffle Off/SVG/ic_fluent_arrow_shuffle_off_16_regular.svg"
   },
   "sha256": {
     "ic_fluent_play_16_filled.svg": "8e605c988e57d87d25d95bcd4653fa992d157ea43516c3726510c33c8790dfc9",
@@ -25,12 +27,14 @@
     "ic_fluent_arrow_repeat_1_16_regular.svg": "a8315ba619770667cb0d4b54bc4794a18ce72136609ab60fb87fc5e6c243de5e",
     "ic_fluent_arrow_shuffle_16_regular.svg": "9caacd414ec542b0678f492c62aa6dcfc80c4dd9b2e4c3b03e7e1e07ac23f102",
     "ic_fluent_image_16_regular.svg": "8760446baa6e8f0108f59067728309f783d02138ed63c78596b402c328a52866",
-    "ic_fluent_video_16_regular.svg": "62d71fb1970d50d880231d9f77bfb06c1b9a634bb119a96c27b7228c8c6a76b4",
     "ic_fluent_music_note_2_16_regular.svg": "44373acbc4df85b8e5a5c0790b02353b6829262d7a38423e17df32b1862abc47",
     "ic_fluent_arrow_right_16_regular.svg": "742472cb8601bb1f555394011604c5494ea5601760901bf6d61c17728bd784f2",
     "ic_fluent_window_new_16_regular.svg": "2c814c53ee22ed422b61b80f4d87a90b4fbb33193ec43a29829ba3fec3d1c528",
     "ic_fluent_prohibited_16_regular.svg": "7546603ae6dffe15043dc787033a6200cb9b87f50ca03acfcf15dc5724d61dbc",
     "LICENSE": "69bc45dc42b9acb96a69823adbc6ae538374e3c0bde169b855b32c48eaaef52f",
-    "NOTICE": "2fb367a84df52c8b6f8401119708014b327f595554d41712d7407151c9ce73ef"
+    "NOTICE": "2fb367a84df52c8b6f8401119708014b327f595554d41712d7407151c9ce73ef",
+    "ic_fluent_filmstrip_play_16_regular.svg": "44669f4654d6088e56e0aa227ad4ca9ae5facae77da0600f2642488d02afebc2",
+    "ic_fluent_arrow_repeat_all_off_16_regular.svg": "ae7a12e53e8d8e9bc5f3fa0439b306cc41cd3eb9646fc5dc8f64d00180499da9",
+    "ic_fluent_arrow_shuffle_off_16_regular.svg": "2a0d596f17f2455075a3437df5eef39f04933131276ed0a9fb36ffd200be0633"
   }
 }

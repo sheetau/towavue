@@ -82,6 +82,17 @@ For verified video probe proofs used by audio feeds, run
 changed-source invalidation, metadata/signature bounds and ordinary fallback.
 These changes require the full workspace suite and an ordinary Release build.
 
+For attached album artwork, run runtime
+`decode::playback_audio_input_tests::attached_album_art_does_not_become_a_playback_seek_target`.
+It generates MP3/M4A fixtures and compares fresh/reused audio after forward,
+backward and zero seeks while excluding artwork from playback video.
+The ignored `reference_audio_and_video_seek` and
+`native_reference_audio_seeks_playing_and_paused_without_artwork_failures`
+controls require `TOWAVUE_SEEK_REFERENCE_SOURCE` to name an explicitly authorized,
+read-only audio file longer than 100 seconds. Run them serially with `--ignored --nocapture --test-threads=1`;
+the latter uses windowless D3D11 and muted WASAPI to verify paused/playing seeks
+and resumed PCM progress. These are correctness checks, not latency measurements.
+
 The optional native preroll source patch and its exact hash manifest are in
 [scripts/ffmpeg-preroll](../scripts/ffmpeg-preroll/README.md). Stock FFmpeg must
 continue to work. Run the ignored

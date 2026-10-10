@@ -114,15 +114,15 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let (icon, label) = match repeat {
             RepeatMode::Off => (
                 chrome::AudioIcon::Repeat,
-                localization::Text::PlaybackRepeatOff.in_language(display_language),
+                localization::Text::PlaybackRepeatAll.in_language(display_language),
             ),
             RepeatMode::All => (
                 chrome::AudioIcon::Repeat,
-                localization::Text::PlaybackRepeatAll.in_language(display_language),
+                localization::Text::PlaybackRepeatOne.in_language(display_language),
             ),
             RepeatMode::One => (
                 chrome::AudioIcon::RepeatOne,
-                localization::Text::PlaybackRepeatOne.in_language(display_language),
+                localization::Text::PlaybackRepeatOff.in_language(display_language),
             ),
         };
         if chrome::audio_button(
@@ -142,9 +142,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             &self.command_hint(
                 CommandId::ToggleAudioShuffle,
                 if shuffled {
-                    localization::Text::ShuffleOn.in_language(display_language)
-                } else {
                     localization::Text::ShuffleOff.in_language(display_language)
+                } else {
+                    localization::Text::ShuffleOn.in_language(display_language)
                 },
             ),
         )
@@ -699,8 +699,8 @@ mod tests {
                 (output, actions)
             };
             for (label, command) in [
-                ("Repeat off", CommandId::CycleAudioRepeat),
-                ("Shuffle off", CommandId::ToggleAudioShuffle),
+                ("Repeat all", CommandId::CycleAudioRepeat),
+                ("Shuffle on", CommandId::ToggleAudioShuffle),
             ] {
                 frame(&mut app, vec![]);
                 let output = frame(&mut app, vec![]).0;
@@ -729,7 +729,7 @@ mod tests {
                 assert!((play.y1 - 296.0).abs() < 0.1);
                 assert!((play.width() - play.height()).abs() < 0.1);
                 assert!((bounds.width() - bounds.height()).abs() < 0.1);
-                let expected_x = if label == "Repeat off" {
+                let expected_x = if label == "Repeat all" {
                     play.x1 + 5.0
                 } else {
                     play.x1 + 30.0
@@ -797,7 +797,7 @@ mod tests {
             context.global_style_mut(chrome::style);
             for density in [1.0, 1.25, 2.0] {
                 context.set_pixels_per_point(density);
-                for (label, repeated) in [("Video repeat off", true), ("Video repeat on", false)] {
+                for (label, repeated) in [("Video repeat on", true), ("Video repeat off", false)] {
                     frame(&mut app, vec![]);
                     let output = frame(&mut app, vec![]).0;
                     let update = output.platform_output.accesskit_update.expect("video UIA");

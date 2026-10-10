@@ -57,7 +57,7 @@ impl CommandPalette {
             .flatten()
             .map(Choice::Command);
         let context = ui.ctx().clone();
-        reserve_scroll_bar(ui);
+        overlay_scroll_bar(ui);
         let output = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))

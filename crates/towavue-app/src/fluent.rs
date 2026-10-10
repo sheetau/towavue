@@ -10,8 +10,10 @@ pub(crate) enum Kind {
     Previous,
     Next,
     Repeat,
+    RepeatOff,
     RepeatOne,
     Shuffle,
+    ShuffleOff,
     Image,
     Video,
     Audio,
@@ -45,7 +47,7 @@ pub(crate) fn fill(image: &mut Pixmap, kind: Kind, paint: &Paint<'_>, transform:
 pub(crate) fn paint(ui: &Ui, rect: Rect, kind: Kind, color: Color32) {
     let density = ui.ctx().pixels_per_point();
     let size = (16.0 * density).round().clamp(1.0, 256.0) as u32;
-    // Thirteen bounded slots per context, replaced on DPI changes; tab/button count does not
+    // Fifteen bounded slots per context, replaced on DPI changes; tab/button count does not
     // grow the cache. Hover/selection tint never creates another texture.
     let id = egui::Id::new(("fluent-icon", kind));
     let cached = ui
@@ -90,8 +92,10 @@ mod tests {
             Kind::Previous,
             Kind::Next,
             Kind::Repeat,
+            Kind::RepeatOff,
             Kind::RepeatOne,
             Kind::Shuffle,
+            Kind::ShuffleOff,
             Kind::Image,
             Kind::Video,
             Kind::Audio,

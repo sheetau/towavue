@@ -1768,7 +1768,9 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     let thumbnail = card(&output, &name);
     assert!((title.pos.x - thumbnail.center().x).abs() <= 1.0 / density);
     assert!(
-        (title.pos.y - thumbnail.center().y - layout::DIAMETER * 0.5 - 12.0).abs() <= 1.0 / density
+        (title.pos.y - thumbnail.center().y - layout::size(egui::vec2(3.0, 2.0)).y * 0.5 - 12.0)
+            .abs()
+            <= 1.0 / density
     );
     assert_eq!(title.galley.job.halign, egui::Align::Center);
     assert_eq!(title.galley.job.wrap.max_width, layout::DIAMETER);

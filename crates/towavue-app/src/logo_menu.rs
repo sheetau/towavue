@@ -253,7 +253,9 @@ pub(super) fn show_with_recent(
         None
     };
     context.data_mut(|data| data.insert_temp(state_id(), state.clone()));
-    let mut popup_ui = egui::Popup::menu(&response).open_memory(set_open);
+    let mut popup_ui = egui::Popup::menu(&response)
+        .style(chrome::menu_style)
+        .open_memory(set_open);
     if state.drag.is_some() || state.release == Some(frame) {
         // The opener owns this release; keep the chosen menu available for a later click.
         let config = egui::containers::menu::MenuConfig::new()

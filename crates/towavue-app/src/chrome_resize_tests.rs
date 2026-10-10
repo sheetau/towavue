@@ -55,13 +55,19 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
                 if let egui::Shape::Text(text) = &shape.shape {
                     let name = text.galley.text();
                     if name == "track.wav"
-                        || name == "1. track.wav"
                         || name.ends_with("\\track.wav")
                         || name == "00:00:00:000 / 00:03:00:000"
                         || name == "00:00:00:000"
                         || name == "50%"
                     {
-                        result.insert(name.to_owned(), text.pos * density);
+                        // Tab and playlist now paint the same filename, with
+                        // numbering in its own column. Retain both origins.
+                        let key = if result.contains_key(name) {
+                            format!("second:{name}")
+                        } else {
+                            name.to_owned()
+                        };
+                        result.insert(key, text.pos * density);
                     }
                 }
             }

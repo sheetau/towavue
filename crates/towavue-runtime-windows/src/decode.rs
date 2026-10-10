@@ -1251,7 +1251,7 @@ impl ParallelInput {
         }
         let input = &mut self.input;
         let video_config = (stream != Some(DecodeStream::Audio))
-            .then(|| best_stream_config(input, Type::Video))
+            .then(|| playback_video_stream(input).map(stream_config))
             .flatten();
         allow_reuse &= video_config
             .as_ref()
@@ -2208,7 +2208,7 @@ fn seek_input_with_audio_track(
     }
     if video
         && input.format().name() != "mpegts"
-        && let Some(stream) = input.streams().best(Type::Video)
+        && let Some(stream) = playback_video_stream(input)
     {
         let (index, time_base) = (stream.index(), stream.time_base());
         return seek_video_stream(
@@ -2928,6 +2928,22 @@ fn create_audio_pipeline_from(config: StreamConfig) -> Result<AudioPipeline, Dec
         sample_preroll: None,
         packet_samples: None,
     })
+}
+
+// Attached album artwork is not a timed video stream. It remains available to
+// still-frame extraction, but playback must never seek a cover image's timeline.
+fn playback_video_stream(input: &format::context::Input) -> Option<ffmpeg::Stream<'_>> {
+    let timed = |stream: &ffmpeg::Stream<'_>| {
+        stream.parameters().medium() == Type::Video
+            && !stream
+                .disposition()
+                .contains(ffmpeg::format::stream::Disposition::ATTACHED_PIC)
+    };
+    input
+        .streams()
+        .best(Type::Video)
+        .filter(timed)
+        .or_else(|| input.streams().find(timed))
 }
 
 fn best_stream_config(input: &format::context::Input, media_type: Type) -> Option<StreamConfig> {

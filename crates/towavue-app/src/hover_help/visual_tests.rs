@@ -51,7 +51,7 @@ fn help_labels_and_fluent_icons_reach_gpu() {
                         ui.add_space(16.0);
                         ui.horizontal(|ui| {
                             for kind in [Kind::Play, Kind::Pause, Kind::Previous, Kind::Next, Kind::Repeat,
-                                Kind::RepeatOne, Kind::Shuffle, Kind::Image, Kind::Video, Kind::Audio,
+                                Kind::RepeatOne, Kind::RepeatOff, Kind::Shuffle, Kind::ShuffleOff, Kind::Image, Kind::Video, Kind::Audio,
                                 Kind::Move, Kind::New, Kind::Forbidden] {
                                 let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(28.0), egui::Sense::hover());
                                 crate::fluent::paint(ui, rect, kind, crate::chrome::FOREGROUND);

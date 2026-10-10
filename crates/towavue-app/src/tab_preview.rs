@@ -570,18 +570,9 @@ impl TabPreview {
                     });
                 crate::media_preview::caption(ui, |ui| {
                     let mut caption = String::new();
-                    if texture.is_some_and(|texture| texture.is_err()) {
+                    if kind != MediaKind::Video && texture.is_some_and(|texture| texture.is_err()) {
                         caption
                             .push_str(crate::localization::Text::NoPreview.in_language(language));
-                        caption.push('\n');
-                    }
-                    if kind == MediaKind::Video {
-                        caption.push_str(&towavue_core::localization::formatted::preview_near(
-                            language,
-                            &crate::format_time(crate::media_time(
-                                target.expect("video target").position,
-                            )),
-                        ));
                         caption.push('\n');
                     }
                     caption.push_str(&label);
@@ -1254,9 +1245,9 @@ mod tests {
                             };
                             assert_eq!(
                                 text.contains(&unavailable),
-                                state == 1 && kind != MediaKind::Audio
+                                state == 1 && kind == MediaKind::Image
                             );
-                            assert_eq!(text.contains(&time), kind == MediaKind::Video);
+                            assert!(!text.contains(&time));
                             assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2 && kind != MediaKind::Audio);
                         }
                     }

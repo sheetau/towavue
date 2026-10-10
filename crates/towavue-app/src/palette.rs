@@ -18,7 +18,7 @@ mod files_tests;
 mod history;
 mod preview;
 mod row;
-use row::{RowActions, label_gap, reserve_scroll_bar, row_button, row_icon};
+use row::{RowActions, label_gap, overlay_scroll_bar, row_button, row_icon};
 
 pub struct CommandPalette {
     query: String,
@@ -470,7 +470,7 @@ impl CommandPalette {
             .clamp(1.0, 264.0)
             .min(ui.available_height().max(1.0));
         let scroll_salt = ("quick-open-results", self.folders);
-        reserve_scroll_bar(ui);
+        overlay_scroll_bar(ui);
         let mut scroll = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .id_salt(scroll_salt)
@@ -1765,7 +1765,7 @@ mod tests {
                     .bounds()
                     .expect("button bounds");
                 let position = egui::pos2(
-                    ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                    bounds.x0 as f32 + 2.0,
                     ((bounds.y0 + bounds.y1) / 2.0) as f32,
                 );
                 frame(

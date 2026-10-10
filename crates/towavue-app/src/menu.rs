@@ -291,6 +291,7 @@ pub(crate) fn show_section_with_recent(
     initial: Option<Section>,
     recent: &mut MenuData<'_>,
 ) -> Option<CommandId> {
+    crate::chrome::menu(ui);
     let mut chosen = None;
     if let Some(section) = initial {
         return show_items(ui, section.key(), context, shortcuts, recent, None).0;
@@ -700,6 +701,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
 }
 
 pub(crate) struct MenuKeyboard {
+    rows: crate::chrome::MenuRows,
     active: bool,
     left: bool,
     right: bool,
@@ -747,6 +749,7 @@ impl MenuKeyboard {
             state.open_item.is_none()
         });
         let mut result = Self {
+            rows: crate::chrome::MenuRows::new(ui),
             active: active && keyboard,
             left: false,
             right: false,
@@ -851,6 +854,7 @@ impl MenuKeyboard {
                 }
             });
         }
+        self.rows.finish(ui, &items);
         let pass = ui.ctx().cumulative_pass_nr();
         let selected = requested_focus.or_else(|| {
             ui.memory(|memory| items.iter().find(|id| memory.has_focus(**id)).copied())

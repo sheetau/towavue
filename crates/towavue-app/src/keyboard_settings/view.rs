@@ -232,26 +232,37 @@ impl KeyboardSettings {
                         }
                         response.context_menu(|ui| {
                             chrome::menu(ui);
-                            if ui
-                                .button(Text::EditKeybinding.in_language(display_language))
+                            let mut rows = chrome::Dropdown::new(ui);
+                            if rows
+                                .row(
+                                    ui,
+                                    true,
+                                    false,
+                                    Text::EditKeybinding.in_language(display_language),
+                                )
                                 .clicked()
                             {
                                 self.begin_edit(row.command.id, row.slot, bindings);
                                 ui.close();
                             }
-                            if ui
-                                .button(Text::AddKeybinding.in_language(display_language))
+                            if rows
+                                .row(
+                                    ui,
+                                    true,
+                                    false,
+                                    Text::AddKeybinding.in_language(display_language),
+                                )
                                 .clicked()
                             {
                                 self.begin_edit(row.command.id, None, bindings);
                                 ui.close();
                             }
-                            if ui
-                                .add_enabled(
+                            if rows
+                                .row(
+                                    ui,
                                     row.slot.is_some(),
-                                    egui::Button::new(
-                                        Text::RemoveKeybinding.in_language(display_language),
-                                    ),
+                                    false,
+                                    Text::RemoveKeybinding.in_language(display_language),
                                 )
                                 .clicked()
                             {
@@ -266,8 +277,13 @@ impl KeyboardSettings {
                                 });
                                 ui.close();
                             }
-                            if ui
-                                .button(Text::ResetKeybindings.in_language(display_language))
+                            if rows
+                                .row(
+                                    ui,
+                                    true,
+                                    false,
+                                    Text::ResetKeybindings.in_language(display_language),
+                                )
                                 .clicked()
                             {
                                 change = Some(Change {
@@ -277,6 +293,7 @@ impl KeyboardSettings {
                                 });
                                 ui.close();
                             }
+                            rows.finish(ui);
                         });
                     });
                 }

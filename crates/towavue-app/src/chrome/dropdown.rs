@@ -17,7 +17,9 @@ impl Dropdown {
     pub fn row(&mut self, ui: &mut Ui, enabled: bool, selected: bool, label: &str) -> Response {
         let response = ui.add_enabled(
             enabled,
-            egui::Button::selectable(selected, label).frame(false),
+            egui::Button::selectable(selected, label)
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::NONE),
         );
         self.rows.push((response.clone(), selected));
         response
@@ -39,20 +41,13 @@ impl Dropdown {
     }
 
     pub fn finish(self, ui: &Ui) {
-        let hovered = self.rows.iter().find(|(response, _)| {
-            response.enabled()
-                && response.contains_pointer()
-                && ui
-                    .ctx()
-                    .pointer_hover_pos()
-                    .is_some_and(|point| ui.ctx().layer_id_at(point) == Some(response.layer_id))
-        });
-        let focused = self
+        let fallback = self
             .rows
             .iter()
-            .find(|(response, _)| response.enabled() && response.has_focus());
-        let selected = self.rows.iter().find(|(_, selected)| *selected);
-        if let Some((response, _)) = hovered.or(focused).or(selected) {
+            .find(|(_, selected)| *selected)
+            .map(|(row, _)| row.id);
+        let rows: Vec<_> = self.rows.into_iter().map(|(row, _)| row).collect();
+        if let Some(response) = super::menu_rows::highlighted(ui, &rows, fallback) {
             ui.painter().set(
                 self.background,
                 egui::Shape::rect_filled(

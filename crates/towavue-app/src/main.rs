@@ -6626,9 +6626,9 @@ where
                             &self.command_hint(
                                 CommandId::ToggleVideoRepeat,
                                 if self.video_repeat {
-                                    localization::Text::VideoRepeatOn.in_language(language)
-                                } else {
                                     localization::Text::VideoRepeatOff.in_language(language)
+                                } else {
+                                    localization::Text::VideoRepeatOn.in_language(language)
                                 },
                             ),
                         )
@@ -13779,9 +13779,9 @@ mod tests {
                 let (output, actions) = frame(&mut app, vec![egui::Event::PointerMoved(pos)]);
                 assert!(actions.is_empty());
                 tooltip_visible |= output.shapes.iter().any(|shape| {
-                    matches!(
-                        &shape.shape, egui::Shape::Text(text) if text.galley.text() == "003.wav"
-                    )
+                    matches!(&shape.shape, egui::Shape::Text(text)
+                        if text.galley.text() == "003.wav"
+                            && context.layer_id_at(text.pos).is_some_and(|layer| layer.order == egui::Order::Tooltip))
                 });
                 if blocked {
                     assert!(

@@ -1309,7 +1309,7 @@ impl Filmstrip {
                             job.halign = egui::Align::Center;
                             let text = ui.painter().layout_job(job);
                             ui.painter().galley(
-                                egui::pos2(bounds.center().x, bounds.bottom() + 12.0),
+                                egui::pos2(bounds.center().x, card_rect(index).bottom() + 12.0),
                                 text,
                                 crate::chrome::FOREGROUND,
                             );
@@ -4416,7 +4416,7 @@ mod tests {
                     assert!(
                         (title.pos.y
                             - (bounds.y0 + bounds.y1) as f32 * 0.5
-                            - layout::DIAMETER * 0.5
+                            - layout::size(egui::vec2(3.0, 2.0)).y * 0.5
                             - 12.0)
                             .abs()
                             <= 1.0 / density

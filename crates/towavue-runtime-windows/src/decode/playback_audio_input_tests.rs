@@ -2,6 +2,32 @@ use super::*;
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[test]
+#[ignore = "requires an explicit read-only seek reference source"]
+fn reference_audio_and_video_seek() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("reference source"),
+    );
+    for ms in [0, 30000, 10000, 100000] {
+        let target = MediaTime::from_nanoseconds(ms * 1_000_000);
+        for stream in [DecodeStream::Audio, DecodeStream::Video] {
+            let mut input = ParallelInput::open(&path, &|| false).expect("reference input");
+            let result = input.decode_software(
+                target,
+                Some(target.saturating_add(Duration::from_millis(190))),
+                Some(stream),
+                &|| false,
+                |_| true,
+            );
+            let summary = result.expect("seek reference stream");
+            assert_eq!(summary.video_frames, 0, "album art is not playback video");
+            if stream == DecodeStream::Audio {
+                assert!(summary.audio_frames > 0);
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 struct Samples {
     first: Option<MediaTime>,
@@ -454,4 +480,73 @@ fn retained_audio_matches_fresh_pcm_across_seeks_rewind_eof_and_cancellation() {
         }
     }
     fs::remove_dir_all(root).expect("remove generated fixture");
+}
+
+#[test]
+fn attached_album_art_does_not_become_a_playback_seek_target() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("towavue-cover-seek-{unique}"));
+    fs::create_dir(&root).expect("exclusive fixture");
+    let ffmpeg = crate::media_tools::tool_path("ffmpeg.exe").expect("fixed FFmpeg");
+    for (extension, codec) in [("mp3", "libmp3lame"), ("m4a", "aac")] {
+        let path = root.join(format!("album.{extension}"));
+        let status = crate::hidden_test_command(&ffmpeg)
+            .args([
+                "-v",
+                "error",
+                "-n",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=2.2:sample_rate=48000",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=red:size=64x64:duration=0.04",
+                "-map",
+                "0:a",
+                "-map",
+                "1:v",
+                "-c:a",
+                codec,
+                "-c:v",
+                "mjpeg",
+                "-disposition:v",
+                "attached_pic",
+            ])
+            .arg(&path)
+            .status()
+            .expect("cover fixture");
+        assert!(status.success());
+        let mut video = ParallelInput::open(&path, &|| false).expect("input");
+        assert!(
+            best_stream_config(&video.input, Type::Video).is_some(),
+            "artwork remains extractable"
+        );
+        let mut audio = PlaybackAudioInput::open(&path, None, &|| false).expect("audio input");
+        for ms in [1200, 200, 0, 1700] {
+            let target = MediaTime::from_nanoseconds(ms * 1_000_000);
+            let summary = video
+                .decode_software(
+                    target,
+                    Some(target.saturating_add(Duration::from_millis(190))),
+                    Some(DecodeStream::Video),
+                    &|| false,
+                    |_| true,
+                )
+                .expect("no seek into artwork");
+            assert_eq!(summary.video_frames, 0);
+            let samples = collect(&mut audio, target, AudioSeekPolicy::Playback);
+            let mut fresh = PlaybackAudioInput::open(&path, None, &|| false).expect("fresh audio");
+            assert!(!samples.bytes.is_empty());
+            assert_eq!(
+                samples,
+                collect(&mut fresh, target, AudioSeekPolicy::Playback)
+            );
+        }
+    }
+    fs::remove_dir_all(root).expect("fixture cleanup");
 }

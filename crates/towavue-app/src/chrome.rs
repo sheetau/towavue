@@ -7,6 +7,8 @@ use crate::hover_help::HoverHelp;
 mod input_tests;
 
 mod dropdown;
+mod menu_rows;
+pub(crate) use menu_rows::MenuRows;
 mod modal;
 pub use dropdown::Dropdown;
 pub use modal::{modal, modal_body, set_modal_bounds};
@@ -171,6 +173,7 @@ pub fn style(style: &mut egui::Style) {
         visuals.expansion = 0.0;
     }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
+    style.spacing.menu_margin = egui::Margin::same(4);
 }
 
 pub fn input_style(ui: &mut Ui) {
@@ -473,10 +476,16 @@ pub fn audio_button(ui: &mut Ui, icon: AudioIcon, selected: bool, label: &str) -
         &response,
         ("audio-mode", matches!(icon, AudioIcon::Shuffle)),
     );
-    let color = if selected { FOREGROUND } else { MUTED };
+    let color = if selected {
+        FOREGROUND
+    } else {
+        ui.style().interact(&response).fg_stroke.color
+    };
     let kind = match icon {
+        AudioIcon::Repeat if !selected => crate::fluent::Kind::RepeatOff,
         AudioIcon::Repeat => crate::fluent::Kind::Repeat,
         AudioIcon::RepeatOne => crate::fluent::Kind::RepeatOne,
+        AudioIcon::Shuffle if !selected => crate::fluent::Kind::ShuffleOff,
         AudioIcon::Shuffle => crate::fluent::Kind::Shuffle,
     };
     crate::fluent::paint(ui, response.rect, kind, color);

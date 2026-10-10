@@ -62,13 +62,9 @@ pub(super) fn row_icon(ui: &mut egui::Ui, rect: egui::Rect, glyph: char) -> egui
     )
 }
 
-// Floating bars still own their full expanded hit rectangle. Reserve that width
-// so a row action cannot be painted over a scrollbar click/drag target.
-pub(super) fn reserve_scroll_bar(ui: &mut egui::Ui) {
-    let density = ui.pixels_per_point();
-    let scroll = &mut ui.spacing_mut().scroll;
-    // ScrollArea rounds its content rectangle to physical pixels. Keep the
-    // separately allocated gutter on that same grid to avoid width feedback.
-    let width = scroll.floating_allocated_width.max(scroll.bar_width + 2.0);
-    scroll.floating_allocated_width = (width * density).ceil() / density;
+// ScrollArea paints and registers the floating bar after its children, so its
+// full hit region takes priority over row actions beneath it without a gutter.
+pub(super) fn overlay_scroll_bar(ui: &mut egui::Ui) {
+    ui.spacing_mut().scroll.floating = true;
+    ui.spacing_mut().scroll.floating_allocated_width = 0.0;
 }

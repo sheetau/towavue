@@ -30,31 +30,31 @@ fn japanese_audio_mode_controls_keep_commands_and_compact_bounds() {
             let history = app.edits.clone();
             for (title, command, repeat, shuffled) in [
                 (
-                    "リピート：オフ",
+                    "リピート：全曲",
                     CommandId::CycleAudioRepeat,
                     towavue_core::RepeatMode::All,
                     false,
                 ),
                 (
-                    "リピート：全曲",
+                    "リピート：1曲",
                     CommandId::CycleAudioRepeat,
                     towavue_core::RepeatMode::One,
                     false,
                 ),
                 (
-                    "リピート：1曲",
+                    "リピート：オフ",
                     CommandId::CycleAudioRepeat,
                     towavue_core::RepeatMode::Off,
                     false,
                 ),
                 (
-                    "シャッフル：オフ",
+                    "シャッフル：オン",
                     CommandId::ToggleAudioShuffle,
                     towavue_core::RepeatMode::Off,
                     true,
                 ),
                 (
-                    "シャッフル：オン",
+                    "シャッフル：オフ",
                     CommandId::ToggleAudioShuffle,
                     towavue_core::RepeatMode::Off,
                     false,

@@ -559,6 +559,7 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         context.enable_accesskit();
         context.global_style_mut(|style| {
             style.animation_time = 0.0;
+            style.scroll_animation = egui::style::ScrollAnimation::none();
             style.interaction.tooltip_delay = 60.0;
         });
         let mut palette = CommandPalette::default();
@@ -627,8 +628,8 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
             .bounds()
             .expect("scrollbar bounds");
         assert!(
-            f64::from(remove.right()) <= bar.x0,
-            "actions stay outside the scrollbar hit region at {density}: {remove:?}, {bar:?}"
+            f64::from(remove.right()) > bar.x0,
+            "actions extend underneath the scrollbar at {density}: {remove:?}, {bar:?}"
         );
         assert!((gear.left() - hovered.right() - 2.0).abs() < 0.01);
         assert!((remove.left() - gear.right() - 2.0).abs() < 0.01);
@@ -636,7 +637,8 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
             crate::shortcuts::defaults().label(CommandId::OpenFolder, CommandContext::default());
         let (text, _) = picker_text(&output, &shortcut).expect("shortcut label");
         assert!((gear.left() - text.pos.x - text.galley.size().x - 2.0).abs() <= 1.0 / density);
-        let point = button_position(&output, &format!("Remove {title} from Recently Used"));
+        // The exposed portion still invokes removal, before the bar scrolls it away.
+        let point = egui::pos2(remove.left() + 2.0, remove.center().y);
         render(&mut palette, vec![egui::Event::PointerMoved(point)]);
         let click = |pressed| egui::Event::PointerButton {
             pos: point,
@@ -646,7 +648,26 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         };
         render(&mut palette, vec![click(true)]);
         let choices = render(&mut palette, vec![click(false)]).1;
-        assert_eq!(choices, [Choice::RemoveCommand(CommandId::OpenFolder)]);
+        assert_eq!(
+            choices,
+            [Choice::RemoveCommand(CommandId::OpenFolder)],
+            "exposed action at {density}: {remove:?}, {bar:?}"
+        );
+        let overlap = egui::pos2((bar.x0 + bar.x1) as f32 * 0.5, remove.center().y);
+        render(&mut palette, vec![egui::Event::PointerMoved(overlap)]);
+        for pressed in [true, false] {
+            let choices = render(
+                &mut palette,
+                vec![egui::Event::PointerButton {
+                    pos: overlap,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )
+            .1;
+            assert!(choices.is_empty(), "scrollbar owns clicks over row actions");
+        }
     }
 }
 

@@ -1057,8 +1057,8 @@ fn tab_focus_registers_image_video_audio_values_and_path_rows_without_dispatch()
             "wav",
             vec![
                 "Play / replay",
-                "Repeat off",
-                "Shuffle off",
+                "Repeat all",
+                "Shuffle on",
                 "2. second.wav",
                 "Time selection start (seconds)",
                 "Time selection end (seconds)",

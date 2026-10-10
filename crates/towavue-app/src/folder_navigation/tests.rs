@@ -30,7 +30,20 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
         tab_transfer::tests::install(&mut app, b.clone(), tab_transfer::tests::decoded(false));
     app.push_visual_edit(EditOperation::RotateClockwise);
     let edits = app.edits[&tab].clone();
-    app.dispatch(CommandId::NextFolder);
+    app.filmstrip_open = true;
+    app.shortcuts.set(
+        CommandId::NextFolder,
+        "Ctrl+J A".parse().expect("folder chord"),
+    );
+    let context = app.ui_context.as_ref().expect("context").clone();
+    let _ = context.run_ui(egui::RawInput::default(), |ui| {
+        ui.button("Filmstrip control").request_focus();
+    });
+    for key in ["Ctrl+J", "A"] {
+        let stroke = key.parse().expect("shortcut");
+        assert!(app.owns_focused_shortcut(&stroke));
+        app.process_shortcut(stroke);
+    }
     assert_eq!(app.path.as_ref(), Some(&b), "retain media during lookup");
     let pending = app.pending_folder.as_ref().expect("pending lookup").0;
     app.refresh_folder_snapshot_from_disk();
@@ -43,6 +56,7 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
         matches!(&app.pending_guard, Some(GuardedAction::NavigateFromFolder(path, _, _)) if path == &a)
     );
     app.resolve_guard(GuardDecision::Cancel);
+    assert!(app.filmstrip_open, "cancel retains Filmstrip");
     assert_eq!(app.path.as_ref(), Some(&b));
     assert_eq!(app.edits[&tab], edits);
 
@@ -62,9 +76,11 @@ fn related_folder_navigation_wraps_and_preserves_dirty_and_stale_owners() {
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&a));
     assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(app.filmstrip_open, "folder replacement retains Filmstrip");
     app.dispatch(CommandId::PreviousFolder);
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&b), "reverse traversal wraps too");
+    assert!(app.filmstrip_open);
     app.dispatch(CommandId::ParentFolder);
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&b), "empty immediate parent stays");

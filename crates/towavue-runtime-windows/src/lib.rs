@@ -142,6 +142,7 @@ pub use file_operation::{
 };
 pub use file_search::{
     FILE_SEARCH_LIMIT, FileSearch, FileSearchFailure, FileSearchRequest, FileSearchResult,
+    FileSearchScope,
 };
 pub use fonts::{
     UiFontFallback, UiFontPreparation, UiFonts, japanese_ui_font, ui_font_fallbacks, ui_symbol_font,

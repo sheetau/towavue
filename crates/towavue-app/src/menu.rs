@@ -88,7 +88,12 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
         Text::MenuFile,
         &[
             &[OpenFile, OpenFolder, OpenGallery],
-            &[GoToFile, OpenRecentFolder],
+            &[
+                GoToFile,
+                OpenRecentFolder,
+                SearchCurrentFiles,
+                SearchCurrentFolders,
+            ],
             &[
                 Save,
                 ExportAs,
@@ -1771,7 +1776,7 @@ mod tests {
                 frame(vec![key(egui::Key::ArrowRight)]);
             }
             for _ in
-                0..leading + usize::from(category == "Edit") + 4 * usize::from(category == "File")
+                0..leading + usize::from(category == "Edit") + 6 * usize::from(category == "File")
             {
                 frame(vec![key(egui::Key::ArrowDown)]);
             }

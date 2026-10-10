@@ -15,10 +15,18 @@ pub const FILE_SEARCH_LIMIT: usize = 1000;
 const DEPTH_LIMIT: usize = 128;
 const REPARSE_POINT: u32 = 0x400;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FileSearchScope {
+    RecursiveFiles,
+    CurrentFiles,
+    CurrentFolders,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileSearchRequest {
     pub root: PathBuf,
     pub query: String,
+    pub scope: FileSearchScope,
 }
 
 #[derive(Debug)]
@@ -121,7 +129,10 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
     if cancellation.is_cancelled() {
         return None;
     }
-    if !result.request.root.is_absolute() || result.request.query.trim().is_empty() {
+    let scope = result.request.scope;
+    if !result.request.root.is_absolute()
+        || scope == FileSearchScope::RecursiveFiles && result.request.query.trim().is_empty()
+    {
         result.error = Some(FileSearchFailure::InvalidRequest);
         return Some(result);
     }
@@ -156,7 +167,7 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
             result.skipped += 1;
             continue;
         }
-        if metadata.is_dir() {
+        if metadata.is_dir() && scope == FileSearchScope::RecursiveFiles {
             if stack.len() >= DEPTH_LIMIT {
                 result.skipped += 1;
             } else if let Ok(entries) = fs::read_dir(entry.path()) {
@@ -166,14 +177,23 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
             }
             continue;
         }
-        if !metadata.is_file() {
+        if !(if scope == FileSearchScope::CurrentFolders {
+            metadata.is_dir()
+        } else {
+            metadata.is_file()
+        }) {
             continue;
         }
         let path = entry.path();
-        if MediaKind::from_path(&path).is_none() {
+        if scope != FileSearchScope::CurrentFolders && MediaKind::from_path(&path).is_none() {
             continue;
         }
-        let Some(score) = file_search_score(&path, &result.request.query) else {
+        let search_path = if scope == FileSearchScope::RecursiveFiles {
+            path.as_path()
+        } else {
+            std::path::Path::new(path.file_name().expect("directory entry name"))
+        };
+        let Some(score) = file_search_score(search_path, &result.request.query) else {
             continue;
         };
         result.matches += 1;
@@ -203,6 +223,44 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn current_scopes_list_only_immediate_children_and_allow_empty_queries() {
+        let root = fixture("current-scopes");
+        let child = root.join("child");
+        fs::create_dir(&child).expect("child folder");
+        fs::write(root.join("alpha.png"), []).expect("file");
+        fs::write(root.join("notes.txt"), []).expect("unsupported file");
+        fs::write(child.join("nested.png"), []).expect("nested file");
+        for (scope, query, expected) in [
+            (
+                FileSearchScope::CurrentFiles,
+                "",
+                vec![root.join("alpha.png")],
+            ),
+            (FileSearchScope::CurrentFolders, "", vec![child.clone()]),
+            (FileSearchScope::CurrentFolders, "ch", vec![child.clone()]),
+            (FileSearchScope::CurrentFiles, "nested", vec![]),
+            (
+                FileSearchScope::RecursiveFiles,
+                "nested",
+                vec![child.join("nested.png")],
+            ),
+        ] {
+            let result = scan(
+                FileSearchRequest {
+                    root: root.clone(),
+                    query: query.into(),
+                    scope,
+                },
+                &Cancellation::default(),
+            )
+            .expect("scan");
+            assert!(result.error.is_none());
+            assert_eq!(result.paths, expected);
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
     fn late_scans_cannot_publish_after_query_root_round_trip_clear_or_drop() {
         use std::sync::atomic::{AtomicBool, Ordering};
         let root = fixture("late");
@@ -211,7 +269,7 @@ mod tests {
         fs::write(root.join("alpha.png"), []).expect("source");
         fs::write(root.join("beta.png"), []).expect("source");
         fs::write(other.join("alpha-other.png"), []).expect("other source");
-        for mode in 0..5 {
+        for mode in 0..6 {
             let (tx, rx) = mpsc::channel();
             let mut worker = FileSearch::new(move || {
                 let _ = tx.send(());
@@ -232,6 +290,7 @@ mod tests {
                 }
             }));
             let original = FileSearchRequest {
+                scope: FileSearchScope::RecursiveFiles,
                 root: root.clone(),
                 query: "alpha".into(),
             };
@@ -240,16 +299,24 @@ mod tests {
                 .recv_timeout(Duration::from_secs(5))
                 .expect("paused before publication");
             let expected = match mode {
+                5 => Some(FileSearchRequest {
+                    root: root.clone(),
+                    query: "alpha".into(),
+                    scope: FileSearchScope::CurrentFolders,
+                }),
                 0 => Some(FileSearchRequest {
+                    scope: FileSearchScope::RecursiveFiles,
                     root: root.clone(),
                     query: "beta".into(),
                 }),
                 1 => Some(FileSearchRequest {
+                    scope: FileSearchScope::RecursiveFiles,
                     root: other.clone(),
                     query: "alpha".into(),
                 }),
                 2 => {
                     worker.update(Some(FileSearchRequest {
+                        scope: FileSearchScope::RecursiveFiles,
                         root: other.clone(),
                         query: "beta".into(),
                     }));
@@ -317,6 +384,7 @@ mod tests {
         std::os::windows::fs::symlink_dir(&inside, &cycle).expect("create owned cycle symlink");
         let result = scan(
             FileSearchRequest {
+                scope: FileSearchScope::RecursiveFiles,
                 root: inside.clone(),
                 query: "image".into(),
             },
@@ -327,6 +395,7 @@ mod tests {
         assert_eq!(result.skipped, 2);
         let explicit = scan(
             FileSearchRequest {
+                scope: FileSearchScope::RecursiveFiles,
                 root: escape.clone(),
                 query: "image".into(),
             },
@@ -355,6 +424,7 @@ mod tests {
             fs::write(root.join(format!("image-{index:04}.jpg")), []).expect("empty media fixture");
         }
         let request = FileSearchRequest {
+            scope: FileSearchScope::RecursiveFiles,
             root: root.clone(),
             query: "image".into(),
         };
@@ -378,6 +448,7 @@ mod tests {
         })
         .expect("worker");
         let request = FileSearchRequest {
+            scope: FileSearchScope::RecursiveFiles,
             root: root.clone(),
             query: "alpha".into(),
         };
@@ -394,6 +465,7 @@ mod tests {
             &worker.result().expect("shared result")
         ));
         let missing = FileSearchRequest {
+            scope: FileSearchScope::RecursiveFiles,
             root: root.join("missing"),
             query: "alpha".into(),
         };
@@ -416,6 +488,7 @@ mod tests {
         );
         let invalid = scan(
             FileSearchRequest {
+                scope: FileSearchScope::RecursiveFiles,
                 root: PathBuf::from("relative"),
                 query: "image".into(),
             },

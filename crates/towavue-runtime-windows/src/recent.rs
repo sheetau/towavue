@@ -81,6 +81,7 @@ struct Mailbox {
 pub struct RecentFiles {
     shared: Arc<(Mutex<Mailbox>, Condvar)>,
     worker: Option<JoinHandle<()>>,
+    cancellation: crate::Cancellation,
 }
 
 impl RecentFiles {
@@ -88,13 +89,46 @@ impl RecentFiles {
         Self::with_presence_probe(path, notify, |path| path.try_exists())
     }
 
+    /// Validate new file visits with the same cached preview used by Gallery.
+    /// Existing history and explicit folder visits are not decoded or removed.
+    pub fn with_preview_cache(
+        path: PathBuf,
+        cache: crate::PreviewCache,
+        notify: impl Fn() + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Self::with_probes(
+            path,
+            notify,
+            |path| path.try_exists(),
+            move |path, cancellation| {
+                towavue_core::MediaKind::from_path(path).is_some_and(|kind| {
+                    cache
+                        .cancellable(cancellation.clone())
+                        .filmstrip(path, kind)
+                        .is_ok()
+                })
+            },
+        )
+    }
+
     fn with_presence_probe(
         path: PathBuf,
         notify: impl Fn() + Send + 'static,
+        exists: impl FnMut(&Path) -> std::io::Result<bool> + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Self::with_probes(path, notify, exists, |_, _| true)
+    }
+
+    fn with_probes(
+        path: PathBuf,
+        notify: impl Fn() + Send + 'static,
         mut exists: impl FnMut(&Path) -> std::io::Result<bool> + Send + 'static,
+        mut previewable: impl FnMut(&Path, &crate::Cancellation) -> bool + Send + 'static,
     ) -> std::io::Result<Self> {
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
+        let cancellation = crate::Cancellation::default();
+        let worker_cancellation = cancellation.clone();
         let worker = thread::Builder::new()
             .name("towavue-recent-files".into())
             .spawn(move || {
@@ -227,12 +261,22 @@ impl RecentFiles {
                         pending = Pending::default();
                         clear = true;
                     }
-                    pending.merge(std::mem::take(&mut mailbox.pending));
+                    let mut incoming = std::mem::take(&mut mailbox.pending);
+                    drop(mailbox);
+                    // No source IO or decoding holds the mailbox lock. Later clears/removals
+                    // suppress publication and remain ordered after this batch. Validate only
+                    // new opens, not retries of a failed history write or loaded archives.
+                    incoming.opens.retain(|entry| {
+                        entry.kind == RecentKind::Folder
+                            || previewable(&entry.path, &worker_cancellation)
+                    });
+                    pending.merge(incoming);
                 }
             })?;
         Ok(Self {
             shared,
             worker: Some(worker),
+            cancellation,
         })
     }
 
@@ -329,6 +373,9 @@ impl RecentFiles {
 
 impl Drop for RecentFiles {
     fn drop(&mut self) {
+        // Stop native preview work and owned helper processes before joining. An
+        // unverified visit is omitted on shutdown; accepted history still drains.
+        self.cancellation.cancel();
         let (mutex, ready) = &*self.shared;
         mutex.lock().expect("recent mailbox").closed = true;
         ready.notify_one();
@@ -635,6 +682,101 @@ fn update_pending(path: &Path, pending: &Pending, clear: bool) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_validation_registers_valid_files_without_publishing_invalid_visits() {
+        let path = fixture("preview-validation");
+        let root = path.parent().expect("owned root");
+        let valid = root.join("valid.png");
+        let corrupt = root.join("corrupt.png");
+        let unsupported = root.join("unsupported.txt");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([20, 40, 60, 255]))
+            .save(&valid)
+            .expect("valid image");
+        fs::write(&corrupt, b"invalid image").expect("corrupt fixture");
+        fs::write(&unsupported, b"unsupported").expect("unsupported fixture");
+        let cache = crate::PreviewCache::new(root.join("cache")).expect("cache");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let recent = RecentFiles::with_preview_cache(path.clone(), cache, move || {
+            let _ = tx.send(());
+        })
+        .expect("worker");
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("initial history");
+        recent.take_completed();
+        recent.record(corrupt.clone());
+        recent.record(unsupported.clone());
+        recent.record(valid.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        loop {
+            rx.recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("validated visit");
+            if let Some(update) = recent.take_completed() {
+                assert!(
+                    !update
+                        .entries
+                        .iter()
+                        .any(|entry| entry.path == corrupt || entry.path == unsupported)
+                );
+                if update.entries.iter().any(|entry| entry.path == valid) {
+                    break;
+                }
+            }
+        }
+        drop(recent);
+        let saved = read(&path).expect("saved history");
+        assert_eq!(
+            saved.iter().map(|entry| &entry.path).collect::<Vec<_>>(),
+            [&valid]
+        );
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn slow_preview_does_not_hold_mailbox_or_resurrect_a_cleared_visit() {
+        let path = fixture("preview-clear");
+        let media = path.with_file_name("image.png");
+        let (start_tx, start_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let recent = RecentFiles::with_probes(
+            path.clone(),
+            move || {
+                let _ = tx.send(());
+            },
+            |_| Ok(true),
+            move |_, _| {
+                start_tx.send(()).expect("validation started");
+                release_rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("release validation");
+                true
+            },
+        )
+        .expect("worker");
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("initial history");
+        recent.take_completed();
+        recent.record(media);
+        start_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("in-flight preview");
+        recent.clear();
+        assert!(recent.take_completed().is_none());
+        release_tx.send(()).expect("release");
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("cleared history");
+        assert!(
+            recent
+                .take_completed()
+                .expect("cleared snapshot")
+                .entries
+                .is_empty()
+        );
+        drop(recent);
+        assert!(read(&path).expect("saved history").is_empty());
+        clean(&path);
+    }
 
     #[test]
     fn recent_worker_preserves_both_invalid_histories_and_localizes_shared_failures() {

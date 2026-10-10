@@ -91,9 +91,37 @@ impl CommandPalette {
                 })
     }
 
+    pub fn search_scope(&self) -> towavue_runtime_windows::FileSearchScope {
+        use towavue_runtime_windows::FileSearchScope::*;
+        match self.query.chars().next() {
+            Some('@') => CurrentFiles,
+            Some(':') => CurrentFolders,
+            _ => RecursiveFiles,
+        }
+    }
+
+    fn folder_mode(&self) -> bool {
+        self.query.starts_with(':') || self.folders && !self.query.starts_with('@')
+    }
+
+    fn search_query(&self) -> String {
+        normalized(
+            self.query
+                .strip_prefix(['@', ':'])
+                .unwrap_or(&self.query)
+                .trim(),
+        )
+    }
+
     pub fn file_query(&self) -> Option<String> {
-        (!self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
-            .then(|| normalized(self.query.trim()))
+        (self.query.starts_with(['@', ':'])
+            || !self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
+        .then(|| self.search_query())
+    }
+
+    pub fn open_current(&mut self, folders: bool) {
+        self.open_files(false);
+        self.query.push(if folders { ':' } else { '@' });
     }
     pub fn with_previews(
         cache: towavue_runtime_windows::PreviewCache,
@@ -285,6 +313,7 @@ impl CommandPalette {
                 let weak_text_color = ui.visuals().weak_text_color;
                 ui.visuals_mut().weak_text_color = Some(crate::chrome::HOVER);
                 ui.spacing_mut().text_edit_width = f32::INFINITY;
+                let folder_mode = self.folder_mode();
                 crate::chrome::text_edit(
                     ui,
                     egui::TextEdit::singleline(&mut self.query)
@@ -292,7 +321,7 @@ impl CommandPalette {
                         .id(query_id)
                         .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
-                        .hint_text(if self.folders {
+                        .hint_text(if folder_mode {
                             Text::PaletteFolderHint.in_language(language)
                         } else if previous_query.starts_with('>') {
                             Text::PaletteCommandHint.in_language(language)
@@ -312,7 +341,7 @@ impl CommandPalette {
                 context.accesskit_node_builder(query_id, |node| {
                     node.set_label(if command_mode {
                         Text::SearchCommands.in_language(language)
-                    } else if self.folders {
+                    } else if self.folder_mode() {
                         Text::SearchRecentFolders.in_language(language)
                     } else {
                         Text::SearchFiles.in_language(language)
@@ -354,17 +383,22 @@ impl CommandPalette {
         query_changed: bool,
     ) -> Option<RecentAction> {
         let language = localization::language(ui.ctx());
-        let recent = if self.folders {
+        let folders = self.folder_mode();
+        let scope = self.search_scope();
+        let current = scope != towavue_runtime_windows::FileSearchScope::RecursiveFiles;
+        let recent = if current {
+            &[][..]
+        } else if folders {
             sources.folders
         } else {
             sources.files
         };
-        let query = normalized(self.query.trim());
+        let query = self.search_query();
         let mut seen = std::collections::HashSet::new();
         let mut paths: Vec<_> = recent
             .iter()
             .filter(|path| {
-                let score = if self.folders {
+                let score = if folders {
                     text_score(&normalized(&path.to_string_lossy()), &query)
                 } else {
                     path_score(path, &query)
@@ -377,15 +411,16 @@ impl CommandPalette {
         // Empty Go to File shows history immediately, as in the reference picker.
         let search = sources
             .search
-            .filter(|result| result.request.query == query);
-        if !self.folders
+            .filter(|result| result.request.query == query && result.request.scope == scope);
+        if (!folders || current)
             && let Some(result) = search
         {
             paths.extend(result.paths.iter().filter(|path| {
                 let key = normalized(&path.to_string_lossy());
                 !self.hidden_paths.contains(&key) && seen.insert(key)
             }));
-        } else if !self.folders
+        } else if !current
+            && !folders
             && !query.is_empty()
             && let Some(folder) = sources.folder
         {
@@ -422,11 +457,11 @@ impl CommandPalette {
         self.selected_path = selected.map(|index| paths[index].clone());
         // Reserve the card before laying out rows, then paint it with this
         // frame's hovered row without changing the keyboard/Enter selection.
-        let preview_slot = (!self.folders && selected.is_some())
+        let preview_slot = (!folders && selected.is_some())
             .then(|| preview::reserve(ui))
             .flatten();
         let mut hovered_path = None;
-        let kind = if self.folders {
+        let kind = if folders {
             RecentKind::Folder
         } else {
             RecentKind::File
@@ -434,7 +469,7 @@ impl CommandPalette {
         let mut chosen = enter.zip(selected).map(|(modifiers, index)| {
             RecentAction::Open(paths[index].clone(), kind, open_target(modifiers))
         });
-        if !self.folders {
+        if !folders || current {
             if let Some(result) = search {
                 if let Some(error) = &result.error {
                     let error = error.message(language);
@@ -458,8 +493,15 @@ impl CommandPalette {
                     )
                     .help_text(formatted::file_search_help(language, &summary));
                 }
-            } else if sources.searching && !query.is_empty() {
-                ui.weak(Text::SearchingSubfolders.in_language(language));
+            } else if sources.searching && (current || !query.is_empty()) {
+                ui.weak(
+                    if current {
+                        Text::SearchingCurrentFolder
+                    } else {
+                        Text::SearchingSubfolders
+                    }
+                    .in_language(language),
+                );
             }
         }
         let row_height = 22.0;
@@ -469,7 +511,7 @@ impl CommandPalette {
         let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0)
             .clamp(1.0, 264.0)
             .min(ui.available_height().max(1.0));
-        let scroll_salt = ("quick-open-results", self.folders);
+        let scroll_salt = ("quick-open-results", folders, scope);
         overlay_scroll_bar(ui);
         let mut scroll = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
@@ -496,7 +538,7 @@ impl CommandPalette {
             if paths.is_empty() {
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(if self.folders {
+                        egui::RichText::new(if folders {
                             Text::NoMatchingFolders.in_language(language)
                         } else {
                             Text::NoMatchingFiles.in_language(language)
@@ -526,16 +568,16 @@ impl CommandPalette {
                 let row_actions = RowActions::new(row, close, false);
                 let body = row_actions.body;
                 let background = ui.painter().add(egui::Shape::Noop);
-                let group = if self.folders && index == 0 {
+                let group = if folders && index == 0 {
                     Text::FolderResults.in_language(language)
-                } else if !self.folders && index == 0 && recent_count > 0 {
+                } else if !folders && index == 0 && recent_count > 0 {
                     Text::RecentlyOpened.in_language(language)
-                } else if !self.folders && index == recent_count {
+                } else if !folders && index == recent_count {
                     Text::FileResults.in_language(language)
                 } else {
                     ""
                 };
-                if !self.folders && index == recent_count && recent_count > 0 {
+                if !folders && index == recent_count && recent_count > 0 {
                     ui.painter().hline(
                         row.x_range(),
                         row.top(),
@@ -574,7 +616,7 @@ impl CommandPalette {
                     node.set_label(path.to_string_lossy().as_ref());
                 });
                 if let Some(close_rect) = row_actions.remove {
-                    let label = if self.folders || index < recent_count {
+                    let label = if !current && (folders || index < recent_count) {
                         Text::RemoveRecentlyOpened.in_language(language)
                     } else {
                         Text::DismissSearchResult.in_language(language)
@@ -595,7 +637,9 @@ impl CommandPalette {
                             self.selected_path = None;
                             self.removed_selection = Some(index);
                         }
-                        chosen = Some(RecentAction::Remove((*path).clone(), kind));
+                        if !current {
+                            chosen = Some(RecentAction::Remove((*path).clone(), kind));
+                        }
                     }
                 }
                 if response.clicked() && !query_changed {
@@ -632,7 +676,7 @@ impl CommandPalette {
                     .contains(&normalized(&path.to_string_lossy()))
             })
             .or(self.selected_path.as_deref());
-        if self.folders {
+        if folders {
             self.clear_preview();
         } else if let Some(preview) = &mut self.preview {
             preview.show(ui, preview_path, preview_slot);
@@ -803,7 +847,7 @@ mod tests {
                     &output,
                     rect,
                     if query.is_empty() {
-                        "Search files by name (hold Ctrl-key to force new window or Alt-key for same window)"
+                        "Search files by name (hold Ctrl-key to force new window or Alt-key for same tab)"
                     } else {
                         query
                     },
@@ -898,6 +942,7 @@ mod tests {
             palette.query = "image".into();
             let mut result = FileSearchResult {
                 request: FileSearchRequest {
+                    scope: towavue_runtime_windows::FileSearchScope::RecursiveFiles,
                     root: "C:/media".into(),
                     query: "image".into(),
                 },
@@ -1234,6 +1279,7 @@ mod tests {
             palette.query = "image".into();
             let result = FileSearchResult {
                 request: FileSearchRequest {
+                    scope: towavue_runtime_windows::FileSearchScope::RecursiveFiles,
                     root: PathBuf::from("C:/owned"),
                     query: "image".into(),
                 },

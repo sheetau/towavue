@@ -1757,8 +1757,9 @@ where
         self.ui_state = Some(state);
         let recent_result = shortcuts::config_path().and_then(|path| {
             let notify = Arc::clone(&self.notify);
-            towavue_runtime_windows::RecentFiles::new(
+            towavue_runtime_windows::RecentFiles::with_preview_cache(
                 path.with_file_name("recent-files.txt"),
+                self.preview_cache.clone(),
                 move || notify(AppEvent::RecentFilesReady),
             )
             .map_err(configuration::Error::from)
@@ -7557,7 +7558,11 @@ where
                             .and_then(|path| path.parent())
                             .map(Path::to_path_buf)
                     })?;
-                Some(towavue_runtime_windows::FileSearchRequest { root, query })
+                Some(towavue_runtime_windows::FileSearchRequest {
+                    root,
+                    query,
+                    scope: self.palette.search_scope(),
+                })
             });
         if self.file_search.update(request) {
             self.request_redraw();
@@ -8033,7 +8038,11 @@ where
         }
         self.command_overlay_return_focus = if matches!(
             command,
-            CommandId::ToggleCommandPalette | CommandId::GoToFile | CommandId::OpenRecentFolder
+            CommandId::ToggleCommandPalette
+                | CommandId::GoToFile
+                | CommandId::OpenRecentFolder
+                | CommandId::SearchCurrentFiles
+                | CommandId::SearchCurrentFolders
         ) {
             if self.palette_open {
                 self.command_overlay_return_focus
@@ -8211,10 +8220,21 @@ where
                 }
                 self.request_redraw();
             }
-            CommandId::GoToFile | CommandId::OpenRecentFolder => {
+            CommandId::GoToFile
+            | CommandId::OpenRecentFolder
+            | CommandId::SearchCurrentFiles
+            | CommandId::SearchCurrentFolders => {
                 self.palette_open = true;
-                self.palette
-                    .open_files(command == CommandId::OpenRecentFolder);
+                if matches!(
+                    command,
+                    CommandId::SearchCurrentFiles | CommandId::SearchCurrentFolders
+                ) {
+                    self.palette
+                        .open_current(command == CommandId::SearchCurrentFolders);
+                } else {
+                    self.palette
+                        .open_files(command == CommandId::OpenRecentFolder);
+                }
                 if let Some(recent) = &self.recent_files {
                     recent.refresh();
                 }
@@ -12011,6 +12031,7 @@ where
     /// Filmstrip traversal belongs to egui even before its first card gains focus.
     fn filmstrip_owns_key(&self, stroke: &KeyStroke) -> bool {
         self.filmstrip_open
+            && self.prefix_started.is_none()
             && !self.palette_open
             && !self.modal_input_blocked()
             && !self.ui_context.as_ref().is_some_and(|context| {
@@ -12100,6 +12121,9 @@ where
     }
 
     fn owns_focused_shortcut(&self, stroke: &KeyStroke) -> bool {
+        if self.native_ime_composing || self.filmstrip_owns_key(stroke) {
+            return false;
+        }
         if self.owns_seek_shortcut(stroke)
             || self.image_arrow_pan(stroke).is_some()
             || self.prefix_started.is_some() && self.list_owns_key(stroke)
@@ -12117,6 +12141,8 @@ where
                 CommandId::OpenKeyboardSettings,
                 CommandId::GoToFile,
                 CommandId::OpenRecentFolder,
+                CommandId::SearchCurrentFiles,
+                CommandId::SearchCurrentFolders,
                 CommandId::ToggleCommandPalette,
             ]
             .iter()
@@ -12140,6 +12166,8 @@ where
                             CommandId::OpenKeyboardSettings
                             | CommandId::GoToFile
                             | CommandId::OpenRecentFolder
+                            | CommandId::SearchCurrentFiles
+                            | CommandId::SearchCurrentFolders
                             | CommandId::ToggleCommandPalette,
                         ) => true,
                         ShortcutMatch::Prefix => entry_prefix(std::slice::from_ref(stroke)),
@@ -12159,19 +12187,13 @@ where
         {
             return false;
         }
-        if self.filmstrip_open {
-            let mut entered = self.entered_shortcut.clone();
-            entered.push(stroke.clone());
-            return self
+        (self.filmstrip_open
+            && self
                 .shortcuts
                 .all(CommandId::ToggleFilmstrip)
                 .iter()
-                .any(|binding| {
-                    binding.strokes().starts_with(&entered)
-                        || binding.strokes().starts_with(std::slice::from_ref(stroke))
-                });
-        }
-        self.prefix_started.is_some()
+                .any(|binding| binding.strokes().starts_with(std::slice::from_ref(stroke))))
+            || self.prefix_started.is_some()
             || ((stroke.modifiers.control
                 || stroke.modifiers.alt
                 || stroke.modifiers.logo
@@ -21363,6 +21385,15 @@ mod tests {
                     "unbound and UI keys remain with filmstrip: {key}"
                 );
             }
+            for key in ["Ctrl+W", "Ctrl+T", "Ctrl+O", "Ctrl+Alt+Up", "K"] {
+                assert!(
+                    app.owns_focused_shortcut(&stroke(key)),
+                    "Filmstrip allows {key}"
+                );
+            }
+            app.native_ime_composing = true;
+            assert!(!app.owns_focused_shortcut(&stroke("Ctrl+W")));
+            app.native_ime_composing = false;
             assert!(app.owns_focused_shortcut(&stroke("Ctrl+G")));
             app.process_shortcut(stroke("Ctrl+G"));
             assert!(app.filmstrip_open);
@@ -21371,7 +21402,7 @@ mod tests {
             assert!(!app.filmstrip_open);
         }
         app.fullscreen = false;
-        for blocked in (0..5).filter(|&blocked| blocked != 1) {
+        for blocked in (0..5).filter(|&blocked| blocked != 1 && blocked != 2) {
             app.palette_open = blocked == 0;
             app.filmstrip_open = blocked == 2;
             app.pending_guard = (blocked == 3).then_some(GuardedAction::Exit);

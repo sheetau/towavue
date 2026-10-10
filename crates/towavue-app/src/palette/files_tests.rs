@@ -2,6 +2,76 @@ use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
 #[test]
+fn current_prefixes_exclude_history_and_stale_scopes_and_keep_open_modifiers() {
+    use towavue_runtime_windows::{FileSearchRequest, FileSearchResult, FileSearchScope};
+    for (prefix, scope, kind) in [
+        ('@', FileSearchScope::CurrentFiles, RecentKind::File),
+        (':', FileSearchScope::CurrentFolders, RecentKind::Folder),
+    ] {
+        let context = crate::fonts::test_context();
+        let mut palette = CommandPalette::default();
+        palette.open_files(true);
+        palette.query = prefix.to_string();
+        assert_eq!(palette.file_query(), Some(String::new()));
+        let history = vec![PathBuf::from("C:/elsewhere/history.png")];
+        let mut result = FileSearchResult {
+            request: FileSearchRequest {
+                root: "C:/media".into(),
+                query: String::new(),
+                scope: FileSearchScope::RecursiveFiles,
+            },
+            paths: vec![PathBuf::from("C:/media/current.png")],
+            matches: 1,
+            skipped: 0,
+            error: None,
+        };
+        let frame = |palette: &mut CommandPalette, result: &FileSearchResult, events| {
+            open_frame_at(
+                &context,
+                palette,
+                OpenSources {
+                    files: &history,
+                    folders: &history,
+                    search: Some(result),
+                    ..Default::default()
+                },
+                events,
+                (egui::vec2(600.0, 400.0), 0.0, 1.0),
+            )
+        };
+        frame(&mut palette, &result, vec![]);
+        assert!(
+            palette.selected_path.is_none(),
+            "scope transition must not show stale rows"
+        );
+        result.request.scope = scope;
+        for _ in 0..3 {
+            frame(&mut palette, &result, vec![]);
+        }
+        assert_eq!(palette.selected_path.as_ref(), result.paths.first());
+        for (modifiers, target) in [
+            (egui::Modifiers::NONE, OpenTarget::Tab),
+            (egui::Modifiers::CTRL, OpenTarget::Window),
+            (egui::Modifiers::ALT, OpenTarget::Replace),
+        ] {
+            assert_eq!(
+                frame(
+                    &mut palette,
+                    &result,
+                    vec![key(egui::Key::Enter, modifiers)]
+                )
+                .1,
+                [Choice::Open(RecentAction::Open(
+                    result.paths[0].clone(),
+                    kind,
+                    target
+                ))]
+            );
+        }
+    }
+}
+
+#[test]
 fn japanese_file_search_preserves_paths_modifiers_and_remove_targets() {
     for density in [1.0, 1.25, 2.0] {
         for folders in [false, true] {
@@ -313,6 +383,7 @@ fn search_result_dismissal_is_query_local_and_recent_results_stay_deduplicated()
     let recent = vec![PathBuf::from("C:/media/image-old.png")];
     let result = towavue_runtime_windows::FileSearchResult {
         request: towavue_runtime_windows::FileSearchRequest {
+            scope: towavue_runtime_windows::FileSearchScope::RecursiveFiles,
             root: "C:/media".into(),
             query: "image".into(),
         },

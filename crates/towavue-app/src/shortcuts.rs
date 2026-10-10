@@ -9,7 +9,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v12";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v13";
+const NAVIGATION_BINDING_HEADER: &str = "# towavue shortcuts v12";
 const SELECTION_BINDING_HEADER: &str = "# towavue shortcuts v11";
 const VOLUME_BINDING_HEADER: &str = "# towavue shortcuts v10";
 const ZOOM_BINDING_HEADER: &str = "# towavue shortcuts v9";
@@ -56,6 +57,8 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::OpenFile, "Ctrl+O"),
         (CommandId::GoToFile, "Ctrl+P"),
         (CommandId::OpenRecentFolder, "Ctrl+F"),
+        (CommandId::SearchCurrentFiles, "Ctrl+G"),
+        (CommandId::SearchCurrentFolders, "Ctrl+Shift+G"),
         (CommandId::ToggleFullscreen, "F11"),
         (CommandId::OpenFolder, "Ctrl+Shift+O"),
         (CommandId::CloseTab, "Ctrl+W"),
@@ -212,9 +215,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
-    let navigation_bindings = text
+    let current_search_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let navigation_bindings = current_search_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == NAVIGATION_BINDING_HEADER);
     let selection_bindings = navigation_bindings
         || text
             .lines()
@@ -296,6 +303,17 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             })?;
         declared.insert(command);
         if sequence.trim().is_empty() {
+            if !current_search_bindings
+                && matches!(
+                    command,
+                    CommandId::SearchCurrentFiles | CommandId::SearchCurrentFolders
+                )
+            {
+                // These commands had no defaults before v13, including in generated
+                // files. Inherit the new keys only if custom commands leave them free.
+                declared.remove(&command);
+                continue;
+            }
             implicit_navigation.remove(&command);
             implicit_volume.remove(&command);
             if command == CommandId::ZoomIn {
@@ -486,6 +504,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ToggleVideoRepeat
                         | CommandId::GoToFile
                         | CommandId::OpenRecentFolder
+                        | CommandId::SearchCurrentFiles
+                        | CommandId::SearchCurrentFolders
                         | CommandId::OpenKeyboardSettings
                         | CommandId::ReadingLeft
                         | CommandId::ReadingRight
@@ -605,6 +625,69 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn current_folder_search_defaults_preserve_custom_keys_prefixes_and_unassignment() {
+        use towavue_core::{CommandId, MediaKind, ShortcutMatch};
+        let context = towavue_core::CommandContext {
+            media_kind: Some(MediaKind::Image),
+            ..Default::default()
+        };
+        for (command, key) in [
+            (CommandId::SearchCurrentFiles, "Ctrl+G"),
+            (CommandId::SearchCurrentFolders, "Ctrl+Shift+G"),
+        ] {
+            for text in [
+                String::new(),
+                super::serialize(&super::defaults()),
+                "# towavue shortcuts v12\nopen_file = Ctrl+O\n".into(),
+                format!("# towavue shortcuts v12\n{} = \n", command.as_str()),
+            ] {
+                let bindings = super::parse(&text, super::defaults()).expect("bindings");
+                assert_eq!(
+                    bindings.resolve(&[key.parse().expect("key")], context),
+                    ShortcutMatch::Command(command)
+                );
+            }
+            for suffix in ["", " Ctrl+K"] {
+                let bindings = super::parse(
+                    &format!(
+                        "# towavue shortcuts v12\nopen_file = {key}{suffix}\n{} =\n",
+                        command.as_str()
+                    ),
+                    super::defaults(),
+                )
+                .expect("custom binding");
+                assert!(
+                    bindings.all(command).is_empty(),
+                    "new defaults yield to existing prefixes"
+                );
+            }
+            let bindings = super::parse(
+                &format!(
+                    "{}\n{} = \n",
+                    super::CURRENT_BINDING_HEADER,
+                    command.as_str()
+                ),
+                super::defaults(),
+            )
+            .expect("unassigned");
+            assert!(bindings.all(command).is_empty());
+            let bindings = super::parse(
+                &format!(
+                    "{}\n{} = Ctrl+Alt+G\n",
+                    super::CURRENT_BINDING_HEADER,
+                    command.as_str()
+                ),
+                super::defaults(),
+            )
+            .expect("custom");
+            assert_eq!(
+                bindings.get(command).expect("custom key").to_string(),
+                "Ctrl+Alt+G"
+            );
+        }
+    }
+
     #[test]
     fn related_folder_defaults_yield_to_explicit_keys_prefixes_and_removal() {
         for header in ["# towavue shortcuts v7", "# towavue shortcuts v12"] {

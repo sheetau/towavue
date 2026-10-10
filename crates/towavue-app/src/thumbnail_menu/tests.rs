@@ -238,8 +238,8 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
         }
         let mut choices = vec![
             (Text::ThumbnailOpen.in_language(language), Action::Open),
-            (Text::ThumbnailWindow.in_language(language), Action::Window),
             (Text::ThumbnailTab.in_language(language), Action::Tab),
+            (Text::ThumbnailWindow.in_language(language), Action::Window),
             (
                 Text::CommandCopyFilePath.in_language(language),
                 Action::Copy,
@@ -409,7 +409,7 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
                         == Some(if scope == Scope::Playlist {
                             Text::CommandRevealFile.in_language(language)
                         } else {
-                            Text::ThumbnailWindow.in_language(language)
+                            Text::ThumbnailTab.in_language(language)
                         })),
             "ArrowDown advances exactly one menu action"
         );

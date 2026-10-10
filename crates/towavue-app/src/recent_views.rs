@@ -104,16 +104,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.viewed_media.begin(id, path);
     }
 
-    pub(super) fn qualify_history(&mut self, id: TabId, path: &Path) {
-        if self.deleted_sources.contains_key(&id) {
-            return;
-        }
-        // A new explicit open also restores an item the owner removed from history.
-        self.viewed_media.visits.remove(&id);
-        self.viewed_media.qualify(id, path);
-        self.flush_viewed_history();
-    }
-
     pub(super) fn qualify_current_history(&mut self) {
         if let (Some(id), Some(path)) = (self.displayed_tab, self.path.as_deref())
             && self.tabs.active_id() == Some(id)
@@ -256,6 +246,45 @@ mod tests {
     }
 
     #[test]
+    fn direct_and_internal_opens_share_presented_dwell_before_registration() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "recent_views::tests::direct_and_internal_opens_share_presented_dwell_before_registration",
+        ) else {
+            return;
+        };
+        let path = root.join("source.bmp");
+        tab_transfer::tests::bitmap(&path);
+        for route in 0..3 {
+            let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+            app.ui_context = Some(fonts::test_context());
+            match route {
+                0 => app.open_external(path.clone(), false),
+                1 => app.open_viewed(path.clone(), false),
+                _ => app.handle_ui_action(UiAction::OpenMedia(path.clone(), false)),
+            }
+            let tab = app.displayed_tab.expect("opened tab");
+            assert!(!app.viewed_media.visits[&tab].recorded, "route {route}");
+            let now = Instant::now();
+            app.observe_viewed_history(now);
+            app.observe_viewed_history(now + DWELL * 3);
+            assert!(
+                !app.viewed_media.visits[&tab].recorded,
+                "loading does not qualify"
+            );
+            ready(&mut app);
+            app.history_presented(false);
+            app.observe_viewed_history(now + DWELL * 4);
+            app.observe_viewed_history(now + DWELL * 5 - Duration::from_millis(1));
+            assert!(!app.viewed_media.visits[&tab].recorded);
+            app.observe_viewed_history(now + DWELL * 5);
+            assert!(
+                app.viewed_media.visits[&tab].recorded,
+                "route {route} uses ordinary dwell"
+            );
+        }
+    }
+
+    #[test]
     fn explicit_guarded_opens_dwell_zoom_and_edits_persist_only_qualified_files() {
         let Some(root) = crate::tests::isolated_test_root(
             "recent_views::tests::explicit_guarded_opens_dwell_zoom_and_edits_persist_only_qualified_files",
@@ -314,7 +343,7 @@ mod tests {
         for (index, path) in paths.iter().enumerate() {
             assert_eq!(
                 persisted.contains(path.to_str().expect("path")),
-                matches!(index, 0 | 3 | 4 | 5),
+                matches!(index, 3..=5),
                 "file {index}"
             );
         }

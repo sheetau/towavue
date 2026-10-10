@@ -38,12 +38,8 @@ pub fn volume_deltas(
                 phase: egui::TouchPhase::Move,
             } if position.is_some_and(|pos| {
                 let in_list = audio_list.is_some_and(|rect| rect.contains(pos));
-                let allowed = if audio_list.is_some() {
-                    in_list
-                        && modifiers.ctrl
-                        && !modifiers.shift
-                        && !modifiers.alt
-                        && !modifiers.mac_cmd
+                let allowed = if in_list {
+                    modifiers.ctrl && !modifiers.shift && !modifiers.alt && !modifiers.mac_cmd
                 } else {
                     modifiers.is_none()
                 };
@@ -777,6 +773,65 @@ mod tests {
     }
 
     #[test]
+    fn audio_status_volume_accepts_plain_wheel_while_list_requires_control() {
+        let context = Context::default();
+        let list = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(300.0, 200.0));
+        let label = egui::Rect::from_min_size(egui::pos2(250.0, 250.0), egui::vec2(40.0, 24.0));
+        let frame = |events| {
+            let mut result = Vec::new();
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        Pos2::ZERO,
+                        egui::vec2(400.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    begin_frame(ui.ctx());
+                    let targets = [
+                        ui.interact(list, Id::new("list"), egui::Sense::hover()),
+                        ui.interact(label, Id::new("volume"), egui::Sense::hover()),
+                    ];
+                    result = volume_deltas(ui.ctx(), &targets, Some(list));
+                },
+            );
+            result
+        };
+        let wheel = |modifiers| Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 1.0),
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        };
+        frame(vec![]);
+        for (pos, modifiers, expected) in [
+            (list.center(), egui::Modifiers::NONE, vec![]),
+            (list.center(), egui::Modifiers::CTRL, vec![1.0]),
+            (label.center(), egui::Modifiers::NONE, vec![1.0]),
+            (label.center(), egui::Modifiers::CTRL, vec![]),
+            (egui::pos2(50.0, 260.0), egui::Modifiers::NONE, vec![]),
+        ] {
+            assert_eq!(
+                frame(vec![Event::PointerMoved(pos), wheel(modifiers)]),
+                expected
+            );
+        }
+        assert_eq!(
+            frame(vec![
+                Event::PointerMoved(list.center()),
+                wheel(egui::Modifiers::NONE),
+                wheel(egui::Modifiers::CTRL),
+                Event::PointerMoved(label.center()),
+                wheel(egui::Modifiers::NONE)
+            ]),
+            vec![1.0, 1.0]
+        );
+        assert!(frame(vec![]).is_empty(), "no inertial volume tail");
+    }
+
+    #[test]
     fn audio_list_splits_ctrl_volume_from_scroll_per_event() {
         let context = Context::default();
         let list = egui::Rect::from_min_max(egui::pos2(20.0, 20.0), egui::pos2(300.0, 250.0));
@@ -794,11 +849,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let target = ui.interact(
-                        ui.max_rect(),
-                        Id::new("audio-surface"),
-                        egui::Sense::hover(),
-                    );
+                    let target = ui.interact(list, Id::new("audio-surface"), egui::Sense::hover());
                     result.0 = volume_deltas(ui.ctx(), &[target], Some(list));
                     result.1 = scroll.delta(ui, list, true);
                 },

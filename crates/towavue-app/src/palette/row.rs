@@ -43,14 +43,28 @@ pub(super) fn row_button(
     // empty trailing atoms extending the gap before independent row actions.
     atoms.push_left(egui::Atom::default().atom_size(egui::vec2(6.0, 0.0)));
     crate::chrome::flat_buttons(ui);
-    ui.put(
+    let foreground = ui.visuals().widgets.inactive.fg_stroke.color;
+    let hovered = ui.visuals().widgets.hovered.fg_stroke.color;
+    let active = ui.visuals().widgets.active.fg_stroke.color;
+    let open = ui.visuals().widgets.open.fg_stroke.color;
+    if !selected {
+        // Only the Enter target uses selected text; pointer feedback keeps its fill.
+        ui.visuals_mut().widgets.hovered.fg_stroke.color = foreground;
+        ui.visuals_mut().widgets.active.fg_stroke.color = foreground;
+        ui.visuals_mut().widgets.open.fg_stroke.color = foreground;
+    }
+    let response = ui.put(
         rect,
         egui::Button::selectable(selected, atoms)
             .gap(0.0)
             .frame(false)
             .truncate()
             .min_size(rect.size()),
-    )
+    );
+    ui.visuals_mut().widgets.hovered.fg_stroke.color = hovered;
+    ui.visuals_mut().widgets.active.fg_stroke.color = active;
+    ui.visuals_mut().widgets.open.fg_stroke.color = open;
+    response
 }
 
 pub(super) fn row_icon(ui: &mut egui::Ui, rect: egui::Rect, glyph: char) -> egui::Response {

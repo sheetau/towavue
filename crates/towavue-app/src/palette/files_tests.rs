@@ -2,6 +2,93 @@ use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
 #[test]
+fn only_the_enter_target_has_selected_text_while_another_row_is_hovered() {
+    for mode in 0..3 {
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(|style| {
+            crate::chrome::style(style);
+            style.animation_time = 0.0;
+            style.interaction.tooltip_delay = 60.0;
+        });
+        let paths = vec![
+            PathBuf::from("C:/media/first.png"),
+            PathBuf::from("C:/media/second.png"),
+        ];
+        let mut palette = CommandPalette::default();
+        if mode != 0 {
+            palette.open_files(mode == 2);
+        }
+        let sources = OpenSources {
+            files: &paths,
+            folders: &paths,
+            ..Default::default()
+        };
+        let frame = |palette: &mut CommandPalette, events| {
+            open_frame_at(
+                &context,
+                palette,
+                sources,
+                events,
+                (egui::vec2(600.0, 400.0), 0.0, 1.0),
+            )
+        };
+        for _ in 0..20 {
+            frame(&mut palette, vec![]);
+        }
+        let selected = if mode == 0 { "Open file" } else { "first.png" };
+        let other = if mode == 0 {
+            "Toggle fullscreen"
+        } else {
+            "second.png"
+        };
+        let output = frame(&mut palette, vec![]).0;
+        let point = picker_text(&output, other).expect("other row").0.pos + egui::vec2(10.0, 5.0);
+        for _ in 0..3 {
+            frame(&mut palette, vec![egui::Event::PointerMoved(point)]);
+        }
+        let output = frame(&mut palette, vec![egui::Event::PointerMoved(point)]).0;
+        let color = |label| {
+            let shape = picker_text(&output, label).expect("row label").0;
+            let color = shape.galley.job.sections[0].format.color;
+            shape
+                .override_text_color
+                .unwrap_or(if color == egui::Color32::PLACEHOLDER {
+                    shape.fallback_color
+                } else {
+                    color
+                })
+        };
+        let selected_color = color(selected);
+        let hovered_color = color(other);
+        assert_eq!(selected_color, crate::chrome::FOREGROUND);
+        assert_eq!(hovered_color, crate::chrome::MUTED);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.contains(point) && rect.fill == crate::chrome::HOVER)));
+        let expected = if mode == 0 {
+            Choice::Command(CommandId::OpenFile)
+        } else {
+            Choice::Open(RecentAction::Open(
+                paths[0].clone(),
+                if mode == 2 {
+                    RecentKind::Folder
+                } else {
+                    RecentKind::File
+                },
+                OpenTarget::Tab,
+            ))
+        };
+        assert_eq!(
+            frame(
+                &mut palette,
+                vec![key(egui::Key::Enter, egui::Modifiers::NONE)]
+            )
+            .1,
+            [expected]
+        );
+    }
+}
+
+#[test]
 fn current_prefixes_exclude_history_and_stale_scopes_and_keep_open_modifiers() {
     use towavue_runtime_windows::{FileSearchRequest, FileSearchResult, FileSearchScope};
     for (prefix, scope, kind) in [

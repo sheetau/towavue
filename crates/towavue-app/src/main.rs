@@ -1849,14 +1849,14 @@ where
     }
 
     fn open_external(&mut self, path: PathBuf, force_new_tab: bool) {
-        self.open_path(path, force_new_tab, true);
+        self.open_path(path, force_new_tab);
     }
 
     fn open_viewed(&mut self, path: PathBuf, force_new_tab: bool) {
-        self.open_path(path, force_new_tab, false);
+        self.open_path(path, force_new_tab);
     }
 
-    fn open_path(&mut self, path: PathBuf, force_new_tab: bool, immediate_history: bool) {
+    fn open_path(&mut self, path: PathBuf, force_new_tab: bool) {
         let language = self.language();
         let path = match canonical_shell_path(&path) {
             Ok(path) => path,
@@ -1903,11 +1903,7 @@ where
             self.tabs.open_external(path.clone(), kind)
         };
         self.seed_playback_volume(id);
-        if immediate_history {
-            self.qualify_history(id, &path);
-        } else {
-            self.begin_history_visit(id, &path);
-        }
+        self.begin_history_visit(id, &path);
         if kind == MediaKind::Audio
             && self.displayed_tab == Some(id)
             && self.path.as_ref() == Some(&path)
@@ -4378,13 +4374,13 @@ where
         } else {
             self.draw_top_bar(root, actions);
         }
-        if self.media_kind == Some(MediaKind::Audio) {
-            volume_targets.push(root.interact(
+        let audio_volume_surface = (self.media_kind == Some(MediaKind::Audio)).then(|| {
+            root.interact(
                 root.available_rect_before_wrap(),
                 root.id().with("audio-volume-surface"),
                 egui::Sense::hover(),
-            ));
-        }
+            )
+        });
         let status_rect = if !self.fullscreen {
             let rect = self.draw_status_bar(root, actions, &mut volume_targets);
             Some(rect)
@@ -4450,6 +4446,14 @@ where
         }
         self.draw_fullscreen_controls(&context, actions, &mut volume_targets);
         self.draw_video_scrub();
+        if let Some(mut response) = audio_volume_surface
+            && let Some(rect) = self.playlist.scroll_rect
+        {
+            // Register behind the rows, then narrow to this frame's actual list.
+            // Status-volume targets remain separate and accept an unmodified wheel.
+            response.interact_rect = response.interact_rect.intersect(rect);
+            volume_targets.push(response);
+        }
         self.volume_wheel(&context, &volume_targets, actions);
         if self.gallery_active() {
             self.prepare_gallery(&context);
@@ -5040,9 +5044,6 @@ where
         let audio_list = (self.media_kind == Some(MediaKind::Audio))
             .then_some(self.playlist.scroll_rect)
             .flatten();
-        if self.media_kind == Some(MediaKind::Audio) && audio_list.is_none() {
-            return;
-        }
         let before = self.playback_volume();
         // Preserve reversals at either limit, but publish only the final setting.
         let volume = wheel_input::volume_deltas(context, targets, audio_list)
@@ -18897,9 +18898,9 @@ mod tests {
     }
 
     #[test]
-    fn audio_volume_wheel_requires_ctrl_in_list_and_ignores_status_and_timeline() {
+    fn audio_volume_wheel_requires_ctrl_in_list_and_plain_wheel_over_status_volume() {
         let Some(root) = isolated_test_root(
-            "tests::audio_volume_wheel_requires_ctrl_in_list_and_ignores_status_and_timeline",
+            "tests::audio_volume_wheel_requires_ctrl_in_list_and_plain_wheel_over_status_volume",
         ) else {
             return;
         };
@@ -18970,7 +18971,7 @@ mod tests {
                         wheel.clone(),
                         egui::Event::PointerMoved(outside),
                     ],
-                    false,
+                    true,
                 ),
                 (
                     vec![
@@ -18979,7 +18980,7 @@ mod tests {
                         egui::Event::PointerMoved(label.center()),
                         wheel.clone(),
                     ],
-                    false,
+                    true,
                 ),
             ] {
                 let actions = frame(events).1;
@@ -19030,7 +19031,7 @@ mod tests {
                 );
             }
             for (pos, expected) in [
-                (label.center(), false),
+                (label.center(), true),
                 (egui::pos2(100.0, 100.0), false),
                 (egui::pos2(width - 10.0, 100.0), false),
                 (egui::pos2(2.0, 100.0), false),
@@ -21371,6 +21372,7 @@ mod tests {
         );
         app.process_shortcut(stroke("F"));
         assert!(!app.filmstrip_open);
+        app.shortcuts.remove(CommandId::SearchCurrentFiles);
         app.shortcuts.set(
             CommandId::ToggleFilmstrip,
             "Ctrl+G Space".parse().expect("custom filmstrip chord"),

@@ -21,9 +21,78 @@ fn tab_hover_id() -> egui::Id {
 
 pub const SIZE: egui::Vec2 = egui::vec2(160.0, 108.0);
 
+#[derive(Clone)]
+struct DismissedTabHover {
+    source: egui::Id,
+    rect: egui::Rect,
+    frame: u64,
+}
+
+fn tab_hover_dismissed(response: &Response) -> bool {
+    let context = &response.ctx;
+    let id = egui::Id::new("dismissed-tab-preview");
+    let frame = context.cumulative_frame_nr();
+    let mut dismissed = context.data(|data| data.get_temp::<DismissedTabHover>(id));
+    if dismissed
+        .as_ref()
+        .is_some_and(|old| old.frame.saturating_add(1) < frame)
+    {
+        dismissed = None;
+    }
+    context.input(|input| {
+        // Replay in event order so a release followed by leave/re-entry in one
+        // frame starts a fresh hover. Repeated layout passes are idempotent.
+        for event in &input.events {
+            match event {
+                egui::Event::PointerGone => dismissed = None,
+                egui::Event::PointerMoved(pos)
+                    if dismissed
+                        .as_ref()
+                        .is_some_and(|old| !old.rect.contains(*pos)) =>
+                {
+                    dismissed = None;
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    pressed: false,
+                    ..
+                } if response.enabled() && response.interact_rect.contains(*pos) => {
+                    dismissed = Some(DismissedTabHover {
+                        source: response.id,
+                        rect: response.interact_rect,
+                        frame,
+                    });
+                }
+                _ => {}
+            }
+        }
+        if dismissed.as_ref().is_some_and(|old| {
+            input
+                .pointer
+                .hover_pos()
+                .is_none_or(|pos| !old.rect.contains(pos))
+        }) {
+            dismissed = None;
+        }
+    });
+    let blocked = dismissed
+        .as_ref()
+        .is_some_and(|old| old.source == response.id);
+    context.data_mut(|data| {
+        if let Some(mut dismissed) = dismissed {
+            dismissed.frame = frame;
+            data.insert_temp(id, dismissed);
+        } else {
+            data.remove::<DismissedTabHover>(id);
+        }
+    });
+    blocked
+}
+
 pub fn tab_hovered(response: &Response) -> bool {
     let context = &response.ctx;
-    if !response.enabled()
+    if tab_hover_dismissed(response)
+        || !response.enabled()
         || egui::Popup::is_any_open(context)
         || context.input(|input| !input.raw.hovered_files.is_empty())
     {
@@ -315,6 +384,76 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_release_hides_card_until_pointer_leaves_and_reenters() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let source = egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(140.0, 24.0));
+            let outside = egui::pos2(400.0, 250.0);
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos: source.center(),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let frame = |events| {
+                let mut shown = false;
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(600.0, 400.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response =
+                            ui.interact(source, "tab-source".into(), egui::Sense::click());
+                        shown = Preview::tab(&response)
+                            .show(|ui| {
+                                ui.label("preview body");
+                            })
+                            .is_some();
+                    },
+                );
+                shown
+            };
+            for _ in 0..3 {
+                frame(vec![egui::Event::PointerMoved(source.center())]);
+            }
+            assert!(frame(vec![]));
+            assert!(!frame(vec![pointer(true)]));
+            assert!(!frame(vec![pointer(false)]));
+            for _ in 0..4 {
+                assert!(!frame(vec![egui::Event::PointerMoved(
+                    source.center() + egui::vec2(2.0, 0.0)
+                )]));
+            }
+            assert!(!frame(vec![egui::Event::PointerMoved(outside)]));
+            for _ in 0..3 {
+                frame(vec![egui::Event::PointerMoved(source.center())]);
+            }
+            assert!(frame(vec![]));
+            // A coalesced click/leave/re-entry already contains the next mouseenter.
+            frame(vec![
+                pointer(true),
+                pointer(false),
+                egui::Event::PointerMoved(outside),
+                egui::Event::PointerMoved(source.center()),
+            ]);
+            assert!(frame(vec![]));
+            frame(vec![pointer(true), pointer(false)]);
+            assert!(!frame(vec![]));
+            frame(vec![egui::Event::PointerGone]);
+            for _ in 0..3 {
+                frame(vec![egui::Event::PointerMoved(source.center())]);
+            }
+            assert!(frame(vec![]));
+        }
+    }
 
     #[test]
     fn fitted_images_and_pages_keep_geometry_and_uv_mapping_near_card_corners() {

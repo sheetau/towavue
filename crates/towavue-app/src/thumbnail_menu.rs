@@ -65,8 +65,8 @@ pub(crate) fn show(
         if scope != Scope::Playlist {
             for (label, action) in [
                 (Text::ThumbnailOpen.in_language(language), Action::Open),
-                (Text::ThumbnailWindow.in_language(language), Action::Window),
                 (Text::ThumbnailTab.in_language(language), Action::Tab),
+                (Text::ThumbnailWindow.in_language(language), Action::Window),
             ] {
                 let response = ui.button(label);
                 items.push(response.id);

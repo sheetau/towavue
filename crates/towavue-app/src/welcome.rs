@@ -200,14 +200,14 @@ pub fn show(
     if offset != previous_offset {
         scroll = scroll.vertical_scroll_offset(offset);
     }
-    if let Some(offset) = keyboard_offset {
-        scroll = scroll.vertical_scroll_offset(offset);
-    }
     if reset {
         scroll = scroll.vertical_scroll_offset(0.0);
     }
     let mut output = scroll.show_styled(ui, |ui| {
         ui.set_style(content_style);
+        if let Some(target) = keyboard_offset.filter(|_| !reset) {
+            ui.scroll_with_delta(egui::vec2(0.0, previous_offset - target));
+        }
         if gutter_scroll != 0.0 {
             ui.scroll_with_delta_animation(
                 egui::vec2(0.0, gutter_scroll),
@@ -764,6 +764,67 @@ mod tests {
                 "owned drag reaches the end outside the rail"
             );
         }
+    }
+
+    #[test]
+    fn gallery_page_keys_scroll_smoothly_without_card_focus() {
+        let context = crate::fonts::test_context();
+        let mut time = 0.0;
+        let mut frame = |key: Option<egui::Key>| {
+            time += 1.0 / 60.0;
+            let mut origin = 0.0;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events: key
+                        .into_iter()
+                        .map(|key| egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(ui, &ShortcutBindings::default(), |ui| {
+                        origin = ui.max_rect().top();
+                        ui.set_min_height(2000.0);
+                    });
+                },
+            );
+            origin
+        };
+        for _ in 0..3 {
+            frame(None);
+        }
+        let before = frame(None);
+        frame(Some(egui::Key::PageDown));
+        frame(None); // ScrollArea applies a newly requested target on the next pass.
+        let first = frame(None);
+        for _ in 0..50 {
+            frame(None);
+        }
+        let last = frame(None);
+        assert!(
+            last < first && first < before,
+            "intermediate frame: {before} -> {first} -> {last}"
+        );
+        assert!(
+            before - last > 200.0 && before - last < 300.0,
+            "one body viewport"
+        );
+        frame(Some(egui::Key::PageUp));
+        for _ in 0..50 {
+            frame(None);
+        }
+        assert!((frame(None) - before).abs() < 1.0);
     }
 
     #[test]

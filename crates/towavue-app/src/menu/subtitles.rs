@@ -94,12 +94,12 @@ pub(super) fn submenu(
                             ui.close();
                         }
                         let previous_visible = data.subtitle_settings.visible;
-                        let response = ui
-                            .checkbox(
-                                &mut data.subtitle_settings.visible,
-                                text(ui.ctx(), Text::CommandToggleSubtitles),
-                            )
-                            .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
+                        let response = crate::chrome::menu_checkbox(
+                            ui,
+                            &mut data.subtitle_settings.visible,
+                            text(ui.ctx(), Text::CommandToggleSubtitles),
+                        )
+                        .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
                         items.push(response.id);
                         if crate::logo_menu::drag::captured(ui.ctx()) {
                             data.subtitle_settings.visible = previous_visible;

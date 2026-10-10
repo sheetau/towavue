@@ -39,6 +39,14 @@ pub(crate) fn render(kind: Kind, size: u32, logical_size: f32) -> Option<Pixmap>
 
 /// Reuse exact upstream compound paths, including holes, at every native surface.
 pub(crate) fn fill(image: &mut Pixmap, kind: Kind, paint: &Paint<'_>, transform: Transform) {
+    // Upstream Play uses optical centering (issue #137). Its silhouette spans
+    // x=4..15 in a 16-point canvas. Center its bounds for our compact buttons;
+    // applying the translation before scaling also fixes native taskbar icons.
+    let transform = if kind == Kind::Play {
+        transform.pre_translate(-1.5, 0.0)
+    } else {
+        transform
+    };
     for path in paths::paths(kind) {
         image.fill_path(&path, paint, FillRule::Winding, transform, None);
     }
@@ -83,6 +91,27 @@ pub(crate) fn paint(ui: &Ui, rect: Rect, kind: Kind, color: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn play_silhouette_is_centered_at_ui_and_taskbar_densities() {
+        for size in [16, 20, 24, 32, 40, 48, 64, 96] {
+            let image = render(Kind::Play, size, 16.0).expect("raster");
+            let xs: Vec<_> = image
+                .data()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .enumerate()
+                .filter(|(_, pixel)| pixel[3] > 128)
+                .map(|(index, _)| index as u32 % size)
+                .collect();
+            let sum = xs.iter().min().expect("test value") + xs.iter().max().expect("test value");
+            assert!(
+                (sum as f32 - (size - 1) as f32).abs() <= 1.0,
+                "size={size}: bounds sum={sum}"
+            );
+        }
+    }
 
     #[test]
     fn fluent_rasters_keep_distinct_premultiplied_unclipped_artwork_at_each_density() {

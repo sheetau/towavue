@@ -12022,7 +12022,11 @@ where
             && !stroke.modifiers.shift
             && matches!(
                 stroke.key,
-                Key::ArrowLeft | Key::ArrowRight | Key::Character('A' | 'D' | 'a' | 'd')
+                Key::ArrowLeft
+                    | Key::ArrowRight
+                    | Key::PageUp
+                    | Key::PageDown
+                    | Key::Character('A' | 'D' | 'a' | 'd')
             )
     }
 
@@ -21449,7 +21453,7 @@ mod tests {
             generation: 1,
             captured_at: std::time::SystemTime::now(),
         });
-        for key in ["A", "D", "Left", "Right"] {
+        for key in ["A", "D", "Left", "Right", "PageUp", "PageDown"] {
             let stroke: KeyStroke = key.parse().expect("direction");
             assert!(app.filmstrip_owns_key(&stroke));
             app.process_shortcut(stroke.clone());

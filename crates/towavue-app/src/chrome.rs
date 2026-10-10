@@ -8,7 +8,7 @@ mod input_tests;
 
 mod dropdown;
 mod menu_rows;
-pub(crate) use menu_rows::MenuRows;
+pub(crate) use menu_rows::{MenuRows, menu_checkbox};
 mod modal;
 pub use dropdown::Dropdown;
 pub use modal::{modal, modal_body, set_modal_bounds};

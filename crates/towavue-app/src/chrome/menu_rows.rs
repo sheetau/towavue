@@ -21,6 +21,17 @@ pub(super) fn highlighted<'a>(
         })
 }
 
+pub(crate) fn menu_checkbox(
+    ui: &mut Ui,
+    checked: &mut bool,
+    label: impl Into<egui::WidgetText>,
+) -> Response {
+    let response = ui.checkbox(checked, label);
+    let frame = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), frame));
+    response
+}
+
 /// Resolve pointer, keyboard and open-submenu feedback to one row per popup.
 /// Native widget painting still owns text, checkmarks and accessibility state.
 pub(crate) struct MenuRows(egui::layers::ShapeIdx);
@@ -41,6 +52,7 @@ impl MenuRows {
             .find(|row| Some(egui::containers::menu::SubMenu::id_from_widget_id(row.id)) == open)
             .map(|row| row.id);
         let selected = highlighted(ui, &rows, fallback);
+        let pass = ui.ctx().cumulative_pass_nr();
         ui.ctx().graphics_mut(|graphics| {
             let list = graphics.entry(ui.layer_id());
             let end = list.next_idx().0;
@@ -50,9 +62,11 @@ impl MenuRows {
                 });
             }
         });
-        if let Some(row) = selected {
+        if let Some(row) = selected
+            && !ui.data(|data| data.get_temp::<u64>(row.id.with("menu-checkbox")) == Some(pass))
+        {
             ui.painter()
-                .with_clip_rect(ui.clip_rect().intersect(row.interact_rect))
+                .with_clip_rect(ui.clip_rect())
                 .set(self.0, egui::Shape::rect_filled(row.rect, 3, super::HOVER));
         }
     }
@@ -101,7 +115,7 @@ mod tests {
                         let first = ui.button("Keyboard");
                         first.request_focus();
                         let mut checked = true;
-                        let second = ui.checkbox(&mut checked, "Checked");
+                        let second = menu_checkbox(ui, &mut checked, "Checked");
                         assert!(checked);
                         let third = ui.add_enabled(false, egui::Button::new("Disabled"));
                         bounds.extend([first.rect, second.rect, third.rect]);
@@ -120,19 +134,22 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(backgrounds.len(), 1, "one menu row background at {density}");
+                assert!(
+                    backgrounds.len() <= 1,
+                    "at most one row background at {density}"
+                );
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Path(path) if path.points.len() == 3)), "checked state still paints");
-                (bounds, backgrounds[0])
+                (bounds, backgrounds.first().copied())
             };
             draw(vec![]);
             let (bounds, highlighted) = draw(vec![]);
-            assert_eq!(highlighted, bounds[0]);
+            assert_eq!(highlighted, Some(bounds[0]));
             draw(vec![egui::Event::PointerMoved(bounds[1].center())]);
             assert_eq!(
                 draw(vec![egui::Event::PointerMoved(bounds[1].center())]).1,
-                bounds[1]
+                None
             );
-            assert_eq!(draw(vec![egui::Event::PointerGone]).1, bounds[0]);
+            assert_eq!(draw(vec![egui::Event::PointerGone]).1, Some(bounds[0]));
         }
     }
 }

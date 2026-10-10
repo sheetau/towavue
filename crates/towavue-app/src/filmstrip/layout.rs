@@ -17,6 +17,10 @@ pub(super) fn size(source: Vec2) -> Vec2 {
 }
 
 impl Layout {
+    pub fn index(&self, path: &Path) -> Option<usize> {
+        self.indices.get(path).copied()
+    }
+
     pub fn prepare(
         &mut self,
         snapshot: &FolderSnapshot,
@@ -99,8 +103,8 @@ impl Layout {
 
     pub fn visible(&self, viewport: Rect) -> Range<usize> {
         let half = viewport.width() * 0.5;
-        // Include enlarged edge pixels while keeping the working set bounded.
-        let radius = DIAMETER * 0.55 + 4.0;
+        // Include bracket edge pixels while keeping the working set bounded.
+        let radius = DIAMETER * 0.5 + indicator::GAP;
         let start = ((viewport.left() - half - radius) / (DIAMETER + GAP))
             .ceil()
             .max(0.0) as usize;

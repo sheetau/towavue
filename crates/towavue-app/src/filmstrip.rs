@@ -59,6 +59,7 @@ pub(crate) enum PreparationPolicy {
 }
 
 mod drag;
+mod indicator;
 mod layout;
 pub(crate) mod swipe;
 
@@ -118,11 +119,15 @@ mod duration_tests;
 #[derive(Default)]
 pub struct View {
     focus: Option<PathBuf>,
+    selection: Option<PathBuf>,
     offset: f32,
 }
 
 impl View {
     pub fn relocate(&mut self, source: &Path, target: &Path) {
+        if self.selection.as_deref() == Some(source) {
+            self.selection = Some(target.to_owned());
+        }
         if self.focus.as_deref() == Some(source) {
             self.focus = Some(target.to_owned());
         }
@@ -167,7 +172,13 @@ pub struct Filmstrip {
     focus_requested: bool,
     focused_card: Option<egui::Id>,
     recent_focus: Option<PathBuf>,
+    selection: Option<PathBuf>,
+    indicator: indicator::Indicator,
+    selection_only: bool,
+    page_target: Option<f32>,
+    page_frame: Option<u64>,
     pointer_position: Option<egui::Pos2>,
+    window_focused: bool,
     card_paths: Vec<(egui::Id, PathBuf, usize)>,
     tab_navigation: Option<(u64, usize)>,
     scroll_offset: f32,
@@ -209,7 +220,13 @@ impl Filmstrip {
             focus_requested: false,
             focused_card: None,
             recent_focus: None,
+            selection: None,
+            indicator: Default::default(),
+            selection_only: false,
+            page_target: None,
+            page_frame: None,
             pointer_position: None,
+            window_focused: true,
             card_paths: Vec::new(),
             tab_navigation: None,
             scroll_offset: 0.0,
@@ -255,6 +272,10 @@ impl Filmstrip {
         target: Option<&Path>,
     ) {
         self.cancel_drag();
+        self.selection_only = true;
+        if self.selection.as_deref() == Some(source) {
+            self.selection = target.map(Path::to_owned);
+        }
         if self.focus.as_deref() == Some(source)
             && let Some(target) = target
         {
@@ -315,6 +336,7 @@ impl Filmstrip {
     }
 
     pub fn cancel_drag(&mut self) {
+        self.page_target = None;
         self.scroll_target = None;
         self.scroll_time = None;
         self.drag.clear();
@@ -323,6 +345,7 @@ impl Filmstrip {
     }
 
     pub(crate) fn cancel_native_drag(&mut self, context: &Context) -> bool {
+        self.page_target = None;
         self.scroll_target = None;
         self.scroll_time = None;
         self.swipe.clear();
@@ -432,6 +455,7 @@ impl Filmstrip {
         });
         let view = View {
             focus: self.focus.take(),
+            selection: self.selection.take(),
             offset,
         };
         self.suspend_view();
@@ -441,11 +465,17 @@ impl Filmstrip {
     pub fn restore_view(&mut self, view: View) {
         self.suspend_view();
         self.focus = view.focus;
+        self.selection = view.selection;
+        self.indicator = Default::default();
         self.scroll_offset = view.offset;
         self.restore_scroll = true;
     }
 
     pub fn focus_current(&mut self) {
+        self.selection = None;
+        self.selection_only = false;
+        self.indicator = Default::default();
+        self.page_target = None;
         self.restore_scroll = false;
         self.scroll_target = None;
         self.scroll_time = None;
@@ -745,9 +775,14 @@ impl Filmstrip {
         let screen = media_rect.intersect(context.content_rect());
         self.drag.begin(context, snapshot, current, screen, enabled);
         let pointer = context.input(|input| input.pointer.hover_pos());
-        let pointer_moved = pointer != self.pointer_position
+        let pointer_moved = self.window_focused
+            && pointer != self.pointer_position
             && context.input(|input| {
                 input.focused
+                    && !input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::WindowFocused(_)))
                     && !input.pointer.any_down()
                     && input
                         .events
@@ -755,6 +790,7 @@ impl Filmstrip {
                         .any(|event| matches!(event, egui::Event::PointerMoved(_)))
             });
         self.pointer_position = pointer;
+        self.window_focused = context.input(|input| input.focused);
         context
             .layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
@@ -763,12 +799,30 @@ impl Filmstrip {
             .rect_filled(screen, 0.0, Color32::from_black_alpha(191));
         let recenter = current != self.focus.as_deref();
         self.focus = current.map(Path::to_owned);
-        let selected = snapshot.and_then(|snapshot| {
+        if let Some(snapshot) = snapshot {
+            self.layout
+                .prepare(snapshot, &self.previews, &self.gallery_video_uvs);
+        }
+        let selected = current.and_then(|path| self.layout.index(path));
+        let retained = self
+            .selection
+            .as_deref()
+            .and_then(|path| self.layout.index(path));
+        let selection = if recenter || self.focus_requested {
+            selected
+        } else {
+            retained.or(selected)
+        }
+        .or_else(|| {
             snapshot
-                .items
-                .iter()
-                .position(|item| Some(item.path.as_path()) == current)
+                .filter(|folder| !folder.items.is_empty())
+                .map(|_| 0)
         });
+        self.selection =
+            selection.and_then(|index| snapshot.map(|folder| folder.items[index].path.clone()));
+        if recenter {
+            self.indicator = Default::default();
+        }
         let frame = context.cumulative_frame_nr();
         let can_focus =
             enabled && !egui::Popup::is_any_open(context) && context.input(|input| input.focused);
@@ -834,7 +888,7 @@ impl Filmstrip {
                                     snapshot?.items.iter().position(|item| item.path == *path)
                                 })
                         })
-                        .or(selected)
+                        .or(selection)
                 }
                 .unwrap_or(0)
                 .min(count - 1);
@@ -884,9 +938,37 @@ impl Filmstrip {
             self.tab_navigation = Some((frame, target));
             context.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
         }
+        let mut pages = 0;
+        if can_focus && !context.text_edit_focused() {
+            context.input_mut(|input| {
+                input.events.retain(|event| {
+                    if let egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } = event
+                        && *modifiers == egui::Modifiers::NONE
+                    {
+                        match key {
+                            egui::Key::PageUp => pages -= 1,
+                            egui::Key::PageDown => pages += 1,
+                            _ => return true,
+                        }
+                        return false;
+                    }
+                    true
+                })
+            });
+        }
+        if self.page_frame == Some(frame) {
+            pages = 0;
+        } else if pages != 0 {
+            self.page_frame = Some(frame);
+        }
         let snap = recenter || self.focus_requested || relocated_focus.is_some();
         let restore = self.restore_scroll && snapshot.is_some();
-        let was_scrolling = self.scroll_target.is_some();
+        let was_scrolling = self.scroll_target.is_some() || self.page_target.is_some();
         // Keyboard navigation owns selection until it reaches its destination.
         // Fresh pointer movement can take over on a subsequent idle frame.
         let pointer_selection = pointer_moved && !was_scrolling && tab_target.is_none() && !snap;
@@ -902,7 +984,7 @@ impl Filmstrip {
             .flatten();
         let pointer_takeover =
             can_focus && pointer_target.is_some_and(|(_, index)| self.scroll_target != Some(index));
-        if snap || restore || tab_target.is_some() {
+        if snap || restore || tab_target.is_some() || pages != 0 {
             // egui smooths wheels in shared InputState as well as ScrollArea.
             // A reopened view must not inherit that tail, including extra passes.
             self.wheel_reset_frame = Some(frame);
@@ -918,7 +1000,6 @@ impl Filmstrip {
         }
         let wheel_enabled = self.wheel_reset_frame.is_none();
         if snap
-            || !can_focus
             || pointer_takeover
             || context.input(|input| {
                 input.pointer.any_pressed()
@@ -929,11 +1010,13 @@ impl Filmstrip {
             })
         {
             self.scroll_target = None;
+            self.page_target = None;
         }
         if let Some(target) = tab_target {
+            self.page_target = None;
             self.scroll_target = Some(target);
         }
-        let focus_target = self
+        let mut focus_target = self
             .scroll_target
             .or(relocated_focus)
             .or_else(|| snap.then_some(selected).flatten())
@@ -942,15 +1025,29 @@ impl Filmstrip {
                     .then_some(pointer_target.map(|(_, index)| index))
                     .flatten()
             });
-        if let Some(snapshot) = snapshot {
-            self.layout
-                .prepare(snapshot, &self.previews, &self.gallery_video_uvs);
+        if pages != 0 && !snap {
+            let page = (screen.width() - 16.0).max(1.0);
+            let maximum = self.layout.width(page) - page;
+            self.page_target = Some(
+                (self.page_target.unwrap_or(self.scroll_offset) + pages as f32 * page)
+                    .clamp(0.0, maximum),
+            );
+            self.scroll_target = None;
+            focus_target = None;
+        }
+        // Restore keyboard ownership after a background click without recentering.
+        if focus_target.is_none()
+            && can_focus
+            && !self.selection_only
+            && context.memory(|memory| memory.focused().is_none())
+        {
+            focus_target = selection;
         }
         let time = context.input(|input| input.time);
         let mut elapsed = self
             .scroll_time
             .map_or(0.0, |previous| (time - previous).max(0.0));
-        if tab_target.is_some() && !was_scrolling {
+        if (tab_target.is_some() || pages != 0) && !was_scrolling {
             // An input after a long idle starts an animation, not a large jump.
             elapsed = elapsed.min(1.0 / 60.0);
         }
@@ -960,8 +1057,11 @@ impl Filmstrip {
                 .layout
                 .center_offset(focus_target.or(selected).unwrap_or(0));
             self.scroll_target = None;
-        } else if let Some(target) = self.scroll_target {
-            let destination = self.layout.center_offset(target);
+        } else if let Some(destination) = self
+            .scroll_target
+            .map(|target| self.layout.center_offset(target))
+            .or(self.page_target)
+        {
             self.scroll_offset +=
                 (destination - self.scroll_offset) * (1.0 - (-elapsed / 0.055).exp()) as f32;
             let tolerance =
@@ -969,6 +1069,7 @@ impl Filmstrip {
             if (destination - self.scroll_offset).abs() <= tolerance {
                 self.scroll_offset = destination;
                 self.scroll_target = None;
+                self.page_target = None;
             } else {
                 context.request_repaint();
             }
@@ -1040,7 +1141,7 @@ impl Filmstrip {
                 );
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;
-                if snap || restore {
+                if snap || restore || pages != 0 {
                     // Retire egui's pending reveal target, wheel velocity and drag
                     // state before the first presentation of a reopened strip.
                     let mut state = egui::scroll_area::State::default();
@@ -1078,6 +1179,7 @@ impl Filmstrip {
                     let range = self.layout.visible(viewport);
                     let mut indices: Vec<_> = range.clone().collect();
                     if let Some(target) = focus_target
+                        .or(selection)
                         .filter(|index| *index < snapshot.items.len() && !range.contains(index))
                     {
                         // Materialize the keyboard target while it approaches the
@@ -1088,13 +1190,23 @@ impl Filmstrip {
                     let row_height = ui.fonts_mut(|fonts| {
                         fonts.row_height(&FontId::proportional(crate::hover_help::TEXT_SIZE))
                     });
-                    // Reserve four filename rows even before focus changes. Compact
-                    // windows shift the whole strip once, never individual thumbnails.
+                    // Reserve a stable caption band independent of aspect or filename.
+                    // Compact windows elide sooner so the position above stays visible.
+                    let caption_rows = ((ui.clip_rect().height()
+                        - layout::DIAMETER
+                        - 2.0 * indicator::GAP
+                        - 2.0 * indicator::TEXT_GAP
+                        - row_height
+                        - 4.0)
+                        / row_height)
+                        .floor()
+                        .clamp(1.0, 4.0) as usize;
                     let center_y = (origin.y + viewport.height() * 0.5).min(
                         ui.clip_rect().bottom()
                             - layout::DIAMETER * 0.5
-                            - 12.0
-                            - row_height * 4.0
+                            - indicator::GAP
+                            - indicator::TEXT_GAP
+                            - row_height * caption_rows as f32
                             - 2.0,
                     );
                     let offset_y = center_y - (origin.y + viewport.height() * 0.5);
@@ -1133,7 +1245,7 @@ impl Filmstrip {
                     if let Some(id) = requested_target {
                         context.memory_mut(|memory| memory.request_focus(id));
                     }
-                    let zoom_target = context.memory(|memory| memory.focused());
+                    let mut selected_index = selection;
                     let mut cards = Vec::new();
                     let mut focused_card = None;
                     self.card_paths.clear();
@@ -1148,19 +1260,7 @@ impl Filmstrip {
                         let presented_rect = context
                             .read_response(id)
                             .map_or(base, |response| response.rect);
-                        let zoomed = ui.is_enabled() && zoom_target == Some(id);
-                        // Only the selected thumbnail may be enlarged. Retire the
-                        // previous owner immediately instead of overlapping fades.
-                        let hover = context.animate_bool_with_time_and_easing(
-                            id.with("thumbnail-hover"),
-                            zoomed,
-                            if zoomed { 0.32 } else { 0.0 },
-                            egui::emath::easing::cubic_out,
-                        );
-                        let rect = Rect::from_center_size(
-                            base.center(),
-                            base.size() * (1.0 + 0.10 * hover),
-                        );
+                        let rect = base;
                         let response = ui
                             .interact(
                                 rect,
@@ -1188,7 +1288,10 @@ impl Filmstrip {
                         }
                         crate::tab_focus::observe(&response, ("filmstrip-item", &item.path));
                         if response.has_focus() {
+                            self.selection_only = false;
                             focused_card = Some(response.id);
+                            selected_index = Some(index);
+                            self.selection = Some(item.path.clone());
                             // Arrow navigation resolves after layout, so gained_focus alone
                             // cannot observe every transition on the following frame.
                             if self.focused_card != focused_card
@@ -1220,7 +1323,9 @@ impl Filmstrip {
                         });
                         cards.push((index, response));
                     }
-                    self.focused_card = focused_card;
+                    if focused_card.is_some() {
+                        self.focused_card = focused_card;
+                    }
                     for (index, response) in cards {
                         let item = &snapshot.items[index];
                         let deleted = self.held_deleted.as_ref() == Some(&item.path);
@@ -1294,27 +1399,33 @@ impl Filmstrip {
                         if !deleted && response.middle_clicked() {
                             actions.push(UiAction::OpenFilmstripMedia(item.path.clone(), true));
                         }
-                        if response.has_focus() {
-                            let bounds = Rect::from_center_size(
-                                card_rect(index).center(),
-                                Vec2::splat(layout::DIAMETER),
-                            );
+                        response.help_text(item.path.display().to_string());
+                    }
+                    if let Some(index) = selected_index {
+                        let bounds = self.indicator.paint(ui, card_rect(index), origin);
+                        for (caption, below) in [
+                            (format!("{} / {}", index + 1, snapshot.items.len()), false),
+                            (display_name(&snapshot.items[index].path), true),
+                        ] {
                             let mut job = egui::text::LayoutJob::simple(
-                                display_name(&item.path),
+                                caption,
                                 FontId::proportional(crate::hover_help::TEXT_SIZE),
                                 crate::chrome::FOREGROUND,
-                                bounds.width(),
+                                indicator::TEXT_WIDTH,
                             );
-                            job.wrap.max_rows = 4;
-                            job.halign = egui::Align::Center;
+                            job.wrap.max_rows = if below { caption_rows } else { 1 };
                             let text = ui.painter().layout_job(job);
+                            let y = if below {
+                                bounds.bottom() + indicator::TEXT_GAP
+                            } else {
+                                bounds.top() - indicator::TEXT_GAP - text.size().y
+                            };
                             ui.painter().galley(
-                                egui::pos2(bounds.center().x, card_rect(index).bottom() + 12.0),
+                                egui::pos2(bounds.left(), y),
                                 text,
                                 crate::chrome::FOREGROUND,
                             );
                         }
-                        response.help_text(item.path.display().to_string());
                     }
                 });
                 self.scroll_offset = output.state.offset.x;
@@ -4401,10 +4512,10 @@ mod tests {
                             .all(|section| section.format.font_id.size == 12.0)
                     );
                     assert!(
-                        (title.pos.x - (bounds.x0 + bounds.x1) as f32 * 0.5).abs() <= 1.0 / density
+                        (title.pos.x - bounds.x0 as f32 + indicator::GAP).abs() <= 1.0 / density
                     );
-                    assert_eq!(title.galley.job.halign, egui::Align::Center);
-                    assert_eq!(title.galley.job.wrap.max_width, layout::DIAMETER);
+                    assert_eq!(title.galley.job.halign, egui::Align::Min);
+                    assert_eq!(title.galley.job.wrap.max_width, indicator::TEXT_WIDTH);
                     assert!(
                         title
                             .galley
@@ -4417,7 +4528,8 @@ mod tests {
                         (title.pos.y
                             - (bounds.y0 + bounds.y1) as f32 * 0.5
                             - layout::size(egui::vec2(3.0, 2.0)).y * 0.5
-                            - 12.0)
+                            - indicator::GAP
+                            - indicator::TEXT_GAP)
                             .abs()
                             <= 1.0 / density
                     );
@@ -4728,8 +4840,8 @@ mod tests {
                         );
                         assert_eq!(
                             text.iter().any(|text| text.contains("fixture.png")),
-                            mode == 1,
-                            "only seek retains captions without card focus: mode {mode}"
+                            mode <= 1,
+                            "Filmstrip retains one selection; seek retains its caption: mode {mode}"
                         );
                         assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
                         assert_eq!(output.pixels_per_point, density);

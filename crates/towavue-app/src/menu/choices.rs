@@ -263,7 +263,8 @@ pub(super) fn submenu(
                 for (id, label) in rows {
                     let was_selected = *label == selected;
                     let mut checked = was_selected;
-                    let response = ui.checkbox(&mut checked, text(ui.ctx(), *label));
+                    let response =
+                        crate::chrome::menu_checkbox(ui, &mut checked, text(ui.ctx(), *label));
                     items.push(response.id);
                     if crate::logo_menu::drag::clicked(&response) {
                         if !toggle || !was_selected {

@@ -1160,7 +1160,7 @@ fn first_frame_trial(
                     let mut raw = input(vec![]);
                     // Settle pre-existing chrome fades before opening the new overlay.
                     // Freeze animation time after settling chrome: this control isolates
-                    // first-frame layout/upload from the intentional focus zoom.
+                    // first-frame layout/upload from selection interpolation.
                     raw.time = Some(if frame_number >= 3 {
                         1.0
                     } else {
@@ -1213,6 +1213,17 @@ fn first_frame_trial(
                     app.dispatch(CommandId::ToggleFilmstrip);
                     assert!(app.filmstrip_open);
                     let (first, first_pixels) = draw(&mut app);
+                    if let Some(directory) = std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR") {
+                        std::fs::write(
+                            PathBuf::from(directory).join(format!(
+                                "filmstrip-{}x{}.rgba",
+                                (960.0 * density) as usize,
+                                (576.0 * density) as usize,
+                            )),
+                            &first_pixels,
+                        )
+                        .expect("Filmstrip GPU readback");
+                    }
                     let previews = meshes(&first, preview.id());
                     assert_eq!(
                         previews.len(),
@@ -1696,6 +1707,16 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             input(vec![egui::Event::PointerMoved(rect.center())]),
         );
     }
+    for _ in 0..40 {
+        frame(
+            &mut strip,
+            &context,
+            &snapshot,
+            current,
+            true,
+            input(vec![]),
+        );
+    }
     let output = frame(
         &mut strip,
         &context,
@@ -1766,14 +1787,18 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     assert_eq!(title.galley.rows.len(), 4);
     assert!(title.galley.elided);
     let thumbnail = card(&output, &name);
-    assert!((title.pos.x - thumbnail.center().x).abs() <= 1.0 / density);
+    assert!((title.pos.x - thumbnail.left() + indicator::GAP).abs() <= 1.0 / density);
     assert!(
-        (title.pos.y - thumbnail.center().y - layout::size(egui::vec2(3.0, 2.0)).y * 0.5 - 12.0)
+        (title.pos.y
+            - thumbnail.center().y
+            - layout::size(egui::vec2(3.0, 2.0)).y * 0.5
+            - indicator::GAP
+            - indicator::TEXT_GAP)
             .abs()
             <= 1.0 / density
     );
-    assert_eq!(title.galley.job.halign, egui::Align::Center);
-    assert_eq!(title.galley.job.wrap.max_width, layout::DIAMETER);
+    assert_eq!(title.galley.job.halign, egui::Align::Min);
+    assert_eq!(title.galley.job.wrap.max_width, indicator::TEXT_WIDTH);
     let third_id = output
         .platform_output
         .accesskit_update
@@ -1902,6 +1927,15 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     .0;
     assert!(outlines(&reopened).is_empty());
     assert!(card(&reopened, "source.png").is_positive());
+    strip.focus_current();
+    frame(
+        &mut strip,
+        &context,
+        &snapshot,
+        current,
+        true,
+        input(vec![]),
+    );
     // Batch navigation with activation, including wrapping into virtualized cards.
     for (shift, target) in [(false, 1), (false, 2), (false, 0), (true, 2), (true, 1)] {
         let mut raw = input(vec![

@@ -115,6 +115,36 @@ fn held_direction_opens_immediately_and_tracks_the_original_press() {
             }
             let output = frame(&mut app, size, vec![]);
             row_center(&output, label);
+            let drag = context
+                .data(|data| data.get_temp::<State>(state_id()))
+                .expect("state")
+                .drag
+                .expect("drag");
+            let tooltip = context
+                .read_response(drag.id.with("drag-section-help"))
+                .expect("drag tooltip")
+                .rect;
+            let tree = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree");
+            let first_tab = tree
+                .nodes
+                .iter()
+                .filter(|(_, node)| {
+                    matches!(node.label(), Some("Gallery tab" | "source.png"))
+                        && node.role() == egui::accesskit::Role::Button
+                })
+                .filter_map(|(_, node)| node.bounds())
+                .min_by(|a, b| a.x0.total_cmp(&b.x0))
+                .expect("first tab bounds");
+            assert!(
+                (tooltip.left() - first_tab.x0 as f32).abs() <= 1.0 / density,
+                "tooltip left {} vs tab {}",
+                tooltip.left(),
+                first_tab.x0
+            );
             let name = localization::text(&context, section.key());
             assert!(
                 output.shapes.iter().any(|shape| matches!(&shape.shape,
@@ -1344,5 +1374,71 @@ fn keyboard_logo_entry_restores_focus_after_escape() {
             .accesskit_update
             .expect("returned tree");
         assert_eq!(tree.focus, logo);
+    }
+}
+
+#[test]
+fn root_menu_highlights_keep_both_corners_inside_equal_padding() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::root_menu_highlights_keep_both_corners_inside_equal_padding",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let (mut app, _) = setup(&root);
+        app.ui_context
+            .as_ref()
+            .expect("test value")
+            .set_pixels_per_point(density);
+        app.ui_context
+            .as_ref()
+            .expect("context")
+            .global_style_mut(|style| style.animation_time = 0.0);
+        let size = egui::vec2(640.0, 480.0);
+        let tree = frame(&mut app, size, vec![])
+            .platform_output
+            .accesskit_update
+            .expect("test value");
+        frame(
+            &mut app,
+            size,
+            vec![access(node(&tree, "towavue menu"), None)],
+        );
+        for _ in 0..4 {
+            frame(&mut app, size, vec![]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        let point = row_center(&output, "File");
+        for _ in 0..2 {
+            frame(&mut app, size, vec![egui::Event::PointerMoved(point)]);
+        }
+        let output = frame(&mut app, size, vec![]);
+        let popup = popup_bounds(&output)[0];
+        let highlight = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect)
+                    if rect.fill == chrome::HOVER && rect.rect.contains(point) =>
+                {
+                    Some((shape.clip_rect, rect))
+                }
+                _ => None,
+            })
+            .expect("highlight");
+        assert!(
+            highlight.0.contains_rect(highlight.1.rect),
+            "unclipped rounded row: {highlight:?}"
+        );
+        let left = highlight.1.rect.left() - popup.left();
+        let right = popup.right() - highlight.1.rect.right();
+        assert!(
+            (left - right).abs() <= 1.0 / density,
+            "padding left={left} right={right}"
+        );
+        assert!(
+            (left - 5.0).abs() <= 1.0 / density,
+            "four-point padding plus one-point frame stroke: left={left}, right={right}"
+        );
     }
 }

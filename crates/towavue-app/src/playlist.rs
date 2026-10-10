@@ -245,7 +245,7 @@ impl Playlist {
             }
             let font = egui::FontId::proportional(14.0);
             let measure = |text: String| ui.painter().layout_no_wrap(text, font.clone(), egui::Color32::WHITE).size().x;
-            let number_width = measure(format!("{}.", items.len()));
+            let number_width = measure(items.len().to_string());
             let duration_width = self.durations.values().flatten()
                 .max()
                 .map(|duration| measure(crate::format_time(crate::media_time(*duration))))
@@ -259,7 +259,7 @@ impl Playlist {
                         let selected = current == Some(item.path.as_path());
                         let name = crate::display_name(&item.path);
                         let text = RichText::new(&name).size(14.0);
-                        let number = RichText::new(format!("{}.", index + 1)).size(14.0);
+                        let number = RichText::new((index + 1).to_string()).size(14.0);
                         let duration = self
                             .durations
                             .get(&item.path)
@@ -295,7 +295,7 @@ impl Playlist {
                                             f32::INFINITY, egui::TextStyle::Button,
                                         );
                                         let padding = ui.spacing().button_padding.x;
-                                        let gap = ui.spacing().item_spacing.x;
+                                        let gap = 12.0;
                                         let number = egui::WidgetText::from(number).into_galley(
                                             ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Button,
                                         );
@@ -779,7 +779,7 @@ mod tests {
                 .collect();
             let numbers: Vec<_> = painted
                 .iter()
-                .filter(|text| text.galley.text().ends_with('.'))
+                .filter(|text| text.galley.text().parse::<usize>().is_ok())
                 .collect();
             let names: Vec<_> = painted
                 .iter()
@@ -789,13 +789,13 @@ mod tests {
                 .iter()
                 .filter(|text| text.galley.text() == "02:03")
                 .collect();
-            assert!(numbers.iter().any(|text| text.galley.text() == "10."));
+            assert!(numbers.iter().any(|text| text.galley.text() == "10"));
             assert_eq!(numbers.len(), names.len());
             assert_eq!(numbers.len(), durations.len());
             let right = numbers[0].pos.x + numbers[0].galley.size().x;
             for ((number, name), duration) in numbers.iter().zip(names).zip(&durations) {
                 assert!((number.pos.x + number.galley.size().x - right).abs() <= 1.0 / density);
-                assert_eq!(name.pos.x, right + 8.0);
+                assert_eq!(name.pos.x, right + 12.0);
                 assert!(
                     (duration.pos.x + duration.galley.size().x
                         - durations[0].pos.x
@@ -1747,11 +1747,7 @@ mod tests {
                 // Navigation assertions inspect names and known durations, not number cells.
                 Shape::Text(text)
                     if text.galley.text() != "—"
-                        && !text
-                            .galley
-                            .text()
-                            .strip_suffix('.')
-                            .is_some_and(|number| number.parse::<usize>().is_ok()) =>
+                        && !text.galley.text().parse::<usize>().is_ok() =>
                 {
                     result.push(text)
                 }

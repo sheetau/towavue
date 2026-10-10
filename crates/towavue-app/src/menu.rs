@@ -573,7 +573,8 @@ fn language_menu(
                     (Language::Japanese, Text::LanguageJapanese),
                 ] {
                     let mut selected = data.language.next == language;
-                    let response = ui.checkbox(&mut selected, text(ui.ctx(), label));
+                    let response =
+                        crate::chrome::menu_checkbox(ui, &mut selected, text(ui.ctx(), label));
                     items.push(response.id);
                     if crate::logo_menu::drag::clicked(&response) {
                         data.language_action = Some(language);

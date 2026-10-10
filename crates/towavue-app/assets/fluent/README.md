@@ -13,6 +13,10 @@ Arrow Right/Window New/Prohibited serve native drag badges. Compound filled outl
 are rasterized with their original winding and without adding a stroke.
 The UI uses a 16-point box, taskbar buttons 32 points and badge symbols 17 points.
 The existing color tints, taskbar contrast edge and badge decoration are retained.
+Play's upstream optical alignment is translated 1.5 source units left at rasterization
+to center its silhouette in our compact buttons, consistently across UI and taskbar
+sizes. Source SVGs and generated paths remain unchanged (upstream discussion:
+[Play alignment](https://github.com/microsoft/fluentui-system-icons/issues/137)).
 Custom logo and reading artwork, font-based Codicons and Chromium cursors remain.
 
 Run `python scripts/generate-fluent-paths.py` to regenerate the Rust paths, or

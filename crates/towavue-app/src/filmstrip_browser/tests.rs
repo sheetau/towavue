@@ -1,0 +1,610 @@
+use super::*;
+use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
+
+fn snapshot(folder: &Path) -> FolderSnapshot {
+    FolderSnapshot {
+        folder_identity: ShellIdentity::new(vec![42]),
+        folder_path: folder.to_owned(),
+        items: ["z10.jpg", "alpha.mp4", "z2.jpg", "sound.wav"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| FolderMediaItem {
+                identity: ShellIdentity::new(vec![index as u8]),
+                path: folder.join(name),
+                kind: MediaKind::from_path(Path::new(name)).expect("kind"),
+            })
+            .collect(),
+        sort_columns: Vec::new(),
+        source: FolderSnapshotSource::PersistedShellView,
+        generation: 7,
+        captured_at: SystemTime::UNIX_EPOCH,
+    }
+}
+
+fn context(density: f32) -> Context {
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    context.set_pixels_per_point(density);
+    context.global_style_mut(|style| {
+        chrome::style(style);
+        style.animation_time = 0.0;
+    });
+    context
+}
+
+fn frame(
+    context: &Context,
+    browser: &mut Browser,
+    size: Vec2,
+    events: Vec<egui::Event>,
+) -> (egui::FullOutput, Option<PathBuf>) {
+    let mut target = None;
+    let output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            target = browser
+                .show(ui.ctx(), ui.ctx().content_rect(), None, true)
+                .or(target.take());
+        },
+    );
+    (output, target)
+}
+
+fn node(output: &egui::FullOutput, label: &str) -> Rect {
+    let (_, node) = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("tree")
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some(label))
+        .unwrap_or_else(|| panic!("node {label}"));
+    let bounds = node.bounds().expect("bounds");
+    Rect::from_min_max(
+        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+    )
+}
+
+fn key(key: egui::Key) -> egui::Event {
+    egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+fn click(
+    context: &Context,
+    browser: &mut Browser,
+    size: Vec2,
+    pos: egui::Pos2,
+) -> (egui::FullOutput, Option<PathBuf>) {
+    frame(
+        context,
+        browser,
+        size,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    frame(
+        context,
+        browser,
+        size,
+        vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    )
+}
+
+#[test]
+fn browser_projection_preserves_shell_identity_order_and_caches_between_paints() {
+    let folder = Path::new("C:/pictures/alpha");
+    let source = snapshot(folder);
+    let mut browser = Browser::default();
+    browser.sync_folder(folder, &context(1.0));
+    browser.query = "z".into();
+    browser.filter = Some(MediaKind::Image);
+    let (projected, changed) = browser.project(Some(&source));
+    assert!(changed);
+    let projected = projected.expect("projection");
+    assert_eq!(
+        projected.items,
+        [source.items[0].clone(), source.items[2].clone()]
+    );
+    assert_eq!(projected.folder_identity, source.folder_identity);
+    assert!(Arc::ptr_eq(
+        &projected,
+        &browser.project(Some(&source)).0.expect("cached")
+    ));
+    browser.query = "alpha".into();
+    assert!(
+        browser
+            .project(Some(&source))
+            .0
+            .expect("filename-only search")
+            .items
+            .is_empty()
+    );
+    assert_eq!(source.items.len(), 4);
+    browser.sync_folder(Path::new("C:/other"), &context(1.0));
+    assert!(browser.query.is_empty());
+    assert_eq!(browser.filter, Some(MediaKind::Image));
+    assert!(
+        browser.worker.is_none(),
+        "projection never creates a directory worker"
+    );
+}
+
+#[test]
+fn browser_header_matches_gallery_geometry_and_address_selects_all_then_commits_or_cancels() {
+    for density in [1.0, 1.25, 2.0] {
+        for width in [240.0, 480.0, 960.0] {
+            let context = context(density);
+            let mut browser = Browser::default();
+            browser.sync_folder(
+                Path::new("C:/very-long-ancestor/another-parent/Pictures"),
+                &context,
+            );
+            let size = egui::vec2(width, 400.0);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame(&context, &mut browser, size, vec![]).0;
+            }
+            let inputs: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == BACKGROUND => Some(rect.rect),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(inputs.len(), 2);
+            assert!((inputs[0].width() / inputs[1].width() - 2.5).abs() < 0.01);
+            assert_eq!(inputs[0].top(), 8.0);
+            let expected_inset =
+                crate::filmstrip::gallery_side_inset(width).min(((width - 284.0) * 0.5).max(8.0));
+            assert!((inputs[0].left() - expected_inset).abs() < 0.01);
+            assert!(
+                inputs[1].width() > 2.0 * (chrome::SEARCH_BUTTON_SIZE + 2.0),
+                "compact search retains an editable text region"
+            );
+            assert!(
+                browser.worker.is_none(),
+                "opening Filmstrip does no filesystem work"
+            );
+            click(
+                &context,
+                &mut browser,
+                size,
+                inputs[0].right_center() - egui::vec2(10.0, 0.0),
+            );
+            for _ in 0..3 {
+                frame(&context, &mut browser, size, vec![]);
+            }
+            assert!(browser.editing);
+            frame(
+                &context,
+                &mut browser,
+                size,
+                vec![egui::Event::Text("C:/new-place".into())],
+            );
+            assert_eq!(
+                browser.address, "C:/new-place",
+                "whole address selected at {width}/{density}"
+            );
+            let target = frame(&context, &mut browser, size, vec![key(egui::Key::Enter)]).1;
+            assert_eq!(target, Some(PathBuf::from("C:/new-place")));
+            assert!(!browser.editing);
+            click(
+                &context,
+                &mut browser,
+                size,
+                inputs[0].right_center() - egui::vec2(10.0, 0.0),
+            );
+            for _ in 0..3 {
+                frame(&context, &mut browser, size, vec![]);
+            }
+            assert!(
+                frame(&context, &mut browser, size, vec![key(egui::Key::Escape)])
+                    .1
+                    .is_none()
+            );
+            assert!(!browser.editing);
+        }
+    }
+}
+
+#[test]
+fn browser_lazy_cascade_reaches_descendants_without_opening_empty_parent() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip_browser::tests::browser_lazy_cascade_reaches_descendants_without_opening_empty_parent",
+    ) else {
+        return;
+    };
+    std::fs::create_dir_all(root.join("empty/deep")).expect("nested folders");
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    browser.sync_folder(&root, &context);
+    let size = egui::vec2(1160.0, 600.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let root_arrow = node(
+        &output,
+        &format!(
+            "Subfolders: {}",
+            crate::folder_navigation::folder_name(&root)
+        ),
+    );
+    assert!(
+        click(&context, &mut browser, size, root_arrow.center())
+            .1
+            .is_none()
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        output = frame(&context, &mut browser, size, vec![]).0;
+        if browser.cache.iter().any(|listing| listing.path == root) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "directory listing");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let arrow = node(&output, "Subfolders: empty");
+    assert!(
+        click(&context, &mut browser, size, arrow.center())
+            .1
+            .is_none(),
+        "arrow explores without replacing media"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        output = frame(&context, &mut browser, size, vec![]).0;
+        if browser
+            .cache
+            .iter()
+            .any(|listing| listing.path == root.join("empty"))
+        {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "nested listing");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let deep = node(&output, "deep");
+    assert_eq!(
+        click(&context, &mut browser, size, deep.center()).1,
+        Some(root.join("empty/deep"))
+    );
+    browser.hide(Some(&context));
+    assert!(browser.cache.is_empty());
+    assert!(
+        browser
+            .worker
+            .as_ref()
+            .expect("lazy worker")
+            .result()
+            .is_none()
+    );
+}
+
+#[test]
+fn browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actions() {
+    use crate::*;
+    let Some(root) = tests::isolated_test_root(
+        "filmstrip_browser::tests::browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actions",
+    ) else {
+        return;
+    };
+    let a = root.join("a/first.bmp");
+    let b = root.join("b/second.bmp");
+    for path in [&a, &b] {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("folder");
+        tab_transfer::tests::bitmap(path);
+    }
+    std::fs::create_dir(root.join("empty")).expect("empty");
+    let mut app = Application::new(None, |_| {}).expect("app");
+    app.ui_context = Some(context(1.0));
+    let tab =
+        tab_transfer::tests::install(&mut app, a.clone(), tab_transfer::tests::decoded(false));
+    app.filmstrip_open = true;
+    let settle = |app: &mut Application<_>| {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while app.pending_folder.is_some() {
+            app.finish_folder_load();
+            assert!(Instant::now() < deadline, "folder delivery");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    };
+    let pending_before = app
+        .pending_folder
+        .as_ref()
+        .map(|(generation, _)| *generation);
+    app.handle_ui_action(UiAction::FilmstripFolder(
+        Some(tab),
+        app.media_generation.wrapping_sub(1),
+        root.join("b"),
+    ));
+    assert_eq!(
+        app.pending_folder
+            .as_ref()
+            .map(|(generation, _)| *generation),
+        pending_before
+    );
+    app.handle_ui_action(UiAction::FilmstripFolder(
+        Some(tab),
+        app.media_generation,
+        root.join("empty"),
+    ));
+    settle(&mut app);
+    assert_eq!(app.path.as_ref(), Some(&a));
+    assert!(app.filmstrip_open);
+    app.push_visual_edit(EditOperation::RotateClockwise);
+    app.handle_ui_action(UiAction::FilmstripFolder(
+        Some(tab),
+        app.media_generation,
+        root.join("b"),
+    ));
+    settle(&mut app);
+    assert!(matches!(
+        app.pending_guard,
+        Some(GuardedAction::NavigateFromFolder(..))
+    ));
+    app.resolve_guard(GuardDecision::Cancel);
+    assert_eq!(app.path.as_ref(), Some(&a));
+    app.handle_ui_action(UiAction::FilmstripFolder(
+        Some(tab),
+        app.media_generation,
+        root.join("b"),
+    ));
+    settle(&mut app);
+    app.resolve_guard(GuardDecision::Discard);
+    assert_eq!(app.path.as_ref(), Some(&b));
+    assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(app.filmstrip_open);
+}
+
+#[test]
+#[ignore = "requires hidden hardware D3D11; optional Filmstrip browser readbacks"]
+fn browser_header_reaches_gpu_at_supported_densities() {
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(_root) = crate::tests::isolated_test_root(
+        "filmstrip_browser::tests::browser_header_reaches_gpu_at_supported_densities",
+    ) else {
+        return;
+    };
+    struct Trial {
+        complete: bool,
+    }
+    impl winit::application::ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let window = event_loop
+                .create_window(winit::window::Window::default_attributes().with_visible(false))
+                .expect("hidden window");
+            let mut renderer = towavue_runtime_windows::FrameRenderer::new(&window).expect("D3D11");
+            for density in [1.0, 1.25, 2.0] {
+                for width in [480.0, 960.0] {
+                    let context = context(density);
+                    let size = egui::vec2(width, 220.0);
+                    let pixels_w = (size.x * density) as u32;
+                    let pixels_h = (size.y * density) as u32;
+                    renderer
+                        .resize_surface(pixels_w, pixels_h)
+                        .expect("surface");
+                    let mut browser = Browser::default();
+                    browser
+                        .sync_folder(Path::new("C:/Users/Viewer/Pictures/Travel 2026"), &context);
+                    for mode in 0..5 {
+                        browser.editing = mode == 1;
+                        browser.address = browser.folder.display().to_string();
+                        browser.select_address = mode == 1;
+                        browser.query = if mode == 2 {
+                            "mountain".into()
+                        } else {
+                            String::new()
+                        };
+                        browser.filter = (mode == 2).then_some(MediaKind::Image);
+                        let initial =
+                            frame(&context, &mut browser, size, vec![egui::Event::PointerGone]).0;
+                        let hover = match mode {
+                            3 => Some(node(&initial, "Travel 2026").center() / density),
+                            4 => Some(node(&initial, "Subfolders: Travel 2026").center() / density),
+                            _ => None,
+                        };
+                        renderer
+                            .clear([0.18, 0.25, 0.32, 1.0])
+                            .expect("initial background");
+                        renderer
+                            .render_ui(&context, initial)
+                            .expect("initial UI textures");
+                        for pass in 0..5 {
+                            let output = frame(
+                                &context,
+                                &mut browser,
+                                size,
+                                hover
+                                    .map(|pos| vec![egui::Event::PointerMoved(pos)])
+                                    .unwrap_or_default(),
+                            )
+                            .0;
+                            renderer.clear([0.18, 0.25, 0.32, 1.0]).expect("background");
+                            renderer.render_ui(&context, output).expect("UI");
+                            if pass == 4 {
+                                let pixels =
+                                    renderer.verification_surface_rgba().expect("readback");
+                                assert_eq!(pixels.len(), (pixels_w * pixels_h * 4) as usize);
+                                if let Some(directory) =
+                                    std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
+                                {
+                                    std::fs::write(
+                                        PathBuf::from(directory).join(format!(
+                                            "browser-{mode}-{pixels_w}x{pixels_h}.rgba"
+                                        )),
+                                        pixels,
+                                    )
+                                    .expect("readback file");
+                                }
+                            }
+                            renderer.present_surface().expect("Present");
+                        }
+                    }
+                }
+            }
+            self.complete = true;
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _: &winit::event_loop::ActiveEventLoop,
+            _: winit::window::WindowId,
+            _: winit::event::WindowEvent,
+        ) {
+        }
+    }
+    let mut trial = Trial { complete: false };
+    let mut builder = winit::event_loop::EventLoop::builder();
+    builder.with_any_thread(true);
+    builder
+        .build()
+        .expect("event loop")
+        .run_app(&mut trial)
+        .expect("trial");
+    assert!(trial.complete);
+}
+
+#[test]
+fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
+    use crate::*;
+    let Some(root) = tests::isolated_test_root(
+        "filmstrip_browser::tests::browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths",
+    ) else {
+        return;
+    };
+    let a = root.join("z10.bmp");
+    let b = root.join("z2.bmp");
+    tab_transfer::tests::bitmap(&a);
+    tab_transfer::tests::bitmap(&b);
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = context(1.0);
+    app.ui_context = Some(context.clone());
+    let tab =
+        tab_transfer::tests::install(&mut app, a.clone(), tab_transfer::tests::decoded(false));
+    app.filmstrip_open = true;
+    let mut source = snapshot(&root);
+    source.items[0].path = a.clone();
+    source.items[2].path = b.clone();
+    app.folder_snapshot = Some(source.clone());
+    let size = egui::vec2(960.0, 400.0);
+    let draw = |app: &mut Application<_>, events| {
+        let mut actions = Vec::new();
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| app.draw_filmstrip(ui.ctx(), ui.ctx().content_rect(), &mut actions),
+        );
+        assert!(actions.is_empty());
+        output
+    };
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = draw(&mut app, vec![]);
+    }
+    let search = node(
+        &output,
+        &format!("Search {}", folder_navigation::folder_name(&root)),
+    );
+    let pos = search.center();
+    for pressed in [true, false] {
+        draw(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    draw(&mut app, vec![egui::Event::Text("z2".into())]);
+    assert_eq!(app.filmstrip_browser.query, "z2");
+    assert!(
+        context.text_edit_focused(),
+        "filtering must not steal editor focus"
+    );
+    assert_eq!(app.path.as_ref(), Some(&a));
+    assert_eq!(
+        app.filmstrip_browser
+            .snapshot()
+            .expect("projection")
+            .items
+            .iter()
+            .map(|item| &item.path)
+            .collect::<Vec<_>>(),
+        vec![&b]
+    );
+    draw(&mut app, vec![key(egui::Key::Escape)]);
+    assert!(app.filmstrip_browser.query.is_empty());
+    assert!(app.filmstrip_open);
+    app.filmstrip_browser.query = "z".into();
+    app.filmstrip_browser.filter = Some(MediaKind::Image);
+    draw(&mut app, vec![]);
+    context.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    assert!(app.navigate_filmstrip_tab(&"Tab".parse().expect("key")));
+    assert_eq!(app.path.as_ref(), Some(&b));
+    assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(app.filmstrip_open);
+    app.folder_snapshot = Some(source.clone());
+    app.filmstrip_browser.query = "z2".into();
+    draw(&mut app, vec![]);
+    let generation = app.media_generation;
+    assert!(app.navigate_filmstrip_tab(&"Tab".parse().expect("key")));
+    assert_eq!(
+        app.media_generation, generation,
+        "a single filtered item must not reload"
+    );
+    app.filmstrip_browser.query = "no-match".into();
+    app.folder_snapshot = Some(source);
+    draw(&mut app, vec![]);
+    assert!(
+        app.filmstrip_browser
+            .snapshot()
+            .expect("empty projection")
+            .items
+            .is_empty()
+    );
+    assert!(app.navigate_filmstrip_tab(&"Tab".parse().expect("key")));
+    assert_eq!(app.path.as_ref(), Some(&b));
+}

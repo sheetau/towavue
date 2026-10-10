@@ -193,6 +193,18 @@ pub struct Filmstrip {
 }
 
 impl Filmstrip {
+    pub fn filter_changed(&mut self) {
+        self.cancel_drag();
+        self.layout = Default::default();
+        self.scroll_offset = 0.0;
+        self.scroll_target = None;
+        self.page_target = None;
+        self.tab_navigation = None;
+        self.card_paths.clear();
+        self.selection = None;
+        self.indicator = Default::default();
+    }
+
     pub fn is_idle(&self) -> bool {
         self.loader.is_idle()
     }
@@ -1105,6 +1117,17 @@ impl Filmstrip {
                     );
                     return;
                 };
+                if snapshot.items.is_empty() {
+                    self.card_paths.clear();
+                    ui.painter().text(
+                        screen.center(),
+                        Align2::CENTER_CENTER,
+                        localization::text(context, Text::NoMatchingFiles),
+                        FontId::proportional(14.0),
+                        crate::chrome::MUTED,
+                    );
+                    return;
+                }
                 ui.style_mut().always_scroll_the_only_direction = true;
                 ui.spacing_mut().scroll.bar_width = 5.0;
                 let inset = screen.shrink(8.0_f32.min(screen.size().min_elem().max(0.0) * 0.25));

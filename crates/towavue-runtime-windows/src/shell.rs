@@ -1141,7 +1141,7 @@ fn fallback_snapshot(
     })
 }
 
-fn natural_path_cmp(left: &Path, right: &Path) -> Ordering {
+pub(crate) fn natural_path_cmp(left: &Path, right: &Path) -> Ordering {
     let left = wide_null(left.file_name().unwrap_or_else(|| OsStr::new("")));
     let right = wide_null(right.file_name().unwrap_or_else(|| OsStr::new("")));
     // SAFETY: both arguments are valid, terminated UTF-16 strings for this call.

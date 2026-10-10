@@ -294,6 +294,26 @@ pub fn surface_icon_button_at(ui: &mut Ui, rect: Rect, button: egui::Button<'_>)
     styled_icon_button_at(ui, rect, button, true)
 }
 
+pub fn input_button_at(
+    ui: &mut Ui,
+    rect: Rect,
+    button: egui::Button<'_>,
+    hover: Color32,
+) -> egui::Response {
+    ui.scope(|ui| {
+        flat_buttons(ui);
+        let widgets = &mut ui.visuals_mut().widgets;
+        for visual in [&mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
+            visual.bg_fill = hover;
+            visual.weak_bg_fill = hover;
+        }
+        ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+        ui.spacing_mut().interact_size = rect.size();
+        ui.put(rect, button)
+    })
+    .inner
+}
+
 /// Separators share egui's noninteractive stroke with disabled buttons.
 /// Restore only the separator's stroke, leaving flat button geometry untouched.
 pub fn separator(ui: &mut Ui) -> egui::Response {

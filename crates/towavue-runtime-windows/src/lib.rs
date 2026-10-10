@@ -44,6 +44,8 @@ pub use source_save::{
     prepare_source_save,
 };
 mod file_search;
+mod folder_browser;
+pub use folder_browser::{BrowserFolder, FolderBrowser, FolderListing};
 mod fonts;
 mod image;
 mod image_clipboard;

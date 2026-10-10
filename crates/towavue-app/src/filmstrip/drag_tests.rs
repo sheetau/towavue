@@ -2288,12 +2288,15 @@ fn filmstrip_media_bounds_own_dimming_wheel_and_scrollbar_without_dragging_cards
                 let bounds = output
                     .shapes
                     .iter()
-                    .find_map(|shape| match &shape.shape {
+                    .filter_map(|shape| match &shape.shape {
                         egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191) => {
                             Some(rect.rect)
                         }
                         _ => None,
                     })
+                    // The fixed browser header and scrolling strip paint
+                    // adjacent dim regions over the same media panel.
+                    .reduce(Rect::union)
                     .expect("filmstrip dim");
                 assert_eq!(bounds.left(), 0.0);
                 assert_eq!(bounds.right(), 960.0);

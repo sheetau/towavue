@@ -286,75 +286,17 @@ fn search_field(
             query,
         )
     });
-    let filter_button = chrome::surface_icon_button_at(
+    media_filter_button(
         ui,
         filter_rect,
-        egui::Button::new(
-            match filter {
-                Some(MediaKind::Image) => chrome::Icon::Image,
-                Some(MediaKind::Video) => chrome::Icon::Video,
-                Some(MediaKind::Audio) => chrome::Icon::Audio,
-                None => chrome::Icon::Filter,
-            }
-            .text()
-            .color(if filter.is_some() {
-                chrome::FOREGROUND
-            } else {
-                chrome::MUTED
-            }),
-        )
-        .stroke(egui::Stroke::NONE)
-        .frame_when_inactive(false),
-    )
-    .help_text(Text::GalleryFilter.in_language(language));
-    if let Some(kind) = *filter {
-        crate::fluent::paint(
-            ui,
-            filter_button.rect,
-            match kind {
-                MediaKind::Image => crate::fluent::Kind::Image,
-                MediaKind::Video => crate::fluent::Kind::Video,
-                MediaKind::Audio => crate::fluent::Kind::Audio,
-            },
-            chrome::FOREGROUND,
-        );
-    }
-    filter_button.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            filter_button.enabled(),
-            Text::GalleryFilter.in_language(language),
-        )
-    });
-    if ui.is_enabled() {
-        filter_menu::show(&filter_button, |ui, selected| {
-            let mut rows = chrome::Dropdown::new(ui);
-            for (kind, label) in [
-                (None, Text::GalleryAll.in_language(language)),
-                (
-                    Some(MediaKind::Image),
-                    Text::GalleryImages.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Video),
-                    Text::GalleryVideos.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Audio),
-                    Text::GalleryAudio.in_language(language),
-                ),
-            ] {
-                let available =
-                    kind.is_none() || paths.iter().any(|path| MediaKind::from_path(path) == kind);
-                let row = rows.row(ui, available, *filter == kind, label);
-                if selected(&row) {
-                    *filter = kind;
-                    ui.close();
-                }
-            }
-            rows.finish(ui);
-        });
-    }
+        filter,
+        |kind| {
+            paths
+                .iter()
+                .any(|path| MediaKind::from_path(path) == Some(kind))
+        },
+        chrome::SURFACE_HOVER,
+    );
     let clear = ui
         .add_enabled_ui(!query.is_empty(), |ui| {
             chrome::surface_icon_button_at(
@@ -450,6 +392,85 @@ fn search_field(
         egui::StrokeKind::Inside,
     );
     search.changed()
+}
+
+pub(super) fn media_filter_button(
+    ui: &mut egui::Ui,
+    filter_rect: egui::Rect,
+    filter: &mut Option<MediaKind>,
+    available: impl Fn(MediaKind) -> bool,
+    hover: egui::Color32,
+) {
+    let language = localization::language(ui.ctx());
+    let filter_button = chrome::input_button_at(
+        ui,
+        filter_rect,
+        egui::Button::new(
+            match filter {
+                Some(MediaKind::Image) => chrome::Icon::Image,
+                Some(MediaKind::Video) => chrome::Icon::Video,
+                Some(MediaKind::Audio) => chrome::Icon::Audio,
+                None => chrome::Icon::Filter,
+            }
+            .text()
+            .color(if filter.is_some() {
+                chrome::FOREGROUND
+            } else {
+                chrome::MUTED
+            }),
+        )
+        .stroke(egui::Stroke::NONE)
+        .frame_when_inactive(false),
+        hover,
+    )
+    .help_text(Text::GalleryFilter.in_language(language));
+    if let Some(kind) = *filter {
+        crate::fluent::paint(
+            ui,
+            filter_button.rect,
+            match kind {
+                MediaKind::Image => crate::fluent::Kind::Image,
+                MediaKind::Video => crate::fluent::Kind::Video,
+                MediaKind::Audio => crate::fluent::Kind::Audio,
+            },
+            chrome::FOREGROUND,
+        );
+    }
+    filter_button.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            filter_button.enabled(),
+            Text::GalleryFilter.in_language(language),
+        )
+    });
+    if ui.is_enabled() {
+        filter_menu::show(&filter_button, |ui, selected| {
+            let mut rows = chrome::Dropdown::new(ui);
+            for (kind, label) in [
+                (None, Text::GalleryAll.in_language(language)),
+                (
+                    Some(MediaKind::Image),
+                    Text::GalleryImages.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Video),
+                    Text::GalleryVideos.in_language(language),
+                ),
+                (
+                    Some(MediaKind::Audio),
+                    Text::GalleryAudio.in_language(language),
+                ),
+            ] {
+                let available = kind.is_none_or(&available);
+                let row = rows.row(ui, available, *filter == kind, label);
+                if selected(&row) {
+                    *filter = kind;
+                    ui.close();
+                }
+            }
+            rows.finish(ui);
+        });
+    }
 }
 
 pub(super) fn matches(path: &std::path::Path, query: &str) -> bool {

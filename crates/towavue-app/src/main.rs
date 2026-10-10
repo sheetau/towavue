@@ -26,6 +26,7 @@ mod external_open;
 mod file_drop;
 mod file_operations;
 mod filmstrip;
+mod filmstrip_browser;
 mod fluent;
 mod folder_navigation;
 mod fonts;
@@ -358,6 +359,7 @@ enum UiAction {
     TimelineMenu(timeline_menu::Intent),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
+    FilmstripFolder(Option<TabId>, u64, PathBuf),
     OpenFilmstripWindow(PathBuf),
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     OpenGalleryWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
@@ -1289,6 +1291,7 @@ struct Application<N> {
     filmstrip_open: bool,
     filmstrip_return_focus: Option<(u64, egui::Id)>,
     filmstrip: filmstrip::Filmstrip,
+    filmstrip_browser: filmstrip_browser::Browser,
     tab_preview: tab_preview::TabPreview,
     playlist: playlist::Playlist,
     image_seek_preview_active: bool,
@@ -1604,6 +1607,7 @@ where
             filmstrip_open: false,
             filmstrip_return_focus: None,
             filmstrip,
+            filmstrip_browser: Default::default(),
             tab_preview: tab_preview::TabPreview::new()?,
             playlist: playlist::Playlist::default(),
             image_seek_preview_active: false,
@@ -4457,6 +4461,9 @@ where
         self.volume_wheel(&context, &volume_targets, actions);
         if self.gallery_active() {
             self.prepare_gallery(&context);
+        }
+        if !self.filmstrip_open || modal_blocked || self.palette_open {
+            self.filmstrip_browser.hide(Some(&context));
         }
         if self.filmstrip_open {
             if !modal_blocked {
@@ -7869,6 +7876,20 @@ where
                         towavue_runtime_windows::RecentKind::File,
                         menu::OpenTarget::Window,
                     ));
+                }
+            }
+            UiAction::FilmstripFolder(tab, generation, folder) => {
+                if self.filmstrip_open
+                    && !self.modal_input_blocked()
+                    && tab == self.tabs.active_id()
+                    && generation == self.media_generation
+                    && self.can_replace_active_tab()
+                    && self.path.as_deref().and_then(Path::parent) != Some(folder.as_path())
+                {
+                    self.open_folder_path(folder);
+                    if let Some((_, intent)) = &mut self.pending_folder {
+                        *intent = FolderIntent::OpenReplacing(tab, generation, false);
+                    }
                 }
             }
             UiAction::OpenFilmstripMedia(path, background) => {
@@ -11948,10 +11969,35 @@ where
         if deleted.is_none() {
             self.filmstrip.set_held_deleted(None);
         }
+        let source = held.as_deref().or(self.folder_snapshot.as_ref());
+        let folder = self
+            .path
+            .as_deref()
+            .and_then(Path::parent)
+            .or_else(|| source.map(|snapshot| snapshot.folder_path.as_path()));
+        let mut body = rect;
+        if let Some(folder) = folder {
+            self.filmstrip_browser.sync_folder(folder, context);
+            if let Some(target) =
+                self.filmstrip_browser
+                    .show(context, rect, source, !self.palette_open)
+            {
+                actions.push(UiAction::FilmstripFolder(
+                    self.tabs.active_id(),
+                    self.media_generation,
+                    target,
+                ));
+            }
+            body.min.y = (body.top() + filmstrip_browser::HEADER_HEIGHT).min(body.bottom());
+        }
+        let (projected, changed) = self.filmstrip_browser.project(source);
+        if changed {
+            self.filmstrip.filter_changed();
+        }
         self.filmstrip.show(
             context,
-            rect,
-            held.as_deref().or(self.folder_snapshot.as_ref()),
+            body,
+            projected.as_deref(),
             self.path.as_deref(),
             !self.palette_open,
             actions,
@@ -11986,6 +12032,7 @@ where
 
     fn close_filmstrip(&mut self) {
         self.filmstrip_open = false;
+        self.filmstrip_browser.hide(self.ui_context.as_ref());
         self.filmstrip.cancel_drag();
         let origin = self
             .filmstrip_return_focus
@@ -12095,7 +12142,42 @@ where
         {
             return false;
         }
-        self.navigate(!stroke.modifiers.shift, false);
+        if self.filmstrip_browser.filter.is_some() || !self.filmstrip_browser.query.is_empty() {
+            if let Some(snapshot) = self.filmstrip_browser.snapshot().filter(|snapshot| {
+                self.path.as_deref().and_then(Path::parent) == Some(snapshot.folder_path.as_path())
+            }) {
+                let current = self
+                    .path
+                    .as_ref()
+                    .and_then(|path| snapshot.items.iter().position(|item| &item.path == path));
+                let count = snapshot.items.len();
+                let wrap = !self.reading_mode
+                    && (self.media_kind == Some(MediaKind::Audio) || self.folder_navigation_loop);
+                let next = match current {
+                    None => count
+                        .checked_sub(1)
+                        .map(|last| if stroke.modifiers.shift { last } else { 0 }),
+                    Some(index) if stroke.modifiers.shift => {
+                        index.checked_sub(1).or_else(|| wrap.then(|| count - 1))
+                    }
+                    Some(index) => (index + 1 < count)
+                        .then_some(index + 1)
+                        .or_else(|| wrap.then_some(0)),
+                };
+                if let Some(path) = next
+                    .and_then(|index| snapshot.items.get(index))
+                    .map(|item| item.path.clone())
+                    .filter(|path| self.path.as_ref() != Some(path))
+                {
+                    if self.media_kind == Some(MediaKind::Image) {
+                        self.image_navigation_forward = !stroke.modifiers.shift;
+                    }
+                    self.request_guarded(GuardedAction::Navigate(path));
+                }
+            }
+        } else {
+            self.navigate(!stroke.modifiers.shift, false);
+        }
         self.filmstrip.focus_current();
         true
     }
@@ -13315,6 +13397,10 @@ where
             }))
             && !self.palette_open
             && !self.modal_input_blocked()
+            && !(self.filmstrip_open
+                && self.ui_context.as_ref().is_some_and(|context| {
+                    context.text_edit_focused() || egui::Popup::is_any_open(context)
+                }))
             && let WindowEvent::KeyboardInput { event, .. } = &event
             && event.state == ElementState::Pressed
             && event.logical_key == WinitKey::Named(NamedKey::Escape)

@@ -1,6 +1,8 @@
 use super::*;
 use std::sync::mpsc;
 
+mod modal_gpu;
+
 #[test]
 fn japanese_image_rotation_returns_an_edit_without_changing_history_during_preview() {
     use crate::localization::test_ui as ui;
@@ -24,13 +26,29 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
             area.width() < 340.0,
             "compact content must not reserve 400 points: {area:?}"
         );
-        let input = resize::tests::assert_unit_input(
-            &output,
-            Text::RotationAngleInput.in_language(crate::localization::Language::Japanese),
-            "°",
-            96.0,
-            density,
+        let node = &output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label()
+                    == Some(
+                        Text::RotationAngleInput
+                            .in_language(crate::localization::Language::Japanese),
+                    )
+            })
+            .expect("angle input")
+            .1;
+        let bounds = node.bounds().expect("bounds");
+        let input = egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
+        assert!((input.width() - 120.0).abs() <= 1.0 / density);
+        assert!((input.height() - 26.0).abs() <= 1.0 / density);
         let dimensions = output
             .shapes
             .iter()
@@ -38,11 +56,10 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
                 egui::Shape::Text(text) if text.galley.text().ends_with(" px") => Some(text),
                 _ => None,
             })
-            .expect("result dimensions beside input");
-        assert!(dimensions.pos.x > input.right());
+            .expect("result dimensions below input");
         assert!(
-            (dimensions.pos.y + dimensions.galley.size().y * 0.5 - input.center().y).abs()
-                <= 1.0 / density
+            dimensions.pos.y >= input.bottom(),
+            "dimensions occupy the following row"
         );
         ui::frame(
             &context,
@@ -52,12 +69,12 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
         );
         let compact = egui::vec2(320.0, 240.0);
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "回転を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         let actions = ui::frame(
             &context,
             compact,
-            vec![ui::action(&output, "回転を適用", None)],
+            vec![ui::action(&output, "適用", None)],
             |context| dialog.show(context),
         )
         .1;
@@ -404,26 +421,19 @@ fn numeric_rotation_dialog_validates_accessible_input_apply_and_escape_without_m
         .find(|(_, node)| node.label() == Some("Rotation angle in degrees"))
         .map(|(id, _)| *id)
         .expect("angle field");
-    let set = |text: &str| {
-        egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
-            action: egui::accesskit::Action::SetValue,
-            target_tree: egui::accesskit::TreeId::ROOT,
-            target_node: input,
-            data: Some(egui::accesskit::ActionData::Value(text.into())),
-        })
-    };
-    for value in ["", "-", "NaN", "inf", "180.1", "-180.1"] {
-        let (action, output) = frame(&mut dialog, vec![set(value)]);
-        assert!(action.is_none() && dialog.value().is_none());
-        assert!(
-            output
-                .platform_output
-                .accesskit_update
-                .expect("tree")
-                .nodes
-                .iter()
-                .any(|(_, node)| node.label() == Some("Apply rotation") && node.is_disabled())
+    let set = |text: &str| crate::video_rotation::tests::numeric_access(input, text);
+    for value in ["NaN", "inf"] {
+        let before = dialog.angle.clone();
+        let (action, _) = frame(&mut dialog, vec![set(value)]);
+        assert!(action.is_none());
+        assert_eq!(
+            dialog.angle, before,
+            "nonfinite numeric requests are rejected"
         );
+    }
+    for (value, expected) in [("180.1", 1800), ("-180.1", -1800)] {
+        frame(&mut dialog, vec![set(value)]);
+        assert_eq!(dialog.value().expect("clamped input").tenths(), expected);
     }
     let (_, output) = frame(&mut dialog, vec![set("31.74")]);
     assert_eq!(dialog.value().expect("rounded").tenths(), 317);
@@ -431,7 +441,7 @@ fn numeric_rotation_dialog_validates_accessible_input_apply_and_escape_without_m
     let apply = tree
         .nodes
         .iter()
-        .find(|(_, node)| node.label() == Some("Apply rotation"))
+        .find(|(_, node)| node.label() == Some("Apply"))
         .map(|(id, _)| *id)
         .expect("apply");
     let (action, _) = frame(
@@ -602,7 +612,7 @@ fn compact_rotation_dialog_scrolls_to_apply_and_cancel_controls() {
         );
     }
     let (_, tree) = frame(&mut dialog, vec![]);
-    for label in ["Apply rotation", "Cancel"] {
+    for label in ["Apply", "Cancel"] {
         let (_, node) = tree
             .nodes
             .iter()
@@ -635,7 +645,7 @@ fn compact_rotation_dialog_scrolls_to_apply_and_cancel_controls() {
 }
 
 #[test]
-fn rotation_modal_routes_keyboard_and_slider_input_and_restores_selection_focus() {
+fn rotation_modal_routes_keyboard_and_drag_input_and_restores_selection_focus() {
     let (mut app, _) = application();
     let context = app.ui_context.clone().expect("context");
     let frame = |app: &mut Application<_>, events| {
@@ -701,7 +711,8 @@ fn rotation_modal_routes_keyboard_and_slider_input_and_restores_selection_focus(
         .nodes
         .iter()
         .find(|(_, node)| {
-            node.role() == egui::accesskit::Role::Slider && node.label() == Some("Rotation angle")
+            node.role() == egui::accesskit::Role::SpinButton
+                && node.label() == Some("Rotation angle in degrees")
         })
         .expect("slider");
     let bounds = node.bounds().expect("slider bounds");
@@ -725,32 +736,47 @@ fn rotation_modal_routes_keyboard_and_slider_input_and_restores_selection_focus(
             .tenths(),
         450
     );
+    context.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    frame(&mut app, vec![]);
     let pos = egui::pos2(
-        (bounds.x0 + (bounds.x1 - bounds.x0) * 0.25) as f32,
-        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        ((bounds.x0 + bounds.x1) * 0.5) as f32,
+        ((bounds.y0 + bounds.y1) * 0.5) as f32,
     );
-    for pressed in [true, false] {
-        frame(
-            &mut app,
-            vec![
-                egui::Event::PointerMoved(pos),
-                egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        );
-    }
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    let moved = pos + egui::vec2(-60.0, 0.0);
+    frame(&mut app, vec![egui::Event::PointerMoved(moved)]);
+    frame(
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: moved,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
     assert!(
         app.rotation_dialog
             .as_ref()
             .expect("dialog")
             .value()
-            .expect("pointer angle")
+            .expect("dragged angle")
             .tenths()
-            < 0
+            < 450
     );
     assert!(app.edits.is_empty());
     frame(
@@ -929,11 +955,7 @@ fn image_edit_modals_use_the_media_preview_and_keep_cancel_apply_and_undo_consis
                 } else {
                     "free-rotate-image"
                 };
-                let apply = if resize {
-                    "Apply resize"
-                } else {
-                    "Apply rotation"
-                };
+                let apply = "Apply";
                 app.dispatch(command);
                 for _ in 0..3 {
                     frame(&mut app, vec![]);
@@ -958,9 +980,9 @@ fn image_edit_modals_use_the_media_preview_and_keep_cancel_apply_and_undo_consis
                 } else {
                     frame(
                         &mut app,
-                        vec![access(
+                        vec![crate::video_rotation::tests::numeric_access(
                             node(&tree, "Rotation angle in degrees"),
-                            Some("31.7"),
+                            "31.7",
                         )],
                     );
                 }
@@ -1068,9 +1090,9 @@ fn image_edit_modals_use_the_media_preview_and_keep_cancel_apply_and_undo_consis
                 } else {
                     frame(
                         &mut app,
-                        vec![access(
+                        vec![crate::video_rotation::tests::numeric_access(
                             node(&tree, "Rotation angle in degrees"),
-                            Some("31.7"),
+                            "31.7",
                         )],
                     );
                 }

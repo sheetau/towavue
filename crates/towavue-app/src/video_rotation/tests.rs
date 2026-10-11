@@ -25,13 +25,29 @@ fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
         };
         let size = egui::vec2(640.0, 600.0);
         let output = ui::settle(&context, size, |context| dialog.show(context));
-        let input = resize::tests::assert_unit_input(
-            &output,
-            Text::VideoRotationAngleInput.in_language(Language::Japanese),
-            "°",
-            96.0,
-            density,
+        let node = &output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree")
+            .nodes
+            .iter()
+            .find(|(_, node)| {
+                node.label()
+                    == Some(
+                        Text::RotationAngleInput
+                            .in_language(crate::localization::Language::Japanese),
+                    )
+            })
+            .expect("angle input")
+            .1;
+        let bounds = node.bounds().expect("bounds");
+        let input = egui::Rect::from_min_max(
+            egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+            egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
+        assert!((input.width() - 120.0).abs() <= 1.0 / density);
+        assert!((input.height() - 26.0).abs() <= 1.0 / density);
         let dimensions = output
             .shapes
             .iter()
@@ -39,24 +55,23 @@ fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
                 egui::Shape::Text(text) if text.galley.text().ends_with(" px") => Some(text),
                 _ => None,
             })
-            .expect("result dimensions beside input");
-        assert!(dimensions.pos.x > input.right());
+            .expect("result dimensions below input");
         assert!(
-            (dimensions.pos.y + dimensions.galley.size().y * 0.5 - input.center().y).abs()
-                <= 1.0 / density
+            dimensions.pos.y >= input.bottom(),
+            "dimensions occupy the following row"
         );
         ui::frame(
             &context,
             size,
-            vec![ui::action(&output, "動画の回転角度（度）", Some("NaN"))],
+            vec![ui::action(&output, "回転角度（度）", Some("NaN"))],
             |context| dialog.show(context),
         );
         let output = ui::settle(&context, size, |context| dialog.show(context));
-        ui::visible_button(&output, "回転を適用", size, false);
+        ui::visible_button(&output, "適用", size, true);
         ui::frame(
             &context,
             size,
-            vec![ui::action(&output, "動画の回転角度（度）", Some("31.74"))],
+            vec![ui::action(&output, "回転角度（度）", Some("31.74"))],
             |context| dialog.show(context),
         );
         let compact = egui::vec2(320.0, 240.0);
@@ -71,15 +86,15 @@ fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
         );
         let output = ui::settle(&context, compact, |context| dialog.show(context));
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == reason)));
-        ui::visible_button(&output, "回転を適用", compact, false);
+        ui::visible_button(&output, "適用", compact, false);
         dialog.snapshot.max_side = 16384;
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "回転を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         let actions = ui::frame(
             &context,
             compact,
-            vec![ui::action(&output, "回転を適用", None)],
+            vec![ui::action(&output, "適用", None)],
             |context| dialog.show(context),
         )
         .1;
@@ -238,9 +253,24 @@ fn frame_input_focused<N: Fn(AppEvent) + Send + Sync + 'static>(
 pub(crate) fn node(tree: &egui::accesskit::TreeUpdate, label: &str) -> egui::accesskit::NodeId {
     tree.nodes
         .iter()
-        .find(|(_, node)| node.label() == Some(label))
+        .filter(|(_, node)| node.label() == Some(label))
+        .max_by_key(|(_, node)| {
+            node.supports_action(egui::accesskit::Action::Click)
+                || node.supports_action(egui::accesskit::Action::SetValue)
+        })
         .map(|(id, _)| *id)
         .unwrap_or_else(|| panic!("missing UIA node {label}"))
+}
+
+pub(crate) fn numeric_access(target_node: egui::accesskit::NodeId, value: &str) -> egui::Event {
+    egui::Event::AccessKitActionRequest(egui::accesskit::ActionRequest {
+        action: egui::accesskit::Action::SetValue,
+        target_tree: egui::accesskit::TreeId::ROOT,
+        target_node,
+        data: Some(egui::accesskit::ActionData::NumericValue(
+            value.trim().parse().expect("number"),
+        )),
+    })
 }
 
 pub(crate) fn access(target_node: egui::accesskit::NodeId, value: Option<&str>) -> egui::Event {
@@ -465,16 +495,16 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             assert!(app.video_rotation_dialog.is_some());
             frame(&mut app, vec![]);
             let tree = frame(&mut app, vec![]);
-            let input = node(&tree, "Video rotation angle in degrees");
-            let tree = frame(&mut app, vec![access(input, Some(" 31.74 "))]);
+            let input = node(&tree, "Rotation angle in degrees");
+            let tree = frame(&mut app, vec![numeric_access(input, "31.74")]);
             let shown = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Video rotation angle"))
+                .find(|(_, node)| node.label() == Some("Rotation angle in degrees"))
                 .expect("slider node")
                 .1
                 .numeric_value();
-            assert!((shown.expect("slider numeric value") - 31.7).abs() < 1e-9);
+            assert!((shown.expect("input numeric value") - 31.74).abs() < 1e-9);
             frame(
                 &mut app,
                 vec![
@@ -501,7 +531,7 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
                     .tenths(),
                 -317
             );
-            let slider = node(&tree, "Video rotation angle");
+            let slider = node(&tree, "Rotation angle in degrees");
             frame(
                 &mut app,
                 vec![egui::Event::AccessKitActionRequest(
@@ -522,17 +552,20 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
                     .tenths(),
                 450
             );
-            for value in ["NaN", "180.1", "-", "inf"] {
-                let tree = frame(&mut app, vec![access(input, Some(value))]);
-                assert!(
-                    tree.nodes
-                        .iter()
-                        .any(|(_, node)| node.label() == Some("Apply rotation")
-                            && node.is_disabled())
+            for value in ["NaN", "inf"] {
+                frame(&mut app, vec![numeric_access(input, value)]);
+                assert_eq!(
+                    app.video_rotation_dialog
+                        .as_ref()
+                        .expect("dialog")
+                        .value()
+                        .expect("unchanged")
+                        .tenths(),
+                    450
                 );
                 assert_eq!(app.edits[&tab], history);
             }
-            frame(&mut app, vec![access(input, Some("31.74"))]);
+            frame(&mut app, vec![numeric_access(input, "31.74")]);
             let tree = frame(&mut app, vec![]);
             assert!(app.video_raster_operations.is_some());
             assert_eq!(app.image_view, view);
@@ -571,15 +604,15 @@ fn video_rotation_modal_previews_commits_crops_undoes_and_exports_without_changi
             app.dispatch(CommandId::FreeRotateVideo);
             frame(&mut app, vec![]);
             let tree = frame(&mut app, vec![]);
-            let input = node(&tree, "Video rotation angle in degrees");
-            let tree = frame(&mut app, vec![access(input, Some("31.7"))]);
+            let input = node(&tree, "Rotation angle in degrees");
+            let tree = frame(&mut app, vec![numeric_access(input, "31.7")]);
             let first = app
                 .video_rotation_dialog
                 .as_ref()
                 .expect("dialog")
                 .value()
                 .expect("first");
-            frame(&mut app, vec![access(node(&tree, "Apply rotation"), None)]);
+            frame(&mut app, vec![access(node(&tree, "Apply"), None)]);
             assert!(app.video_rotation_dialog.is_none());
             assert_eq!(
                 app.edits[&tab].operations().last(),
@@ -845,7 +878,7 @@ fn video_angle_validation_and_compact_modal_keep_budget_failures_uncommittable()
     assert!(
         tree.nodes
             .iter()
-            .any(|(_, node)| node.label() == Some("Apply rotation") && node.is_disabled())
+            .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
     );
     let cancel = node(&tree, "Cancel");
     assert_eq!(run(&mut dialog, vec![access(cancel, None)]).0, Some(None));

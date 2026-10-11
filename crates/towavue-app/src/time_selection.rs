@@ -56,6 +56,8 @@ enum Gesture {
     Band(TimeRange, f32),
     Gain(TimeRange, f32),
     Stretch(TimeRange),
+    Move(TimeRange),
+    Context,
 }
 
 #[derive(Default)]
@@ -113,15 +115,18 @@ pub(super) fn show(
             .map(|(_, preview)| preview)
     });
     let drag = if enabled {
-        crate::timeline_input::seek_drag(response)
+        crate::timeline_input::selection_drag(response)
     } else {
         crate::timeline_input::cancel(ui.ctx());
         Default::default()
     };
     let mode_id = response.id.with("time-selection-mode");
     let choose = |origin: egui::Pos2, modifiers: egui::Modifiers| {
-        let selected =
-            selection.filter(|range| at(origin.x) >= range.start() && at(origin.x) <= range.end());
+        let selected = selection
+            .filter(|range| origin.x >= x_at(range.start()) && origin.x <= x_at(range.end()));
+        if drag.secondary {
+            return selected.map_or(Gesture::Context, Gesture::Move);
+        }
         if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
             return selected.map_or(Gesture::Select, Gesture::Stretch);
         }
@@ -153,6 +158,14 @@ pub(super) fn show(
         }
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
         Gesture::Select => egui::CursorIcon::Text,
+        Gesture::Move(_) => {
+            if drag.dragging {
+                egui::CursorIcon::Grabbing
+            } else {
+                egui::CursorIcon::Grab
+            }
+        }
+        Gesture::Context => egui::CursorIcon::Default,
     };
     if enabled
         && drag.origin.is_none()
@@ -259,7 +272,24 @@ pub(super) fn show(
                 .data_mut(|data| data.insert_temp(mode_id, (mode, snap_head)));
         }
         ui.ctx().set_cursor_icon(cursor(mode));
-        if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
+        if drag.dragging
+            && let Gesture::Move(range) = mode
+        {
+            let delta = (f64::from(pointer.x - origin.x) / f64::from(rect.width().max(1.0))
+                * duration.as_nanoseconds() as f64)
+                .round() as i64;
+            let delta = delta.clamp(
+                -range.start().as_nanoseconds(),
+                duration.as_nanoseconds() - range.end().as_nanoseconds(),
+            );
+            preview = TimeRange::new(
+                MediaTime::from_nanoseconds(range.start().as_nanoseconds() + delta),
+                MediaTime::from_nanoseconds(range.end().as_nanoseconds() + delta),
+            );
+            if drag.released && preview != selection {
+                output.selection = Some(preview);
+            }
+        } else if drag.dragging && matches!(mode, Gesture::Gain(..) | Gesture::Stretch(_)) {
             let edit = match mode {
                 Gesture::Gain(range, original) => {
                     let gain = adjustment::dragged_gain(rect, original, pointer.y - origin.y)
@@ -557,6 +587,97 @@ fn playhead_contains(rect: Rect, x: f32, point: egui::Pos2) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn secondary_drag_moves_only_the_range_preserving_length_and_clamping_at_edges() {
+        for density in [1.0, 1.25, 2.0] {
+            for batched in [false, true] {
+                for (origin, target, expected) in [
+                    (180.0, 220.0, 3.0),
+                    (100.0, -100.0, 0.0),
+                    (260.0, 700.0, 6.0),
+                ] {
+                    let context = egui::Context::default();
+                    context.set_pixels_per_point(density);
+                    let selected = TimeRange::new(time(2.0), time(6.0));
+                    frame(&context, vec![], true, selected);
+                    let secondary = |x, pressed| egui::Event::PointerButton {
+                        pos: egui::pos2(x, 70.0),
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    let press = vec![
+                        egui::Event::PointerMoved(egui::pos2(origin, 70.0)),
+                        secondary(origin, true),
+                    ];
+                    let release = vec![
+                        egui::Event::PointerMoved(egui::pos2(target, 70.0)),
+                        secondary(target, false),
+                    ];
+                    let events = if batched {
+                        [press, release].concat()
+                    } else {
+                        assert!(frame(&context, press, true, selected).is_empty());
+                        assert!(
+                            frame(
+                                &context,
+                                vec![egui::Event::PointerMoved(egui::pos2(target, 70.0))],
+                                true,
+                                selected
+                            )
+                            .is_empty()
+                        );
+                        release
+                    };
+                    let result = frame(&context, events, true, selected);
+                    assert_eq!(
+                        result.len(),
+                        1,
+                        "one commit across discarded passes: {origin}->{target}, density={density}, batched={batched}"
+                    );
+                    assert_eq!(
+                        result[0].selection,
+                        Some(TimeRange::new(time(expected), time(expected + 4.0)))
+                    );
+                    assert!(result[0].seek.is_none() && result[0].edit.is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn secondary_click_outside_drag_and_cancellation_do_not_seek_or_edit() {
+        for cancel in [false, true] {
+            let context = egui::Context::default();
+            let selected = TimeRange::new(time(2.0), time(6.0));
+            frame(&context, vec![], true, selected);
+            for (origin, target) in [(180.0, 180.0), (380.0, 300.0)] {
+                let secondary = |x, pressed| egui::Event::PointerButton {
+                    pos: egui::pos2(x, 70.0),
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                assert!(frame(&context, vec![secondary(origin, true)], true, selected).is_empty());
+                if cancel {
+                    crate::timeline_input::cancel(&context);
+                }
+                assert!(
+                    frame(
+                        &context,
+                        vec![
+                            egui::Event::PointerMoved(egui::pos2(target, 70.0)),
+                            secondary(target, false)
+                        ],
+                        true,
+                        selected
+                    )
+                    .is_empty()
+                );
+            }
+        }
+    }
+
     #[test]
     fn selection_endpoints_and_cti_share_the_same_physical_pixel() {
         for density in [1.0, 1.25, 1.5, 2.0] {

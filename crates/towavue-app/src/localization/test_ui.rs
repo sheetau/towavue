@@ -60,7 +60,17 @@ pub(crate) fn action(output: &egui::FullOutput, label: &str, value: Option<&str>
         .accesskit_update
         .as_ref()
         .expect("tree");
-    crate::video_rotation::tests::access(crate::video_rotation::tests::node(tree, label), value)
+    let id = crate::video_rotation::tests::node(tree, label);
+    if let Some(value) = value
+        && tree
+            .nodes
+            .iter()
+            .any(|(key, node)| *key == id && node.numeric_value().is_some())
+    {
+        crate::video_rotation::tests::numeric_access(id, value)
+    } else {
+        crate::video_rotation::tests::access(id, value)
+    }
 }
 
 pub(crate) fn visible_button(

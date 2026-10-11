@@ -67,7 +67,7 @@ fn output_track_checkboxes_allow_subset_none_and_all_at_each_density() {
             let output = ui::settle(&context, compact, |context| dialog.show(context));
             ui::visible_button(
                 &output,
-                Text::ApplyOptions.in_language(language(&context)),
+                Text::Apply.in_language(language(&context)),
                 compact,
                 true,
             );

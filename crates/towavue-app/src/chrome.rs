@@ -212,6 +212,48 @@ pub fn text_edit(ui: &mut Ui, editor: egui::TextEdit<'_>, multiline: bool) -> eg
     .inner
 }
 
+/// Fixed geometry for editable numeric controls, including their drag state.
+pub fn number_input(
+    ui: &mut Ui,
+    value: &mut f64,
+    range: std::ops::RangeInclusive<f64>,
+    width: f32,
+    suffix: &str,
+    label: &str,
+) -> egui::Response {
+    let response = ui
+        .scope(|ui| {
+            input_style(ui);
+            ui.spacing_mut().interact_size = egui::vec2(width, INPUT_HEIGHT);
+            ui.style_mut().drag_value_text_style = egui::TextStyle::Body;
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = ui.visuals().extreme_bg_color;
+            let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
+            ui.allocate_ui_with_layout(egui::vec2(width, INPUT_HEIGHT), layout, |ui| {
+            let id = ui.next_auto_id();
+            ui.input_mut(|input| input.consume_accesskit_action_requests(id, |request| {
+                matches!(request.data, Some(egui::accesskit::ActionData::NumericValue(value)) if !value.is_finite())
+            }));
+            ui.add(
+                egui::DragValue::from_get_set(|next| {
+                    if let Some(next) = next.filter(|v| v.is_finite()) {
+                        *value = next;
+                    }
+                    *value
+                })
+                .range(range)
+                .speed(0.1)
+                .fixed_decimals(1)
+                .suffix(suffix)
+                .custom_parser(|text| text.trim().parse::<f64>().ok().filter(|v| v.is_finite())),
+            )
+            }).inner
+        })
+        .inner;
+    ui.ctx()
+        .accesskit_node_builder(response.id, |node| node.set_label(label));
+    response
+}
+
 pub fn icon_button_at(ui: &mut Ui, rect: egui::Rect, button: egui::Button<'_>) -> egui::Response {
     styled_icon_button_at(ui, rect, button, false)
 }
@@ -349,9 +391,6 @@ pub fn bar() -> egui::Frame {
 #[derive(Clone, Copy)]
 pub enum Icon {
     Filter,
-    Image,
-    Video,
-    Audio,
     OpenFile,
     OpenFolder,
     Pause,
@@ -366,7 +405,6 @@ impl Icon {
     pub fn text(self) -> egui::RichText {
         let glyph = match self {
             Self::Filter => '\u{eaf1}',
-            Self::Image | Self::Video | Self::Audio => return egui::RichText::new(""),
             Self::OpenFile => '\u{ea94}',
             Self::OpenFolder => '\u{eaf7}',
             Self::Pause | Self::Play | Self::PreviousTrack | Self::NextTrack => {

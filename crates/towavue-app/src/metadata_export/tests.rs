@@ -99,12 +99,12 @@ fn japanese_metadata_keeps_canonical_png_keywords_user_text_and_compact_actions(
         );
         let compact = egui::vec2(320.0, 240.0);
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "メタデータ設定を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         let actions = ui::frame(
             &context,
             compact,
-            vec![ui::action(&output, "メタデータ設定を適用", None)],
+            vec![ui::action(&output, "適用", None)],
             |context| dialog.show(context),
         )
         .1;
@@ -548,7 +548,7 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
         );
         set_value(&mut app, "Copyright text");
         let expected = app
@@ -557,7 +557,7 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
             .expect("draft")
             .options()
             .expect("valid");
-        click(&mut app, "Apply metadata");
+        click(&mut app, "Apply");
         assert_eq!(app.metadata_export_settings.get(&tab), Some(&expected));
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
@@ -602,7 +602,7 @@ fn metadata_ui_all_fields_modes_invalid_text_cancel_focus_and_compact_layout() {
             }
             let output = frame(&mut app, size, vec![]);
             let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-            for label in ["Apply metadata", "Cancel"] {
+            for label in ["Apply", "Cancel"] {
                 let (clip, text) = output
                     .shapes
                     .iter()
@@ -854,7 +854,7 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     let tree = crate::video_rotation::tests::frame(app, vec![]);
     crate::video_rotation::tests::frame(app, vec![access(node(&tree, "Remove value"), None)]);
     let tree = crate::video_rotation::tests::frame(app, vec![]);
-    crate::video_rotation::tests::frame(app, vec![access(node(&tree, "Apply metadata"), None)]);
+    crate::video_rotation::tests::frame(app, vec![access(node(&tree, "Apply"), None)]);
     assert_eq!(
         app.metadata_export_settings
             .get(&tab)
@@ -956,7 +956,7 @@ fn metadata_ime_and_popup_escape(source: &Path, kind: MediaKind) {
                 .expect("tree")
                 .nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
         );
     }
     frame(&mut app, size, vec![escape()]);
@@ -1058,7 +1058,7 @@ fn japanese_metadata_sources_and_validation_preserve_user_values() {
         }
         let compact = egui::vec2(320.0, 240.0);
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "メタデータ設定を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         assert!(
             dialog

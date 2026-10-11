@@ -2,8 +2,8 @@ use egui::{Context, Id, PointerButton, Pos2, Response};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
-    Seek,
     CompactSeek,
+    Selection,
     VideoSeek,
 }
 
@@ -104,13 +104,12 @@ impl SeekContinuation {
         let active = context
             .data(|data| data.get_temp::<State>(state_id()))?
             .active?;
-        (active.id == id
-            && matches!(active.kind, Kind::Seek | Kind::CompactSeek)
-            && active.dragging)
-            .then(|| Self {
+        (active.id == id && matches!(active.kind, Kind::CompactSeek) && active.dragging).then(
+            || Self {
                 active,
                 captured: context.dragged_id() == Some(id),
-            })
+            },
+        )
     }
 
     pub fn resume(self, context: &Context) {
@@ -129,8 +128,13 @@ pub fn seek_commit(response: &Response) -> Option<Pos2> {
     if drag.released { drag.position } else { None }
 }
 
+pub fn selection_drag(response: &Response) -> Drag {
+    update(response, Kind::Selection)
+}
+
+#[cfg(test)]
 pub fn seek_drag(response: &Response) -> Drag {
-    update(response, Kind::Seek)
+    update(response, Kind::Selection)
 }
 
 pub fn compact_seek_drag(response: &Response) -> Drag {
@@ -164,7 +168,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
                             ..
                         } if Some(*button) == owned_button ||
                             (owned_button.is_none() && (*button == PointerButton::Primary ||
-                                (kind == Kind::CompactSeek && *button == PointerButton::Secondary)))
+                                (matches!(kind, Kind::CompactSeek | Kind::Selection) && *button == PointerButton::Secondary)))
                     )
                 })
                 .any(|event| {
@@ -204,7 +208,8 @@ fn update(response: &Response, kind: Kind) -> Drag {
                 modifiers,
             } if owned_button.is_none_or(|owner| owner == *button)
                 && (*button == PointerButton::Primary
-                    || (kind == Kind::CompactSeek && *button == PointerButton::Secondary)) =>
+                    || (matches!(kind, Kind::CompactSeek | Kind::Selection)
+                        && *button == PointerButton::Secondary)) =>
             {
                 Some((index, *pos, *modifiers, *button))
             }
@@ -281,7 +286,7 @@ fn update(response: &Response, kind: Kind) -> Drag {
             result.position = pointer;
             state.active = Some(active);
         }
-    } else if matches!(kind, Kind::Seek | Kind::CompactSeek | Kind::VideoSeek)
+    } else if matches!(kind, Kind::CompactSeek | Kind::VideoSeek | Kind::Selection)
         && response.clicked()
         && press.is_none()
         && !events.iter().any(|event| {
@@ -316,7 +321,7 @@ mod tests {
             (egui::vec2(-20.0, -20.0), false),
             (egui::vec2(0.0, 20.0), false),
         ] {
-            for kind in [Kind::VideoSeek, Kind::Seek] {
+            for kind in [Kind::VideoSeek, Kind::Selection] {
                 let mut active = Active {
                     id: Id::new("test"),
                     kind,

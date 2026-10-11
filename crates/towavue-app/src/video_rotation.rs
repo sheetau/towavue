@@ -54,52 +54,20 @@ impl VideoRotationDialog {
                 ui,
                 Text::CommandFreeRotateVideo.in_language(display_language),
                 &[
-                    Text::ApplyRotation.in_language(display_language),
+                    Text::Apply.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().text_edit_width = 96.0;
-                        let response = resize::text_input(
-                            ui,
-                            Text::VideoRotationAngleInput.in_language(display_language),
-                            &mut self.angle,
-                            "°",
-                        )
-                        .help_text(Text::RotationAngleHelp.in_language(display_language));
-                        if self.first_frame {
-                            response.request_focus();
-                            self.first_frame = false;
-                        }
-                        if let Ok(value) = self.value_in(display_language) {
-                            let size = if value.tenths() == 0 {
-                                self.snapshot.geometry
-                            } else {
-                                self.snapshot
-                                    .geometry_with(EditOperation::RotateVideo(value))
-                                    .expect("validated rotation")
-                            };
-                            ui.label(formatted::pixel_size(display_language, size.0, size.1));
-                        }
-                    });
-                    let mut degrees = self
-                        .angle
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|value| value.is_finite())
-                        .map(|value| (value.clamp(-180.0, 180.0) * 10.0).round() / 10.0)
-                        .unwrap_or(0.0);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut degrees, -180.0..=180.0)
-                                .step_by(0.1)
-                                .show_value(false)
-                                .text(Text::VideoRotationAngle.in_language(display_language)),
-                        )
-                        .changed()
-                    {
-                        self.angle = format!("{degrees:.1}");
+                    crate::rotation::angle_input(ui, &mut self.angle, &mut self.first_frame);
+                    if let Ok(value) = self.value_in(display_language) {
+                        let size = if value.tenths() == 0 {
+                            self.snapshot.geometry
+                        } else {
+                            self.snapshot
+                                .geometry_with(EditOperation::RotateVideo(value))
+                                .expect("validated rotation")
+                        };
+                        ui.label(formatted::pixel_size(display_language, size.0, size.1));
                     }
                     let value = self.value_in(display_language);
                     if let Err(error) = &value {
@@ -113,7 +81,7 @@ impl VideoRotationDialog {
                 if ui
                     .add_enabled(
                         value.is_ok(),
-                        egui::Button::new(Text::ApplyRotation.in_language(display_language)),
+                        egui::Button::new(Text::Apply.in_language(display_language)),
                     )
                     .clicked()
                 {

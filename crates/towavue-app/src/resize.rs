@@ -60,12 +60,22 @@ impl ResizeDialog {
     pub(super) fn controls(&mut self, ui: &mut egui::Ui) {
         let display_language = language(ui.ctx());
         let previous = (self.width.clone(), self.height.clone(), self.filter);
+        let labels = [
+            Text::WidthPixels,
+            Text::HeightPixels,
+            Text::ResamplingFilter,
+        ]
+        .map(|key| key.in_language(display_language));
+        let label_width = label_width(ui, &labels);
+        let field_width = (ui.available_width() - label_width - 48.0).clamp(40.0, 120.0);
+        let mut dimensions = [egui::Rect::NOTHING; 2];
+        let mut link_slot = egui::Rect::NOTHING;
         egui::Grid::new("resize-dimensions")
-            .num_columns(2)
+            .num_columns(3)
             .spacing(egui::vec2(8.0, 4.0))
             .show(ui, |ui| {
-                ui.spacing_mut().text_edit_width = 120.0;
-                ui.label(Text::WidthPixels.in_language(display_language));
+                ui.spacing_mut().text_edit_width = field_width;
+                aligned_label(ui, labels[0], label_width);
                 let width = text_input(
                     ui,
                     Text::WidthInPixels.in_language(display_language),
@@ -76,6 +86,7 @@ impl ResizeDialog {
                     width.request_focus();
                     self.first_frame = false;
                 }
+                dimensions[0] = width.rect;
                 let width = self.reveal_focus(width);
                 if width.changed()
                     && self.keep_ratio
@@ -83,14 +94,21 @@ impl ResizeDialog {
                 {
                     self.height = self.round(f64::from(value) / self.ratio);
                 }
+                link_slot = ui
+                    .allocate_exact_size(
+                        egui::vec2(32.0, chrome::INPUT_HEIGHT),
+                        egui::Sense::hover(),
+                    )
+                    .0;
                 ui.end_row();
-                ui.label(Text::HeightPixels.in_language(display_language));
+                aligned_label(ui, labels[1], label_width);
                 let height = text_input(
                     ui,
                     Text::HeightInPixels.in_language(display_language),
                     &mut self.height,
                     "px",
                 );
+                dimensions[1] = height.rect;
                 let height = self.reveal_focus(height);
                 if height.changed()
                     && self.keep_ratio
@@ -98,51 +116,102 @@ impl ResizeDialog {
                 {
                     self.width = self.round(f64::from(value) * self.ratio);
                 }
+                ui.allocate_space(egui::vec2(32.0, chrome::INPUT_HEIGHT));
+                ui.end_row();
+                aligned_label(ui, labels[2], label_width);
+                let filter = chrome::combo_box(
+                    ui,
+                    egui::ComboBox::from_id_salt("resize-resample")
+                        .truncate()
+                        .width(field_width)
+                        .selected_text(filter_name(self.filter, display_language)),
+                    |ui| {
+                        let mut rows = chrome::Dropdown::new(ui);
+                        for filter in [
+                            ResampleFilter::Nearest,
+                            ResampleFilter::Bilinear,
+                            ResampleFilter::Bicubic,
+                            ResampleFilter::Lanczos,
+                        ] {
+                            if rows
+                                .value(
+                                    ui,
+                                    &mut self.filter,
+                                    filter,
+                                    filter_name(filter, display_language),
+                                )
+                                .clicked()
+                            {
+                                ui.close();
+                            }
+                        }
+                        rows.finish(ui);
+                    },
+                );
+                filter.response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        filter.response.enabled(),
+                        labels[2],
+                    )
+                });
+                self.reveal_focus(
+                    filter
+                        .response
+                        .on_hover_cursor(egui::CursorIcon::PointingHand),
+                );
                 ui.end_row();
             });
-        let ratio = ui
-            .checkbox(
-                &mut self.keep_ratio,
+        let top = dimensions[0].center().y;
+        let bottom = dimensions[1].center().y;
+        let x = link_slot.left() + 2.0;
+        let center = egui::pos2(link_slot.center().x + 2.0, (top + bottom) * 0.5);
+        let stroke = egui::Stroke::new(1.0, chrome::MUTED);
+        ui.painter().add(egui::Shape::line(
+            vec![
+                egui::pos2(dimensions[0].right() + 2.0, top),
+                egui::pos2(x, top),
+                egui::pos2(x, bottom),
+                egui::pos2(dimensions[1].right() + 2.0, bottom),
+            ],
+            stroke,
+        ));
+        ui.painter()
+            .line_segment([egui::pos2(x, center.y), center], stroke);
+        let rect =
+            egui::Rect::from_center_size(center, egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE));
+        let response = ui.place(
+            rect,
+            egui::Button::selectable(self.keep_ratio, "").min_size(rect.size()),
+        );
+        if response.clicked() {
+            self.keep_ratio = !self.keep_ratio;
+            if self.keep_ratio
+                && let Ok(value) = self.width.parse::<u32>()
+            {
+                self.height = self.round(f64::from(value) / self.ratio);
+            }
+        }
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Checkbox,
+                response.enabled(),
+                self.keep_ratio,
                 Text::KeepAspectRatio.in_language(display_language),
             )
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        if self.reveal_focus(ratio).changed()
-            && self.keep_ratio
-            && let Ok(value) = self.width.parse::<u32>()
-        {
-            self.height = self.round(f64::from(value) / self.ratio);
-        }
-        let filter = chrome::combo_box(
+        });
+        crate::fluent::paint(
             ui,
-            egui::ComboBox::from_label(Text::ResamplingFilter.in_language(display_language))
-                .selected_text(filter_name(self.filter, display_language)),
-            |ui| {
-                let mut rows = chrome::Dropdown::new(ui);
-                for filter in [
-                    ResampleFilter::Nearest,
-                    ResampleFilter::Bilinear,
-                    ResampleFilter::Bicubic,
-                    ResampleFilter::Lanczos,
-                ] {
-                    if rows
-                        .value(
-                            ui,
-                            &mut self.filter,
-                            filter,
-                            filter_name(filter, display_language),
-                        )
-                        .clicked()
-                    {
-                        ui.close();
-                    }
-                }
-                rows.finish(ui);
+            rect,
+            crate::fluent::Kind::Link,
+            if self.keep_ratio {
+                chrome::FOREGROUND
+            } else {
+                ui.style().interact(&response).fg_stroke.color
             },
         );
         self.reveal_focus(
-            filter
-                .response
-                .on_hover_cursor(egui::CursorIcon::PointingHand),
+            response.on_hover_text(Text::KeepAspectRatio.in_language(display_language)),
         );
         if previous != (self.width.clone(), self.height.clone(), self.filter) {
             ui.ctx().request_repaint();
@@ -171,7 +240,7 @@ impl ResizeDialog {
                 ui,
                 Text::CommandResizeImage.in_language(display_language),
                 &[
-                    Text::ApplyResize.in_language(display_language),
+                    Text::Apply.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
@@ -196,7 +265,7 @@ impl ResizeDialog {
                 if self
                     .reveal_focus(ui.add_enabled(
                         value.is_some(),
-                        egui::Button::new(Text::ApplyResize.in_language(display_language)),
+                        egui::Button::new(Text::Apply.in_language(display_language)),
                     ))
                     .clicked()
                 {
@@ -219,6 +288,37 @@ impl ResizeDialog {
         }
         action
     }
+}
+
+pub(super) fn label_width(ui: &egui::Ui, labels: &[&str]) -> f32 {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    labels
+        .iter()
+        .map(|label| {
+            ui.painter()
+                .layout_no_wrap((*label).into(), font.clone(), chrome::FOREGROUND)
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max)
+}
+
+pub(super) fn aligned_label(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(width, chrome::INPUT_HEIGHT),
+        egui::Sense::hover(),
+    );
+    ui.painter().text(
+        rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        label,
+        egui::TextStyle::Body.resolve(ui.style()),
+        ui.visuals().text_color(),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, response.enabled(), label)
+    });
+    response
 }
 
 fn scroll_on_focus(response: egui::Response) -> egui::Response {
@@ -435,7 +535,12 @@ pub(crate) mod tests {
                         _ => None,
                     })
                     .expect("dimension label");
-                assert!(text.pos.x + text.galley.size().x < input.left());
+                assert!(
+                    text.pos.x + text.galley.size().x < input.left(),
+                    "label {:?}/{:?}, input {input:?}, density {density}",
+                    text.pos,
+                    text.galley.size()
+                );
                 assert!(
                     (text.pos.y + text.galley.size().y * 0.5 - input.center().y).abs()
                         <= 1.0 / density
@@ -448,7 +553,7 @@ pub(crate) mod tests {
                 |context| dialog.show(context),
             );
             let output = ui::settle(&context, size, |context| dialog.show(context));
-            ui::visible_button(&output, "サイズ変更を適用", size, false);
+            ui::visible_button(&output, "適用", size, false);
             ui::frame(
                 &context,
                 size,
@@ -457,12 +562,12 @@ pub(crate) mod tests {
             );
             let compact = egui::vec2(320.0, 240.0);
             let output = ui::settle(&context, compact, |context| dialog.show(context));
-            ui::visible_button(&output, "サイズ変更を適用", compact, true);
+            ui::visible_button(&output, "適用", compact, true);
             ui::visible_button(&output, "キャンセル", compact, true);
             let actions = ui::frame(
                 &context,
                 compact,
-                vec![ui::action(&output, "サイズ変更を適用", None)],
+                vec![ui::action(&output, "適用", None)],
                 |context| dialog.show(context),
             )
             .1;
@@ -745,7 +850,7 @@ pub(crate) mod tests {
                     );
                 }
                 let (_, tree) = frame(&mut dialog, vec![]);
-                for label in ["Apply resize", "Cancel"] {
+                for label in ["Apply", "Cancel"] {
                     let (_, node) = tree
                         .nodes
                         .iter()
@@ -763,7 +868,7 @@ pub(crate) mod tests {
                 let apply = tree
                     .nodes
                     .iter()
-                    .find(|(_, node)| node.label() == Some("Apply resize"))
+                    .find(|(_, node)| node.label() == Some("Apply"))
                     .expect("apply")
                     .0;
                 let (action, _) = frame(
@@ -907,7 +1012,7 @@ pub(crate) mod tests {
             "Width in pixels",
             "Height in pixels",
             "Keep aspect ratio",
-            "Apply resize",
+            "Apply",
             "Cancel",
         ] {
             assert!(seen.contains(label), "Tab must reach {label}: {seen:?}");
@@ -930,15 +1035,23 @@ pub(crate) mod tests {
             frame(vec![]);
         }
         let mut arrow_seen = std::collections::BTreeSet::new();
-        let mut arrow_filter_seen = false;
-        for key in [
-            egui::Key::ArrowDown,
-            egui::Key::ArrowDown,
-            egui::Key::ArrowRight,
-            egui::Key::ArrowLeft,
-            egui::Key::ArrowUp,
-            egui::Key::ArrowUp,
-        ] {
+        // Tab covers the side-mounted link and all form fields; the footer keeps
+        // ordinary horizontal arrow navigation without entering a text editor.
+        let tree = frame(vec![]);
+        let (apply, _) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Apply"))
+            .expect("apply");
+        frame(vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Focus,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *apply,
+                data: None,
+            },
+        )]);
+        for key in [egui::Key::ArrowRight, egui::Key::ArrowLeft] {
             for pressed in [true, false] {
                 frame(vec![egui::Event::Key {
                     key,
@@ -958,7 +1071,6 @@ pub(crate) mod tests {
                 .iter()
                 .find(|(id, _)| *id == tree.focus)
                 .expect("focus node");
-            arrow_filter_seen |= focus_node.1.role() == egui::accesskit::Role::ComboBox;
             if let Some(label) = focus_node.1.label() {
                 arrow_seen.insert(label.to_owned());
             }
@@ -970,8 +1082,7 @@ pub(crate) mod tests {
                 response.rect
             );
         }
-        assert!(arrow_filter_seen, "arrows must reach the resampling filter");
-        for label in ["Apply resize", "Cancel"] {
+        for label in ["Apply", "Cancel"] {
             assert!(
                 arrow_seen.contains(label),
                 "arrows must reach {label}: {arrow_seen:?}"
@@ -1049,7 +1160,7 @@ pub(crate) mod tests {
             let (apply, node) = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Apply resize"))
+                .find(|(_, node)| node.label() == Some("Apply"))
                 .expect("apply");
             assert!(node.is_disabled());
             assert!(
@@ -1142,7 +1253,7 @@ pub(crate) mod tests {
         let apply = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Apply resize"))
+            .find(|(_, node)| node.label() == Some("Apply"))
             .map(|(id, _)| *id)
             .expect("accessible apply");
         let (action, _) = frame(
@@ -1179,7 +1290,7 @@ pub(crate) mod tests {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply resize") && node.is_disabled())
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
         );
         let (action, _) = frame(
             &mut dialog,

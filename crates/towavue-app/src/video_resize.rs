@@ -42,7 +42,7 @@ impl VideoResizeDialog {
                 ui,
                 Text::CommandResizeVideo.in_language(display_language),
                 &[
-                    Text::ApplyResize.in_language(display_language),
+                    Text::Apply.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
@@ -60,7 +60,7 @@ impl VideoResizeDialog {
                     .inputs
                     .reveal_focus(ui.add_enabled(
                         value.is_ok(),
-                        egui::Button::new(Text::ApplyResize.in_language(display_language)),
+                        egui::Button::new(Text::Apply.in_language(display_language)),
                     ))
                     .clicked()
                 {

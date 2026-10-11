@@ -151,16 +151,17 @@ impl Browser {
                     ui.disable();
                     ui.set_opacity(opacity);
                 }
-                let total = screen.width().max(1.0);
+                let content = screen.shrink2(egui::vec2(8.0, 0.0));
+                let total = content.width().max(1.0);
                 let gap = 4.0_f32.min(total);
                 let search_width = ((total - gap) * 0.5).min(250.0);
                 let address = Rect::from_min_size(
-                    screen.min + egui::vec2(0.0, 8.0),
+                    content.min + egui::vec2(0.0, 8.0),
                     egui::vec2((total - gap - search_width).max(0.0), chrome::INPUT_HEIGHT),
                 );
                 let search = Rect::from_min_max(
                     egui::pos2(address.right() + gap, address.top()),
-                    egui::pos2(screen.right(), address.bottom()),
+                    egui::pos2(content.right(), address.bottom()),
                 );
                 self.address_bar(ui, address, &mut target);
                 self.search_bar(ui, search, source);
@@ -346,7 +347,11 @@ impl Browser {
                     egui::Align2::CENTER_CENTER,
                     glyph,
                     crate::fonts::icon_font(),
-                    chrome::MUTED,
+                    if open || arrow_response.hovered() {
+                        chrome::FOREGROUND
+                    } else {
+                        chrome::MUTED
+                    },
                 );
             }
             let left_hover = !blocked && (name_response.hovered() || name_response.has_focus());

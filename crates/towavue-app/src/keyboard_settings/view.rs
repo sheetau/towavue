@@ -549,6 +549,9 @@ fn keycaps(ui: &mut egui::Ui, sequence: &KeySequence) {
             tokens.push((key.to_owned(), true));
         }
     }
+    if tokens.is_empty() {
+        return;
+    }
     let width = ui.available_width();
     let font = egui::TextStyle::Body.resolve(ui.style());
     let mut rows = vec![(0.0_f32, Vec::new())];

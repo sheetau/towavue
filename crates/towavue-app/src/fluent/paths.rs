@@ -677,5 +677,59 @@ pub(super) fn paths(kind: Kind) -> Vec<Path> {
             path.close();
             path.finish().expect("pinned Fluent path")
         }],
+        Kind::Link => vec![{
+            let mut path = PathBuilder::new();
+            path.move_to(9.49999, 4.0);
+            path.line_to(10.5, 4.0);
+            path.cubic_to(12.433, 4.0, 14.0, 5.567, 14.0, 7.5);
+            path.cubic_to(14.0, 9.36856, 12.5357, 10.8951, 10.6941, 10.9948);
+            path.line_to(10.5023, 11.0);
+            path.line_to(9.5023, 11.0046);
+            path.cubic_to(9.22616, 11.0059, 9.00127, 10.783, 8.99999, 10.5069);
+            path.cubic_to(8.99888, 10.2614, 9.17481, 10.0565, 9.40787, 10.0131);
+            path.line_to(9.4977, 10.0046);
+            path.line_to(10.5, 10.0);
+            path.cubic_to(11.8807, 10.0, 13.0, 8.88071, 13.0, 7.5);
+            path.cubic_to(13.0, 6.17452, 11.9685, 5.08996, 10.6644, 5.00532);
+            path.line_to(10.5, 5.0);
+            path.line_to(9.49999, 5.0);
+            path.cubic_to(9.22386, 5.0, 8.99999, 4.77614, 8.99999, 4.5);
+            path.cubic_to(8.99999, 4.25454, 9.17687, 4.05039, 9.41012, 4.00806);
+            path.line_to(9.49999, 4.0);
+            path.line_to(10.5, 4.0);
+            path.line_to(9.49999, 4.0);
+            path.close();
+            path.move_to(5.5, 4.0);
+            path.line_to(6.5, 4.0);
+            path.cubic_to(6.77614, 4.0, 7.0, 4.22386, 7.0, 4.5);
+            path.cubic_to(7.0, 4.74546, 6.82312, 4.94961, 6.58988, 4.99194);
+            path.line_to(6.5, 5.0);
+            path.line_to(5.5, 5.0);
+            path.cubic_to(4.11929, 5.0, 3.0, 6.11929, 3.0, 7.5);
+            path.cubic_to(3.0, 8.82548, 4.03154, 9.91004, 5.33562, 9.99468);
+            path.line_to(5.5, 10.0);
+            path.line_to(6.5, 10.0);
+            path.cubic_to(6.77614, 10.0, 7.0, 10.2239, 7.0, 10.5);
+            path.cubic_to(7.0, 10.7455, 6.82312, 10.9496, 6.58988, 10.9919);
+            path.line_to(6.5, 11.0);
+            path.line_to(5.5, 11.0);
+            path.cubic_to(3.567, 11.0, 2.0, 9.433, 2.0, 7.5);
+            path.cubic_to(2.0, 5.63144, 3.46428, 4.10487, 5.30796, 4.00518);
+            path.line_to(5.5, 4.0);
+            path.line_to(6.5, 4.0);
+            path.line_to(5.5, 4.0);
+            path.close();
+            path.move_to(5.50023, 7.0);
+            path.line_to(10.5002, 7.0023);
+            path.cubic_to(10.7764, 7.00242, 11.0001, 7.22638, 11.0, 7.50252);
+            path.cubic_to(10.9999, 7.74798, 10.8229, 7.95205, 10.5897, 7.99428);
+            path.line_to(10.4998, 8.0023);
+            path.line_to(5.49977, 8.0);
+            path.cubic_to(5.22363, 7.99987, 4.99987, 7.77591, 5.0, 7.49977);
+            path.cubic_to(5.00011, 7.25431, 5.17708, 7.05024, 5.41035, 7.00801);
+            path.line_to(5.50023, 7.0);
+            path.close();
+            path.finish().expect("pinned Fluent path")
+        }],
     }
 }

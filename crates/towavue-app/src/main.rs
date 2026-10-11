@@ -4358,6 +4358,7 @@ where
             if self.metadata_dialog.is_none()
                 && self.resize_dialog.is_none()
                 && self.video_resize_dialog.is_none()
+                && self.audio_export_dialog.is_none()
             {
                 egui::Popup::close_all(&context);
             }

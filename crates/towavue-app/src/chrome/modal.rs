@@ -69,7 +69,8 @@ pub fn modal_body<R>(
         ui.spacing_mut().item_spacing.y = 2.0;
         if bounds.height() < 112.0 {
             // Keep a wrapped footer inside very short media areas with its full gap.
-            ui.spacing_mut().button_padding.y = 2.0;
+            ui.spacing_mut().button_padding.y = 0.0;
+            ui.spacing_mut().interact_size.y = 16.0;
         }
     }
     ui.ctx().accesskit_node_builder(ui.unique_id(), |node| {
@@ -78,6 +79,8 @@ pub fn modal_body<R>(
         node.set_modal();
     });
     let heading = ui.label(egui::RichText::new(title).color(super::FOREGROUND));
+    let header_gap = (MARGIN - ui.spacing().item_spacing.y).max(0.0);
+    ui.add_space(header_gap);
     let font = egui::TextStyle::Button.resolve(ui.style());
     let row_height =
         ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
@@ -111,11 +114,14 @@ pub fn modal_body<R>(
     let height = (bounds.height()
         - FRAME_SPACE
         - heading.rect.height()
+        - header_gap
         - ui.spacing().item_spacing.y
         - footer)
         .max(1.0);
     let clip_margin = ui.visuals().clip_rect_margin;
-    ui.visuals_mut().clip_rect_margin = 0.0;
+    // Egui rounds ScrollArea bounds separately from child widget positions.
+    // Half a physical pixel retains their antialiasing at fractional densities.
+    ui.visuals_mut().clip_rect_margin = 0.5 / ui.ctx().pixels_per_point();
     let body = egui::ScrollArea::vertical()
         .id_salt("modal-body")
         .auto_shrink([true, true])
@@ -123,7 +129,9 @@ pub fn modal_body<R>(
         .min_scrolled_height(1.0)
         .show_styled(ui, content);
     ui.visuals_mut().clip_rect_margin = clip_margin;
-    ui.add_space(footer_gap);
+    if !actions.is_empty() {
+        ui.add_space(footer_gap);
+    }
     body.inner
 }
 

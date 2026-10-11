@@ -124,15 +124,15 @@ pub(super) fn paint(
     match texture {
         Some(Ok(texture)) => {
             let size = texture.size_vec2();
-            let scale = (rect.width().min(240.0) / size.x)
-                .min(rect.height() / size.y)
-                .min(1.0);
+            let scale = rect.height() / size.y;
+            // Match the card height; retain aspect-ratio width under its clip.
+
             let kind = MediaKind::from_path(path);
             let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
             let target = if kind == Some(MediaKind::Audio) {
                 egui::Rect::from_center_size(
                     image_rect.center(),
-                    egui::vec2(image_rect.width(), image_rect.height() * (2.0 / 3.0)),
+                    egui::vec2(image_rect.width(), image_rect.height() * 0.5),
                 )
             } else {
                 image_rect
@@ -164,6 +164,45 @@ mod tests {
     use crate::palette::{CommandPalette, OpenSources};
     use std::os::windows::process::CommandExt;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn preview_matches_card_height_with_variable_width_and_half_height_audio() {
+        for (kind, dimensions) in [("png", [40, 80]), ("mp4", [160, 90]), ("wav", [240, 80])] {
+            let context = crate::fonts::test_context();
+            let texture = context.load_texture(
+                "preview-height",
+                egui::ColorImage::filled(dimensions, egui::Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            );
+            let mut slot = egui::Rect::NOTHING;
+            let output = context.run_ui(Default::default(), |ui| {
+                let area = ui.allocate_exact_size(egui::vec2(300.0, 160.0), egui::Sense::hover());
+                slot = area.0;
+                paint(
+                    ui,
+                    Some(&PathBuf::from(format!("preview.{kind}"))),
+                    Some(&Ok(texture.clone())),
+                    Some(area),
+                );
+            });
+            let (bounds, clip) = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id() => {
+                        Some((mesh.calc_bounds(), shape.clip_rect))
+                    }
+                    _ => None,
+                })
+                .expect("preview pixels");
+            assert!((bounds.height() - if kind == "wav" { 80.0 } else { 160.0 }).abs() < 0.01);
+            assert!(
+                (bounds.width() - dimensions[0] as f32 / dimensions[1] as f32 * 160.0).abs() < 0.01
+            );
+            assert_eq!(clip, slot);
+            assert_eq!(bounds.center(), slot.center());
+        }
+    }
 
     #[test]
     fn picker_preview_tracks_selection_and_leaves_results_inside_small_windows() {

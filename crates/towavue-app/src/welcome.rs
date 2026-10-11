@@ -402,37 +402,13 @@ pub(super) fn media_filter_button(
     let filter_button = chrome::input_button_at(
         ui,
         filter_rect,
-        egui::Button::new(
-            match filter {
-                Some(MediaKind::Image) => chrome::Icon::Image,
-                Some(MediaKind::Video) => chrome::Icon::Video,
-                Some(MediaKind::Audio) => chrome::Icon::Audio,
-                None => chrome::Icon::Filter,
-            }
-            .text()
-            .color(if filter.is_some() {
-                chrome::FOREGROUND
-            } else {
-                chrome::MUTED
-            }),
-        )
-        .stroke(egui::Stroke::NONE)
-        .frame_when_inactive(false),
+        egui::Button::new("")
+            .stroke(egui::Stroke::NONE)
+            .frame_when_inactive(false),
         hover,
     )
     .help_text(Text::GalleryFilter.in_language(language));
-    if let Some(kind) = *filter {
-        crate::fluent::paint(
-            ui,
-            filter_button.rect,
-            match kind {
-                MediaKind::Image => crate::fluent::Kind::Image,
-                MediaKind::Video => crate::fluent::Kind::Video,
-                MediaKind::Audio => crate::fluent::Kind::Audio,
-            },
-            chrome::FOREGROUND,
-        );
-    }
+    let icon_shape = ui.painter().add(egui::Shape::Noop);
     filter_button.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -467,6 +443,38 @@ pub(super) fn media_filter_button(
             }
             rows.finish(ui);
         });
+    }
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&filter_button));
+    if open {
+        ui.painter().set(
+            icon_shape,
+            egui::Shape::rect_filled(filter_rect, 3.0, hover),
+        );
+    }
+    let color = if open || filter_button.hovered() || filter.is_some() {
+        chrome::FOREGROUND
+    } else {
+        chrome::MUTED
+    };
+    if let Some(kind) = *filter {
+        crate::fluent::paint(
+            ui,
+            filter_button.rect,
+            match kind {
+                MediaKind::Image => crate::fluent::Kind::Image,
+                MediaKind::Video => crate::fluent::Kind::Video,
+                MediaKind::Audio => crate::fluent::Kind::Audio,
+            },
+            color,
+        );
+    } else {
+        ui.painter().text(
+            filter_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            chrome::Icon::Filter.text().text(),
+            crate::fonts::icon_font(),
+            color,
+        );
     }
 }
 

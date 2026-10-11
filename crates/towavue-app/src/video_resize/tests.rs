@@ -31,7 +31,7 @@ fn japanese_video_resize_keeps_even_display_dimensions_and_compact_actions() {
             |context| dialog.show(context),
         );
         let output = ui::settle(&context, size, |context| dialog.show(context));
-        ui::visible_button(&output, "サイズ変更を適用", size, false);
+        ui::visible_button(&output, "適用", size, false);
         ui::frame(
             &context,
             size,
@@ -50,15 +50,15 @@ fn japanese_video_resize_keeps_even_display_dimensions_and_compact_actions() {
         );
         let output = ui::settle(&context, compact, |context| dialog.show(context));
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == reason)));
-        ui::visible_button(&output, "サイズ変更を適用", compact, false);
+        ui::visible_button(&output, "適用", compact, false);
         dialog.snapshot.max_side = 16384;
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "サイズ変更を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         let actions = ui::frame(
             &context,
             compact,
-            vec![ui::action(&output, "サイズ変更を適用", None)],
+            vec![ui::action(&output, "適用", None)],
             |context| dialog.show(context),
         )
         .1;
@@ -98,7 +98,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply resize") && node.is_disabled()),
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled()),
             "{invalid}"
         );
         assert_eq!(app.edits, history);
@@ -200,7 +200,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(
         app,
         vec![access(node(&tree, "Height in pixels"), Some("64"))],
     );
-    frame(app, vec![access(node(&tree, "Apply resize"), None)]);
+    frame(app, vec![access(node(&tree, "Apply"), None)]);
     frame(app, vec![]);
     assert!(app.video_resize_dialog.is_none());
     assert_eq!(
@@ -399,7 +399,7 @@ fn video_resize_modal_filters_ratio_budget_and_compact_escape() {
     assert!(
         tree.nodes
             .iter()
-            .any(|(_, node)| node.label() == Some("Apply resize") && node.is_disabled())
+            .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
     );
     dialog.snapshot.max_side = 16384;
     let (_, tree) = draw(&mut dialog, true, vec![]);

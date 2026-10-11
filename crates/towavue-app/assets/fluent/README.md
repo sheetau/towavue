@@ -9,7 +9,8 @@ The 16-unit filled Play/Pause/Previous/Next artwork serves both UI transport
 and taskbar buttons. Regular Arrow Repeat All/Arrow Repeat 1/Arrow Shuffle,
 Arrow Repeat All Off and Arrow Shuffle Off serve playback modes.
 Image/Filmstrip Play/Music Note 2 serve Gallery filters and media-tab/recent-file decorations;
-Image Multiple serves Gallery tabs;
+Image Multiple serves Gallery tabs; Link, rotated 90 degrees at rasterization,
+serves the Resize aspect-ratio toggle;
 Arrow Right/Window New/Prohibited serve native drag badges. Compound filled outlines
 are rasterized with their original winding and without adding a stroke.
 The UI uses a 16-point box, taskbar buttons 32 points and badge symbols 17 points.

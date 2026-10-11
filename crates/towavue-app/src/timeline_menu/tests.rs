@@ -1,5 +1,88 @@
 use super::*;
 
+#[test]
+fn context_click_waits_for_release_and_rejects_drag_return_and_interruption() {
+    for batched in [false, true] {
+        for gesture in ["click", "drag", "return", "escape", "focus"] {
+            let context = fonts::test_context();
+            let rect = egui::Rect::from_min_max(egui::pos2(20.0, 30.0), egui::pos2(420.0, 130.0));
+            let frame = |events| {
+                let _ = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(500.0, 400.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.interact(
+                            rect,
+                            "context-click-test".into(),
+                            egui::Sense::click_and_drag(),
+                        );
+                        ui.interact(
+                            rect.shrink(30.0),
+                            "child-control".into(),
+                            egui::Sense::hover(),
+                        );
+                        let clicked = context_click(ui, &response, None);
+                        tab_menu::popup_with_pointer(ui, &response, &response, clicked, |ui| {
+                            ui.label("Menu");
+                            None::<()>
+                        });
+                        if context.current_pass_index() == 0 {
+                            context.request_discard("context click control");
+                        }
+                    },
+                );
+            };
+            frame(vec![]);
+            let origin = egui::pos2(180.0, 70.0);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let mut events = vec![egui::Event::PointerMoved(origin), button(origin, true)];
+            if !batched {
+                frame(std::mem::take(&mut events));
+                assert!(!egui::Popup::is_any_open(&context));
+            }
+            let target = if gesture == "drag" {
+                origin + egui::vec2(60.0, 0.0)
+            } else {
+                origin
+            };
+            if matches!(gesture, "drag" | "return") {
+                events.push(egui::Event::PointerMoved(origin + egui::vec2(60.0, 0.0)));
+            }
+            if gesture == "escape" {
+                events.push(egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            if gesture == "focus" {
+                events.push(egui::Event::WindowFocused(false));
+            }
+            events.extend([egui::Event::PointerMoved(target), button(target, false)]);
+            frame(events);
+            frame(vec![]);
+            assert_eq!(
+                egui::Popup::is_any_open(&context),
+                gesture == "click",
+                "{gesture}, batched={batched}"
+            );
+        }
+    }
+}
+
 fn media_app(
     root: &Path,
     kind: MediaKind,
@@ -139,6 +222,12 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
                             actions.is_empty(),
                             "right click must not select, seek or edit"
                         );
+                        if pressed {
+                            assert!(
+                                !egui::Popup::is_any_open(&context),
+                                "menu waits for release"
+                            );
+                        }
                     }
                     let (_, tree) = frame(&mut app, vec![]);
                     assert!(
@@ -574,9 +663,14 @@ fn timeline_menu_outside_press_hands_off_selection_and_secondary_retargeting() {
                 .is_empty()
             );
             assert!(
-                egui::Popup::is_any_open(&context),
-                "secondary press opens the replacement menu immediately"
+                !egui::Popup::is_any_open(&context),
+                "secondary press dismisses the old menu and waits for release"
             );
+            frame(
+                &mut app,
+                button(target, egui::PointerButton::Secondary, false),
+            );
+            frame(&mut app, vec![]);
             let layers = context.memory(|memory| memory.layer_ids().collect::<Vec<_>>());
             let popup = layers
                 .into_iter()

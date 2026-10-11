@@ -64,7 +64,7 @@ impl Dialog {
                     ui,
                     Text::CommandEditSpeed.in_language(language),
                     &[
-                        Text::ApplySpeed.in_language(language),
+                        Text::Apply.in_language(language),
                         Text::Cancel.in_language(language),
                     ],
                     |ui| {
@@ -88,7 +88,11 @@ impl Dialog {
                         egui::Grid::new("speed-duration-fields")
                             .num_columns(2)
                             .show(ui, |ui| {
-                                ui.label(Text::SpeedLabel.in_language(language));
+                                resize::aligned_label(
+                                    ui,
+                                    Text::SpeedLabel.in_language(language),
+                                    label_width,
+                                );
                                 ui.spacing_mut().text_edit_width = field_width;
                                 if resize::text_input(
                                     ui,
@@ -102,7 +106,11 @@ impl Dialog {
                                     self.sync_linked_input();
                                 }
                                 ui.end_row();
-                                ui.label(Text::DurationLabel.in_language(language));
+                                resize::aligned_label(
+                                    ui,
+                                    Text::DurationLabel.in_language(language),
+                                    label_width,
+                                );
                                 if resize::text_input(
                                     ui,
                                     Text::DurationLabel.in_language(language),
@@ -141,7 +149,7 @@ impl Dialog {
                     if ui
                         .add_enabled(
                             value.is_some(),
-                            egui::Button::new(Text::ApplySpeed.in_language(language)),
+                            egui::Button::new(Text::Apply.in_language(language)),
                         )
                         .clicked()
                     {

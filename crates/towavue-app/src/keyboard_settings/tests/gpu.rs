@@ -29,10 +29,17 @@ fn keyboard_settings_ui_reaches_gpu_at_three_densities() {
                 let mut app = Application::new(None, |_| {}).expect("settings GPU fixture");
                 app.ui_context = Some(context.clone());
                 app.dispatch(CommandId::OpenKeyboardSettings);
-                for (phase_index, phase) in
-                    ["list", "search", "commands", "files", "folders", "edit"]
-                        .into_iter()
-                        .enumerate()
+                for (phase_index, phase) in [
+                    "list",
+                    "search",
+                    "commands",
+                    "files",
+                    "folders",
+                    "edit",
+                    "edit-empty",
+                ]
+                .into_iter()
+                .enumerate()
                 {
                     if phase == "search" {
                         app.keyboard_settings.query = "reading".into();
@@ -64,6 +71,10 @@ fn keyboard_settings_ui_reaches_gpu_at_three_densities() {
                             .capture("Ctrl+K".parse().expect("valid test key"));
                         app.keyboard_settings
                             .capture("Ctrl+S".parse().expect("valid test key"));
+                    }
+                    if phase == "edit-empty" {
+                        app.keyboard_settings
+                            .begin_edit(CommandId::OpenFile, None, &app.shortcuts);
                     }
                     let width = (900.0 * density) as u32;
                     let height = (600.0 * density) as u32;

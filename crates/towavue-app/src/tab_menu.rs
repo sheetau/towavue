@@ -28,7 +28,7 @@ pub(crate) fn popup<A>(
     close: &egui::Response,
     contents: impl FnOnce(&mut egui::Ui) -> Option<A>,
 ) -> Option<(A, Option<egui::Id>)> {
-    popup_with_pointer(ui, response, close, false, contents)
+    popup_with_pointer(ui, response, close, response.secondary_clicked(), contents)
 }
 
 pub(crate) fn popup_with_pointer<A>(
@@ -81,13 +81,18 @@ pub(crate) fn popup_with_pointer<A>(
             });
         });
         context.data_mut(|data| data.insert_temp(anchor_id, origin.id));
-    } else if response.secondary_clicked() || (eligible && pointer_requested) {
+    } else if eligible && pointer_requested {
         response.surrender_focus();
         close.surrender_focus();
         context.data_mut(|data| data.remove::<egui::Id>(anchor_id));
     }
     let keyboard_origin = context.data(|data| data.get_temp::<egui::Id>(anchor_id));
-    let mut popup = egui::Popup::context_menu(response);
+    // The caller owns secondary-click recognition, including child controls.
+    let mut popup = egui::Popup::context_menu(response).open_memory(
+        response
+            .clicked()
+            .then_some(egui::SetOpenCommand::Bool(false)),
+    );
     if origin.is_some() || (eligible && pointer_requested) {
         popup = popup.open_memory(egui::SetOpenCommand::Bool(true));
     }
@@ -100,7 +105,7 @@ pub(crate) fn popup_with_pointer<A>(
                 .left_bottom(),
         );
     }
-    // A menu opened on secondary press must survive that button's release.
+    // Opening on a secondary click must survive that button's release.
     // Item activation still closes explicitly, and Escape keeps its normal path.
     if ui.input(|input| {
         input

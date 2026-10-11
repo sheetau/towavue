@@ -3,6 +3,9 @@ use crate::*;
 use towavue_core::ImageRotation;
 use towavue_core::localization::formatted;
 
+mod angle;
+pub(super) use angle::input as angle_input;
+
 mod drag;
 pub(super) use drag::{RotationDrag, RotationResponse, rotation_input};
 
@@ -55,45 +58,14 @@ impl RotationDialog {
                 ui,
                 Text::CommandFreeRotateImage.in_language(display_language),
                 &[
-                    Text::ApplyRotation.in_language(display_language),
+                    Text::Apply.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().text_edit_width = 96.0;
-                        let response = resize::text_input(
-                            ui,
-                            Text::RotationAngleInput.in_language(display_language),
-                            &mut self.angle,
-                            "°",
-                        )
-                        .help_text(format!(
-                            "{}\n{}",
-                            Text::RotationAngleHelp.in_language(display_language),
-                            Text::RotateDragTip.in_language(display_language)
-                        ));
-                        if self.first_frame {
-                            response.request_focus();
-                            self.first_frame = false;
-                        }
-                        if let Some(value) = self.value() {
-                            let size = self.result_size(value);
-                            ui.label(formatted::pixel_size(display_language, size.0, size.1));
-                        }
-                    });
-                    let mut degrees = self
-                        .value()
-                        .map_or(0.0, |value| f64::from(value.tenths()) / 10.0);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut degrees, -180.0..=180.0)
-                                .step_by(0.1)
-                                .show_value(false)
-                                .text(Text::RotationAngle.in_language(display_language)),
-                        )
-                        .changed()
-                    {
-                        self.angle = format!("{degrees:.1}");
+                    angle_input(ui, &mut self.angle, &mut self.first_frame);
+                    if let Some(value) = self.value() {
+                        let size = self.result_size(value);
+                        ui.label(formatted::pixel_size(display_language, size.0, size.1));
                     }
                     let value = self.value();
                     if value.is_none() {
@@ -107,7 +79,7 @@ impl RotationDialog {
                 if ui
                     .add_enabled(
                         value.is_some(),
-                        egui::Button::new(Text::ApplyRotation.in_language(display_language)),
+                        egui::Button::new(Text::Apply.in_language(display_language)),
                     )
                     .clicked()
                 {

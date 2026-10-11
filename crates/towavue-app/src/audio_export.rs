@@ -58,28 +58,17 @@ fn target_control(
     value: &mut i16,
     range: std::ops::RangeInclusive<i16>,
     label: &str,
+    width: f32,
 ) -> egui::Response {
     let mut number = f64::from(*value) / 10.0;
-    let response = ui
-        .horizontal(|ui| {
-            let label = ui.label(label);
-            chrome::input_style(ui);
-            ui.add_sized(
-                [ui.spacing().interact_size.x, chrome::INPUT_HEIGHT],
-                egui::DragValue::new(&mut number)
-                    .range(f64::from(*range.start()) / 10.0..=f64::from(*range.end()) / 10.0)
-                    .speed(0.1)
-                    .fixed_decimals(1)
-                    .custom_parser(|text| {
-                        text.trim()
-                            .parse::<f64>()
-                            .ok()
-                            .filter(|value| value.is_finite())
-                    }),
-            )
-            .labelled_by(label.id)
-        })
-        .inner;
+    let response = chrome::number_input(
+        ui,
+        &mut number,
+        f64::from(*range.start()) / 10.0..=f64::from(*range.end()) / 10.0,
+        width,
+        "",
+        label,
+    );
     if number.is_finite() {
         *value = ((number * 10.0).round() as i16).clamp(*range.start(), *range.end());
     }
@@ -107,7 +96,7 @@ impl AudioExportDialog {
                     ui,
                     Text::CommandAudioExportOptions.in_language(display_language),
                     &[
-                        Text::ApplyOptions.in_language(display_language),
+                        Text::Apply.in_language(display_language),
                         Text::Cancel.in_language(display_language),
                     ],
                     |ui| {
@@ -160,69 +149,143 @@ impl AudioExportDialog {
                             ui.label(Text::SavedAudioTracksHelp.in_language(display_language));
                             crate::chrome::separator(ui);
                         }
-                        ui.label(Text::Normalization.in_language(display_language));
-                        for (value, label) in [
-                            (
-                                AudioNormalization::Off,
-                                Text::RepeatOff.in_language(display_language),
-                            ),
-                            (
-                                AudioNormalization::Peak,
-                                Text::NormalizationPeak.in_language(display_language),
-                            ),
-                            (
-                                AudioNormalization::Loudness(match self.options.normalization {
-                                    AudioNormalization::Loudness(target) => target,
-                                    _ => LoudnessTarget::default(),
-                                }),
-                                Text::Loudness.in_language(display_language),
-                            ),
-                        ] {
-                            let response = ui
-                                .radio_value(&mut self.options.normalization, value, label)
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
-                            if self.first_frame {
-                                response.request_focus();
-                                self.first_frame = false;
-                            }
-                            reveal_focus(&response);
-                        }
-                        if let AudioNormalization::Loudness(target) =
-                            &mut self.options.normalization
-                        {
-                            reveal_focus(&target_control(
-                                ui,
-                                &mut target.integrated_tenths,
-                                -700..=-50,
-                                Text::IntegratedLoudness.in_language(display_language),
-                            ));
-                            reveal_focus(&target_control(
-                                ui,
-                                &mut target.true_peak_tenths,
-                                -90..=0,
-                                Text::MaximumTruePeak.in_language(display_language),
-                            ));
+                        let labels = [
+                            Text::Normalization,
+                            Text::OutputChannels,
+                            Text::IntegratedLoudness,
+                            Text::MaximumTruePeak,
+                        ]
+                        .map(|text| text.in_language(display_language));
+                        let label_width = resize::label_width(ui, &labels);
+                        let field_width =
+                            (ui.available_width() - label_width - 8.0).clamp(40.0, 160.0);
+                        egui::Grid::new("audio-options-grid")
+                            .num_columns(2)
+                            .spacing(egui::vec2(8.0, 4.0))
+                            .show(ui, |ui| {
+                                resize::aligned_label(ui, labels[0], label_width);
+                                let normalization = [
+                                    (AudioNormalization::Off, Text::RepeatOff),
+                                    (AudioNormalization::Peak, Text::NormalizationPeak),
+                                    (
+                                        AudioNormalization::Loudness(
+                                            match self.options.normalization {
+                                                AudioNormalization::Loudness(target) => target,
+                                                _ => LoudnessTarget::default(),
+                                            },
+                                        ),
+                                        Text::Loudness,
+                                    ),
+                                ];
+                                let selected = normalization
+                                    .iter()
+                                    .find(|(value, _)| *value == self.options.normalization)
+                                    .expect("normalization")
+                                    .1;
+                                let response = chrome::combo_box(
+                                    ui,
+                                    egui::ComboBox::from_id_salt("normalization")
+                                        .truncate()
+                                        .width(field_width)
+                                        .selected_text(selected.in_language(display_language)),
+                                    |ui| {
+                                        let mut rows = chrome::Dropdown::new(ui);
+                                        for (value, label) in normalization {
+                                            if rows
+                                                .value(
+                                                    ui,
+                                                    &mut self.options.normalization,
+                                                    value,
+                                                    label.in_language(display_language),
+                                                )
+                                                .clicked()
+                                            {
+                                                ui.close();
+                                            }
+                                        }
+                                        rows.finish(ui);
+                                    },
+                                )
+                                .response;
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::ComboBox,
+                                        response.enabled(),
+                                        labels[0],
+                                    )
+                                });
+                                if self.first_frame {
+                                    response.request_focus();
+                                    self.first_frame = false;
+                                }
+                                reveal_focus(&response);
+                                ui.end_row();
+                                if let AudioNormalization::Loudness(target) =
+                                    &mut self.options.normalization
+                                {
+                                    for (value, range, label) in [
+                                        (&mut target.integrated_tenths, -700..=-50, labels[2]),
+                                        (&mut target.true_peak_tenths, -90..=0, labels[3]),
+                                    ] {
+                                        resize::aligned_label(ui, label, label_width);
+                                        reveal_focus(&target_control(
+                                            ui,
+                                            value,
+                                            range,
+                                            label,
+                                            field_width,
+                                        ));
+                                        ui.end_row();
+                                    }
+                                }
+                                resize::aligned_label(ui, labels[1], label_width);
+                                let channels = [
+                                    (AudioChannels::Keep, Text::KeepSourceChannels),
+                                    (AudioChannels::Mono, Text::Mono),
+                                    (AudioChannels::Stereo, Text::Stereo),
+                                ];
+                                let selected = channels
+                                    .iter()
+                                    .find(|(value, _)| *value == self.options.channels)
+                                    .expect("channels")
+                                    .1;
+                                let response = chrome::combo_box(
+                                    ui,
+                                    egui::ComboBox::from_id_salt("output-channels")
+                                        .truncate()
+                                        .width(field_width)
+                                        .selected_text(selected.in_language(display_language)),
+                                    |ui| {
+                                        let mut rows = chrome::Dropdown::new(ui);
+                                        for (value, label) in channels {
+                                            if rows
+                                                .value(
+                                                    ui,
+                                                    &mut self.options.channels,
+                                                    value,
+                                                    label.in_language(display_language),
+                                                )
+                                                .clicked()
+                                            {
+                                                ui.close();
+                                            }
+                                        }
+                                        rows.finish(ui);
+                                    },
+                                )
+                                .response;
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::ComboBox,
+                                        response.enabled(),
+                                        labels[1],
+                                    )
+                                });
+                                reveal_focus(&response);
+                                ui.end_row();
+                            });
+                        if matches!(self.options.normalization, AudioNormalization::Loudness(_)) {
                             ui.label(Text::LoudnessVerificationHelp.in_language(display_language));
-                        }
-                        ui.label(Text::OutputChannels.in_language(display_language));
-                        for (value, label) in [
-                            (
-                                AudioChannels::Keep,
-                                Text::KeepSourceChannels.in_language(display_language),
-                            ),
-                            (
-                                AudioChannels::Mono,
-                                Text::Mono.in_language(display_language),
-                            ),
-                            (
-                                AudioChannels::Stereo,
-                                Text::Stereo.in_language(display_language),
-                            ),
-                        ] {
-                            let response = ui
-                                .radio_value(&mut self.options.channels, value, label)
-                                .on_hover_cursor(egui::CursorIcon::PointingHand);
-                            reveal_focus(&response);
                         }
                         crate::chrome::separator(ui);
                         ui.label(Text::AudioOptionsScope.in_language(display_language));
@@ -234,7 +297,7 @@ impl AudioExportDialog {
                 ui.horizontal_wrapped(|ui| {
                     crate::chrome::flat_buttons(ui);
                     if ui
-                        .button(Text::ApplyOptions.in_language(display_language))
+                        .button(Text::Apply.in_language(display_language))
                         .clicked()
                     {
                         action = Some(Some(self.options));

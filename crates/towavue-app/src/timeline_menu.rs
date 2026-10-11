@@ -43,6 +43,96 @@ pub(crate) struct Intent {
     action: Action,
 }
 
+#[derive(Clone, Default)]
+struct ContextClick {
+    frame: Option<u64>,
+    active: Option<(Option<Owner>, egui::Pos2, bool)>,
+}
+
+/// Children share this context; track the press origin and every move so an
+/// out-and-back drag cannot turn into a click on release or a discarded pass.
+fn context_click(ui: &egui::Ui, response: &egui::Response, owner: Option<Owner>) -> bool {
+    let context = ui.ctx();
+    let popup = egui::Popup::default_response_id(response);
+    let key = popup.with("timeline-click");
+    let mut state = context
+        .data(|data| data.get_temp::<ContextClick>(key))
+        .unwrap_or_default();
+    let frame = context.cumulative_frame_nr();
+    if state.frame == Some(frame) {
+        return false;
+    }
+    state.frame = Some(frame);
+    let eligible = |position| {
+        let layer = context.layer_id_at(position);
+        let closed_popup = layer.is_some_and(|layer| layer.id == popup)
+            && !egui::Popup::is_id_open(context, popup);
+        response.enabled()
+            && response.rect.intersect(ui.clip_rect()).contains(position)
+            && (layer == Some(ui.layer_id()) || closed_popup)
+    };
+    let (events, focused) = ui.input(|input| (input.events.clone(), input.focused));
+    let interrupted = !focused
+        || events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::WindowFocused(false)
+                    | egui::Event::Key {
+                        key: egui::Key::Escape,
+                        pressed: true,
+                        ..
+                    }
+                    | egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        ..
+                    }
+            )
+        });
+    let mut clicked = false;
+    if interrupted {
+        state.active = None;
+    } else {
+        if state
+            .active
+            .is_some_and(|(previous, _, _)| previous != owner)
+        {
+            state.active = None;
+        }
+        let threshold = context.options(|options| options.input_options.max_click_dist);
+        for event in events {
+            match event {
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    ..
+                } => {
+                    state.active = eligible(pos).then_some((owner, pos, false));
+                }
+                egui::Event::PointerMoved(pos) => {
+                    if let Some((_, origin, dragged)) = &mut state.active {
+                        *dragged |= pos.distance(*origin) > threshold;
+                    }
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    ..
+                } => {
+                    if let Some((_, origin, dragged)) = state.active.take() {
+                        clicked = !dragged && pos.distance(origin) <= threshold && eligible(pos);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    context.data_mut(|data| data.insert_temp(key, state));
+    clicked
+}
+
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     fn timeline_menu_owner(&self) -> Option<Owner> {
         Some(Owner {
@@ -81,6 +171,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let popup = egui::Popup::default_response_id(response);
         let owner_id = popup.with("timeline-owner");
         let owner = self.timeline_menu_owner();
+        if self.modal_input_blocked() || self.palette_open || self.filmstrip_open {
+            ui.ctx()
+                .data_mut(|data| data.remove::<ContextClick>(popup.with("timeline-click")));
+        }
         if egui::Popup::is_id_open(ui.ctx(), popup)
             && (ui
                 .ctx()
@@ -96,25 +190,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if self.modal_input_blocked() || self.palette_open || self.filmstrip_open {
             return;
         }
-        // Child gain/endpoint controls also belong to this context. Observe only a
-        // secondary press in our visible layer, without adding a primary-input overlay.
-        let (pressed, position) = ui.input(|input| {
-            (
-                input.pointer.button_pressed(egui::PointerButton::Secondary),
-                input.pointer.interact_pos(),
-            )
-        });
-        let pointer_pressed = pressed
-            && position.is_some_and(|position| {
-                let layer = ui.ctx().layer_id_at(position);
-                // egui retains a just-closed popup's hit geometry for one pass.
-                // It must not block reopening the same owner after an action.
-                let closed_popup = layer.is_some_and(|layer| layer.id == popup)
-                    && !egui::Popup::is_id_open(ui.ctx(), popup);
-                response.rect.intersect(ui.clip_rect()).contains(position)
-                    && (layer == Some(ui.layer_id()) || closed_popup)
-            });
-        let chosen = tab_menu::popup_with_pointer(ui, response, response, pointer_pressed, |ui| {
+        let pointer_clicked = context_click(ui, response, owner);
+        let chosen = tab_menu::popup_with_pointer(ui, response, response, pointer_clicked, |ui| {
             chrome::menu(ui);
             ui.set_min_width(170.0);
             let keyboard = menu::MenuKeyboard::begin(ui);

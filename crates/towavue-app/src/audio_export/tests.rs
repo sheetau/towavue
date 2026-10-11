@@ -22,7 +22,21 @@ fn japanese_audio_options_choose_the_same_encoder_settings_and_keep_compact_acti
             focused_option: None,
         };
         let size = egui::vec2(640.0, 700.0);
-        for label in ["ピーク（-1 dBFS）", "モノラル"] {
+        for (control, label) in [
+            (Text::Normalization, "ピーク（-1 dBFS）"),
+            (Text::OutputChannels, "モノラル"),
+        ] {
+            let output = ui::settle(&context, size, |context| dialog.show(context));
+            ui::frame(
+                &context,
+                size,
+                vec![ui::action(
+                    &output,
+                    control.in_language(Language::Japanese),
+                    None,
+                )],
+                |context| dialog.show(context),
+            );
             let output = ui::settle(&context, size, |context| dialog.show(context));
             assert!(
                 ui::frame(
@@ -37,12 +51,12 @@ fn japanese_audio_options_choose_the_same_encoder_settings_and_keep_compact_acti
         }
         let compact = egui::vec2(320.0, 240.0);
         let output = ui::settle(&context, compact, |context| dialog.show(context));
-        ui::visible_button(&output, "設定を適用", compact, true);
+        ui::visible_button(&output, "適用", compact, true);
         ui::visible_button(&output, "キャンセル", compact, true);
         let actions = ui::frame(
             &context,
             compact,
-            vec![ui::action(&output, "設定を適用", None)],
+            vec![ui::action(&output, "適用", None)],
             |context| dialog.show(context),
         )
         .1;
@@ -144,6 +158,28 @@ fn audio_export_modal_is_transactional_and_rejects_stale_tokens_sources_and_unre
         app.dispatch(CommandId::AudioExportOptions);
         assert!(app.audio_export_dialog.is_none());
     }
+}
+
+fn select_option<N: Fn(AppEvent) + Send + Sync + 'static>(
+    app: &mut Application<N>,
+    size: egui::Vec2,
+    label: &str,
+) {
+    use crate::video_rotation::tests::{access, node};
+    let control = if matches!(label, "Off" | "Peak (-1 dBFS)" | "Loudness") {
+        "Normalization"
+    } else {
+        "Output channels"
+    };
+    let output = frame(app, size, vec![]);
+    let tree = output.platform_output.accesskit_update.expect("tree");
+    frame(app, size, vec![access(node(&tree, control), None)]);
+    let output = frame(app, size, vec![]);
+    let tree = output.platform_output.accesskit_update.expect("tree");
+    frame(app, size, vec![access(node(&tree, label), None)]);
+    assert!(!egui::Popup::is_any_open(
+        app.ui_context.as_ref().expect("context")
+    ));
 }
 
 pub(crate) fn frame<N: Fn(AppEvent) + Send + Sync + 'static>(
@@ -258,7 +294,7 @@ fn compact_audio_export_arrow_focus_remains_visible_without_changing_options() {
                 response.rect
             );
         }
-        for label in ["Peak (-1 dBFS)", "Keep source channels", "Mono", "Stereo"] {
+        for label in ["Normalization", "Output channels"] {
             assert!(
                 seen.contains(label),
                 "arrow keys must reach {label}: {seen:?}"
@@ -337,9 +373,7 @@ fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
         "Keep source channels",
         "Mono",
     ] {
-        let output = frame(&mut app, size, vec![]);
-        let tree = output.platform_output.accesskit_update.expect("tree");
-        frame(&mut app, size, vec![access(node(&tree, label), None)]);
+        select_option(&mut app, size, label);
     }
     assert_eq!(
         app.audio_export_dialog.as_ref().expect("inputs").options,
@@ -356,7 +390,7 @@ fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
         vec![access(
             node(
                 &output.platform_output.accesskit_update.expect("tree"),
-                "Apply options",
+                "Apply",
             ),
             None,
         )],
@@ -413,7 +447,7 @@ fn audio_export_controls_apply_cancel_restore_focus_and_fit_compact_windows() {
         }
         let output = frame(&mut app, size, vec![]);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
-        for label in ["Apply options", "Cancel"] {
+        for label in ["Apply", "Cancel"] {
             let (shape, text) = output
                 .shapes
                 .iter()
@@ -712,11 +746,15 @@ pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
     app.dispatch(CommandId::AudioExportOptions);
     app.render_frame();
     let tree = frame(app, vec![]);
+    frame(app, vec![access(node(&tree, "Normalization"), None)]);
+    let tree = frame(app, vec![]);
     frame(app, vec![access(node(&tree, "Peak (-1 dBFS)"), None)]);
+    let tree = frame(app, vec![]);
+    frame(app, vec![access(node(&tree, "Output channels"), None)]);
     let tree = frame(app, vec![]);
     frame(app, vec![access(node(&tree, "Mono"), None)]);
     let tree = frame(app, vec![]);
-    frame(app, vec![access(node(&tree, "Apply options"), None)]);
+    frame(app, vec![access(node(&tree, "Apply"), None)]);
     assert_eq!(app.audio_export_settings.get(&tab), Some(&setting()));
     app.dispatch(CommandId::AudioExportOptions);
     app.render_frame();
@@ -765,11 +803,7 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
-        let tree = frame(&mut app, size, vec![])
-            .platform_output
-            .accesskit_update
-            .expect("accessibility tree");
-        frame(&mut app, size, vec![access(node(&tree, "Loudness"), None)]);
+        select_option(&mut app, size, "Loudness");
         for (before, after) in [(-14.0, -18.5), (-1.0, -2.3)] {
             let tree = frame(&mut app, size, vec![])
                 .platform_output
@@ -812,11 +846,7 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
             .platform_output
             .accesskit_update
             .expect("accessibility tree");
-        frame(
-            &mut app,
-            size,
-            vec![access(node(&tree, "Apply options"), None)],
-        );
+        frame(&mut app, size, vec![access(node(&tree, "Apply"), None)]);
         assert_eq!(app.audio_export_settings.get(&tab), Some(&expected));
         assert!(summary(expected, Language::English).contains("-18.5 LUFS / max -2.3 dBTP"));
         assert!(
@@ -832,11 +862,7 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
                 .options,
             expected
         );
-        let tree = frame(&mut app, size, vec![])
-            .platform_output
-            .accesskit_update
-            .expect("accessibility tree");
-        frame(&mut app, size, vec![access(node(&tree, "Off"), None)]);
+        select_option(&mut app, size, "Off");
         let tree = frame(&mut app, size, vec![])
             .platform_output
             .accesskit_update
@@ -861,7 +887,7 @@ fn loudness_numeric_input_keeps_26_point_height_when_editing() {
                     .expect("root viewport")
                     .native_pixels_per_point = Some(density);
                 let _ = context.run_ui(input, |ui| {
-                    let response = target_control(ui, &mut value, -700..=-50, "Target");
+                    let response = target_control(ui, &mut value, -700..=-50, "Target", 160.0);
                     assert!(
                         (response.rect.height() - 26.0).abs() <= 1.0 / density,
                         "editing {editing}: {:?}",

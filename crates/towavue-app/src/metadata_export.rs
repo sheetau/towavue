@@ -135,7 +135,7 @@ impl MetadataDialog {
                 ui,
                 Text::CommandMetadataExportOptions.in_language(display_language),
                 &[
-                    Text::ApplyMetadata.in_language(display_language),
+                    Text::Apply.in_language(display_language),
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
@@ -325,7 +325,7 @@ impl MetadataDialog {
                 if ui
                     .add_enabled(
                         options.is_ok() && !self.ime_composing,
-                        egui::Button::new(Text::ApplyMetadata.in_language(display_language)),
+                        egui::Button::new(Text::Apply.in_language(display_language)),
                     )
                     .clicked()
                 {

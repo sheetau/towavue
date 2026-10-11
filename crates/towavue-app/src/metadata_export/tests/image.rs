@@ -199,7 +199,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
         !tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Apply metadata"))
+            .find(|(_, node)| node.label() == Some("Apply"))
             .expect("Apply")
             .1
             .is_disabled()
@@ -332,7 +332,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             assert!(
                 tree.nodes
                     .iter()
-                    .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+                    .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
             );
             let mut bad = MetadataExportOptions::default();
             bad.set(field, Some(invalid.into())).expect("generic text");
@@ -355,7 +355,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
             assert!(
                 tree.nodes
                     .iter()
-                    .any(|(_, node)| node.label() == Some("Apply metadata") && !node.is_disabled())
+                    .any(|(_, node)| node.label() == Some("Apply") && !node.is_disabled())
             );
             click(&mut app, "Remove value");
             assert_eq!(
@@ -401,14 +401,14 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
         );
         app.handle_ui_action(UiAction::FinishMetadataOptions(token, Some(setting())));
         assert!(app.metadata_dialog.is_some() && app.metadata_export_settings.is_empty());
     }
     click(&mut app, "Set value");
     set_value(&mut app, "日本語 UI title");
-    click(&mut app, "Apply metadata");
+    click(&mut app, "Apply");
     assert_eq!(
         app.metadata_export_settings[&tab].get(MetadataField::Title),
         Some("日本語 UI title")
@@ -480,7 +480,7 @@ fn metadata_ui_reads_source_blocks_unsupported_or_failed_reads_and_explains_scop
         assert!(
             tree.nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Apply metadata"))
+                .find(|(_, node)| node.label() == Some("Apply"))
                 .expect("Apply")
                 .1
                 .is_disabled()
@@ -1192,7 +1192,7 @@ fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, node)| node.label() == Some("Apply metadata") && node.is_disabled())
+                .any(|(_, node)| node.label() == Some("Apply") && node.is_disabled())
         );
         set_value(&mut app, valid);
         assert_eq!(
@@ -1207,7 +1207,7 @@ fn webp_metadata_ui_explains_animation_scope_and_validates_typed_fields() {
         click(&mut app, field.label());
         click(&mut app, "Title");
     }
-    click(&mut app, "Apply metadata");
+    click(&mut app, "Apply");
     assert_eq!(
         app.metadata_export_settings[&tab].get(MetadataField::Track),
         Some("+0002")

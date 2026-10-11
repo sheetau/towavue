@@ -223,7 +223,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                 };
                 let output = settle(&context, size, &mut show);
                 assert_eq!(output.pixels_per_point, density);
-                let apply = Text::ApplySpeed.in_language(language);
+                let apply = Text::Apply.in_language(language);
                 let cancel = Text::Cancel.in_language(language);
                 visible_button(&output, apply, size, false);
                 visible_button(&output, cancel, size, true);

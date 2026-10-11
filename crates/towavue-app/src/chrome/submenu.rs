@@ -134,9 +134,21 @@ pub fn submenu<R>(
                 .with_tag_value(MenuConfig::MENU_CONFIG_TAG, config.clone()),
         )
         .show(|child| {
-            // Register before drawing descendants so each deeper popup remains
-            // above its parent, including the shared one-point border.
+            // egui only supports one sublayer level. Flatten the cascade under
+            // its root; promoting every descendant preserves their creation
+            // order when clicking a parent would otherwise raise it above them.
+            let pass = child.ctx().cumulative_pass_nr();
+            let root = ui
+                .data(|data| {
+                    data.get_temp::<(u64, egui::LayerId)>(ui.layer_id().id.with("cascade-root"))
+                })
+                .filter(|(saved, _)| *saved == pass)
+                .map_or(ui.layer_id(), |(_, root)| root);
+            child.ctx().set_sublayer(root, child.layer_id());
             child.ctx().move_to_top(child.layer_id());
+            child.data_mut(|data| {
+                data.insert_temp(child.layer_id().id.with("cascade-root"), (pass, root))
+            });
             child.set_max_size(max_size);
             let inner = content(child);
             remember_menu_bounds(child);

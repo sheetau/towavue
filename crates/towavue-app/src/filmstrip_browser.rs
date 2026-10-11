@@ -14,6 +14,27 @@ const HOVER: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
 pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 16.0;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
 
+fn menu_message(ui: &mut Ui, label: &str) {
+    let width = egui::WidgetText::from(label)
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+        .size()
+        .x
+        + 2.0 * ui.spacing().button_padding.x;
+    ui.set_width(
+        width
+            .ceil()
+            .min(ui.ctx().content_rect().width() - 10.0)
+            .max(1.0),
+    );
+    ui.add_enabled(false, egui::Button::new(label).truncate());
+    chrome::remember_menu_bounds(ui);
+}
+
 #[derive(Default)]
 pub(super) struct Browser {
     folder: PathBuf,
@@ -422,7 +443,8 @@ impl Browser {
     ) {
         let language = localization::language(ui.ctx());
         let Some(listing) = self.listing(ui, path) else {
-            ui.label(
+            menu_message(
+                ui,
                 if self.worker_failed {
                     Text::FilmstripFolderUnavailable
                 } else {
@@ -433,11 +455,11 @@ impl Browser {
             return;
         };
         if listing.unavailable {
-            ui.label(Text::FilmstripFolderUnavailable.in_language(language));
+            menu_message(ui, Text::FilmstripFolderUnavailable.in_language(language));
             return;
         }
         if listing.folders.is_empty() {
-            ui.label(Text::FilmstripNoFolders.in_language(language));
+            menu_message(ui, Text::FilmstripNoFolders.in_language(language));
             return;
         }
         let entries: Vec<_> = listing

@@ -56,7 +56,8 @@ def generate():
              "pub(super) fn paths(kind: Kind) -> Vec<Path> {", "match kind {"]
     for kind, source in manifest["icons"].items():
         svg = ET.parse(ASSETS / source.rsplit("/", 1)[-1]).getroot()
-        assert svg.attrib["viewBox"] == "0 0 16 16"
+        assert svg.attrib["viewBox"] in ("0 0 16 16", "0 0 20 20")
+        scale = 16.0 / float(svg.attrib["viewBox"].split()[2])
         lines.append(f"Kind::{kind} => vec![")
         for element in svg:
             assert element.tag.split("}")[-1] == "path"
@@ -64,7 +65,7 @@ def generate():
             assert element.attrib["fill"] == "#212121"
             lines.append("{ let mut path = PathBuilder::new();")
             for method, values in parse(element.attrib["d"]):
-                lines.append(f"path.{method}({', '.join(number(v) for v in values)});")
+                lines.append(f"path.{method}({', '.join(number(v * scale) for v in values)});")
             lines.append('path.finish().expect("pinned Fluent path") },')
         lines.append("],")
     lines.extend(["}", "}"])

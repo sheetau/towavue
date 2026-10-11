@@ -72,10 +72,13 @@ pub(super) fn submenu(
                         text(ui.ctx(), Text::CommandCycleAudioTrack),
                     )))
                     .fold(0.0, f32::max)
-                    + ui.spacing().icon_width
-                    + ui.spacing().icon_spacing
-                    + 2.0 * ui.spacing().button_padding.x
-                    + ui.spacing().scroll.bar_width;
+                    + ui.spacing().interact_size.y
+                    + 2.0 * ui.spacing().button_padding.x;
+                let natural = crate::logo_menu::drag::scroll_width(
+                    ui,
+                    egui::Id::new("audio-tracks"),
+                    natural,
+                );
                 ui.set_width(natural.min(width));
                 let height = sizing::height(ui);
                 crate::logo_menu::drag::scroll(ui, egui::Id::new("audio-tracks"), height, |ui| {

@@ -294,21 +294,19 @@ impl AudioExportDialog {
                         ui.label(Text::AudioOptionsLifetime.in_language(display_language));
                     },
                 );
-                ui.horizontal_wrapped(|ui| {
-                    crate::chrome::flat_buttons(ui);
-                    if ui
-                        .button(Text::Apply.in_language(display_language))
-                        .clicked()
-                    {
-                        action = Some(Some(self.options));
-                    }
-                    if ui
-                        .button(Text::Cancel.in_language(display_language))
-                        .clicked()
-                    {
-                        action = Some(None);
-                    }
-                });
+                let buttons = chrome::modal_actions(
+                    ui,
+                    &[
+                        (Text::Apply.in_language(display_language), true),
+                        (Text::Cancel.in_language(display_language), true),
+                    ],
+                );
+                if buttons[0].clicked() {
+                    action = Some(Some(self.options));
+                }
+                if buttons[1].clicked() {
+                    action = Some(None);
+                }
             });
         self.focused_option = focused_option;
         if modal.is_top_modal

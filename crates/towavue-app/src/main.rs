@@ -4500,11 +4500,11 @@ where
                                 ui.label(error);
                             },
                         );
-                        chrome::flat_buttons(ui);
-                        if ui
-                            .button(localization::Text::NativeOk.in_language(language))
-                            .clicked()
-                        {
+                        let buttons = chrome::modal_actions(
+                            ui,
+                            &[(localization::Text::NativeOk.in_language(language), true)],
+                        );
+                        if buttons[0].clicked() {
                             actions.push(UiAction::DismissExportError);
                         }
                     });
@@ -4598,36 +4598,22 @@ where
                         ui.label(localization::Text::UndoKeptInTabs.in_language(language));
                     },
                 );
-                ui.horizontal_wrapped(|ui| {
-                    chrome::flat_buttons(ui);
-                    if ui
-                        .add_enabled(
-                            self.active_export.is_none(),
-                            egui::Button::new(
-                                localization::Text::NativeSaveContinue.in_language(language),
-                            ),
-                        )
-                        .clicked()
-                    {
-                        actions.push(UiAction::ResolveGuard(GuardDecision::Save));
+                let buttons: Vec<_> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(index, label)| (*label, index != 0 || self.active_export.is_none()))
+                    .collect();
+                for (index, response) in chrome::modal_actions(ui, &buttons).into_iter().enumerate()
+                {
+                    if response.clicked() {
+                        actions.push(match index {
+                            0 => UiAction::ResolveGuard(GuardDecision::Save),
+                            1 => UiAction::ResolveGuard(GuardDecision::Discard),
+                            2 => UiAction::ResolveGuard(GuardDecision::Cancel),
+                            _ => UiAction::CancelExport,
+                        });
                     }
-                    if ui.button(discard).clicked() {
-                        actions.push(UiAction::ResolveGuard(GuardDecision::Discard));
-                    }
-                    if ui
-                        .button(localization::Text::Cancel.in_language(language))
-                        .clicked()
-                    {
-                        actions.push(UiAction::ResolveGuard(GuardDecision::Cancel));
-                    }
-                    if self.active_export.is_some()
-                        && ui
-                            .button(localization::Text::CancelCurrentExport.in_language(language))
-                            .clicked()
-                    {
-                        actions.push(UiAction::CancelExport);
-                    }
-                });
+                }
             });
         if modal.is_top_modal
             && !modal.any_popup_open

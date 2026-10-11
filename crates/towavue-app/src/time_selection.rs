@@ -158,13 +158,7 @@ pub(super) fn show(
         }
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
         Gesture::Select => egui::CursorIcon::Text,
-        Gesture::Move(_) => {
-            if drag.dragging {
-                egui::CursorIcon::Grabbing
-            } else {
-                egui::CursorIcon::Grab
-            }
-        }
+        Gesture::Move(_) => egui::CursorIcon::Default,
         Gesture::Context => egui::CursorIcon::Default,
     };
     if enabled

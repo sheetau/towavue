@@ -154,7 +154,7 @@ templates! {
     preview_input_failed(error: &str) => ("preview input preparation failed: {error}", "プレビューの入力を準備できません: {error}"),
     image_resample_reason(error: &str) => ("Could not resample image: {error}", "画像を再サンプリングできません: {error}"),
     image_resample_failed(error: &str) => ("Could not resample image: {error}. Undo to restore the previous edit.", "画像を再サンプリングできませんでした: {error}。「元に戻す」で前の編集状態に戻せます。"),
-    speed_duration_limits(min: f64, max: f64) => ("Speed must be between {min:.3}x and {max:.3}x.", "速度は{min:.3}倍から{max:.3}倍の範囲で指定してください。"),
+    speed_duration_limits(min: f64, max: f64) => ("Speed must be between {min:.3}% and {max:.3}%.", "速度は{min:.3}%から{max:.3}%の範囲で指定してください。"),
     preview_rate(rate: f32) => ("Playback speed {rate:.2}\u{00d7}", "\u{518d}\u{751f}\u{901f}\u{5ea6} {rate:.2}\u{00d7}"),
     rate_edited(rate: f32) => ("Rate {rate:.2}× · playback and export (source unchanged)", "速度 {rate:.2}× · 再生と書き出しに適用（元ファイルは変更していません）"),
     trim_edited(start: &str, end: &str) => ("Trim {start} – {end} · playback and export", "トリミング {start} – {end} · 再生と書き出しに適用"),

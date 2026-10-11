@@ -55,9 +55,13 @@ pub(super) fn named_tab(
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
-    let icon = (crate::tab_icons::enabled(ui.ctx())
-        && title == localization::text(ui.ctx(), Text::Gallery))
-    .then_some(crate::fluent::Kind::ImageMultiple);
+    let icon = crate::tab_icons::enabled(ui.ctx()).then(|| {
+        if title == localization::text(ui.ctx(), Text::CommandOpenKeyboardSettings) {
+            crate::fluent::Kind::Keyboard
+        } else {
+            crate::fluent::Kind::ImageMultiple
+        }
+    });
     if icon.is_some() {
         ui.spacing_mut().button_padding.x = 0.0;
     }
@@ -403,6 +407,7 @@ pub(super) fn media_filter_button(
         ui,
         filter_rect,
         egui::Button::new("")
+            .fill(egui::Color32::TRANSPARENT)
             .stroke(egui::Stroke::NONE)
             .frame_when_inactive(false),
         hover,
@@ -445,7 +450,7 @@ pub(super) fn media_filter_button(
         });
     }
     let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&filter_button));
-    if open {
+    if open || filter_button.hovered() || filter_button.has_focus() {
         ui.painter().set(
             icon_shape,
             egui::Shape::rect_filled(filter_rect, 3.0, hover),

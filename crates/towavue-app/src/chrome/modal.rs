@@ -6,6 +6,84 @@ const MARGIN: f32 = 8.0;
 const FRAME_SPACE: f32 = 18.0;
 const MAX_CONTENT_WIDTH: f32 = 400.0;
 
+/// Keep action order and keyboard traversal left-to-right while aligning each
+/// wrapped footer row to the content's right edge.
+pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Response> {
+    super::flat_buttons(ui);
+    let gap = ui.spacing().item_spacing;
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let height = (ui.text_style_height(&egui::TextStyle::Button)
+        + 2.0 * ui.spacing().button_padding.y)
+        .max(ui.spacing().interact_size.y)
+        .ceil();
+    let available = ui.available_width().max(1.0);
+    let widths: Vec<_> = actions
+        .iter()
+        .map(|(label, _)| {
+            (ui.painter()
+                .layout_no_wrap((*label).into(), font.clone(), super::MUTED)
+                .size()
+                .x
+                + 2.0 * ui.spacing().button_padding.x)
+                .ceil()
+                .min(available)
+        })
+        .collect();
+    let natural = widths.iter().sum::<f32>() + gap.x * actions.len().saturating_sub(1) as f32;
+    let width = ui.min_size().x.max(natural.min(available));
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut used = 0.0;
+    for (index, item) in widths.iter().copied().enumerate() {
+        if index > start && used + gap.x + item > width {
+            rows.push((start..index, used));
+            start = index;
+            used = 0.0;
+        }
+        used += if index == start { item } else { gap.x + item };
+    }
+    if start < actions.len() {
+        rows.push((start..actions.len(), used));
+    }
+    let total_height = rows.len() as f32 * height + rows.len().saturating_sub(1) as f32 * gap.y;
+    let rect = ui
+        .allocate_exact_size(egui::vec2(width, total_height), egui::Sense::hover())
+        .0;
+    // An anchored Area starts with its previous size. Reposition growing content
+    // before presenting the newly right-aligned actions outside the viewport.
+    if !bounds(ui.ctx()).expand(1.0).contains_rect(rect) {
+        ui.ctx()
+            .request_discard("modal footer grew beyond its anchor");
+    }
+    let mut responses = Vec::with_capacity(actions.len());
+    for (row, (indices, used)) in rows.into_iter().enumerate() {
+        let mut x = rect.right() - used;
+        for index in indices {
+            let button = Rect::from_min_size(
+                egui::pos2(x, rect.top() + row as f32 * (height + gap.y)),
+                egui::vec2(widths[index], height),
+            );
+            let mut child = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(button)
+                    .layout(egui::Layout::top_down_justified(egui::Align::Min)),
+            );
+            if !actions[index].1 {
+                child.disable();
+            }
+            responses.push(
+                child.add(
+                    egui::Button::new(actions[index].0)
+                        .truncate()
+                        .min_size(button.size()),
+                ),
+            );
+            x += widths[index] + gap.x;
+        }
+    }
+    responses
+}
+
 pub fn set_modal_bounds(context: &Context, bounds: Rect) {
     let pass = context.cumulative_pass_nr();
     context.data_mut(|data| data.insert_temp(Id::new("modal-media-bounds"), (pass, bounds)));
@@ -138,6 +216,59 @@ pub fn modal_body<R>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn footer_rows_align_right_without_reversing_actions_or_growing_after_layout() {
+        for density in [1.0, 1.25, 2.0] {
+            for width in [140.0, 220.0, 400.0] {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
+                context.set_pixels_per_point(density);
+                for _ in 0..4 {
+                    let _ = context.run_ui(Default::default(), |ui| {
+                        ui.set_width(width);
+                        let body = ui
+                            .allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover())
+                            .0;
+                        let buttons = modal_actions(
+                            ui,
+                            &[
+                                ("Save and continue", false),
+                                ("Discard", true),
+                                ("Cancel", true),
+                            ],
+                        );
+                        assert!(!buttons[0].enabled());
+                        assert!(buttons[1].enabled());
+                        for (index, button) in buttons.iter().enumerate() {
+                            assert!(button.rect.left() >= body.left() - 1.0 / density);
+                            assert!(button.rect.right() <= body.right() + 1.0 / density);
+                            if let Some(next) = buttons.get(index + 1) {
+                                assert!(
+                                    next.rect.top() > button.rect.top()
+                                        || next.rect.left() > button.rect.left()
+                                );
+                            }
+                            if buttons
+                                .get(index + 1)
+                                .is_none_or(|next| next.rect.top() > button.rect.top())
+                            {
+                                assert!(
+                                    (button.rect.right() - body.right()).abs() <= 1.0 / density
+                                );
+                            }
+                        }
+                        assert!(
+                            (ui.min_rect().bottom()
+                                - buttons.last().expect("footer").rect.bottom())
+                            .abs()
+                                <= 1.0 / density
+                        );
+                    });
+                }
+            }
+        }
+    }
 
     #[test]
     fn modal_width_follows_content_and_shrinks_after_larger_content() {

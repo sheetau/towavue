@@ -43,6 +43,25 @@ fn recent_file_icons_follow_the_setting_without_changing_folder_or_command_rows(
             assert_eq!(icon.is_some(), enabled && !folders);
             if let Some(icon) = icon {
                 assert!(icon.calc_bounds().right() < text.pos.x);
+                let row = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("test fixture")
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        node.role() == egui::accesskit::Role::Button
+                            && node
+                                .label()
+                                .is_some_and(|label| label.contains("first.png"))
+                    })
+                    .and_then(|(_, node)| node.bounds())
+                    .expect("file row");
+                assert!(
+                    (icon.calc_bounds().left() - row.x0 as f32 - 6.0).abs() < 1.0,
+                    "icon shares the ordinary label inset"
+                );
                 let format = text.galley.job.sections[0].format.color;
                 let color =
                     text.override_text_color

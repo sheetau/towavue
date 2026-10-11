@@ -1078,3 +1078,38 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
     assert!(app.navigate_filmstrip_tab(&"Tab".parse().expect("key")));
     assert_eq!(app.path.as_ref(), Some(&b));
 }
+#[test]
+fn folder_status_menus_size_to_their_current_message() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = context(density);
+        for label in ["Loading folders...", "No subfolders", "Folder unavailable"] {
+            let mut measured = (0.0, 0.0);
+            for _ in 0..4 {
+                let _ = context.run_ui(egui::RawInput::default(), |ui| {
+                    let opener = ui.button("Open");
+                    let popup = egui::Popup::menu(&opener)
+                        .style(chrome::menu_style)
+                        .open(true)
+                        .show(|ui| {
+                            menu_message(ui, label);
+                            measured.1 = egui::WidgetText::from(label)
+                                .into_galley(
+                                    ui,
+                                    Some(egui::TextWrapMode::Extend),
+                                    f32::INFINITY,
+                                    egui::TextStyle::Button,
+                                )
+                                .size()
+                                .x;
+                        })
+                        .expect("test fixture");
+                    measured.0 = popup.response.rect.width();
+                });
+            }
+            assert!(
+                (measured.0 - measured.1 - 22.0).abs() <= 2.0 / density,
+                "message width plus row padding and frame: {measured:?}"
+            );
+        }
+    }
+}

@@ -7,13 +7,15 @@ use crate::hover_help::HoverHelp;
 
 #[cfg(test)]
 mod input_tests;
+#[cfg(test)]
+mod menu_tests;
 
 mod dropdown;
 mod menu_rows;
 pub(crate) use menu_rows::{MenuRows, menu_checkbox};
 mod modal;
 pub use dropdown::Dropdown;
-pub use modal::{modal, modal_body, set_modal_bounds};
+pub use modal::{modal, modal_actions, modal_body, set_modal_bounds};
 
 mod reading_icon;
 mod tab_audio_fade;
@@ -227,6 +229,9 @@ pub fn number_input(
             ui.spacing_mut().interact_size = egui::vec2(width, INPUT_HEIGHT);
             ui.style_mut().drag_value_text_style = egui::TextStyle::Body;
             ui.visuals_mut().widgets.inactive.weak_bg_fill = ui.visuals().extreme_bg_color;
+            ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = Color32::from_gray(0x18);
+            ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_gray(0x18);
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
             ui.allocate_ui_with_layout(egui::vec2(width, INPUT_HEIGHT), layout, |ui| {
             let id = ui.next_auto_id();
@@ -321,22 +326,27 @@ pub fn combo_box<R>(
     combo: egui::ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    ui.scope(|ui| {
-        flat_buttons(ui);
-        combo
-            .icon(|ui, rect, visuals, _| {
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "\u{eab4}",
-                    crate::fonts::icon_font(),
-                    visuals.fg_stroke.color,
-                );
-            })
-            .popup_style(menu_style.into())
-            .show_ui(ui, contents)
-    })
-    .inner
+    let mut result = ui
+        .scope(|ui| {
+            flat_buttons(ui);
+            combo
+                .icon(|ui, rect, visuals, _| {
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "\u{eab4}",
+                        crate::fonts::icon_font(),
+                        visuals.fg_stroke.color,
+                    );
+                })
+                .popup_style(menu_style.into())
+                .show_ui(ui, contents)
+        })
+        .inner;
+    result.response = result
+        .response
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    result
 }
 
 /// Frameless controls painted directly over the black content surface.

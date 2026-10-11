@@ -26,14 +26,75 @@ pub(crate) fn menu_checkbox(
     checked: &mut bool,
     label: impl Into<egui::WidgetText>,
 ) -> Response {
-    let response = ui.checkbox(checked, label);
-    let frame = ui.ctx().cumulative_pass_nr();
-    ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), frame));
+    let label = label.into();
+    let text = label.text().to_owned();
+    let height = ui.spacing().interact_size.y;
+    let padding = ui.spacing().button_padding.x;
+    let galley = label.into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (ui.available_width() - height - 2.0 * padding).max(0.0),
+        egui::TextStyle::Button,
+    );
+    let (rect, mut response) = ui.allocate_at_least(
+        egui::vec2(height + galley.size().x + 2.0 * padding, height),
+        egui::Sense::click(),
+    );
+    if response.clicked() {
+        *checked = !*checked;
+        response.mark_changed();
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Checkbox,
+            response.enabled(),
+            *checked,
+            &text,
+        )
+    });
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let checkbox = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + height * 0.5, rect.center().y),
+            egui::Vec2::splat(ui.spacing().icon_width),
+        );
+        ui.painter().rect(
+            checkbox,
+            visuals.corner_radius,
+            visuals.bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        let icon = egui::Rect::from_center_size(
+            checkbox.center(),
+            egui::Vec2::splat(ui.spacing().icon_width_inner),
+        );
+        if *checked {
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    egui::pos2(icon.left(), icon.center().y),
+                    egui::pos2(icon.center().x, icon.bottom()),
+                    egui::pos2(icon.right(), icon.top()),
+                ],
+                visuals.fg_stroke,
+            ));
+        }
+        ui.painter().galley(
+            egui::pos2(
+                rect.left() + height + padding,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            visuals.fg_stroke.color,
+        );
+    }
+    let pass = ui.ctx().cumulative_pass_nr();
+    ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), pass));
     response
 }
 
 /// Resolve pointer, keyboard and open-submenu feedback to one row per popup.
-/// Native widget painting still owns text, checkmarks and accessibility state.
+/// Row widgets still own text, checkmarks and accessibility state.
 pub(crate) struct MenuRows(egui::layers::ShapeIdx);
 
 impl MenuRows {
@@ -52,7 +113,6 @@ impl MenuRows {
             .find(|row| Some(egui::containers::menu::SubMenu::id_from_widget_id(row.id)) == open)
             .map(|row| row.id);
         let selected = highlighted(ui, &rows, fallback);
-        let pass = ui.ctx().cumulative_pass_nr();
         ui.ctx().graphics_mut(|graphics| {
             let list = graphics.entry(ui.layer_id());
             let end = list.next_idx().0;
@@ -67,6 +127,7 @@ impl MenuRows {
                 shape.clip_rect = shape.clip_rect.intersect(ui.clip_rect());
             });
         });
+        let pass = ui.ctx().cumulative_pass_nr();
         if let Some(row) = selected
             && !ui.data(|data| data.get_temp::<u64>(row.id.with("menu-checkbox")) == Some(pass))
         {

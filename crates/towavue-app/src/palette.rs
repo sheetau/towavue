@@ -590,11 +590,7 @@ impl CommandPalette {
                     && crate::tab_icons::enabled(ui.ctx()))
                 .then(|| crate::tab_icons::media(Some(path.as_path())))
                 .flatten();
-                let icon_width = if icon.is_some() {
-                    crate::chrome::TAB_AUDIO_WIDTH
-                } else {
-                    0.0
-                };
+                let icon_width = if icon.is_some() { 22.0 } else { 0.0 };
                 let (name_width, parent_width, group_width) =
                     file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, group);
                 let mut atoms = egui::Atoms::new((
@@ -626,7 +622,7 @@ impl CommandPalette {
                 if let Some(kind) = icon {
                     let slot = egui::Rect::from_min_size(
                         body.min + egui::vec2(6.0, 0.0),
-                        egui::vec2(icon_width, body.height()),
+                        egui::vec2(16.0, body.height()),
                     );
                     let color = if selected_row {
                         ui.visuals().selection.stroke.color

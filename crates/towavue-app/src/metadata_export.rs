@@ -320,24 +320,22 @@ impl MetadataDialog {
                 },
             );
             let options = self.options_in(display_language);
-            ui.horizontal_wrapped(|ui| {
-                crate::chrome::flat_buttons(ui);
-                if ui
-                    .add_enabled(
+            let buttons = chrome::modal_actions(
+                ui,
+                &[
+                    (
+                        Text::Apply.in_language(display_language),
                         options.is_ok() && !self.ime_composing,
-                        egui::Button::new(Text::Apply.in_language(display_language)),
-                    )
-                    .clicked()
-                {
-                    action = Some(Some(options.expect("valid options")));
-                }
-                if ui
-                    .button(Text::Cancel.in_language(display_language))
-                    .clicked()
-                {
-                    action = Some(None);
-                }
-            });
+                    ),
+                    (Text::Cancel.in_language(display_language), true),
+                ],
+            );
+            if buttons[0].clicked() {
+                action = Some(Some(options.expect("valid options")));
+            }
+            if buttons[1].clicked() {
+                action = Some(None);
+            }
         });
         self.focused_control = focused_control;
         if modal.is_top_modal && escape {

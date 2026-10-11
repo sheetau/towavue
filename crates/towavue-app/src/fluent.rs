@@ -5,6 +5,7 @@ mod paths;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Kind {
+    Keyboard,
     Play,
     Pause,
     Previous,
@@ -17,6 +18,7 @@ pub(crate) enum Kind {
     Image,
     ImageMultiple,
     Link,
+    LinkOff,
     Video,
     Audio,
     Move,
@@ -46,7 +48,7 @@ pub(crate) fn fill(image: &mut Pixmap, kind: Kind, paint: &Paint<'_>, transform:
     // applying the translation before scaling also fixes native taskbar icons.
     let transform = if kind == Kind::Play {
         transform.pre_translate(-1.5, 0.0)
-    } else if kind == Kind::Link {
+    } else if matches!(kind, Kind::Link | Kind::LinkOff) {
         // Vertical link connects the width and height fields.
         transform
             .pre_translate(8.0, 8.0)
@@ -63,7 +65,7 @@ pub(crate) fn fill(image: &mut Pixmap, kind: Kind, paint: &Paint<'_>, transform:
 pub(crate) fn paint(ui: &Ui, rect: Rect, kind: Kind, color: Color32) {
     let density = ui.ctx().pixels_per_point();
     let size = (16.0 * density).round().clamp(1.0, 256.0) as u32;
-    // Seventeen bounded slots per context, replaced on DPI changes; tab/button count does not
+    // One bounded slot per icon per context, replaced on DPI changes; tab/button count does not
     // grow the cache. Hover/selection tint never creates another texture.
     let id = egui::Id::new(("fluent-icon", kind));
     let cached = ui
@@ -136,6 +138,8 @@ mod tests {
             Kind::Image,
             Kind::ImageMultiple,
             Kind::Link,
+            Kind::LinkOff,
+            Kind::Keyboard,
             Kind::Video,
             Kind::Audio,
             Kind::Move,

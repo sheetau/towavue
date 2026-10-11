@@ -429,11 +429,7 @@ fn show_items(
                     if response.enabled() {
                         items.push(response.id);
                     }
-                    if response.gained_focus()
-                        || (response.has_focus()
-                            && (response.rect.top() < ui.clip_rect().top()
-                                || response.rect.bottom() > ui.clip_rect().bottom()))
-                    {
+                    if response.gained_focus() {
                         response.scroll_to_me(None);
                     }
                     chosen = chosen.or(command);
@@ -458,11 +454,7 @@ fn show_items(
                 if response.enabled() {
                     items.push(response.id);
                 }
-                if response.gained_focus()
-                    || (response.has_focus()
-                        && (response.rect.top() < ui.clip_rect().top()
-                            || response.rect.bottom() > ui.clip_rect().bottom()))
-                {
+                if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
                 if crate::logo_menu::drag::clicked(&response) {
@@ -586,7 +578,13 @@ fn language_menu(
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 let mut items = Vec::new();
-                ui.set_min_width(100.0);
+                let width = [Text::LanguageEnglish, Text::LanguageJapanese]
+                    .into_iter()
+                    .map(|label| sizing::text_width(ui, text(ui.ctx(), label)))
+                    .fold(0.0, f32::max)
+                    + ui.spacing().interact_size.y
+                    + 2.0 * ui.spacing().button_padding.x;
+                ui.set_width(width.ceil().min(ui.available_width()));
                 for (language, label) in [
                     (Language::English, Text::LanguageEnglish),
                     (Language::Japanese, Text::LanguageJapanese),
@@ -643,7 +641,11 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
                 .x
         })
         .fold(0.0, f32::max);
-    let width = text_width + 2.0 * ui.spacing().button_padding.x + ui.spacing().scroll.bar_width;
+    let width = crate::logo_menu::drag::scroll_width(
+        ui,
+        egui::Id::new("recent"),
+        text_width + 2.0 * ui.spacing().button_padding.x,
+    );
     ui.set_width(width.min((available_width - frame_width).max(1.0)));
     let height = sizing::height(ui);
     crate::logo_menu::drag::scroll(ui, egui::Id::new("recent"), height, |ui| {
@@ -733,9 +735,9 @@ impl MenuKeyboard {
     pub(crate) fn begin(ui: &egui::Ui) -> Self {
         let modality = ui.input(|input| {
             input.events.iter().rev().find_map(|event| match event {
-                // Pointer motion alone must not erase keyboard selection. An
-                // actual button event hands ownership back to pointer interaction.
-                egui::Event::PointerButton { .. } => Some(false),
+                // Pointer motion alone must not erase keyboard selection. A
+                // button or wheel event hands ownership back to pointer interaction.
+                egui::Event::PointerButton { .. } | egui::Event::MouseWheel { .. } => Some(false),
                 egui::Event::Key { pressed: true, .. } | egui::Event::AccessKitActionRequest(_) => {
                     Some(true)
                 }

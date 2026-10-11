@@ -100,7 +100,11 @@ pub(super) fn items(
             .max(1.0);
     ui.set_max_width(available);
     choices::reserve_cascade(ui, groups, context, ancestor);
-    let width = width + 2.0 * ui.spacing().button_padding.x + ui.spacing().scroll.bar_width;
+    let width = crate::logo_menu::drag::scroll_width(
+        ui,
+        egui::Id::new(title),
+        width + 2.0 * ui.spacing().button_padding.x,
+    );
     ui.set_width(width.min(ui.available_width()).max(1.0));
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
 }
@@ -108,6 +112,76 @@ pub(super) fn items(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wheel_scroll_does_not_reveal_the_old_keyboard_selection() {
+        let context = crate::fonts::test_context();
+        context.global_style_mut(crate::chrome::style);
+        let label = command_definitions()
+            .iter()
+            .find(|definition| definition.id == ToggleFullscreen)
+            .expect("test fixture")
+            .title_in(crate::localization::Language::English);
+        let mut time = 0.0;
+        let mut draw = |events| {
+            time += 0.1;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(700.0, 300.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let opener = ui.button("Open");
+                    egui::Popup::menu(&opener)
+                        .style(crate::chrome::menu_style)
+                        .open(true)
+                        .show(|ui| {
+                            show_items(
+                                ui,
+                                Text::MenuView,
+                                CommandContext {
+                                    media_kind: Some(towavue_core::MediaKind::Image),
+                                    ..Default::default()
+                                },
+                                &crate::shortcuts::defaults(),
+                                &mut MenuData::default(),
+                                None,
+                            );
+                        });
+                },
+            );
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => Some(text.pos),
+                _ => None,
+            })
+        };
+        let mut initial = None;
+        for _ in 0..5 {
+            initial = draw(vec![]);
+        }
+        let initial = initial.expect("first menu item");
+        draw(vec![egui::Event::PointerMoved(
+            initial + egui::vec2(10.0, 60.0),
+        )]);
+        draw(vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -120.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+        for _ in 0..30 {
+            let current = draw(vec![]);
+            assert!(
+                current.is_none_or(|point| point.y < initial.y - 20.0),
+                "old focus must not snap back: {current:?}"
+            );
+        }
+    }
 
     #[test]
     fn menus_fit_single_line_rows_and_recover_height_after_viewport_growth() {

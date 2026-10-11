@@ -64,7 +64,7 @@ fn linked_speed_duration_edits_apply_only_to_the_captured_range_and_preserve_pre
                 !dialog.valid_length(target.duration()),
                 "identity cannot dirty the document"
             );
-            dialog.speed = "2".into();
+            dialog.speed = "200".into();
             dialog.sync_linked_input();
             let length = dialog.length().expect("linked duration");
             assert_eq!(
@@ -77,7 +77,7 @@ fn linked_speed_duration_edits_apply_only_to_the_captured_range_and_preserve_pre
             dialog.sync_linked_input();
             assert_eq!(
                 dialog.speed.parse::<f64>().expect("speed"),
-                target.duration().as_seconds_f64() / 8.0
+                100.0 * target.duration().as_seconds_f64() / 8.0
             );
             let token = dialog.token;
             app.finish_speed_edit(token.wrapping_add(1), Some(length));
@@ -178,7 +178,7 @@ fn mixed_speed_limits_reject_invalid_input_without_clamping_or_creating_history(
         dialog.speed = speed.into();
         assert_eq!(dialog.length(), None);
     }
-    dialog.speed = "2".into();
+    dialog.speed = "200".into();
     let invalid = dialog.length().expect("finite input");
     assert!(
         !dialog.valid_length(invalid),
@@ -213,7 +213,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                     source_duration: Duration::from_secs(10),
                     plan: EditTimeline::new(time(10), PlaybackRange::default()).expect("plan"),
                     range: range(0, 10),
-                    speed: "1.00".into(),
+                    speed: "100".into(),
                     duration: "00:00:10".into(),
                     from_speed: true,
                 };
@@ -263,7 +263,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                     vec![action(
                         &output,
                         Text::SpeedLabel.in_language(language),
-                        Some("2"),
+                        Some("200"),
                     )],
                     &mut show,
                 );
@@ -309,7 +309,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                         .expect("tree")
                         .nodes
                         .iter()
-                        .any(|(_, node)| node.value() == Some("1.25"))
+                        .any(|(_, node)| node.value() == Some("125"))
                 );
                 visible_button(&output, apply, size, true);
                 let (_, actions) = frame(

@@ -76,24 +76,19 @@ impl VideoRotationDialog {
                     value
                 },
             );
-            ui.horizontal_wrapped(|ui| {
-                crate::chrome::flat_buttons(ui);
-                if ui
-                    .add_enabled(
-                        value.is_ok(),
-                        egui::Button::new(Text::Apply.in_language(display_language)),
-                    )
-                    .clicked()
-                {
-                    action = Some(value.ok());
-                }
-                if ui
-                    .button(Text::Cancel.in_language(display_language))
-                    .clicked()
-                {
-                    action = Some(None);
-                }
-            });
+            let buttons = chrome::modal_actions(
+                ui,
+                &[
+                    (Text::Apply.in_language(display_language), value.is_ok()),
+                    (Text::Cancel.in_language(display_language), true),
+                ],
+            );
+            if buttons[0].clicked() {
+                action = Some(value.ok());
+            }
+            if buttons[1].clicked() {
+                action = Some(None);
+            }
         });
         if modal.is_top_modal
             && !modal.any_popup_open

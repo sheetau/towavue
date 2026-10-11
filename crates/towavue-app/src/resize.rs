@@ -167,22 +167,11 @@ impl ResizeDialog {
         let x = link_slot.left() + 2.0;
         let center = egui::pos2(link_slot.center().x + 2.0, (top + bottom) * 0.5);
         let stroke = egui::Stroke::new(1.0, chrome::MUTED);
-        ui.painter().add(egui::Shape::line(
-            vec![
-                egui::pos2(dimensions[0].right() + 2.0, top),
-                egui::pos2(x, top),
-                egui::pos2(x, bottom),
-                egui::pos2(dimensions[1].right() + 2.0, bottom),
-            ],
-            stroke,
-        ));
-        ui.painter()
-            .line_segment([egui::pos2(x, center.y), center], stroke);
         let rect =
             egui::Rect::from_center_size(center, egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE));
         let response = ui.place(
             rect,
-            egui::Button::selectable(self.keep_ratio, "").min_size(rect.size()),
+            egui::Button::new("").frame(false).min_size(rect.size()),
         );
         if response.clicked() {
             self.keep_ratio = !self.keep_ratio;
@@ -191,6 +180,17 @@ impl ResizeDialog {
             {
                 self.height = self.round(f64::from(value) / self.ratio);
             }
+        }
+        if self.keep_ratio {
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    egui::pos2(dimensions[0].right() + 2.0, top),
+                    egui::pos2(x, top),
+                    egui::pos2(x, bottom),
+                    egui::pos2(dimensions[1].right() + 2.0, bottom),
+                ],
+                stroke,
+            ));
         }
         response.widget_info(|| {
             egui::WidgetInfo::selected(
@@ -203,7 +203,11 @@ impl ResizeDialog {
         crate::fluent::paint(
             ui,
             rect,
-            crate::fluent::Kind::Link,
+            if self.keep_ratio {
+                crate::fluent::Kind::Link
+            } else {
+                crate::fluent::Kind::LinkOff
+            },
             if self.keep_ratio {
                 chrome::FOREGROUND
             } else {
@@ -260,24 +264,22 @@ impl ResizeDialog {
                     value
                 },
             );
-            ui.horizontal_wrapped(|ui| {
-                crate::chrome::flat_buttons(ui);
-                if self
-                    .reveal_focus(ui.add_enabled(
-                        value.is_some(),
-                        egui::Button::new(Text::Apply.in_language(display_language)),
-                    ))
-                    .clicked()
-                {
-                    action = Some(value);
-                }
-                if self
-                    .reveal_focus(ui.button(Text::Cancel.in_language(display_language)))
-                    .clicked()
-                {
-                    action = Some(None);
-                }
-            });
+            let buttons = chrome::modal_actions(
+                ui,
+                &[
+                    (Text::Apply.in_language(display_language), value.is_some()),
+                    (Text::Cancel.in_language(display_language), true),
+                ],
+            );
+            if buttons[0].clicked() {
+                action = Some(value);
+            }
+            if buttons[1].clicked() {
+                action = Some(None);
+            }
+            for response in buttons {
+                self.reveal_focus(response);
+            }
         });
         if modal.is_top_modal
             && !modal.any_popup_open

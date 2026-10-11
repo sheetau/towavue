@@ -23,7 +23,7 @@ impl Dialog {
             if !speed.is_finite() || speed <= 0.0 {
                 return None;
             }
-            let nanos = self.range.duration().as_nanoseconds() as f64 / speed;
+            let nanos = self.range.duration().as_nanoseconds() as f64 / (speed / 100.0);
             if !(1.0..i64::MAX as f64).contains(&nanos) {
                 return None;
             }
@@ -38,7 +38,8 @@ impl Dialog {
             if self.from_speed {
                 self.duration = format_duration(length);
             } else {
-                let speed = self.range.duration().as_seconds_f64() / length.as_seconds_f64();
+                let speed =
+                    100.0 * self.range.duration().as_seconds_f64() / length.as_seconds_f64();
                 self.speed = format!("{speed:.6}")
                     .trim_end_matches('0')
                     .trim_end_matches('.')
@@ -98,7 +99,7 @@ impl Dialog {
                                     ui,
                                     Text::SpeedLabel.in_language(language),
                                     &mut self.speed,
-                                    "×",
+                                    "%",
                                 )
                                 .changed()
                                 {
@@ -136,29 +137,27 @@ impl Dialog {
                             ui.label(
                                 towavue_core::localization::formatted::speed_duration_limits(
                                     language,
-                                    seconds / *limits.end(),
-                                    seconds / *limits.start(),
+                                    100.0 * seconds / *limits.end(),
+                                    100.0 * seconds / *limits.start(),
                                 ),
                             );
                         }
                         length.filter(|length| self.valid_length(*length))
                     },
                 );
-                ui.horizontal_wrapped(|ui| {
-                    chrome::flat_buttons(ui);
-                    if ui
-                        .add_enabled(
-                            value.is_some(),
-                            egui::Button::new(Text::Apply.in_language(language)),
-                        )
-                        .clicked()
-                    {
-                        action = Some(value);
-                    }
-                    if ui.button(Text::Cancel.in_language(language)).clicked() {
-                        action = Some(None);
-                    }
-                });
+                let buttons = chrome::modal_actions(
+                    ui,
+                    &[
+                        (Text::Apply.in_language(language), value.is_some()),
+                        (Text::Cancel.in_language(language), true),
+                    ],
+                );
+                if buttons[0].clicked() {
+                    action = Some(value);
+                }
+                if buttons[1].clicked() {
+                    action = Some(None);
+                }
             });
         if modal.is_top_modal
             && !modal.any_popup_open
@@ -305,7 +304,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             source_duration,
             plan,
             range,
-            speed: "1.00".into(),
+            speed: "100".into(),
             duration: format_duration(range.duration()),
             from_speed: true,
         });

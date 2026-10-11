@@ -53,6 +53,19 @@ struct ScrollView {
     maximum: f32,
 }
 
+pub(crate) fn scroll_width(ui: &egui::Ui, salt: egui::Id, natural: f32) -> f32 {
+    let key = ui.id().with(("logo-drag-scroll", salt));
+    let scrolls = ui
+        .data(|data| data.get_temp::<ScrollView>(key))
+        .is_some_and(|view| view.maximum > 0.0);
+    natural
+        + if scrolls {
+            ui.spacing().scroll.allocated_width()
+        } else {
+            0.0
+        }
+}
+
 pub(crate) fn scroll<R>(
     ui: &mut egui::Ui,
     salt: egui::Id,
@@ -98,6 +111,13 @@ pub(crate) fn scroll<R>(
         }
     }
     let output = area.show_styled(ui, content);
+    let maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
+    let previous = context
+        .data(|data| data.get_temp::<ScrollView>(key))
+        .is_some_and(|view| view.maximum > 0.0);
+    if previous != (maximum > 0.0) {
+        context.request_discard("menu scrollbar width changed");
+    }
     crate::chrome::remember_menu_bounds(ui);
     context.data_mut(|data| {
         data.insert_temp(
@@ -106,7 +126,7 @@ pub(crate) fn scroll<R>(
                 frame,
                 bounds: output.inner_rect.intersect(ui.clip_rect()),
                 offset: output.state.offset.y,
-                maximum: (output.content_size.y - output.inner_rect.height()).max(0.0),
+                maximum,
             },
         )
     });

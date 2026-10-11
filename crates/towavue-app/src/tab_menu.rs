@@ -115,7 +115,10 @@ pub(crate) fn popup_with_pointer<A>(
         popup = popup.close_behavior(egui::PopupCloseBehavior::IgnoreClicks);
     }
     let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    let chosen = popup.show(contents).and_then(|inner| inner.inner);
+    let chosen = popup
+        .style(crate::chrome::menu_style)
+        .show(contents)
+        .and_then(|inner| inner.inner);
     if egui::Popup::is_id_open(context, popup_id) {
         crate::overlay_input::context_menu_shown(context, popup_id);
     }

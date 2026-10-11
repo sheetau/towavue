@@ -67,6 +67,12 @@ use `filmstrip_browser::` and `filmstrip::drag_tests::`. Run the ignored
 changes to Filmstrip autoplay: it uses a hidden app window, generated silent
 audio/video, and the normal D3D11/WASAPI session path. Tab-icon settings use
 `tab_icons::`, `palette::files_tests::`, and the owned preference restart control.
+Menu geometry uses `chrome::menu_tests::`, `menu::`, and `logo_menu::` controls.
+Run the ignored `menus_reach_gpu_at_supported_densities` serially for hidden
+D3D11 readbacks of left/right cascades, checkbox rows and tab context menus.
+Set `TOWAVUE_REFERENCE_RENDER_DIR` to an existing private directory to retain
+RGBA output. These checks cover generated frames and injected input, not
+physical desktop appearance approval.
 
 Startup appearance requires visible desktop evidence in addition to hidden native
 controls. Capture from before process/window creation through the first complete

@@ -122,8 +122,7 @@ fn row_width(ui: &egui::Ui, rows: &[(CommandId, Text)]) -> f32 {
                 .x
         })
         .fold(0.0, f32::max)
-        + ui.spacing().icon_width
-        + ui.spacing().icon_spacing
+        + ui.spacing().interact_size.y
         + 2.0 * ui.spacing().button_padding.x;
     // Keep fractional glyph advances inside the pixel-rounded checkbox bounds.
     (width * ui.ctx().pixels_per_point()).ceil() / ui.ctx().pixels_per_point()

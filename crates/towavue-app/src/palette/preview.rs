@@ -88,7 +88,7 @@ pub(super) fn reserve(ui: &mut Ui) -> Option<(egui::Rect, egui::Response)> {
     let remaining = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0)
         .min(ui.available_height())
         .max(0.0);
-    let height = (remaining - 88.0).clamp(0.0, 160.0);
+    let height = (remaining - 88.0).clamp(0.0, crate::media_preview::SIZE.y);
     (height >= 1.0).then(|| {
         ui.allocate_exact_size(
             egui::vec2(ui.available_width(), height),
@@ -124,8 +124,9 @@ pub(super) fn paint(
     match texture {
         Some(Ok(texture)) => {
             let size = texture.size_vec2();
-            let scale = rect.height() / size.y;
-            // Match the card height; retain aspect-ratio width under its clip.
+            let scale = rect.height().min(crate::media_preview::SIZE.y) / size.y;
+            // Share the hover thumbnail height budget; keep aspect-ratio width
+            // free to grow under the palette clip.
 
             let kind = MediaKind::from_path(path);
             let image_rect = egui::Rect::from_center_size(rect.center(), size * scale);
@@ -166,7 +167,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn preview_matches_card_height_with_variable_width_and_half_height_audio() {
+    fn preview_matches_hover_thumbnail_height_with_variable_width_and_half_height_audio() {
         for (kind, dimensions) in [("png", [40, 80]), ("mp4", [160, 90]), ("wav", [240, 80])] {
             let context = crate::fonts::test_context();
             let texture = context.load_texture(
@@ -195,9 +196,13 @@ mod tests {
                     _ => None,
                 })
                 .expect("preview pixels");
-            assert!((bounds.height() - if kind == "wav" { 80.0 } else { 160.0 }).abs() < 0.01);
+            let height = crate::media_preview::SIZE.y;
             assert!(
-                (bounds.width() - dimensions[0] as f32 / dimensions[1] as f32 * 160.0).abs() < 0.01
+                (bounds.height() - if kind == "wav" { height * 0.5 } else { height }).abs() < 0.01
+            );
+            assert!(
+                (bounds.width() - dimensions[0] as f32 / dimensions[1] as f32 * height).abs()
+                    < 0.01
             );
             assert_eq!(clip, slot);
             assert_eq!(bounds.center(), slot.center());
@@ -261,7 +266,10 @@ mod tests {
                             .bounds()
                             .expect("bounds");
                         assert!(bounds.y1 as f32 <= row.top());
-                        assert!((bounds.y1 - bounds.y0 - 160.0).abs() <= 1.0);
+                        assert!(
+                            (bounds.y1 - bounds.y0 - f64::from(crate::media_preview::SIZE.y)).abs()
+                                <= 1.0
+                        );
                     }
                 }
                 // Filtering to nothing and entering command/folder modes removes the preview.

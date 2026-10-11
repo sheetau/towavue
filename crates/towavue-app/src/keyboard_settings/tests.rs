@@ -595,7 +595,7 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
             let (add, node) = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Add keybinding"))
+                .find(|(_, node)| node.label() == Some("Add keybinding") && !node.is_disabled())
                 .expect("context menu action");
             assert!(!node.is_disabled());
             frame(

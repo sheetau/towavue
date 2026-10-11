@@ -61,7 +61,12 @@ batched/discarded passes, matching-button release and cancellation. Folder-tab r
 uses `external_open::`, `window_host::launch_tests::` and
 `window_host::preference_tests::`; defaults, dirty-document guards and restart
 persistence must remain covered. Gallery/header and directional-menu changes use
-`welcome::` and `logo_menu::` controls.
+`welcome::` and `logo_menu::` controls. Filmstrip cascades and filtered drag ownership
+use `filmstrip_browser::` and `filmstrip::drag_tests::`. Run the ignored
+`browser_native_navigation_stays_paused_until_explicit_play` control serially for
+changes to Filmstrip autoplay: it uses a hidden app window, generated silent
+audio/video, and the normal D3D11/WASAPI session path. Tab-icon settings use
+`tab_icons::`, `palette::files_tests::`, and the owned preference restart control.
 
 Startup appearance requires visible desktop evidence in addition to hidden native
 controls. Capture from before process/window creation through the first complete

@@ -287,10 +287,7 @@ pub(super) fn show_with_recent(
         egui::Area::new(response.id.with("drag-section-help"))
             .order(egui::Order::Tooltip)
             .interactable(false)
-            .fixed_pos(egui::pos2(
-                ui.available_rect_before_wrap().left(),
-                response.rect.top(),
-            ))
+            .fixed_pos(egui::pos2(response.rect.right(), response.rect.top()))
             .show(context, |ui| {
                 crate::hover_help::frame(ui.style()).show(ui, |ui| {
                     crate::hover_help::content(ui, |ui| {

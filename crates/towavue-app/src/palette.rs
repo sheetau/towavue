@@ -584,8 +584,19 @@ impl CommandPalette {
                         egui::Stroke::new(1.0, crate::chrome::BORDER),
                     );
                 }
+                let icon = (!folders
+                    && !current
+                    && index < recent_count
+                    && crate::tab_icons::enabled(ui.ctx()))
+                .then(|| crate::tab_icons::media(Some(path.as_path())))
+                .flatten();
+                let icon_width = if icon.is_some() {
+                    crate::chrome::TAB_AUDIO_WIDTH
+                } else {
+                    0.0
+                };
                 let (name_width, parent_width, group_width) =
-                    file_label_widths(ui, body.width(), &name, group);
+                    file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, group);
                 let mut atoms = egui::Atoms::new((
                     name.as_ref().atom_max_width(name_width),
                     label_gap(ui),
@@ -596,6 +607,9 @@ impl CommandPalette {
                         .atom_shrink(true),
                     egui::Atom::grow(),
                 ));
+                if icon.is_some() {
+                    atoms.push_left(egui::Atom::default().atom_size(egui::vec2(icon_width, 0.0)));
+                }
                 if !group.is_empty() {
                     atoms.push_right(label_gap(ui));
                     atoms.push_right(
@@ -609,6 +623,18 @@ impl CommandPalette {
                     .push_id(path, |ui| row_button(ui, body, selected_row, atoms))
                     .inner
                     .help_text(path.to_string_lossy());
+                if let Some(kind) = icon {
+                    let slot = egui::Rect::from_min_size(
+                        body.min + egui::vec2(6.0, 0.0),
+                        egui::vec2(icon_width, body.height()),
+                    );
+                    let color = if selected_row {
+                        ui.visuals().selection.stroke.color
+                    } else {
+                        ui.visuals().widgets.inactive.fg_stroke.color
+                    };
+                    crate::tab_icons::paint(ui, slot, kind, color);
+                }
                 ui.painter()
                     .set(background, row_background(ui, row, &response, selected_row));
                 ui.ctx().accesskit_node_builder(response.id, |node| {

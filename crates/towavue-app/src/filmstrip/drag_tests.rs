@@ -2522,7 +2522,14 @@ fn filmstrip_drag_copies_the_owned_path_once_without_a_floating_preview() {
             style.animation_time = 0.0;
         });
         context.enable_accesskit();
-        let snapshot = snapshot(&root);
+        let original = snapshot(&root);
+        let mut browser = crate::filmstrip_browser::Browser::default();
+        browser.query = ".png".into();
+        let snapshot = browser
+            .project(Some(&original))
+            .0
+            .expect("filtered snapshot");
+        assert_eq!(snapshot.generation, original.generation);
         let source = &snapshot.items[0].path;
         let target = &snapshot.items[1].path;
         let mut strip =

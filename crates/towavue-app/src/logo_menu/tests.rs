@@ -124,27 +124,8 @@ fn held_direction_opens_immediately_and_tracks_the_original_press() {
                 .read_response(drag.id.with("drag-section-help"))
                 .expect("drag tooltip")
                 .rect;
-            let tree = output
-                .platform_output
-                .accesskit_update
-                .as_ref()
-                .expect("tree");
-            let first_tab = tree
-                .nodes
-                .iter()
-                .filter(|(_, node)| {
-                    matches!(node.label(), Some("Gallery tab" | "source.png"))
-                        && node.role() == egui::accesskit::Role::Button
-                })
-                .filter_map(|(_, node)| node.bounds())
-                .min_by(|a, b| a.x0.total_cmp(&b.x0))
-                .expect("first tab bounds");
-            assert!(
-                (tooltip.left() - first_tab.x0 as f32).abs() <= 1.0 / density,
-                "tooltip left {} vs tab {}",
-                tooltip.left(),
-                first_tab.x0
-            );
+            let opener = context.read_response(drag.id).expect("opener").rect;
+            assert!((tooltip.left() - opener.right()).abs() <= 1.0 / density);
             let name = localization::text(&context, section.key());
             assert!(
                 output.shapes.iter().any(|shape| matches!(&shape.shape,
@@ -930,7 +911,7 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
 fn logo_corners_follow_the_supplied_round_outline_at_button_and_drop_guide_sizes() {
     for density in [1.0, 1.25, 2.0] {
         for size in [16.0, 48.0] {
-            let context = egui::Context::default();
+            let context = crate::fonts::test_context();
             context.set_pixels_per_point(density);
             let rect = egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::Vec2::splat(size));
             let output = context.run_ui(Default::default(), |ui| {
@@ -976,7 +957,7 @@ fn logo_corners_follow_the_supplied_round_outline_at_button_and_drop_guide_sizes
 #[test]
 fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
     for density in [1.0, 1.25, 2.0] {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         context.set_pixels_per_point(density);
         let idle = context.run_ui(Default::default(), |ui| {
             chrome::logo(
@@ -1205,8 +1186,8 @@ fn choice_submenus_from_logo_click_apply_once_without_inheriting_parent_geometry
             );
             for pair in bounds.windows(2) {
                 assert!(
-                    pair[0].right() <= pair[1].left(),
-                    "menu frames cannot overlap: {bounds:?}"
+                    (pair[0].right() - pair[1].left() - 1.0).abs() <= 1.0 / density,
+                    "menu frames share only their border: {bounds:?}"
                 );
             }
             let tree = output.platform_output.accesskit_update.expect("choices");

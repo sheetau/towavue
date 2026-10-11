@@ -38,6 +38,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.nearest_images = store.value(Key::Nearest) != 0;
         self.high_quality_minification = store.value(Key::Minification) != 0;
         self.folder_navigation_loop = store.value(Key::FolderLoop) != 0;
+        self.tab_icons = store.value(Key::TabIcons) != 0;
         self.reuse_folder_tab = store.value(Key::ReuseFolderTab) != 0;
         let pages = store.value(Key::ReadingPages);
         self.reading_settings = ReadingSettings {
@@ -78,6 +79,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             VolumeStepTwo | VolumeStepFive | VolumeStepTen | CycleVolumeStep => {
                 (Key::VolumeStep, u16::from(self.volume_step_percent))
             }
+            ToggleTabIcons => (Key::TabIcons, u16::from(self.tab_icons)),
             ToggleReuseFolderTab => (Key::ReuseFolderTab, u16::from(self.reuse_folder_tab)),
             ToggleImageInterpolation => (Key::Nearest, u16::from(self.nearest_images)),
             ToggleImageMinification => {

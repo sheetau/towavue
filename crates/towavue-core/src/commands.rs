@@ -10,6 +10,7 @@ pub enum CommandId {
     OpenFolder,
     OpenGallery,
     ToggleReuseFolderTab,
+    ToggleTabIcons,
     GoToFile,
     OpenRecentFolder,
     SearchCurrentFiles,
@@ -190,6 +191,7 @@ impl CommandId {
         match self {
             Self::OpenFile => "open_file",
             Self::OpenGallery => "open_gallery",
+            Self::ToggleTabIcons => "toggle_tab_icons",
             Self::ToggleReuseFolderTab => "toggle_reuse_folder_tab",
             Self::GoToFile => "go_to_file",
             Self::OpenRecentFolder => "open_recent_folder",
@@ -783,6 +785,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::OpenFolder, &[]),
     command(CommandId::OpenGallery, &[]),
     command(CommandId::ToggleReuseFolderTab, &[]),
+    command(CommandId::ToggleTabIcons, &[]),
     command(CommandId::GoToFile, &[]),
     command(CommandId::OpenRecentFolder, &[]),
     command(CommandId::SearchCurrentFiles, ANY_MEDIA),

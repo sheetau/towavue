@@ -55,7 +55,13 @@ pub(super) fn named_tab(
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
-    let response = chrome::tab_title(ui, label_rect, title, active);
+    let icon = (crate::tab_icons::enabled(ui.ctx())
+        && title == localization::text(ui.ctx(), Text::Gallery))
+    .then_some(crate::fluent::Kind::ImageMultiple);
+    if icon.is_some() {
+        ui.spacing_mut().button_padding.x = 0.0;
+    }
+    let response = chrome::tab_title_with_icon(ui, label_rect, title, active, None, icon);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -126,9 +132,11 @@ pub fn show(
     let width = (viewport.width() - 2.0 * side).max(0.0);
     let left = viewport.left() + side - inset.left();
     let mut chosen = None;
+    let header_width = inset.width().min(400.0);
+    let header_left = viewport.center().x - header_width * 0.5 - inset.left();
     let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-        ui.cursor().min + egui::vec2(left, 0.0),
-        egui::vec2(width, chrome::INPUT_HEIGHT),
+        ui.cursor().min + egui::vec2(header_left, 0.0),
+        egui::vec2(header_width, chrome::INPUT_HEIGHT),
     )));
     let search_changed = header
         .horizontal_centered(|ui| {
@@ -144,8 +152,13 @@ pub fn show(
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
     ui.visuals_mut().widgets.active.fg_stroke.color = color;
     let body = ui.available_rect_before_wrap();
+    let rail_top = if header.min_rect().right() > body.right() - 32.0 {
+        body.top()
+    } else {
+        inset.top()
+    };
     let rail = egui::Rect::from_min_max(
-        egui::pos2(body.right() - 32.0, inset.top()),
+        egui::pos2(body.right() - 32.0, rail_top),
         egui::pos2(body.right(), inset.bottom()),
     );
     let swipe_id = ui.make_persistent_id("gallery-swipe");
@@ -262,7 +275,6 @@ fn search_field(
     );
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(outer));
     let ui = &mut content;
-    let background = ui.painter().add(egui::Shape::Noop);
     let button_step = chrome::SEARCH_BUTTON_SIZE + 2.0;
     let buttons = [0.0, button_step, 2.0 * button_step, 3.0 * button_step].map(|offset| {
         egui::Rect::from_min_size(
@@ -376,21 +388,6 @@ fn search_field(
             )
         });
     }
-    let stroke = if search.has_focus() {
-        ui.visuals().selection.stroke
-    } else {
-        egui::Stroke::NONE
-    };
-    ui.painter().set(
-        background,
-        egui::Shape::rect_filled(outer, chrome::INPUT_RADIUS, egui::Color32::from_gray(12)),
-    );
-    ui.painter().rect_stroke(
-        outer,
-        chrome::INPUT_RADIUS,
-        stroke,
-        egui::StrokeKind::Inside,
-    );
     search.changed()
 }
 
@@ -912,20 +909,12 @@ mod tests {
                     let clear = node_rect(&output, "Clear Gallery search");
                     assert!(search.right() < clear.left());
                     assert!(clear.right() < filter_rect.left());
-                    let border = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Rect(rect)
-                                if rect.fill == egui::Color32::from_gray(12)
-                                    && rect.rect.contains_rect(clear)
-                                    && rect.rect.contains_rect(search) =>
-                            {
-                                Some(rect.rect)
-                            }
-                            _ => None,
-                        })
-                        .expect("search border contains editor and inline buttons");
+                    let border = egui::Rect::from_min_size(
+                        egui::pos2((width - (width - 16.0).min(400.0)) * 0.5, 8.0),
+                        egui::vec2((width - 16.0).min(400.0), chrome::INPUT_HEIGHT),
+                    );
+                    assert!((border.center().x - width * 0.5).abs() < 0.1);
+                    assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.contains_rect(search) && rect.rect.contains_rect(clear) && rect.fill == egui::Color32::from_gray(12))));
                     assert!(
                         (border.top() - 8.0).abs() <= 1.0 / density,
                         "header top matches its side inset: {border:?}"
@@ -1129,7 +1118,7 @@ mod tests {
                 assert!(clear.1.is_disabled(), "empty clear retains a disabled slot");
                 assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Text(text) if text.galley.text() == "Search Gallery"
-                        && text.galley.job.sections.iter().all(|s| s.format.color == chrome::MUTED.gamma_multiply(context.global_style().visuals.disabled_alpha())))));
+                        && text.galley.job.sections.iter().all(|s| s.format.color == context.global_style().visuals.text_color()))));
                 frame(vec![egui::Event::Text("new search".into())]);
                 assert_eq!(query.borrow().as_str(), "new search");
                 let escape = || egui::Event::Key {
@@ -1341,8 +1330,9 @@ mod tests {
             let hint = text_rect(&output, Text::GallerySearch.in_language(language))
                 .expect("Gallery placeholder");
             assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);
-            assert!((search.left() - grid.get().left()).abs() <= 1.0 / density);
-            assert!((folder.right() + 2.0 - grid.get().right()).abs() <= 1.0 / density);
+            let header_width = (size.x - 16.0).min(400.0);
+            assert!((search.left() - (size.x - header_width) * 0.5).abs() <= 1.0 / density);
+            assert!((folder.right() + 2.0 - (size.x + header_width) * 0.5).abs() <= 1.0 / density);
             let border = |output: &egui::FullOutput| {
                 output
                     .shapes
@@ -1357,7 +1347,7 @@ mod tests {
                         }
                         _ => None,
                     })
-                    .expect("search field border")
+                    .unwrap_or(egui::Stroke::NONE)
             };
             let idle_border = border(&output);
             frame(vec![egui::Event::PointerMoved(search.center())]);

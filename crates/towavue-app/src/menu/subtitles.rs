@@ -22,7 +22,10 @@ pub(super) fn submenu(
     };
     let margin = egui::Frame::popup(ui.style()).total_margin().sum().x;
     let width = (side - margin - 2.0 - 1.0 / ui.ctx().pixels_per_point()).max(1.0);
-    let (response, contents) = ui
+    let egui::InnerResponse {
+        response,
+        inner: contents,
+    } = ui
         .add_enabled_ui(!context.playback_blocked, |ui| {
             let category = ui.next_auto_id();
             if requested == Some(category) || crate::logo_menu::drag::submenu(ui, category) {
@@ -32,135 +35,131 @@ pub(super) fn submenu(
                     state.open_item = Some(id)
                 });
             }
-            egui::containers::menu::SubMenuButton::new(text(ui.ctx(), Text::Subtitles)).ui(
-                ui,
-                |ui| {
-                    let delay_key = ui.id().with("subtitle-delay-control");
-                    let editing = ui
-                        .data(|data| data.get_temp::<egui::Id>(delay_key))
-                        .is_some_and(|id| ui.memory(|memory| memory.has_focus(id)));
-                    // Leave text editing's arrows/Tab/IME to the numeric editor.
-                    let keyboard = (!editing).then(|| MenuKeyboard::begin(ui));
-                    let back = keyboard.as_ref().is_some_and(|keyboard| keyboard.left);
-                    let mut rows = vec![(
-                        Selection::None,
-                        text(ui.ctx(), Text::SubtitleNone).to_owned(),
-                    )];
-                    if let Some(path) = &data.subtitle_settings.external {
-                        rows.push((
-                            Selection::External,
-                            path.file_name()
-                                .unwrap_or_default()
-                                .to_string_lossy()
-                                .into_owned(),
-                        ));
-                    }
-                    if let Some(tracks) = data.subtitle_tracks {
-                        rows.extend(tracks.iter().enumerate().map(|(index, track)| {
-                            (
-                                Selection::Embedded(track.id),
-                                crate::subtitles::track_label(language(ui.ctx()), index, track),
-                            )
-                        }));
-                    }
-                    let natural = rows
-                        .iter()
-                        .map(|(_, label)| sizing::text_width(ui, label))
-                        .chain(
-                            [
-                                Text::CommandLoadSubtitles,
-                                Text::CommandToggleSubtitles,
-                                Text::SubtitleDelay,
-                            ]
-                            .into_iter()
-                            .map(|label| sizing::text_width(ui, text(ui.ctx(), label))),
+            crate::chrome::menu_button(ui, text(ui.ctx(), Text::Subtitles), |ui| {
+                let delay_key = ui.id().with("subtitle-delay-control");
+                let editing = ui
+                    .data(|data| data.get_temp::<egui::Id>(delay_key))
+                    .is_some_and(|id| ui.memory(|memory| memory.has_focus(id)));
+                // Leave text editing's arrows/Tab/IME to the numeric editor.
+                let keyboard = (!editing).then(|| MenuKeyboard::begin(ui));
+                let back = keyboard.as_ref().is_some_and(|keyboard| keyboard.left);
+                let mut rows = vec![(
+                    Selection::None,
+                    text(ui.ctx(), Text::SubtitleNone).to_owned(),
+                )];
+                if let Some(path) = &data.subtitle_settings.external {
+                    rows.push((
+                        Selection::External,
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned(),
+                    ));
+                }
+                if let Some(tracks) = data.subtitle_tracks {
+                    rows.extend(tracks.iter().enumerate().map(|(index, track)| {
+                        (
+                            Selection::Embedded(track.id),
+                            crate::subtitles::track_label(language(ui.ctx()), index, track),
                         )
-                        .fold(120.0, f32::max)
-                        + ui.spacing().icon_width
-                        + ui.spacing().icon_spacing
-                        + 2.0 * ui.spacing().button_padding.x
-                        + ui.spacing().scroll.bar_width;
-                    let width = natural.min(width);
-                    ui.set_width(width);
-                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    let mut command = None;
-                    let mut items = Vec::new();
-                    let height = sizing::height(ui);
-                    crate::logo_menu::drag::scroll(ui, egui::Id::new("subtitles"), height, |ui| {
-                        let response = ui.button(text(ui.ctx(), Text::CommandLoadSubtitles));
+                    }));
+                }
+                let natural = rows
+                    .iter()
+                    .map(|(_, label)| sizing::text_width(ui, label))
+                    .chain(
+                        [
+                            Text::CommandLoadSubtitles,
+                            Text::CommandToggleSubtitles,
+                            Text::SubtitleDelay,
+                        ]
+                        .into_iter()
+                        .map(|label| sizing::text_width(ui, text(ui.ctx(), label))),
+                    )
+                    .fold(120.0, f32::max)
+                    + ui.spacing().icon_width
+                    + ui.spacing().icon_spacing
+                    + 2.0 * ui.spacing().button_padding.x
+                    + ui.spacing().scroll.bar_width;
+                let width = natural.min(width);
+                ui.set_width(width);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                let mut command = None;
+                let mut items = Vec::new();
+                let height = sizing::height(ui);
+                crate::logo_menu::drag::scroll(ui, egui::Id::new("subtitles"), height, |ui| {
+                    let response = ui.button(text(ui.ctx(), Text::CommandLoadSubtitles));
+                    items.push(response.id);
+                    if crate::logo_menu::drag::clicked(&response) {
+                        command = Some(LoadSubtitles);
+                        ui.close();
+                    }
+                    let previous_visible = data.subtitle_settings.visible;
+                    let response = crate::chrome::menu_checkbox(
+                        ui,
+                        &mut data.subtitle_settings.visible,
+                        text(ui.ctx(), Text::CommandToggleSubtitles),
+                    )
+                    .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
+                    items.push(response.id);
+                    if crate::logo_menu::drag::captured(ui.ctx()) {
+                        data.subtitle_settings.visible = previous_visible;
+                    } else if response.changed() {
+                        data.subtitle_action = Some(Action::Show(data.subtitle_settings.visible));
+                    }
+                    crate::chrome::separator(ui);
+                    for (selection, label) in rows {
+                        let response = ui
+                            .radio(data.subtitle_settings.selection == selection, &label)
+                            .help_text(label);
                         items.push(response.id);
                         if crate::logo_menu::drag::clicked(&response) {
-                            command = Some(LoadSubtitles);
+                            data.subtitle_action = Some(Action::Select(selection));
                             ui.close();
                         }
-                        let previous_visible = data.subtitle_settings.visible;
-                        let response = crate::chrome::menu_checkbox(
-                            ui,
-                            &mut data.subtitle_settings.visible,
-                            text(ui.ctx(), Text::CommandToggleSubtitles),
-                        )
-                        .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
-                        items.push(response.id);
-                        if crate::logo_menu::drag::captured(ui.ctx()) {
-                            data.subtitle_settings.visible = previous_visible;
-                        } else if response.changed() {
-                            data.subtitle_action =
-                                Some(Action::Show(data.subtitle_settings.visible));
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
                         }
-                        crate::chrome::separator(ui);
-                        for (selection, label) in rows {
-                            let response = ui
-                                .radio(data.subtitle_settings.selection == selection, &label)
-                                .help_text(label);
-                            items.push(response.id);
-                            if crate::logo_menu::drag::clicked(&response) {
-                                data.subtitle_action = Some(Action::Select(selection));
-                                ui.close();
-                            }
-                            if response.gained_focus() {
-                                response.scroll_to_me(None);
-                            }
-                        }
-                        crate::chrome::separator(ui);
-                        let label = ui.label(text(ui.ctx(), Text::SubtitleDelay));
-                        let mut delay = f64::from(data.subtitle_settings.delay.tenths()) / 10.0;
-                        crate::chrome::input_style(ui);
-                        let response = ui
-                            .add_sized(
-                                [width.min(120.0), crate::chrome::INPUT_HEIGHT],
-                                egui::DragValue::new(&mut delay)
-                                    .range(f64::from(i32::MIN) / 10.0..=f64::from(i32::MAX) / 10.0)
-                                    .speed(0.1)
-                                    .fixed_decimals(1)
-                                    .suffix(" s")
-                                    .custom_parser(|text| {
-                                        text.trim()
-                                            .trim_end_matches('s')
-                                            .trim()
-                                            .parse::<f64>()
-                                            .ok()
-                                            .filter(|number| number.is_finite())
-                                    }),
-                            )
-                            .labelled_by(label.id)
-                            .help_text(text(ui.ctx(), Text::SubtitleDelayHelp));
-                        ui.data_mut(|data| data.insert_temp(delay_key, response.id));
-                        items.push(response.id);
-                        if response.changed() && delay.is_finite() {
-                            data.subtitle_action = Some(Action::Delay(SubtitleDelay::from_tenths(
-                                (delay * 10.0).round() as i32,
-                            )));
-                        }
-                    });
-                    if let Some(keyboard) = keyboard {
-                        keyboard.finish(ui, items);
                     }
-                    (command, back)
-                },
-            )
+                    crate::chrome::separator(ui);
+                    let label = ui.label(text(ui.ctx(), Text::SubtitleDelay));
+                    let mut delay = f64::from(data.subtitle_settings.delay.tenths()) / 10.0;
+                    crate::chrome::input_style(ui);
+                    let response = ui
+                        .add_sized(
+                            [width.min(120.0), crate::chrome::INPUT_HEIGHT],
+                            egui::DragValue::new(&mut delay)
+                                .range(f64::from(i32::MIN) / 10.0..=f64::from(i32::MAX) / 10.0)
+                                .speed(0.1)
+                                .fixed_decimals(1)
+                                .suffix(" s")
+                                .custom_parser(|text| {
+                                    text.trim()
+                                        .trim_end_matches('s')
+                                        .trim()
+                                        .parse::<f64>()
+                                        .ok()
+                                        .filter(|number| number.is_finite())
+                                }),
+                        )
+                        .labelled_by(label.id)
+                        .help_text(text(ui.ctx(), Text::SubtitleDelayHelp));
+                    ui.data_mut(|data| data.insert_temp(delay_key, response.id));
+                    items.push(response.id);
+                    if response.changed() && delay.is_finite() {
+                        data.subtitle_action = Some(Action::Delay(SubtitleDelay::from_tenths(
+                            (delay * 10.0).round() as i32,
+                        )));
+                    }
+                });
+                if let Some(keyboard) = keyboard {
+                    keyboard.finish(ui, items);
+                }
+                (command, back)
+            })
         })
         .inner;
-    let (command, back) = contents.map(|inner| inner.inner).unwrap_or_default();
+    let (command, back) = contents.unwrap_or_default();
     if back {
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = None);
         response.request_focus();

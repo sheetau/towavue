@@ -10,9 +10,6 @@ use crate::chrome;
 use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
 
-fn background() -> Color32 {
-    Color32::from_rgba_unmultiplied(0x2c, 0x2c, 0x2c, 112)
-}
 const HOVER: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
 pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 16.0;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
@@ -22,13 +19,11 @@ pub(super) struct Browser {
     folder: PathBuf,
     pub query: String,
     pub filter: Option<MediaKind>,
-    editing: bool,
-    address: String,
-    select_address: bool,
     worker: Option<FolderBrowser>,
     cache: Vec<Arc<FolderListing>>,
     worker_failed: bool,
     menu_open: Option<egui::Id>,
+    menu_floor: f32,
     blocked_frame: Option<u64>,
     blocked_gesture: bool,
     popup_was_open: bool,
@@ -36,7 +31,6 @@ pub(super) struct Browser {
     projected: Option<Arc<FolderSnapshot>>,
     projected_query: String,
     projected_filter: Option<MediaKind>,
-    revision: u64,
 }
 
 impl Browser {
@@ -50,7 +44,6 @@ impl Browser {
             worker.request(None);
         }
         self.cache.clear();
-        self.editing = false;
     }
 
     pub fn sync_folder(&mut self, folder: &Path, context: &Context) {
@@ -89,7 +82,6 @@ impl Browser {
             self.source = Some(key);
             self.projected_query.clone_from(&self.query);
             self.projected_filter = self.filter;
-            self.revision = self.revision.wrapping_add(1);
             let words: Vec<_> = self
                 .query
                 .split_whitespace()
@@ -113,7 +105,7 @@ impl Browser {
                 items,
                 sort_columns: source.sort_columns.clone(),
                 source: source.source,
-                generation: self.revision,
+                generation: source.generation,
                 captured_at: source.captured_at,
             };
             self.projected = Some(Arc::new(snapshot));
@@ -159,19 +151,16 @@ impl Browser {
                     ui.disable();
                     ui.set_opacity(opacity);
                 }
-                // Reuse Gallery's minimum gutter, without its grid rounding.
-                let side = crate::filmstrip::gallery_minimum_inset(screen.width())
-                    .min(((screen.width() - 284.0) * 0.5).max(8.0));
-                let total = (screen.width() - side * 2.0).max(1.0);
+                let total = screen.width().max(1.0);
                 let gap = 4.0_f32.min(total);
-                let address_width = (total - gap) * 2.5 / 3.5;
+                let search_width = ((total - gap) * 0.5).min(250.0);
                 let address = Rect::from_min_size(
-                    screen.min + egui::vec2(side, 8.0),
-                    egui::vec2(address_width, chrome::INPUT_HEIGHT),
+                    screen.min + egui::vec2(0.0, 8.0),
+                    egui::vec2((total - gap - search_width).max(0.0), chrome::INPUT_HEIGHT),
                 );
                 let search = Rect::from_min_max(
                     egui::pos2(address.right() + gap, address.top()),
-                    egui::pos2(screen.right() - side, address.bottom()),
+                    egui::pos2(screen.right(), address.bottom()),
                 );
                 self.address_bar(ui, address, &mut target);
                 self.search_bar(ui, search, source);
@@ -195,75 +184,15 @@ impl Browser {
     }
 
     fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<PathBuf>) {
-        ui.painter()
-            .rect_filled(outer, chrome::INPUT_RADIUS, background());
         let language = localization::language(ui.ctx());
+        self.menu_floor = outer.top() + 2.0 + chrome::SEARCH_BUTTON_SIZE;
         // Ancestors necessarily contain the next path component. Only the
         // current folder needs an asynchronous listing to determine its arrow.
         if ui.is_enabled() && self.menu_open.is_none() {
             self.listing(ui, &self.folder.clone());
         }
         let blocked = self.blocked_frame == Some(ui.ctx().cumulative_frame_nr());
-        if self.editing {
-            let clear_rect = end_button(outer, 0);
-            let text_rect = Rect::from_min_max(
-                outer.min,
-                egui::pos2(clear_rect.left() - 2.0, outer.bottom()),
-            );
-            let response = input(
-                ui,
-                text_rect,
-                "filmstrip-address",
-                Text::FilmstripAddress.in_language(language),
-                &mut self.address,
-            );
-            if self.select_address {
-                self.select_address = false;
-                response.request_focus();
-                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
-                    state
-                        .cursor
-                        .set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(self.address.chars().count()),
-                        )));
-                    state.store(ui.ctx(), response.id);
-                }
-                ui.ctx().request_discard("select address on entry");
-            }
-            let clear = clear_button(ui, clear_rect, !self.address.is_empty());
-            if clear.clicked() {
-                self.address.clear();
-                response.request_focus();
-            }
-            if response.has_focus() || response.lost_focus() {
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                    self.editing = false;
-                    response.surrender_focus();
-                } else if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
-                    let path = PathBuf::from(self.address.trim().trim_matches('"'));
-                    if !path.as_os_str().is_empty() {
-                        *target = Some(if path.is_absolute() {
-                            path
-                        } else {
-                            self.folder.join(path)
-                        });
-                        self.editing = false;
-                        response.surrender_focus();
-                    }
-                }
-            }
-            if response.has_focus() {
-                input_focus(ui, outer);
-            }
-            if response.lost_focus() && !clear.clicked() {
-                self.editing = false;
-            }
-            return;
-        }
-        // Reserve blank space even for a very long final component, so address
-        // entry always has a direct pointer target. Ancestors elide first.
-        let available = (outer.width() - 26.0).max(0.0);
+        let available = (outer.width() - 4.0).max(0.0);
         let mut paths: Vec<_> = self.folder.ancestors().map(Path::to_owned).collect();
         paths.reverse();
         let mut widths: Vec<_> = paths
@@ -305,7 +234,12 @@ impl Browser {
                 Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
             );
             let response = ui
-                .add_enabled_ui(!blocked, |ui| {
+                .scope(|ui| {
+                    if blocked {
+                        let opacity = ui.opacity();
+                        ui.disable();
+                        ui.set_opacity(opacity);
+                    }
                     chrome::input_button_at(
                         ui,
                         rect,
@@ -319,6 +253,7 @@ impl Browser {
             }
             egui::Popup::menu(&response)
                 .style(chrome::menu_style)
+                .align_alternatives(&[])
                 .show(|ui| {
                     let entries: Vec<_> = paths[..first]
                         .iter()
@@ -353,7 +288,12 @@ impl Browser {
             let label = crate::folder_navigation::folder_name(path);
             let name_response = ui
                 .push_id(("crumb", path), |ui| {
-                    ui.add_enabled_ui(!blocked, |ui| {
+                    ui.scope(|ui| {
+                        if blocked {
+                            let opacity = ui.opacity();
+                            ui.disable();
+                            ui.set_opacity(opacity);
+                        }
                         ui.put(
                             name,
                             egui::Button::new(&label)
@@ -368,7 +308,12 @@ impl Browser {
                 .help_text(path.display().to_string());
             let arrow_response = has_children.then(|| {
                 ui.push_id(("children", path), |ui| {
-                    ui.add_enabled_ui(!blocked, |ui| {
+                    ui.scope(|ui| {
+                        if blocked {
+                            let opacity = ui.opacity();
+                            ui.disable();
+                            ui.set_opacity(opacity);
+                        }
                         ui.put(
                             arrow,
                             egui::Button::new("").frame(false).min_size(arrow.size()),
@@ -410,60 +355,22 @@ impl Browser {
                     && arrow_response
                         .as_ref()
                         .is_some_and(|r| r.hovered() || r.has_focus()));
-            if left_hover || right_hover {
-                // Stroke and fill occupy disjoint geometry: alpha is applied once.
-                let half = if right_hover { arrow } else { name };
-                let radius = egui::CornerRadius {
-                    nw: if left_hover && !right_hover { 2 } else { 0 },
-                    sw: if left_hover && !right_hover { 2 } else { 0 },
-                    ne: if right_hover || !has_children { 2 } else { 0 },
-                    se: if right_hover || !has_children { 2 } else { 0 },
-                };
-                let fill = Rect::from_min_max(
-                    egui::pos2(half.left().max(rect.left() + 1.0), rect.top() + 1.0),
-                    egui::pos2(half.right().min(rect.right() - 1.0), rect.bottom() - 1.0),
-                );
-                ui.painter().set(
-                    background,
-                    egui::Shape::Vec(vec![
-                        egui::Shape::rect_stroke(
-                            rect,
-                            3,
-                            egui::Stroke::new(1.0, HOVER),
-                            egui::StrokeKind::Inside,
-                        ),
-                        egui::Shape::rect_filled(fill, radius, HOVER),
-                    ]),
-                );
-            }
+            ui.painter().set(
+                background,
+                split_background(rect, split, left_hover, right_hover, HOVER),
+            );
             if name_response.clicked() {
                 *target = Some(path.clone());
             }
             if let Some(arrow_response) = &arrow_response {
                 egui::Popup::menu(arrow_response)
                     .style(chrome::menu_style)
+                    .align_alternatives(&[])
                     .show(|ui| {
                         self.directory_menu(ui, path, 0, target);
                     });
             }
             x = rect.right();
-        }
-        let blank = Rect::from_min_max(egui::pos2(x.min(outer.right()), outer.top()), outer.max);
-        if ui
-            .add_enabled_ui(!blocked, |ui| {
-                ui.interact(
-                    blank,
-                    ui.id().with("edit-filmstrip-address"),
-                    egui::Sense::click(),
-                )
-            })
-            .inner
-            .clicked()
-        {
-            self.address = self.folder.display().to_string();
-            self.editing = true;
-            self.select_address = true;
-            ui.ctx().request_repaint();
         }
     }
 
@@ -548,7 +455,12 @@ impl Browser {
     ) {
         let language = localization::language(ui.ctx());
         let margin = egui::Frame::popup(ui.style()).total_margin().sum();
-        let available = (ui.ctx().content_rect().size() - margin).max(Vec2::splat(1.0));
+        let screen = ui.ctx().content_rect();
+        let available = egui::vec2(
+            ui.available_width().min(screen.width() - margin.x),
+            screen.bottom() - self.menu_floor - margin.y,
+        )
+        .max(Vec2::splat(1.0));
         let labels: Vec<_> = entries
             .iter()
             .map(|(path, _)| crate::folder_navigation::folder_name(path))
@@ -566,10 +478,18 @@ impl Browser {
                     .size()
                     .x
                     + 2.0 * ui.spacing().button_padding.x
-                    + if *children && depth < 63 { 20.0 } else { 0.0 }
+                    + if *children && depth < 63 {
+                        chrome::SEARCH_BUTTON_SIZE
+                    } else {
+                        0.0
+                    }
             })
             .fold(32.0, f32::max)
-            .min(available.x);
+            .min(if depth == 0 {
+                screen.width() - margin.x
+            } else {
+                available.x
+            });
         // A loading popup may have been only one row high on the previous pass.
         // Restore the full constraint before ScrollArea computes its viewport.
         ui.set_max_height(available.y);
@@ -577,70 +497,98 @@ impl Browser {
         egui::ScrollArea::vertical()
             .id_salt("folder-cascade")
             .max_height(available.y)
-            .show_rows(ui, 18.0, entries.len(), |ui, range| {
-                let rows = chrome::MenuRows::new(ui);
-                let mut ids = Vec::new();
-                for index in range {
-                    let (path, children) = entries[index];
-                    let label = &labels[index];
-                    let response = if children && depth < 63 {
-                        let row = ui
-                            .allocate_exact_size(
-                                egui::vec2(ui.available_width(), 18.0),
-                                egui::Sense::hover(),
-                            )
-                            .0;
-                        let arrow_rect =
-                            Rect::from_min_max(egui::pos2(row.right() - 20.0, row.top()), row.max);
-                        let name_rect = Rect::from_min_max(
-                            row.min,
-                            egui::pos2(arrow_rect.left(), row.bottom()),
-                        );
-                        let response = ui.put(
-                            name_rect,
-                            egui::Button::new(label)
-                                .right_text(())
-                                .gap(0.0)
-                                .truncate()
-                                .min_size(name_rect.size()),
-                        );
-                        let arrow = ui.put(
-                            arrow_rect,
-                            egui::Button::new("⏵").min_size(arrow_rect.size()),
-                        );
-                        arrow.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                arrow.enabled(),
-                                format!(
-                                    "{}: {label}",
-                                    Text::FilmstripSubfolders.in_language(language)
+            .show_rows(
+                ui,
+                chrome::SEARCH_BUTTON_SIZE,
+                entries.len(),
+                |ui, range| {
+                    let rows = chrome::MenuRows::new(ui);
+                    let mut ids = Vec::new();
+                    for index in range {
+                        let (path, children) = entries[index];
+                        let label = &labels[index];
+                        let response = if children && depth < 63 {
+                            let row = ui
+                                .allocate_exact_size(
+                                    egui::vec2(ui.available_width(), chrome::SEARCH_BUTTON_SIZE),
+                                    egui::Sense::hover(),
+                                )
+                                .0;
+                            let arrow_rect = Rect::from_min_max(
+                                egui::pos2(row.right() - chrome::SEARCH_BUTTON_SIZE, row.top()),
+                                row.max,
+                            );
+                            let name_rect = Rect::from_min_max(
+                                row.min,
+                                egui::pos2(arrow_rect.left(), row.bottom()),
+                            );
+                            let background = ui.painter().add(egui::Shape::Noop);
+                            let response = ui.put(
+                                name_rect,
+                                egui::Button::new(label)
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE)
+                                    .right_text(())
+                                    .gap(0.0)
+                                    .truncate()
+                                    .min_size(name_rect.size()),
+                            );
+                            let arrow = ui.put(
+                                arrow_rect,
+                                egui::Button::new(chrome::chevron())
+                                    .frame(false)
+                                    .min_size(arrow_rect.size()),
+                            );
+                            arrow.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    arrow.enabled(),
+                                    format!(
+                                        "{}: {label}",
+                                        Text::FilmstripSubfolders.in_language(language)
+                                    ),
+                                )
+                            });
+                            chrome::submenu(ui, &arrow, Some(self.menu_floor), |ui| {
+                                self.directory_menu(ui, path, depth + 1, target)
+                            });
+                            let open =
+                                egui::containers::menu::MenuState::from_ui(ui, |state, _| {
+                                    state.open_item
+                                }) == Some(egui::containers::menu::SubMenu::id_from_widget_id(
+                                    arrow.id,
+                                ));
+                            ui.painter().set(
+                                background,
+                                split_background(
+                                    row,
+                                    arrow_rect.left(),
+                                    response.hovered() || response.has_focus(),
+                                    open || arrow.hovered() || arrow.has_focus(),
+                                    HOVER,
                                 ),
-                            )
-                        });
-                        egui::containers::menu::SubMenu::new().show(ui, &arrow, |ui| {
-                            self.directory_menu(ui, path, depth + 1, target)
-                        });
-                        ids.push(arrow.id);
-                        response
-                    } else {
-                        ui.add(egui::Button::new(label).right_text(()).gap(0.0).truncate())
-                    };
-                    ids.push(response.id);
-                    if response.clicked() {
-                        *target = Some(path.to_owned());
+                            );
+                            response
+                        } else {
+                            ui.add(egui::Button::new(label).right_text(()).gap(0.0).truncate())
+                        };
+                        if !children || depth >= 63 {
+                            ids.push(response.id);
+                        }
+                        if response.clicked() {
+                            *target = Some(path.to_owned());
+                        }
                     }
-                }
-                rows.finish(ui, &ids);
-            });
+                    rows.finish(ui, &ids);
+                },
+            );
+        chrome::remember_menu_bounds(ui);
         if target.is_some() {
             egui::Popup::close_all(ui.ctx());
         }
     }
 
     fn search_bar(&mut self, ui: &mut Ui, outer: Rect, source: Option<&FolderSnapshot>) {
-        ui.painter()
-            .rect_filled(outer, chrome::INPUT_RADIUS, background());
         let language = localization::language(ui.ctx());
         let filter_rect = end_button(outer, 0);
         let clear_rect = end_button(outer, 1);
@@ -673,9 +621,6 @@ impl Browser {
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.query.clear();
-        }
-        if response.has_focus() {
-            input_focus(ui, outer);
         }
     }
 }
@@ -715,15 +660,6 @@ fn input(ui: &mut Ui, rect: Rect, id: &str, hint: &str, value: &mut String) -> e
     response
 }
 
-fn input_focus(ui: &Ui, rect: Rect) {
-    ui.painter().rect_stroke(
-        rect,
-        chrome::INPUT_RADIUS,
-        ui.visuals().selection.stroke,
-        egui::StrokeKind::Inside,
-    );
-}
-
 fn clear_button(ui: &mut Ui, rect: Rect, enabled: bool) -> egui::Response {
     let label = localization::text(ui.ctx(), Text::FilmstripClear);
     let response = ui
@@ -747,3 +683,41 @@ fn clear_button(ui: &mut Ui, rect: Rect, enabled: bool) -> egui::Response {
 
 #[cfg(test)]
 mod tests;
+
+fn split_background(
+    rect: Rect,
+    split: f32,
+    left: bool,
+    right: bool,
+    color: Color32,
+) -> egui::Shape {
+    if !left && !right {
+        return egui::Shape::Noop;
+    }
+    let has_arrow = split < rect.right();
+    let half = if right {
+        Rect::from_min_max(egui::pos2(split, rect.top()), rect.max)
+    } else {
+        Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()))
+    };
+    let radius = egui::CornerRadius {
+        nw: if left && !right { 2 } else { 0 },
+        sw: if left && !right { 2 } else { 0 },
+        ne: if right || !has_arrow { 2 } else { 0 },
+        se: if right || !has_arrow { 2 } else { 0 },
+    };
+    let fill = Rect::from_min_max(
+        egui::pos2(half.left().max(rect.left() + 1.0), rect.top() + 1.0),
+        egui::pos2(half.right().min(rect.right() - 1.0), rect.bottom() - 1.0),
+    );
+    // Disjoint stroke and fill apply translucent feedback exactly once.
+    egui::Shape::Vec(vec![
+        egui::Shape::rect_stroke(
+            rect,
+            3,
+            egui::Stroke::new(1.0, color),
+            egui::StrokeKind::Inside,
+        ),
+        egui::Shape::rect_filled(fill, radius, color),
+    ])
+}

@@ -142,6 +142,10 @@ fn browser_projection_preserves_shell_identity_order_and_caches_between_paints()
         [source.items[0].clone(), source.items[2].clone()]
     );
     assert_eq!(projected.folder_identity, source.folder_identity);
+    assert_eq!(
+        projected.generation, source.generation,
+        "drag ownership stays tied to the Shell snapshot"
+    );
     assert!(Arc::ptr_eq(
         &projected,
         &browser.project(Some(&source)).0.expect("cached")
@@ -179,6 +183,186 @@ fn cached_listing(
 }
 
 #[test]
+fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade() {
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    let folder = Path::new("C:/Parent/Current");
+    browser.sync_folder(folder, &context);
+    let branch = folder.join("branch");
+    let long = branch.join("A very long child name ".repeat(50));
+    cached_listing(
+        &mut browser,
+        folder,
+        vec![towavue_runtime_windows::BrowserFolder {
+            path: branch.clone(),
+            has_children: true,
+        }],
+    );
+    cached_listing(
+        &mut browser,
+        &branch,
+        vec![towavue_runtime_windows::BrowserFolder {
+            path: long.clone(),
+            has_children: false,
+        }],
+    );
+    let size = egui::vec2(480.0, 220.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let opener = node(&output, "Subfolders: Current");
+    click(&context, &mut browser, size, opener.center());
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let arrow = node(&output, "Subfolders: branch");
+    click(&context, &mut browser, size, arrow.center());
+    for _ in 0..4 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let child = node(&output, &crate::folder_navigation::folder_name(&long));
+    assert!(child.top() >= opener.bottom());
+    assert!(
+        (child.top() - arrow.top()).abs() < 1.0,
+        "one-row child stays row-aligned"
+    );
+    assert!(child.width() < size.x * 0.75);
+    let text = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.starts_with("A very long child") => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .expect("long child text");
+    assert!(text.galley.elided);
+    let parent = node(&output, "branch").union(arrow);
+    let margin = egui::Frame::menu(&context.global_style())
+        .total_margin()
+        .sum()
+        .x;
+    let separation = if child.left() >= parent.right() {
+        child.left() - parent.right()
+    } else {
+        parent.left() - child.right()
+    };
+    assert!(
+        (separation - (margin - 1.0)).abs() < 1.0,
+        "menu borders overlap by one point: {parent:?} {child:?}"
+    );
+}
+
+#[test]
+#[ignore = "hidden D3D11/WASAPI navigation control; generated silent media only"]
+fn browser_native_navigation_stays_paused_until_explicit_play() {
+    use crate::*;
+    use winit::platform::windows::EventLoopBuilderExtWindows;
+    let Some(root) = tests::isolated_test_root(
+        "filmstrip_browser::tests::browser_native_navigation_stays_paused_until_explicit_play",
+    ) else {
+        return;
+    };
+    let ffmpeg =
+        PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");
+    for (name, source, codec) in [
+        ("silent.wav", "anullsrc=r=48000:cl=stereo", "pcm_s16le"),
+        ("silent.mp4", "color=red:s=64x64:r=30", "mpeg4"),
+    ] {
+        assert!(
+            tests::hidden_command(&ffmpeg)
+                .args([
+                    "-v", "error", "-f", "lavfi", "-i", source, "-t", "2", "-c", codec
+                ])
+                .arg(root.join(name))
+                .status()
+                .expect("fixture")
+                .success()
+        );
+    }
+    struct Trial {
+        root: PathBuf,
+        complete: bool,
+    }
+    impl winit::application::ApplicationHandler for Trial {
+        fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+            let (send, receive) = std::sync::mpsc::channel();
+            let mut app = Application::new(None, move |event| {
+                let _ = send.send(event);
+            })
+            .expect("app");
+            let window = Arc::new(
+                event_loop
+                    .create_window(winit::window::Window::default_attributes().with_visible(false))
+                    .expect("hidden window"),
+            );
+            app.renderer = Some(FrameRenderer::new(window.as_ref()).expect("D3D11"));
+            app.window = Some(window);
+            app.ui_context = Some(fonts::test_context());
+            tab_transfer::tests::install(
+                &mut app,
+                self.root.join("origin.bmp"),
+                tab_transfer::tests::decoded(false),
+            );
+            for name in ["silent.wav", "silent.mp4"] {
+                app.filmstrip_open = true;
+                app.navigate_to_unchecked(self.root.join(name));
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while app.session.is_none() {
+                    while let Ok(event) = receive.try_recv() {
+                        app.handle_app_event(event);
+                    }
+                    app.finish_folder_load();
+                    assert!(
+                        Instant::now() < deadline,
+                        "session: {:?}",
+                        app.playback_error
+                    );
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                assert!(app.filmstrip_open);
+                assert_eq!(app.state, PlaybackState::Paused);
+                let position = app.current_position();
+                let until = Instant::now() + Duration::from_millis(200);
+                while Instant::now() < until {
+                    while let Ok(event) = receive.try_recv() {
+                        app.handle_app_event(event);
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                assert_eq!(app.state, PlaybackState::Paused);
+                assert_eq!(app.current_position(), position, "paused clock: {name}");
+                app.close_filmstrip();
+                app.toggle_pause();
+                assert_eq!(app.state, PlaybackState::Playing, "explicit play: {name}");
+            }
+            self.complete = true;
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _: &winit::event_loop::ActiveEventLoop,
+            _: winit::window::WindowId,
+            _: winit::event::WindowEvent,
+        ) {
+        }
+    }
+    let mut trial = Trial {
+        root,
+        complete: false,
+    };
+    winit::event_loop::EventLoop::builder()
+        .with_any_thread(true)
+        .build()
+        .expect("event loop")
+        .run_app(&mut trial)
+        .expect("trial");
+    assert!(trial.complete);
+}
+
+#[test]
 fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
     let context = context(1.0);
     let mut browser = Browser::default();
@@ -204,14 +388,7 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
     );
     let opener = node(&output, "Subfolders: Parent");
     let current = node(&output, "Current");
-    let address = output
-        .shapes
-        .iter()
-        .find_map(|shape| match &shape.shape {
-            egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
-            _ => None,
-        })
-        .expect("address");
+    let blank = egui::pos2(size.x - 260.0, current.center().y);
     click(&context, &mut browser, size, opener.center());
     for _ in 0..3 {
         frame(&context, &mut browser, size, vec![]);
@@ -233,7 +410,7 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
         output = frame(&context, &mut browser, size, vec![]).0;
     }
     let first = node(&output, "folder00");
-    let last = node(&output, "folder29");
+    let last = node(&output, "folder23");
     assert!(
         last.bottom() - first.top() > 500.0,
         "loading height must not constrain the menu"
@@ -281,7 +458,6 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
             .1
             .is_none()
     );
-    assert!(!browser.editing);
     assert!(
         !egui::Popup::is_any_open(&context),
         "outside breadcrumb click dismisses the menu"
@@ -297,20 +473,7 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
         egui::Popup::is_any_open(&context),
         "menu reopened before outside click"
     );
-    assert!(
-        click(
-            &context,
-            &mut browser,
-            size,
-            address.right_center() - egui::vec2(8.0, 0.0)
-        )
-        .1
-        .is_none()
-    );
-    assert!(
-        !browser.editing,
-        "outside click closes the menu without entering path editing"
-    );
+    assert!(click(&context, &mut browser, size, blank).1.is_none());
     for _ in 0..3 {
         output = frame(&context, &mut browser, size, vec![]).0;
     }
@@ -376,16 +539,9 @@ fn browser_elided_ancestors_are_ordered_menu_targets_and_gutters_change_continuo
             vec![],
         )
         .0;
-        let address = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
-                _ => None,
-            })
-            .expect("address");
+        let address = node(&output, "Search Current");
         if let Some(previous) = previous {
-            assert!((address.left() - previous.left()).abs() <= 0.51);
+            assert!((address.left() - previous.left()).abs() <= 1.01);
             assert!((address.width() - previous.width()).abs() <= 1.01);
         }
         previous = Some(address);
@@ -393,80 +549,60 @@ fn browser_elided_ancestors_are_ordered_menu_targets_and_gutters_change_continuo
 }
 
 #[test]
-fn browser_header_uses_smooth_gallery_gutter_and_address_selects_all_then_commits_or_cancels() {
+fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click() {
     for density in [1.0, 1.25, 2.0] {
         for width in [240.0, 480.0, 960.0] {
             let context = context(density);
             let mut browser = Browser::default();
-            browser.sync_folder(
-                Path::new("C:/very-long-ancestor/another-parent/Pictures"),
-                &context,
-            );
+            browser.sync_folder(Path::new("C:/Pictures"), &context);
             let size = egui::vec2(width, 400.0);
             let mut output = egui::FullOutput::default();
             for _ in 0..4 {
                 output = frame(&context, &mut browser, size, vec![]).0;
             }
-            let inputs: Vec<_> = output
-                .shapes
+            let search = node(&output, "Search Pictures");
+            assert!(search.width() <= 250.0);
+            assert!(search.width() > 32.0);
+            let inputs = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("tree")
+                .nodes
                 .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == background() => Some(rect.rect),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(inputs.len(), 2);
-            assert!((inputs[0].width() / inputs[1].width() - 2.5).abs() < 0.01);
-            assert_eq!(inputs[0].top(), 8.0);
-            let expected_inset = crate::filmstrip::gallery_minimum_inset(width)
-                .min(((width - 284.0) * 0.5).max(8.0));
-            assert!((inputs[0].left() - expected_inset).abs() < 0.01);
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
+                .count();
+            assert_eq!(inputs, 1, "only the search is editable");
+            assert!(node(&output, "Pictures").left() < search.left());
+            let blank = egui::pos2(search.left() - 6.0, search.center().y);
+            assert!(click(&context, &mut browser, size, blank).1.is_none());
             assert!(
-                inputs[1].width() > 2.0 * (chrome::SEARCH_BUTTON_SIZE + 2.0),
-                "compact search retains an editable text region"
+                frame(
+                    &context,
+                    &mut browser,
+                    size,
+                    vec![
+                        egui::Event::Text("C:/new-place".into()),
+                        key(egui::Key::Enter)
+                    ]
+                )
+                .1
+                .is_none()
             );
-            assert!(
-                browser.worker.is_some(),
-                "opening Filmstrip asynchronously resolves the current folder arrow"
-            );
-            click(
-                &context,
-                &mut browser,
-                size,
-                inputs[0].right_center() - egui::vec2(10.0, 0.0),
-            );
+            assert_eq!(browser.folder, Path::new("C:/Pictures"));
+            click(&context, &mut browser, size, search.center());
             for _ in 0..3 {
                 frame(&context, &mut browser, size, vec![]);
             }
-            assert!(browser.editing);
             frame(
                 &context,
                 &mut browser,
                 size,
-                vec![egui::Event::Text("C:/new-place".into())],
+                vec![egui::Event::Text("mountain".into())],
             );
-            assert_eq!(
-                browser.address, "C:/new-place",
-                "whole address selected at {width}/{density}"
-            );
-            let target = frame(&context, &mut browser, size, vec![key(egui::Key::Enter)]).1;
-            assert_eq!(target, Some(PathBuf::from("C:/new-place")));
-            assert!(!browser.editing);
-            click(
-                &context,
-                &mut browser,
-                size,
-                inputs[0].right_center() - egui::vec2(10.0, 0.0),
-            );
-            for _ in 0..3 {
-                frame(&context, &mut browser, size, vec![]);
-            }
-            assert!(
-                frame(&context, &mut browser, size, vec![key(egui::Key::Escape)])
-                    .1
-                    .is_none()
-            );
-            assert!(!browser.editing);
+            assert_eq!(browser.query, "mountain");
+            frame(&context, &mut browser, size, vec![key(egui::Key::Escape)]);
+            assert!(browser.query.is_empty());
         }
     }
 }
@@ -701,9 +837,6 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             let folder = browser.folder.clone();
                             cached_listing(&mut browser, &folder, vec![]);
                         }
-                        browser.editing = mode == 1;
-                        browser.address = browser.folder.display().to_string();
-                        browser.select_address = mode == 1;
                         browser.query = if mode == 2 {
                             "mountain".into()
                         } else {
@@ -723,6 +856,17 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         renderer
                             .render_ui(&context, initial)
                             .expect("initial UI textures");
+                        if mode == 1 {
+                            let output = frame(&context, &mut browser, size, vec![]).0;
+                            let search = node(&output, "Search Travel 2026");
+                            renderer
+                                .render_ui(&context, output)
+                                .expect("search textures");
+                            let output = click(&context, &mut browser, size, search.center()).0;
+                            renderer
+                                .render_ui(&context, output)
+                                .expect("focused search");
+                        }
                         if mode >= 5 {
                             let (output, _) = frame(&context, &mut browser, size, vec![]);
                             let label = match mode {

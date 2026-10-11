@@ -29,7 +29,6 @@ pub(super) fn items(
     shortcuts: &ShortcutBindings,
     ancestor: Option<egui::Rect>,
 ) {
-    let arrow = egui::containers::menu::SubMenuButton::RIGHT_ARROW;
     let gap = ui.spacing().item_spacing.x;
     let row = |label: &str, shortcut: &str, submenu: bool| {
         text_width(ui, label)
@@ -39,7 +38,11 @@ pub(super) fn items(
                 text_width(ui, shortcut) + 2.0 * gap
             }
             + if submenu {
-                text_width(ui, arrow) + 2.0 * gap
+                egui::WidgetText::from(crate::chrome::chevron())
+                    .into_galley(ui, None, f32::INFINITY, egui::TextStyle::Button)
+                    .size()
+                    .x
+                    + 2.0 * gap
             } else {
                 0.0
             }

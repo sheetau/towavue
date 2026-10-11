@@ -1,4 +1,5 @@
 use crate::localization::{Text, language, text};
+use egui::AtomExt as _;
 use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definitions};
 
 use CommandId::*;
@@ -114,7 +115,12 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 CloseAllTabs,
                 ReopenClosedTab,
             ],
-            &[ToggleReuseFolderTab, OpenKeyboardSettings, ReloadShortcuts],
+            &[
+                ToggleTabIcons,
+                ToggleReuseFolderTab,
+                OpenKeyboardSettings,
+                ReloadShortcuts,
+            ],
         ],
     ),
     (
@@ -336,7 +342,7 @@ fn submenu(
     }
     let root = egui::containers::menu::find_menu_root(ui);
     let parent = ui.ctx().read_response(root.id).expect("parent menu").rect;
-    let menu = ui.menu_button(text(ui.ctx(), title), |ui| {
+    let menu = crate::chrome::menu_button(ui, text(ui.ctx(), title), |ui| {
         show_items(ui, title, context, shortcuts, recent, Some(parent))
     });
     let (chosen, back) = menu.inner.unwrap_or_default();
@@ -438,8 +444,16 @@ fn show_items(
                     .find(|definition| definition.id == *id)
                     .expect("menu command is registered");
                 let enabled = definition.is_enabled(context);
+                let shortcut_width = (ui.available_width()
+                    - 2.0 * ui.spacing().button_padding.x
+                    - 2.0 * ui.spacing().item_spacing.x
+                    - 40.0)
+                    .max(0.0);
                 let button = egui::Button::new(definition.title_in(language(ui.ctx())))
-                    .shortcut_text(shortcut_text(ui, shortcuts.label(*id, context), enabled));
+                    .shortcut_text(
+                        shortcut_text(ui, shortcuts.label(*id, context), enabled)
+                            .atom_max_width(shortcut_width),
+                    );
                 let response = ui.add_enabled(enabled, button);
                 if response.enabled() {
                     items.push(response.id);
@@ -503,7 +517,7 @@ fn show_items(
                     right.max(left)
                 };
                 let available_width = side_width - 2.0 - 1.0 / ui.ctx().pixels_per_point();
-                let menu = ui.menu_button(text(ui.ctx(), Text::OpenRecent), |ui| {
+                let menu = crate::chrome::menu_button(ui, text(ui.ctx(), Text::OpenRecent), |ui| {
                     show_recent(ui, recent, available_width)
                 });
                 if menu.response.enabled() {
@@ -568,7 +582,7 @@ fn language_menu(
                 });
             }
             // Autonyms stay recognizable even when the current language is unfamiliar.
-            ui.menu_button(text(ui.ctx(), Text::DisplayLanguage), |ui| {
+            crate::chrome::menu_button(ui, text(ui.ctx(), Text::DisplayLanguage), |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 let mut items = Vec::new();
@@ -1279,7 +1293,7 @@ mod tests {
 
     #[test]
     fn keyboard_stays_in_menu_tree_and_scrolls_to_enabled_items() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         let shortcuts = ShortcutBindings::default();
         let mut time = 0.0;
         let mut frame = |events| {
@@ -1369,6 +1383,7 @@ mod tests {
         navigate(egui::Key::ArrowDown, false, "Open Recent Folder");
         navigate(egui::Key::ArrowDown, false, "Close tab");
         navigate(egui::Key::ArrowDown, false, "Reopen closed tab");
+        navigate(egui::Key::ArrowDown, false, "Tab icons");
         navigate(
             egui::Key::ArrowDown,
             false,
@@ -1425,7 +1440,7 @@ mod tests {
 
     #[test]
     fn menu_opens_and_dispatches_file_action() {
-        let context = egui::Context::default();
+        let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
         let mut shortcuts = ShortcutBindings::default();
         shortcuts.set(OpenFile, "Ctrl+K Ctrl+O".parse().expect("custom shortcut"));
@@ -1688,7 +1703,7 @@ mod tests {
                 towavue_core::MediaKind::Image,
             ),
         ] {
-            let context = egui::Context::default();
+            let context = crate::fonts::test_context();
             let shortcuts = crate::shortcuts::defaults();
             let mut time = 0.0;
             let mut frame = |events| {
@@ -1843,6 +1858,7 @@ mod tests {
                             command,
                             ToggleImageInterpolation
                                 | ToggleImageMinification
+                                | ToggleTabIcons
                                 | ToggleReuseFolderTab
                         ) {
                             assert_eq!(rows.len(), 2);

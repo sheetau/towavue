@@ -1209,6 +1209,7 @@ messages! {
     CommandPasteImage => ("Paste image", "画像を貼り付け"),
     CommandToggleFullscreen => ("Toggle fullscreen", "全画面表示を切り替え"),
     CommandOpenFolder => ("Open folder", "フォルダーを開く"),
+    CommandToggleTabIcons => ("Tab icons", "タブアイコン"),
     CommandToggleReuseFolderTab => ("Reuse tabs for files in the same folder", "同じフォルダのファイルはタブを再利用"),
     ReuseFolderTabOff => ("Off", "オフ"),
     ReuseFolderTabOn => ("On", "オン"),

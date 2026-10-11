@@ -38,9 +38,9 @@ pub(super) fn submenu(
             }
             let button = egui::Button::new(text(ui.ctx(), Text::AudioTracks)).right_text((
                 shortcut_text(ui, shortcuts.label(CycleAudioTrack, context), enabled),
-                egui::containers::menu::SubMenuButton::RIGHT_ARROW,
+                crate::chrome::chevron(),
             ));
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+            crate::chrome::submenu_button(ui, button, |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);

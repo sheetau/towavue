@@ -62,12 +62,22 @@ impl MenuRows {
                 });
             }
         });
+        ui.ctx().graphics_mut(|graphics| {
+            graphics.entry(ui.layer_id()).mutate_shape(self.0, |shape| {
+                shape.clip_rect = shape.clip_rect.intersect(ui.clip_rect());
+            });
+        });
         if let Some(row) = selected
             && !ui.data(|data| data.get_temp::<u64>(row.id.with("menu-checkbox")) == Some(pass))
         {
             ui.painter()
                 .with_clip_rect(ui.clip_rect())
                 .set(self.0, egui::Shape::rect_filled(row.rect, 3, super::HOVER));
+            ui.ctx().graphics_mut(|graphics| {
+                graphics.entry(ui.layer_id()).mutate_shape(self.0, |shape| {
+                    shape.clip_rect = shape.clip_rect.intersect(row.interact_rect)
+                })
+            });
         }
     }
 }

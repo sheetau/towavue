@@ -98,6 +98,7 @@ pub(crate) fn scroll<R>(
         }
     }
     let output = area.show_styled(ui, content);
+    crate::chrome::remember_menu_bounds(ui);
     context.data_mut(|data| {
         data.insert_temp(
             key,

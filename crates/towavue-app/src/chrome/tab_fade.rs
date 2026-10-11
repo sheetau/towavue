@@ -1,15 +1,17 @@
 use super::*;
 
+#[cfg(test)]
 pub fn tab_title(ui: &mut Ui, rect: Rect, label: &str, active: bool) -> egui::Response {
-    tab_title_with_volume(ui, rect, label, active, None)
+    tab_title_with_icon(ui, rect, label, active, None, None)
 }
 
-pub fn tab_title_with_volume(
+pub fn tab_title_with_icon(
     ui: &mut Ui,
     rect: Rect,
     label: &str,
     active: bool,
     volume: Option<(f32, f32)>,
+    icon: Option<crate::fluent::Kind>,
 ) -> egui::Response {
     let response = ui.put(
         rect,
@@ -19,6 +21,19 @@ pub fn tab_title_with_volume(
             .stroke(Stroke::NONE)
             .sense(egui::Sense::click_and_drag()),
     );
+    let rect = if let Some(kind) = icon {
+        let mut slot = rect;
+        slot.set_width(TAB_AUDIO_WIDTH);
+        crate::tab_icons::paint(
+            ui,
+            slot,
+            kind,
+            crate::tab_icons::title_color(ui, &response, active),
+        );
+        Rect::from_min_max(egui::pos2(slot.right(), rect.top()), rect.max)
+    } else {
+        rect
+    };
     if ui.is_rect_visible(rect) {
         let text = egui::RichText::new(label);
         let text = if active { text.color(FOREGROUND) } else { text };

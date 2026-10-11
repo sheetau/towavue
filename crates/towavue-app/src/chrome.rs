@@ -1,4 +1,6 @@
+mod submenu;
 use egui::{Color32, Pos2, Rect, Stroke, Ui, emath::GuiRounding};
+pub use submenu::{chevron, menu_button, remember_menu_bounds, submenu, submenu_button};
 use towavue_runtime_windows::{CaptionAction, CaptionButton};
 
 use crate::hover_help::HoverHelp;
@@ -17,7 +19,9 @@ mod reading_icon;
 mod tab_audio_fade;
 mod tab_fade;
 pub use tab_audio_fade::tab_audio_visibility;
-pub use tab_fade::{tab_strip_fades, tab_title, tab_title_fade, tab_title_with_volume};
+#[cfg(test)]
+pub use tab_fade::tab_title;
+pub use tab_fade::{tab_strip_fades, tab_title_fade, tab_title_with_icon};
 
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
     let mut actions = Vec::new();
@@ -250,7 +254,8 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
 /// Shared menu geometry, also used by combo popups and context menus.
 pub fn menu_style(style: &mut egui::Style) {
     egui::containers::menu::menu_style(style);
-    style.spacing.interact_size.y = 18.0;
+    style.spacing.interact_size.y = SEARCH_BUTTON_SIZE;
+    style.spacing.button_padding = egui::vec2(6.0, 2.0);
     style.spacing.item_spacing.y = 0.0;
     for visual in [
         &mut style.visuals.widgets.noninteractive,
@@ -276,7 +281,18 @@ pub fn combo_box<R>(
 ) -> egui::InnerResponse<Option<R>> {
     ui.scope(|ui| {
         flat_buttons(ui);
-        combo.popup_style(menu_style.into()).show_ui(ui, contents)
+        combo
+            .icon(|ui, rect, visuals, _| {
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "\u{eab4}",
+                    crate::fonts::icon_font(),
+                    visuals.fg_stroke.color,
+                );
+            })
+            .popup_style(menu_style.into())
+            .show_ui(ui, contents)
     })
     .inner
 }

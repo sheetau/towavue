@@ -16,7 +16,8 @@
     "New": "assets/Window New/SVG/ic_fluent_window_new_16_regular.svg",
     "Forbidden": "assets/Prohibited/SVG/ic_fluent_prohibited_16_regular.svg",
     "RepeatOff": "assets/Arrow Repeat All Off/SVG/ic_fluent_arrow_repeat_all_off_16_regular.svg",
-    "ShuffleOff": "assets/Arrow Shuffle Off/SVG/ic_fluent_arrow_shuffle_off_16_regular.svg"
+    "ShuffleOff": "assets/Arrow Shuffle Off/SVG/ic_fluent_arrow_shuffle_off_16_regular.svg",
+    "ImageMultiple": "assets/Image Multiple/SVG/ic_fluent_image_multiple_16_regular.svg"
   },
   "sha256": {
     "ic_fluent_play_16_filled.svg": "8e605c988e57d87d25d95bcd4653fa992d157ea43516c3726510c33c8790dfc9",
@@ -35,6 +36,7 @@
     "NOTICE": "2fb367a84df52c8b6f8401119708014b327f595554d41712d7407151c9ce73ef",
     "ic_fluent_filmstrip_play_16_regular.svg": "44669f4654d6088e56e0aa227ad4ca9ae5facae77da0600f2642488d02afebc2",
     "ic_fluent_arrow_repeat_all_off_16_regular.svg": "ae7a12e53e8d8e9bc5f3fa0439b306cc41cd3eb9646fc5dc8f64d00180499da9",
-    "ic_fluent_arrow_shuffle_off_16_regular.svg": "2a0d596f17f2455075a3437df5eef39f04933131276ed0a9fb36ffd200be0633"
+    "ic_fluent_arrow_shuffle_off_16_regular.svg": "2a0d596f17f2455075a3437df5eef39f04933131276ed0a9fb36ffd200be0633",
+    "ic_fluent_image_multiple_16_regular.svg": "67dc6aa2742794014ec72ba4117ff4daf181160eaa174c13dd93b24514158504"
   }
 }

@@ -240,7 +240,7 @@ pub(super) fn text_input(
         label,
         value,
         1,
-        true,
+        InputFrame::Framed,
         suffix,
     )
 }
@@ -274,7 +274,11 @@ fn text_input_rows(
         label,
         value,
         rows,
-        framed,
+        if framed {
+            InputFrame::Framed
+        } else {
+            InputFrame::Unframed
+        },
         "",
     )
 }
@@ -285,7 +289,14 @@ pub(super) fn unframed_text_input_with_id(
     label: &str,
     value: &mut String,
 ) -> egui::Response {
-    text_input_rows_with_id(ui, id, label, value, 1, false, "")
+    text_input_rows_with_id(ui, id, label, value, 1, InputFrame::Header, "")
+}
+
+#[derive(Clone, Copy)]
+enum InputFrame {
+    Framed,
+    Unframed,
+    Header,
 }
 
 fn text_input_rows_with_id(
@@ -294,10 +305,11 @@ fn text_input_rows_with_id(
     label: &str,
     value: &mut String,
     rows: usize,
-    framed: bool,
+    frame: InputFrame,
     suffix: &'static str,
 ) -> egui::Response {
     use egui::accesskit::{Action, ActionData, TreeId};
+    let framed = matches!(frame, InputFrame::Framed);
     let mut changed = false;
     if ui.is_enabled() {
         ui.input_mut(|input| {
@@ -338,6 +350,8 @@ fn text_input_rows_with_id(
         .scope(|ui| {
             ui.visuals_mut().weak_text_color = Some(if framed {
                 crate::chrome::HOVER
+            } else if matches!(frame, InputFrame::Header) {
+                ui.visuals().text_color()
             } else {
                 ui.visuals()
                     .widgets

@@ -8,6 +8,7 @@ pub(crate) struct Choices {
     pub video_quality: VideoExportQuality,
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
+    pub tab_icons: bool,
     pub reuse_folder_tab: bool,
     pub nearest_images: bool,
     pub high_quality_minification: bool,
@@ -21,6 +22,7 @@ impl Default for Choices {
             video_quality: VideoExportQuality::High,
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
+            tab_icons: true,
             reuse_folder_tab: false,
             nearest_images: false,
             high_quality_minification: true,
@@ -54,6 +56,13 @@ pub(super) fn options(command: CommandId) -> Option<Options> {
             &[
                 (ToggleImageMinification, Text::QualityHigh),
                 (ToggleImageMinification, Text::MinificationFast),
+            ],
+        ),
+        ToggleTabIcons => (
+            Text::CommandToggleTabIcons,
+            &[
+                (ToggleTabIcons, Text::ReuseFolderTabOff),
+                (ToggleTabIcons, Text::ReuseFolderTabOn),
             ],
         ),
         ToggleReuseFolderTab => (
@@ -185,18 +194,23 @@ pub(super) fn submenu(
                 FolderNavigationStop
             }
         }
-        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab => command,
+        ToggleImageInterpolation
+        | ToggleImageMinification
+        | ToggleReuseFolderTab
+        | ToggleTabIcons => command,
         _ => return None,
     };
     let toggle = matches!(
         command,
-        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab
+        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab | ToggleTabIcons
     );
     let selected = match command {
         ToggleImageInterpolation if choices.nearest_images => Text::StatusNearest,
         ToggleImageInterpolation => Text::StatusSmooth,
         ToggleImageMinification if choices.high_quality_minification => Text::QualityHigh,
         ToggleImageMinification => Text::MinificationFast,
+        ToggleTabIcons if choices.tab_icons => Text::ReuseFolderTabOn,
+        ToggleTabIcons => Text::ReuseFolderTabOff,
         ToggleReuseFolderTab if choices.reuse_folder_tab => Text::ReuseFolderTabOn,
         ToggleReuseFolderTab => Text::ReuseFolderTabOff,
         _ => {
@@ -242,14 +256,14 @@ pub(super) fn submenu(
             } else {
                 String::new()
             };
-            let arrow = egui::containers::menu::SubMenuButton::RIGHT_ARROW;
+            let arrow = crate::chrome::chevron();
             let button = egui::Button::new(text(ui.ctx(), title));
             let button = if shortcut.is_empty() {
                 button.right_text(arrow)
             } else {
                 button.right_text((shortcut_text(ui, shortcut, enabled), arrow))
             };
-            egui::containers::menu::SubMenuButton::from_button(button).ui(ui, |ui| {
+            crate::chrome::submenu_button(ui, button, |ui| {
                 let keyboard = MenuKeyboard::begin(ui);
                 let back = keyboard.left;
                 let frame = egui::Frame::popup(ui.style()).total_margin().sum().x;

@@ -47,6 +47,13 @@ impl Dropdown {
             .find(|(_, selected)| *selected)
             .map(|(row, _)| row.id);
         let rows: Vec<_> = self.rows.into_iter().map(|(row, _)| row).collect();
+        ui.ctx().graphics_mut(|graphics| {
+            graphics
+                .entry(ui.layer_id())
+                .mutate_shape(self.background, |shape| {
+                    shape.clip_rect = shape.clip_rect.intersect(ui.clip_rect());
+                });
+        });
         if let Some(response) = super::menu_rows::highlighted(ui, &rows, fallback) {
             ui.painter().set(
                 self.background,
@@ -56,6 +63,13 @@ impl Dropdown {
                     ui.visuals().selection.bg_fill,
                 ),
             );
+            ui.ctx().graphics_mut(|graphics| {
+                graphics
+                    .entry(ui.layer_id())
+                    .mutate_shape(self.background, |shape| {
+                        shape.clip_rect = shape.clip_rect.intersect(response.interact_rect)
+                    })
+            });
         }
     }
 }

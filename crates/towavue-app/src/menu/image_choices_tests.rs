@@ -135,9 +135,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                                 .expect("visible custom shortcut");
                             let (_, arrow_rect, _, _) = texts
                                 .iter()
-                                .find(|(text, ..)| {
-                                    *text == egui::containers::menu::SubMenuButton::RIGHT_ARROW
-                                })
+                                .find(|(text, ..)| *text == "\u{eab6}")
                                 .expect("submenu arrow");
                             assert!(
                                 !elided && clip.contains_rect(*shortcut_rect),

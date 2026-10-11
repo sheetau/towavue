@@ -65,6 +65,7 @@ fn preference_restart_child() {
         .expect("owned preference fixture");
     if std::env::var("TOWAVUE_PREFERENCE_PHASE").expect("owned preference fixture") == "write" {
         assert!(!path.exists(), "startup does not write defaults");
+        assert!(host.windows[&first].shows_tab_icons());
         let second = host
             .add_application(None)
             .expect("owned preference fixture");
@@ -86,6 +87,7 @@ fn preference_restart_child() {
             CommandId::ToggleImageMinification,
             CommandId::FolderNavigationStop,
             CommandId::ToggleReuseFolderTab,
+            CommandId::ToggleTabIcons,
             CommandId::ToggleReadingMode,
             CommandId::IncreaseReadingPages,
             CommandId::DecreaseReadingFirstPage,
@@ -120,6 +122,10 @@ fn preference_restart_child() {
             .get_mut(&second)
             .expect("owned preference fixture");
         assert_eq!(app.view_resize_mode, view_resize::Mode::Fit);
+        assert!(
+            !app.shows_tab_icons(),
+            "existing windows observe the shared choice"
+        );
         app.dispatch(CommandId::CycleVolumeStep);
         assert_eq!(app.volume_step_percent, 5);
         assert_eq!(app.video_export_quality(), VideoExportQuality::Smaller);
@@ -130,6 +136,10 @@ fn preference_restart_child() {
         // Closing an older window does not write its stale defaults.
         host.windows.remove(&second);
     } else {
+        assert!(
+            !host.windows[&first].shows_tab_icons(),
+            "restart restores tab icons"
+        );
         verify(&host.windows[&first]);
         let second = host
             .add_application(None)

@@ -2,6 +2,62 @@ use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
 #[test]
+fn recent_file_icons_follow_the_setting_without_changing_folder_or_command_rows() {
+    for enabled in [false, true] {
+        for folders in [false, true] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            crate::tab_icons::set(&context, enabled);
+            let files = [PathBuf::from("C:/media/first.png")];
+            let sources = OpenSources {
+                files: &files,
+                folders: &files,
+                ..Default::default()
+            };
+            let mut palette = CommandPalette::default();
+            palette.open_files(folders);
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources,
+                    vec![],
+                    (egui::vec2(600.0, 400.0), 0.0, 1.0),
+                )
+                .0;
+            }
+            let text = picker_text(&output, "first.png").expect("file label").0;
+            let icon = output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh)
+                    if (mesh.calc_bounds().center().y
+                        - (text.pos.y + text.galley.size().y * 0.5))
+                        .abs()
+                        < 2.0 =>
+                {
+                    Some(mesh)
+                }
+                _ => None,
+            });
+            assert_eq!(icon.is_some(), enabled && !folders);
+            if let Some(icon) = icon {
+                assert!(icon.calc_bounds().right() < text.pos.x);
+                let format = text.galley.job.sections[0].format.color;
+                let color =
+                    text.override_text_color
+                        .unwrap_or(if format == egui::Color32::PLACEHOLDER {
+                            text.fallback_color
+                        } else {
+                            format
+                        });
+                assert!(icon.vertices.iter().all(|vertex| vertex.color == color));
+            }
+        }
+    }
+}
+
+#[test]
 fn only_the_enter_target_has_selected_text_while_another_row_is_hovered() {
     for mode in 0..3 {
         let context = crate::fonts::test_context();
@@ -609,7 +665,14 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                     if long {
                         assert!(label.galley.elided);
                         assert!(
-                            label.galley.size().x > body.width() * 0.6,
+                            label.galley.size().x
+                                > (body.width()
+                                    - if folders {
+                                        0.0
+                                    } else {
+                                        crate::chrome::TAB_AUDIO_WIDTH
+                                    })
+                                    * 0.6,
                             "filename receives priority over the long parent"
                         );
                     } else if width == 600.0 {

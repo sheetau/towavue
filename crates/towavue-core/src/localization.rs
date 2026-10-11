@@ -41,6 +41,7 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::ResizeViewKeepScale => Text::ResizeViewKeepScale,
         CommandId::OpenFolder => Text::CommandOpenFolder,
         CommandId::OpenGallery => Text::CommandOpenGallery,
+        CommandId::ToggleTabIcons => Text::CommandToggleTabIcons,
         CommandId::ToggleReuseFolderTab => Text::CommandToggleReuseFolderTab,
         CommandId::GoToFile => Text::CommandGoToFile,
         CommandId::OpenRecentFolder => Text::CommandOpenRecentFolder,

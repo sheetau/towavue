@@ -102,6 +102,7 @@ mod subtitles;
 mod tab_close_layout;
 mod tab_drag;
 mod tab_focus;
+mod tab_icons;
 mod tab_menu;
 mod tab_preview;
 mod tab_transfer;
@@ -1126,6 +1127,7 @@ struct Application<N> {
     volume_step_percent: u8,
     folder_navigation_loop: bool,
     reuse_folder_tab: bool,
+    tab_icons: bool,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
     restored_reading_pages: bool,
@@ -1438,6 +1440,7 @@ where
             volume_step_percent: 2,
             folder_navigation_loop: true,
             reuse_folder_tab: false,
+            tab_icons: true,
             graphics_epoch: 0,
             idle_graphics_frame: None,
             restored_reading_pages: false,
@@ -2513,13 +2516,16 @@ where
         let notify = Arc::clone(&self.notify);
         let media_generation = self.media_generation;
         self.playback_origin = self.window_key.map(|key| (key, media_generation));
+        // Navigation keeps Filmstrip visible; prime the new session paused so
+        // neither audio nor the playback clock advances behind the browser.
+        let paused = self.filmstrip_open;
         match PlaybackSession::open_input_with_audio(
             self.media_input(&path),
             graphics_device,
             self.edit_state().volume * self.playback_volume(),
             self.preview_rate(),
             self.edit_state().playback_range(),
-            false,
+            paused,
             self.audio_selection_for(self.displayed_tab, &path),
             move |event| notify(AppEvent::Playback(media_generation, event)),
         ) {
@@ -2532,11 +2538,15 @@ where
                 self.generation = session.generation();
                 self.audio_drained = !session.has_audio();
                 self.session = Some(session);
-                self.state = PlaybackState::Playing;
+                self.state = if paused {
+                    PlaybackState::Paused
+                } else {
+                    PlaybackState::Playing
+                };
             }
             Err(error) => self.fail_with_message(error.to_string(), error.message(self.language())),
         }
-        if self.state == PlaybackState::Playing
+        if matches!(self.state, PlaybackState::Playing | PlaybackState::Paused)
             && let Some(resume) = resume
         {
             self.install_resume(resume);
@@ -4254,6 +4264,7 @@ where
     }
 
     fn draw_ui(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        tab_icons::set(root.ctx(), self.shows_tab_icons());
         let language = self.language();
         self.filmstrip.menu_owner = self.tabs.active_id().map(|tab| thumbnail_menu::Owner {
             tab,
@@ -5580,6 +5591,7 @@ where
     }
 
     fn draw_top_bar(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        let show_tab_icons = self.shows_tab_icons();
         self.tab_volume_huds
             .retain(|id, _| self.tabs.tab_ids().any(|tab| tab == *id));
         let language = self.language();
@@ -5671,6 +5683,7 @@ where
                             audio_repeat: self.audio_mode().0,
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
                             reuse_folder_tab: self.reuses_folder_tabs(),
+                            tab_icons: show_tab_icons,
                             nearest_images: self.nearest_images,
                             high_quality_minification: self.high_quality_minification,
                         },
@@ -5937,6 +5950,8 @@ where
                                                 .map(|muted| (muted, opacity))
                                         },
                                     );
+                                    let decoration = show_tab_icons
+                                        .then(|| tab_icons::kind(tab.target.media_kind()));
                                     let audio_rect = audio.map(|_| {
                                         let mut bounds = label_rect;
                                         bounds.set_width(chrome::TAB_AUDIO_WIDTH);
@@ -5952,7 +5967,7 @@ where
                                     tab_ui.set_clip_rect(clip);
                                     // The audio slot already supplies the leading text gap.
                                     tab_ui.spacing_mut().button_padding = egui::vec2(
-                                        if audio.is_some() {
+                                        if audio.is_some() || decoration.is_some() {
                                             0.0
                                         } else {
                                             chrome::TAB_PADDING
@@ -5973,13 +5988,25 @@ where
                                             hud.title_opacity(tab_ui.ctx(), (tab.id, 0), now)
                                         })
                                         .map(|opacity| (self.playback_volume_for(tab.id), opacity));
-                                    let response = chrome::tab_title_with_volume(
+                                    let response = chrome::tab_title_with_icon(
                                         &mut tab_ui,
                                         label_rect,
                                         &label,
                                         active,
                                         notice,
+                                        decoration.filter(|_| audio.is_none()),
                                     );
+                                    if let Some((kind, rect)) = decoration.zip(audio_rect) {
+                                        tab_icons::paint(
+                                            &tab_ui,
+                                            rect,
+                                            kind,
+                                            tab_icons::title_color(&tab_ui, &response, active)
+                                                .gamma_multiply(
+                                                    1.0 - audio.map_or(0.0, |(_, opacity)| opacity),
+                                                ),
+                                        );
+                                    }
                                     if let Some(path) = tab.target.current_path()
                                         && self.tab_mute_state(tab.id).is_some()
                                         && !self.modal_input_blocked()
@@ -6366,10 +6393,9 @@ where
                             .into_iter()
                             .map(UiAction::NativeCaption),
                         );
-                        caption.set_drag_region(
-                            ui.is_enabled()
-                                .then_some(drag_rect * ui.ctx().pixels_per_point()),
-                        );
+                        // Custom dialogs disable product commands, but moving
+                        // the host window remains a native caption operation.
+                        caption.set_drag_region(Some(drag_rect * ui.ctx().pixels_per_point()));
                     }
                 });
             });
@@ -8179,6 +8205,10 @@ where
             CommandId::AudioRepeatOff => self.set_audio_repeat(towavue_core::RepeatMode::Off),
             CommandId::AudioRepeatAll => self.set_audio_repeat(towavue_core::RepeatMode::All),
             CommandId::AudioRepeatOne => self.set_audio_repeat(towavue_core::RepeatMode::One),
+            CommandId::ToggleTabIcons => {
+                self.tab_icons = !self.shows_tab_icons();
+                self.request_redraw();
+            }
             CommandId::ToggleReuseFolderTab => {
                 self.reuse_folder_tab = !self.reuses_folder_tabs();
             }
@@ -16335,7 +16365,8 @@ mod tests {
                         })
                         .expect("tab label paint");
                     assert!(
-                        (text.pos.x - label.left() - chrome::TAB_PADDING).abs() <= 1.0 / density,
+                        (text.pos.x - label.left() - chrome::TAB_AUDIO_WIDTH).abs()
+                            <= 1.0 / density,
                         "text {:?}, label {label:?}",
                         text.pos
                     );
@@ -16356,10 +16387,11 @@ mod tests {
                         })
                         .expect("close glyph");
                     let trailing = close.right() - close_glyph.visual_bounding_rect().right();
-                    let leading = text.pos.x - label.left();
+                    let expected =
+                        (close.width() - close_glyph.visual_bounding_rect().width()) * 0.5;
                     assert!(
-                        (leading - trailing).abs() <= 1.5 / density,
-                        "tab edge spacing: text={leading}, close={trailing}"
+                        (expected - trailing).abs() <= 1.5 / density,
+                        "centered close glyph: expected={expected}, actual={trailing}"
                     );
                     let borders: Vec<_> = output
                         .shapes

@@ -67,7 +67,9 @@ impl Dropdown {
                 graphics
                     .entry(ui.layer_id())
                     .mutate_shape(self.background, |shape| {
-                        shape.clip_rect = shape.clip_rect.intersect(response.interact_rect)
+                        shape.clip_rect = shape
+                            .clip_rect
+                            .intersect(super::menu_rows::background_clip(ui, response))
                     })
             });
         }

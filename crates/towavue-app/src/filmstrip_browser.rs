@@ -576,9 +576,13 @@ impl Browser {
                                     ),
                                 )
                             });
-                            chrome::submenu(ui, &arrow, Some(self.menu_floor), |ui| {
-                                self.directory_menu(ui, path, depth + 1, target)
-                            });
+                            chrome::submenu(
+                                ui,
+                                &arrow,
+                                Some(self.menu_floor),
+                                Some(arrow.rect.left()),
+                                |ui| self.directory_menu(ui, path, depth + 1, target),
+                            );
                             let open =
                                 egui::containers::menu::MenuState::from_ui(ui, |state, _| {
                                     state.open_item

@@ -1,5 +1,21 @@
 use egui::{Response, Ui};
 
+/// Clip at viewport edges, leaving the rounded row's antialiasing fringe intact.
+/// The interaction rectangle also ends at the row itself; those edges are not
+/// clipping boundaries and must not cut off the last physical pixel.
+pub(super) fn background_clip(ui: &Ui, row: &Response) -> egui::Rect {
+    let mut clip = ui.clip_rect();
+    for axis in 0..2 {
+        if row.interact_rect.min[axis] > row.rect.min[axis] {
+            clip.min[axis] = clip.min[axis].max(row.interact_rect.min[axis]);
+        }
+        if row.interact_rect.max[axis] < row.rect.max[axis] {
+            clip.max[axis] = clip.max[axis].min(row.interact_rect.max[axis]);
+        }
+    }
+    clip
+}
+
 pub(super) fn highlighted<'a>(
     ui: &Ui,
     rows: &'a [Response],
@@ -136,7 +152,7 @@ impl MenuRows {
                 .set(self.0, egui::Shape::rect_filled(row.rect, 3, super::HOVER));
             ui.ctx().graphics_mut(|graphics| {
                 graphics.entry(ui.layer_id()).mutate_shape(self.0, |shape| {
-                    shape.clip_rect = shape.clip_rect.intersect(row.interact_rect)
+                    shape.clip_rect = shape.clip_rect.intersect(background_clip(ui, row))
                 })
             });
         }

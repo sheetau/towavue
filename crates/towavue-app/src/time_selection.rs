@@ -121,10 +121,10 @@ pub(super) fn show(
         Default::default()
     };
     let mode_id = response.id.with("time-selection-mode");
-    let choose = |origin: egui::Pos2, modifiers: egui::Modifiers| {
+    let choose = |origin: egui::Pos2, modifiers: egui::Modifiers, secondary: bool| {
         let selected = selection
             .filter(|range| origin.x >= x_at(range.start()) && origin.x <= x_at(range.end()));
-        if drag.secondary {
+        if secondary {
             return selected.map_or(Gesture::Context, Gesture::Move);
         }
         if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
@@ -158,7 +158,7 @@ pub(super) fn show(
         }
         Gesture::Band(..) | Gesture::Gain(..) => egui::CursorIcon::ResizeRow,
         Gesture::Select => egui::CursorIcon::Text,
-        Gesture::Move(_) => egui::CursorIcon::Default,
+        Gesture::Move(_) => egui::CursorIcon::Grabbing,
         Gesture::Context => egui::CursorIcon::Default,
     };
     if enabled
@@ -169,7 +169,7 @@ pub(super) fn show(
             .filter(|point| rect.contains(*point))
     {
         use crate::hover_help::HoverHelp;
-        let help = match choose(pointer, egui::Modifiers::NONE) {
+        let help = match choose(pointer, egui::Modifiers::NONE, false) {
             Gesture::Seek => Some((
                 playhead_rect(rect, cti_x(rect, x_at(position), pixel)),
                 "head",
@@ -229,18 +229,25 @@ pub(super) fn show(
         && response.hovered()
         && let Some(pointer) = response.hover_pos()
     {
-        ui.ctx()
-            .set_cursor_icon(cursor(choose(pointer, ui.input(|input| input.modifiers))));
+        ui.ctx().set_cursor_icon(cursor(choose(
+            pointer,
+            ui.input(|input| input.modifiers),
+            false,
+        )));
     }
     if let (Some(origin), Some(pointer)) = (drag.origin, drag.position) {
         if drag.started {
             ui.ctx().data_mut(|data| {
-                data.insert_temp(mode_id, (choose(origin, drag.modifiers), position));
+                data.insert_temp(
+                    mode_id,
+                    (choose(origin, drag.modifiers, drag.secondary), position),
+                );
             });
         }
         let (mut mode, snap_head) = ui.ctx().data_mut(|data| {
-            *data
-                .get_temp_mut_or_insert_with(mode_id, || (choose(origin, drag.modifiers), position))
+            *data.get_temp_mut_or_insert_with(mode_id, || {
+                (choose(origin, drag.modifiers, drag.secondary), position)
+            })
         });
         // A selection press may seek immediately. Keep the original CTI as the
         // magnet for this gesture, with a small screen-space radius and no latch.
@@ -265,7 +272,12 @@ pub(super) fn show(
             ui.ctx()
                 .data_mut(|data| data.insert_temp(mode_id, (mode, snap_head)));
         }
-        ui.ctx().set_cursor_icon(cursor(mode));
+        let cursor_mode = if matches!(mode, Gesture::Move(_)) && !drag.dragging {
+            choose(origin, drag.modifiers, false)
+        } else {
+            mode
+        };
+        ui.ctx().set_cursor_icon(cursor(cursor_mode));
         if drag.dragging
             && let Gesture::Move(range) = mode
         {
@@ -581,6 +593,73 @@ fn playhead_contains(rect: Rect, x: f32, point: egui::Pos2) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn secondary_selection_cursor_changes_only_after_dragging_starts() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = egui::Context::default();
+            context.set_pixels_per_point(density);
+            let draw = |events| {
+                context
+                    .run_ui(
+                        egui::RawInput {
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            let response = ui.interact(
+                                Rect::from_min_size(
+                                    egui::pos2(20.0, 30.0),
+                                    egui::vec2(400.0, 100.0),
+                                ),
+                                "secondary-cursor".into(),
+                                egui::Sense::click_and_drag(),
+                            );
+                            show(
+                                ui,
+                                &response,
+                                time(10.0),
+                                time(0.0),
+                                TimeRange::new(time(2.0), time(6.0)),
+                                None,
+                                true,
+                            );
+                        },
+                    )
+                    .platform_output
+                    .cursor_icon
+            };
+            let point = egui::pos2(180.0, 70.0);
+            let button = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Secondary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            draw(vec![]);
+            let hover = draw(vec![egui::Event::PointerMoved(point)]);
+            assert_eq!(hover, egui::CursorIcon::Text);
+            assert_eq!(draw(vec![button(true)]), hover);
+            assert_eq!(
+                draw(vec![egui::Event::PointerMoved(
+                    point + egui::vec2(1.0, 0.0)
+                )]),
+                hover
+            );
+            assert_eq!(
+                draw(vec![egui::Event::PointerMoved(
+                    point + egui::vec2(30.0, 0.0)
+                )]),
+                egui::CursorIcon::Grabbing
+            );
+            assert_eq!(
+                draw(vec![egui::Event::PointerMoved(egui::pos2(620.0, 70.0))]),
+                egui::CursorIcon::Grabbing
+            );
+            draw(vec![button(false)]);
+            assert_eq!(draw(vec![egui::Event::PointerMoved(point)]), hover);
+        }
+    }
+
     #[test]
     fn secondary_drag_moves_only_the_range_preserving_length_and_clamping_at_edges() {
         for density in [1.0, 1.25, 2.0] {

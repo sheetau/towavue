@@ -7,7 +7,7 @@ fn cascade(ui: &mut Ui, level: usize, layers: &mut Vec<(egui::LayerId, Rect)>) {
         let id = egui::containers::menu::SubMenu::id_from_widget_id(button.id);
         egui::containers::menu::MenuState::mark_shown(ui.ctx(), id);
         egui::containers::menu::MenuState::from_ui(ui, |state, _| state.open_item = Some(id));
-        if let Some(popup) = submenu(ui, &button, None, |ui| cascade(ui, level + 1, layers)) {
+        if let Some(popup) = submenu(ui, &button, None, None, |ui| cascade(ui, level + 1, layers)) {
             layers.push((popup.response.layer_id, popup.response.rect));
         }
     }
@@ -153,6 +153,60 @@ fn menu_rows_have_symmetric_padding_unclipped_corners_and_square_check_slots() {
 }
 
 #[test]
+fn menu_backgrounds_preserve_antialiasing_and_clip_partial_rows_at_the_viewport() {
+    for density in [1.0, 1.25, 2.0] {
+        for dropdown in [false, true] {
+            for top in [30.0, 50.0, 90.0] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(style);
+                let viewport = Rect::from_min_max(egui::pos2(20.0, 40.0), egui::pos2(180.0, 100.0));
+                let row = Rect::from_min_size(egui::pos2(30.0, top), egui::vec2(140.0, 22.0));
+                let mut output = egui::FullOutput::default();
+                for _ in 0..3 {
+                    output = context.run_ui(Default::default(), |ui| {
+                        let mut child = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(row)
+                                .layout(egui::Layout::top_down_justified(egui::Align::Min)),
+                        );
+                        child.set_clip_rect(viewport);
+                        menu(&mut child);
+                        if dropdown {
+                            let mut rows = Dropdown::new(&child);
+                            rows.row(&mut child, true, true, "Choice");
+                            rows.finish(&child);
+                        } else {
+                            let rows = MenuRows::new(&child);
+                            let response = child.button("Choice");
+                            response.request_focus();
+                            rows.finish(&child, &[response.id]);
+                        }
+                    });
+                }
+                let shape = output
+                    .shapes
+                    .iter()
+                    .find(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == HOVER))
+                    .expect("background");
+                assert!(shape.clip_rect.left() <= row.left() - 0.5 / density);
+                assert!(shape.clip_rect.right() >= row.right() + 0.5 / density);
+                assert!(shape.clip_rect.top() >= viewport.top());
+                assert!(shape.clip_rect.bottom() <= viewport.bottom());
+                if top == 50.0 {
+                    let mesh = context.tessellate(vec![shape.clone()], density);
+                    for primitive in mesh {
+                        if let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive {
+                            assert!(primitive.clip_rect.contains_rect(mesh.calc_bounds()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires hidden hardware D3D11; optional menu readbacks"]
 fn menus_reach_gpu_at_supported_densities() {
     use winit::platform::windows::EventLoopBuilderExtWindows;
@@ -175,7 +229,7 @@ fn menus_reach_gpu_at_supported_densities() {
                 renderer
                     .resize_surface(width, height)
                     .expect("test fixture");
-                for mode in 0..4 {
+                for mode in 0..6 {
                     let context = crate::fonts::test_context();
                     context.set_pixels_per_point(density);
                     context.global_style_mut(style);
@@ -207,6 +261,19 @@ fn menus_reach_gpu_at_supported_densities() {
                                             let second = menu_checkbox(ui, &mut false, "Japanese");
                                             rows.finish(ui, &[first.id, second.id]);
                                         }
+                                        4 | 5 => {
+                                            ui.set_width(123.0);
+                                            if mode == 4 {
+                                                let rows = MenuRows::new(ui);
+                                                let response = ui.button("Choice");
+                                                response.request_focus();
+                                                rows.finish(ui, &[response.id]);
+                                            } else {
+                                                let mut rows = Dropdown::new(ui);
+                                                rows.row(ui, true, true, "Choice");
+                                                rows.finish(ui);
+                                            }
+                                        }
                                         _ => {
                                             let tabs = towavue_core::TabSet::default();
                                             crate::tab_menu::show(
@@ -221,6 +288,15 @@ fn menus_reach_gpu_at_supported_densities() {
                                     });
                             },
                         );
+                        let reference = (pass == 7 && mode >= 4).then(|| {
+                            let mut reference = output.clone();
+                            for shape in &mut reference.shapes {
+                                if matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == HOVER) {
+                                    shape.clip_rect = shape.clip_rect.expand(2.0);
+                                }
+                            }
+                            reference
+                        });
                         renderer
                             .clear([0.18, 0.25, 0.32, 1.0])
                             .expect("test fixture");
@@ -229,6 +305,21 @@ fn menus_reach_gpu_at_supported_densities() {
                             let pixels =
                                 renderer.verification_surface_rgba().expect("test fixture");
                             assert_eq!(pixels.len(), (width * height * 4) as usize);
+                            if let Some(reference) = reference {
+                                renderer
+                                    .clear([0.18, 0.25, 0.32, 1.0])
+                                    .expect("clear reference");
+                                renderer
+                                    .render_ui(&context, reference)
+                                    .expect("render reference");
+                                let expected = renderer
+                                    .verification_surface_rgba()
+                                    .expect("reference pixels");
+                                assert!(
+                                    pixels == expected,
+                                    "row fringe differs from unclipped GPU reference: mode={mode}, density={density}"
+                                );
+                            }
                             if let Some(directory) =
                                 std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
                             {

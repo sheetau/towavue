@@ -188,7 +188,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
     let mut browser = Browser::default();
     let folder = Path::new("C:/Parent/Current");
     browser.sync_folder(folder, &context);
-    let branch = folder.join("branch");
+    let branch = folder.join("branch with a long name");
     let long = branch.join("A very long child name ".repeat(50));
     cached_listing(
         &mut browser,
@@ -206,7 +206,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
             has_children: false,
         }],
     );
-    let size = egui::vec2(480.0, 220.0);
+    let size = egui::vec2(320.0, 220.0);
     let mut output = egui::FullOutput::default();
     for _ in 0..4 {
         output = frame(&context, &mut browser, size, vec![]).0;
@@ -216,7 +216,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
     for _ in 0..4 {
         output = frame(&context, &mut browser, size, vec![]).0;
     }
-    let arrow = node(&output, "Subfolders: branch");
+    let arrow = node(&output, "Subfolders: branch with a long name");
     click(&context, &mut browser, size, arrow.center());
     for _ in 0..4 {
         output = frame(&context, &mut browser, size, vec![]).0;
@@ -227,7 +227,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
         (child.top() - arrow.top()).abs() < 1.0,
         "one-row child stays row-aligned"
     );
-    assert!(child.width() < size.x * 0.75);
+    assert!(child.width() < size.x);
     let text = output
         .shapes
         .iter()
@@ -239,20 +239,38 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
         })
         .expect("long child text");
     assert!(text.galley.elided);
-    let parent = node(&output, "branch").union(arrow);
+    let parent = node(&output, "branch with a long name").union(arrow);
     let margin = egui::Frame::menu(&context.global_style())
         .total_margin()
         .sum()
         .x;
-    let separation = if child.left() >= parent.right() {
-        child.left() - parent.right()
-    } else {
-        parent.left() - child.right()
-    };
     assert!(
-        (separation - (margin - 1.0)).abs() < 1.0,
-        "menu borders overlap by one point: {parent:?} {child:?}"
+        child.right() < arrow.left(),
+        "fixture opens left: {child:?} {arrow:?}"
     );
+    if child.left() >= parent.right() {
+        assert!((child.left() - parent.right() - (margin - 1.0)).abs() < 1.0);
+    } else {
+        assert!(
+            (child.right() + margin * 0.5 - arrow.left() - 1.0).abs() < 1.0,
+            "left child meets the chevron: {arrow:?} {child:?}"
+        );
+        let point = egui::pos2(child.right() - 2.0, arrow.center().y);
+        for _ in 0..4 {
+            output = frame(
+                &context,
+                &mut browser,
+                size,
+                vec![egui::Event::PointerMoved(point)],
+            )
+            .0;
+            assert_eq!(
+                node(&output, &crate::folder_navigation::folder_name(&long)),
+                child
+            );
+        }
+        assert_eq!(click(&context, &mut browser, size, point).1, Some(long));
+    }
 }
 
 #[test]

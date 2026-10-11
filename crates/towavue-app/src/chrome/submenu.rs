@@ -42,7 +42,7 @@ pub fn submenu_button<R>(
             node.set_label(label);
         }
     });
-    let inner = submenu(ui, &response, None, content);
+    let inner = submenu(ui, &response, None, None, content);
     (response, inner)
 }
 
@@ -52,6 +52,7 @@ pub fn submenu<R>(
     ui: &Ui,
     button: &Response,
     floor: Option<f32>,
+    left_anchor: Option<f32>,
     content: impl FnOnce(&mut Ui) -> R,
 ) -> Option<InnerResponse<R>> {
     let frame = egui::Frame::menu(ui.style());
@@ -99,7 +100,8 @@ pub fn submenu<R>(
     let content_bounds = egui::Rect::from_min_size(ui.max_rect().min, content_bounds.size());
     let parent_frame = content_bounds.expand2(egui::vec2(frame.total_margin().sum().x * 0.5, 0.0));
     let right = (screen.right() - parent_frame.right() + 1.0).max(1.0);
-    let left = (parent_frame.left() - screen.left() + 1.0).max(1.0);
+    let left_edge = left_anchor.unwrap_or(parent_frame.left());
+    let left = (left_edge - screen.left() + 1.0).max(1.0);
     let expected = egui::AreaState::load(ui.ctx(), id)
         .and_then(|state| state.size)
         .unwrap_or_default();
@@ -113,7 +115,7 @@ pub fn submenu<R>(
     let x = if use_right {
         parent_frame.right() - 1.0
     } else {
-        parent_frame.left() + 1.0 - expected.x.min(room)
+        left_edge + 1.0 - expected.x.min(room)
     };
     let y = (button.rect.top() - frame.total_margin().top)
         .min(screen.bottom() - expected.y.min(screen.bottom() - floor))

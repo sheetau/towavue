@@ -16,6 +16,11 @@ pub(super) struct Indicator {
 }
 
 impl Indicator {
+    pub fn resume(&mut self) {
+        self.time = None;
+        self.snap_frame = None;
+    }
+
     pub fn paint(&mut self, ui: &egui::Ui, target: Rect, origin: egui::Pos2) -> Rect {
         let time = ui.input(|input| input.time);
         let elapsed = self
@@ -69,6 +74,44 @@ impl Indicator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tab_view_restores_its_indicator_without_interpolating_from_another_tab() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::indicator::tests::tab_view_restores_its_indicator_without_interpolating_from_another_tab",
+        ) else {
+            return;
+        };
+        let context = crate::fonts::test_context();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        let a = Rect::from_min_size(egui::pos2(50.0, 80.0), egui::vec2(120.0, 60.0));
+        let b = Rect::from_min_size(egui::pos2(380.0, 60.0), egui::vec2(60.0, 120.0));
+        let paint = |strip: &mut Filmstrip, target, time| {
+            let mut drawn = Rect::NOTHING;
+            let _ = context.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    drawn = strip.indicator.paint(ui, target, egui::Pos2::ZERO);
+                },
+            );
+            drawn
+        };
+        let before = paint(&mut strip, a, 1.0);
+        let view = strip.take_view();
+        paint(&mut strip, b, 2.0);
+        strip.restore_view(view);
+        assert_eq!(paint(&mut strip, a, 30.0), before);
+        assert_eq!(paint(&mut strip, a, 30.01), before);
+    }
 
     #[test]
     fn selection_brackets_interpolate_and_survive_blank_clicks_window_switches_and_pages() {

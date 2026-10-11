@@ -9,7 +9,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v13";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v14";
+const SEARCH_BINDING_HEADER: &str = "# towavue shortcuts v13";
 const NAVIGATION_BINDING_HEADER: &str = "# towavue shortcuts v12";
 const SELECTION_BINDING_HEADER: &str = "# towavue shortcuts v11";
 const VOLUME_BINDING_HEADER: &str = "# towavue shortcuts v10";
@@ -90,8 +91,10 @@ pub fn defaults() -> ShortcutBindings {
         (CommandId::NextFolder, "Ctrl+Alt+Right"),
         (CommandId::ParentFolder, "Ctrl+Alt+Up"),
         (CommandId::FirstChildFolder, "Ctrl+Alt+Down"),
-        (CommandId::PreviousMedia, "Alt+Left"),
-        (CommandId::NextMedia, "Alt+Right"),
+        (CommandId::HistoryBack, "Alt+Left"),
+        (CommandId::HistoryForward, "Alt+Right"),
+        (CommandId::PreviousMedia, "Shift+Tab"),
+        (CommandId::NextMedia, "Tab"),
         (CommandId::ToggleFilmstrip, "F"),
         (CommandId::ToggleCommandPalette, "Ctrl+Shift+P"),
         (CommandId::OpenKeyboardSettings, "Ctrl+K Ctrl+S"),
@@ -215,9 +218,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
-    let current_search_bindings = text
+    let history_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let current_search_bindings = history_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == SEARCH_BINDING_HEADER);
     let navigation_bindings = current_search_bindings
         || text
             .lines()
@@ -338,6 +345,18 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map(|part| part.trim().parse::<KeySequence>())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| Error::InvalidShortcut { line: index + 1 })?;
+        if !history_bindings
+            && sequences.len() == 1
+            && matches!(
+                (command, sequences[0].to_string().as_str()),
+                (CommandId::PreviousMedia, "Alt+Left") | (CommandId::NextMedia, "Alt+Right")
+            )
+        {
+            // Migrate only the former generated defaults. Custom alternatives,
+            // prefixes and explicit unassignment remain exact replacements.
+            sequences = standard.all(command).to_vec();
+            declared.remove(&command);
+        }
         // Old generated files listed every default. Preserve new alternatives
         // only for unchanged defaults; custom bindings remain exact replacements.
         if command == CommandId::ToggleFullscreen {
@@ -517,6 +536,10 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::NextFolder
                         | CommandId::ParentFolder
                         | CommandId::FirstChildFolder
+                        | CommandId::HistoryBack
+                        | CommandId::HistoryForward
+                        | CommandId::PreviousMedia
+                        | CommandId::NextMedia
                 ))
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
@@ -538,6 +561,8 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                     reading_mode,
                     timeline_open,
                     has_time_selection: true,
+                    can_history_back: true,
+                    can_history_forward: true,
                     ..Default::default()
                 })
             })
@@ -625,6 +650,64 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn history_keys_migrate_only_unchanged_media_defaults_and_yield_to_custom_bindings() {
+        use super::*;
+        use towavue_core::{CommandContext, MediaKind, ShortcutMatch};
+        let context = CommandContext {
+            media_kind: Some(MediaKind::Image),
+            can_history_back: true,
+            can_history_forward: true,
+            ..Default::default()
+        };
+        let old = "# towavue shortcuts v13\nprevious_media = Alt+Left\nnext_media = Alt+Right\n";
+        let bindings = parse(old, defaults()).expect("migration");
+        for (key, command) in [
+            ("Alt+Left", CommandId::HistoryBack),
+            ("Alt+Right", CommandId::HistoryForward),
+            ("Tab", CommandId::NextMedia),
+            ("Shift+Tab", CommandId::PreviousMedia),
+        ] {
+            assert_eq!(
+                bindings.resolve(&[key.parse().expect("key")], context),
+                ShortcutMatch::Command(command)
+            );
+        }
+        assert_eq!(
+            parse(&serialize(&bindings), defaults()).expect("round trip"),
+            bindings
+        );
+        for custom in ["Alt+Left", "Alt+Left Ctrl+K", "Tab", "Tab Ctrl+K"] {
+            let text = format!("{old}open_file = {custom}\n");
+            let bindings = parse(&text, defaults()).expect("custom");
+            let key = custom
+                .split_whitespace()
+                .next()
+                .expect("key")
+                .parse()
+                .expect("stroke");
+            assert_eq!(
+                bindings.resolve(&[key], context),
+                if custom.contains(' ') {
+                    ShortcutMatch::Prefix
+                } else {
+                    ShortcutMatch::Command(CommandId::OpenFile)
+                }
+            );
+        }
+        let bindings = parse(
+            "# towavue shortcuts v14\nprevious_media = Alt+Left\nhistory_forward =\n",
+            defaults(),
+        )
+        .expect("explicit");
+        assert_eq!(
+            bindings.all(CommandId::PreviousMedia)[0].to_string(),
+            "Alt+Left"
+        );
+        assert!(bindings.all(CommandId::HistoryBack).is_empty());
+        assert!(bindings.all(CommandId::HistoryForward).is_empty());
+    }
+
     #[test]
     fn current_folder_search_defaults_preserve_custom_keys_prefixes_and_unassignment() {
         use towavue_core::{CommandId, MediaKind, ShortcutMatch};

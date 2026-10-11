@@ -51,7 +51,8 @@ Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF, including suppor
 | Action                                                                 | Shortcut                                                                  |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | Toggle filmstrip / reading mode / timeline                             | F / B / T                                                                 |
-| Previous / next file in the folder, across media types                 | Alt+Left / Alt+Right                                                      |
+| Previous / next file in the folder, across media types                 | Shift+Tab / Tab                                                           |
+| Back / forward in this tab's path history                             | Alt+Left / Alt+Right                                                      |
 | Previous / next file of the same media type                            | Ctrl+Left / Ctrl+Right                                                    |
 | Crop the image selection / keep only the selected video or audio range | Ctrl+Y                                                                    |
 | Set the time selection's start / end at the playhead                   | I / O                                                                     |

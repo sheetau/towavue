@@ -13,7 +13,8 @@ Image Multiple serves Gallery tabs; Keyboard serves keyboard-shortcut settings t
 Link and Link Off, rotated 90 degrees at rasterization, serve the Resize
 aspect-ratio toggle. Link Off's smallest upstream artwork is 20 units; the
 generator normalizes its coordinates to the shared 16-unit drawing space.
-Arrow Right/Window New/Prohibited serve native drag badges. Compound filled outlines
+Arrow Left/Arrow Right serve path-history navigation; Arrow Right/Window New/Prohibited
+also serve native drag badges. Compound filled outlines
 are rasterized with their original winding and without adding a stroke.
 The UI uses a 16-point box, taskbar buttons 32 points and badge symbols 17 points.
 The existing color tints, taskbar contrast edge and badge decoration are retained.

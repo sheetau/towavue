@@ -125,6 +125,7 @@ pub struct View {
     focus: Option<PathBuf>,
     selection: Option<PathBuf>,
     offset: f32,
+    indicator: indicator::Indicator,
 }
 
 impl View {
@@ -473,6 +474,7 @@ impl Filmstrip {
             focus: self.focus.take(),
             selection: self.selection.take(),
             offset,
+            indicator: std::mem::take(&mut self.indicator),
         };
         self.suspend_view();
         view
@@ -482,7 +484,9 @@ impl Filmstrip {
         self.suspend_view();
         self.focus = view.focus;
         self.selection = view.selection;
-        self.indicator = Default::default();
+        self.indicator = view.indicator;
+        self.indicator.resume();
+        self.card_paths.clear();
         self.scroll_offset = view.offset;
         self.restore_scroll = true;
     }
@@ -1009,7 +1013,8 @@ impl Filmstrip {
         let was_scrolling = self.scroll_target.is_some() || self.page_target.is_some();
         // Keyboard navigation owns selection until it reaches its destination.
         // Fresh pointer movement can take over on a subsequent idle frame.
-        let pointer_selection = pointer_moved && !was_scrolling && tab_target.is_none() && !snap;
+        let pointer_selection =
+            pointer_moved && !was_scrolling && tab_target.is_none() && !snap && !restore;
         let pointer_target = pointer_selection
             .then(|| {
                 self.card_paths.iter().find_map(|(id, _, index)| {

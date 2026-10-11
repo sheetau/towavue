@@ -1,6 +1,154 @@
 use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
+#[test]
+fn browser_tab_return_keeps_query_filter_and_editor_focus_without_projection_reset() {
+    let context = context(1.0);
+    let folder = Path::new("C:/Pictures");
+    let source = snapshot(folder);
+    let mut tabs = towavue_core::TabSet::default();
+    let a = tabs.open_new(folder.join("a.jpg"), MediaKind::Image);
+    let b = tabs.open_new(folder.join("b.jpg"), MediaKind::Image);
+    let mut browser = Browser::default();
+    browser.switch_tab(Some(a), Some(&context));
+    browser.sync_folder(folder, &context);
+    browser.worker_failed = true;
+    let size = egui::vec2(960.0, 600.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..3 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    click(
+        &context,
+        &mut browser,
+        size,
+        node(&output, "Search").center(),
+    );
+    frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::Text("z".into())],
+    );
+    browser.filter = Some(MediaKind::Image);
+    browser.project(Some(&source));
+    assert!(browser.search_focused);
+    browser.switch_tab(Some(b), Some(&context));
+    browser.sync_folder(folder, &context);
+    frame(&context, &mut browser, size, vec![]);
+    assert!(browser.query.is_empty());
+    assert_eq!(browser.filter, None);
+    assert!(!browser.search_focused);
+    browser.query = "sound".into();
+    browser.filter = Some(MediaKind::Audio);
+    browser.project(Some(&source));
+    browser.switch_tab(Some(a), Some(&context));
+    browser.sync_folder(folder, &context);
+    assert_eq!(browser.query, "z");
+    assert_eq!(browser.filter, Some(MediaKind::Image));
+    let (projection, reset) = browser.project(Some(&source));
+    assert!(!reset, "returning to a tab is not a filter edit");
+    assert_eq!(projection.expect("projection").items.len(), 2);
+    for _ in 0..3 {
+        frame(&context, &mut browser, size, vec![]);
+    }
+    assert!(context.text_edit_focused());
+    assert!(browser.search_focused);
+    browser.switch_tab(Some(b), Some(&context));
+    assert_eq!(browser.query, "sound");
+    assert_eq!(browser.filter, Some(MediaKind::Audio));
+    assert!(!browser.search_focused);
+    browser.remove_tab(a, Some(&context));
+    assert!(!browser.views.contains_key(&a));
+}
+
+#[test]
+fn browser_middle_clicks_crumbs_and_cascade_rows_and_history_buttons_have_a_gap() {
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    let folder = Path::new("C:/Parent/Current");
+    browser.sync_folder(folder, &context);
+    browser.worker_failed = true;
+    let child = folder.parent().expect("parent").join("Child");
+    cached_listing(
+        &mut browser,
+        folder.parent().expect("parent"),
+        vec![towavue_runtime_windows::BrowserFolder {
+            path: child.clone(),
+            has_children: false,
+        }],
+    );
+    cached_listing(&mut browser, folder, vec![]);
+    browser.navigation = [true, false];
+    let size = egui::vec2(960.0, 600.0);
+    let mut output = egui::FullOutput::default();
+    for _ in 0..3 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let forward = node(&output, "Forward");
+    let first = node(&output, "C:");
+    assert!((first.left() - forward.right() - 18.0).abs() < 0.01);
+    let activate = |browser: &mut Browser, pos, button| {
+        let mut action = None;
+        for pressed in [true, false] {
+            action = action_frame(
+                &context,
+                browser,
+                size,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            )
+            .1
+            .or(action);
+        }
+        action
+    };
+    assert_eq!(
+        activate(
+            &mut browser,
+            node(&output, "Parent").center(),
+            egui::PointerButton::Middle
+        ),
+        Some(Action::Folder(
+            folder.parent().expect("parent").to_owned(),
+            true
+        ))
+    );
+    assert_eq!(
+        activate(
+            &mut browser,
+            node(&output, "Back").center(),
+            egui::PointerButton::Primary
+        ),
+        Some(Action::History(false))
+    );
+    assert_eq!(
+        activate(&mut browser, forward.center(), egui::PointerButton::Primary),
+        None
+    );
+    click(
+        &context,
+        &mut browser,
+        size,
+        node(&output, "Subfolders: Parent").center(),
+    );
+    for _ in 0..3 {
+        output = frame(&context, &mut browser, size, vec![]).0;
+    }
+    let row = node(&output, "Child");
+    assert_eq!(
+        activate(&mut browser, row.center(), egui::PointerButton::Middle),
+        Some(Action::Folder(child, true))
+    );
+}
+
 fn snapshot(folder: &Path) -> FolderSnapshot {
     FolderSnapshot {
         folder_identity: ShellIdentity::new(vec![42]),
@@ -114,6 +262,22 @@ fn frame(
     size: Vec2,
     events: Vec<egui::Event>,
 ) -> (egui::FullOutput, Option<PathBuf>) {
+    let (output, action) = action_frame(context, browser, size, events);
+    (
+        output,
+        action.and_then(|action| match action {
+            Action::Folder(path, _) => Some(path),
+            Action::History(_) => None,
+        }),
+    )
+}
+
+fn action_frame(
+    context: &Context,
+    browser: &mut Browser,
+    size: Vec2,
+    events: Vec<egui::Event>,
+) -> (egui::FullOutput, Option<Action>) {
     let mut target = None;
     let mut input = egui::RawInput {
         screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -839,6 +1003,7 @@ fn browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actio
         Some(tab),
         app.media_generation.wrapping_sub(1),
         root.join("b"),
+        false,
     ));
     assert_eq!(
         app.pending_folder
@@ -850,6 +1015,7 @@ fn browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actio
         Some(tab),
         app.media_generation,
         root.join("empty"),
+        false,
     ));
     settle(&mut app);
     assert_eq!(app.path.as_ref(), Some(&a));
@@ -859,6 +1025,7 @@ fn browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actio
         Some(tab),
         app.media_generation,
         root.join("b"),
+        false,
     ));
     settle(&mut app);
     assert!(matches!(
@@ -871,6 +1038,7 @@ fn browser_navigation_retains_tab_filmstrip_dirty_guards_and_rejects_stale_actio
         Some(tab),
         app.media_generation,
         root.join("b"),
+        false,
     ));
     settle(&mut app);
     app.resolve_guard(GuardDecision::Discard);
@@ -923,6 +1091,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                     }));
                     browser.counts.values = [120, 80, 30, 10];
                     for mode in 0..8 {
+                        browser.navigation = [true, mode > 0];
                         if mode == 5 {
                             browser.cache.clear();
                             let folder = browser.folder.clone();

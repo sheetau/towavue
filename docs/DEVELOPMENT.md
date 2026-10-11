@@ -74,6 +74,13 @@ Set `TOWAVUE_REFERENCE_RENDER_DIR` to an existing private directory to retain
 RGBA output. These checks cover generated frames and injected input, not
 physical desktop appearance approval.
 
+Per-tab Filmstrip state and path navigation also use app `path_history::`,
+`filmstrip::indicator::`, `recent_views::`, `shortcuts::` and `tab_transfer::`.
+Keep background folder opens free of activation/decoder creation, validate
+unsaved-change cancellation and history branching, and check old shortcut-file
+migration alongside explicit custom bindings. The browser GPU control covers
+the history buttons and breadcrumb/search layout at the supported densities.
+
 Startup appearance requires visible desktop evidence in addition to hidden native
 controls. Capture from before process/window creation through the first complete
 frame, including ordinary launch, restored maximization and Gallery Ctrl-click

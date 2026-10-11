@@ -20,7 +20,8 @@
     "ImageMultiple": "assets/Image Multiple/SVG/ic_fluent_image_multiple_16_regular.svg",
     "Link": "assets/Link/SVG/ic_fluent_link_16_regular.svg",
     "Keyboard": "assets/Keyboard/SVG/ic_fluent_keyboard_16_regular.svg",
-    "LinkOff": "assets/Link Off/SVG/ic_fluent_link_off_20_regular.svg"
+    "LinkOff": "assets/Link Off/SVG/ic_fluent_link_off_20_regular.svg",
+    "Back": "assets/Arrow Left/SVG/ic_fluent_arrow_left_16_regular.svg"
   },
   "sha256": {
     "ic_fluent_play_16_filled.svg": "8e605c988e57d87d25d95bcd4653fa992d157ea43516c3726510c33c8790dfc9",
@@ -43,6 +44,7 @@
     "ic_fluent_image_multiple_16_regular.svg": "67dc6aa2742794014ec72ba4117ff4daf181160eaa174c13dd93b24514158504",
     "ic_fluent_link_16_regular.svg": "1d65ba77871f8aa828e0c99d755088d7d652f22bbd084aac8fc52230fb4d565d",
     "ic_fluent_keyboard_16_regular.svg": "51af9f27011763e70246ef2277b73970e9a1df73147d19e45616fe99147fb795",
-    "ic_fluent_link_off_20_regular.svg": "658b59417a84657b37bae71c2ba22424ee76184217761a3e673eaa5c9ef92090"
+    "ic_fluent_link_off_20_regular.svg": "658b59417a84657b37bae71c2ba22424ee76184217761a3e673eaa5c9ef92090",
+    "ic_fluent_arrow_left_16_regular.svg": "60d62363274c047c96ce1f4ff9057f84ace2bbd2911686092d8ba4244d1b82bb"
   }
 }

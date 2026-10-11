@@ -15,7 +15,7 @@ struct Visit {
 #[derive(Default)]
 pub(super) struct Views {
     visits: HashMap<TabId, Visit>,
-    pending: Vec<PathBuf>,
+    pending: Vec<(TabId, PathBuf)>,
 }
 
 impl Views {
@@ -53,11 +53,14 @@ impl Views {
             visit.since = None;
         }
         self.pending
-            .retain(|pending| path.is_some_and(|path| pending != path));
+            .retain(|(_, pending)| path.is_some_and(|path| pending != path));
     }
 
     pub fn take_pending(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.pending)
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect()
     }
 
     pub fn begin(&mut self, id: TabId, path: &Path) {
@@ -70,7 +73,7 @@ impl Views {
             visit.recorded = true;
             visit.forgotten = false;
             visit.since = None;
-            self.pending.push(path.to_owned());
+            self.pending.push((id, path.to_owned()));
         }
     }
 
@@ -115,7 +118,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     fn flush_viewed_history(&mut self) {
-        for path in self.viewed_media.pending.drain(..) {
+        for (id, path) in self.viewed_media.pending.drain(..) {
+            self.path_history.entry(id).or_default().qualify(&path);
             if let Some(recent) = &self.recent_files {
                 recent.record(path);
             }
@@ -219,14 +223,17 @@ mod tests {
         views.observe(id, last, true, false, now + DWELL * 2);
         assert_eq!(views.deadline(), Some(now + DWELL * 3));
         views.observe(id, last, true, false, now + DWELL * 3);
-        assert_eq!(views.pending, [last.to_owned()]);
+        assert_eq!(views.pending, [(id, last.to_owned())]);
         views.observe(id, last, true, false, now + DWELL * 4);
         assert_eq!(views.pending.len(), 1, "one record per qualified visit");
         assert!(views.deadline().is_none());
         let background = Path::new("background.wav");
         views.observe(id, background, false, true, now);
         views.observe(id, background, false, true, now + DWELL);
-        assert_eq!(views.pending.last().map(PathBuf::as_path), Some(background));
+        assert_eq!(
+            views.pending.last().map(|(_, path)| path.as_path()),
+            Some(background)
+        );
     }
 
     fn ready(app: &mut Application<fn(AppEvent)>) {

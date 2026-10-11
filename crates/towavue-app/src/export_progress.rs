@@ -100,7 +100,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     .and_then(|(generation, intent)| match intent {
                         FolderIntent::Open
                         | FolderIntent::OpenReplacing(_, _, _)
-                        | FolderIntent::Related(_, _) => Some((
+                        | FolderIntent::Related(_, _)
+                        | FolderIntent::History(_)
+                        | FolderIntent::Background(_, _) => Some((
                             LoadingOwner::Folder(*generation),
                             Text::OpeningFolder.in_language(language),
                         )),

@@ -64,6 +64,7 @@ mod native_import_tests;
 mod native_input_tests;
 mod overlay_input;
 mod palette;
+mod path_history;
 mod playback_tab;
 mod playback_tab_preparation;
 #[cfg(test)]
@@ -361,7 +362,7 @@ enum UiAction {
     TimelineMenu(timeline_menu::Intent),
     Recent(menu::RecentAction),
     OpenFilmstripMedia(PathBuf, bool),
-    FilmstripFolder(Option<TabId>, u64, PathBuf),
+    FilmstripFolder(Option<TabId>, u64, PathBuf, bool),
     OpenFilmstripWindow(PathBuf),
     OpenWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     OpenGalleryWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
@@ -549,6 +550,8 @@ enum FolderIntent {
     OpenReplacing(Option<TabId>, u64, bool),
     Related(Option<TabId>, u64),
     Refresh(PathBuf),
+    History(path_history::Request),
+    Background(Option<TabId>, u64),
 }
 
 enum DialogIntent {
@@ -575,6 +578,7 @@ enum GuardedAction {
     Navigate(PathBuf),
     View(PathBuf),
     NavigateFromFolder(PathBuf, PathBuf, bool),
+    NavigateHistory(path_history::Request, PathBuf),
     NavigateAudioTab(TabId, PathBuf, PathBuf),
     NavigateImageTab(TabId, u64, PathBuf, PathBuf),
     Exit,
@@ -1135,6 +1139,7 @@ struct Application<N> {
     closed_tabs: VecDeque<closed_tabs::ClosedTab>,
     recent_files: Option<towavue_runtime_windows::RecentFiles>,
     viewed_media: recent_views::Views,
+    path_history: BTreeMap<TabId, path_history::History>,
     resume_history: Option<towavue_runtime_windows::VideoResumeHistory>,
     resume_owner: Option<resume::Owner>,
     resume_open: Option<towavue_runtime_windows::VideoResume>,
@@ -1448,6 +1453,7 @@ where
             closed_tabs: VecDeque::new(),
             recent_files: None,
             viewed_media: recent_views::Views::default(),
+            path_history: BTreeMap::new(),
             resume_history: None,
             resume_owner: None,
             resume_open: None,
@@ -2325,6 +2331,11 @@ where
         transferred: bool,
         handoff: Option<image_handoff::ImageHandoff>,
     ) {
+        self.filmstrip_browser
+            .switch_tab(self.tabs.active_id(), self.ui_context.as_ref());
+        if let Some(id) = self.tabs.active_id() {
+            self.path_history.entry(id).or_default().begin(&path);
+        }
         if let Some(id) = self.tabs.active().map(|tab| tab.id) {
             self.seed_playback_volume(id);
         }
@@ -2691,6 +2702,8 @@ where
                 FolderIntent::Open
                     | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
+                    | FolderIntent::History(_)
+                    | FolderIntent::Background(_, _)
             ))
         ) {
             return;
@@ -2769,6 +2782,9 @@ where
                         self.open_viewed(path.clone(), false);
                     }
                     if self.path.as_ref() == Some(&path) {
+                        if !replacing {
+                            self.record_folder_navigation(snapshot.folder_path.clone());
+                        }
                         if !replacing && let Some(recent) = &self.recent_files {
                             recent.record_folder(snapshot.folder_path.clone());
                         }
@@ -2786,6 +2802,29 @@ where
                 } else {
                     self.finish_empty_folder(&snapshot.folder_path);
                 }
+            }
+            FolderIntent::History(request) => {
+                if self.history_request_valid(&request) {
+                    if let Some(first) = snapshot.items.first() {
+                        let path = first.path.clone();
+                        self.request_guarded(GuardedAction::NavigateHistory(request, path.clone()));
+                        if self.path.as_ref() == Some(&path) {
+                            self.folder_order.request(None);
+                            self.pending_folder = None;
+                            self.apply_folder_snapshot(snapshot);
+                        }
+                    } else {
+                        self.finish_empty_folder(&snapshot.folder_path);
+                    }
+                } else {
+                    self.refresh_folder_snapshot();
+                }
+            }
+            FolderIntent::Background(tab, generation) => {
+                if tab == self.tabs.active_id() && generation == self.media_generation {
+                    self.open_background_folder_media(&snapshot);
+                }
+                self.refresh_folder_snapshot();
             }
             FolderIntent::Related(_, _) => unreachable!("navigation returns paths, not snapshots"),
             FolderIntent::Refresh(path) if self.path.as_ref() == Some(&path) => {
@@ -7892,17 +7931,22 @@ where
                     ));
                 }
             }
-            UiAction::FilmstripFolder(tab, generation, folder) => {
+            UiAction::FilmstripFolder(tab, generation, folder, background) => {
                 if self.filmstrip_open
                     && !self.modal_input_blocked()
                     && tab == self.tabs.active_id()
                     && generation == self.media_generation
                     && self.can_replace_active_tab()
-                    && self.path.as_deref().and_then(Path::parent) != Some(folder.as_path())
+                    && (background
+                        || self.path.as_deref().and_then(Path::parent) != Some(folder.as_path()))
                 {
                     self.open_folder_path(folder);
                     if let Some((_, intent)) = &mut self.pending_folder {
-                        *intent = FolderIntent::OpenReplacing(tab, generation, false);
+                        *intent = if background {
+                            FolderIntent::Background(tab, generation)
+                        } else {
+                            FolderIntent::OpenReplacing(tab, generation, false)
+                        };
                     }
                 }
             }
@@ -8181,6 +8225,8 @@ where
             CommandId::FirstChildFolder => {
                 self.navigate_folder(towavue_core::FolderNavigation::FirstChild)
             }
+            CommandId::HistoryBack => self.navigate_history(false),
+            CommandId::HistoryForward => self.navigate_history(true),
             CommandId::PreviousMedia => self.navigate(false, false),
             CommandId::NextMedia => self.navigate(true, false),
             CommandId::PreviousSameKind => self.navigate(false, true),
@@ -9293,6 +9339,8 @@ where
                 FolderIntent::Open
                     | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
+                    | FolderIntent::History(_)
+                    | FolderIntent::Background(_, _)
             ))
         ) {
             self.folder_order.request(None);
@@ -10030,6 +10078,8 @@ where
                     FolderIntent::Open
                         | FolderIntent::OpenReplacing(_, _, _)
                         | FolderIntent::Related(_, _)
+                        | FolderIntent::History(_)
+                        | FolderIntent::Background(_, _)
                 ))
             )
         {
@@ -10045,7 +10095,8 @@ where
                 GuardedAction::CloseTabs(ids) => ids.contains(&export.tab),
                 GuardedAction::Navigate(_)
                 | GuardedAction::View(_)
-                | GuardedAction::NavigateFromFolder(_, _, _) => {
+                | GuardedAction::NavigateFromFolder(_, _, _)
+                | GuardedAction::NavigateHistory(_, _) => {
                     self.tabs.active().is_some_and(|tab| tab.id == export.tab)
                 }
                 GuardedAction::Exit | GuardedAction::CoordinatedExit(_) => true,
@@ -10081,7 +10132,8 @@ where
                 .then_some(id),
             GuardedAction::Navigate(_)
             | GuardedAction::View(_)
-            | GuardedAction::NavigateFromFolder(_, _, _) => self.tabs.active().and_then(|tab| {
+            | GuardedAction::NavigateFromFolder(_, _, _)
+            | GuardedAction::NavigateHistory(_, _) => self.tabs.active().and_then(|tab| {
                 self.edits
                     .get(&tab.id)
                     .is_some_and(EditHistory::is_dirty)
@@ -10153,6 +10205,9 @@ where
             }
             GuardedAction::DetachTab(id) => self.detach_tab_unchecked(id),
             GuardedAction::Navigate(path) => self.navigate_to_unchecked(path),
+            GuardedAction::NavigateHistory(request, path) => {
+                self.finish_history_navigation(request, path)
+            }
             GuardedAction::View(path) => {
                 self.navigate_to_unchecked(path.clone());
                 if let Some(id) = self.displayed_tab {
@@ -10177,6 +10232,7 @@ where
             }
             GuardedAction::NavigateFromFolder(path, folder, used_name_fallback) => {
                 self.navigate_to_unchecked(path);
+                self.record_folder_navigation(folder.clone());
                 if used_name_fallback {
                     self.set_status(
                         localization::Text::FolderOrderFallback
@@ -10356,6 +10412,9 @@ where
         }
         self.tab_preview.clear();
         self.edits.remove(&id);
+        self.path_history.remove(&id);
+        self.filmstrip_browser
+            .remove_tab(id, self.ui_context.as_ref());
         self.source_versions.remove(&id);
         self.source_backings.remove(&id);
         self.deleted_sources.remove(&id);
@@ -10404,6 +10463,8 @@ where
     }
 
     fn clear_active_media(&mut self) {
+        self.filmstrip_browser
+            .switch_tab(None, self.ui_context.as_ref());
         self.keyboard_settings.cancel_capture();
         if let Some(recent) = &self.recent_files {
             recent.refresh_gallery();
@@ -11707,7 +11768,9 @@ where
             .and_then(|(_, intent)| match intent {
                 FolderIntent::Open
                 | FolderIntent::OpenReplacing(_, _, _)
-                | FolderIntent::Related(_, _) => Some(
+                | FolderIntent::Related(_, _)
+                | FolderIntent::History(_)
+                | FolderIntent::Background(_, _) => Some(
                     localization::Text::OpeningFolderNotice
                         .in_language(language)
                         .into(),
@@ -11830,6 +11893,8 @@ where
                 || self.playback_duration() == Some(Duration::ZERO),
             timeline_open: self.timeline_is_visible(),
             has_time_selection: self.time_selection.is_some(),
+            can_history_back: self.history_available(false),
+            can_history_forward: self.history_available(true),
             media_kind: self.media_kind,
             palette_open: self.palette_open,
             filmstrip_open: self.filmstrip_open,
@@ -11995,16 +12060,30 @@ where
             .or_else(|| source.map(|snapshot| snapshot.folder_path.as_path()));
         let mut body = rect;
         if let Some(folder) = folder {
+            self.filmstrip_browser.navigation =
+                [self.history_available(false), self.history_available(true)];
             self.filmstrip_browser.sync_folder(folder, context);
             if let Some(target) =
                 self.filmstrip_browser
                     .show(context, rect, source, !self.palette_open)
             {
-                actions.push(UiAction::FilmstripFolder(
-                    self.tabs.active_id(),
-                    self.media_generation,
-                    target,
-                ));
+                match target {
+                    filmstrip_browser::Action::Folder(folder, background) => {
+                        actions.push(UiAction::FilmstripFolder(
+                            self.tabs.active_id(),
+                            self.media_generation,
+                            folder,
+                            background,
+                        ))
+                    }
+                    filmstrip_browser::Action::History(forward) => {
+                        actions.push(UiAction::Command(if forward {
+                            CommandId::HistoryForward
+                        } else {
+                            CommandId::HistoryBack
+                        }))
+                    }
+                }
             }
             body.min.y = (body.top() + filmstrip_browser::HEADER_HEIGHT).min(body.bottom());
         }
@@ -12238,6 +12317,18 @@ where
         let Some(context) = &self.ui_context else {
             return false;
         };
+        if !self.modal_input_blocked()
+            && !self.palette_open
+            && !egui::Popup::is_any_open(context)
+            && (stroke.modifiers.alt || stroke.modifiers.control || stroke.modifiers.logo)
+            && matches!(
+                self.shortcuts
+                    .resolve(std::slice::from_ref(stroke), self.command_context()),
+                ShortcutMatch::Command(CommandId::HistoryBack | CommandId::HistoryForward)
+            )
+        {
+            return true;
+        }
         // A modified picker/settings chord can start from text focus. Once started, its
         // next stroke belongs to the chord (including cancellation/invalid keys),
         // not the text editor. IME and modal input still retain ownership.

@@ -77,6 +77,8 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::NextFolder => Text::CommandNextFolder,
         CommandId::ParentFolder => Text::CommandParentFolder,
         CommandId::FirstChildFolder => Text::CommandFirstChildFolder,
+        CommandId::HistoryBack => Text::CommandHistoryBack,
+        CommandId::HistoryForward => Text::CommandHistoryForward,
         CommandId::PreviousMedia => Text::CommandPreviousMedia,
         CommandId::NextMedia => Text::CommandNextMedia,
         CommandId::PreviousSameKind => Text::CommandPreviousSameKind,

@@ -10,6 +10,14 @@ use crate::chrome;
 use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
 
+#[derive(Default)]
+pub(super) struct View {
+    folder: PathBuf,
+    query: String,
+    filter: Option<MediaKind>,
+    search_focused: bool,
+}
+
 const HOVER: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
 pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 36.0;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
@@ -35,8 +43,19 @@ fn menu_message(ui: &mut Ui, label: &str) {
     chrome::remember_menu_bounds(ui);
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) enum Action {
+    Folder(PathBuf, bool),
+    History(bool),
+}
+
 #[derive(Default)]
 pub(super) struct Browser {
+    pub navigation: [bool; 2],
+    tab: Option<towavue_core::TabId>,
+    views: std::collections::BTreeMap<towavue_core::TabId, View>,
+    search_focused: bool,
+    restore_search_focus: bool,
     folder: PathBuf,
     pub query: String,
     pub filter: Option<MediaKind>,
@@ -53,6 +72,52 @@ pub(super) struct Browser {
 }
 
 impl Browser {
+    pub fn switch_tab(&mut self, tab: Option<towavue_core::TabId>, context: Option<&Context>) {
+        if self.tab == tab {
+            return;
+        }
+        self.hide(context);
+        if let Some(old) = self.tab {
+            self.views.insert(
+                old,
+                View {
+                    folder: std::mem::take(&mut self.folder),
+                    query: std::mem::take(&mut self.query),
+                    filter: self.filter.take(),
+                    search_focused: self.search_focused,
+                },
+            );
+        }
+        self.tab = tab;
+        let view = tab
+            .and_then(|id| self.views.remove(&id))
+            .unwrap_or_default();
+        self.folder = view.folder;
+        self.query = view.query;
+        self.filter = view.filter;
+        self.search_focused = view.search_focused;
+        self.restore_search_focus = view.search_focused;
+        self.source = None;
+        self.projected = None;
+        self.projected_query.clone_from(&self.query);
+        self.projected_filter = self.filter;
+    }
+
+    pub fn remove_tab(
+        &mut self,
+        tab: towavue_core::TabId,
+        context: Option<&Context>,
+    ) -> Option<View> {
+        if self.tab == Some(tab) {
+            self.switch_tab(None, context);
+        }
+        self.views.remove(&tab)
+    }
+
+    pub fn adopt_tab(&mut self, tab: towavue_core::TabId, view: View) {
+        self.views.insert(tab, view);
+    }
+
     pub fn hide(&mut self, context: Option<&Context>) {
         if let Some(id) = self.menu_open.take()
             && let Some(context) = context
@@ -145,7 +210,7 @@ impl Browser {
         screen: Rect,
         _source: Option<&FolderSnapshot>,
         enabled: bool,
-    ) -> Option<PathBuf> {
+    ) -> Option<Action> {
         let mut target = None;
         let header = Rect::from_min_size(
             screen.min,
@@ -168,7 +233,8 @@ impl Browser {
                     ui.set_opacity(opacity);
                 }
                 let content = screen.shrink2(egui::vec2(crate::browser_controls::INSET, 0.0));
-                let total = content.width().max(1.0);
+                let navigation_width = 2.0 * chrome::SEARCH_BUTTON_SIZE + 18.0;
+                let total = (content.width() - navigation_width).max(1.0);
                 let gap = 16.0_f32.min(total);
                 let desired_address: f32 = self
                     .folder
@@ -194,7 +260,7 @@ impl Browser {
                     crate::browser_controls::SEARCH_MAX,
                 );
                 let address = Rect::from_min_size(
-                    content.min + egui::vec2(0.0, crate::browser_controls::INSET),
+                    content.min + egui::vec2(navigation_width, crate::browser_controls::INSET),
                     egui::vec2(
                         (total - gap - search_width).max(0.0),
                         crate::browser_controls::text_height(ui),
@@ -204,11 +270,63 @@ impl Browser {
                     egui::pos2(address.right() + gap, address.top()),
                     egui::pos2(content.right(), address.bottom()),
                 );
+                for (index, forward) in [false, true].into_iter().enumerate() {
+                    let rect = Rect::from_min_size(
+                        egui::pos2(
+                            content.left() + index as f32 * chrome::SEARCH_BUTTON_SIZE,
+                            address.top(),
+                        ),
+                        egui::vec2(chrome::SEARCH_BUTTON_SIZE, address.height()),
+                    );
+                    let available = self.navigation[index] && ui.is_enabled();
+                    let response = ui
+                        .add_enabled_ui(available, |ui| {
+                            ui.interact(
+                                rect,
+                                ui.id().with(("history", forward)),
+                                egui::Sense::click(),
+                            )
+                        })
+                        .inner;
+                    let text = if forward {
+                        Text::CommandHistoryForward
+                    } else {
+                        Text::CommandHistoryBack
+                    };
+                    let label = localization::text(context, text);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, available, label)
+                    });
+                    crate::fluent::paint(
+                        ui,
+                        rect,
+                        if forward {
+                            crate::fluent::Kind::Move
+                        } else {
+                            crate::fluent::Kind::Back
+                        },
+                        if available {
+                            Color32::WHITE
+                        } else {
+                            chrome::MUTED
+                        },
+                    );
+                    if available && response.clicked() {
+                        target = Some(Action::History(forward));
+                    }
+                    response.help_text(label);
+                }
                 self.address_bar(ui, address, &mut target);
+                let search_id = ui.id().with(("filmstrip-search", self.tab));
+                if self.restore_search_focus && ui.is_enabled() {
+                    ui.data_mut(|data| data.insert_temp(search_id.with("editing"), true));
+                    ui.memory_mut(|memory| memory.request_focus(search_id));
+                    self.restore_search_focus = false;
+                }
                 crate::browser_controls::search(
                     ui,
                     search,
-                    ui.id().with("filmstrip-search"),
+                    search_id,
                     &format!(
                         "{} {}",
                         localization::text(context, Text::FilmstripSearch),
@@ -216,6 +334,18 @@ impl Browser {
                     ),
                     &mut self.query,
                 );
+                // Tab chrome releases text focus before dispatching the tab switch.
+                // Keep the departing editor's role through that pointer gesture.
+                let chrome_gesture = ui.input(|input| {
+                    (input.pointer.any_down() || input.pointer.any_released())
+                        && input
+                            .pointer
+                            .interact_pos()
+                            .is_some_and(|pos| pos.y < screen.top())
+                });
+                if ui.is_enabled() && !chrome_gesture {
+                    self.search_focused = ui.memory(|memory| memory.has_focus(search_id));
+                }
             });
         if self
             .menu_open
@@ -229,7 +359,7 @@ impl Browser {
         target
     }
 
-    fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<PathBuf>) {
+    fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<Action>) {
         let language = localization::language(ui.ctx());
         self.menu_floor = outer.bottom();
         // Ancestors necessarily contain the next path component. Only the
@@ -367,8 +497,8 @@ impl Browser {
                 let origin = arrow.center() - galley.mesh_bounds.center().to_vec2();
                 ui.painter().galley(origin, galley, Color32::WHITE);
             }
-            if name_response.clicked() {
-                *target = Some(path.clone());
+            if name_response.clicked() || name_response.middle_clicked() {
+                *target = Some(Action::Folder(path.clone(), name_response.middle_clicked()));
             }
             if let Some(arrow_response) = &arrow_response {
                 egui::Popup::menu(arrow_response)
@@ -421,7 +551,7 @@ impl Browser {
         ui: &mut Ui,
         path: &Path,
         depth: usize,
-        target: &mut Option<PathBuf>,
+        target: &mut Option<Action>,
     ) {
         let language = localization::language(ui.ctx());
         let Some(listing) = self.listing(ui, path) else {
@@ -460,7 +590,7 @@ impl Browser {
         ui: &mut Ui,
         entries: &[(&Path, bool)],
         depth: usize,
-        target: &mut Option<PathBuf>,
+        target: &mut Option<Action>,
     ) {
         let language = localization::language(ui.ctx());
         let margin = egui::Frame::popup(ui.style()).total_margin().sum();
@@ -588,8 +718,9 @@ impl Browser {
                         if !children || depth >= 63 {
                             ids.push(response.id);
                         }
-                        if response.clicked() {
-                            *target = Some(path.to_owned());
+                        if response.clicked() || response.middle_clicked() {
+                            *target =
+                                Some(Action::Folder(path.to_owned(), response.middle_clicked()));
                         }
                     }
                     rows.finish(ui, &ids);

@@ -34,6 +34,8 @@ pub(super) struct MediaTabTransfer {
     audio_preview: Option<audio_preview::Choice>,
     subtitles: Option<subtitles::Choice>,
     focus: Option<egui::Id>,
+    browser: Option<filmstrip_browser::View>,
+    history: Option<path_history::History>,
     timeline: Option<egui::containers::panel::PanelState>,
 }
 
@@ -314,6 +316,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             })
         });
         let transfer = MediaTabTransfer {
+            browser: self
+                .filmstrip_browser
+                .remove_tab(id, self.ui_context.as_ref()),
+            history: self.path_history.remove(&id),
             target,
             media,
             edits: self.edits.remove(&id),
@@ -394,6 +400,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(edits) = transfer.edits {
             self.edits.insert(id, edits);
+        }
+        if let Some(history) = transfer.history {
+            self.path_history.insert(id, history);
+        }
+        if let Some(browser) = transfer.browser {
+            self.filmstrip_browser.adopt_tab(id, browser);
         }
         if let Some(path) = transfer.export_path {
             self.export_paths.insert(id, path);

@@ -219,6 +219,8 @@ fn when_label_in(command: &CommandDefinition, language: Language) -> String {
                 timeline_open,
                 has_time_selection: true,
                 has_video_frame: true,
+                can_history_back: true,
+                can_history_forward: true,
                 ..Default::default()
             })
         };

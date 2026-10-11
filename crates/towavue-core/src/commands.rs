@@ -38,6 +38,8 @@ pub enum CommandId {
     NextFolder,
     ParentFolder,
     FirstChildFolder,
+    HistoryBack,
+    HistoryForward,
     PreviousMedia,
     NextMedia,
     PreviousSameKind,
@@ -228,6 +230,8 @@ impl CommandId {
             Self::NextFolder => "next_folder",
             Self::ParentFolder => "parent_folder",
             Self::FirstChildFolder => "first_child_folder",
+            Self::HistoryBack => "history_back",
+            Self::HistoryForward => "history_forward",
             Self::PreviousMedia => "previous_media",
             Self::NextMedia => "next_media",
             Self::PreviousSameKind => "previous_same_kind",
@@ -554,6 +558,8 @@ pub struct CommandContext {
     pub has_unsaved_edits: bool,
     pub source_deleted: bool,
     pub source_untitled: bool,
+    pub can_history_back: bool,
+    pub can_history_forward: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -570,6 +576,11 @@ impl CommandDefinition {
     }
 
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if (self.id == CommandId::HistoryBack && !context.can_history_back)
+            || (self.id == CommandId::HistoryForward && !context.can_history_forward)
+        {
+            return false;
+        }
         if context.source_untitled
             && matches!(
                 self.id,
@@ -820,6 +831,8 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::NextFolder, ANY_MEDIA),
     command(CommandId::ParentFolder, ANY_MEDIA),
     command(CommandId::FirstChildFolder, ANY_MEDIA),
+    command(CommandId::HistoryBack, ANY_MEDIA),
+    command(CommandId::HistoryForward, ANY_MEDIA),
     command(CommandId::PreviousMedia, ANY_MEDIA),
     command(CommandId::NextMedia, ANY_MEDIA),
     command(CommandId::PreviousSameKind, ANY_MEDIA),

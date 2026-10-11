@@ -1269,6 +1269,8 @@ messages! {
     CommandNextFolder => ("Next folder", "次のフォルダ"),
     CommandParentFolder => ("Parent folder", "親フォルダ"),
     CommandFirstChildFolder => ("First child folder", "最初の子フォルダ"),
+    CommandHistoryBack => ("Back", "戻る"),
+    CommandHistoryForward => ("Forward", "進む"),
     CommandPreviousMedia => ("Previous media", "前のメディア"),
     CommandNextMedia => ("Next media", "次のメディア"),
     CommandPreviousSameKind => ("Previous media of same kind", "同じ種類の前のメディア"),

@@ -862,5 +862,25 @@ pub(super) fn paths(kind: Kind) -> Vec<Path> {
             path.close();
             path.finish().expect("pinned Fluent path")
         }],
+        Kind::Back => vec![{
+            let mut path = PathBuilder::new();
+            path.move_to(13.5, 8.5);
+            path.cubic_to(13.7761, 8.5, 14.0, 8.27614, 14.0, 8.0);
+            path.cubic_to(14.0, 7.72386, 13.7761, 7.5, 13.5, 7.5);
+            path.line_to(3.80298, 7.5);
+            path.line_to(7.83448, 3.87165);
+            path.cubic_to(8.03974, 3.68692, 8.05638, 3.37078, 7.87165, 3.16552);
+            path.cubic_to(7.68692, 2.96027, 7.37077, 2.94363, 7.16552, 3.12836);
+            path.line_to(2.16552, 7.62835);
+            path.cubic_to(2.06016, 7.72317, 2.0, 7.85826, 2.0, 8.0);
+            path.cubic_to(2.0, 8.14174, 2.06016, 8.27683, 2.16552, 8.37165);
+            path.line_to(7.16552, 12.8716);
+            path.cubic_to(7.37077, 13.0564, 7.68692, 13.0397, 7.87165, 12.8345);
+            path.cubic_to(8.05638, 12.6292, 8.03974, 12.3131, 7.83448, 12.1283);
+            path.line_to(3.80298, 8.5);
+            path.line_to(13.5, 8.5);
+            path.close();
+            path.finish().expect("pinned Fluent path")
+        }],
     }
 }

@@ -171,6 +171,8 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 LoadSubtitles,
             ],
             &[
+                HistoryBack,
+                HistoryForward,
                 PreviousMedia,
                 NextMedia,
                 PreviousSameKind,

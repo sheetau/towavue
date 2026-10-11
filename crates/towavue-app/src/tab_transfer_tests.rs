@@ -185,6 +185,39 @@ use towavue_runtime_windows::DecodedImageFrame;
 type App = Application<Box<dyn Fn(AppEvent) + Send + Sync>>;
 
 #[test]
+fn media_transfer_keeps_browser_state_and_navigation_history_on_the_new_tab_id() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_transfer::tests::media_transfer_keeps_browser_state_and_navigation_history_on_the_new_tab_id",
+    ) else {
+        return;
+    };
+    let (mut source, _) = app();
+    let (mut destination, _) = app();
+    let first = root.join("first.bmp");
+    let second = root.join("second.bmp");
+    for path in [&first, &second] {
+        bitmap(path);
+    }
+    let id = install(&mut source, second.clone(), decoded(false));
+    let history = source.path_history.entry(id).or_default();
+    history.qualify(&first);
+    history.qualify(&second);
+    source.filmstrip_browser.query = "second".into();
+    source.filmstrip_browser.filter = Some(MediaKind::Image);
+    install(&mut destination, root.join("neighbor.bmp"), decoded(false));
+    assert!(source.history_available(false));
+    let target = transfer(&mut source, &mut destination, id);
+    assert_ne!(id, target);
+    assert!(!source.path_history.contains_key(&id));
+    assert_eq!(destination.filmstrip_browser.query, "second");
+    assert_eq!(destination.filmstrip_browser.filter, Some(MediaKind::Image));
+    assert!(destination.history_available(false));
+    destination.navigate_history(false);
+    assert_eq!(destination.path.as_ref(), Some(&first));
+    assert!(destination.history_available(true));
+}
+
+#[test]
 fn gallery_transfer_preserves_query_and_filter_when_reusing_the_destination() {
     let Some(_) = crate::tests::isolated_test_root(
         "tab_transfer::tests::gallery_transfer_preserves_query_and_filter_when_reusing_the_destination",

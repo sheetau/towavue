@@ -236,8 +236,9 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                         });
                         if *visible_dates != dates {
                             *visible_dates = dates;
-                            // Status is laid out before media input in this frame.
-                            ui.ctx().request_repaint();
+                            // Status precedes media input. Rebuild it before presenting
+                            // this scroll position, rather than displaying the old dates.
+                            ui.ctx().request_discard("Refresh Gallery visible dates");
                         }
                         if *hovered != grid.hovered {
                             *hovered = grid.hovered.clone();

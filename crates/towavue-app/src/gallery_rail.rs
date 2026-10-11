@@ -122,8 +122,8 @@ pub(super) fn month_name(month: u16, language: Language) -> &'static str {
     NAMES[usize::from(month) - 1].in_language(language)
 }
 
-// All pointer motion uses the same linear content scale as a native scrollbar.
-// Dates annotate that scale; they never change the amount scrolled per pixel.
+// Date markers span the full track; the thumb retains ordinary viewport sizing.
+// Both pointer paths stay linear, so month density never changes drag speed.
 pub(super) fn show(
     ui: &mut egui::Ui,
     output: &mut egui::scroll_area::ScrollAreaOutput<Vec<Month>>,
@@ -151,7 +151,7 @@ pub(super) fn show(
     let thumb_height = (rect.height() * output.inner_rect.height()
         / output.content_size.y.max(1.0))
     .clamp(pixel, rect.height());
-    let travel = rect.top() + thumb_height * 0.5..=rect.bottom() - thumb_height * 0.5;
+    let travel = rect.top()..=rect.bottom();
     let remembered = ui
         .data(|data| data.get_temp::<Position>(position_id))
         .filter(|position| {
@@ -177,7 +177,10 @@ pub(super) fn show(
         ..=((rect.right() - rect.width() * 0.075) / pixel).round() * pixel;
     let line = |left: f32, y: f32| {
         // A one-physical-pixel fill needs integer edges, not an integer center.
-        let top = ((y - pixel * 0.5) / pixel).round() * pixel;
+        let top = (((y - pixel * 0.5) / pixel).round() * pixel).clamp(
+            (rect.top() / pixel).ceil() * pixel,
+            (rect.bottom() / pixel).floor() * pixel - pixel,
+        );
         egui::Rect::from_min_max(
             egui::pos2(left, top),
             egui::pos2(*line_x.end(), top + pixel),
@@ -201,8 +204,7 @@ pub(super) fn show(
     let mut last_label_bottom = f32::NEG_INFINITY;
     for (index, month) in months.iter().enumerate() {
         let start = fraction_at(maximum, month.offset);
-        let date_y =
-            |offset| rect.top() + rect.height() * fraction_at(output.content_size.y, offset);
+        let date_y = |offset| rect.top() + rect.height() * fraction_at(maximum, offset);
         let bottom = months
             .get(index + 1)
             .map_or(rect.bottom(), |month| date_y(month.offset));
@@ -362,9 +364,7 @@ pub(super) fn show(
         && let Some(position) = if dragging { Some(fraction) } else { hint }
     {
         let index = months
-            .partition_point(|month| {
-                month.offset <= offset_at(maximum, position) + output.inner_rect.height() * 0.5
-            })
+            .partition_point(|month| month.offset <= offset_at(maximum, position))
             .saturating_sub(1);
         let anchor = egui::pos2(*line_x.start() - 4.0, egui::lerp(travel, position));
         show_label(ui, output.id, anchor, months[index].label(language));

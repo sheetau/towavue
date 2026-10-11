@@ -12012,7 +12012,6 @@ where
         if changed {
             self.filmstrip.filter_changed();
         }
-        context.data_mut(|data| data.remove::<egui::Rect>(egui::Id::new("filmstrip-caption")));
         self.filmstrip.show_with_header(
             context,
             body,

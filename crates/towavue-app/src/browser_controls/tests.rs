@@ -40,15 +40,32 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
                 },
             )
         };
+        let assert_border = |output: &egui::FullOutput| {
+            let border = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(border)
+                        if border.fill == Color32::WHITE && border.rect.width() > 200.0 =>
+                    {
+                        Some(border.rect)
+                    }
+                    _ => None,
+                })
+                .expect("white input bottom border, including after blur");
+            assert!((border.height() * density - 1.0).abs() < 0.001);
+            assert!((border.bottom() - 36.0).abs() <= 0.5 / density);
+        };
         frame(vec![]);
         context.memory_mut(|memory| memory.request_focus(id.with("button")));
         frame(vec![key(egui::Key::Enter)]);
-        frame(vec![]);
+        assert_border(&frame(vec![]));
         assert!(context.memory(|memory| memory.has_focus(id)));
         frame(vec![egui::Event::Text("日本語 photo".into())]);
         assert_eq!(&*query.borrow(), "日本語 photo");
         context.memory_mut(|memory| memory.surrender_focus(id));
         let output = frame(vec![]);
+        assert_border(&output);
         let entered = output
             .shapes
             .iter()
@@ -97,7 +114,7 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
 }
 
 #[test]
-fn filter_labels_align_before_superscripts_and_disabled_kinds_do_not_activate() {
+fn filter_labels_share_one_row_with_superscripts_and_omit_absent_kinds() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.global_style_mut(crate::chrome::style);
@@ -105,14 +122,13 @@ fn filter_labels_align_before_superscripts_and_disabled_kinds_do_not_activate() 
         let selected = std::cell::Cell::new(None);
         let output = context.run_ui(egui::RawInput::default(), |ui| {
             let values = [123, 100, 23, 0];
-            let size = filter_size(ui, &values, true);
+            let size = filter_size(ui, &values);
             let mut value = selected.get();
             filters(
                 ui,
                 Rect::from_min_size(egui::pos2(20.0, 20.0), size),
                 &values,
                 &mut value,
-                true,
             );
             selected.set(value);
         });
@@ -129,7 +145,8 @@ fn filter_labels_align_before_superscripts_and_disabled_kinds_do_not_activate() 
         let right = text("All").pos.x + text("All").galley.size().x;
         for label in ["Image", "Video"] {
             let label = text(label);
-            assert!((label.pos.x + label.galley.size().x - right).abs() <= 1.0 / density);
+            assert!((label.pos.y - text("All").pos.y).abs() <= 1.0 / density);
+            assert!(label.pos.x > right);
         }
         let count = text("123");
         assert!(count.pos.x > right && count.pos.y < text("All").pos.y);

@@ -1469,17 +1469,6 @@ impl Filmstrip {
                             } else {
                                 bounds.top() - indicator::TEXT_GAP - text.size().y
                             };
-                            if below {
-                                ui.ctx().data_mut(|data| {
-                                    data.insert_temp(
-                                        egui::Id::new("filmstrip-caption"),
-                                        egui::Rect::from_min_size(
-                                            egui::pos2(bounds.left(), y),
-                                            text.size(),
-                                        ),
-                                    )
-                                });
-                            }
                             ui.painter().galley(
                                 egui::pos2(bounds.left(), y),
                                 text,

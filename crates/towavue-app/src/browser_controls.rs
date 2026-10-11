@@ -167,6 +167,16 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
             ui.visuals_mut().override_text_color = Some(Color32::WHITE);
             crate::resize::unframed_text_input_with_id(ui, id, "", query)
         });
+        let pixel = 1.0 / ui.ctx().pixels_per_point();
+        let bottom = (rect.bottom() / pixel).round() * pixel;
+        ui.painter().rect_filled(
+            Rect::from_min_max(
+                egui::pos2((rect.left() / pixel).round() * pixel, bottom - pixel),
+                egui::pos2((rect.right() / pixel).round() * pixel, bottom),
+            ),
+            0.0,
+            Color32::WHITE,
+        );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, response.enabled(), label)
         });
@@ -251,38 +261,22 @@ impl FilterGeometry {
         }
     }
 
-    fn number_width(&self) -> f32 {
-        (0..4)
-            .filter(|&i| self.visible[i])
-            .map(|i| self.numbers[i].size().x)
-            .fold(0.0, f32::max)
-    }
-
-    fn size(&self, vertical: bool) -> egui::Vec2 {
+    fn size(&self) -> egui::Vec2 {
         let indices: Vec<_> = (0..4).filter(|&i| self.visible[i]).collect();
         let gaps = indices.len().saturating_sub(1) as f32;
-        if vertical {
-            egui::vec2(
-                indices.iter().map(|&i| self.widths[i]).fold(0.0, f32::max)
-                    + self.space
-                    + self.number_width(),
-                self.row * indices.len() as f32 + 4.0 * gaps,
-            )
-        } else {
-            egui::vec2(
-                indices
-                    .iter()
-                    .map(|&i| self.widths[i] + self.space + self.numbers[i].size().x)
-                    .sum::<f32>()
-                    + GAP * gaps,
-                self.row,
-            )
-        }
+        egui::vec2(
+            indices
+                .iter()
+                .map(|&i| self.widths[i] + self.space + self.numbers[i].size().x)
+                .sum::<f32>()
+                + GAP * gaps,
+            self.row,
+        )
     }
 }
 
-pub(super) fn filter_size(ui: &Ui, counts: &[usize; 4], vertical: bool) -> egui::Vec2 {
-    FilterGeometry::new(ui, counts).size(vertical)
+pub(super) fn filter_size(ui: &Ui, counts: &[usize; 4]) -> egui::Vec2 {
+    FilterGeometry::new(ui, counts).size()
 }
 
 pub(super) fn filters(
@@ -290,7 +284,6 @@ pub(super) fn filters(
     rect: Rect,
     counts: &[usize; 4],
     current: &mut Option<MediaKind>,
-    vertical: bool,
 ) {
     normalize_filter(counts, current);
     let geometry = FilterGeometry::new(ui, counts);
@@ -300,26 +293,21 @@ pub(super) fn filters(
         .filter(|&&visible| visible)
         .count()
         .saturating_sub(1) as f32;
-    let content_width = geometry.size(false).x - GAP * gaps;
+    let content_width = geometry.size().x - GAP * gaps;
     let gap = if gaps > 0.0 {
         ((rect.width() - content_width) / gaps).clamp(0.0, GAP)
     } else {
         0.0
     };
     let mut x = rect.right() - content_width - gap * gaps;
-    let mut y = rect.top();
     let single = counts[1..].iter().filter(|&&count| count > 0).count() == 1;
     for (index, (label, kind)) in labels(ui).into_iter().enumerate() {
         if !geometry.visible[index] {
             continue;
         }
-        let right = if vertical {
-            rect.right() - geometry.number_width() - geometry.space
-        } else {
-            x + geometry.widths[index]
-        };
+        let right = x + geometry.widths[index];
         let name = Rect::from_min_size(
-            egui::pos2(right - geometry.widths[index], y),
+            egui::pos2(x, rect.top()),
             egui::vec2(geometry.widths[index], geometry.row),
         );
         let response = text_button(
@@ -342,8 +330,5 @@ pub(super) fn filters(
             Color32::WHITE,
         );
         x = right + geometry.space + geometry.numbers[index].size().x + gap;
-        if vertical {
-            y += geometry.row + 4.0;
-        }
     }
 }

@@ -12,13 +12,7 @@ fn rail() -> egui::Rect {
 }
 
 fn point(fraction: f32) -> egui::Pos2 {
-    egui::pos2(
-        616.0,
-        egui::lerp(
-            (40.0 + 320.0 * 320.0 / 1200.0 * 0.5)..=(360.0 - 320.0 * 320.0 / 1200.0 * 0.5),
-            fraction,
-        ),
-    )
+    egui::pos2(616.0, egui::lerp(40.0..=360.0, fraction))
 }
 
 fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
@@ -187,7 +181,7 @@ fn month_labels_in_language(language: Language) {
                         + rail().height()
                             * months
                                 .get(index + 1)
-                                .map_or(1.0, |month| month.offset / 1200.0);
+                                .map_or(1.0, |month| fraction_at(output.maximum, month.offset));
                     let x = rail().right() - rail().width() * 0.075;
                     assert!(
                         output.output.shapes.iter().any(|shape| matches!(
@@ -208,7 +202,7 @@ fn month_labels_in_language(language: Language) {
                     + rail().height()
                         * months
                             .get(index + 1)
-                            .map_or(1.0, |month| month.offset / 1200.0);
+                            .map_or(1.0, |month| fraction_at(output.maximum, month.offset));
                 assert!(
                     (bounds.bottom() - boundary).abs() <= 1.0 / density,
                     "{text} bottom {} must mark chronological start {boundary}",
@@ -262,6 +256,44 @@ fn crowded_year_boundaries_do_not_overlap_or_escape_the_rail() {
             count > 0 && count < months.len(),
             "show only labels that fit"
         );
+    }
+}
+
+#[test]
+fn marker_uses_both_track_edges_and_month_hints_share_its_scroll_scale() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(chrome::style);
+        let offsets = [0.0, 200.0, 500.0, 1100.0];
+        let first = frame(&context, &offsets, true, vec![]);
+        for fraction in [0.0, 0.2, 0.3, 0.55, 0.75, 1.0] {
+            let mut state = egui::scroll_area::State::default();
+            state.offset.y = first.maximum * fraction;
+            state.store(&context, first.id);
+            let pos = point(fraction).clamp(
+                rail().min + egui::vec2(0.0, 0.1),
+                rail().max - egui::vec2(0.0, 0.1),
+            );
+            frame(
+                &context,
+                &offsets,
+                true,
+                vec![egui::Event::PointerMoved(pos)],
+            );
+            let result = frame(&context, &offsets, true, vec![]);
+            let line = marker(&result, chrome::FOREGROUND);
+            let pixel = 1.0 / density;
+            assert!((line[0].y - point(fraction).y).abs() <= pixel * 0.51);
+            assert!(line[0].y - pixel * 0.5 >= rail().top());
+            assert!(line[0].y + pixel * 0.5 <= rail().bottom());
+            let expected = match fraction {
+                x if x < 200.0 / 880.0 => "December 2026",
+                x if x < 500.0 / 880.0 => "November 2026",
+                _ => "October 2026",
+            };
+            label(&result, expected);
+        }
     }
 }
 

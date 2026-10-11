@@ -45,9 +45,6 @@ pub(super) struct Browser {
     worker_failed: bool,
     menu_open: Option<egui::Id>,
     menu_floor: f32,
-    blocked_frame: Option<u64>,
-    blocked_gesture: bool,
-    popup_was_open: bool,
     source: Option<SourceKey>,
     projected: Option<Arc<FolderSnapshot>>,
     projected_query: String,
@@ -150,13 +147,6 @@ impl Browser {
         enabled: bool,
     ) -> Option<PathBuf> {
         let mut target = None;
-        // A popup can close before these widgets run, or trigger a second pass.
-        // Keep the outside click owned through release, even if the popup has
-        // disappeared before the address widgets are evaluated again.
-        if egui::Popup::is_any_open(context) || self.popup_was_open || self.blocked_gesture {
-            self.blocked_frame = Some(context.cumulative_frame_nr());
-            self.blocked_gesture = context.input(|input| input.pointer.any_down());
-        }
         let header = Rect::from_min_size(
             screen.min,
             egui::vec2(screen.width(), HEADER_HEIGHT.min(screen.height())),
@@ -236,12 +226,6 @@ impl Browser {
                 worker.request(None);
             }
         }
-        self.popup_was_open = egui::Popup::is_any_open(context);
-        if !self.popup_was_open && self.blocked_frame == Some(context.cumulative_frame_nr()) {
-            // Rebuild enabled hit regions after the owned closing gesture,
-            // even if the pointer remains still until the next click.
-            context.request_repaint();
-        }
         target
     }
 
@@ -253,7 +237,6 @@ impl Browser {
         if ui.is_enabled() && self.menu_open.is_none() {
             self.listing(ui, &self.folder.clone());
         }
-        let blocked = self.blocked_frame == Some(ui.ctx().cumulative_frame_nr());
         let available = outer.width().max(0.0);
         let mut paths: Vec<_> = self.folder.ancestors().map(Path::to_owned).collect();
         paths.reverse();
@@ -294,23 +277,14 @@ impl Browser {
                 egui::pos2(x, outer.top()),
                 egui::vec2(chrome::SEARCH_BUTTON_SIZE, outer.height()),
             );
-            let response = ui
-                .scope(|ui| {
-                    if blocked {
-                        let opacity = ui.opacity();
-                        ui.disable();
-                        ui.set_opacity(opacity);
-                    }
-                    crate::browser_controls::text_button_color(
-                        ui,
-                        rect,
-                        ui.id().with("ancestors"),
-                        "…",
-                        false,
-                        Color32::WHITE,
-                    )
-                })
-                .inner;
+            let response = crate::browser_controls::text_button_color(
+                ui,
+                rect,
+                ui.id().with("ancestors"),
+                "…",
+                false,
+                Color32::WHITE,
+            );
             if response.clicked() {
                 self.menu_open = Some(egui::Popup::default_response_id(&response));
             }
@@ -350,37 +324,21 @@ impl Browser {
             let label = crate::folder_navigation::folder_name(path);
             let name_response = ui
                 .push_id(("crumb", path), |ui| {
-                    ui.scope(|ui| {
-                        if blocked {
-                            let opacity = ui.opacity();
-                            ui.disable();
-                            ui.set_opacity(opacity);
-                        }
-                        crate::browser_controls::text_button_color(
-                            ui,
-                            name,
-                            ui.id().with("name"),
-                            &label,
-                            false,
-                            Color32::WHITE,
-                        )
-                    })
-                    .inner
+                    crate::browser_controls::text_button_color(
+                        ui,
+                        name,
+                        ui.id().with("name"),
+                        &label,
+                        false,
+                        Color32::WHITE,
+                    )
                 })
                 .inner
                 .help_text(path.display().to_string());
             let arrow_response = has_children.then(|| {
                 ui.push_id(("children", path), |ui| {
-                    ui.scope(|ui| {
-                        if blocked {
-                            let opacity = ui.opacity();
-                            ui.disable();
-                            ui.set_opacity(opacity);
-                        }
-                        ui.interact(arrow, ui.id().with("arrow"), egui::Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                    })
-                    .inner
+                    ui.interact(arrow, ui.id().with("arrow"), egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                 })
                 .inner
             });
@@ -401,13 +359,13 @@ impl Browser {
                 }
                 let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
                 let glyph = if open { '\u{eab4}' } else { '\u{eab6}' };
-                ui.painter().text(
-                    arrow.center(),
-                    egui::Align2::CENTER_CENTER,
-                    glyph,
+                let galley = ui.painter().layout_no_wrap(
+                    glyph.to_string(),
                     crate::fonts::icon_font(),
                     Color32::WHITE,
                 );
+                let origin = arrow.center() - galley.mesh_bounds.center().to_vec2();
+                ui.painter().galley(origin, galley, Color32::WHITE);
             }
             if name_response.clicked() {
                 *target = Some(path.clone());
@@ -659,16 +617,10 @@ impl Browser {
                     ui.layer_id(),
                 );
                 ui.set_clip_rect(screen);
-                if !enabled || egui::Popup::is_any_open(context) {
+                if !enabled {
                     ui.disable();
                 }
-                let size = crate::browser_controls::filter_size(ui, &self.counts.values, true);
-                let caption =
-                    context.data(|data| data.get_temp::<Rect>(egui::Id::new("filmstrip-caption")));
-                let vertical =
-                    caption.is_none_or(|caption| inset.bottom() - size.y > caption.bottom());
-                let mut size =
-                    crate::browser_controls::filter_size(ui, &self.counts.values, vertical);
+                let mut size = crate::browser_controls::filter_size(ui, &self.counts.values);
                 size.x = size.x.min(inset.width());
                 let size_id = ui.id().with("content-size");
                 if ui.data(|data| data.get_temp::<Vec2>(size_id)) != Some(size) {
@@ -680,13 +632,7 @@ impl Browser {
                 ui.set_min_size(size);
                 ui.set_max_size(size);
                 let rect = Rect::from_min_size(ui.min_rect().min, size);
-                crate::browser_controls::filters(
-                    ui,
-                    rect,
-                    &self.counts.values,
-                    &mut self.filter,
-                    vertical,
-                );
+                crate::browser_controls::filters(ui, rect, &self.counts.values, &mut self.filter);
             });
     }
 }

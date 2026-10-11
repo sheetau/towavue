@@ -138,9 +138,10 @@ pub fn show(
     let width = (viewport.width() - 2.0 * side).max(0.0);
     counts.update(paths, query);
     crate::browser_controls::normalize_filter(&counts.values, filter);
-    let filters_size = crate::browser_controls::filter_size(ui, &counts.values, false);
+    let filters_size = crate::browser_controls::filter_size(ui, &counts.values);
     let header_width = width;
-    let compact = header_width <= filters_size.x + 16.0 + crate::browser_controls::SEARCH_MIN;
+    // Spend the search gutter before collapsing filters, retaining a 100-point editor.
+    let compact = header_width < filters_size.x + crate::browser_controls::SEARCH_MIN;
     let header_height = crate::browser_controls::text_height(ui);
     let header_rect = egui::Rect::from_min_size(
         egui::pos2(
@@ -349,7 +350,6 @@ pub fn show(
             egui::Rect::from_min_size(header_rect.min, filters_size),
             &counts.values,
             filter,
-            false,
         );
         filters_size.x
     };
@@ -496,6 +496,69 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn gallery_search_reaches_minimum_before_filters_collapse() {
+        let mut checked_gutter_threshold = false;
+        for density in [1.0, 1.25, 2.0] {
+            for font_size in [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0] {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(|style| {
+                    chrome::style(style);
+                    style
+                        .text_styles
+                        .insert(egui::TextStyle::Body, egui::FontId::proportional(font_size));
+                });
+                context.set_pixels_per_point(density);
+                context.enable_accesskit();
+                let mut counts = crate::browser_controls::Counts::default();
+                let mut query = String::from("file");
+                let mut filter = Some(MediaKind::Video);
+                let paths = ["file.png", "file.mp4", "file.wav"].map(std::path::PathBuf::from);
+                let mut full_width = 0.0;
+                let mut frame = || {
+                    context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(480.0, 300.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            full_width = crate::browser_controls::filter_size(ui, &[3, 1, 1, 1]).x;
+                            super::show(
+                                ui,
+                                &mut counts,
+                                &mut query,
+                                &mut filter,
+                                &paths,
+                                true,
+                                |_, _, _| vec![],
+                            );
+                        },
+                    )
+                };
+                frame();
+                let output = frame();
+                let width = 480.0 - 2.0 * crate::filmstrip::gallery_side_inset(480.0);
+                let compact = width - full_width < 100.0;
+                checked_gutter_threshold |= (100.0..116.0).contains(&(width - full_width));
+                assert_eq!(text_rect(&output, "All").is_none(), compact);
+                assert_eq!(filter, Some(MediaKind::Video));
+                let input = node_rect(&output, "Search Gallery");
+                assert!(input.width() >= 100.0 - 1.0 / density);
+                assert!(input.width() <= 250.0 + 1.0 / density);
+                if !compact && width - full_width < 116.0 {
+                    assert!((input.width() - 100.0).abs() <= 1.0 / density);
+                }
+            }
+        }
+        assert!(
+            checked_gutter_threshold,
+            "exercise the formerly premature collapse"
+        );
     }
 
     #[test]

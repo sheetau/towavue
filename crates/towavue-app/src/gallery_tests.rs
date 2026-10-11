@@ -114,7 +114,8 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
                 let mut indices: Vec<usize> = bounds
                     .iter()
                     .filter(|(_, rect)| {
-                        rect.y1 > top + 0.1 && rect.y0 < f64::from(size.y - chrome::STATUS_HEIGHT)
+                        rect.y1 > f64::from(chrome::TITLE_HEIGHT) + 0.1
+                            && rect.y0 < f64::from(size.y - chrome::STATUS_HEIGHT)
                     })
                     .map(|(name, _)| {
                         name.strip_prefix("tile-")
@@ -194,6 +195,9 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
                     .status_date(localization::Language::English),
                 Some(expected_dates(&cards(&output)))
             );
+            let expected = expected_dates(&cards(&output));
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text().starts_with(&expected))));
             app.gallery_search = "tile-119".into();
             app.recent_dates.remove(&app.recent_paths[119]);
             app.gallery_listing.invalidate();
@@ -757,6 +761,12 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
             (selected_top - media_top).abs() <= tolerance,
             "selected month aligns its first row at {density}x: {selected_top} vs {media_top}"
         );
+        assert!(
+            app.gallery_listing
+                .status_date(localization::Language::English)
+                .expect("visible date")
+                .starts_with("December 1, 2024")
+        );
         app.pending_guard = Some(GuardedAction::Exit);
         frame(&mut app, size, vec![activate(september)]);
         app.pending_guard = None;
@@ -794,6 +804,12 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         assert!(
             (card_top(&output, "july-10.png") - media_top).abs() <= tolerance,
             "keyboard activation uses the same month target"
+        );
+        assert!(
+            app.gallery_listing
+                .status_date(localization::Language::English)
+                .expect("visible date")
+                .starts_with("July 1, 2026")
         );
         frame(&mut app, size, vec![activate(search_button)]);
         let output = frame(&mut app, size, vec![]);

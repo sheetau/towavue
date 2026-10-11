@@ -33,7 +33,7 @@ fn context(density: f32) -> Context {
 }
 
 #[test]
-fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
+fn browser_filters_use_bottom_insets_and_one_row_at_every_height() {
     for density in [1.0, 1.25, 2.0] {
         for compact in [false, true] {
             let context = context(density);
@@ -41,12 +41,6 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
             browser.sync_folder(Path::new("C:/Pictures"), &context);
             browser.counts.values = [124, 100, 23, 1];
             let size = egui::vec2(480.0, if compact { 240.0 } else { 600.0 });
-            context.data_mut(|data| {
-                data.insert_temp(
-                    egui::Id::new("filmstrip-caption"),
-                    Rect::from_min_max(egui::pos2(150.0, 130.0), egui::pos2(330.0, 190.0)),
-                )
-            });
             let mut output = egui::FullOutput::default();
             for _ in 0..4 {
                 output = frame(&context, &mut browser, size, vec![]).0;
@@ -55,13 +49,8 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
             let image = node(&output, "Image");
             let audio = node(&output, "Audio");
             assert!((audio.bottom() - (size.y - 18.0)).abs() <= 1.0 / density);
-            if compact {
-                assert!((all.top() - audio.top()).abs() < 0.01);
-                assert!(all.right() < image.left() && all.top() > 190.0);
-            } else {
-                assert!((all.right() - audio.right()).abs() <= 1.0 / density);
-                assert!(all.bottom() <= image.top());
-            }
+            assert!((all.top() - audio.top()).abs() < 0.01);
+            assert!(all.right() < image.left() && all.top() > 190.0);
             let right = output
                 .shapes
                 .iter()
@@ -79,6 +68,46 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
     }
 }
 
+#[test]
+fn browser_chevrons_center_the_visible_glyph_inside_the_unchanged_hitbox() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = context(density);
+        let mut browser = Browser::default();
+        let folder = Path::new("C:/Parent/Current");
+        browser.sync_folder(folder, &context);
+        browser.worker_failed = true;
+        cached_listing(&mut browser, folder, vec![]);
+        let size = egui::vec2(960.0, 600.0);
+        for _ in 0..3 {
+            frame(&context, &mut browser, size, vec![]);
+        }
+        for open in [false, true] {
+            let mut output = frame(&context, &mut browser, size, vec![]).0;
+            let hitbox = node(&output, "Subfolders: Parent");
+            if open {
+                click(&context, &mut browser, size, hitbox.center());
+                output = frame(&context, &mut browser, size, vec![]).0;
+            }
+            let glyph = if open { "\u{eab4}" } else { "\u{eab6}" };
+            let bounds = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text() == glyph
+                            && hitbox.contains(text.visual_bounding_rect().center()) =>
+                    {
+                        Some(text.visual_bounding_rect())
+                    }
+                    _ => None,
+                })
+                .expect("breadcrumb glyph");
+            assert!(bounds.center().distance(hitbox.center()) <= 0.5 / density);
+            assert!((hitbox.height() - node(&output, "Parent").height()).abs() < 0.01);
+        }
+    }
+}
+
 fn frame(
     context: &Context,
     browser: &mut Browser,
@@ -86,19 +115,24 @@ fn frame(
     events: Vec<egui::Event>,
 ) -> (egui::FullOutput, Option<PathBuf>) {
     let mut target = None;
-    let output = context.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            target = browser
-                .show(ui.ctx(), ui.ctx().content_rect(), None, true)
-                .or(target.take());
-            browser.show_filters(ui.ctx(), ui.ctx().content_rect(), true);
-        },
-    );
+    let mut input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)),
+        events,
+        ..Default::default()
+    };
+    if let Some(density) = context.data(|data| data.get_temp::<f32>("browser-native-dpi".into())) {
+        input
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .native_pixels_per_point = Some(density);
+    }
+    let output = context.run_ui(input, |ui| {
+        target = browser
+            .show(ui.ctx(), ui.ctx().content_rect(), None, true)
+            .or(target.take());
+        browser.show_filters(ui.ctx(), ui.ctx().content_rect(), true);
+    });
     (output, target)
 }
 
@@ -432,12 +466,13 @@ fn browser_native_navigation_stays_paused_until_explicit_play() {
 }
 
 #[test]
-fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
+fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
     let context = context(1.0);
     let mut browser = Browser::default();
     let folder = Path::new("C:/Ancestor/Parent/Current");
     browser.sync_folder(folder, &context);
     browser.worker_failed = true;
+    browser.counts.values = [3, 1, 1, 1];
     cached_listing(&mut browser, folder, vec![]);
     let size = egui::vec2(960.0, 600.0);
     let mut output = egui::FullOutput::default();
@@ -519,20 +554,46 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
         .find(|(_, node)| node.label() == Some("Current"))
         .expect("current");
     assert!(
-        current_node.1.is_disabled(),
-        "open menu blocks breadcrumb hover and clicks"
+        !current_node.1.is_disabled(),
+        "open menu retains breadcrumb hover and clicks"
     );
-    assert!(
+    for label in ["All", "Image", "Video", "Audio"] {
+        let tree = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("tree");
+        let (_, control) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .expect("filter");
+        assert!(
+            !control.is_disabled(),
+            "open folder menu keeps {label} enabled"
+        );
+        let text = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label => Some(text),
+                _ => None,
+            })
+            .expect("filter text");
+        assert!(text.galley.job.sections.iter().all(|section| {
+            text.override_text_color.unwrap_or(section.format.color) == Color32::WHITE
+        }));
+    }
+    assert_eq!(
         click(&context, &mut browser, size, current.center())
             .1
-            .is_none()
+            .as_deref(),
+        Some(folder)
     );
     assert!(
         !egui::Popup::is_any_open(&context),
         "outside breadcrumb click dismisses the menu"
     );
-    // The dismissing release is still owned by the popup. Let egui rebuild
-    // enabled hit regions before starting the next independent gesture.
     for _ in 0..3 {
         frame(&context, &mut browser, size, vec![]);
     }
@@ -838,7 +899,10 @@ fn browser_header_reaches_gpu_at_supported_densities() {
             let mut renderer = towavue_runtime_windows::FrameRenderer::new(&window).expect("D3D11");
             for density in [1.0, 1.25, 2.0] {
                 for width in [480.0, 960.0] {
-                    let context = context(density);
+                    // Native DPI must not be modeled as UI zoom: raster rounding
+                    // happens before the renderer applies that separate zoom.
+                    let context = context(1.0);
+                    context.data_mut(|data| data.insert_temp("browser-native-dpi".into(), density));
                     let size = egui::vec2(width, 220.0);
                     let pixels_w = (size.x * density) as u32;
                     let pixels_h = (size.y * density) as u32;
@@ -859,20 +923,6 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                     }));
                     browser.counts.values = [120, 80, 30, 10];
                     for mode in 0..8 {
-                        context.data_mut(|data| {
-                            let id = egui::Id::new("filmstrip-caption");
-                            if mode == 7 {
-                                data.insert_temp(
-                                    id,
-                                    Rect::from_min_max(
-                                        egui::pos2(100.0, 100.0),
-                                        egui::pos2(280.0, 180.0),
-                                    ),
-                                );
-                            } else {
-                                data.remove::<Rect>(id);
-                            }
-                        });
                         if mode == 5 {
                             browser.cache.clear();
                             let folder = browser.folder.clone();
@@ -971,6 +1021,28 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                     .unwrap_or_default(),
                             )
                             .0;
+                            assert_eq!(output.pixels_per_point, density);
+                            assert_eq!(context.zoom_factor(), 1.0);
+                            let border = if mode == 1 || mode == 2 {
+                                Some(
+                                    output
+                                        .shapes
+                                        .iter()
+                                        .find_map(|shape| match &shape.shape {
+                                            egui::Shape::Rect(shape)
+                                                if shape.fill == Color32::WHITE
+                                                    && shape.rect.width() >= 90.0
+                                                    && shape.rect.height() <= 1.01 =>
+                                            {
+                                                Some(shape.rect)
+                                            }
+                                            _ => None,
+                                        })
+                                        .expect("input bottom border"),
+                                )
+                            } else {
+                                None
+                            };
                             renderer.clear([0.18, 0.25, 0.32, 1.0]).expect("background");
                             renderer.render_ui(&context, output).expect("UI");
                             if pass == 4 {
@@ -983,6 +1055,26 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                 let pixels =
                                     renderer.verification_surface_rgba().expect("readback");
                                 assert_eq!(pixels.len(), (pixels_w * pixels_h * 4) as usize);
+                                if let Some(border) = border {
+                                    let x = (border.center().x * density) as usize;
+                                    let y = (border.center().y * density) as usize;
+                                    let at = |y: usize| {
+                                        let offset = (y * pixels_w as usize + x) * 4;
+                                        &pixels[offset..offset + 4]
+                                    };
+                                    assert_eq!(
+                                        at(y),
+                                        &[255, 255, 255, 255],
+                                        "white input border at {density}x"
+                                    );
+                                    for adjacent in [y - 1, y + 1] {
+                                        assert_ne!(
+                                            at(adjacent),
+                                            &[255, 255, 255, 255],
+                                            "one physical row"
+                                        );
+                                    }
+                                }
                                 if let Some(directory) =
                                     std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
                                 {

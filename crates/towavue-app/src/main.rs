@@ -12012,7 +12012,6 @@ where
         if changed {
             self.filmstrip.filter_changed();
         }
-        body.max.y = (body.bottom() - 30.0).max(body.top());
         context.data_mut(|data| data.remove::<egui::Rect>(egui::Id::new("filmstrip-caption")));
         self.filmstrip.show_with_header(
             context,
@@ -12021,7 +12020,7 @@ where
             self.path.as_deref(),
             !self.palette_open,
             actions,
-            body.top() - rect.top() - 30.0,
+            body.top() - rect.top(),
             rect,
         );
         self.filmstrip_browser

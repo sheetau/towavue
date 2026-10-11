@@ -326,12 +326,54 @@ pub fn combo_box<R>(
     combo: egui::ComboBox,
     contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
+    combo_box_impl(ui, combo, None, contents)
+}
+
+pub fn labeled_combo_box<R>(
+    ui: &mut Ui,
+    label: &str,
+    label_width: f32,
+    combo: egui::ComboBox,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    combo_box_impl(ui, combo, Some((label, label_width)), contents)
+}
+
+fn combo_box_impl<R>(
+    ui: &mut Ui,
+    combo: egui::ComboBox,
+    label: Option<(&str, f32)>,
+    contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let label = label.map(|(text, width)| {
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, INPUT_HEIGHT), egui::Sense::hover());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, response.enabled(), text)
+        });
+        (
+            text.to_owned(),
+            rect,
+            ui.painter().clone(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().text_color(),
+        )
+    });
     let mut result = ui
         .scope(|ui| {
             flat_buttons(ui);
-            ui.spacing_mut().interact_size.y = INPUT_HEIGHT;
             combo
-                .icon(|ui, rect, visuals, _| {
+                .icon(move |ui, rect, visuals, _| {
+                    // ComboBox centers its label and icon in the same content rect.
+                    if let Some((text, bounds, painter, font, color)) = &label {
+                        painter.text(
+                            egui::pos2(bounds.right(), rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            text,
+                            font.clone(),
+                            *color,
+                        );
+                    }
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,

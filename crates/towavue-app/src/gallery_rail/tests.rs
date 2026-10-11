@@ -12,7 +12,13 @@ fn rail() -> egui::Rect {
 }
 
 fn point(fraction: f32) -> egui::Pos2 {
-    egui::pos2(616.0, egui::lerp(42.0..=358.0, fraction))
+    egui::pos2(
+        616.0,
+        egui::lerp(
+            (40.0 + 320.0 * 320.0 / 1200.0 * 0.5)..=(360.0 - 320.0 * 320.0 / 1200.0 * 0.5),
+            fraction,
+        ),
+    )
 }
 
 fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
@@ -177,13 +183,17 @@ fn month_labels_in_language(language: Language) {
                     .get(index + 1)
                     .is_some_and(|next| next.date.map(|date| date.0) == year)
                 {
-                    let boundary = point((index + 1) as f32 / months.len() as f32).y;
+                    let boundary = rail().top()
+                        + rail().height()
+                            * months
+                                .get(index + 1)
+                                .map_or(1.0, |month| month.offset / 1200.0);
                     let x = rail().right() - rail().width() * 0.075;
                     assert!(
                         output.output.shapes.iter().any(|shape| matches!(
                             &shape.shape,
                             egui::Shape::Rect(line)
-                                if (line.rect.width() - 5.0 / density).abs() < 0.01
+                                if (line.rect.width() - 10.0 / density).abs() < 0.01
                                     && (line.rect.height() - 1.0 / density).abs() < 0.01
                                     && (line.rect.right() - x).abs() <= 0.51 / density
                                     && (line.rect.center().y - boundary).abs() <= 0.51 / density
@@ -194,7 +204,11 @@ fn month_labels_in_language(language: Language) {
                 }
                 let text = year.map_or_else(|| "?".into(), |year| year.to_string());
                 let bounds = label(&output, &text);
-                let boundary = point((index + 1) as f32 / months.len() as f32).y;
+                let boundary = rail().top()
+                    + rail().height()
+                        * months
+                            .get(index + 1)
+                            .map_or(1.0, |month| month.offset / 1200.0);
                 assert!(
                     (bounds.bottom() - boundary).abs() <= 1.0 / density,
                     "{text} bottom {} must mark chronological start {boundary}",
@@ -277,12 +291,12 @@ fn clicks_interpolate_and_thumb_drag_preserves_grab_offset_with_retargeting() {
         assert_eq!(clicked.maximum, 880.0);
         assert_eq!(clicked.offset, 0.0, "no instantaneous jump");
         let first = frame(&context, &offsets, true, vec![]);
-        assert!(first.offset > 0.0 && first.offset < 690.0);
+        assert!(first.offset > 0.0 && first.offset < 550.0);
         for _ in 0..70 {
             frame(&context, &offsets, true, vec![]);
         }
         let settled = frame(&context, &offsets, true, vec![]);
-        assert!((settled.offset - 690.0).abs() < 0.01);
+        assert!((settled.offset - 550.0).abs() < 0.01);
         assert!((marker(&settled, chrome::FOREGROUND)[0].y - pos.y).abs() <= 0.51 / density);
         let thumb_height = rail().height() * 320.0 / 1200.0;
         let grab = egui::pos2(
@@ -334,17 +348,7 @@ fn clicks_interpolate_and_thumb_drag_preserves_grab_offset_with_retargeting() {
             frame(&context, &offsets, true, vec![]);
         }
         let result = frame(&context, &offsets, true, vec![]);
-        let expected = offset_at(
-            &offsets
-                .iter()
-                .map(|offset| Month {
-                    date: None,
-                    offset: *offset,
-                })
-                .collect::<Vec<_>>(),
-            880.0,
-            0.625 + 20.0 / (rail().height() - thumb_height),
-        );
+        let expected = offset_at(880.0, 0.625 + 20.0 / (rail().height() - thumb_height));
         assert!(
             (result.offset - expected).abs() < 0.01,
             "anchored target {expected}, actual {}",
@@ -429,16 +433,19 @@ fn paint_only_month_help_does_not_intercept_underlying_clicks() {
 }
 
 #[test]
-fn strict_month_spans_round_trip_and_single_month_reaches_both_edges() {
-    for offsets in [vec![0.0], vec![0.0, 150.0, 550.0, 650.0]] {
-        let months: Vec<_> = offsets
-            .into_iter()
-            .map(|offset| Month { date: None, offset })
-            .collect();
+fn linear_scroll_scale_round_trips_and_has_constant_drag_speed() {
+    for maximum in [1.0, 900.0, 50000.0] {
         for index in 0..=100 {
             let fraction = index as f32 / 100.0;
             assert!(
-                (fraction_at(&months, 900.0, offset_at(&months, 900.0, fraction)) - fraction).abs()
+                (fraction_at(maximum, offset_at(maximum, fraction)) - fraction).abs() < 0.00001
+            );
+        }
+        for fraction in [0.1, 0.4, 0.8] {
+            assert!(
+                ((offset_at(maximum, fraction + 0.05) - offset_at(maximum, fraction)) / maximum
+                    - 0.05)
+                    .abs()
                     < 0.00001
             );
         }

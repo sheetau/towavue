@@ -49,6 +49,22 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
         assert_eq!(&*query.borrow(), "日本語 photo");
         context.memory_mut(|memory| memory.surrender_focus(id));
         let output = frame(vec![]);
+        let entered = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "日本語 photo" => Some(text),
+                _ => None,
+            })
+            .expect("entered query");
+        assert!(
+            entered
+                .galley
+                .job
+                .sections
+                .iter()
+                .all(|section| section.format.color == Color32::WHITE)
+        );
         assert!(
             !output
                 .shapes
@@ -111,7 +127,7 @@ fn filter_labels_align_before_superscripts_and_disabled_kinds_do_not_activate() 
                 .expect("label")
         };
         let right = text("All").pos.x + text("All").galley.size().x;
-        for label in ["Image", "Video", "Audio"] {
+        for label in ["Image", "Video"] {
             let label = text(label);
             assert!((label.pos.x + label.galley.size().x - right).abs() <= 1.0 / density);
         }
@@ -125,9 +141,11 @@ fn filter_labels_align_before_superscripts_and_disabled_kinds_do_not_activate() 
                 .iter()
                 .all(|s| s.format.underline.is_empty())
         );
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Audio")));
         assert_eq!(
-            text("Audio").galley.job.sections[0].format.color,
-            crate::chrome::MUTED
+            visible_filters(&[12, 12, 0, 0]),
+            [false, true, false, false]
         );
     }
 }

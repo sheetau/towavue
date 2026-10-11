@@ -163,7 +163,6 @@ impl AudioExportDialog {
                             .num_columns(2)
                             .spacing(egui::vec2(8.0, 4.0))
                             .show(ui, |ui| {
-                                resize::aligned_label(ui, labels[0], label_width);
                                 let normalization = [
                                     (AudioNormalization::Off, Text::RepeatOff),
                                     (AudioNormalization::Peak, Text::NormalizationPeak),
@@ -182,8 +181,10 @@ impl AudioExportDialog {
                                     .find(|(value, _)| *value == self.options.normalization)
                                     .expect("normalization")
                                     .1;
-                                let response = chrome::combo_box(
+                                let response = chrome::labeled_combo_box(
                                     ui,
+                                    labels[0],
+                                    label_width,
                                     egui::ComboBox::from_id_salt("normalization")
                                         .truncate()
                                         .width(field_width)
@@ -238,7 +239,6 @@ impl AudioExportDialog {
                                         ui.end_row();
                                     }
                                 }
-                                resize::aligned_label(ui, labels[1], label_width);
                                 let channels = [
                                     (AudioChannels::Keep, Text::KeepSourceChannels),
                                     (AudioChannels::Mono, Text::Mono),
@@ -249,8 +249,10 @@ impl AudioExportDialog {
                                     .find(|(value, _)| *value == self.options.channels)
                                     .expect("channels")
                                     .1;
-                                let response = chrome::combo_box(
+                                let response = chrome::labeled_combo_box(
                                     ui,
+                                    labels[1],
+                                    label_width,
                                     egui::ComboBox::from_id_salt("output-channels")
                                         .truncate()
                                         .width(field_width)

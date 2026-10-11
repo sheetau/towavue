@@ -16,7 +16,6 @@ struct Motion {
     target: f32,
     offset: f32,
     maximum: f32,
-    months: std::sync::Arc<[Month]>,
     time: f64,
     pass: u64,
 }
@@ -51,7 +50,7 @@ pub(super) fn advance(context: &egui::Context, scroll_id: egui::Id) {
     if (motion.target - motion.fraction).abs() < 0.0001 {
         motion.fraction = motion.target;
     }
-    motion.offset = offset_at(&motion.months, motion.maximum, motion.fraction);
+    motion.offset = offset_at(motion.maximum, motion.fraction);
     let moving = motion.fraction != motion.target;
     state = egui::scroll_area::State::default();
     state.offset.y = motion.offset;
@@ -123,8 +122,8 @@ pub(super) fn month_name(month: u16, language: Language) -> &'static str {
     NAMES[usize::from(month) - 1].in_language(language)
 }
 
-// Equal slots expose only populated months, including months sharing a card row.
-// Actual row offsets determine navigation; missing calendar intervals take no space.
+// All pointer motion uses the same linear content scale as a native scrollbar.
+// Dates annotate that scale; they never change the amount scrolled per pixel.
 pub(super) fn show(
     ui: &mut egui::Ui,
     output: &mut egui::scroll_area::ScrollAreaOutput<Vec<Month>>,
@@ -152,14 +151,14 @@ pub(super) fn show(
     let thumb_height = (rect.height() * output.inner_rect.height()
         / output.content_size.y.max(1.0))
     .clamp(pixel, rect.height());
-    let travel = rect.top() + 2.0..=rect.bottom() - 2.0;
+    let travel = rect.top() + thumb_height * 0.5..=rect.bottom() - thumb_height * 0.5;
     let remembered = ui
         .data(|data| data.get_temp::<Position>(position_id))
         .filter(|position| {
             position.layout == layout && (position.offset - output.state.offset.y).abs() < 0.01
         });
     let fraction = remembered.map_or_else(
-        || fraction_at(months, maximum, output.state.offset.y),
+        || fraction_at(maximum, output.state.offset.y),
         |position| position.fraction,
     );
     let motion_id = output.id.with("rail-motion");
@@ -186,7 +185,6 @@ pub(super) fn show(
     };
     // Keep the axis ID used by the native wheel adapter, including page-sized input.
     ui.interact(rect, output.id.with(1_usize), egui::Sense::hover());
-    let slot = rect.height() / months.len() as f32;
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let thumb = egui::Rect::from_center_size(
         egui::pos2(
@@ -202,9 +200,15 @@ pub(super) fn show(
     let mut dragging = false;
     let mut last_label_bottom = f32::NEG_INFINITY;
     for (index, month) in months.iter().enumerate() {
-        let band = egui::Rect::from_min_size(
-            rect.min + egui::vec2(0.0, slot * index as f32),
-            egui::vec2(rect.width(), slot),
+        let start = fraction_at(maximum, month.offset);
+        let date_y =
+            |offset| rect.top() + rect.height() * fraction_at(output.content_size.y, offset);
+        let bottom = months
+            .get(index + 1)
+            .map_or(rect.bottom(), |month| date_y(month.offset));
+        let band = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), date_y(month.offset)),
+            egui::pos2(rect.right(), bottom),
         );
         let response = ui.interact(
             band,
@@ -220,7 +224,7 @@ pub(super) fn show(
             egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), &label)
         });
         if response.clicked() {
-            let mut fraction = index as f32 / months.len() as f32;
+            let mut fraction = start;
             if ui.input(|input| input.pointer.primary_clicked())
                 && let Some(pointer) = response.interact_pointer_pos()
             {
@@ -243,7 +247,6 @@ pub(super) fn show(
         let year_start = months
             .get(index + 1)
             .is_none_or(|next| next.date.map(|date| date.0) != year);
-        let bottom = egui::lerp(travel.clone(), (index + 1) as f32 / months.len() as f32);
         let label = year_start.then(|| {
             painter.layout_no_wrap(
                 year.map_or_else(|| "?".into(), |year| year.to_string()),
@@ -259,7 +262,7 @@ pub(super) fn show(
             last_label_bottom = bottom + 2.0;
         } else {
             painter.rect_filled(
-                line(*line_x.end() - 5.0 * pixel, bottom),
+                line(*line_x.end() - 10.0 * pixel, bottom),
                 0.0,
                 chrome::MUTED,
             );
@@ -311,10 +314,19 @@ pub(super) fn show(
     } else {
         ui.data_mut(|data| data.remove::<DragAnchor>(anchor_id));
     }
-    if ui.is_enabled() && (thumb_response.hovered() || dragging || ui.rect_contains_pointer(rect)) {
+    let opacity = ui.ctx().animate_bool_with_time(
+        output.id.with("thumb-hover"),
+        ui.is_enabled() && (thumb_response.hovered() || dragging || ui.rect_contains_pointer(rect)),
+        0.12,
+    );
+    if opacity > 0.0 {
         painter.set(
             thumb_background,
-            egui::Shape::rect_filled(thumb, 0.0, egui::Color32::from_rgb(24, 24, 24)),
+            egui::Shape::rect_filled(
+                thumb,
+                0.0,
+                egui::Color32::from_rgb(24, 24, 24).gamma_multiply(opacity),
+            ),
         );
     }
     if let Some(target) = target.filter(|_| ui.is_enabled()) {
@@ -327,7 +339,6 @@ pub(super) fn show(
                 target,
                 offset: output.state.offset.y,
                 maximum,
-                months: months.clone().into(),
                 time: now,
                 pass: ui.ctx().cumulative_pass_nr(),
             });
@@ -350,7 +361,11 @@ pub(super) fn show(
         && ui.input(|input| input.raw.hovered_files.is_empty())
         && let Some(position) = if dragging { Some(fraction) } else { hint }
     {
-        let index = ((position * months.len() as f32) as usize).min(months.len() - 1);
+        let index = months
+            .partition_point(|month| {
+                month.offset <= offset_at(maximum, position) + output.inner_rect.height() * 0.5
+            })
+            .saturating_sub(1);
         let anchor = egui::pos2(*line_x.start() - 4.0, egui::lerp(travel, position));
         show_label(ui, output.id, anchor, months[index].label(language));
     }
@@ -360,39 +375,15 @@ pub(super) fn show(
 #[cfg(test)]
 mod tests;
 
-fn offset_at(months: &[Month], maximum: f32, fraction: f32) -> f32 {
-    let position = fraction * months.len() as f32;
-    let left = (position as usize).min(months.len() - 1);
-    let end = months
-        .get(left + 1)
-        .map_or(maximum, |month| month.offset.min(maximum));
-    egui::lerp(
-        months[left].offset.min(maximum)..=end,
-        position - left as f32,
-    )
+fn offset_at(maximum: f32, fraction: f32) -> f32 {
+    maximum * fraction.clamp(0.0, 1.0)
 }
 
-fn fraction_at(months: &[Month], maximum: f32, offset: f32) -> f32 {
-    if maximum <= 0.0 || offset <= 0.0 {
+fn fraction_at(maximum: f32, offset: f32) -> f32 {
+    if maximum <= 0.0 {
         0.0
-    } else if offset >= maximum {
-        1.0
-    } else if months.len() == 1 {
-        offset / maximum
     } else {
-        let left = months
-            .partition_point(|month| month.offset <= offset)
-            .saturating_sub(1);
-        let start = months[left].offset.min(maximum);
-        let end = months
-            .get(left + 1)
-            .map_or(maximum, |month| month.offset.min(maximum));
-        let within = if end > start {
-            (offset - start) / (end - start)
-        } else {
-            0.0
-        };
-        (left as f32 + within) / months.len() as f32
+        (offset / maximum).clamp(0.0, 1.0)
     }
 }
 

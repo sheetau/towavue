@@ -11,7 +11,7 @@ use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
 
 const HOVER: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
-pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 16.0;
+pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 36.0;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
 
 fn menu_message(ui: &mut Ui, label: &str) {
@@ -100,18 +100,18 @@ impl Browser {
             source.captured_at,
             source.items.len(),
         );
-        let changed = self.projected_query != self.query || self.projected_filter != self.filter;
+        let mut changed =
+            self.projected_query != self.query || self.projected_filter != self.filter;
         if self.source.as_ref() != Some(&key) || changed {
             self.source = Some(key);
             self.projected_query.clone_from(&self.query);
-            self.projected_filter = self.filter;
             let words: Vec<_> = self
                 .query
                 .split_whitespace()
                 .map(str::to_lowercase)
                 .collect();
             self.counts.values = [0; 4];
-            let items = source
+            let mut items: Vec<_> = source
                 .items
                 .iter()
                 .filter(|item| {
@@ -120,10 +120,14 @@ impl Browser {
                         return false;
                     }
                     self.counts.add(item.kind);
-                    self.filter.is_none_or(|kind| item.kind == kind)
+                    true
                 })
                 .cloned()
                 .collect();
+            crate::browser_controls::normalize_filter(&self.counts.values, &mut self.filter);
+            changed |= self.projected_filter != self.filter;
+            self.projected_filter = self.filter;
+            items.retain(|item| self.filter.is_none_or(|kind| item.kind == kind));
             let snapshot = FolderSnapshot {
                 folder_identity: source.folder_identity.clone(),
                 folder_path: source.folder_path.clone(),
@@ -158,9 +162,7 @@ impl Browser {
             egui::vec2(screen.width(), HEADER_HEIGHT.min(screen.height())),
         );
         egui::Area::new("filmstrip-browser".into())
-            // Menus use Foreground. Keep the header and its dimming below them,
-            // including the popup shadow overlapping the bottom of this band.
-            .order(egui::Order::Middle)
+            .order(egui::Order::Foreground)
             .fade_in(false)
             .movable(false)
             .fixed_pos(header.min)
@@ -175,13 +177,38 @@ impl Browser {
                     ui.disable();
                     ui.set_opacity(opacity);
                 }
-                let content = screen.shrink2(egui::vec2(8.0, 0.0));
+                let content = screen.shrink2(egui::vec2(crate::browser_controls::INSET, 0.0));
                 let total = content.width().max(1.0);
-                let gap = 4.0_f32.min(total);
-                let search_width = ((total - gap) * 0.5).min(250.0);
+                let gap = 16.0_f32.min(total);
+                let desired_address: f32 = self
+                    .folder
+                    .ancestors()
+                    .map(|path| {
+                        ui.painter()
+                            .layout_no_wrap(
+                                crate::folder_navigation::folder_name(path),
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                Color32::WHITE,
+                            )
+                            .size()
+                            .x
+                            + if self.has_children(path) {
+                                chrome::SEARCH_BUTTON_SIZE
+                            } else {
+                                0.0
+                            }
+                    })
+                    .sum();
+                let search_width = (total - gap - desired_address).clamp(
+                    crate::browser_controls::SEARCH_MIN,
+                    crate::browser_controls::SEARCH_MAX,
+                );
                 let address = Rect::from_min_size(
-                    content.min + egui::vec2(0.0, 8.0),
-                    egui::vec2((total - gap - search_width).max(0.0), chrome::INPUT_HEIGHT),
+                    content.min + egui::vec2(0.0, crate::browser_controls::INSET),
+                    egui::vec2(
+                        (total - gap - search_width).max(0.0),
+                        crate::browser_controls::text_height(ui),
+                    ),
                 );
                 let search = Rect::from_min_max(
                     egui::pos2(address.right() + gap, address.top()),
@@ -220,7 +247,7 @@ impl Browser {
 
     fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<PathBuf>) {
         let language = localization::language(ui.ctx());
-        self.menu_floor = outer.top() + 2.0 + chrome::SEARCH_BUTTON_SIZE;
+        self.menu_floor = outer.bottom();
         // Ancestors necessarily contain the next path component. Only the
         // current folder needs an asynchronous listing to determine its arrow.
         if ui.is_enabled() && self.menu_open.is_none() {
@@ -264,8 +291,8 @@ impl Browser {
         let mut x = outer.left();
         if first > 0 && available > 60.0 {
             let rect = Rect::from_min_size(
-                egui::pos2(x, outer.top() + 2.0),
-                Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
+                egui::pos2(x, outer.top()),
+                egui::vec2(chrome::SEARCH_BUTTON_SIZE, outer.height()),
             );
             let response = ui
                 .scope(|ui| {
@@ -303,8 +330,8 @@ impl Browser {
         for index in first..paths.len() {
             widths[index] = widths[index].min((outer.left() + available - x).max(0.0));
             let rect = Rect::from_min_size(
-                egui::pos2(x, outer.top() + 2.0),
-                egui::vec2(widths[index], chrome::SEARCH_BUTTON_SIZE),
+                egui::pos2(x, outer.top()),
+                egui::vec2(widths[index], outer.height()),
             );
             if rect.width() < 2.0 {
                 break;
@@ -351,6 +378,7 @@ impl Browser {
                             ui.set_opacity(opacity);
                         }
                         ui.interact(arrow, ui.id().with("arrow"), egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
                     })
                     .inner
                 })
@@ -616,7 +644,7 @@ impl Browser {
     }
 
     pub fn show_filters(&mut self, context: &Context, screen: Rect, enabled: bool) {
-        let inset = screen.shrink(8.0);
+        let inset = screen.shrink(crate::browser_controls::INSET);
         egui::Area::new("filmstrip-filters".into())
             .order(egui::Order::Foreground)
             .fade_in(false)
@@ -626,6 +654,10 @@ impl Browser {
             .sense(egui::Sense::hover())
             .constrain(false)
             .show(context, |ui| {
+                context.set_sublayer(
+                    egui::LayerId::new(egui::Order::Foreground, "filmstrip".into()),
+                    ui.layer_id(),
+                );
                 ui.set_clip_rect(screen);
                 if !enabled || egui::Popup::is_any_open(context) {
                     ui.disable();
@@ -638,6 +670,13 @@ impl Browser {
                 let mut size =
                     crate::browser_controls::filter_size(ui, &self.counts.values, vertical);
                 size.x = size.x.min(inset.width());
+                let size_id = ui.id().with("content-size");
+                if ui.data(|data| data.get_temp::<Vec2>(size_id)) != Some(size) {
+                    ui.data_mut(|data| data.insert_temp(size_id, size));
+                    // Resolve the bottom-right pivot against this content width before
+                    // presenting a resize or a changed set of superscript counts.
+                    context.request_discard("Resolve Filmstrip filter bounds");
+                }
                 ui.set_min_size(size);
                 ui.set_max_size(size);
                 let rect = Rect::from_min_size(ui.min_rect().min, size);

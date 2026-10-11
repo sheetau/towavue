@@ -39,7 +39,7 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
             let context = context(density);
             let mut browser = Browser::default();
             browser.sync_folder(Path::new("C:/Pictures"), &context);
-            browser.counts.values = [123, 100, 23, 0];
+            browser.counts.values = [124, 100, 23, 1];
             let size = egui::vec2(480.0, if compact { 240.0 } else { 600.0 });
             context.data_mut(|data| {
                 data.insert_temp(
@@ -54,7 +54,7 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
             let all = node(&output, "All");
             let image = node(&output, "Image");
             let audio = node(&output, "Audio");
-            assert!((audio.bottom() - (size.y - 8.0)).abs() <= 1.0 / density);
+            assert!((audio.bottom() - (size.y - 18.0)).abs() <= 1.0 / density);
             if compact {
                 assert!((all.top() - audio.top()).abs() < 0.01);
                 assert!(all.right() < image.left() && all.top() > 190.0);
@@ -67,14 +67,14 @@ fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
                 .iter()
                 .filter_map(|shape| match &shape.shape {
                     egui::Shape::Text(text)
-                        if ["123", "100", "23", "0"].contains(&text.galley.text()) =>
+                        if ["124", "100", "23", "1"].contains(&text.galley.text()) =>
                     {
                         Some(text.pos.x + text.galley.size().x)
                     }
                     _ => None,
                 })
                 .fold(0.0, f32::max);
-            assert!((right - (size.x - 8.0)).abs() <= 1.0 / density);
+            assert!((right - (size.x - 18.0)).abs() <= 1.0 / density);
         }
     }
 }
@@ -199,18 +199,21 @@ fn browser_projection_preserves_shell_identity_order_and_caches_between_paints()
         &browser.project(Some(&source)).0.expect("cached")
     ));
     browser.query = "alpha".into();
-    assert!(
+    assert_eq!(
         browser
             .project(Some(&source))
             .0
             .expect("filename-only search")
-            .items
-            .is_empty()
+            .items,
+        [source.items[1].clone()]
     );
     assert_eq!(source.items.len(), 4);
     browser.sync_folder(Path::new("C:/other"), &context(1.0));
     assert!(browser.query.is_empty());
-    assert_eq!(browser.filter, Some(MediaKind::Image));
+    assert_eq!(
+        browser.filter, None,
+        "an unavailable hidden filter is retired"
+    );
     assert!(
         browser.worker.is_none(),
         "projection never creates a directory worker"
@@ -565,7 +568,7 @@ fn browser_elided_ancestors_are_ordered_menu_targets_and_gutters_change_continuo
     let root = node(&output, "C:");
     let ancestor = node(&output, "very-long-ancestor");
     assert!(
-        ancestor.top() >= HEADER_HEIGHT - 8.0 && root.top() >= ancestor.bottom(),
+        ancestor.top() >= 18.0 && root.top() >= ancestor.bottom(),
         "each parent appears below its child, with the root last"
     );
     assert_eq!(
@@ -884,7 +887,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                     .collect(),
                             );
                         } else if mode == 6 {
-                            browser.sync_folder(Path::new("C:/very-long-ancestor-with-an-extra-long-name/another-long-parent-with-an-extra-long-name/near-parent/Current"), &context);
+                            browser.sync_folder(Path::new("C:/very-long-ancestor-with-an-extra-long-name/another-long-parent-with-an-extra-long-name/third-long-ancestor-for-overflow-at-wide-window/near-parent/Current"), &context);
                             let folder = browser.folder.clone();
                             cached_listing(&mut browser, &folder, vec![]);
                         } else if mode == 7 {
@@ -1063,6 +1066,51 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
         (node(&output, "z10.bmp").center().y - size.y * 0.5).abs() < 1.0,
         "header must not move the strip below the media center"
     );
+    let dim = output
+        .shapes
+        .iter()
+        .position(|shape| {
+            matches!(&shape.shape,
+        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))
+        })
+        .expect("backdrop");
+    let search_paint = output
+        .shapes
+        .iter()
+        .position(|shape| {
+            matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == "Search")
+        })
+        .expect("header text");
+    assert!(
+        search_paint > dim,
+        "the full media backdrop must stay behind the header"
+    );
+    for (label, expected) in [("Video", Some(MediaKind::Video)), ("All", None)] {
+        let position = node(&output, label).center();
+        draw(&mut app, vec![egui::Event::PointerMoved(position)]);
+        let hovered = draw(&mut app, vec![]);
+        assert_eq!(
+            hovered.platform_output.cursor_icon,
+            egui::CursorIcon::PointingHand
+        );
+        for pressed in [true, false] {
+            draw(
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        output = draw(&mut app, vec![]);
+        assert_eq!(
+            app.filmstrip_browser.filter, expected,
+            "footer must receive clicks above the strip"
+        );
+    }
     let search = node(&output, "Search");
     let pos = search.center();
     for pressed in [true, false] {

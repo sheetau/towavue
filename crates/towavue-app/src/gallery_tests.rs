@@ -475,24 +475,10 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         frame(&mut app, size, vec![]);
         assert!(app.gallery_filter.is_none());
         let menu = frame(&mut app, size, vec![]);
-        for label in ["All", "Image", "Video", "Audio"] {
-            let node = &menu
-                .platform_output
-                .accesskit_update
-                .as_ref()
-                .expect("tree")
-                .nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(label))
-                .expect("filter option")
-                .1;
-            assert_eq!(node.is_disabled(), label == "Audio");
+        for label in ["All", "Image", "Video"] {
+            assert!(has(&menu, label));
         }
-        frame(&mut app, size, vec![click(&menu, "Audio")]);
-        assert!(
-            app.gallery_filter.is_none(),
-            "disabled kind cannot activate"
-        );
+        assert!(!has(&menu, "Audio"), "absent kinds are hidden");
         let menu = frame(&mut app, size, vec![]);
         frame(&mut app, size, vec![click(&menu, "Video")]);
         let output = frame(&mut app, size, vec![]);
@@ -506,9 +492,8 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         );
         app.gallery_search = "image".into();
         let output = frame(&mut app, size, vec![]);
-        assert!(!has(&output, "video.mp4") && !has(&output, "image.png"));
-        let menu = frame(&mut app, size, vec![]);
-        frame(&mut app, size, vec![click(&menu, "All")]);
+        assert!(!has(&output, "video.mp4") && has(&output, "image.png"));
+        assert!(!has(&output, "All"), "one kind needs no All option");
         let output = frame(&mut app, size, vec![]);
         assert!(has(&output, "image.png") && !has(&output, "video.mp4"));
         app.gallery_filter = Some(MediaKind::Image);
@@ -530,9 +515,8 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         app.gallery_listing.invalidate();
         frame(&mut app, size, vec![]);
         assert_eq!(
-            app.gallery_filter,
-            Some(MediaKind::Video),
-            "history refresh does not silently change a selected filter"
+            app.gallery_filter, None,
+            "a hidden absent kind must not leave an inaccessible active filter"
         );
         app.recent_paths.push(root.join("audio.wav"));
         app.gallery_listing.invalidate();
@@ -751,7 +735,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
                 .expect("bounds")
                 .y0
         };
-        let first_row_top = card_top(&output, "september-00.png");
+        let media_top = f64::from(chrome::TITLE_HEIGHT);
         let activate = |target| {
             egui::Event::AccessKitActionRequest(ActionRequest {
                 action: Action::Click,
@@ -770,8 +754,8 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         // ScrollArea snaps to physical pixels, then egui's logical layout grid.
         let tolerance = 1.0 / f64::from(density) + f64::from(egui::emath::GUI_ROUNDING);
         assert!(
-            (selected_top + f64::from(filmstrip::GALLERY_GAP) - first_row_top).abs() <= tolerance,
-            "selected month aligns its first row at {density}x: {selected_top} vs {first_row_top}"
+            (selected_top - media_top).abs() <= tolerance,
+            "selected month aligns its first row at {density}x: {selected_top} vs {media_top}"
         );
         app.pending_guard = Some(GuardedAction::Exit);
         frame(&mut app, size, vec![activate(september)]);
@@ -808,9 +792,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
         }
         let output = frame(&mut app, size, vec![]);
         assert!(
-            (card_top(&output, "july-10.png") + f64::from(filmstrip::GALLERY_GAP) - first_row_top)
-                .abs()
-                <= tolerance,
+            (card_top(&output, "july-10.png") - media_top).abs() <= tolerance,
             "keyboard activation uses the same month target"
         );
         frame(&mut app, size, vec![activate(search_button)]);

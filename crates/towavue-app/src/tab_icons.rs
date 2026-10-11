@@ -37,14 +37,7 @@ pub(super) fn paint(ui: &Ui, rect: Rect, kind: Kind, color: Color32) {
     crate::fluent::paint(
         ui,
         Rect::from_center_size(rect.center(), egui::Vec2::splat(16.0)),
-        match kind {
-            Kind::Image => Kind::ImageFilled,
-            Kind::Video => Kind::VideoFilled,
-            Kind::Audio => Kind::AudioFilled,
-            Kind::ImageMultiple => Kind::ImageMultipleFilled,
-            Kind::Keyboard => Kind::KeyboardFilled,
-            other => other,
-        },
+        kind,
         color,
     );
 }

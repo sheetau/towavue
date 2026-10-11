@@ -118,9 +118,10 @@ impl ResizeDialog {
                 }
                 ui.allocate_space(egui::vec2(32.0, chrome::INPUT_HEIGHT));
                 ui.end_row();
-                aligned_label(ui, labels[2], label_width);
-                let filter = chrome::combo_box(
+                let filter = chrome::labeled_combo_box(
                     ui,
+                    labels[2],
+                    label_width,
                     egui::ComboBox::from_id_salt("resize-resample")
                         .truncate()
                         .width(field_width)

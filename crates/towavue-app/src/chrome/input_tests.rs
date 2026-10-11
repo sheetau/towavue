@@ -257,45 +257,53 @@ fn flat_buttons_and_combo_keep_corners_through_hover_press_and_open() {
 }
 
 #[test]
-fn modal_combo_text_shares_the_adjacent_label_center() {
+fn modal_combo_text_shares_the_adjacent_label_center_without_growing_the_button() {
     for density in [1.0, 1.25, 2.0] {
-        for fixed_label in [false, true] {
-            let context = crate::fonts::test_context();
-            context.global_style_mut(style);
-            context.set_pixels_per_point(density);
-            let mut output = egui::FullOutput::default();
-            for _ in 0..3 {
-                output = context.run_ui(Default::default(), |ui| {
-                    egui::Grid::new("modal-labels")
-                        .num_columns(2)
-                        .show(ui, |ui| {
-                            if fixed_label {
-                                crate::resize::aligned_label(ui, "Resample", 80.0);
-                            } else {
-                                ui.label("Resample");
-                            }
-                            combo_box(
-                                ui,
-                                egui::ComboBox::from_id_salt("resample").selected_text("Lanczos"),
-                                |_| {},
-                            );
-                            ui.end_row();
-                        });
-                });
-            }
-            let center = |label| {
-                output
-                    .shapes
-                    .iter()
-                    .find_map(|shape| match &shape.shape {
-                        egui::Shape::Text(text) if text.galley.text() == label => {
-                            Some(text.pos.y + text.galley.rect.center().y)
-                        }
-                        _ => None,
-                    })
-                    .expect("painted text")
-            };
-            assert!((center("Resample") - center("Lanczos")).abs() <= 0.5 / density);
+        let context = crate::fonts::test_context();
+        context.global_style_mut(style);
+        context.set_pixels_per_point(density);
+        let mut output = egui::FullOutput::default();
+        let mut button_height = 0.0;
+        for _ in 0..3 {
+            output = context.run_ui(Default::default(), |ui| {
+                egui::Grid::new("modal-labels")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        button_height = labeled_combo_box(
+                            ui,
+                            "Resample",
+                            80.0,
+                            egui::ComboBox::from_id_salt("resample").selected_text("Lanczos"),
+                            |_| {},
+                        )
+                        .response
+                        .rect
+                        .height();
+                        ui.end_row();
+                    });
+            });
         }
+        let center = |label| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.pos.y + text.galley.rect.center().y)
+                    }
+                    _ => None,
+                })
+                .expect("painted text")
+        };
+        assert!(
+            (center("Resample") - center("Lanczos")).abs() <= 0.5 / density,
+            "label {}, combo {}, height {button_height} at {density}",
+            center("Resample"),
+            center("Lanczos")
+        );
+        assert!(
+            button_height < INPUT_HEIGHT,
+            "retain the original compact button height"
+        );
     }
 }

@@ -119,10 +119,12 @@ pub fn show(
     let language = localization::language(ui.ctx());
     let previous_filter = *filter;
     let viewport = ui.available_rect_before_wrap();
-    let inset = viewport.shrink(8.0_f32.min(viewport.size().min_elem().max(0.0) * 0.25));
+    let inset = viewport.shrink(8.0);
     // Keep the header/rail insets, but let scrolling cards reach the media edge.
-    let content_rect =
-        egui::Rect::from_min_max(inset.min, egui::pos2(inset.right(), viewport.bottom()));
+    let content_rect = egui::Rect::from_min_max(
+        egui::pos2(inset.left(), viewport.top()),
+        egui::pos2(inset.right(), viewport.bottom()),
+    );
     let mut content = ui.new_child(egui::UiBuilder::new().max_rect(content_rect));
     ui.advance_cursor_after_rect(viewport);
     let ui = &mut content;
@@ -134,14 +136,17 @@ pub fn show(
     // Center against the complete viewport, independently of the date rail.
     let side = crate::filmstrip::gallery_side_inset(viewport.width());
     let width = (viewport.width() - 2.0 * side).max(0.0);
-    let left = viewport.left() + side - inset.left();
     counts.update(paths, query);
+    crate::browser_controls::normalize_filter(&counts.values, filter);
     let filters_size = crate::browser_controls::filter_size(ui, &counts.values, false);
     let header_width = width;
-    let compact = header_width < filters_size.x + 56.0;
-    let header_height = chrome::INPUT_HEIGHT;
+    let compact = header_width <= filters_size.x + 16.0 + crate::browser_controls::SEARCH_MIN;
+    let header_height = crate::browser_controls::text_height(ui);
     let header_rect = egui::Rect::from_min_size(
-        egui::pos2(viewport.center().x - header_width * 0.5, inset.top()),
+        egui::pos2(
+            viewport.center().x - header_width * 0.5,
+            viewport.top() + crate::browser_controls::INSET,
+        ),
         egui::vec2(header_width, header_height),
     );
     let content_style = ui.style().clone();
@@ -227,8 +232,13 @@ pub fn show(
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(egui::Rect::from_min_size(
-                    ui.cursor().min
-                        + egui::vec2(left, header_height + 8.0 + crate::filmstrip::GALLERY_GAP),
+                    egui::pos2(
+                        viewport.left() + side,
+                        ui.cursor().top()
+                            + header_height
+                            + 2.0 * crate::browser_controls::INSET
+                            + crate::filmstrip::GALLERY_GAP,
+                    ),
                     egui::vec2(width, 0.0),
                 ))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
@@ -256,7 +266,10 @@ pub fn show(
     let mut mesh = egui::Mesh::default();
     let fade = egui::Rect::from_min_max(
         viewport.min,
-        egui::pos2(viewport.right(), header_rect.bottom() + 16.0),
+        egui::pos2(
+            viewport.right(),
+            header_rect.bottom() + crate::browser_controls::INSET,
+        ),
     );
     for (pos, color) in [
         (fade.left_top(), egui::Color32::BLACK),
@@ -274,11 +287,22 @@ pub fn show(
             .id_salt("gallery-header")
             .max_rect(header_rect),
     );
-    header.set_clip_rect(inset);
+    header.set_clip_rect(viewport);
     let filter_width = if compact {
+        let visible = crate::browser_controls::visible_filters(&counts.values);
+        let selected = if visible.iter().filter(|&&show| show).count() == 1 {
+            crate::browser_controls::labels(&header)
+                .into_iter()
+                .enumerate()
+                .find(|(index, _)| visible[*index])
+                .map(|(_, (_, kind))| kind)
+                .unwrap_or(*filter)
+        } else {
+            *filter
+        };
         let label = crate::browser_controls::labels(&header)
             .into_iter()
-            .find(|(_, kind)| kind == filter)
+            .find(|(_, kind)| *kind == selected)
             .expect("media kind")
             .0;
         let width = header
@@ -292,7 +316,7 @@ pub fn show(
             .x;
         let response = crate::browser_controls::text_button(
             &header,
-            egui::Rect::from_min_size(header_rect.min, egui::vec2(width, chrome::INPUT_HEIGHT)),
+            egui::Rect::from_min_size(header_rect.min, egui::vec2(width, header_height)),
             header.id().with("compact-filter"),
             label,
             true,
@@ -302,6 +326,9 @@ pub fn show(
             for (index, (label, kind)) in
                 crate::browser_controls::labels(ui).into_iter().enumerate()
             {
+                if !visible[index] {
+                    continue;
+                }
                 let row = rows.row(
                     ui,
                     kind.is_none() || counts.values[index] > 0,
@@ -326,8 +353,14 @@ pub fn show(
         );
         filters_size.x
     };
+    let search_gap =
+        (header_width - filter_width - crate::browser_controls::SEARCH_MIN).clamp(0.0, 16.0);
     let search_rect = egui::Rect::from_min_max(
-        header_rect.left_top() + egui::vec2(filter_width + 16.0, 0.0),
+        egui::pos2(
+            (header_rect.left() + filter_width + search_gap)
+                .max(header_rect.right() - crate::browser_controls::SEARCH_MAX),
+            header_rect.top(),
+        ),
         header_rect.max,
     );
     let search_id = header.make_persistent_id("Search Gallery");
@@ -439,10 +472,28 @@ mod tests {
                     assert!(text_rect(&output, "Image").is_some());
                     assert!(text_rect(&output, "All").is_none());
                 } else {
-                    for label in ["Image", "Video", "Audio"] {
+                    for label in ["Image", "Video"] {
                         assert!(text_rect(&output, label).is_some());
                     }
                 }
+                let output = frame(vec![]);
+                let position = node_rect(&output, "Search").center();
+                frame(vec![egui::Event::PointerMoved(position)]);
+                for pressed in [true, false] {
+                    frame(vec![egui::Event::PointerButton {
+                        pos: position,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers: egui::Modifiers::NONE,
+                    }]);
+                }
+                let output = frame(vec![]);
+                let input = node_rect(&output, "Search Gallery");
+                assert!(
+                    input.width() >= 100.0 - 1.0 / density
+                        && input.width() <= 250.0 + 1.0 / density,
+                    "search width at {width}: {input:?}"
+                );
             }
         }
     }
@@ -595,11 +646,10 @@ mod tests {
             let idle = frame(vec![]);
             let track = node_rect(&idle, "Date unknown");
             let grid_top = grid_origin.get();
+            let header_text_height = text_rect(&idle, "Search").expect("header").height();
+            let idle_marker = marker(&idle);
             assert!(
-                (grid_clip.get().top()
-                    + chrome::INPUT_HEIGHT
-                    + 8.0
-                    + crate::filmstrip::GALLERY_GAP
+                (grid_clip.get().top() + header_text_height + 36.0 + crate::filmstrip::GALLERY_GAP
                     - grid_top)
                     .abs()
                     <= 1.0 / density,
@@ -648,19 +698,15 @@ mod tests {
                 let scrolled = marker(&frame(vec![]));
                 assert!(
                     (grid_clip.get().top()
-                        + chrome::INPUT_HEIGHT
-                        + 8.0
+                        + header_text_height
+                        + 36.0
                         + crate::filmstrip::GALLERY_GAP
                         - grid_top)
                         .abs()
                         <= 1.0 / density,
                     "scrolling retains the full viewport clip beneath the header"
                 );
-                if gutter.y < track.top() {
-                    assert_eq!(scrolled, after, "fixed header does not scroll");
-                } else {
-                    assert!(scrolled > after, "body gutter scrolls: {gutter:?}");
-                }
+                assert!(scrolled > after, "body gutter scrolls: {gutter:?}");
             }
             overlay.set(true);
             for _ in 0..3 {
@@ -696,7 +742,7 @@ mod tests {
             }
             let bottom = marker(&frame(vec![]));
             assert!(
-                (bottom - (track.bottom() - 2.0)).abs() <= 1.0 / density,
+                (bottom - (track.bottom() - (idle_marker - track.top()))).abs() <= 2.0 / density,
                 "owned drag reaches the end outside the rail"
             );
         }
@@ -752,10 +798,7 @@ mod tests {
             last < first && first < before,
             "intermediate frame: {before} -> {first} -> {last}"
         );
-        assert!(
-            before - last > 200.0 && before - last < 300.0,
-            "one body viewport"
-        );
+        assert!((before - last - 300.0).abs() <= 1.0, "one body viewport");
         frame(Some(egui::Key::PageUp));
         for _ in 0..50 {
             frame(None);

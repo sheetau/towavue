@@ -250,7 +250,10 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                                 offset: if index == 0 {
                                     0.0
                                 } else {
-                                    crate::filmstrip::GALLERY_GAP + grid.offset(index)
+                                    ui.text_style_height(&egui::TextStyle::Body)
+                                        + 2.0 * crate::browser_controls::INSET
+                                        + crate::filmstrip::GALLERY_GAP
+                                        + grid.offset(index)
                                 },
                             })
                             .collect()

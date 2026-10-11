@@ -32,6 +32,53 @@ fn context(density: f32) -> Context {
     context
 }
 
+#[test]
+fn browser_filters_use_bottom_insets_and_one_row_below_caption() {
+    for density in [1.0, 1.25, 2.0] {
+        for compact in [false, true] {
+            let context = context(density);
+            let mut browser = Browser::default();
+            browser.sync_folder(Path::new("C:/Pictures"), &context);
+            browser.counts.values = [123, 100, 23, 0];
+            let size = egui::vec2(480.0, if compact { 240.0 } else { 600.0 });
+            context.data_mut(|data| {
+                data.insert_temp(
+                    egui::Id::new("filmstrip-caption"),
+                    Rect::from_min_max(egui::pos2(150.0, 130.0), egui::pos2(330.0, 190.0)),
+                )
+            });
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = frame(&context, &mut browser, size, vec![]).0;
+            }
+            let all = node(&output, "All");
+            let image = node(&output, "Image");
+            let audio = node(&output, "Audio");
+            assert!((audio.bottom() - (size.y - 8.0)).abs() <= 1.0 / density);
+            if compact {
+                assert!((all.top() - audio.top()).abs() < 0.01);
+                assert!(all.right() < image.left() && all.top() > 190.0);
+            } else {
+                assert!((all.right() - audio.right()).abs() <= 1.0 / density);
+                assert!(all.bottom() <= image.top());
+            }
+            let right = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if ["123", "100", "23", "0"].contains(&text.galley.text()) =>
+                    {
+                        Some(text.pos.x + text.galley.size().x)
+                    }
+                    _ => None,
+                })
+                .fold(0.0, f32::max);
+            assert!((right - (size.x - 8.0)).abs() <= 1.0 / density);
+        }
+    }
+}
+
 fn frame(
     context: &Context,
     browser: &mut Browser,
@@ -49,6 +96,7 @@ fn frame(
             target = browser
                 .show(ui.ctx(), ui.ctx().content_rect(), None, true)
                 .or(target.take());
+            browser.show_filters(ui.ctx(), ui.ctx().content_rect(), true);
         },
     );
     (output, target)
@@ -495,30 +543,7 @@ fn browser_menus_expand_after_loading_align_labels_and_block_address_input() {
     for _ in 0..3 {
         output = frame(&context, &mut browser, size, vec![]).0;
     }
-    let filter = node(&output, localization::text(&context, Text::GalleryFilter));
-    click(&context, &mut browser, size, filter.center());
-    for _ in 0..4 {
-        output = frame(&context, &mut browser, size, vec![]).0;
-    }
-    let all = node(&output, localization::text(&context, Text::GalleryAll));
-    assert_eq!(
-        context.layer_id_at(all.center()).expect("menu layer").order,
-        egui::Order::Foreground
-    );
-    let dim = output
-        .shapes
-        .iter()
-        .position(|shape| {
-            matches!(&shape.shape,
-        egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))
-        })
-        .expect("header dim");
-    let menu_text = output.shapes.iter().position(|shape| matches!(&shape.shape,
-        egui::Shape::Text(text) if text.galley.job.text == localization::text(&context, Text::GalleryAll))).expect("menu text");
-    assert!(
-        dim < menu_text,
-        "header dim must paint beneath the filter popup"
-    );
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(191))), "text header has no dimming band");
 }
 
 #[test]
@@ -557,7 +582,7 @@ fn browser_elided_ancestors_are_ordered_menu_targets_and_gutters_change_continuo
             vec![],
         )
         .0;
-        let address = node(&output, "Search Current");
+        let address = node(&output, "Search");
         if let Some(previous) = previous {
             assert!((address.left() - previous.left()).abs() <= 1.01);
             assert!((address.width() - previous.width()).abs() <= 1.01);
@@ -578,7 +603,7 @@ fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click
             for _ in 0..4 {
                 output = frame(&context, &mut browser, size, vec![]).0;
             }
-            let search = node(&output, "Search Pictures");
+            let search = node(&output, "Search");
             assert!(search.width() <= 250.0);
             assert!(search.width() > 32.0);
             let inputs = output
@@ -590,7 +615,7 @@ fn browser_header_has_only_search_input_and_preserves_breadcrumbs_on_blank_click
                 .iter()
                 .filter(|(_, node)| node.role() == egui::accesskit::Role::TextInput)
                 .count();
-            assert_eq!(inputs, 1, "only the search is editable");
+            assert_eq!(inputs, 0, "the editor is hidden until Search is activated");
             assert!(node(&output, "Pictures").left() < search.left());
             let blank = egui::pos2(search.left() - 6.0, search.center().y);
             assert!(click(&context, &mut browser, size, blank).1.is_none());
@@ -829,7 +854,22 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         truncated: false,
                         unavailable: false,
                     }));
+                    browser.counts.values = [120, 80, 30, 10];
                     for mode in 0..8 {
+                        context.data_mut(|data| {
+                            let id = egui::Id::new("filmstrip-caption");
+                            if mode == 7 {
+                                data.insert_temp(
+                                    id,
+                                    Rect::from_min_max(
+                                        egui::pos2(100.0, 100.0),
+                                        egui::pos2(280.0, 180.0),
+                                    ),
+                                );
+                            } else {
+                                data.remove::<Rect>(id);
+                            }
+                        });
                         if mode == 5 {
                             browser.cache.clear();
                             let folder = browser.folder.clone();
@@ -876,7 +916,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             .expect("initial UI textures");
                         if mode == 1 {
                             let output = frame(&context, &mut browser, size, vec![]).0;
-                            let search = node(&output, "Search Travel 2026");
+                            let search = node(&output, "Search");
                             renderer
                                 .render_ui(&context, output)
                                 .expect("search textures");
@@ -885,7 +925,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                 .render_ui(&context, output)
                                 .expect("focused search");
                         }
-                        if mode >= 5 {
+                        if mode == 5 || mode == 6 {
                             let (output, _) = frame(&context, &mut browser, size, vec![]);
                             let label = match mode {
                                 5 => "Subfolders: Travel 2026",
@@ -931,7 +971,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                             renderer.clear([0.18, 0.25, 0.32, 1.0]).expect("background");
                             renderer.render_ui(&context, output).expect("UI");
                             if pass == 4 {
-                                if mode >= 5 {
+                                if mode == 5 || mode == 6 {
                                     assert!(
                                         egui::Popup::is_any_open(&context),
                                         "menu {mode} at density {density}/{width}"
@@ -1023,10 +1063,7 @@ fn browser_search_retains_media_focus_and_filtered_tab_traversal_uses_paths() {
         (node(&output, "z10.bmp").center().y - size.y * 0.5).abs() < 1.0,
         "header must not move the strip below the media center"
     );
-    let search = node(
-        &output,
-        &format!("Search {}", folder_navigation::folder_name(&root)),
-    );
+    let search = node(&output, "Search");
     let pos = search.center();
     for pressed in [true, false] {
         draw(

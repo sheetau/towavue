@@ -5,6 +5,11 @@ mod paths;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Kind {
+    ImageFilled,
+    VideoFilled,
+    AudioFilled,
+    ImageMultipleFilled,
+    KeyboardFilled,
     Keyboard,
     Play,
     Pause,
@@ -137,6 +142,11 @@ mod tests {
             Kind::ShuffleOff,
             Kind::Image,
             Kind::ImageMultiple,
+            Kind::ImageFilled,
+            Kind::VideoFilled,
+            Kind::AudioFilled,
+            Kind::ImageMultipleFilled,
+            Kind::KeyboardFilled,
             Kind::Link,
             Kind::LinkOff,
             Kind::Keyboard,

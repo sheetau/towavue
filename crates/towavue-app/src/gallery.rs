@@ -16,6 +16,7 @@ pub(super) struct Listing {
     source_valid: bool,
     filter_valid: bool,
     available: Vec<PathBuf>,
+    counts: crate::browser_controls::Counts,
     filtered: Vec<PathBuf>,
     warmable: Vec<usize>,
     months: Vec<(Option<(u16, u16)>, usize)>,
@@ -139,6 +140,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         let policy = self.gallery_preparation_policy(ui.ctx());
         let listing = &mut self.gallery_listing;
         if !listing.source_valid {
+            listing.counts.invalidate();
             let missing: HashSet<_> = self.gallery_missing_files.iter().collect();
             listing.available = self
                 .recent_paths
@@ -151,6 +153,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         }
         let Listing {
             available,
+            counts,
             revision,
             filtered,
             warmable,
@@ -166,7 +169,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             .push_id(("gallery", self.tabs.gallery()), |ui| {
                 welcome::show(
                     ui,
-                    &self.shortcuts,
+                    counts,
                     &mut self.gallery_search,
                     &mut self.gallery_filter,
                     available,

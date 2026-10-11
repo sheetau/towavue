@@ -8,8 +8,9 @@ are bundled with the upstream [MIT license](LICENSE) and [NOTICE](NOTICE).
 The 16-unit filled Play/Pause/Previous/Next artwork serves both UI transport
 and taskbar buttons. Regular Arrow Repeat All/Arrow Repeat 1/Arrow Shuffle,
 Arrow Repeat All Off and Arrow Shuffle Off serve playback modes.
-Image/Filmstrip Play/Music Note 2 serve Gallery filters and media-tab/recent-file decorations;
-Image Multiple serves Gallery tabs; Keyboard serves keyboard-shortcut settings tabs.
+Filled Image/Filmstrip Play/Music Note 2 serve media-tab/recent-file decorations;
+filled Image Multiple serves Gallery tabs and filled Keyboard serves keyboard-shortcut
+settings tabs. Regular variants remain pinned alongside the filled sources.
 Link and Link Off, rotated 90 degrees at rasterization, serve the Resize
 aspect-ratio toggle. Link Off's smallest upstream artwork is 20 units; the
 generator normalizes its coordinates to the shared 16-unit drawing space.

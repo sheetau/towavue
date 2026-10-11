@@ -14,6 +14,7 @@ mod audio_playback;
 mod audio_preview;
 #[cfg(test)]
 mod audio_view_tests;
+mod browser_controls;
 mod chrome;
 #[cfg(test)]
 mod chrome_resize_tests;
@@ -12011,6 +12012,8 @@ where
         if changed {
             self.filmstrip.filter_changed();
         }
+        body.max.y = (body.bottom() - 30.0).max(body.top());
+        context.data_mut(|data| data.remove::<egui::Rect>(egui::Id::new("filmstrip-caption")));
         self.filmstrip.show_with_header(
             context,
             body,
@@ -12018,8 +12021,11 @@ where
             self.path.as_deref(),
             !self.palette_open,
             actions,
-            body.top() - rect.top(),
+            body.top() - rect.top() - 30.0,
+            rect,
         );
+        self.filmstrip_browser
+            .show_filters(context, rect, !self.palette_open);
     }
 
     fn prepare_filmstrip(&mut self, context: &egui::Context) {
@@ -14103,7 +14109,7 @@ mod tests {
     }
 
     #[test]
-    fn accessibility_activation_and_actions_reach_existing_welcome_commands() {
+    fn accessibility_activation_opens_gallery_search() {
         let context = fonts::test_context();
         let mut state = egui_winit::State::new(
             context.clone(),
@@ -14114,70 +14120,65 @@ mod tests {
             None,
         );
         let frame = |state: &mut egui_winit::State| {
-            let mut chosen = Vec::new();
-            let output = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(480.0, 300.0),
-                    )),
-                    events: std::mem::take(&mut state.egui_input_mut().events),
-                    ..Default::default()
-                },
-                |ui| {
-                    if let Some(command) = welcome::show(
-                        ui,
-                        &ShortcutBindings::default(),
-                        &mut String::new(),
-                        &mut None,
-                        &[],
-                        true,
-                        |_, _, _| Vec::new(),
-                    ) {
-                        chosen.push(command);
-                    }
-                },
-            );
-            (output.platform_output.accesskit_update, chosen)
+            context
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 300.0),
+                        )),
+                        events: std::mem::take(&mut state.egui_input_mut().events),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        welcome::show(
+                            ui,
+                            &mut crate::browser_controls::Counts::default(),
+                            &mut String::new(),
+                            &mut None,
+                            &[],
+                            true,
+                            |_, _, _| Vec::new(),
+                        );
+                    },
+                )
+                .platform_output
+                .accesskit_update
         };
-        assert!(frame(&mut state).0.is_none());
-        for _ in 0..2 {
-            handle_accesskit_window_event(
-                &mut state,
-                accesskit_winit::WindowEvent::InitialTreeRequested,
-            );
-            let (tree, chosen) = frame(&mut state);
-            assert!(chosen.is_empty());
-            let tree = tree.expect("requested accessibility tree");
-            for (label, command) in [
-                ("Open File…", CommandId::OpenFile),
-                ("Open Folder…", CommandId::OpenFolder),
-            ] {
-                let (target, node) = tree
-                    .nodes
-                    .iter()
-                    .find(|(_, node)| node.label() == Some(label))
-                    .expect("named Welcome button");
-                assert_eq!(node.role(), egui::accesskit::Role::Button);
-                assert!(node.supports_action(egui::accesskit::Action::Click));
-                handle_accesskit_window_event(
-                    &mut state,
-                    accesskit_winit::WindowEvent::ActionRequested(egui::accesskit::ActionRequest {
-                        action: egui::accesskit::Action::Click,
-                        target_tree: egui::accesskit::TreeId::ROOT,
-                        target_node: *target,
-                        data: None,
-                    }),
-                );
-                assert_eq!(frame(&mut state).1, [command]);
-                assert!(frame(&mut state).1.is_empty());
-            }
-            handle_accesskit_window_event(
-                &mut state,
-                accesskit_winit::WindowEvent::AccessibilityDeactivated,
-            );
-            assert!(frame(&mut state).0.is_none());
-        }
+        assert!(frame(&mut state).is_none());
+        handle_accesskit_window_event(
+            &mut state,
+            accesskit_winit::WindowEvent::InitialTreeRequested,
+        );
+        let tree = frame(&mut state).expect("requested tree");
+        let (target, node) = tree
+            .nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("Search"))
+            .expect("Search button");
+        assert_eq!(node.role(), egui::accesskit::Role::Button);
+        assert!(node.supports_action(egui::accesskit::Action::Click));
+        handle_accesskit_window_event(
+            &mut state,
+            accesskit_winit::WindowEvent::ActionRequested(egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: *target,
+                data: None,
+            }),
+        );
+        let tree = frame(&mut state).expect("editor tree");
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Search Gallery")
+                    && node.role() == egui::accesskit::Role::TextInput)
+        );
+        handle_accesskit_window_event(
+            &mut state,
+            accesskit_winit::WindowEvent::AccessibilityDeactivated,
+        );
+        assert!(frame(&mut state).is_none());
     }
 
     #[test]
@@ -22584,14 +22585,7 @@ mod tests {
                     .expect("tree")
                     .nodes
                     .iter()
-                    .find(|(_, node)| {
-                        node.label()
-                            == Some(if folder {
-                                "Open Folder…"
-                            } else {
-                                "Open File…"
-                            })
-                    })
+                    .find(|(_, node)| node.label() == Some("All"))
                     .expect("Welcome action")
                     .0;
                 frame(
@@ -22614,12 +22608,7 @@ mod tests {
                     modifiers: egui::Modifiers::NONE,
                 };
                 let actions = frame(&mut app, vec![key(true), key(false)]).1;
-                let command = if folder {
-                    CommandId::OpenFolder
-                } else {
-                    CommandId::OpenFile
-                };
-                assert!(matches!(actions.as_slice(), [UiAction::Command(id)] if *id == command));
+                assert!(actions.is_empty());
                 // Model the captured origin and pending interval without opening a native dialog.
                 app.file_dialog_return_focus = Some((app.media_generation, None, origin));
                 app.pending_dialog = Some(if folder {
@@ -22648,7 +22637,7 @@ mod tests {
                 );
                 assert_eq!(context.memory(egui::Memory::focused), Some(origin));
                 let actions = frame(&mut app, vec![key(true), key(false)]).1;
-                assert!(matches!(actions.as_slice(), [UiAction::Command(id)] if *id == command));
+                assert!(actions.is_empty());
                 assert!(app.path.is_none() && app.edits.is_empty());
             }
         }

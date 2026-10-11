@@ -52,6 +52,7 @@ pub(super) struct Browser {
     projected: Option<Arc<FolderSnapshot>>,
     projected_query: String,
     projected_filter: Option<MediaKind>,
+    counts: crate::browser_controls::Counts,
 }
 
 impl Browser {
@@ -90,6 +91,7 @@ impl Browser {
         let Some(source) = source else {
             self.source = None;
             self.projected = None;
+            self.counts.values = [0; 4];
             return (None, false);
         };
         let key = (
@@ -108,15 +110,17 @@ impl Browser {
                 .split_whitespace()
                 .map(str::to_lowercase)
                 .collect();
+            self.counts.values = [0; 4];
             let items = source
                 .items
                 .iter()
                 .filter(|item| {
-                    if self.filter.is_some_and(|kind| item.kind != kind) {
+                    let name = crate::display_name(&item.path).to_lowercase();
+                    if !words.iter().all(|word| name.contains(word)) {
                         return false;
                     }
-                    let name = crate::display_name(&item.path).to_lowercase();
-                    words.iter().all(|word| name.contains(word))
+                    self.counts.add(item.kind);
+                    self.filter.is_none_or(|kind| item.kind == kind)
                 })
                 .cloned()
                 .collect();
@@ -138,7 +142,7 @@ impl Browser {
         &mut self,
         context: &Context,
         screen: Rect,
-        source: Option<&FolderSnapshot>,
+        _source: Option<&FolderSnapshot>,
         enabled: bool,
     ) -> Option<PathBuf> {
         let mut target = None;
@@ -165,8 +169,7 @@ impl Browser {
                 ui.set_min_size(header.size());
                 ui.set_max_size(header.size());
                 ui.set_clip_rect(header);
-                ui.painter()
-                    .rect_filled(header, 0.0, Color32::from_black_alpha(191));
+
                 if !enabled {
                     let opacity = ui.opacity();
                     ui.disable();
@@ -185,7 +188,17 @@ impl Browser {
                     egui::pos2(content.right(), address.bottom()),
                 );
                 self.address_bar(ui, address, &mut target);
-                self.search_bar(ui, search, source);
+                crate::browser_controls::search(
+                    ui,
+                    search,
+                    ui.id().with("filmstrip-search"),
+                    &format!(
+                        "{} {}",
+                        localization::text(context, Text::FilmstripSearch),
+                        crate::folder_navigation::folder_name(&self.folder)
+                    ),
+                    &mut self.query,
+                );
             });
         if self
             .menu_open
@@ -214,7 +227,7 @@ impl Browser {
             self.listing(ui, &self.folder.clone());
         }
         let blocked = self.blocked_frame == Some(ui.ctx().cumulative_frame_nr());
-        let available = (outer.width() - 4.0).max(0.0);
+        let available = outer.width().max(0.0);
         let mut paths: Vec<_> = self.folder.ancestors().map(Path::to_owned).collect();
         paths.reverse();
         let mut widths: Vec<_> = paths
@@ -229,7 +242,6 @@ impl Browser {
                     )
                     .size()
                     .x
-                    + 12.0
                     + if self.has_children(path) {
                         chrome::SEARCH_BUTTON_SIZE
                     } else {
@@ -249,7 +261,7 @@ impl Browser {
         {
             first += 1;
         }
-        let mut x = outer.left() + 2.0;
+        let mut x = outer.left();
         if first > 0 && available > 60.0 {
             let rect = Rect::from_min_size(
                 egui::pos2(x, outer.top() + 2.0),
@@ -262,11 +274,13 @@ impl Browser {
                         ui.disable();
                         ui.set_opacity(opacity);
                     }
-                    chrome::input_button_at(
+                    crate::browser_controls::text_button_color(
                         ui,
                         rect,
-                        egui::Button::new("…").frame_when_inactive(false),
-                        HOVER,
+                        ui.id().with("ancestors"),
+                        "…",
+                        false,
+                        Color32::WHITE,
                     )
                 })
                 .inner;
@@ -306,7 +320,6 @@ impl Browser {
             .max(rect.left());
             let name = Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()));
             let arrow = Rect::from_min_max(egui::pos2(split, rect.top()), rect.max);
-            let background = ui.painter().add(egui::Shape::Noop);
             let label = crate::folder_navigation::folder_name(path);
             let name_response = ui
                 .push_id(("crumb", path), |ui| {
@@ -316,12 +329,13 @@ impl Browser {
                             ui.disable();
                             ui.set_opacity(opacity);
                         }
-                        ui.put(
+                        crate::browser_controls::text_button_color(
+                            ui,
                             name,
-                            egui::Button::new(&label)
-                                .frame(false)
-                                .truncate()
-                                .min_size(name.size()),
+                            ui.id().with("name"),
+                            &label,
+                            false,
+                            Color32::WHITE,
                         )
                     })
                     .inner
@@ -336,16 +350,12 @@ impl Browser {
                             ui.disable();
                             ui.set_opacity(opacity);
                         }
-                        ui.put(
-                            arrow,
-                            egui::Button::new("").frame(false).min_size(arrow.size()),
-                        )
+                        ui.interact(arrow, ui.id().with("arrow"), egui::Sense::click())
                     })
                     .inner
                 })
                 .inner
             });
-            let mut open = false;
             if let Some(arrow_response) = &arrow_response {
                 arrow_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -361,30 +371,16 @@ impl Browser {
                 if arrow_response.clicked() {
                     self.menu_open = Some(popup_id);
                 }
-                open = egui::Popup::is_id_open(ui.ctx(), popup_id);
+                let open = egui::Popup::is_id_open(ui.ctx(), popup_id);
                 let glyph = if open { '\u{eab4}' } else { '\u{eab6}' };
                 ui.painter().text(
                     arrow.center(),
                     egui::Align2::CENTER_CENTER,
                     glyph,
                     crate::fonts::icon_font(),
-                    if open || arrow_response.hovered() {
-                        chrome::FOREGROUND
-                    } else {
-                        chrome::MUTED
-                    },
+                    Color32::WHITE,
                 );
             }
-            let left_hover = !blocked && (name_response.hovered() || name_response.has_focus());
-            let right_hover = open
-                || (!blocked
-                    && arrow_response
-                        .as_ref()
-                        .is_some_and(|r| r.hovered() || r.has_focus()));
-            ui.painter().set(
-                background,
-                split_background(rect, split, left_hover, right_hover, HOVER),
-            );
             if name_response.clicked() {
                 *target = Some(path.clone());
             }
@@ -619,97 +615,41 @@ impl Browser {
         }
     }
 
-    fn search_bar(&mut self, ui: &mut Ui, outer: Rect, source: Option<&FolderSnapshot>) {
-        let language = localization::language(ui.ctx());
-        let filter_rect = end_button(outer, 0);
-        let clear_rect = end_button(outer, 1);
-        let text_rect = Rect::from_min_max(
-            outer.min,
-            egui::pos2(clear_rect.left().max(outer.left()), outer.bottom()),
-        );
-        let hint = format!(
-            "{} {}",
-            Text::FilmstripSearch.in_language(language),
-            crate::folder_navigation::folder_name(&self.folder)
-        );
-        let response = input(ui, text_rect, "filmstrip-search", &hint, &mut self.query);
-        if clear_button(ui, clear_rect, !self.query.is_empty()).clicked() {
-            self.query.clear();
-            response.request_focus();
-        }
-        let previous = self.filter;
-        crate::welcome::media_filter_button(
-            ui,
-            filter_rect,
-            &mut self.filter,
-            |kind| source.is_some_and(|s| s.items.iter().any(|item| item.kind == kind)),
-            HOVER,
-        );
-        if previous != self.filter {
-            ui.ctx().request_repaint();
-        }
-        if response.has_focus()
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.query.clear();
-        }
+    pub fn show_filters(&mut self, context: &Context, screen: Rect, enabled: bool) {
+        let inset = screen.shrink(8.0);
+        egui::Area::new("filmstrip-filters".into())
+            .order(egui::Order::Foreground)
+            .fade_in(false)
+            .movable(false)
+            .pivot(egui::Align2::RIGHT_BOTTOM)
+            .fixed_pos(inset.max)
+            .sense(egui::Sense::hover())
+            .constrain(false)
+            .show(context, |ui| {
+                ui.set_clip_rect(screen);
+                if !enabled || egui::Popup::is_any_open(context) {
+                    ui.disable();
+                }
+                let size = crate::browser_controls::filter_size(ui, &self.counts.values, true);
+                let caption =
+                    context.data(|data| data.get_temp::<Rect>(egui::Id::new("filmstrip-caption")));
+                let vertical =
+                    caption.is_none_or(|caption| inset.bottom() - size.y > caption.bottom());
+                let mut size =
+                    crate::browser_controls::filter_size(ui, &self.counts.values, vertical);
+                size.x = size.x.min(inset.width());
+                ui.set_min_size(size);
+                ui.set_max_size(size);
+                let rect = Rect::from_min_size(ui.min_rect().min, size);
+                crate::browser_controls::filters(
+                    ui,
+                    rect,
+                    &self.counts.values,
+                    &mut self.filter,
+                    vertical,
+                );
+            });
     }
-}
-
-fn end_button(outer: Rect, index: usize) -> Rect {
-    Rect::from_min_size(
-        outer.right_top()
-            + egui::vec2(
-                -((index + 1) as f32) * (chrome::SEARCH_BUTTON_SIZE + 2.0),
-                2.0,
-            ),
-        Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
-    )
-    .intersect(outer)
-}
-
-fn input(ui: &mut Ui, rect: Rect, id: &str, hint: &str, value: &mut String) -> egui::Response {
-    let input_id = ui.id().with(id);
-    let response = ui.put(rect, |ui: &mut Ui| {
-        ui.set_clip_rect(ui.clip_rect().intersect(rect));
-        ui.spacing_mut().text_edit_width = f32::INFINITY;
-        crate::resize::unframed_text_input_with_id(ui, input_id, hint, value)
-    });
-    if response.has_focus() {
-        ui.memory_mut(|memory| {
-            memory.set_focus_lock_filter(
-                response.id,
-                egui::EventFilter {
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                    ..Default::default()
-                },
-            )
-        });
-    }
-    response
-}
-
-fn clear_button(ui: &mut Ui, rect: Rect, enabled: bool) -> egui::Response {
-    let label = localization::text(ui.ctx(), Text::FilmstripClear);
-    let response = ui
-        .add_enabled_ui(enabled, |ui| {
-            chrome::input_button_at(
-                ui,
-                rect,
-                egui::Button::new(egui::RichText::new("\u{eabf}").font(crate::fonts::icon_font()))
-                    .stroke(egui::Stroke::NONE)
-                    .frame_when_inactive(false),
-                HOVER,
-            )
-        })
-        .inner
-        .help_text(label);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
-    });
-    response
 }
 
 #[cfg(test)]

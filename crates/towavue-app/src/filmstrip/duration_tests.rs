@@ -451,7 +451,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             .rect_filled(ui.max_rect(), 0.0, crate::chrome::BACKGROUND);
                         crate::welcome::show(
                             ui,
-                            &Default::default(),
+                            &mut Default::default(),
                             &mut String::new(),
                             &mut None,
                             &paths,
@@ -497,6 +497,20 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         assert_eq!(bounds.center(), idle.center());
                         assert!((bounds.width() / idle.width() - 1.05).abs() < 0.001);
                     }
+                    let rail_marker = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(shape)
+                                if shape.fill == crate::chrome::FOREGROUND
+                                    && shape.rect.width() > 20.0
+                                    && shape.rect.height() <= 1.01 =>
+                            {
+                                Some(shape.rect)
+                            }
+                            _ => None,
+                        })
+                        .expect("one-pixel rail marker");
                     renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
                     renderer.render_ui(&context, output).expect("UI");
                     if frame == 2 || frame == 7 {
@@ -508,7 +522,20 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                                 * 4;
                             &pixels[start..start + 4]
                         };
-                        assert_eq!(at(66.0, 44.0), &crate::chrome::BACKGROUND.to_array());
+                        assert_eq!(at(66.0, 54.0), &crate::chrome::BACKGROUND.to_array());
+                        let marker_x = rail_marker.center().x;
+                        assert_eq!(
+                            at(marker_x, rail_marker.center().y),
+                            &[255, 255, 255, 255],
+                            "header fade must not dim the rail"
+                        );
+                        for dy in [-1.0, 1.0] {
+                            assert_ne!(
+                                at(marker_x, rail_marker.center().y + dy / density),
+                                &[255, 255, 255, 255],
+                                "rail occupies exactly one physical row"
+                            );
+                        }
                         assert_eq!(
                             at(audio_bounds.center().x, audio_bounds.top() + 3.0),
                             &crate::chrome::BORDER.to_array()

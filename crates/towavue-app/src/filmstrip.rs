@@ -789,7 +789,7 @@ impl Filmstrip {
         actions: &mut Vec<UiAction>,
     ) {
         self.show_with_header(
-            context, media_rect, snapshot, current, enabled, actions, 0.0,
+            context, media_rect, snapshot, current, enabled, actions, 0.0, media_rect,
         );
     }
 
@@ -803,6 +803,7 @@ impl Filmstrip {
         enabled: bool,
         actions: &mut Vec<UiAction>,
         header_height: f32,
+        backdrop: Rect,
     ) {
         let language = localization::language(context);
         let screen = media_rect.intersect(context.content_rect());
@@ -829,7 +830,11 @@ impl Filmstrip {
                 egui::Order::Middle,
                 "filmstrip-dim".into(),
             ))
-            .rect_filled(screen, 0.0, Color32::from_black_alpha(191));
+            .rect_filled(
+                backdrop.intersect(context.content_rect()),
+                0.0,
+                Color32::from_black_alpha(191),
+            );
         let recenter = current != self.focus.as_deref();
         self.focus = current.map(Path::to_owned);
         if let Some(snapshot) = snapshot {
@@ -1464,6 +1469,17 @@ impl Filmstrip {
                             } else {
                                 bounds.top() - indicator::TEXT_GAP - text.size().y
                             };
+                            if below {
+                                ui.ctx().data_mut(|data| {
+                                    data.insert_temp(
+                                        egui::Id::new("filmstrip-caption"),
+                                        egui::Rect::from_min_size(
+                                            egui::pos2(bounds.left(), y),
+                                            text.size(),
+                                        ),
+                                    )
+                                });
+                            }
                             ui.painter().galley(
                                 egui::pos2(bounds.left(), y),
                                 text,
@@ -2793,7 +2809,7 @@ mod tests {
                 |ui| {
                     crate::welcome::show(
                         ui,
-                        &towavue_core::ShortcutBindings::default(),
+                        &mut crate::browser_controls::Counts::default(),
                         &mut String::new(),
                         &mut None,
                         &paths,

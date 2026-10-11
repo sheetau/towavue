@@ -339,7 +339,7 @@ fn gallery_activation_refreshes_missing_cards_but_preserves_history_and_loaded_t
         let bottom = tree
             .nodes
             .iter()
-            .find(|(_, node)| node.label() == Some("Search Gallery"))
+            .find(|(_, node)| matches!(node.label(), Some("Search" | "Search Gallery")))
             .expect("search")
             .1
             .bounds()
@@ -453,7 +453,7 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
             let header_bottom = tree
                 .nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("Search Gallery"))
+                .find(|(_, node)| matches!(node.label(), Some("Search" | "Search Gallery")))
                 .expect("search field")
                 .1
                 .bounds()
@@ -472,11 +472,10 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         for _ in 0..3 {
             frame(&mut app, size, vec![]);
         }
-        let output = frame(&mut app, size, vec![]);
+        frame(&mut app, size, vec![]);
         assert!(app.gallery_filter.is_none());
-        frame(&mut app, size, vec![click(&output, "Filter media types")]);
         let menu = frame(&mut app, size, vec![]);
-        for label in ["All", "Images", "Videos", "Audio"] {
+        for label in ["All", "Image", "Video", "Audio"] {
             let node = &menu
                 .platform_output
                 .accesskit_update
@@ -495,7 +494,7 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
             "disabled kind cannot activate"
         );
         let menu = frame(&mut app, size, vec![]);
-        frame(&mut app, size, vec![click(&menu, "Videos")]);
+        frame(&mut app, size, vec![click(&menu, "Video")]);
         let output = frame(&mut app, size, vec![]);
         assert_eq!(app.gallery_filter, Some(MediaKind::Video));
         assert!(has(&output, "video.mp4") && has(&output, "July 2026"));
@@ -508,7 +507,6 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         app.gallery_search = "image".into();
         let output = frame(&mut app, size, vec![]);
         assert!(!has(&output, "video.mp4") && !has(&output, "image.png"));
-        frame(&mut app, size, vec![click(&output, "Filter media types")]);
         let menu = frame(&mut app, size, vec![]);
         frame(&mut app, size, vec![click(&menu, "All")]);
         let output = frame(&mut app, size, vec![]);
@@ -539,11 +537,10 @@ fn gallery_type_filter_combines_search_disables_absent_kinds_and_preserves_tab_s
         app.recent_paths.push(root.join("audio.wav"));
         app.gallery_listing.invalidate();
         for (label, kind, name) in [
-            ("Images", MediaKind::Image, "image.png"),
+            ("Image", MediaKind::Image, "image.png"),
             ("Audio", MediaKind::Audio, "audio.wav"),
         ] {
-            let output = frame(&mut app, size, vec![]);
-            frame(&mut app, size, vec![click(&output, "Filter media types")]);
+            frame(&mut app, size, vec![]);
             let menu = frame(&mut app, size, vec![]);
             frame(&mut app, size, vec![click(&menu, label)]);
             let output = frame(&mut app, size, vec![]);
@@ -735,7 +732,7 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
                 .iter()
                 .any(|(_, n)| n.label() == Some("August 2026"))
         );
-        let search = node("Search Gallery");
+        let search_button = node("Search");
         let december = node("December 2024");
         let september = node("September 2026");
         let july = node("July 2026");
@@ -764,6 +761,9 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
             })
         };
         frame(&mut app, size, vec![activate(december)]);
+        for _ in 0..70 {
+            frame(&mut app, size, vec![]);
+        }
         let output = frame(&mut app, size, vec![]);
         assert!(app.path.is_none(), "rail navigation does not open a card");
         let selected_top = card_top(&output, "december-20.png");
@@ -803,12 +803,25 @@ fn gallery_month_rail_tracks_filtered_cards_and_navigates_without_opening_media(
                 modifiers: egui::Modifiers::NONE,
             }],
         );
+        for _ in 0..70 {
+            frame(&mut app, size, vec![]);
+        }
         let output = frame(&mut app, size, vec![]);
         assert!(
             (card_top(&output, "july-10.png") + f64::from(filmstrip::GALLERY_GAP) - first_row_top)
                 .abs()
                 <= tolerance,
             "keyboard activation uses the same month target"
+        );
+        frame(&mut app, size, vec![activate(search_button)]);
+        let output = frame(&mut app, size, vec![]);
+        let search = video_rotation::tests::node(
+            output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .expect("search tree"),
+            "Search Gallery",
         );
         let set = |value: &str| {
             egui::Event::AccessKitActionRequest(ActionRequest {
@@ -981,6 +994,24 @@ fn gallery_search_filters_immediately_rejects_hidden_cards_and_respects_modal_in
             let output = frame(&mut app, size, vec![]);
             assert_eq!(output.pixels_per_point, density);
             let tree = output.platform_output.accesskit_update.expect("tree");
+            let opener = crate::video_rotation::tests::node(
+                &tree,
+                localization::Text::FilmstripSearch.in_language(language),
+            );
+            frame(
+                &mut app,
+                size,
+                vec![egui::Event::AccessKitActionRequest(ActionRequest {
+                    action: Action::Click,
+                    target_tree: TreeId::ROOT,
+                    target_node: opener,
+                    data: None,
+                })],
+            );
+            let tree = frame(&mut app, size, vec![])
+                .platform_output
+                .accesskit_update
+                .expect("editor tree");
             let search = crate::video_rotation::tests::node(
                 &tree,
                 localization::Text::GallerySearch.in_language(language),

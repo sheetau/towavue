@@ -2,7 +2,7 @@ mod filter_menu;
 
 use crate::scroll_style::ScrollAreaStyle;
 use egui::RichText;
-use towavue_core::{CommandId, MediaKind, ShortcutBindings};
+use towavue_core::{CommandId, MediaKind};
 
 use crate::chrome;
 use crate::hover_help::HoverHelp;
@@ -109,7 +109,7 @@ pub(super) fn named_tab(
 
 pub fn show(
     ui: &mut egui::Ui,
-    shortcuts: &ShortcutBindings,
+    counts: &mut crate::browser_controls::Counts,
     query: &mut String,
     filter: &mut Option<MediaKind>,
     paths: &[std::path::PathBuf],
@@ -135,29 +135,22 @@ pub fn show(
     let side = crate::filmstrip::gallery_side_inset(viewport.width());
     let width = (viewport.width() - 2.0 * side).max(0.0);
     let left = viewport.left() + side - inset.left();
-    let mut chosen = None;
-    let header_width = inset.width().min(400.0);
-    let header_left = viewport.center().x - header_width * 0.5 - inset.left();
-    let mut header = ui.new_child(egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
-        ui.cursor().min + egui::vec2(header_left, 0.0),
-        egui::vec2(header_width, chrome::INPUT_HEIGHT),
-    )));
-    let search_changed = header
-        .horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.spacing_mut().button_padding = egui::vec2(2.0, 0.0);
-            search_field(ui, query, filter, paths, shortcuts, &mut chosen)
-        })
-        .inner;
-    ui.advance_cursor_after_rect(header.min_rect());
-    ui.add_space(8.0 - ui.spacing().item_spacing.y);
+    counts.update(paths, query);
+    let filters_size = crate::browser_controls::filter_size(ui, &counts.values, false);
+    let header_width = width;
+    let compact = header_width < filters_size.x + 56.0;
+    let header_height = chrome::INPUT_HEIGHT;
+    let header_rect = egui::Rect::from_min_size(
+        egui::pos2(viewport.center().x - header_width * 0.5, inset.top()),
+        egui::vec2(header_width, header_height),
+    );
     let content_style = ui.style().clone();
     let color = ui.visuals().widgets.inactive.fg_stroke.color;
     ui.visuals_mut().widgets.hovered.fg_stroke.color = color;
     ui.visuals_mut().widgets.active.fg_stroke.color = color;
-    let body = ui.available_rect_before_wrap();
-    let rail_top = if header.min_rect().right() > body.right() - 32.0 {
-        body.top()
+    let body = content_rect;
+    let rail_top = if header_rect.right() > body.right() - 32.0 {
+        header_rect.bottom() + 8.0
     } else {
         inset.top()
     };
@@ -175,14 +168,14 @@ pub fn show(
     );
     // ScrollArea wraps its salt before composing the persistent ID.
     let scroll_id = ui.make_persistent_id(egui::IdSalt::new("welcome"));
+    crate::gallery_rail::advance(ui.ctx(), scroll_id);
     let mut offset = egui::scroll_area::State::load(ui.ctx(), scroll_id)
         .unwrap_or_default()
         .offset
         .y;
     let previous_offset = offset;
     let projection = swipe_id.with((query.as_str(), *filter, paths.len()));
-    let reset =
-        search_changed || previous_filter != *filter || swipe.projection != Some(projection);
+    let reset = previous_filter != *filter || swipe.projection != Some(projection);
     swipe.projection = Some(projection);
     swipe.gesture.update_vertical(
         &background,
@@ -234,13 +227,13 @@ pub fn show(
         ui.scope_builder(
             egui::UiBuilder::new()
                 .max_rect(egui::Rect::from_min_size(
-                    ui.cursor().min + egui::vec2(left, crate::filmstrip::GALLERY_GAP),
+                    ui.cursor().min
+                        + egui::vec2(left, header_height + 8.0 + crate::filmstrip::GALLERY_GAP),
                     egui::vec2(width, 0.0),
                 ))
                 .layout(egui::Layout::top_down(egui::Align::Min)),
             |ui| {
-                // Keep scrolling cards below the fixed header without introducing
-                // a horizontal row's vertical centering offset.
+                // Cards scroll behind the fixed, translucent header.
                 ui.set_clip_rect(ui.clip_rect().intersect(body));
                 let months = recent(ui, query, *filter);
                 if paths.is_empty() {
@@ -260,187 +253,61 @@ pub fn show(
     });
     swipe.maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
     ui.data_mut(|data| data.insert_temp(swipe_id, swipe));
-    crate::gallery_rail::show(ui, &mut output, rail);
-    chosen
-}
-
-fn search_field(
-    ui: &mut egui::Ui,
-    query: &mut String,
-    filter: &mut Option<MediaKind>,
-    paths: &[std::path::PathBuf],
-    shortcuts: &ShortcutBindings,
-    chosen: &mut Option<CommandId>,
-) -> bool {
-    let language = localization::language(ui.ctx());
-    let (outer, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width().max(128.0), chrome::INPUT_HEIGHT),
-        egui::Sense::hover(),
+    let mut mesh = egui::Mesh::default();
+    let fade = egui::Rect::from_min_max(
+        viewport.min,
+        egui::pos2(viewport.right(), header_rect.bottom() + 16.0),
     );
-    let mut content = ui.new_child(egui::UiBuilder::new().max_rect(outer));
-    let ui = &mut content;
-    let button_step = chrome::SEARCH_BUTTON_SIZE + 2.0;
-    let buttons = [0.0, button_step, 2.0 * button_step, 3.0 * button_step].map(|offset| {
-        egui::Rect::from_min_size(
-            outer.right_top() + egui::vec2(-button_step - offset, 2.0),
-            egui::Vec2::splat(chrome::SEARCH_BUTTON_SIZE),
-        )
-    });
-    let clear_rect = buttons[3];
-    let filter_rect = buttons[2];
-    // Keep text scrolling and caret clipping outside all button hit regions.
-    let text_rect = egui::Rect::from_min_max(
-        outer.min,
-        egui::pos2(clear_rect.left() - 2.0, outer.bottom()),
-    );
-    let mut search = ui.put(text_rect, |ui: &mut egui::Ui| {
-        ui.spacing_mut().text_edit_width = f32::INFINITY;
-        crate::resize::unframed_text_input_with_id(
-            ui,
-            ui.make_persistent_id("Search Gallery"),
-            Text::GallerySearch.in_language(language),
-            query,
-        )
-    });
-    media_filter_button(
-        ui,
-        filter_rect,
-        filter,
-        |kind| {
-            paths
-                .iter()
-                .any(|path| MediaKind::from_path(path) == Some(kind))
-        },
-        chrome::SURFACE_HOVER,
-    );
-    let clear = ui
-        .add_enabled_ui(!query.is_empty(), |ui| {
-            chrome::surface_icon_button_at(
-                ui,
-                clear_rect,
-                egui::Button::new(RichText::new("\u{eabf}").font(crate::fonts::icon_font()))
-                    .stroke(egui::Stroke::NONE)
-                    .frame_when_inactive(false),
-            )
-        })
-        .inner
-        .help_text(Text::GalleryClearHelp.in_language(language))
-        .disabled_help_text(Text::GalleryClearHelp.in_language(language));
-    clear.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            clear.enabled(),
-            Text::GalleryClear.in_language(language),
-        )
-    });
-    for (rect, command, label, icon) in [
-        (
-            buttons[1],
-            CommandId::OpenFile,
-            Text::GalleryOpenFile,
-            chrome::Icon::OpenFile,
-        ),
-        (
-            buttons[0],
-            CommandId::OpenFolder,
-            Text::GalleryOpenFolder,
-            chrome::Icon::OpenFolder,
-        ),
+    for (pos, color) in [
+        (fade.left_top(), egui::Color32::BLACK),
+        (fade.right_top(), egui::Color32::BLACK),
+        (fade.left_bottom(), egui::Color32::TRANSPARENT),
+        (fade.right_bottom(), egui::Color32::TRANSPARENT),
     ] {
-        let label = label.in_language(language);
-        let response = chrome::surface_icon_button_at(
-            ui,
-            rect,
-            egui::Button::new(icon.text())
-                .stroke(egui::Stroke::NONE)
-                .frame_when_inactive(false),
-        )
-        .help_text(crate::hover_help::shortcut(
-            label,
-            &shortcuts.label(command, Default::default()),
-        ));
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
-        });
-        if response.clicked() {
-            *chosen = Some(command);
-        }
+        mesh.colored_vertex(pos, color);
     }
-    let clear_key = ui.is_enabled()
-        && (search.has_focus()
-            || ui.memory(|memory| {
-                memory.had_focus_last_frame(search.id) && memory.focused().is_none()
-            }))
-        && !egui::Popup::is_any_open(ui.ctx())
-        && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    if clear.clicked() || clear_key {
-        query.clear();
-        search.mark_changed();
-        search.request_focus();
-    }
-    if search.has_focus() {
-        // Escape clears this search instead of moving focus out before UI routing.
-        ui.memory_mut(|memory| {
-            memory.set_focus_lock_filter(
-                search.id,
-                egui::EventFilter {
-                    horizontal_arrows: true,
-                    vertical_arrows: true,
-                    escape: true,
-                    ..Default::default()
-                },
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(2, 1, 3);
+    ui.painter().add(egui::Shape::mesh(mesh));
+    let mut header = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("gallery-header")
+            .max_rect(header_rect),
+    );
+    header.set_clip_rect(inset);
+    let filter_width = if compact {
+        let label = crate::browser_controls::labels(&header)
+            .into_iter()
+            .find(|(_, kind)| kind == filter)
+            .expect("media kind")
+            .0;
+        let width = header
+            .painter()
+            .layout_no_wrap(
+                label.into(),
+                egui::TextStyle::Body.resolve(header.style()),
+                egui::Color32::WHITE,
             )
-        });
-    }
-    search.changed()
-}
-
-pub(super) fn media_filter_button(
-    ui: &mut egui::Ui,
-    filter_rect: egui::Rect,
-    filter: &mut Option<MediaKind>,
-    available: impl Fn(MediaKind) -> bool,
-    hover: egui::Color32,
-) {
-    let language = localization::language(ui.ctx());
-    let filter_button = chrome::input_button_at(
-        ui,
-        filter_rect,
-        egui::Button::new("")
-            .fill(egui::Color32::TRANSPARENT)
-            .stroke(egui::Stroke::NONE)
-            .frame_when_inactive(false),
-        hover,
-    )
-    .help_text(Text::GalleryFilter.in_language(language));
-    let icon_shape = ui.painter().add(egui::Shape::Noop);
-    filter_button.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            filter_button.enabled(),
-            Text::GalleryFilter.in_language(language),
-        )
-    });
-    if ui.is_enabled() {
-        filter_menu::show(&filter_button, |ui, selected| {
+            .size()
+            .x;
+        let response = crate::browser_controls::text_button(
+            &header,
+            egui::Rect::from_min_size(header_rect.min, egui::vec2(width, chrome::INPUT_HEIGHT)),
+            header.id().with("compact-filter"),
+            label,
+            true,
+        );
+        filter_menu::show(&response, |ui, selected| {
             let mut rows = chrome::Dropdown::new(ui);
-            for (kind, label) in [
-                (None, Text::GalleryAll.in_language(language)),
-                (
-                    Some(MediaKind::Image),
-                    Text::GalleryImages.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Video),
-                    Text::GalleryVideos.in_language(language),
-                ),
-                (
-                    Some(MediaKind::Audio),
-                    Text::GalleryAudio.in_language(language),
-                ),
-            ] {
-                let available = kind.is_none_or(&available);
-                let row = rows.row(ui, available, *filter == kind, label);
+            for (index, (label, kind)) in
+                crate::browser_controls::labels(ui).into_iter().enumerate()
+            {
+                let row = rows.row(
+                    ui,
+                    kind.is_none() || counts.values[index] > 0,
+                    *filter == kind,
+                    label,
+                );
                 if selected(&row) {
                     *filter = kind;
                     ui.close();
@@ -448,39 +315,36 @@ pub(super) fn media_filter_button(
             }
             rows.finish(ui);
         });
-    }
-    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&filter_button));
-    if open || filter_button.hovered() || filter_button.has_focus() {
-        ui.painter().set(
-            icon_shape,
-            egui::Shape::rect_filled(filter_rect, 3.0, hover),
-        );
-    }
-    let color = if open || filter_button.hovered() || filter.is_some() {
-        chrome::FOREGROUND
+        width
     } else {
-        chrome::MUTED
+        crate::browser_controls::filters(
+            &mut header,
+            egui::Rect::from_min_size(header_rect.min, filters_size),
+            &counts.values,
+            filter,
+            false,
+        );
+        filters_size.x
     };
-    if let Some(kind) = *filter {
-        crate::fluent::paint(
-            ui,
-            filter_button.rect,
-            match kind {
-                MediaKind::Image => crate::fluent::Kind::Image,
-                MediaKind::Video => crate::fluent::Kind::Video,
-                MediaKind::Audio => crate::fluent::Kind::Audio,
-            },
-            color,
-        );
-    } else {
-        ui.painter().text(
-            filter_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            chrome::Icon::Filter.text().text(),
-            crate::fonts::icon_font(),
-            color,
-        );
+    let search_rect = egui::Rect::from_min_max(
+        header_rect.left_top() + egui::vec2(filter_width + 16.0, 0.0),
+        header_rect.max,
+    );
+    let search_id = header.make_persistent_id("Search Gallery");
+    let search_changed = crate::browser_controls::search(
+        &mut header,
+        search_rect,
+        search_id,
+        Text::GallerySearch.in_language(language),
+        query,
+    );
+    if search_changed || previous_filter != *filter {
+        ui.ctx()
+            .request_discard("Rebuild Gallery query projection before presenting");
     }
+    // The header fade covers scrolling thumbnails, not the date rail or thumb.
+    crate::gallery_rail::show(ui, &mut output, rail);
+    None
 }
 
 pub(super) fn matches(path: &std::path::Path, query: &str) -> bool {
@@ -495,65 +359,91 @@ mod tests {
     use super::*;
 
     #[test]
-    fn japanese_gallery_search_accessibility_edits_and_clears_without_changing_filter() {
-        use crate::localization::test_ui;
+    fn gallery_header_matches_grid_and_compact_filter_retains_dropdown_selection() {
         for density in [1.0, 1.25, 2.0] {
-            let context = test_ui::japanese_context(density);
-            let mut query = String::new();
-            let mut filter = Some(MediaKind::Image);
-            let frame = |query: &mut String, filter: &mut Option<MediaKind>, events| {
-                context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(480.0, 238.0),
-                        )),
-                        focused: true,
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        super::show(
-                            ui,
-                            &ShortcutBindings::default(),
-                            query,
-                            filter,
-                            &[],
-                            true,
-                            |_, _, _| vec![],
-                        );
-                    },
-                )
-            };
-            for _ in 0..3 {
-                frame(&mut query, &mut filter, vec![]);
-            }
-            let output = frame(&mut query, &mut filter, vec![]);
-            let query_id = |output: &egui::FullOutput, label: &str| {
-                output
-                    .platform_output
-                    .accesskit_update
-                    .as_ref()
-                    .expect("tree")
-                    .nodes
+            for width in [240.0, 480.0, 960.0] {
+                let context = crate::fonts::test_context();
+                context.global_style_mut(chrome::style);
+                context.set_pixels_per_point(density);
+                context.enable_accesskit();
+                let mut counts = crate::browser_controls::Counts::default();
+                let mut query = String::new();
+                let mut filter = None;
+                let paths = ["photo.png", "video.mp4"].map(std::path::PathBuf::from);
+                let mut frame = |events| {
+                    context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width, 300.0),
+                            )),
+                            focused: true,
+                            events,
+                            ..Default::default()
+                        },
+                        |ui| {
+                            super::show(
+                                ui,
+                                &mut counts,
+                                &mut query,
+                                &mut filter,
+                                &paths,
+                                true,
+                                |ui, _, _| {
+                                    ui.set_min_height(1000.0);
+                                    vec![]
+                                },
+                            );
+                        },
+                    )
+                };
+                frame(vec![]);
+                let output = frame(vec![]);
+                let search = text_rect(&output, "Search").expect("Search button");
+                let all = text_rect(&output, "All").expect("All filter");
+                let side = crate::filmstrip::gallery_side_inset(width);
+                assert!((all.left() - side).abs() <= 1.0 / density);
+                assert!((search.right() - (width - side)).abs() <= 1.0 / density);
+                assert!(all.right() < search.left());
+                let fade = output
+                    .shapes
                     .iter()
-                    .find(|(_, node)| node.label() == Some(label))
-                    .expect("query")
-                    .0
-            };
-            let japanese_id = query_id(&output, "ギャラリーを検索");
-            let set = test_ui::action(&output, "ギャラリーを検索", Some("日本語 {original}"));
-            let output = frame(&mut query, &mut filter, vec![set]);
-            assert_eq!(query, "日本語 {original}");
-            assert_eq!(filter, Some(MediaKind::Image));
-            let clear = test_ui::action(&output, "ギャラリーの検索を消去", None);
-            frame(&mut query, &mut filter, vec![clear]);
-            assert!(query.is_empty());
-            assert_eq!(filter, Some(MediaKind::Image));
-            // Identity must not depend on the displayed language, even across host launches.
-            localization::set_language(&context, localization::Language::English);
-            let output = frame(&mut query, &mut filter, vec![]);
-            assert_eq!(japanese_id, query_id(&output, "Search Gallery"));
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Mesh(mesh)
+                            if mesh.vertices.len() == 4
+                                && mesh.vertices[0].color == egui::Color32::BLACK
+                                && mesh.vertices[2].color == egui::Color32::TRANSPARENT =>
+                        {
+                            Some(mesh)
+                        }
+                        _ => None,
+                    })
+                    .expect("transparent gradient behind header controls");
+                assert!(fade.vertices[0].pos.y < fade.vertices[2].pos.y);
+                if width == 240.0 {
+                    assert!(text_rect(&output, "Image").is_none());
+                    let pos = all.center();
+                    let button = |pos, pressed| egui::Event::PointerButton {
+                        pos,
+                        pressed,
+                        button: egui::PointerButton::Primary,
+                        modifiers: egui::Modifiers::NONE,
+                    };
+                    frame(vec![egui::Event::PointerMoved(pos), button(pos, true)]);
+                    assert!(egui::Popup::is_any_open(&context));
+                    let output = frame(vec![]);
+                    let image = node_rect(&output, "Image").center();
+                    frame(vec![egui::Event::PointerMoved(image), button(image, false)]);
+                    let output = frame(vec![]);
+                    assert!(!egui::Popup::is_any_open(&context));
+                    assert!(text_rect(&output, "Image").is_some());
+                    assert!(text_rect(&output, "All").is_none());
+                } else {
+                    for label in ["Image", "Video", "Audio"] {
+                        assert!(text_rect(&output, label).is_some());
+                    }
+                }
+            }
         }
     }
 
@@ -616,12 +506,12 @@ mod tests {
 
     fn show(
         ui: &mut egui::Ui,
-        shortcuts: &ShortcutBindings,
+        counts: &mut crate::browser_controls::Counts,
         recent: impl FnOnce(&mut egui::Ui),
     ) -> Option<CommandId> {
         super::show(
             ui,
-            shortcuts,
+            counts,
             &mut String::new(),
             &mut None,
             &[],
@@ -670,7 +560,7 @@ mod tests {
                                 });
                         }
                         assert!(
-                            show(ui, &ShortcutBindings::default(), |ui| {
+                            show(ui, &mut crate::browser_controls::Counts::default(), |ui| {
                                 assert_eq!(ui.visuals().widgets, original, "card style");
                                 grid_clip.set(ui.clip_rect());
                                 grid_origin.set(ui.max_rect().top());
@@ -690,7 +580,8 @@ mod tests {
                         egui::Shape::Rect(rect)
                             if rect.fill == chrome::FOREGROUND
                                 && rect.rect.left() > 400.0
-                                && rect.rect.height() == 3.0 =>
+                                && rect.rect.height() <= 1.01
+                                && rect.rect.width() > 20.0 =>
                         {
                             Some(rect.rect.center().y)
                         }
@@ -705,7 +596,12 @@ mod tests {
             let track = node_rect(&idle, "Date unknown");
             let grid_top = grid_origin.get();
             assert!(
-                (grid_clip.get().top() + crate::filmstrip::GALLERY_GAP - grid_top).abs()
+                (grid_clip.get().top()
+                    + chrome::INPUT_HEIGHT
+                    + 8.0
+                    + crate::filmstrip::GALLERY_GAP
+                    - grid_top)
+                    .abs()
                     <= 1.0 / density,
                 "initial clip {:?}, grid top {grid_top}, density {density}",
                 grid_clip.get()
@@ -751,9 +647,14 @@ mod tests {
                 }
                 let scrolled = marker(&frame(vec![]));
                 assert!(
-                    (grid_clip.get().top() + crate::filmstrip::GALLERY_GAP - grid_top).abs()
+                    (grid_clip.get().top()
+                        + chrome::INPUT_HEIGHT
+                        + 8.0
+                        + crate::filmstrip::GALLERY_GAP
+                        - grid_top)
+                        .abs()
                         <= 1.0 / density,
-                    "scrolling cannot paint into the header gap"
+                    "scrolling retains the full viewport clip beneath the header"
                 );
                 if gutter.y < track.top() {
                     assert_eq!(scrolled, after, "fixed header does not scroll");
@@ -789,7 +690,11 @@ mod tests {
             let end = track.center_bottom() + egui::vec2(0.0, 30.0);
             frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
             frame(vec![egui::Event::PointerMoved(end)]);
-            let bottom = marker(&frame(vec![button(end, false)]));
+            frame(vec![button(end, false)]);
+            for _ in 0..70 {
+                frame(vec![]);
+            }
+            let bottom = marker(&frame(vec![]));
             assert!(
                 (bottom - (track.bottom() - 2.0)).abs() <= 1.0 / density,
                 "owned drag reaches the end outside the rail"
@@ -824,7 +729,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    show(ui, &ShortcutBindings::default(), |ui| {
+                    show(ui, &mut crate::browser_controls::Counts::default(), |ui| {
                         origin = ui.max_rect().top();
                         ui.set_min_height(2000.0);
                     });
@@ -859,374 +764,6 @@ mod tests {
     }
 
     #[test]
-    fn gallery_header_centers_square_buttons_and_highlights_the_active_filter() {
-        for density in [1.0, 1.25, 2.0] {
-            for width in [240.0, 480.0, 960.0] {
-                for filter in [
-                    None,
-                    Some(MediaKind::Image),
-                    Some(MediaKind::Video),
-                    Some(MediaKind::Audio),
-                ] {
-                    let context = crate::fonts::test_context();
-                    context.set_pixels_per_point(density);
-                    context.global_style_mut(chrome::style);
-                    context.enable_accesskit();
-                    let mut output = egui::FullOutput::default();
-                    let grid_top = std::cell::Cell::new(0.0);
-                    for _ in 0..3 {
-                        output = context.run_ui(
-                            egui::RawInput {
-                                screen_rect: Some(egui::Rect::from_min_size(
-                                    egui::Pos2::ZERO,
-                                    egui::vec2(width, 300.0),
-                                )),
-                                ..Default::default()
-                            },
-                            |ui| {
-                                let mut selected = filter;
-                                super::show(
-                                    ui,
-                                    &ShortcutBindings::default(),
-                                    &mut String::new(),
-                                    &mut selected,
-                                    &[],
-                                    true,
-                                    |ui, _, _| {
-                                        grid_top.set(ui.cursor().top());
-                                        vec![]
-                                    },
-                                );
-                            },
-                        );
-                    }
-                    let search = node_rect(&output, "Search Gallery");
-                    for label in [
-                        "Filter media types",
-                        "Clear Gallery search",
-                        "Open File…",
-                        "Open Folder…",
-                    ] {
-                        let rect = node_rect(&output, label);
-                        assert!(
-                            (rect.width() - rect.height()).abs() <= 1.0 / density,
-                            "square {label}: {rect:?}"
-                        );
-                        assert!(
-                            (rect.center().y - search.center().y).abs() <= 1.0 / density,
-                            "centered {label}: {rect:?}, search={search:?}"
-                        );
-                        assert!(rect.height() <= search.height() - 3.0);
-                    }
-                    let filter_rect = node_rect(&output, "Filter media types");
-                    let clear = node_rect(&output, "Clear Gallery search");
-                    assert!(search.right() < clear.left());
-                    assert!(clear.right() < filter_rect.left());
-                    let border = egui::Rect::from_min_size(
-                        egui::pos2((width - (width - 16.0).min(400.0)) * 0.5, 8.0),
-                        egui::vec2((width - 16.0).min(400.0), chrome::INPUT_HEIGHT),
-                    );
-                    assert!((border.center().x - width * 0.5).abs() < 0.1);
-                    assert!(output.shapes.iter().all(|shape| !matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect.contains_rect(search) && rect.rect.contains_rect(clear) && rect.fill == egui::Color32::from_gray(12))));
-                    assert!(
-                        (border.top() - 8.0).abs() <= 1.0 / density,
-                        "header top matches its side inset: {border:?}"
-                    );
-                    assert!(
-                        (grid_top.get() - border.bottom() - 8.0 - crate::filmstrip::GALLERY_GAP)
-                            .abs()
-                            <= 1.0 / density,
-                        "header/body gap matches the side inset: {} vs {border:?}",
-                        grid_top.get()
-                    );
-                    assert!(border.right() - clear.right() >= 1.0);
-                    assert!(border.contains_rect(node_rect(&output, "Open File…")));
-                    if filter.is_some() {
-                        let mesh = output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::Shape::Mesh(mesh)
-                                    if filter_rect.contains_rect(mesh.calc_bounds()) =>
-                                {
-                                    Some(mesh)
-                                }
-                                _ => None,
-                            })
-                            .expect("Fluent filter icon");
-                        assert!(
-                            (mesh.calc_bounds().center() - filter_rect.center()).length()
-                                <= 1.0 / density
-                        );
-                        assert!((mesh.calc_bounds().width() - 16.0).abs() <= 1.0 / density);
-                        assert!(
-                            mesh.vertices
-                                .iter()
-                                .all(|vertex| vertex.color == chrome::FOREGROUND)
-                        );
-                    } else {
-                        let icon = output
-                            .shapes
-                            .iter()
-                            .find_map(|shape| match &shape.shape {
-                                egui::Shape::Text(text) if text.galley.text() == "\u{eaf1}" => {
-                                    Some(text)
-                                }
-                                _ => None,
-                            })
-                            .expect("unfiltered icon");
-                        assert!(
-                            icon.galley
-                                .job
-                                .sections
-                                .iter()
-                                .all(|s| s.format.color == chrome::MUTED)
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn gallery_inline_search_clips_long_text_and_caret_and_clear_retains_filter() {
-        use egui::accesskit::{Action, ActionRequest, TreeId};
-        for density in [1.0, 1.25, 2.0] {
-            for width in [240.0, 960.0] {
-                let context = crate::fonts::test_context();
-                context.set_pixels_per_point(density);
-                context.enable_accesskit();
-                context.global_style_mut(|style| {
-                    chrome::style(style);
-                    style.visuals.text_cursor.blink = false;
-                });
-                let query = std::cell::RefCell::new("Long Gallery search text ".repeat(16));
-                let filter = std::cell::Cell::new(Some(MediaKind::Video));
-                let enabled = std::cell::Cell::new(true);
-                let frame = |events| {
-                    context.run_ui(
-                        egui::RawInput {
-                            screen_rect: Some(egui::Rect::from_min_size(
-                                egui::Pos2::ZERO,
-                                egui::vec2(width, 320.0),
-                            )),
-                            events,
-                            ..Default::default()
-                        },
-                        |ui| {
-                            let mut selected = filter.get();
-                            super::show(
-                                ui,
-                                &ShortcutBindings::default(),
-                                &mut query.borrow_mut(),
-                                &mut selected,
-                                &["video.mp4".into()],
-                                enabled.get(),
-                                |_, _, _| vec![],
-                            );
-                            filter.set(selected);
-                        },
-                    )
-                };
-                frame(vec![]);
-                let output = frame(vec![]);
-                let tree = output
-                    .platform_output
-                    .accesskit_update
-                    .as_ref()
-                    .expect("tree");
-                let id = |label| {
-                    tree.nodes
-                        .iter()
-                        .find(|(_, node)| node.label() == Some(label))
-                        .expect("control")
-                        .0
-                };
-                let search_id = id("Search Gallery");
-                let clear_id = id("Clear Gallery search");
-                let action = |id, action| {
-                    egui::Event::AccessKitActionRequest(ActionRequest {
-                        target_tree: TreeId::ROOT,
-                        target_node: id,
-                        action,
-                        data: None,
-                    })
-                };
-                frame(vec![action(search_id, Action::Focus)]);
-                let mut positions = vec![];
-                for key in [egui::Key::End, egui::Key::Home, egui::Key::End] {
-                    let output = frame(vec![egui::Event::Key {
-                        key,
-                        physical_key: None,
-                        pressed: true,
-                        repeat: false,
-                        modifiers: egui::Modifiers::NONE,
-                    }]);
-                    let search = node_rect(&output, "Search Gallery");
-                    let button = node_rect(&output, "Filter media types");
-                    crate::resize::tests::assert_centered_input(
-                        &output,
-                        search,
-                        &query.borrow(),
-                        density,
-                    );
-                    let text = output
-                        .shapes
-                        .iter()
-                        .find(|shape| {
-                            matches!(&shape.shape,
-                        egui::Shape::Text(text) if text.galley.text() == query.borrow().as_str())
-                        })
-                        .expect("long text");
-                    assert!(text.clip_rect.right() < button.left());
-                    assert!(text.clip_rect.left() >= search.left());
-                    let egui::Shape::Text(text) = &text.shape else {
-                        unreachable!()
-                    };
-                    positions.push(text.pos.x);
-                    let caret = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::LineSegment { points, .. }
-                                if points[0].x == points[1].x
-                                    && search.contains(points[0])
-                                    && search.contains(points[1]) =>
-                            {
-                                Some(points[0].x)
-                            }
-                            _ => None,
-                        })
-                        .expect("visible caret");
-                    if key == egui::Key::End {
-                        assert!(caret > search.right() - 10.0, "end follows the text slot");
-                    } else {
-                        assert!(caret < search.left() + 10.0, "home returns to the left");
-                    }
-                }
-                assert!(positions[0] < positions[1] - 100.0);
-                assert!((positions[0] - positions[2]).abs() <= 1.0 / density);
-                enabled.set(false);
-                frame(vec![action(clear_id, Action::Click)]);
-                assert!(!query.borrow().is_empty(), "modal guard prevents clear");
-                enabled.set(true);
-                frame(vec![]);
-                let output = frame(vec![action(clear_id, Action::Click)]);
-                assert!(query.borrow().is_empty());
-                assert_eq!(filter.get(), Some(MediaKind::Video));
-                assert_eq!(
-                    output.platform_output.accesskit_update.expect("tree").focus,
-                    search_id
-                );
-                let output = frame(vec![]);
-                let clear = output
-                    .platform_output
-                    .accesskit_update
-                    .as_ref()
-                    .expect("tree")
-                    .nodes
-                    .iter()
-                    .find(|(id, _)| *id == clear_id)
-                    .expect("clear");
-                assert!(clear.1.is_disabled(), "empty clear retains a disabled slot");
-                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                    egui::Shape::Text(text) if text.galley.text() == "Search Gallery"
-                        && text.galley.job.sections.iter().all(|s| s.format.color == context.global_style().visuals.text_color()))));
-                frame(vec![egui::Event::Text("new search".into())]);
-                assert_eq!(query.borrow().as_str(), "new search");
-                let escape = || egui::Event::Key {
-                    key: egui::Key::Escape,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: egui::Modifiers::NONE,
-                };
-                context.memory_mut(|memory| memory.stop_text_input());
-                frame(vec![escape()]);
-                assert_eq!(
-                    query.borrow().as_str(),
-                    "new search",
-                    "Escape requires search focus"
-                );
-                frame(vec![action(search_id, Action::Focus)]);
-                frame(vec![escape()]);
-                assert!(query.borrow().is_empty());
-                assert_eq!(filter.get(), Some(MediaKind::Video));
-                frame(vec![egui::Event::Text("new search".into())]);
-                let output = frame(vec![]);
-                let clear = node_rect(&output, "Clear Gallery search").center();
-                let pointer = |pressed| egui::Event::PointerButton {
-                    pos: clear,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: egui::Modifiers::NONE,
-                };
-                frame(vec![egui::Event::PointerMoved(clear), pointer(true)]);
-                frame(vec![pointer(false)]);
-                assert!(
-                    query.borrow().is_empty(),
-                    "pointer click reaches only clear"
-                );
-                frame(vec![egui::Event::Text("after pointer".into())]);
-                assert_eq!(query.borrow().as_str(), "after pointer");
-            }
-        }
-    }
-
-    #[test]
-    fn welcome_text_uses_ui_font_while_icons_keep_their_own_family() {
-        for density in [1.0, 1.25, 2.0] {
-            for width in [240.0, 480.0, 960.0] {
-                let context = crate::fonts::test_context();
-                context.set_pixels_per_point(density);
-                let output = context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(width, 576.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        show(ui, &ShortcutBindings::default(), |ui| {
-                            ui.label("No recent files");
-                        });
-                    },
-                );
-                let mut wordmark = false;
-                let mut icon = false;
-                let mut open_file_icon = false;
-                for shape in &output.shapes {
-                    let egui::Shape::Text(text) = &shape.shape else {
-                        continue;
-                    };
-                    for section in &text.galley.job.sections {
-                        let family = &section.format.font_id.family;
-                        if family == &crate::fonts::icon_font().family {
-                            icon = true;
-                            open_file_icon |= text.galley.job.text
-                                [section.byte_range.start.0..section.byte_range.end.0]
-                                .contains('\u{ea94}');
-                        } else {
-                            assert_eq!(
-                                family,
-                                &egui::FontFamily::Proportional,
-                                "UI font for {:?} at {density}x / {width}px",
-                                text.galley.text()
-                            );
-                        }
-                    }
-                    if text.galley.text() == "Search Gallery" {
-                        wordmark = true;
-                    }
-                }
-                assert!(wordmark && icon, "audit search text and action icons");
-                assert!(open_file_icon, "Open File uses the requested Codicon");
-            }
-        }
-    }
-
-    #[test]
     fn welcome_idle_output_keeps_wordmark_and_shortcuts_visible() {
         let mut app = crate::Application::new(None, |_| {}).expect("headless app");
         let context = crate::fonts::test_context();
@@ -1251,202 +788,12 @@ mod tests {
                 break;
             }
         }
-        for label in [
-            "Search Gallery",
-            "Drop media files or a folder here to begin.",
-        ] {
+        for label in ["Search", "Drop media files or a folder here to begin."] {
             assert!(
                 text_rect(&last, label).is_some(),
                 "{label} is present in idle CPU output"
             );
         }
-    }
-
-    #[test]
-    fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
-        welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
-            crate::localization::Language::English,
-        );
-    }
-
-    #[test]
-    fn japanese_welcome_keeps_open_actions_together_and_accessible_at_small_sizes() {
-        welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
-            crate::localization::Language::Japanese,
-        );
-    }
-
-    fn welcome_keeps_open_actions_together_and_accessible_at_small_sizes_in_language(
-        language: crate::localization::Language,
-    ) {
-        for (size, density) in [
-            egui::vec2(960.0, 514.0),
-            egui::vec2(480.0, 238.0),
-            egui::vec2(240.0, 119.0),
-        ]
-        .into_iter()
-        .flat_map(|size| [1.0, 1.25, 2.0].map(|density| (size, density)))
-        {
-            let context = crate::fonts::test_context();
-            if language == crate::localization::Language::Japanese {
-                crate::localization::test_ui::configure_japanese(&context, 1.0);
-            }
-            context.set_pixels_per_point(density);
-            context.global_style_mut(chrome::style);
-            let mut shortcuts = ShortcutBindings::default();
-            context.enable_accesskit();
-            shortcuts.set(
-                CommandId::OpenFile,
-                "Ctrl+K Ctrl+O".parse().expect("shortcut"),
-            );
-            let grid = std::cell::Cell::new(egui::Rect::NOTHING);
-            let frame = |events| {
-                let mut commands = Vec::new();
-                let output = context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        if let Some(command) = show(ui, &shortcuts, |ui| {
-                            grid.set(ui.available_rect_before_wrap());
-                        }) {
-                            commands.push(command);
-                        }
-                    },
-                );
-                (output, commands)
-            };
-            for _ in 0..3 {
-                frame(vec![]);
-            }
-            let (output, _) = frame(vec![]);
-            let search = node_rect(&output, Text::GallerySearch.in_language(language));
-            let filter = node_rect(&output, Text::GalleryFilter.in_language(language));
-            let clear = node_rect(&output, Text::GalleryClear.in_language(language));
-            let open = node_rect(&output, Text::GalleryOpenFile.in_language(language));
-            let folder = node_rect(&output, Text::GalleryOpenFolder.in_language(language));
-            assert!(
-                search.right() < clear.left()
-                    && clear.right() < filter.left()
-                    && filter.right() < open.left()
-                    && open.right() < folder.left(),
-                "separate slots: {search:?}, {filter:?}, {clear:?}, {open:?}, {folder:?}"
-            );
-            for rect in [filter, clear, open, folder] {
-                assert!((rect.width() - 22.0).abs() <= 1.0 / density);
-                assert!((rect.height() - 22.0).abs() <= 1.0 / density);
-                assert!((rect.center().y - search.center().y).abs() <= 1.0 / density);
-            }
-            assert!((search.height() - 26.0).abs() <= 1.0 / density);
-            let hint = text_rect(&output, Text::GallerySearch.in_language(language))
-                .expect("Gallery placeholder");
-            assert!((hint.center().y - search.center().y).abs() <= 1.0 / density);
-            let header_width = (size.x - 16.0).min(400.0);
-            assert!((search.left() - (size.x - header_width) * 0.5).abs() <= 1.0 / density);
-            assert!((folder.right() + 2.0 - (size.x + header_width) * 0.5).abs() <= 1.0 / density);
-            let border = |output: &egui::FullOutput| {
-                output
-                    .shapes
-                    .iter()
-                    .find_map(|shape| match &shape.shape {
-                        egui::Shape::Rect(rect)
-                            if rect.rect.contains_rect(search)
-                                && rect.rect.contains_rect(clear)
-                                && rect.fill == egui::Color32::from_gray(12) =>
-                        {
-                            Some(rect.stroke)
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or(egui::Stroke::NONE)
-            };
-            let idle_border = border(&output);
-            frame(vec![egui::Event::PointerMoved(search.center())]);
-            let hovered = frame(vec![egui::Event::PointerMoved(search.center())]).0;
-            assert_eq!(border(&hovered), idle_border);
-            assert_eq!(idle_border, egui::Stroke::NONE);
-            assert!((open.center().y - folder.center().y).abs() < 1.0);
-            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains_rect(folder));
-            for (label, command) in [
-                (
-                    Text::GalleryOpenFile.in_language(language),
-                    CommandId::OpenFile,
-                ),
-                (
-                    Text::GalleryOpenFolder.in_language(language),
-                    CommandId::OpenFolder,
-                ),
-            ] {
-                let (output, _) = frame(vec![]);
-                let rect = node_rect(&output, label);
-                let pos = rect.center();
-                frame(vec![egui::Event::PointerMoved(pos)]);
-                let mut chosen = Vec::new();
-                for pressed in [true, false] {
-                    chosen.extend(
-                        frame(vec![egui::Event::PointerButton {
-                            pos,
-                            button: egui::PointerButton::Primary,
-                            pressed,
-                            modifiers: egui::Modifiers::NONE,
-                        }])
-                        .1,
-                    );
-                }
-                assert_eq!(chosen, [command]);
-            }
-        }
-    }
-
-    #[test]
-    fn welcome_buttons_support_keyboard_focus_and_activation() {
-        let context = crate::fonts::test_context();
-        let frame = |events| {
-            let mut commands = Vec::new();
-            let _ = context.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(480.0, 300.0),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    if let Some(command) = show(ui, &ShortcutBindings::default(), |_| {}) {
-                        commands.push(command);
-                    }
-                },
-            );
-            commands
-        };
-        for _ in 0..3 {
-            frame(vec![]);
-        }
-        let key = |key| {
-            vec![egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }]
-        };
-        frame(key(egui::Key::Tab));
-        assert!(
-            frame(key(egui::Key::Enter)).is_empty(),
-            "search does not open a file"
-        );
-        // Enter finishes a single-line edit; Tab re-enters the first field.
-        frame(key(egui::Key::Tab));
-        frame(key(egui::Key::Tab));
-        // The type-filter button precedes Open File.
-        frame(key(egui::Key::Tab));
-        assert_eq!(frame(key(egui::Key::Enter)), [CommandId::OpenFile]);
-        frame(key(egui::Key::Tab));
-        assert_eq!(frame(key(egui::Key::Enter)), [CommandId::OpenFolder]);
     }
 
     fn node_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {

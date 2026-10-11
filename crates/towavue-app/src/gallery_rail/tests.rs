@@ -63,6 +63,10 @@ fn frame_months(
         |ui| {
             ui.add_space(rect.top());
             ui.add_enabled_ui(enabled, |ui| {
+                advance(
+                    ui.ctx(),
+                    ui.make_persistent_id(egui::IdSalt::new("rail-test")),
+                );
                 let mut output = egui::ScrollArea::vertical()
                     .id_salt("rail-test")
                     .max_height(rect.height())
@@ -99,8 +103,12 @@ fn marker(frame: &Frame, color: egui::Color32) -> [egui::Pos2; 2] {
         .shapes
         .iter()
         .find_map(|shape| match &shape.shape {
-            egui::Shape::Rect(shape) if shape.fill == color && shape.rect.height() == 3.0 => {
-                assert!(shape.corner_radius.nw >= 2);
+            egui::Shape::Rect(shape)
+                if shape.fill == color
+                    && shape.rect.height() <= 1.01
+                    && shape.rect.width() > 20.0 =>
+            {
+                assert_eq!(shape.corner_radius.nw, 0);
                 Some([shape.rect.left_center(), shape.rect.right_center()])
             }
             _ => None,
@@ -174,10 +182,11 @@ fn month_labels_in_language(language: Language) {
                     assert!(
                         output.output.shapes.iter().any(|shape| matches!(
                             &shape.shape,
-                            egui::Shape::Circle(circle)
-                                if circle.radius == 1.5
-                                    && (circle.center.x + circle.radius - x).abs() < 0.01
-                                    && (circle.center.y - boundary).abs() < 0.01
+                            egui::Shape::Rect(line)
+                                if (line.rect.width() - 5.0 / density).abs() < 0.01
+                                    && (line.rect.height() - 1.0 / density).abs() < 0.01
+                                    && (line.rect.right() - x).abs() <= 0.51 / density
+                                    && (line.rect.center().y - boundary).abs() <= 0.51 / density
                         )),
                         "month dot must mark the tooltip boundary at the right edge"
                     );
@@ -243,179 +252,112 @@ fn crowded_year_boundaries_do_not_overlap_or_escape_the_rail() {
 }
 
 #[test]
-fn clicks_and_drag_release_share_coordinates_and_keep_ambiguous_positions() {
+fn clicks_interpolate_and_thumb_drag_preserves_grab_offset_with_retargeting() {
     for density in [1.0, 1.25, 2.0] {
         let context = crate::fonts::test_context();
         context.set_pixels_per_point(density);
         context.global_style_mut(chrome::style);
-        context.global_style_mut(|style| style.interaction.tooltip_delay = 60.0);
-        let offsets = [0.0, 0.0, 500.0, 1100.0];
-        frame(&context, &offsets, true, vec![]);
-        frame(&context, &offsets, true, vec![]);
-        for (fraction, expected) in [(0.125, 0.0), (0.375, 250.0), (0.625, 690.0), (0.875, 880.0)] {
-            let pos = point(fraction);
-            let hovered = frame(
-                &context,
-                &offsets,
-                true,
-                vec![egui::Event::PointerMoved(pos)],
-            );
-            let line = marker(&hovered, chrome::MUTED);
-            assert!((line[1].x - line[0].x - rail().width() * 0.85).abs() < 0.01);
-            let name = [
-                "December 2026",
-                "November 2026",
-                "October 2026",
-                "September 2026",
-            ][(fraction * 4.0) as usize];
-            let help = hovered
-                .output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text() == name => Some(
-                        context
-                            .fonts_mut(|fonts| {
-                                fonts.layout_no_wrap(
-                                    "H".into(),
-                                    egui::FontId::proportional(12.0),
-                                    chrome::FOREGROUND,
-                                )
-                            })
-                            .mesh_bounds
-                            .translate(text.pos.to_vec2()),
-                    ),
-                    _ => None,
-                })
-                .expect("visible month label");
-            assert!((help.center().y - line[0].y).abs() <= 1.0 / density);
-            assert!(help.right() <= line[0].x - 4.0);
-            let clicked = frame(
-                &context,
-                &offsets,
-                true,
-                vec![button(pos, true), button(pos, false)],
-            );
-            assert_eq!(clicked.maximum, 880.0);
-            assert!(
-                (clicked.offset - expected).abs() < 0.01,
-                "click {fraction}: {}",
-                clicked.offset
-            );
-            for output in [
-                clicked,
-                frame(&context, &offsets, true, vec![]),
-                frame(&context, &offsets, true, vec![]),
-            ] {
-                assert!((marker(&output, chrome::FOREGROUND)[0].y - pos.y).abs() <= 1.0 / density);
-            }
+        let offsets = [0.0, 200.0, 500.0, 1100.0];
+        for _ in 0..3 {
+            frame(&context, &offsets, true, vec![]);
         }
-        let start = point(0.1);
+        let pos = point(0.625);
         frame(
             &context,
             &offsets,
             true,
-            vec![egui::Event::PointerMoved(start), button(start, true)],
+            vec![egui::Event::PointerMoved(pos)],
         );
-        // A one-pixel move stays inside the original month band and below
-        // egui's drag threshold, but must already move the scrollbar thumb.
-        let tiny_move = start + egui::vec2(0.0, 1.0 / density);
-        let immediate = frame(
-            &context,
-            &offsets,
-            true,
-            vec![egui::Event::PointerMoved(tiny_move)],
-        );
-        assert!((marker(&immediate, chrome::FOREGROUND)[0].y - tiny_move.y).abs() < 0.01);
-        let end = point(0.6) + egui::vec2(-80.0, 0.0);
-        let dragged = frame(
-            &context,
-            &offsets,
-            true,
-            vec![egui::Event::PointerMoved(end)],
-        );
-        let help = dragged
-            .output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "October 2026" => Some(
-                    context
-                        .fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(
-                                "H".into(),
-                                egui::FontId::proportional(12.0),
-                                chrome::FOREGROUND,
-                            )
-                        })
-                        .mesh_bounds
-                        .translate(text.pos.to_vec2()),
-                ),
-                _ => None,
-            })
-            .expect("visible dragged month label");
-        assert!(
-            (help.center().y - marker(&dragged, chrome::FOREGROUND)[0].y).abs() <= 1.0 / density
-        );
-        let released = point(0.8) + egui::vec2(-80.0, 0.0);
-        let output = frame(
-            &context,
-            &offsets,
-            true,
-            vec![egui::Event::PointerMoved(released), button(released, false)],
-        );
-        assert!((marker(&output, chrome::FOREGROUND)[0].y - released.y).abs() <= 1.0 / density);
-        let blocked = frame(
-            &context,
-            &offsets,
-            false,
-            vec![
-                egui::Event::PointerMoved(point(0.3)),
-                button(point(0.3), true),
-                button(point(0.3), false),
-            ],
-        );
-        assert_eq!(blocked.offset, output.offset);
-        assert!(!blocked.output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains("2026") && text.galley.text() != "2026")));
-        // A wheel/focus scroll invalidates ambiguous cursor memory, even if it returns later.
-        let mut state = egui::scroll_area::State::load(&context, output.id).expect("scroll state");
-        state.offset.y = 100.0;
-        state.store(&context, output.id);
-        frame(&context, &offsets, true, vec![]);
-        state.offset.y = 880.0;
-        state.store(&context, output.id);
-        let output = frame(&context, &offsets, true, vec![]);
-        assert_eq!(marker(&output, chrome::FOREGROUND)[0].y, 358.0);
-        let pos = point(0.125);
-        frame(
-            &context,
-            &offsets,
-            true,
-            vec![
-                egui::Event::PointerMoved(pos),
-                button(pos, true),
-                button(pos, false),
-            ],
-        );
-        let changed = frame(&context, &[0.0, 100.0, 500.0, 1100.0], true, vec![]);
-        assert_eq!(
-            marker(&changed, chrome::FOREGROUND)[0].y,
-            42.0,
-            "changed row offsets invalidate the remembered ambiguous position"
-        );
-        frame(
+        let clicked = frame(
             &context,
             &offsets,
             true,
             vec![button(pos, true), button(pos, false)],
         );
-        frame(&context, &[], true, vec![]);
-        let restored = frame(&context, &offsets, true, vec![]);
-        assert_eq!(
-            marker(&restored, chrome::FOREGROUND)[0].y,
-            42.0,
-            "empty filtered results clear the remembered position"
+        assert_eq!(clicked.maximum, 880.0);
+        assert_eq!(clicked.offset, 0.0, "no instantaneous jump");
+        let first = frame(&context, &offsets, true, vec![]);
+        assert!(first.offset > 0.0 && first.offset < 690.0);
+        for _ in 0..70 {
+            frame(&context, &offsets, true, vec![]);
+        }
+        let settled = frame(&context, &offsets, true, vec![]);
+        assert!((settled.offset - 690.0).abs() < 0.01);
+        assert!((marker(&settled, chrome::FOREGROUND)[0].y - pos.y).abs() <= 0.51 / density);
+        let thumb_height = rail().height() * 320.0 / 1200.0;
+        let grab = egui::pos2(
+            616.0,
+            rail().top() + 0.625 * (rail().height() - thumb_height) + 8.0,
         );
+        frame(
+            &context,
+            &offsets,
+            true,
+            vec![egui::Event::PointerMoved(grab)],
+        );
+        let pressed = frame(&context, &offsets, true, vec![button(grab, true)]);
+        assert!(
+            (pressed.offset - settled.offset).abs() < 0.01,
+            "grabbing the thumb edge preserves its position"
+        );
+        let fill = pressed
+            .output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(shape) if shape.fill == egui::Color32::from_rgb(24, 24, 24) => {
+                    Some(shape.rect)
+                }
+                _ => None,
+            })
+            .expect("hover thumb");
+        assert!((fill.height() - thumb_height).abs() < 0.01);
+        let moved = grab + egui::vec2(0.0, -40.0);
+        frame(
+            &context,
+            &offsets,
+            true,
+            vec![egui::Event::PointerMoved(moved)],
+        );
+        let moving = frame(&context, &offsets, true, vec![]);
+        assert!(moving.offset < settled.offset && moving.offset > 200.0);
+        // Reverse before arrival: one target replaces the old one.
+        let final_point = grab + egui::vec2(0.0, 20.0);
+        frame(
+            &context,
+            &offsets,
+            true,
+            vec![egui::Event::PointerMoved(final_point)],
+        );
+        frame(&context, &offsets, true, vec![button(final_point, false)]);
+        for _ in 0..70 {
+            frame(&context, &offsets, true, vec![]);
+        }
+        let result = frame(&context, &offsets, true, vec![]);
+        let expected = offset_at(
+            &offsets
+                .iter()
+                .map(|offset| Month {
+                    date: None,
+                    offset: *offset,
+                })
+                .collect::<Vec<_>>(),
+            880.0,
+            0.625 + 20.0 / (rail().height() - thumb_height),
+        );
+        assert!(
+            (result.offset - expected).abs() < 0.01,
+            "anchored target {expected}, actual {}",
+            result.offset
+        );
+        // Native wheel or keyboard changes take ownership from a pending rail motion.
+        let mut state = egui::scroll_area::State::load(&context, result.id).expect("scroll state");
+        state.offset.y = 100.0;
+        state.store(&context, result.id);
+        for _ in 0..10 {
+            frame(&context, &offsets, true, vec![]);
+        }
+        assert_eq!(frame(&context, &offsets, true, vec![]).offset, 100.0);
     }
 }
 

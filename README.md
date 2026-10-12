@@ -10,7 +10,7 @@
 
 <h1></h1>
 
-**All your media. One fast, beautifully minimal Windows app.**
+**All your media. The fastest, beautifully minimal Windows app.**
 
 Browse images, watch videos, and listen to music in a single, fluid workspace. Built in Rust with native GPU rendering, towavue brings speed, a modern tabbed interface, and non-destructive editing together, with your files in the same order as Explorer.
 
@@ -19,7 +19,7 @@ Browse images, watch videos, and listen to music in a single, fluid workspace. B
 ## Features
 
 - **Images, video, and audio, together.** Keep your media in tabs, or move tabs between windows with edits and playback state intact.
-- **Built for responsive viewing.** GPU rendering powers the interface and media display. Supported hardware-decoded video stays on the GPU through presentation, avoiding frame copies back to the CPU.
+- **Built for maximum viewing speed.** GPU rendering powers the interface and media display. Supported hardware-decoded video stays on the GPU through presentation, avoiding frame copies back to the CPU.
 - **Browse in the order you expect.** Follow Explorer's folder order, jump through thumbnail filmstrips, and revisit recent files in the gallery.
 - **A comfortable reading view.** Connect images into pages, choose the layout and reading direction, and settle into fullscreen.
 - **Edit without leaving the viewer.** Crop, rotate, and resize images; trim video and audio, adjust speed and gain, or save a video frame. Work non-destructively, with undo available even after saving.
@@ -50,11 +50,15 @@ Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF, including suppor
 
 | Action                                                                 | Shortcut                                                                  |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Show command palette / go to file / open recent folder                 | Ctrl+Shift+P / Ctrl+P / Ctrl+Shift+F                                      |
 | Toggle filmstrip / reading mode / timeline                             | F / B / T                                                                 |
+| Open gallery                                                           | Ctrl+T                                                                    |
 | Previous / next file in the folder, across media types                 | Shift+Tab / Tab                                                           |
-| Back / forward in this tab's path history                             | Alt+Left / Alt+Right                                                      |
+| Back / forward in this tab's path history                              | Alt+Left / Alt+Right                                                      |
 | Previous / next file of the same media type                            | Ctrl+Left / Ctrl+Right                                                    |
 | Crop the image selection / keep only the selected video or audio range | Ctrl+Y                                                                    |
+| Rotate / free rotate media                                             | L / R / Alt+Drag Left / Alt+Drag Right                                    |
+| Flip media horizontally / vertically                                   | H / V                                                                     |
 | Set the time selection's start / end at the playhead                   | I / O                                                                     |
 | Raise / lower playback volume                                          | Wheel up / down over the video or audio view (outside the audio playlist) |
 | Previous / next video frame                                            | `,` / `.`                                                                 |

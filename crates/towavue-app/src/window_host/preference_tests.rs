@@ -50,12 +50,12 @@ fn explicit_settings_survive_fresh_processes_and_old_windows_do_not_revert_them(
 #[test]
 #[ignore = "owned subprocess of preference restart regression"]
 fn preference_restart_child() {
-    let _cleanup =
+    let root =
         crate::tests::isolated_test_root("window_host::preference_tests::preference_restart_child")
             .expect("isolated subprocess");
     let path =
         PathBuf::from(std::env::var_os("TOWAVUE_PREFERENCE_FIXTURE").expect("owned fixture"));
-    let root = PathBuf::from(std::env::var_os("TOWAVUE_APP_TEST_ROOT").expect("isolated root"));
+    // The isolation helper expands short TEMP names, as does the parent fixture.
     assert!(path.starts_with(&root));
     let mut host = host(&path);
     let first = *host

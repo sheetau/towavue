@@ -226,17 +226,38 @@ fn source_stamp_rejects_modified_replaced_missing_and_unleased_files() {
     std::fs::create_dir(&root).expect("unique owned fixture directory");
     let path = root.join("owned.bin");
     std::fs::write(&path, b"original").expect("write owned original");
+    let original_time = path
+        .metadata()
+        .expect("fixture metadata")
+        .modified()
+        .expect("fixture write time");
     let lease = crate::export::frame::SourceLease::open(&path).expect("source lease");
     let source = lease.source.clone();
     drop(lease);
     assert!(source.matches_current());
     std::fs::write(&path, b"modified").expect("modify owned fixture");
+    // Consecutive writes can share a Windows clock tick. Establish the changed
+    // timestamp explicitly instead of depending on the runner's clock resolution.
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("open changed fixture")
+        .set_modified(original_time + std::time::Duration::from_secs(2))
+        .expect("set changed fixture write time");
     assert!(!source.matches_current(), "same-length in-place change");
-    std::fs::remove_file(&path).expect("remove owned fixture");
+    let previous = root.join("previous.bin");
+    std::fs::rename(&path, &previous).expect("retain old file identity");
     std::fs::write(&path, b"original").expect("write owned original");
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .expect("open replacement fixture")
+        .set_modified(original_time)
+        .expect("restore original write time on distinct identity");
     assert!(!source.matches_current(), "replacement with original bytes");
     std::fs::remove_file(&path).expect("remove owned fixture");
     assert!(!source.matches_current(), "missing source");
+    std::fs::remove_file(previous).expect("remove previous fixture");
     std::fs::remove_dir(root).expect("remove empty owned directory");
 }
 

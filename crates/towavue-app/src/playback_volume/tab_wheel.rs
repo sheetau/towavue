@@ -2,7 +2,10 @@ use super::*;
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     pub(crate) fn tab_volume_wheel(&mut self, id: TabId, path: &Path, deltas: &[f32]) {
-        if self.modal_input_blocked()
+        if deltas
+            .iter()
+            .all(|delta| !delta.is_finite() || *delta == 0.0)
+            || self.modal_input_blocked()
             || self.tab_mute_state(id).is_none()
             || !self
                 .tabs
@@ -18,7 +21,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             .iter()
             .copied()
             .filter(|delta| delta.is_finite())
-            .fold(before, |level, delta| {
+            .fold(self.playback_adjustment_base(id), |level, delta| {
                 self.stepped_playback_volume(level, delta)
             });
         if before == level {
@@ -139,7 +142,7 @@ mod tests {
                 "other controls must not renew the title timer"
             );
             app.tab_volume_wheel(id, &path, &[1.0]);
-            assert_eq!(percentages(&mut app), vec!["2%"]);
+            assert_eq!(percentages(&mut app), vec!["62%"]);
         }
     }
 
@@ -164,22 +167,22 @@ mod tests {
         let tabs = app.tabs.clone();
         let edits = app.edits.clone();
         app.tab_volume_wheel(audio, &path, &[1000.0, -1.0]);
-        assert_eq!(app.playback_volume_for(audio), 1.98);
+        assert_eq!(app.playback_volume_for(audio), 0.98);
         assert_eq!(app.tabs, tabs);
         assert_eq!(app.edits, edits);
         assert!(app.session.is_none());
         app.tab_volume_wheel(audio, &root.join("stale.wav"), &[-1000.0]);
         app.tab_volume_wheel(image, &image_path, &[10.0]);
-        assert_eq!(app.playback_volume_for(audio), 1.98);
+        assert_eq!(app.playback_volume_for(audio), 0.98);
         assert!(!app.tab_volume_huds.contains_key(&image));
         app.pending_guard = Some(GuardedAction::Exit);
         app.tab_volume_wheel(audio, &path, &[-1000.0]);
-        assert_eq!(app.playback_volume_for(audio), 1.98);
+        assert_eq!(app.playback_volume_for(audio), 0.98);
         app.pending_guard = None;
         app.tab_volume_wheel(audio, &path, &[-1000.0]);
         assert_eq!(app.playback_volume_for(audio), 0.0);
         app.toggle_tab_mute(audio);
-        assert_eq!(app.playback_volume_for(audio), 1.98);
+        assert_eq!(app.playback_volume_for(audio), 0.98);
     }
 
     #[test]

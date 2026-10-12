@@ -45,19 +45,19 @@ fn preference_worker_coalesces_adjustments_and_flushes_mute_restore_on_shutdown(
         "opening does not manufacture a preference"
     );
     for step in 1..=200 {
-        let level = step as f32 / 100.0;
+        let level = step as f32 / 200.0;
         store.remember(level, level).expect("adjust");
     }
-    store.remember(0.0, 1.234567).expect("muted");
+    store.remember(0.0, 0.734567).expect("muted");
     drop(store);
     let store =
         PlaybackVolumePreferences::open(fixture.path(), |error| panic!("{error}")).expect("reopen");
-    assert_eq!(store.initial(), (0.0, 1.234567));
-    store.remember(1.234567, 1.234567).expect("unmute");
+    assert_eq!(store.initial(), (0.0, 0.734567));
+    store.remember(0.734567, 0.734567).expect("unmute");
     drop(store);
     let store =
         PlaybackVolumePreferences::open(fixture.path(), |error| panic!("{error}")).expect("reopen");
-    assert_eq!(store.initial(), (1.234567, 1.234567));
+    assert_eq!(store.initial(), (0.734567, 0.734567));
 }
 
 #[test]
@@ -183,4 +183,18 @@ fn failed_atomic_replacement_keeps_previous_volume_and_cleans_its_candidate() {
         read(&fixture.path()).expect("read").expect("record").level,
         0.7
     );
+}
+
+#[test]
+fn legacy_listening_levels_are_capped_without_rewriting_on_open() {
+    let fixture = Fixture::new();
+    for level in [0.0_f32, 1.7] {
+        let text = format!("{HEADER}\n1\n{level}\n1.7\n");
+        fs::write(fixture.path(), &text).expect("legacy record");
+        let store = PlaybackVolumePreferences::open(fixture.path(), |_| {}).expect("legacy open");
+        assert_eq!(store.initial(), (level.min(1.0), 1.0));
+        assert!(store.remember(1.01, 1.01).is_err());
+        drop(store);
+        assert_eq!(fs::read_to_string(fixture.path()).expect("preserved"), text);
+    }
 }

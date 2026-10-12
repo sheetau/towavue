@@ -482,6 +482,16 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             _ => None,
                         })
                         .expect("first image");
+                    let unhovered_bounds = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Mesh(mesh) if mesh.texture_id == textures[2] => {
+                                Some(mesh.calc_bounds())
+                            }
+                            _ => None,
+                        })
+                        .expect("unhovered image");
                     assert_eq!(output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if textures.contains(&mesh.texture_id))).count(), paths.len(), "all cards remain painted at frame {frame}");
                     let audio_index = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[11])).expect("audio waveform");
                     let egui::Shape::Rect(audio_background) = &output.shapes[audio_index - 1].shape
@@ -553,7 +563,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                             &[70, 115, 180, 255]
                         );
                         assert_eq!(
-                            at(492.0, 146.0),
+                            at(unhovered_bounds.center().x, unhovered_bounds.center().y),
                             &[90, 115, 180, 255],
                             "unhovered card remains visible at frame {frame}"
                         );

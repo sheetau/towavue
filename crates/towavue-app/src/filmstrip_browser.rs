@@ -287,7 +287,8 @@ impl Browser {
                                 egui::Sense::click(),
                             )
                         })
-                        .inner;
+                        .inner
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
                     let text = if forward {
                         Text::CommandHistoryForward
                     } else {

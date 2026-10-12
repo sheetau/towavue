@@ -69,7 +69,7 @@ pub(crate) fn show(
                 (Text::ThumbnailWindow.in_language(language), Action::Window),
             ] {
                 let response = ui.button(label);
-                items.push(response.id);
+                items.push((response.id, response.enabled()));
                 if response.clicked() {
                     chosen = Some(action);
                 }
@@ -87,7 +87,7 @@ pub(crate) fn show(
             ),
         ] {
             let response = ui.button(label);
-            items.push(response.id);
+            items.push((response.id, response.enabled()));
             if response.clicked() {
                 chosen = Some(action);
             }
@@ -96,7 +96,7 @@ pub(crate) fn show(
         match scope {
             Scope::Gallery => {
                 let response = ui.button(Text::RemoveHistory.in_language(language));
-                items.push(response.id);
+                items.push((response.id, response.enabled()));
                 if response.clicked() {
                     chosen = Some(Action::RemoveHistory);
                 }
@@ -117,7 +117,7 @@ pub(crate) fn show(
                     ),
                 ] {
                     let response = ui.button(label);
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if response.clicked() {
                         chosen = Some(Action::File(kind));
                     }

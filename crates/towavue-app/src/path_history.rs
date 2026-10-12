@@ -304,6 +304,13 @@ mod tests {
         ));
         settle(&mut app);
         assert_eq!(app.tabs.tabs().len(), 1);
+        assert_eq!(
+            app.status_notice().as_deref(),
+            Some(
+                towavue_core::localization::formatted::no_folder_media(app.language(), "empty")
+                    .as_str()
+            )
+        );
         app.handle_ui_action(UiAction::FilmstripFolder(
             Some(owner),
             generation,

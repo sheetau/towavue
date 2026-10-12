@@ -99,6 +99,7 @@ impl Hud {
                 ui.id().with(("volume-hud", tab, generation)),
                 egui::Sense::CLICK | egui::Sense::DRAG,
             )
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
         });
         let owned = response.as_ref().is_some_and(|response| {
             (response.is_pointer_button_down_on() && ui.input(|input| input.pointer.primary_down()))
@@ -118,7 +119,7 @@ impl Hud {
                 } else {
                     (track.bottom() - position.y) / track.height()
                 };
-                fraction.clamp(0.0, 1.0) * towavue_core::MAX_VOLUME
+                fraction.clamp(0.0, 1.0) * towavue_core::MAX_PLAYBACK_VOLUME
             });
         let (_, fill) = geometry(viewport, media, changed.unwrap_or(volume));
         let notice = self.notice.expect("current owner");
@@ -131,32 +132,12 @@ impl Hud {
         }
         let mut painter = ui.painter_at(viewport);
         painter.multiply_opacity(opacity);
-        paint_shadow(&painter, track);
-        painter.rect_filled(
-            track,
-            1.5,
-            crate::chrome::HOVER.gamma_multiply(ui.spacing().scroll.interact_background_opacity),
-        );
+        let pixel = 1.0 / ui.ctx().pixels_per_point();
+        painter.rect_filled(track.expand(pixel), 1.5 + pixel, crate::chrome::BORDER);
         if fill.is_positive() {
             painter.rect_filled(fill, 1.5, Color32::WHITE);
         }
         changed
-    }
-}
-
-// The generic rectangle blur clamps its penumbra to the three-point track's
-// thickness and can leave dark cap artifacts. Nested capsules approximate the
-// soft twelve-point penumbra without that thin-rectangle tessellation path.
-// Taper the outside layers to avoid a visible outer contour; keep the same
-// geometry and layer count, with less cumulative opacity than uniform layers.
-fn paint_shadow(painter: &egui::Painter, track: Rect) {
-    for (layer, alpha) in [1, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8].into_iter().enumerate() {
-        let spread = 7.0 - layer as f32 * 0.5;
-        painter.rect_filled(
-            track.expand(spread),
-            egui::CornerRadius::same(u8::MAX),
-            Color32::from_black_alpha(alpha),
-        );
     }
 }
 
@@ -179,7 +160,7 @@ fn geometry(viewport: Rect, media: Option<Rect>, volume: f32) -> (Rect, Rect) {
         )
     };
     let mut fill = track;
-    let ratio = (volume / towavue_core::MAX_VOLUME).clamp(0.0, 1.0);
+    let ratio = (volume / towavue_core::MAX_PLAYBACK_VOLUME).clamp(0.0, 1.0);
     if top {
         fill.max.x = egui::lerp(track.x_range(), ratio);
     } else {
@@ -191,6 +172,57 @@ fn geometry(viewport: Rect, media: Option<Rect>, volume: f32) -> (Rect, Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hud_has_only_progress_and_one_pixel_outer_track_with_pointer_cursor() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let mut tabs = towavue_core::TabSet::default();
+            let tab = tabs.open_new("video.mp4".into(), towavue_core::MediaKind::Video);
+            let start = Instant::now();
+            let mut hud = Hud::default();
+            hud.changed(tab, 1, start);
+            let mut track = Rect::NOTHING;
+            let mut cursor = egui::CursorIcon::Default;
+            for _ in 0..3 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(500.0, 400.0),
+                        )),
+                        events: if track.is_positive() {
+                            vec![egui::Event::PointerMoved(track.center())]
+                        } else {
+                            vec![]
+                        },
+                        ..Default::default()
+                    },
+                    |ui| {
+                        track = geometry(ui.max_rect(), None, 0.5).0;
+                        hud.show(ui, Some((tab, 1)), None, 0.5, start + FADE);
+                    },
+                );
+                let rectangles: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| {
+                        if let egui::Shape::Rect(rect) = &shape.shape {
+                            Some(rect)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert_eq!(rectangles.len(), 2, "no shadow layers");
+                assert_eq!(rectangles[0].fill, crate::chrome::BORDER);
+                assert_eq!(rectangles[0].rect, track.expand(1.0 / density));
+                cursor = output.platform_output.cursor_icon;
+            }
+            assert_eq!(cursor, egui::CursorIcon::PointingHand);
+        }
+    }
 
     #[test]
     fn visible_hud_clicks_and_drags_follow_both_axes_and_keep_the_deadline_alive() {
@@ -239,14 +271,14 @@ mod tests {
                 10,
                 vec![egui::Event::PointerMoved(center), event(center, true)],
             );
-            assert!((level.expect("press updates volume") - 1.0).abs() < 0.01);
+            assert!((level.expect("press updates volume") - 0.5).abs() < 0.01);
             let maximum = if horizontal {
                 track.right_center()
             } else {
                 track.center_top()
             };
             let (level, _) = frame(&mut hud, 2000, vec![egui::Event::PointerMoved(maximum)]);
-            assert_eq!(level, Some(towavue_core::MAX_VOLUME));
+            assert_eq!(level, Some(towavue_core::MAX_PLAYBACK_VOLUME));
             assert!(
                 hud.notice.is_some(),
                 "an owned drag outlives the display timer"
@@ -438,7 +470,7 @@ mod tests {
                         size.y > 120.0,
                     ),
                 ] {
-                    for volume in [0.0, 0.5, 1.0, 1.5, 2.0] {
+                    for volume in [0.0, 0.25, 0.5, 0.75, 1.0] {
                         let (track, fill) = geometry(viewport, media, volume);
                         assert!(viewport.contains_rect(track));
                         assert!(track.contains_rect(fill));
@@ -447,7 +479,7 @@ mod tests {
                         } else {
                             fill.height() / track.height()
                         };
-                        assert!((fraction - volume / 2.0).abs() < 0.001);
+                        assert!((fraction - volume).abs() < 0.001);
                         if size.y > 50.0 {
                             assert_eq!(track.width() > track.height(), horizontal);
                         }

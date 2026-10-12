@@ -55,6 +55,8 @@ pub use video_rotation::VideoRotation;
 /// Maximum linear level of each listening/master control or relative gain operation.
 /// Timeline gains can accumulate beyond this level through repeated operations.
 pub const MAX_VOLUME: f32 = 2.0;
+/// Listening gain is independent of the editable/exported gain.
+pub const MAX_PLAYBACK_VOLUME: f32 = 1.0;
 
 /// A signed media timestamp stored as nanoseconds.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

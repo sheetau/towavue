@@ -86,6 +86,29 @@ fn browser_middle_clicks_crumbs_and_cascade_rows_and_history_buttons_have_a_gap(
         output = frame(&context, &mut browser, size, vec![]).0;
     }
     let forward = node(&output, "Forward");
+    let back = node(&output, "Back");
+    let hovered = frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::PointerMoved(back.center())],
+    )
+    .0;
+    assert_eq!(
+        hovered.platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
+    let disabled = frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::PointerMoved(forward.center())],
+    )
+    .0;
+    assert_ne!(
+        disabled.platform_output.cursor_icon,
+        egui::CursorIcon::PointingHand
+    );
     let first = node(&output, "C:");
     assert!((first.left() - forward.right() - 18.0).abs() < 0.01);
     let activate = |browser: &mut Browser, pos, button| {

@@ -77,7 +77,8 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
             );
             for pair in row.windows(2) {
                 assert!(
-                    (pair[1].1.x0 - pair[0].1.x1 - 32.0).abs() <= tolerance,
+                    (pair[1].1.x0 - pair[0].1.x1 - f64::from(filmstrip::GALLERY_GAP)).abs()
+                        <= tolerance,
                     "generous horizontal gap"
                 );
             }
@@ -94,7 +95,7 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
                 .expect("second row")
                 .1;
             assert!(
-                (next.y0 - first.y1 - 32.0).abs() <= tolerance,
+                (next.y0 - first.y1 - f64::from(filmstrip::GALLERY_GAP)).abs() <= tolerance,
                 "matching vertical gap"
             );
             assert!(

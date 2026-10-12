@@ -154,12 +154,8 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
                         );
-                        let background = if cancel.hovered() || cancel.is_pointer_button_down_on() {
-                            chrome::HOVER
-                        } else {
-                            chrome::SURFACE_HOVER
-                        };
-                        ui.painter().rect_filled(cancel.rect, 2.0, background);
+                        ui.painter().rect_filled(cancel.rect, 2.0, chrome::BORDER);
+                        chrome::filled_button_border(ui, &cancel, 2);
                         ui.painter().text(
                             cancel.rect.center()
                                 - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),

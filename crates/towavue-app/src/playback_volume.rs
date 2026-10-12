@@ -93,9 +93,24 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
+    pub(super) fn playback_adjustment_base(&self, id: TabId) -> f32 {
+        let volume = self.playback_volumes.get(&id).copied().unwrap_or_default();
+        if volume.level == 0.0 {
+            volume.unmuted
+        } else {
+            volume.level
+        }
+    }
+
+    pub(super) fn active_playback_adjustment_base(&self) -> f32 {
+        self.tabs
+            .active_id()
+            .map_or(0.5, |id| self.playback_adjustment_base(id))
+    }
+
     pub(super) fn stepped_playback_volume(&self, volume: f32, delta: f32) -> f32 {
         let next = (volume + delta * f32::from(self.volume_step_percent) / 100.0)
-            .clamp(0.0, towavue_core::MAX_VOLUME);
+            .clamp(0.0, towavue_core::MAX_PLAYBACK_VOLUME);
         // Remove accumulated float residue at mute/full scale while preserving
         // fractional wheel steps to 0.0001 percentage points.
         (next * 1_000_000.0).round() / 1_000_000.0
@@ -218,7 +233,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
-        let level = level.clamp(0.0, towavue_core::MAX_VOLUME);
+        let level = level.clamp(0.0, towavue_core::MAX_PLAYBACK_VOLUME);
         if level == self.playback_volume() {
             return;
         }
@@ -258,6 +273,47 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn muted_adjustments_restore_once_and_preserve_background_ownership() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "playback_volume::tests::muted_adjustments_restore_once_and_preserve_background_ownership",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, |_| {}).expect("app");
+        let path = root.join("audio.wav");
+        let id = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Audio);
+        for (command, expected) in [(CommandId::VolumeUp, 0.62), (CommandId::VolumeDown, 0.58)] {
+            app.set_playback_volume(0.6);
+            app.toggle_playback_mute();
+            app.dispatch(command);
+            assert_eq!(app.playback_volume(), expected);
+        }
+        app.set_playback_volume(0.6);
+        app.toggle_playback_mute();
+        app.tab_volume_wheel(id, &path, &[]);
+        assert_eq!(app.playback_volume(), 0.0);
+        app.tab_volume_wheel(id, &path, &[-1000.0, 1.0]);
+        assert_eq!(
+            app.playback_volume(),
+            0.02,
+            "restore once, not after the zero crossing"
+        );
+        app.set_playback_volume(0.6);
+        app.toggle_playback_mute();
+        let image = root.join("image.png");
+        let active = app.tabs.open_new(image.clone(), MediaKind::Image);
+        app.path = Some(image);
+        app.media_kind = Some(MediaKind::Image);
+        app.tab_volume_wheel(id, &path, &[-1.0]);
+        assert_eq!(app.playback_volume_for(id), 0.58);
+        assert_eq!(app.tabs.active_id(), Some(active));
+        assert!(app.retained_playback.is_empty());
+        assert!(app.edits.is_empty());
+    }
 
     #[test]
     fn explicit_choices_are_idempotent_and_leave_listening_and_edits_unchanged() {
@@ -319,11 +375,12 @@ mod tests {
             for percent in [2, 5, 10, 2] {
                 assert_eq!(app.volume_step_percent, percent);
                 let step = f32::from(percent) / 100.0;
-                app.set_playback_volume(1.0);
+                app.set_playback_volume(0.5);
                 app.dispatch(CommandId::VolumeUp);
-                assert!((app.playback_volume() - (1.0 + step)).abs() < 0.000001);
+                assert!((app.playback_volume() - (0.5 + step)).abs() < 0.000001);
                 app.dispatch(CommandId::VolumeDown);
-                assert_eq!(app.playback_volume(), 1.0);
+                assert_eq!(app.playback_volume(), 0.5);
+                app.set_playback_volume(1.0);
                 for _ in 0..100 / percent {
                     app.dispatch(CommandId::VolumeDown);
                 }
@@ -331,12 +388,12 @@ mod tests {
                 for _ in 0..200 / u16::from(percent) {
                     app.dispatch(CommandId::VolumeUp);
                 }
-                assert_eq!(app.playback_volume(), 2.0);
+                assert_eq!(app.playback_volume(), 1.0);
                 app.dispatch(CommandId::VolumeUp);
                 app.dispatch(CommandId::ToggleMute);
                 assert_eq!(app.playback_volume(), 0.0);
                 app.dispatch(CommandId::ToggleMute);
-                assert_eq!(app.playback_volume(), 2.0);
+                assert_eq!(app.playback_volume(), 1.0);
 
                 let context = crate::fonts::test_context();
                 let point = egui::pos2(80.0, 80.0);
@@ -379,18 +436,18 @@ mod tests {
                 };
                 frame(&app, vec![]);
                 frame(&app, vec![]);
-                app.set_playback_volume(1.0);
+                app.set_playback_volume(0.5);
                 for (unit, delta, expected) in [
-                    (egui::MouseWheelUnit::Line, 1.0, 1.0 + step),
-                    (egui::MouseWheelUnit::Page, -2.0, 1.0 - step * 2.0),
-                    (egui::MouseWheelUnit::Point, 5.0, 1.0 + step / 10.0),
+                    (egui::MouseWheelUnit::Line, 1.0, 0.5 + step),
+                    (egui::MouseWheelUnit::Page, -2.0, 0.5 - step * 2.0),
+                    (egui::MouseWheelUnit::Point, 5.0, 0.5 + step / 10.0),
                 ] {
                     let actions = frame(&app, vec![(unit, delta)]);
                     assert!(matches!(actions.as_slice(), [UiAction::Volume(id, level)]
                         if *id == tab && (*level - expected).abs() < 0.000001));
                     assert!(frame(&app, vec![]).is_empty(), "no delayed wheel tail");
                 }
-                for (deltas, expected) in [([1000.0, -1.0], 2.0 - step), ([-1000.0, 1.0], step)] {
+                for (deltas, expected) in [([1000.0, -1.0], 1.0 - step), ([-1000.0, 1.0], step)] {
                     let actions = frame(
                         &app,
                         deltas
@@ -557,7 +614,7 @@ mod tests {
                 app.session = session;
                 let generation = app.generation;
                 app.handle_ui_action(UiAction::Volume(first, 2.0));
-                check(&app, 2.0);
+                check(&app, 1.0);
                 assert_eq!(
                     app.generation, generation,
                     "volume does not restart decoding"
@@ -580,22 +637,22 @@ mod tests {
                 check(&app, 0.0);
                 assert!(app.session.as_ref().expect("session").timeline().is_some());
                 app.dispatch(CommandId::ToggleMute);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 app.push_edit(EditOperation::SetVolume(2.0));
-                assert_eq!(app.playback_volume(), 2.0);
+                assert_eq!(app.playback_volume(), 1.0);
                 assert_eq!(
                     app.session
                         .as_ref()
                         .expect("combined output")
                         .verification_volume(),
-                    (4.0, Some(4.0))
+                    (2.0, Some(2.0))
                 );
                 app.dispatch(CommandId::Undo);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 let history = app.edits[&first].clone();
                 app.set_preview_rate(1.5);
                 app.seek_to(media_time(Duration::from_millis(400)));
-                check(&app, 2.0);
+                check(&app, 1.0);
                 assert_eq!(app.edits[&first], history);
                 assert_eq!(app.session.as_ref().expect("preview session").rate(), 1.5);
 
@@ -645,7 +702,7 @@ mod tests {
                         .as_ref()
                         .expect("background audio")
                         .verification_volume(),
-                    (2.0, Some(2.0))
+                    (1.0, Some(1.0))
                 );
                 let first_tab = app
                     .tabs
@@ -661,7 +718,7 @@ mod tests {
                 assert_eq!(app.tab_audio_indicator(first_tab), None);
                 let active_before_mute = app.tabs.active_id();
                 let history_before_mute = app.edits.clone();
-                for (muted, expected) in [(true, 0.0), (false, 2.0)] {
+                for (muted, expected) in [(true, 0.0), (false, 1.0)] {
                     app.dispatch_tab_command(first, CommandId::ToggleMute);
                     assert_eq!(app.tab_mute_state(first), Some(muted));
                     let saved = &app.retained_playback[&first];
@@ -684,7 +741,7 @@ mod tests {
                     .as_ref()
                     .expect("session")
                     .generation();
-                for (delta, expected) in [(-1.0, 1.98), (1.0, 2.0)] {
+                for (delta, expected) in [(-1.0, 0.98), (1.0, 1.0)] {
                     app.tab_volume_wheel(first, &background_path, &[delta]);
                     let saved = &app.retained_playback[&first];
                     let session = saved.session.as_ref().expect("background audio");
@@ -921,7 +978,7 @@ mod tests {
                         }
                         assert_eq!(
                             app.playback_volumes[&id].level,
-                            if id == first { 2.0 } else { 0.0 }
+                            if id == first { 1.0 } else { 0.0 }
                         );
                         assert_eq!(app.tabs.active().expect("active").id, second);
                         assert_eq!(app.edits, histories);
@@ -961,13 +1018,13 @@ mod tests {
                     .expect("background")
                     .error = None;
                 app.activate_tab(first);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 assert_eq!(app.edits[&first], history);
                 let epoch = app.graphics_epoch;
                 let position = app.current_position();
                 app.recover_graphics_device(position);
                 assert!(app.graphics_epoch > epoch);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 assert_eq!(app.preview_rate(), 1.5);
                 assert_eq!(
                     app.retained_playback[&second]
@@ -993,11 +1050,11 @@ mod tests {
                     .target
                     .set_current_path(self.next.clone(), MediaKind::Audio);
                 app.load_path(self.next.clone(), MediaKind::Audio);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 app.dispatch(CommandId::ToggleMute);
                 check(&app, 0.0);
                 app.dispatch(CommandId::ToggleMute);
-                check(&app, 2.0);
+                check(&app, 1.0);
                 let moved_window = Arc::new(
                     event_loop
                         .create_window(
@@ -1054,7 +1111,7 @@ mod tests {
                     generation
                 );
                 destination.dispatch(CommandId::ToggleMute);
-                check(&destination, 2.0);
+                check(&destination, 1.0);
                 assert!(!app.playback_volumes.contains_key(&first));
                 destination.remove_tab(moved, false);
                 assert!(destination.session.is_none());
@@ -1111,12 +1168,12 @@ mod tests {
             app.media_duration = Some(Duration::from_secs(2));
             app.set_playback_volume(1.99);
             app.dispatch(CommandId::VolumeUp);
-            assert_eq!(app.playback_volume(), 2.0);
+            assert_eq!(app.playback_volume(), 1.0);
             app.dispatch(CommandId::VolumeUp);
-            assert_eq!(app.playback_volume(), 2.0);
+            assert_eq!(app.playback_volume(), 1.0);
             app.toggle_playback_mute();
             app.toggle_playback_mute();
-            assert_eq!(app.playback_volume(), 2.0);
+            assert_eq!(app.playback_volume(), 1.0);
             app.handle_ui_action(UiAction::Volume(tab, 0.4));
             assert_eq!(
                 app.edit_state().volume,

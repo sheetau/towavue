@@ -71,13 +71,13 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
             if !actions[index].1 {
                 child.disable();
             }
-            responses.push(
-                child.add(
-                    egui::Button::new(actions[index].0)
-                        .truncate()
-                        .min_size(button.size()),
-                ),
+            let response = child.add(
+                egui::Button::new(actions[index].0)
+                    .truncate()
+                    .min_size(button.size()),
             );
+            super::filled_button_border(&child, &response, 3);
+            responses.push(response);
             x += widths[index] + gap.x;
         }
     }

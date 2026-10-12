@@ -89,7 +89,7 @@ pub(super) fn submenu(
                 let height = sizing::height(ui);
                 crate::logo_menu::drag::scroll(ui, egui::Id::new("subtitles"), height, |ui| {
                     let response = ui.button(text(ui.ctx(), Text::CommandLoadSubtitles));
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if crate::logo_menu::drag::clicked(&response) {
                         command = Some(LoadSubtitles);
                         ui.close();
@@ -101,7 +101,7 @@ pub(super) fn submenu(
                         text(ui.ctx(), Text::CommandToggleSubtitles),
                     )
                     .help_text(text(ui.ctx(), Text::SubtitleExportHelp));
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if crate::logo_menu::drag::captured(ui.ctx()) {
                         data.subtitle_settings.visible = previous_visible;
                     } else if response.changed() {
@@ -112,7 +112,7 @@ pub(super) fn submenu(
                         let response = ui
                             .radio(data.subtitle_settings.selection == selection, &label)
                             .help_text(label);
-                        items.push(response.id);
+                        items.push((response.id, response.enabled()));
                         if crate::logo_menu::drag::clicked(&response) {
                             data.subtitle_action = Some(Action::Select(selection));
                             ui.close();
@@ -145,7 +145,7 @@ pub(super) fn submenu(
                         .labelled_by(label.id)
                         .help_text(text(ui.ctx(), Text::SubtitleDelayHelp));
                     ui.data_mut(|data| data.insert_temp(delay_key, response.id));
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if response.changed() && delay.is_finite() {
                         data.subtitle_action = Some(Action::Delay(SubtitleDelay::from_tenths(
                             (delay * 10.0).round() as i32,

@@ -21,9 +21,9 @@ mod reading_icon;
 mod tab_audio_fade;
 mod tab_fade;
 pub use tab_audio_fade::tab_audio_visibility;
+pub use tab_fade::{tab_strip_fades, tab_title_fade, tab_title_layout};
 #[cfg(test)]
-pub use tab_fade::tab_title;
-pub use tab_fade::{tab_strip_fades, tab_title_fade, tab_title_with_icon};
+pub use tab_fade::{tab_title, tab_title_with_icon};
 
 pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionAction> {
     let mut actions = Vec::new();
@@ -69,7 +69,9 @@ pub const FLOATING_BACKGROUND: Color32 = Color32::from_gray(12);
 pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
 pub const BORDER: Color32 = Color32::from_gray(24);
-pub const HOVER: Color32 = Color32::from_gray(44);
+pub const HOVER: Color32 = Color32::from_gray(24);
+pub const TRACK: Color32 = Color32::from_gray(44);
+pub const DISABLED: Color32 = Color32::from_gray(64);
 pub const SURFACE_HOVER: Color32 = Color32::from_gray(24);
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
@@ -82,16 +84,28 @@ pub const SEARCH_BUTTON_SIZE: f32 = INPUT_HEIGHT - 4.0;
 // Match the visible close glyph's inset in its 24-point slot.
 pub const TAB_PADDING: f32 = 7.0;
 
+#[cfg(test)]
 pub fn tab_close(ui: &mut Ui, rect: Rect, dirty: bool) -> egui::Response {
+    tab_close_visible(ui, rect, dirty, true)
+}
+
+pub fn tab_style(ui: &mut Ui) {
+    let widgets = &mut ui.visuals_mut().widgets;
+    widgets.inactive.fg_stroke.color = DISABLED;
+    widgets.noninteractive.fg_stroke.color = DISABLED;
+}
+
+pub fn tab_close_visible(ui: &mut Ui, rect: Rect, dirty: bool, visible: bool) -> egui::Response {
+    // Keep the keyboard/UIA identity and hit geometry stable. Pointer arrival
+    // reveals the control before a click; hiding only releases painted text width.
     let response = ui.put(
         rect,
         egui::Button::new("").frame(false).min_size(rect.size()),
     );
-    let glyph = if dirty && !response.hovered() && !response.has_focus() {
-        '\u{ea71}'
-    } else {
-        '\u{ea76}'
-    };
+    if !visible && !dirty {
+        return response;
+    }
+    let glyph = if visible { '\u{ea76}' } else { '\u{ea71}' };
     ui.painter().text(
         response.rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -175,7 +189,14 @@ pub fn style(style: &mut egui::Style) {
         visuals.fg_stroke.color = foreground;
         visuals.bg_fill = background;
         visuals.weak_bg_fill = background;
-        visuals.bg_stroke.color = BORDER;
+        visuals.bg_stroke = Stroke::new(
+            1.0,
+            if foreground == FOREGROUND {
+                DISABLED
+            } else {
+                BORDER
+            },
+        );
         visuals.expansion = 0.0;
     }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
@@ -301,6 +322,8 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
 /// Shared menu geometry, also used by combo popups and context menus.
 pub fn menu_style(style: &mut egui::Style) {
     egui::containers::menu::menu_style(style);
+    style.visuals.disabled_alpha = 1.0;
+    style.visuals.widgets.noninteractive.fg_stroke.color = DISABLED;
     style.spacing.interact_size.y = SEARCH_BUTTON_SIZE;
     style.spacing.button_padding = egui::vec2(6.0, 2.0);
     style.spacing.item_spacing.y = 0.0;
@@ -386,10 +409,25 @@ fn combo_box_impl<R>(
                 .show_ui(ui, contents)
         })
         .inner;
+    filled_button_border(ui, &result.response, INPUT_RADIUS);
     result.response = result
         .response
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     result
+}
+
+/// Feedback for filled controls, without changing their fill or layout.
+pub fn filled_button_border(ui: &Ui, response: &egui::Response, radius: u8) {
+    if response.enabled()
+        && (response.hovered() || response.has_focus() || response.is_pointer_button_down_on())
+    {
+        ui.painter().rect_stroke(
+            response.rect,
+            radius,
+            Stroke::new(1.0 / ui.ctx().pixels_per_point(), DISABLED),
+            egui::StrokeKind::Inside,
+        );
+    }
 }
 
 /// Frameless controls painted directly over the black content surface.
@@ -476,7 +514,7 @@ pub fn tab_audio_button(
         (if active || response.hovered() {
             FOREGROUND
         } else {
-            MUTED
+            DISABLED
         })
         .gamma_multiply(opacity),
     );
@@ -683,7 +721,7 @@ pub(super) fn paint_logo(
             {
                 FOREGROUND
             } else {
-                MUTED
+                DISABLED
             },
         )
     };
@@ -1138,7 +1176,7 @@ mod tests {
         style(&mut themed);
         #[cfg(debug_assertions)]
         assert!(!themed.debug.warn_if_rect_changes_id);
-        assert_eq!(HOVER, Color32::from_rgb(44, 44, 44));
+        assert_eq!(HOVER, Color32::from_rgb(24, 24, 24));
         for visuals in [
             themed.visuals.widgets.hovered,
             themed.visuals.widgets.active,

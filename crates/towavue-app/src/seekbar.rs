@@ -159,7 +159,7 @@ fn show_control(
         track,
         0.0,
         if active {
-            crate::chrome::HOVER
+            crate::chrome::TRACK
         } else {
             crate::chrome::BORDER
         },
@@ -486,7 +486,7 @@ mod tests {
                                 .iter()
                                 .find_map(|shape| match &shape.shape {
                                     egui::Shape::Rect(shape)
-                                        if [crate::chrome::HOVER, crate::chrome::BORDER]
+                                        if [crate::chrome::TRACK, crate::chrome::BORDER]
                                             .contains(&shape.fill) =>
                                     {
                                         Some(shape.rect)
@@ -574,7 +574,7 @@ mod tests {
                         let track = rectangles[index - 1];
                         let preview = rectangles[index];
                         let played = rectangles[index + 1];
-                        assert_eq!(track.fill, crate::chrome::HOVER);
+                        assert_eq!(track.fill, crate::chrome::TRACK);
                         assert_eq!(track.rect.x_range(), status.x_range());
                         assert_eq!(played.fill, crate::chrome::FOREGROUND);
                         assert_eq!(preview.rect.left(), track.rect.left());

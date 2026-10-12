@@ -224,9 +224,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     egui::Button::new(title)
                         .shortcut_text(menu::shortcut_text(ui, shortcut, enabled)),
                 );
-                if enabled {
-                    items.push(response.id);
-                }
+                items.push((response.id, response.enabled()));
                 if response.clicked() {
                     chosen = Some(action);
                     ui.close();

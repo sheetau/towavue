@@ -5,6 +5,7 @@ pub fn tab_title(ui: &mut Ui, rect: Rect, label: &str, active: bool) -> egui::Re
     tab_title_with_icon(ui, rect, label, active, None, None)
 }
 
+#[cfg(test)]
 pub fn tab_title_with_icon(
     ui: &mut Ui,
     rect: Rect,
@@ -13,10 +14,22 @@ pub fn tab_title_with_icon(
     volume: Option<(f32, f32)>,
     icon: Option<crate::fluent::Kind>,
 ) -> egui::Response {
+    tab_title_layout(ui, rect, rect, label, active, volume, icon)
+}
+
+pub fn tab_title_layout(
+    ui: &mut Ui,
+    hit_rect: Rect,
+    rect: Rect,
+    label: &str,
+    active: bool,
+    volume: Option<(f32, f32)>,
+    icon: Option<crate::fluent::Kind>,
+) -> egui::Response {
     let response = ui.put(
-        rect,
+        hit_rect,
         egui::Button::new("")
-            .min_size(rect.size())
+            .min_size(hit_rect.size())
             .fill(Color32::TRANSPARENT)
             .stroke(Stroke::NONE)
             .sense(egui::Sense::click_and_drag()),
@@ -84,10 +97,8 @@ pub fn tab_title_fade(ui: &Ui, rect: Rect, active: bool, hovered: bool) {
     // Match Monapad's name-wrap mask: unchanged through 80%, transparent at
     // the close-button boundary. Paint only over the label on its actual tab
     // background, leaving the leading audio slot and trailing controls intact.
-    let background = if hovered {
-        HOVER
-    } else if active {
-        BORDER
+    let background = if hovered && !active {
+        FLOATING_BACKGROUND
     } else {
         BACKGROUND
     };
@@ -208,10 +219,8 @@ mod tests {
                                 < 0.01
                         );
                         assert_eq!(bounds.right(), rect.right());
-                        let background = if hovered {
-                            HOVER
-                        } else if active {
-                            BORDER
+                        let background = if hovered && !active {
+                            FLOATING_BACKGROUND
                         } else {
                             BACKGROUND
                         };

@@ -117,7 +117,7 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
             app.toggle_playback_mute();
             assert_eq!(
                 app.playback_volume(),
-                1.2,
+                0.9,
                 "unmute restores the saved positive level"
             );
             app.set_playback_volume(0.6789);
@@ -148,14 +148,14 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
         let app = host.windows.get_mut(&second_window).expect("second app");
         app.open_external(paths[1].clone(), true);
         assert_eq!(app.playback_volume(), 0.37);
-        app.set_playback_volume(1.2);
+        app.set_playback_volume(0.9);
         app.tabs.active().expect("second tab").id
     };
     {
         let app = host.windows.get_mut(&first_window).expect("first app");
         assert_eq!(app.playback_volume(), 0.37, "existing tab stays unchanged");
         app.open_external(paths[2].clone(), true);
-        assert_eq!(app.playback_volume(), 1.2);
+        assert_eq!(app.playback_volume(), 0.9);
         app.toggle_playback_mute();
         assert_eq!(app.playback_volume(), 0.0);
         app.filmstrip_open = true;
@@ -197,7 +197,7 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
         app.toggle_playback_mute();
         assert_eq!(
             app.playback_volume(),
-            1.2,
+            0.9,
             "inherit the nonzero restore level"
         );
         app.tabs.activate(first);
@@ -208,10 +208,10 @@ fn new_tabs_inherit_last_listening_volume_across_windows_without_rewriting_exist
     {
         let app = host.windows.get_mut(&second_window).expect("second app");
         assert_eq!(app.tabs.active().expect("tab").id, second);
-        assert_eq!(app.playback_volume(), 1.2);
+        assert_eq!(app.playback_volume(), 0.9);
         // Activating an older tab is not a volume adjustment.
         app.open_external(paths[0].clone(), true);
-        assert_eq!(app.playback_volume(), 1.2);
+        assert_eq!(app.playback_volume(), 0.9);
     }
     host.windows
         .get_mut(&second_window)

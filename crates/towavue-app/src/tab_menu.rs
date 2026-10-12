@@ -220,9 +220,7 @@ pub fn show(
                     enabled,
                 )),
             );
-            if enabled {
-                items.push(response.id);
-            }
+            items.push((response.id, response.enabled()));
             if response.clicked() {
                 chosen = Some(*command);
                 ui.close();

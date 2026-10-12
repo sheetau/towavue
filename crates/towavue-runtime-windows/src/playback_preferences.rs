@@ -36,7 +36,13 @@ pub struct PlaybackVolumePreferences {
 impl PlaybackVolumePreferences {
     pub fn open(path: PathBuf, failed: impl Fn(io::Error) + Send + 'static) -> io::Result<Self> {
         let record = read(&path)?;
-        let initial = record.map_or((0.5, 0.5), |record| (record.level, record.unmuted));
+        // Older records allowed 200%; keep mute state while capping both levels.
+        let initial = record.map_or((0.5, 0.5), |record| {
+            (
+                record.level.min(towavue_core::MAX_PLAYBACK_VOLUME),
+                record.unmuted.min(towavue_core::MAX_PLAYBACK_VOLUME),
+            )
+        });
         let shared = Arc::new((
             Mutex::new(Mailbox {
                 observed: record.map_or(0, |record| record.observed),
@@ -93,6 +99,10 @@ impl PlaybackVolumePreferences {
 
     pub fn remember(&self, level: f32, unmuted: f32) -> io::Result<()> {
         validate(level, unmuted)?;
+        if level > towavue_core::MAX_PLAYBACK_VOLUME || unmuted > towavue_core::MAX_PLAYBACK_VOLUME
+        {
+            return Err(invalid());
+        }
         let mut mailbox = self.shared.0.lock().expect("volume mailbox");
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

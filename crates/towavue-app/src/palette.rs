@@ -311,7 +311,7 @@ impl CommandPalette {
                     }
                 });
                 let weak_text_color = ui.visuals().weak_text_color;
-                ui.visuals_mut().weak_text_color = Some(crate::chrome::HOVER);
+                ui.visuals_mut().weak_text_color = Some(crate::chrome::TRACK);
                 ui.spacing_mut().text_edit_width = f32::INFINITY;
                 let folder_mode = self.folder_mode();
                 crate::chrome::text_edit(
@@ -879,7 +879,7 @@ mod tests {
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                         egui::Shape::Text(text) if text.galley.text().starts_with("Search files by name")
                             && text.galley.job.sections.iter().all(|section|
-                                section.format.color == crate::chrome::HOVER))));
+                                section.format.color == crate::chrome::TRACK))));
                 }
             }
         }

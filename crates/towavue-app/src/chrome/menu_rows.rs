@@ -77,8 +77,8 @@ pub(crate) fn menu_checkbox(
         ui.painter().rect(
             checkbox,
             visuals.corner_radius,
-            visuals.bg_fill,
-            visuals.bg_stroke,
+            super::BORDER,
+            egui::Stroke::NONE,
             egui::StrokeKind::Inside,
         );
         let icon = egui::Rect::from_center_size(
@@ -135,6 +135,7 @@ impl MenuRows {
             for index in self.0.0 + 1..end {
                 list.mutate_shape(egui::layers::ShapeIdx(index), |clipped| {
                     clear_row_backgrounds(&mut clipped.shape, &rows);
+                    disabled_foreground(&mut clipped.shape, &rows);
                 });
             }
         });
@@ -156,6 +157,39 @@ impl MenuRows {
                 })
             });
         }
+    }
+}
+
+fn disabled_foreground(shape: &mut egui::Shape, rows: &[Response]) {
+    if let egui::Shape::Vec(shapes) = shape {
+        for shape in shapes {
+            disabled_foreground(shape, rows);
+        }
+        return;
+    }
+    if !rows
+        .iter()
+        .any(|row| !row.enabled() && row.rect.contains(shape.visual_bounding_rect().center()))
+    {
+        return;
+    }
+    // egui disables input/opacity without changing the response's click sense.
+    // Use an opaque foreground for disabled rows, preserving their backgrounds.
+    match shape {
+        egui::Shape::Text(text) => {
+            text.fallback_color = super::DISABLED;
+            text.override_text_color = Some(super::DISABLED);
+        }
+        egui::Shape::Mesh(mesh) => {
+            for vertex in &mut std::sync::Arc::make_mut(mesh).vertices {
+                vertex.color = super::DISABLED.gamma_multiply(vertex.color.a() as f32 / 255.0);
+            }
+        }
+        egui::Shape::Path(path) => {
+            path.stroke.color = egui::epaint::ColorMode::Solid(super::DISABLED);
+        }
+        egui::Shape::LineSegment { stroke, .. } => stroke.color = super::DISABLED,
+        _ => {}
     }
 }
 

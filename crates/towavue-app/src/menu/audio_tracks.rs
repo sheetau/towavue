@@ -92,7 +92,7 @@ pub(super) fn submenu(
                         } else {
                             response
                         };
-                        items.push(response.id);
+                        items.push((response.id, response.enabled()));
                         if response.gained_focus() {
                             response.scroll_to_me(None);
                         }
@@ -103,7 +103,7 @@ pub(super) fn submenu(
                     }
                     crate::chrome::separator(ui);
                     let response = ui.button(text(ui.ctx(), Text::CommandCycleAudioTrack));
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if crate::logo_menu::drag::clicked(&response) {
                         command = Some(CycleAudioTrack);
                         ui.close();

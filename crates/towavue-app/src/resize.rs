@@ -452,7 +452,7 @@ fn text_input_rows_with_id(
     let mut response = ui
         .scope(|ui| {
             ui.visuals_mut().weak_text_color = Some(if framed {
-                crate::chrome::HOVER
+                crate::chrome::TRACK
             } else if matches!(frame, InputFrame::Header) {
                 ui.visuals().text_color()
             } else {
@@ -711,7 +711,7 @@ pub(crate) mod tests {
                         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                             egui::Shape::Text(text) if text.galley.text() == "Placeholder"
                                 && text.galley.job.sections.iter().all(|section|
-                                    section.format.color == crate::chrome::HOVER))));
+                                    section.format.color == crate::chrome::TRACK))));
                     }
                 }
             }

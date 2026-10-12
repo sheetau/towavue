@@ -39,15 +39,9 @@ pub(super) fn named_tab(
     title: &str,
 ) -> (egui::Response, egui::Response) {
     let language = localization::language(ui.ctx());
-    ui.painter().rect_filled(
-        rect,
-        3.0,
-        if active {
-            chrome::BORDER
-        } else {
-            chrome::BACKGROUND
-        },
-    );
+    let show_close = active || ui.rect_contains_pointer(rect);
+    chrome::tab_style(ui);
+    ui.painter().rect_filled(rect, 3.0, chrome::BACKGROUND);
     let hover_background = ui.painter().add(egui::Shape::Noop);
     ui.spacing_mut().button_padding = egui::vec2(chrome::TAB_PADDING, 0.0);
     ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
@@ -55,6 +49,7 @@ pub(super) fn named_tab(
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
+    let text_rect = if show_close { label_rect } else { rect };
     let icon = crate::tab_icons::enabled(ui.ctx()).then(|| {
         if title == localization::text(ui.ctx(), Text::CommandOpenKeyboardSettings) {
             crate::fluent::Kind::Keyboard
@@ -65,7 +60,7 @@ pub(super) fn named_tab(
     if icon.is_some() {
         ui.spacing_mut().button_padding.x = 0.0;
     }
-    let response = chrome::tab_title_with_icon(ui, label_rect, title, active, None, icon);
+    let response = chrome::tab_title_layout(ui, label_rect, text_rect, title, active, None, icon);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -73,9 +68,16 @@ pub(super) fn named_tab(
             formatted::tab_label(language, title),
         )
     });
-    let close_rect = egui::Rect::from_min_max(egui::pos2(label_rect.right(), rect.top()), rect.max);
+    let close_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.right() - chrome::TAB_CLOSE_WIDTH, rect.top()),
+        rect.max,
+    );
+    let opacity = ui.opacity();
     let close = ui
-        .add_enabled_ui(can_close, |ui| chrome::tab_close(ui, close_rect, false))
+        .add_enabled_ui(can_close, |ui| {
+            ui.set_opacity(opacity);
+            chrome::tab_close_visible(ui, close_rect, false, show_close)
+        })
         .inner
         .help_text(formatted::close_title(language, title));
     close.widget_info(|| {
@@ -89,11 +91,11 @@ pub(super) fn named_tab(
     crate::tab_focus::release_pointer_button_focus(&response, egui::PointerButton::Middle);
     crate::tab_focus::release_pointer_focus(&close);
     let hovered = response.hovered() || close.hovered();
-    chrome::tab_title_fade(ui, label_rect, active, hovered);
-    if hovered {
+    chrome::tab_title_fade(ui, text_rect, active, hovered);
+    if hovered && !active {
         ui.painter().set(
             hover_background,
-            egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
+            egui::Shape::rect_filled(rect, 3.0, chrome::FLOATING_BACKGROUND),
         );
     }
     if response.has_focus() || close.has_focus() {
@@ -593,7 +595,7 @@ mod tests {
                     let hovered = frame(position);
                     assert_eq!(text_rect(&hovered, "Gallery").expect("label"), text);
                     assert!(hovered.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Rect(background) if background.rect == rect && background.fill == chrome::HOVER
+                        egui::Shape::Rect(background) if background.rect == rect && background.fill == if active { chrome::BACKGROUND } else { chrome::FLOATING_BACKGROUND }
                     )));
                 }
             }

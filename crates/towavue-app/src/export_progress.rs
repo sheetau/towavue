@@ -454,12 +454,8 @@ pub(super) fn show_status(
                         )
                     })
                     .inner;
-                let background = if cancel.hovered() || cancel.is_pointer_button_down_on() {
-                    chrome::HOVER
-                } else {
-                    egui::Color32::from_gray(24)
-                };
-                ui.painter().rect_filled(cancel.rect, 2.0, background);
+                ui.painter().rect_filled(cancel.rect, 2.0, chrome::BORDER);
+                chrome::filled_button_border(ui, &cancel, 2);
                 ui.painter().text(
                     cancel.rect.center() - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
                     egui::Align2::CENTER_CENTER,

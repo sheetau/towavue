@@ -970,10 +970,12 @@ fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
         });
         for shape in idle.shapes {
             match shape.shape {
-                egui::Shape::LineSegment { stroke, .. } => assert_eq!(stroke.color, chrome::MUTED),
+                egui::Shape::LineSegment { stroke, .. } => {
+                    assert_eq!(stroke.color, chrome::DISABLED)
+                }
                 egui::Shape::Path(path) => assert_eq!(
                     path.stroke.color,
-                    egui::epaint::ColorMode::Solid(chrome::MUTED)
+                    egui::epaint::ColorMode::Solid(chrome::DISABLED)
                 ),
                 _ => {}
             }

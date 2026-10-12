@@ -65,7 +65,7 @@ pub(crate) mod swipe;
 
 // Retain the transfer implementation while Gallery gestures scroll the grid.
 const GALLERY_DRAG_OUT: bool = false;
-pub(crate) const GALLERY_GAP: f32 = 32.0;
+pub(crate) const GALLERY_GAP: f32 = 36.0;
 const GALLERY_DIAMETER: f32 = 144.0;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
@@ -1938,7 +1938,7 @@ fn draw_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32, 
     let background = duration_background(rect, size, gallery);
     // Very thin thumbnails may place the badge beyond the image, within its cell.
     let painter = ui.painter_at(if gallery { ui.clip_rect() } else { rect });
-    painter.rect_filled(background, 2.0, crate::chrome::HOVER.gamma_multiply(0.6));
+    painter.rect_filled(background, 2.0, crate::chrome::TRACK.gamma_multiply(0.6));
     painter.galley(background.min + padding, galley, Color32::WHITE);
 }
 

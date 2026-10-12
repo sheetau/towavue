@@ -2822,9 +2822,15 @@ where
             }
             FolderIntent::Background(tab, generation) => {
                 if tab == self.tabs.active_id() && generation == self.media_generation {
-                    self.open_background_folder_media(&snapshot);
+                    if snapshot.items.is_empty() {
+                        self.finish_empty_folder(&snapshot.folder_path);
+                    } else {
+                        self.open_background_folder_media(&snapshot);
+                        self.refresh_folder_snapshot();
+                    }
+                } else {
+                    self.refresh_folder_snapshot();
                 }
-                self.refresh_folder_snapshot();
             }
             FolderIntent::Related(_, _) => unreachable!("navigation returns paths, not snapshots"),
             FolderIntent::Refresh(path) if self.path.as_ref() == Some(&path) => {
@@ -5091,9 +5097,13 @@ where
             .flatten();
         let before = self.playback_volume();
         // Preserve reversals at either limit, but publish only the final setting.
-        let volume = wheel_input::volume_deltas(context, targets, audio_list)
+        let deltas = wheel_input::volume_deltas(context, targets, audio_list);
+        if deltas.is_empty() {
+            return;
+        }
+        let volume = deltas
             .into_iter()
-            .fold(before, |volume, delta| {
+            .fold(self.playback_adjustment_base(tab.id), |volume, delta| {
                 self.stepped_playback_volume(volume, delta)
             });
         if volume != before {
@@ -5941,15 +5951,9 @@ where
                                             ui.scroll_to_rect(tab_rects[index], None);
                                         }
                                     }
-                                    painter.rect_filled(
-                                        rect,
-                                        3.0,
-                                        if active {
-                                            chrome::BORDER
-                                        } else {
-                                            chrome::BACKGROUND
-                                        },
-                                    );
+                                    let hovered = ui.rect_contains_pointer(rect);
+                                    let show_close = hovered || (active && !dirty);
+                                    painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
                                     let hover_background = painter.add(egui::Shape::Noop);
                                     let mut label_rect = egui::Rect::from_min_max(
                                         rect.min,
@@ -6001,6 +6005,7 @@ where
                                         },
                                         0.0,
                                     );
+                                    chrome::tab_style(&mut tab_ui);
                                     tab_ui.visuals_mut().widgets.inactive.bg_stroke =
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.hovered.bg_stroke =
@@ -6015,9 +6020,15 @@ where
                                             hud.title_opacity(tab_ui.ctx(), (tab.id, 0), now)
                                         })
                                         .map(|opacity| (self.playback_volume_for(tab.id), opacity));
-                                    let response = chrome::tab_title_with_icon(
+                                    let text_rect = label_rect.with_max_x(if show_close || dirty {
+                                        label_rect.right()
+                                    } else {
+                                        rect.right()
+                                    });
+                                    let response = chrome::tab_title_layout(
                                         &mut tab_ui,
                                         label_rect,
+                                        text_rect,
                                         &label,
                                         active,
                                         notice,
@@ -6111,27 +6122,30 @@ where
                                         ),
                                         rect.max,
                                     );
-                                    let close = chrome::tab_close(&mut tab_ui, close_rect, dirty)
-                                        .help_text(
-                                            localization::Text::CommandCloseTab
-                                                .in_language(language),
-                                        );
+                                    let close = chrome::tab_close_visible(
+                                        &mut tab_ui,
+                                        close_rect,
+                                        dirty,
+                                        show_close,
+                                    )
+                                    .help_text(
+                                        localization::Text::CommandCloseTab.in_language(language),
+                                    );
                                     tab_focus::release_pointer_focus(&close);
                                     let tab_hovered = response.hovered()
                                         || close.hovered()
                                         || audio_button
                                             .as_ref()
                                             .is_some_and(egui::Response::hovered);
-                                    chrome::tab_title_fade(
-                                        &tab_ui,
-                                        label_rect,
-                                        active,
-                                        tab_hovered,
-                                    );
-                                    if tab_hovered {
+                                    chrome::tab_title_fade(&tab_ui, text_rect, active, tab_hovered);
+                                    if tab_hovered && !active {
                                         painter.set(
                                             hover_background,
-                                            egui::Shape::rect_filled(rect, 3.0, chrome::HOVER),
+                                            egui::Shape::rect_filled(
+                                                rect,
+                                                3.0,
+                                                chrome::FLOATING_BACKGROUND,
+                                            ),
                                         );
                                     }
                                     if response.has_focus()
@@ -6760,11 +6774,15 @@ where
                             .add_sized(
                                 [40.0, 24.0],
                                 egui::Label::new(
-                                    RichText::new(format!(
-                                        "{:.0}%",
-                                        self.playback_volume() * 100.0
-                                    ))
-                                    .size(12.0)
+                                    if self.playback_volume() == 0.0 {
+                                        chrome::Icon::Muted.text()
+                                    } else {
+                                        RichText::new(format!(
+                                            "{:.0}%",
+                                            self.playback_volume() * 100.0
+                                        ))
+                                        .size(12.0)
+                                    }
                                     .color(chrome::MUTED),
                                 ),
                             )
@@ -8610,11 +8628,13 @@ where
             }
             CommandId::VolumeDown => {
                 self.set_playback_volume(
-                    self.stepped_playback_volume(self.playback_volume(), -1.0),
+                    self.stepped_playback_volume(self.active_playback_adjustment_base(), -1.0),
                 );
             }
             CommandId::VolumeUp => {
-                self.set_playback_volume(self.stepped_playback_volume(self.playback_volume(), 1.0));
+                self.set_playback_volume(
+                    self.stepped_playback_volume(self.active_playback_adjustment_base(), 1.0),
+                );
             }
             CommandId::ToggleMute => {
                 self.toggle_playback_mute();
@@ -16631,19 +16651,26 @@ mod tests {
             for edge in edges {
                 assert!(edge.left() == clip.left() || edge.right() == clip.right());
             }
+            let index = app
+                .tabs
+                .tab_ids()
+                .position(|id| Some(id) == app.tabs.active_id())
+                .expect("active index");
             output
                 .shapes
                 .iter()
-                .find_map(|shape| match &shape.shape {
+                .filter_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.fill == chrome::BORDER
-                            && rect.rect.width() >= 70.0
+                        if rect.fill == chrome::BACKGROUND
+                            && (70.0..=220.0).contains(&rect.rect.width())
+                            && rect.rect.height() < 30.0
                             && rect.rect.top() < 32.0 =>
                     {
                         Some((rect.rect, shape.clip_rect))
                     }
                     _ => None,
                 })
+                .nth(index)
                 .expect("active tab rectangle")
         };
         let settle = |app: &mut Application<_>, width| {
@@ -19106,7 +19133,7 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
-        app.set_playback_volume(1.0);
+        app.set_playback_volume(0.5);
         for (width, focused) in [240.0, 480.0, 960.0]
             .into_iter()
             .flat_map(|width| [true, false].map(|focused| (width, focused)))
@@ -19137,7 +19164,7 @@ mod tests {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Text(text)
-                        if text.galley.job.text == "100%" && text.pos.y >= chrome::TITLE_HEIGHT =>
+                        if text.galley.job.text == "50%" && text.pos.y >= chrome::TITLE_HEIGHT =>
                     {
                         Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
                     }
@@ -19182,7 +19209,7 @@ mod tests {
                 let actions = frame(events).1;
                 assert!(
                     if expected {
-                        actions == [UiAction::Volume(tab, 0.9)]
+                        actions == [UiAction::Volume(tab, 0.4)]
                     } else {
                         actions.is_empty()
                     },
@@ -19219,7 +19246,7 @@ mod tests {
                 .1;
                 assert!(
                     if expected {
-                        actions == [UiAction::Volume(tab, 1.1)]
+                        actions == [UiAction::Volume(tab, 0.6)]
                     } else {
                         actions.is_empty()
                     },
@@ -19254,7 +19281,7 @@ mod tests {
                     "width={width} focused={focused} position={pos:?}"
                 );
                 if expected {
-                    assert!(actions == [UiAction::Volume(tab, 0.9)]);
+                    assert!(actions == [UiAction::Volume(tab, 0.4)]);
                 }
             }
         }
@@ -19456,7 +19483,7 @@ mod tests {
                 (egui::Modifiers::NONE, egui::Modifiers::CTRL)
             };
             let normal = |delta| wheel(delta, allowed, egui::TouchPhase::Move);
-            app.set_playback_volume(1.0);
+            app.set_playback_volume(0.5);
             for focused in [true, false] {
                 for _ in 0..3 {
                     frame(
@@ -19470,7 +19497,7 @@ mod tests {
                     (
                         vec![normal(100.0), normal(-1.0)],
                         egui::Modifiers::NONE,
-                        Some(1.9),
+                        Some(0.9),
                     ),
                     (
                         vec![normal(-100.0), normal(1.0)],
@@ -19482,12 +19509,12 @@ mod tests {
                     (
                         vec![normal(-1.0), wheel(10.0, rejected, egui::TouchPhase::Move)],
                         egui::Modifiers::CTRL,
-                        Some(0.9),
+                        Some(0.4),
                     ),
                     (
                         vec![wheel(10.0, rejected, egui::TouchPhase::Move), normal(-1.0)],
                         egui::Modifiers::NONE,
-                        Some(0.9),
+                        Some(0.4),
                     ),
                     (
                         vec![
@@ -19495,7 +19522,7 @@ mod tests {
                             normal(-1.0),
                         ],
                         egui::Modifiers::SHIFT,
-                        Some(0.9),
+                        Some(0.4),
                     ),
                     (
                         vec![
@@ -19537,7 +19564,7 @@ mod tests {
         let tab = app.tabs.open_new(root.join("audio.wav"), MediaKind::Audio);
         app.path = Some(root.join("audio.wav"));
         app.media_kind = Some(MediaKind::Audio);
-        app.set_playback_volume(1.0);
+        app.set_playback_volume(0.5);
         let context = fonts::test_context();
         let point = egui::pos2(100.0, 100.0);
         let wheel = |unit, delta, modifiers| egui::Event::MouseWheel {
@@ -19595,13 +19622,13 @@ mod tests {
                 0.1,
             );
             assert!(
-                matches!(actions.as_slice(), [UiAction::Volume(id, volume)] if *id == tab && (*volume - 0.9).abs() < 0.0001)
+                matches!(actions.as_slice(), [UiAction::Volume(id, volume)] if *id == tab && (*volume - 0.4).abs() < 0.0001)
             );
             for (unit, delta, expected) in [
-                (egui::MouseWheelUnit::Line, 1.0, 1.1),
-                (egui::MouseWheelUnit::Page, -2.0, 0.8),
-                (egui::MouseWheelUnit::Point, 5.0, 1.01),
-                (egui::MouseWheelUnit::Point, -50.0, 0.9),
+                (egui::MouseWheelUnit::Line, 1.0, 0.6),
+                (egui::MouseWheelUnit::Page, -2.0, 0.3),
+                (egui::MouseWheelUnit::Point, 5.0, 0.51),
+                (egui::MouseWheelUnit::Point, -50.0, 0.4),
             ] {
                 for dt in [1.0 / 30.0, 1.0 / 120.0] {
                     let actions = frame(
@@ -19646,10 +19673,10 @@ mod tests {
             "one playback setting for batched wheel events"
         );
         app.handle_ui_action(actions[0].clone());
-        assert!((app.playback_volume() - 0.7).abs() < 0.0001);
+        assert!((app.playback_volume() - 0.2).abs() < 0.0001);
         app.dispatch(CommandId::Undo);
         assert_eq!(app.edit_state().volume, 1.0);
-        assert!((app.playback_volume() - 0.7).abs() < 0.0001);
+        assert!((app.playback_volume() - 0.2).abs() < 0.0001);
         app.playlist.scroll_rect = Some(egui::Rect::from_min_size(
             egui::pos2(20.0, 20.0),
             egui::vec2(200.0, 160.0),
@@ -19790,7 +19817,7 @@ mod tests {
             assert_eq!(app.playback_volume(), 0.0);
             app.dispatch(CommandId::ToggleMute);
             assert_eq!(app.playback_volume(), 0.5, "initial default volume");
-            for volume in [0.35, 1.6, 0.2] {
+            for volume in [0.35, 0.8, 0.2] {
                 app.set_playback_volume(volume);
                 app.dispatch(CommandId::ToggleMute);
                 assert_eq!(app.playback_volume(), 0.0);

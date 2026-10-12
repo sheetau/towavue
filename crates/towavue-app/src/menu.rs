@@ -14,16 +14,8 @@ mod sizing;
 mod subtitles;
 pub(crate) use choices::Choices;
 
-pub(crate) fn shortcut_text(ui: &egui::Ui, label: String, enabled: bool) -> egui::RichText {
-    let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
-    // Disabled rows already receive the UI's opacity adjustment. Enabled rows
-    // use that same disabled-label color even while their title is hovered.
-    let color = if enabled && ui.is_enabled() {
-        ui.visuals().disable(color)
-    } else {
-        color
-    };
-    egui::RichText::new(label).color(color)
+pub(crate) fn shortcut_text(_ui: &egui::Ui, label: String, _enabled: bool) -> egui::RichText {
+    egui::RichText::new(label).color(crate::chrome::DISABLED)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -321,7 +313,9 @@ pub(crate) fn show_section_with_recent(
     {
         let (response, command) =
             submenu(ui, *title, context, shortcuts, requested_category, recent);
-        categories.push(response.id);
+        // Root categories are always available. Keep them through the popup's
+        // disabled sizing pass so keyboard entry can select the first category.
+        categories.push((response.id, true));
         chosen = chosen.or(command);
     }
     keyboard.finish(ui, categories);
@@ -389,9 +383,7 @@ fn show_items(
                     if context.media_kind == Some(towavue_core::MediaKind::Video) {
                         let (response, command) =
                             subtitles::submenu(ui, context, requested, recent, ancestor);
-                        if response.enabled() {
-                            items.push(response.id);
-                        }
+                        items.push((response.id, response.enabled()));
                         if response.gained_focus() {
                             response.scroll_to_me(None);
                         }
@@ -404,9 +396,7 @@ fn show_items(
                         let (response, command) = audio_tracks::submenu(
                             ui, context, shortcuts, requested, recent, ancestor,
                         );
-                        if response.enabled() {
-                            items.push(response.id);
-                        }
+                        items.push((response.id, response.enabled()));
                         if response.gained_focus() {
                             response.scroll_to_me(None);
                         }
@@ -428,9 +418,7 @@ fn show_items(
                     requested,
                     ancestor,
                 ) {
-                    if response.enabled() {
-                        items.push(response.id);
-                    }
+                    items.push((response.id, response.enabled()));
                     if response.gained_focus() {
                         response.scroll_to_me(None);
                     }
@@ -453,9 +441,7 @@ fn show_items(
                             .atom_max_width(shortcut_width),
                     );
                 let response = ui.add_enabled(enabled, button);
-                if response.enabled() {
-                    items.push(response.id);
-                }
+                items.push((response.id, response.enabled()));
                 if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
@@ -479,9 +465,7 @@ fn show_items(
                         )
                     })
                     .inner;
-                if response.enabled() {
-                    items.push(response.id);
-                }
+                items.push((response.id, response.enabled()));
                 if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
@@ -514,9 +498,7 @@ fn show_items(
                 let menu = crate::chrome::menu_button(ui, text(ui.ctx(), Text::OpenRecent), |ui| {
                     show_recent(ui, recent, available_width)
                 });
-                if menu.response.enabled() {
-                    items.push(menu.response.id);
-                }
+                items.push((menu.response.id, menu.response.enabled()));
                 if menu.response.gained_focus() {
                     menu.response.scroll_to_me(None);
                 }
@@ -541,15 +523,11 @@ fn show_items(
             if response.gained_focus() {
                 response.scroll_to_me(None);
             }
-            if response.enabled() {
-                items.push(response.id);
-            }
+            items.push((response.id, response.enabled()));
             chosen = chosen.or(command);
             crate::chrome::separator(ui);
             let response = language_menu(ui, requested, recent);
-            if response.enabled() {
-                items.push(response.id);
-            }
+            items.push((response.id, response.enabled()));
             if response.gained_focus() {
                 response.scroll_to_me(None);
             }
@@ -594,7 +572,7 @@ fn language_menu(
                     let mut selected = data.language.next == language;
                     let response =
                         crate::chrome::menu_checkbox(ui, &mut selected, text(ui.ctx(), label));
-                    items.push(response.id);
+                    items.push((response.id, response.enabled()));
                     if crate::logo_menu::drag::clicked(&response) {
                         data.language_action = Some(language);
                         ui.close();
@@ -662,9 +640,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
                     })
                     .inner
                     .help_text(path.display().to_string());
-                if response.enabled() {
-                    items.push(response.id);
-                }
+                items.push((response.id, response.enabled()));
                 if response.gained_focus() {
                     response.scroll_to_me(None);
                 }
@@ -712,9 +688,7 @@ fn show_recent(ui: &mut egui::Ui, recent: &mut MenuData<'_>, available_width: f3
         // Resume positions can outlive the shorter recent-path lists.
         let response =
             ui.add(egui::Button::new(text(ui.ctx(), Text::ClearRecentlyOpened)).truncate());
-        if response.enabled() {
-            items.push(response.id);
-        }
+        items.push((response.id, response.enabled()));
         if crate::logo_menu::drag::clicked(&response) {
             recent.action = Some(RecentAction::Clear);
             ui.close();
@@ -840,7 +814,14 @@ impl MenuKeyboard {
         result
     }
 
-    pub(crate) fn finish(self, ui: &egui::Ui, items: Vec<egui::Id>) {
+    pub(crate) fn finish(self, ui: &egui::Ui, rows: Vec<(egui::Id, bool)>) {
+        // Keep logical availability separate from popup sizing passes. Disabled
+        // leaf rows still participate in painting, but never in traversal.
+        let items: Vec<_> = rows
+            .iter()
+            .filter_map(|(id, enabled)| enabled.then_some(*id))
+            .collect();
+        let rows: Vec<_> = rows.into_iter().map(|(id, _)| id).collect();
         let requested_focus = self.requested_focus.or_else(|| {
             self.initial_move.and_then(|forward| {
                 let index = if forward {
@@ -878,7 +859,7 @@ impl MenuKeyboard {
                 }
             });
         }
-        self.rows.finish(ui, &items);
+        self.rows.finish(ui, &rows);
         let pass = ui.ctx().cumulative_pass_nr();
         let selected = requested_focus.or_else(|| {
             ui.memory(|memory| items.iter().find(|id| memory.has_focus(**id)).copied())
@@ -1503,6 +1484,7 @@ mod tests {
                 .expect("painted text color")
         };
         let disabled = color(&output, "Save as");
+        assert_eq!(disabled, crate::chrome::DISABLED);
         assert_eq!(color(&output, "Ctrl+K Ctrl+O"), disabled);
         assert_eq!(
             color(&output, "Ctrl+Alt+E"),

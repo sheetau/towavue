@@ -8120,6 +8120,11 @@ where
                     .and_then(|context| context.memory(egui::Memory::focused))
             };
             self.filmstrip_return_focus = focus.map(|id| (self.media_generation, id));
+            if let Some(context) = &self.ui_context {
+                // A context menu belongs to the view it was opened from.
+                egui::Popup::close_all(context);
+                logo_menu::cancel(context);
+            }
         }
         if matches!(
             command,

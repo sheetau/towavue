@@ -829,16 +829,6 @@ impl Filmstrip {
             });
         self.pointer_position = pointer;
         self.window_focused = context.input(|input| input.focused);
-        context
-            .layer_painter(egui::LayerId::new(
-                egui::Order::Middle,
-                "filmstrip-dim".into(),
-            ))
-            .rect_filled(
-                backdrop.intersect(context.content_rect()),
-                0.0,
-                Color32::from_black_alpha(191),
-            );
         let recenter = current != self.focus.as_deref();
         self.focus = current.map(Path::to_owned);
         if let Some(snapshot) = snapshot {
@@ -866,8 +856,11 @@ impl Filmstrip {
             self.indicator = Default::default();
         }
         let frame = context.cumulative_frame_nr();
-        let can_focus =
-            enabled && !egui::Popup::is_any_open(context) && context.input(|input| input.focused);
+        let editing = context.text_edit_focused();
+        let can_focus = enabled
+            && !editing
+            && !egui::Popup::is_any_open(context)
+            && context.input(|input| input.focused);
         let relocated_focus = if can_focus && !recenter && !self.focus_requested {
             context
                 .memory(|memory| memory.focused())
@@ -1120,7 +1113,7 @@ impl Filmstrip {
         let mut wanted = Vec::new();
         let mut band = None;
         egui::Area::new("filmstrip".into())
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .fade_in(false)
             .movable(false)
             .sense(egui::Sense::click())
@@ -1135,6 +1128,11 @@ impl Filmstrip {
                     ui.disable();
                     ui.set_opacity(opacity);
                 }
+                // Keep the backdrop and cards on one parent layer; the header
+                // and filters are sibling sublayers, always above this dimming.
+                ui.painter()
+                    .with_clip_rect(backdrop.intersect(context.content_rect()))
+                    .rect_filled(backdrop, 0.0, Color32::from_black_alpha(191));
                 ui.set_clip_rect(screen);
                 ui.set_min_size(screen.size());
                 ui.set_max_size(screen.size());
@@ -1290,12 +1288,12 @@ impl Filmstrip {
                                     .with(("filmstrip-item", &snapshot.items[index].path))
                             });
                     let requested_target = focus_target
-                        .filter(|index| ui.is_enabled() && indices.contains(index))
+                        .filter(|index| can_focus && ui.is_enabled() && indices.contains(index))
                         .map(|index| {
                             ui.id()
                                 .with(("filmstrip-item", &snapshot.items[index].path))
                         })
-                        .or(pointer_target);
+                        .or(pointer_target.filter(|_| can_focus));
                     if let Some(id) = requested_target {
                         context.memory_mut(|memory| memory.request_focus(id));
                     }
@@ -1503,6 +1501,11 @@ impl Filmstrip {
                     .intersect(screen),
                 );
             });
+        if editing && snapshot.is_some() {
+            // Consume the opening reveal only after laying out the first listing.
+            // Text focus stays in the header even if that listing arrives later.
+            self.focus_requested = false;
+        }
         // The ready set is bounded; prioritize the anchor and then its neighbors.
         let anchor = self.layout.nearest(self.scroll_offset);
         if let Some(snapshot) = snapshot {

@@ -217,12 +217,16 @@ impl Browser {
             egui::vec2(screen.width(), HEADER_HEIGHT.min(screen.height())),
         );
         egui::Area::new("filmstrip-browser".into())
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .fade_in(false)
             .movable(false)
             .fixed_pos(header.min)
             .constrain(false)
             .show(context, |ui| {
+                context.set_sublayer(
+                    egui::LayerId::new(egui::Order::Middle, "filmstrip".into()),
+                    ui.layer_id(),
+                );
                 ui.set_min_size(header.size());
                 ui.set_max_size(header.size());
                 ui.set_clip_rect(header);
@@ -231,6 +235,11 @@ impl Browser {
                     let opacity = ui.opacity();
                     ui.disable();
                     ui.set_opacity(opacity);
+                }
+                // Apply arriving arrow metadata before measuring either column.
+                // A late change inside address_bar would elide ancestors for one frame.
+                if ui.is_enabled() && self.menu_open.is_none() {
+                    self.listing(ui, &self.folder.clone());
                 }
                 let content = screen.shrink2(egui::vec2(crate::browser_controls::INSET, 0.0));
                 let navigation_width = 2.0 * chrome::SEARCH_BUTTON_SIZE + 18.0;
@@ -306,7 +315,7 @@ impl Browser {
                         } else {
                             crate::fluent::Kind::Back
                         },
-                        if available {
+                        if self.navigation[index] {
                             Color32::WHITE
                         } else {
                             chrome::MUTED
@@ -363,11 +372,6 @@ impl Browser {
     fn address_bar(&mut self, ui: &mut Ui, outer: Rect, target: &mut Option<Action>) {
         let language = localization::language(ui.ctx());
         self.menu_floor = outer.bottom();
-        // Ancestors necessarily contain the next path component. Only the
-        // current folder needs an asynchronous listing to determine its arrow.
-        if ui.is_enabled() && self.menu_open.is_none() {
-            self.listing(ui, &self.folder.clone());
-        }
         let available = outer.width().max(0.0);
         let mut paths: Vec<_> = self.folder.ancestors().map(Path::to_owned).collect();
         paths.reverse();
@@ -736,7 +740,7 @@ impl Browser {
     pub fn show_filters(&mut self, context: &Context, screen: Rect, enabled: bool) {
         let inset = screen.shrink(crate::browser_controls::INSET);
         egui::Area::new("filmstrip-filters".into())
-            .order(egui::Order::Foreground)
+            .order(egui::Order::Middle)
             .fade_in(false)
             .movable(false)
             .pivot(egui::Align2::RIGHT_BOTTOM)
@@ -745,12 +749,14 @@ impl Browser {
             .constrain(false)
             .show(context, |ui| {
                 context.set_sublayer(
-                    egui::LayerId::new(egui::Order::Foreground, "filmstrip".into()),
+                    egui::LayerId::new(egui::Order::Middle, "filmstrip".into()),
                     ui.layer_id(),
                 );
                 ui.set_clip_rect(screen);
                 if !enabled {
+                    let opacity = ui.opacity();
                     ui.disable();
+                    ui.set_opacity(opacity);
                 }
                 let mut size = crate::browser_controls::filter_size(ui, &self.counts.values);
                 size.x = size.x.min(inset.width());

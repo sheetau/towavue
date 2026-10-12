@@ -1111,12 +1111,16 @@ fn first_frame_trial(
     root: &Path,
     mut present: impl FnMut(&Context, &egui::FullOutput, bool) -> Vec<u8>,
 ) {
+    // Keep asynchronous child-folder discovery separate from pixel stability.
+    // The application creates config/cache directories under the fixture root.
+    let media_folder = root.join("media");
+    std::fs::create_dir_all(&media_folder).expect("stable empty media folder");
     for density in [1.0, 1.25, 2.0] {
         for reading in [false, true] {
             for zoom in [ZoomMode::Fit, ZoomMode::Custom(3.0)] {
                 let context = crate::fonts::test_context();
                 context.global_style_mut(chrome::style);
-                let snapshot = snapshot(root);
+                let snapshot = snapshot(&media_folder);
                 let source = snapshot.items[0].path.clone();
                 let mut app = Application::new(None, |_| {}).expect("app");
                 app.ui_context = Some(context.clone());
@@ -1248,6 +1252,36 @@ fn first_frame_trial(
                             "opening must not move the underlying image"
                         );
                         if pixels != first_pixels {
+                            if let Some(directory) =
+                                std::env::var_os("TOWAVUE_REFERENCE_RENDER_DIR")
+                            {
+                                std::fs::write(
+                                    PathBuf::from(directory).join(format!(
+                                        "filmstrip-next-{}x{}.rgba",
+                                        (960.0 * density) as usize,
+                                        (576.0 * density) as usize
+                                    )),
+                                    &pixels,
+                                )
+                                .expect("changed frame readback");
+                            }
+                            for (name, frame) in [("first", &first), ("next", &output)] {
+                                for shape in &frame.shapes {
+                                    if let egui::Shape::Text(text) = &shape.shape
+                                        && (40.0..80.0).contains(&text.pos.y)
+                                    {
+                                        eprintln!(
+                                            "HEADER {name}: label={:?}, pos={:?}, clip={:?}, size={:?}, color={:?}, opacity={}",
+                                            text.galley.text(),
+                                            text.pos,
+                                            shape.clip_rect,
+                                            text.galley.size(),
+                                            text.fallback_color,
+                                            text.opacity_factor
+                                        );
+                                    }
+                                }
+                            }
                             let width = (960.0 * density) as usize;
                             let mut bounds = (usize::MAX, usize::MAX, 0, 0);
                             let mut count = 0;

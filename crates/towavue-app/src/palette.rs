@@ -300,6 +300,7 @@ impl CommandPalette {
                     .corner_radius(context.global_style().visuals.menu_corner_radius),
             )
             .show(context, |ui| {
+                ui.spacing_mut().scroll.fade.strength = 0.0;
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
                 let previous_query = self.query.clone();
                 let inactive_stroke = ui.visuals().widgets.inactive.bg_stroke;

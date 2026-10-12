@@ -14,7 +14,7 @@ wasapi = { path = "vendor/wasapi" }
 image-webp = { path = "vendor/image-webp" }
 
 [workspace.package]
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 rust-version = "1.98"
 license = "Apache-2.0"

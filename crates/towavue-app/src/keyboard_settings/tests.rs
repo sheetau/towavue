@@ -39,6 +39,23 @@ fn focus_search_routes_to_the_active_view_and_opens_closed_filmstrip() {
         let stroke = "Ctrl+F".parse().expect("valid search shortcut");
         assert!(app.owns_focused_shortcut(&stroke));
         app.process_shortcut(stroke);
+        if view == 2 {
+            // Exercise both the loading header and a later populated listing.
+            frame(&mut app);
+            app.folder_snapshot = Some(towavue_core::FolderSnapshot {
+                folder_identity: towavue_core::ShellIdentity::new(vec![42]),
+                folder_path: root.clone(),
+                items: vec![towavue_core::FolderMediaItem {
+                    identity: towavue_core::ShellIdentity::new(vec![43]),
+                    path: root.join("source.png"),
+                    kind: towavue_core::MediaKind::Image,
+                }],
+                sort_columns: vec![],
+                source: towavue_core::FolderSnapshotSource::PersistedShellView,
+                generation: 7,
+                captured_at: std::time::SystemTime::UNIX_EPOCH,
+            });
+        }
         for _ in 0..3 {
             frame(&mut app);
         }
@@ -50,6 +67,17 @@ fn focus_search_routes_to_the_active_view_and_opens_closed_filmstrip() {
         frame(&mut app);
         assert_eq!(context.memory(egui::Memory::focused), focused);
         assert_eq!(app.filmstrip_open, view == 2, "repeat never toggles closed");
+        if view == 2 {
+            app.close_filmstrip();
+            app.process_shortcut("Ctrl+F".parse().expect("valid search shortcut"));
+            for _ in 0..3 {
+                frame(&mut app);
+                assert!(
+                    context.text_edit_focused(),
+                    "populated first-open keeps search focus"
+                );
+            }
+        }
     }
     app.native_ime_composing = true;
     assert!(!app.owns_focused_shortcut(&"Ctrl+F".parse().expect("valid search shortcut")));

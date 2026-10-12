@@ -69,6 +69,9 @@ switch ($Phase) {
         # Separate development FFmpeg artifacts from production packaging builds.
         $env:CARGO_TARGET_DIR = Join-Path $repositoryRoot 'target/ci-cargo'
         $env:CARGO_INCREMENTAL = '0'
+        # Match the hosted worker's bounded concurrency on high-core local PCs.
+        # Large UI test codegen otherwise exhausts commit memory before linking.
+        $env:CARGO_BUILD_JOBS = '2'
         Invoke-Check 'format' 'cargo' 'fmt --all --check'
         $null = & (Join-Path $PSScriptRoot 'setup-ffmpeg.ps1')
         Invoke-Script 'generate-m1-fixtures'

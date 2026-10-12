@@ -2,6 +2,155 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+fn arriving_child_metadata_does_not_temporarily_elide_ancestors() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip_browser::tests::arriving_child_metadata_does_not_temporarily_elide_ancestors",
+    ) else {
+        return;
+    };
+    std::fs::create_dir_all(root.join("child")).expect("owned child folder");
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    browser.sync_folder(&root, &context);
+    let mut size = egui::vec2(1160.0, 400.0);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !browser.has_children(&root) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child metadata arrives"
+        );
+        frame(&context, &mut browser, size, vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let font = egui::TextStyle::Body.resolve(&context.global_style());
+    let width: f32 = context.fonts_mut(|fonts| {
+        root.ancestors()
+            .map(|path| {
+                fonts
+                    .layout_no_wrap(
+                        crate::folder_navigation::folder_name(path),
+                        font.clone(),
+                        Color32::WHITE,
+                    )
+                    .size()
+                    .x
+                    + chrome::SEARCH_BUTTON_SIZE
+            })
+            .sum()
+    });
+    size.x = width
+        + 2.0 * crate::browser_controls::INSET
+        + 2.0 * chrome::SEARCH_BUTTON_SIZE
+        + 18.0
+        + 16.0
+        + crate::browser_controls::SEARCH_MIN
+        + 50.0;
+    for _ in 0..3 {
+        frame(&context, &mut browser, size, vec![]);
+    }
+    // The worker retains its completed result. Reapply it on the next paint,
+    // reproducing an arrival after the old layout calculation deterministically.
+    browser.cache.clear();
+    let first = frame(&context, &mut browser, size, vec![]).0;
+    assert!(browser.has_children(&root));
+    let next = frame(&context, &mut browser, size, vec![]).0;
+    for ancestor in root.ancestors() {
+        let label = crate::folder_navigation::folder_name(ancestor);
+        assert_eq!(
+            node(&first, &label),
+            node(&next, &label),
+            "stable breadcrumb {label}"
+        );
+    }
+}
+
+#[test]
+fn blocked_browser_keeps_control_colors_and_popups_cover_every_strip_surface() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = context(density);
+        let mut browser = Browser::default();
+        browser.sync_folder(Path::new("C:/Pictures"), &context);
+        browser.worker_failed = true;
+        browser.navigation = [true, false];
+        browser.counts.values = [12, 4, 4, 4];
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 400.0));
+        let mut baseline = None;
+        for enabled in [true, false] {
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |_| {
+                        browser.show(&context, screen, None, enabled);
+                        browser.show_filters(&context, screen, enabled);
+                    },
+                );
+            }
+            let mut labels: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        Some((
+                            text.galley.text().to_owned(),
+                            text.pos,
+                            text.fallback_color,
+                            text.override_text_color,
+                            text.opacity_factor,
+                            text.galley
+                                .job
+                                .sections
+                                .iter()
+                                .map(|section| section.format.color)
+                                .collect::<Vec<_>>(),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            labels.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.x.total_cmp(&b.1.x)));
+            if let Some(baseline) = &baseline {
+                assert_eq!(&labels, baseline, "blocking input keeps control colors");
+            } else {
+                baseline = Some(labels);
+            }
+        }
+        for _ in 0..4 {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ui| {
+                    let opener = ui.button("Open");
+                    // Draw the popup first: later Filmstrip Areas must stay underneath.
+                    let popup = egui::Popup::menu(&opener)
+                        .style(chrome::menu_style)
+                        .open(true)
+                        .at_position(egui::pos2(100.0, 20.0))
+                        .show(|ui| {
+                            ui.set_min_size(egui::vec2(440.0, 360.0));
+                            ui.label("Popup");
+                        })
+                        .expect("popup");
+                    browser.show(&context, screen, None, true);
+                    browser.show_filters(&context, screen, true);
+                    for point in [egui::pos2(200.0, 30.0), egui::pos2(500.0, 370.0)] {
+                        if context.cumulative_frame_nr() > 9 {
+                            assert_eq!(context.layer_id_at(point), Some(popup.response.layer_id));
+                        }
+                    }
+                },
+            );
+        }
+    }
+}
+
+#[test]
 fn browser_tab_return_keeps_query_filter_and_editor_focus_without_projection_reset() {
     let context = context(1.0);
     let folder = Path::new("C:/Pictures");

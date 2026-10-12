@@ -70,12 +70,7 @@ impl Counts {
 
 /// A text-only control: underline belongs to the label, never its surrounding hit area.
 pub(super) fn text_button(ui: &Ui, rect: Rect, id: Id, label: &str, selected: bool) -> Response {
-    let color = if ui.is_enabled() {
-        Color32::WHITE
-    } else {
-        crate::chrome::MUTED
-    };
-    text_button_color(ui, rect, id, label, selected, color)
+    text_button_color(ui, rect, id, label, selected, Color32::WHITE)
 }
 
 pub(super) fn text_button_color(

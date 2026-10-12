@@ -371,6 +371,9 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
 /// Shared menu geometry, also used by combo popups and context menus.
 pub fn menu_style(style: &mut egui::Style) {
     egui::containers::menu::menu_style(style);
+    // Popup edges keep their actual frame color. Translucent scroll fades mix
+    // with clipped labels/highlights and can leave a lighter band at either end.
+    style.spacing.scroll.fade.strength = 0.0;
     style.visuals.disabled_alpha = 1.0;
     style.visuals.widgets.noninteractive.fg_stroke.color = DISABLED;
     style.spacing.interact_size.y = SEARCH_BUTTON_SIZE;

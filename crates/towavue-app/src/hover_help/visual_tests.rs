@@ -34,6 +34,11 @@ fn help_labels_and_fluent_icons_reach_gpu() {
                             egui::vec2(720.0, 360.0),
                         )),
                         max_texture_side: Some(renderer.max_texture_side()),
+                        hovered_files: vec![egui::HoveredFile {
+                            path: Some("generated.srt".into()),
+                            ..Default::default()
+                        }],
+                        events: vec![egui::Event::PointerMoved(egui::pos2(30.0, 290.0))],
                         ..Default::default()
                     };
                     input
@@ -72,6 +77,7 @@ fn help_labels_and_fluent_icons_reach_gpu() {
                                 }));
                             }
                         });
+                        crate::file_drop::draw(&context, false, true);
                     });
                     renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
                     renderer.render_ui(&context, output).expect("UI");

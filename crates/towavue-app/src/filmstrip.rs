@@ -768,7 +768,7 @@ impl Filmstrip {
                         Align2::CENTER_CENTER,
                         localization::text(ui.ctx(), Text::NoPreview),
                         FontId::proportional(11.0),
-                        Color32::GRAY,
+                        crate::chrome::MUTED,
                     );
                 }
             }
@@ -1419,7 +1419,7 @@ impl Filmstrip {
                                     Align2::CENTER_CENTER,
                                     localization::text(ui.ctx(), Text::Deleted),
                                     FontId::proportional(12.0),
-                                    Color32::GRAY,
+                                    crate::chrome::MUTED,
                                 );
                             }
                             Some(Err(_)) => {
@@ -1428,7 +1428,7 @@ impl Filmstrip {
                                     Align2::CENTER_CENTER,
                                     localization::text(ui.ctx(), Text::NoPreview),
                                     FontId::proportional(12.0),
-                                    Color32::GRAY,
+                                    crate::chrome::MUTED,
                                 );
                             }
                             None => {}

@@ -32,6 +32,7 @@ fn keyboard_settings_ui_reaches_gpu_at_three_densities() {
                 for (phase_index, phase) in [
                     "list",
                     "search",
+                    "input",
                     "commands",
                     "files",
                     "folders",
@@ -44,7 +45,11 @@ fn keyboard_settings_ui_reaches_gpu_at_three_densities() {
                     if phase == "search" {
                         app.keyboard_settings.query = "reading".into();
                     }
+                    if phase == "input" {
+                        app.keyboard_settings.record_search = true;
+                    }
                     if phase == "commands" {
+                        app.keyboard_settings.record_search = false;
                         app.recent_commands = vec![CommandId::OpenFile, CommandId::OpenFolder];
                         app.dispatch(CommandId::ToggleCommandPalette);
                     }

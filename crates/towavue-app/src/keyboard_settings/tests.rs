@@ -3,6 +3,83 @@ use super::*;
 mod gpu;
 
 #[test]
+fn focus_search_routes_to_the_active_view_and_opens_closed_filmstrip() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "keyboard_settings::tests::focus_search_routes_to_the_active_view_and_opens_closed_filmstrip",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    context.global_style_mut(chrome::style);
+    context.enable_accesskit();
+    app.ui_context = Some(context.clone());
+    let frame = |app: &mut Application<_>| {
+        crate::audio_export::tests::frame(app, egui::vec2(900.0, 650.0), vec![])
+    };
+    for view in 0..3 {
+        match view {
+            1 => app.dispatch(CommandId::OpenKeyboardSettings),
+            2 => {
+                tab_transfer::tests::install(
+                    &mut app,
+                    root.join("source.png"),
+                    tab_transfer::tests::decoded(false),
+                );
+            }
+            _ => {}
+        }
+        frame(&mut app);
+        frame(&mut app);
+        context.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        let stroke = "Ctrl+F".parse().expect("valid search shortcut");
+        assert!(app.owns_focused_shortcut(&stroke));
+        app.process_shortcut(stroke);
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+        assert!(context.text_edit_focused(), "search focus in view {view}");
+        assert!(!app.palette_open);
+        assert_eq!(app.filmstrip_open, view == 2);
+        let focused = context.memory(egui::Memory::focused);
+        app.process_shortcut("Ctrl+F".parse().expect("valid search shortcut"));
+        frame(&mut app);
+        assert_eq!(context.memory(egui::Memory::focused), focused);
+        assert_eq!(app.filmstrip_open, view == 2, "repeat never toggles closed");
+    }
+    app.native_ime_composing = true;
+    assert!(!app.owns_focused_shortcut(&"Ctrl+F".parse().expect("valid search shortcut")));
+}
+
+#[test]
+fn recording_button_keeps_its_hover_fill_while_selected() {
+    for density in [1.0, 1.25, 2.0] {
+        let context = fonts::test_context();
+        context.global_style_mut(chrome::style);
+        context.set_pixels_per_point(density);
+        let rect = egui::Rect::from_min_size(egui::pos2(30.0, 30.0), egui::Vec2::splat(22.0));
+        for pointer in [egui::pos2(200.0, 100.0), rect.center()] {
+            for _ in 0..2 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(pointer)],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        super::view::icon(ui, rect, '\u{ea65}', "Record keys", true, None);
+                    },
+                );
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(fill) if fill.rect == rect && fill.fill == chrome::HOVER)));
+            }
+        }
+    }
+}
+
+#[test]
 fn japanese_search_sort_and_recording_keep_persisted_command_and_key_names() {
     let bindings = shortcuts::defaults();
     let mut settings = KeyboardSettings {

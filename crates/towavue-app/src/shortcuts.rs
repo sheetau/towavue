@@ -9,7 +9,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v14";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v15";
+const HISTORY_BINDING_HEADER: &str = "# towavue shortcuts v14";
 const SEARCH_BINDING_HEADER: &str = "# towavue shortcuts v13";
 const NAVIGATION_BINDING_HEADER: &str = "# towavue shortcuts v12";
 const SELECTION_BINDING_HEADER: &str = "# towavue shortcuts v11";
@@ -57,7 +58,8 @@ pub fn defaults() -> ShortcutBindings {
     for (command, shortcut) in [
         (CommandId::OpenFile, "Ctrl+O"),
         (CommandId::GoToFile, "Ctrl+P"),
-        (CommandId::OpenRecentFolder, "Ctrl+F"),
+        (CommandId::OpenRecentFolder, "Ctrl+Shift+F"),
+        (CommandId::FocusSearch, "Ctrl+F"),
         (CommandId::SearchCurrentFiles, "Ctrl+G"),
         (CommandId::SearchCurrentFolders, "Ctrl+Shift+G"),
         (CommandId::ToggleFullscreen, "F11"),
@@ -218,9 +220,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
-    let history_bindings = text
+    let focus_search_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let history_bindings = focus_search_bindings
+        || text
+            .lines()
+            .any(|line| line.trim() == HISTORY_BINDING_HEADER);
     let current_search_bindings = history_bindings
         || text
             .lines()
@@ -345,6 +351,14 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
             .map(|part| part.trim().parse::<KeySequence>())
             .collect::<Result<Vec<_>, _>>()
             .map_err(|_| Error::InvalidShortcut { line: index + 1 })?;
+        if !focus_search_bindings
+            && command == CommandId::OpenRecentFolder
+            && sequences.len() == 1
+            && sequences[0].to_string() == "Ctrl+F"
+        {
+            sequences = standard.all(command).to_vec();
+            declared.remove(&command);
+        }
         if !history_bindings
             && sequences.len() == 1
             && matches!(
@@ -523,6 +537,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         | CommandId::ToggleVideoRepeat
                         | CommandId::GoToFile
                         | CommandId::OpenRecentFolder
+                        | CommandId::FocusSearch
                         | CommandId::SearchCurrentFiles
                         | CommandId::SearchCurrentFolders
                         | CommandId::OpenKeyboardSettings
@@ -650,6 +665,65 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_focus_migrates_only_the_old_folder_default_and_preserves_conflicts() {
+        use super::*;
+        let old = "# towavue shortcuts v14\nopen_recent_folder = Ctrl+F\n";
+        let migrated = parse(old, defaults()).expect("old defaults");
+        assert_eq!(
+            migrated
+                .get(CommandId::OpenRecentFolder)
+                .expect("valid shortcut fixture")
+                .to_string(),
+            "Ctrl+Shift+F"
+        );
+        assert_eq!(
+            migrated
+                .get(CommandId::FocusSearch)
+                .expect("valid shortcut fixture")
+                .to_string(),
+            "Ctrl+F"
+        );
+        assert_eq!(
+            parse(&serialize(&migrated), defaults()).expect("valid shortcut fixture"),
+            migrated
+        );
+        for key in [
+            "Ctrl+F",
+            "Ctrl+F Ctrl+K",
+            "Ctrl+Shift+F",
+            "Ctrl+Shift+F Ctrl+K",
+        ] {
+            let bindings = parse(&format!("{old}open_file = {key}\n"), defaults())
+                .expect("valid shortcut fixture");
+            let blocked = if key.starts_with("Ctrl+Shift") {
+                CommandId::OpenRecentFolder
+            } else {
+                CommandId::FocusSearch
+            };
+            assert!(bindings.all(blocked).is_empty(), "preserve custom {key}");
+        }
+        for (header, value) in [
+            (CURRENT_BINDING_HEADER, "Ctrl+F"),
+            (HISTORY_BINDING_HEADER, "Alt+F"),
+            (HISTORY_BINDING_HEADER, ""),
+        ] {
+            let bindings = parse(
+                &format!("{header}\nopen_recent_folder = {value}\nfocus_search =\n"),
+                defaults(),
+            )
+            .expect("valid shortcut fixture");
+            assert!(bindings.all(CommandId::FocusSearch).is_empty());
+            assert_eq!(
+                bindings
+                    .get(CommandId::OpenRecentFolder)
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+                value
+            );
+        }
+    }
+
     #[test]
     fn history_keys_migrate_only_unchanged_media_defaults_and_yield_to_custom_bindings() {
         use super::*;
@@ -2306,14 +2380,14 @@ mod tests {
             .expect("old generated default");
             assert_eq!(
                 bindings.get(command).expect("new default").to_string(),
-                "Ctrl+F"
+                "Ctrl+Shift+F"
             );
             assert_eq!(
                 parse(&serialize(&bindings), defaults()).expect("round trip"),
                 bindings
             );
         }
-        for custom in ["Ctrl+F", "Ctrl+F X"] {
+        for custom in ["Ctrl+Shift+F", "Ctrl+Shift+F X"] {
             let bindings = parse(&format!("{READING_BINDING_HEADER}\nopen_recent_folder = Ctrl+Alt+O\nopen_file = {custom}\n"), defaults()).expect("custom conflict");
             assert_eq!(
                 bindings
@@ -2363,7 +2437,10 @@ mod tests {
     fn quick_open_defaults_do_not_shadow_existing_custom_keys_or_prefixes() {
         for (text, removed) in [
             ("open_file = Ctrl+P\n", CommandId::GoToFile),
-            ("open_folder = Ctrl+F X\n", CommandId::OpenRecentFolder),
+            (
+                "open_folder = Ctrl+Shift+F X\n",
+                CommandId::OpenRecentFolder,
+            ),
             ("toggle_audio_shuffle = Ctrl+P\n", CommandId::GoToFile),
         ] {
             let bindings = parse(text, defaults()).expect("existing custom binding");
@@ -2372,7 +2449,7 @@ mod tests {
         let bindings = defaults();
         for (keys, command) in [
             ("Ctrl+P", CommandId::GoToFile),
-            ("Ctrl+F", CommandId::OpenRecentFolder),
+            ("Ctrl+Shift+F", CommandId::OpenRecentFolder),
         ] {
             assert_eq!(
                 bindings.resolve(

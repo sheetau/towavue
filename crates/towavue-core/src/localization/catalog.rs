@@ -1210,6 +1210,7 @@ messages! {
     ReuseFolderTabOn => ("On", "オン"),
     CommandOpenGallery => ("Open Gallery", "ギャラリーを開く"),
     CommandGoToFile => ("Go to File", "ファイルへ移動"),
+    CommandFocusSearch => ("Focus Search", "検索にフォーカス"),
     CommandSearchCurrentFiles => ("Search Files in Current Folder", "現在のフォルダー内のファイルを検索"),
     CommandSearchCurrentFolders => ("Search Folders in Current Folder", "現在のフォルダー内のフォルダーを検索"),
     CommandOpenRecentFolder => ("Open Recent Folder", "最近使ったフォルダーを開く"),

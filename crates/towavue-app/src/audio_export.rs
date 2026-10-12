@@ -110,10 +110,19 @@ impl AudioExportDialog {
                                             ids.contains(&track.id)
                                         }
                                     };
-                                    let response = ui.checkbox(
-                                        &mut checked,
-                                        audio_preview::track_label(display_language, index, track),
-                                    );
+                                    let response = ui
+                                        .scope(|ui| {
+                                            chrome::flat_buttons(ui);
+                                            ui.checkbox(
+                                                &mut checked,
+                                                audio_preview::track_label(
+                                                    display_language,
+                                                    index,
+                                                    track,
+                                                ),
+                                            )
+                                        })
+                                        .inner;
                                     if self.first_frame {
                                         response.request_focus();
                                         self.first_frame = false;

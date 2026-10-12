@@ -133,7 +133,11 @@ impl Hud {
         let mut painter = ui.painter_at(viewport);
         painter.multiply_opacity(opacity);
         let pixel = 1.0 / ui.ctx().pixels_per_point();
-        painter.rect_filled(track.expand(pixel), 1.5 + pixel, crate::chrome::BORDER);
+        painter.rect_filled(
+            track.expand(pixel),
+            1.5 + pixel,
+            crate::chrome::BORDER.gamma_multiply(0.45),
+        );
         if fill.is_positive() {
             painter.rect_filled(fill, 1.5, Color32::WHITE);
         }
@@ -216,7 +220,10 @@ mod tests {
                     })
                     .collect();
                 assert_eq!(rectangles.len(), 2, "no shadow layers");
-                assert_eq!(rectangles[0].fill, crate::chrome::BORDER);
+                assert_eq!(
+                    rectangles[0].fill,
+                    crate::chrome::BORDER.gamma_multiply(0.45)
+                );
                 assert_eq!(rectangles[0].rect, track.expand(1.0 / density));
                 cursor = output.platform_output.cursor_icon;
             }

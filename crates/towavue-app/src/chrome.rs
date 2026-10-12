@@ -89,19 +89,64 @@ pub fn tab_close(ui: &mut Ui, rect: Rect, dirty: bool) -> egui::Response {
     tab_close_visible(ui, rect, dirty, true)
 }
 
-pub fn tab_style(ui: &mut Ui) {
+pub fn tab_hovered(ui: &Ui, rect: Rect) -> bool {
+    ui.is_enabled()
+        && ui.rect_contains_pointer(rect)
+        && !crate::tab_drag::hover_suppressed(ui.ctx())
+}
+
+pub(super) fn tab_response(mut response: egui::Response) -> egui::Response {
+    // egui admits nearby pointer hits within its global interaction radius.
+    // Tabs use their painted bounds; keep keyboard/UIA clicks and owned drags.
+    let (inside, origin_inside) = response.ctx.input(|input| {
+        (
+            input
+                .pointer
+                .hover_pos()
+                .is_some_and(|p| response.interact_rect.contains(p)),
+            input
+                .pointer
+                .press_origin()
+                .is_none_or(|p| response.interact_rect.contains(p)),
+        )
+    });
+    if !inside {
+        response
+            .flags
+            .remove(egui::response::Flags::HOVERED | egui::response::Flags::CONTAINS_POINTER);
+    }
+    if !inside || !origin_inside {
+        response
+            .flags
+            .remove(egui::response::Flags::CLICKED | egui::response::Flags::LONG_TOUCHED);
+    }
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+pub fn tab_style(ui: &mut Ui, rect: Rect, highlighted: bool) {
+    ui.set_clip_rect(ui.clip_rect().intersect(rect));
+    ui.spacing_mut().interact_size.y = rect.height();
+    // Set the cursor only after rejecting the expanded nearest-widget hover.
+    ui.visuals_mut().interact_cursor = None;
     let widgets = &mut ui.visuals_mut().widgets;
-    widgets.inactive.fg_stroke.color = DISABLED;
-    widgets.noninteractive.fg_stroke.color = DISABLED;
+    for visual in [
+        &mut widgets.inactive,
+        &mut widgets.noninteractive,
+        &mut widgets.hovered,
+        &mut widgets.active,
+        &mut widgets.open,
+    ] {
+        visual.fg_stroke.color = if highlighted { FOREGROUND } else { DISABLED };
+    }
 }
 
 pub fn tab_close_visible(ui: &mut Ui, rect: Rect, dirty: bool, visible: bool) -> egui::Response {
     // Keep the keyboard/UIA identity and hit geometry stable. Pointer arrival
     // reveals the control before a click; hiding only releases painted text width.
-    let response = ui.put(
+    let response = tab_response(ui.put(
         rect,
         egui::Button::new("").frame(false).min_size(rect.size()),
-    );
+    ));
     if !visible && !dirty {
         return response;
     }
@@ -111,7 +156,11 @@ pub fn tab_close_visible(ui: &mut Ui, rect: Rect, dirty: bool, visible: bool) ->
         egui::Align2::CENTER_CENTER,
         glyph,
         crate::fonts::icon_font(),
-        ui.style().interact(&response).fg_stroke.color,
+        if response.enabled() {
+            ui.visuals().widgets.inactive.fg_stroke.color
+        } else {
+            DISABLED
+        },
     );
     response
 }
@@ -498,8 +547,7 @@ pub fn tab_audio_button(
     } else {
         towavue_core::localization::formatted::mute_named_tab(language, name)
     };
-    let response = ui
-        .interact(rect, ui.id().with("audio"), egui::Sense::click())
+    let response = tab_response(ui.interact(rect, ui.id().with("audio"), egui::Sense::click()))
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .help_text(&label);
     response.widget_info(|| {
@@ -511,10 +559,10 @@ pub fn tab_audio_button(
         egui::Align2::CENTER_CENTER,
         icon.text(),
         egui::FontId::new(14.0, crate::fonts::icon_font().family),
-        (if active || response.hovered() {
+        (if active {
             FOREGROUND
         } else {
-            DISABLED
+            ui.visuals().widgets.inactive.fg_stroke.color
         })
         .gamma_multiply(opacity),
     );

@@ -119,7 +119,7 @@ pub(super) fn rotated_mesh(
 pub(super) fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
     let rect = rect.intersect(painter.clip_rect());
     let painter = painter.with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(32));
+    painter.rect_filled(rect, 0.0, crate::chrome::BORDER);
     for row in 0..(rect.height() / 12.0).ceil() as usize {
         for column in 0..(rect.width() / 12.0).ceil() as usize {
             if (row + column) % 2 == 0 {

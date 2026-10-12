@@ -13,6 +13,7 @@ pub enum CommandId {
     ToggleTabIcons,
     GoToFile,
     OpenRecentFolder,
+    FocusSearch,
     SearchCurrentFiles,
     SearchCurrentFolders,
     ShowLicenses,
@@ -197,6 +198,7 @@ impl CommandId {
             Self::ToggleReuseFolderTab => "toggle_reuse_folder_tab",
             Self::GoToFile => "go_to_file",
             Self::OpenRecentFolder => "open_recent_folder",
+            Self::FocusSearch => "focus_search",
             Self::SearchCurrentFiles => "search_current_files",
             Self::SearchCurrentFolders => "search_current_folders",
             Self::OpenFolder => "open_folder",
@@ -592,6 +594,7 @@ impl CommandDefinition {
                     | CommandId::ToggleFilmstrip
                     | CommandId::ReloadFolderOrder
                     | CommandId::GoToFile
+                    | CommandId::FocusSearch
                     | CommandId::SearchCurrentFiles
                     | CommandId::SearchCurrentFolders
                     | CommandId::ToggleReadingMode
@@ -799,6 +802,7 @@ const COMMANDS: &[CommandDefinition] = &[
     command(CommandId::ToggleTabIcons, &[]),
     command(CommandId::GoToFile, &[]),
     command(CommandId::OpenRecentFolder, &[]),
+    command(CommandId::FocusSearch, &[]),
     command(CommandId::SearchCurrentFiles, ANY_MEDIA),
     command(CommandId::SearchCurrentFolders, ANY_MEDIA),
     command(CommandId::ShowLicenses, &[]),

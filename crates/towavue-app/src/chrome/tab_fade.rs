@@ -26,13 +26,15 @@ pub fn tab_title_layout(
     volume: Option<(f32, f32)>,
     icon: Option<crate::fluent::Kind>,
 ) -> egui::Response {
-    let response = ui.put(
-        hit_rect,
-        egui::Button::new("")
-            .min_size(hit_rect.size())
-            .fill(Color32::TRANSPARENT)
-            .stroke(Stroke::NONE)
-            .sense(egui::Sense::click_and_drag()),
+    let response = tab_response(
+        ui.put(
+            hit_rect,
+            egui::Button::new("")
+                .min_size(hit_rect.size())
+                .fill(Color32::TRANSPARENT)
+                .stroke(Stroke::NONE)
+                .sense(egui::Sense::click_and_drag()),
+        ),
     );
     let rect = if let Some(kind) = icon {
         let mut slot = rect;

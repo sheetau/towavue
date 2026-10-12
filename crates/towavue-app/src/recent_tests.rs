@@ -90,7 +90,7 @@ fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_
     let stroke = |text: &str| text.parse::<KeySequence>().expect("key").strokes()[0].clone();
     for palette in [false, true] {
         app.palette_open = palette;
-        for keys in ["Ctrl+P", "Ctrl+Shift+P", "Ctrl+F"] {
+        for keys in ["Ctrl+P", "Ctrl+Shift+P", "Ctrl+Shift+F"] {
             assert!(app.owns_focused_shortcut(&stroke(keys)));
             app.native_ime_composing = true;
             assert!(!app.owns_focused_shortcut(&stroke(keys)));
@@ -110,8 +110,8 @@ fn picker_shortcuts_work_from_text_focus_without_stealing_composition_or_custom_
     ] {
         app.media_kind = kind;
         app.palette_open = false;
-        assert!(app.owns_focused_shortcut(&stroke("Ctrl+F")));
-        app.process_shortcut(stroke("Ctrl+F"));
+        assert!(app.owns_focused_shortcut(&stroke("Ctrl+Shift+F")));
+        app.process_shortcut(stroke("Ctrl+Shift+F"));
         assert!(
             app.palette_open,
             "folder picker opens from text focus for {kind:?}"
@@ -227,7 +227,7 @@ fn quick_open_dispatches_from_gallery_and_preserves_replacement_guards() {
     app.activate_tab(gallery);
     app.recent_folders = vec![root.clone()];
     app.process_shortcut(
-        "Ctrl+F"
+        "Ctrl+Shift+F"
             .parse::<KeySequence>()
             .expect("folder binding")
             .strokes()[0]

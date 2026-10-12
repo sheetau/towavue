@@ -485,7 +485,7 @@ impl KeyboardSettings {
     }
 }
 
-fn icon(
+pub(super) fn icon(
     ui: &mut egui::Ui,
     rect: egui::Rect,
     glyph: char,
@@ -500,13 +500,9 @@ fn icon(
         RichText::new(glyph.to_string()).font(fonts::icon_font()),
     )
     .stroke(egui::Stroke::NONE)
-    .frame_when_inactive(false);
+    .frame_when_inactive(selected);
     if selected {
-        button = button.fill(if ui.rect_contains_pointer(rect) {
-            chrome::HOVER
-        } else {
-            chrome::SURFACE_HOVER
-        });
+        button = button.fill(chrome::SURFACE_HOVER);
     }
     let response = chrome::surface_icon_button_at(ui, rect, button)
         .help_text(help.clone())

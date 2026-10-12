@@ -241,7 +241,11 @@ impl MetadataDialog {
                         ),
                     ] {
                         let response = ui
-                            .radio_value(&mut draft.mode, mode, label)
+                            .scope(|ui| {
+                                chrome::flat_buttons(ui);
+                                ui.radio_value(&mut draft.mode, mode, label)
+                            })
+                            .inner
                             .on_hover_cursor(egui::CursorIcon::PointingHand);
                         reveal_focus(&response);
                     }

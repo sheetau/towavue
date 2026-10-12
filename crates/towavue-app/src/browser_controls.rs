@@ -116,9 +116,23 @@ pub(super) fn text_button_color(
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
+/// The active Gallery/Filmstrip consumes this request when its header is drawn.
+pub(super) fn request_search_focus(context: &egui::Context) {
+    context.data_mut(|data| data.insert_temp(Id::new("browser-search-focus"), true));
+}
+
 /// A populated query remains visible after blur; Escape clears and collapses it.
 pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut String) -> bool {
     let state = id.with("editing");
+    let requested = ui.is_enabled()
+        && ui.data_mut(|data| {
+            data.remove_temp::<bool>(Id::new("browser-search-focus"))
+                .unwrap_or(false)
+        });
+    if requested {
+        ui.data_mut(|data| data.insert_temp(state, true));
+        ui.memory_mut(|memory| memory.request_focus(id));
+    }
     if ui.is_enabled()
         && ui.memory(|memory| memory.has_focus(id))
         && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
@@ -134,7 +148,7 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
             .data(|data| data.get_temp::<bool>(state))
             .unwrap_or(false)
             && ui.memory(|memory| memory.has_focus(id)));
-    let mut opened = false;
+    let mut opened = requested;
     if !editing {
         let title = crate::localization::text(ui.ctx(), crate::localization::Text::FilmstripSearch);
         let width = ui

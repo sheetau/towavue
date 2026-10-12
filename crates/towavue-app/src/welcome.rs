@@ -39,17 +39,23 @@ pub(super) fn named_tab(
     title: &str,
 ) -> (egui::Response, egui::Response) {
     let language = localization::language(ui.ctx());
-    let show_close = active || ui.rect_contains_pointer(rect);
-    chrome::tab_style(ui);
-    ui.painter().rect_filled(rect, 3.0, chrome::BACKGROUND);
-    let hover_background = ui.painter().add(egui::Shape::Noop);
+    let hovered = chrome::tab_hovered(ui, rect);
+    let show_close = active || hovered;
+    let painter = ui.painter().clone();
+    painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
+    let hover_background = painter.add(egui::Shape::Noop);
+    chrome::tab_style(ui, rect, active || hovered);
     ui.spacing_mut().button_padding = egui::vec2(chrome::TAB_PADDING, 0.0);
     ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
     ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
     let mut label_rect = rect;
     label_rect.max.x -= chrome::TAB_CLOSE_WIDTH;
-    let text_rect = if show_close { label_rect } else { rect };
+    let text_rect = if show_close {
+        label_rect
+    } else {
+        rect.with_max_x(rect.right() - chrome::TAB_PADDING)
+    };
     let icon = crate::tab_icons::enabled(ui.ctx()).then(|| {
         if title == localization::text(ui.ctx(), Text::CommandOpenKeyboardSettings) {
             crate::fluent::Kind::Keyboard
@@ -90,10 +96,9 @@ pub(super) fn named_tab(
     crate::tab_focus::release_pointer_focus(&response);
     crate::tab_focus::release_pointer_button_focus(&response, egui::PointerButton::Middle);
     crate::tab_focus::release_pointer_focus(&close);
-    let hovered = response.hovered() || close.hovered();
     chrome::tab_title_fade(ui, text_rect, active, hovered);
     if hovered && !active {
-        ui.painter().set(
+        painter.set(
             hover_background,
             egui::Shape::rect_filled(rect, 3.0, chrome::FLOATING_BACKGROUND),
         );

@@ -5951,7 +5951,7 @@ where
                                             ui.scroll_to_rect(tab_rects[index], None);
                                         }
                                     }
-                                    let hovered = ui.rect_contains_pointer(rect);
+                                    let hovered = chrome::tab_hovered(ui, rect);
                                     let show_close = hovered || (active && !dirty);
                                     painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
                                     let hover_background = painter.add(egui::Shape::Noop);
@@ -6005,7 +6005,7 @@ where
                                         },
                                         0.0,
                                     );
-                                    chrome::tab_style(&mut tab_ui);
+                                    chrome::tab_style(&mut tab_ui, rect, active || hovered);
                                     tab_ui.visuals_mut().widgets.inactive.bg_stroke =
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.hovered.bg_stroke =
@@ -6023,7 +6023,7 @@ where
                                     let text_rect = label_rect.with_max_x(if show_close || dirty {
                                         label_rect.right()
                                     } else {
-                                        rect.right()
+                                        rect.right() - chrome::TAB_PADDING
                                     });
                                     let response = chrome::tab_title_layout(
                                         &mut tab_ui,
@@ -6132,11 +6132,7 @@ where
                                         localization::Text::CommandCloseTab.in_language(language),
                                     );
                                     tab_focus::release_pointer_focus(&close);
-                                    let tab_hovered = response.hovered()
-                                        || close.hovered()
-                                        || audio_button
-                                            .as_ref()
-                                            .is_some_and(egui::Response::hovered);
+                                    let tab_hovered = hovered;
                                     chrome::tab_title_fade(&tab_ui, text_rect, active, tab_hovered);
                                     if tab_hovered && !active {
                                         painter.set(
@@ -8112,7 +8108,10 @@ where
         {
             self.close_filmstrip();
         }
-        if command == CommandId::ToggleFilmstrip && !self.filmstrip_open {
+        if matches!(command, CommandId::ToggleFilmstrip | CommandId::FocusSearch)
+            && self.media_kind.is_some()
+            && !self.filmstrip_open
+        {
             let focus = if self.palette_open {
                 self.command_overlay_return_focus
             } else {
@@ -8170,6 +8169,21 @@ where
             }
             CommandId::OpenFolder => {
                 self.begin_dialog(FileDialogKind::OpenFolder, DialogIntent::OpenFolder);
+            }
+            CommandId::FocusSearch => {
+                if self.keyboard_settings_active() {
+                    self.keyboard_settings.request_search_focus();
+                } else {
+                    if self.media_kind.is_some() && !self.filmstrip_open {
+                        self.refresh_folder_snapshot();
+                        self.filmstrip.focus_current();
+                        self.filmstrip_open = true;
+                    }
+                    if let Some(context) = &self.ui_context {
+                        browser_controls::request_search_focus(context);
+                    }
+                }
+                self.request_redraw();
             }
             CommandId::OpenKeyboardSettings => {
                 let previous = self.tabs.active_id();
@@ -12355,6 +12369,7 @@ where
         let entry_prefix = |sequence: &[KeyStroke]| {
             [
                 CommandId::OpenKeyboardSettings,
+                CommandId::FocusSearch,
                 CommandId::GoToFile,
                 CommandId::OpenRecentFolder,
                 CommandId::SearchCurrentFiles,
@@ -12380,6 +12395,7 @@ where
                     {
                         ShortcutMatch::Command(
                             CommandId::OpenKeyboardSettings
+                            | CommandId::FocusSearch
                             | CommandId::GoToFile
                             | CommandId::OpenRecentFolder
                             | CommandId::SearchCurrentFiles

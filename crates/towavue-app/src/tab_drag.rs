@@ -32,6 +32,12 @@ struct State {
     strip: Option<egui::Rect>,
 }
 
+pub(super) fn hover_suppressed(context: &egui::Context) -> bool {
+    context
+        .data(|data| data.get_temp::<bool>(egui::Id::new("tab-drag-hover-suppressed")))
+        .unwrap_or(false)
+}
+
 fn state_id() -> egui::Id {
     egui::Id::new("tab-drag-state")
 }
@@ -174,6 +180,12 @@ impl Layout {
             .as_ref()
             .filter(|drag| drag.started == context.cumulative_frame_nr())
             .map(|drag| drag.tab);
+        context.data_mut(|data| {
+            data.insert_temp(
+                egui::Id::new("tab-drag-hover-suppressed"),
+                state.drag.as_ref().is_some_and(|drag| drag.crossed),
+            )
+        });
         state.widgets.clear();
         Self {
             state,

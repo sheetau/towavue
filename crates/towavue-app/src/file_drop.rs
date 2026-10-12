@@ -203,21 +203,26 @@ pub(super) fn draw(context: &Context, blocked: bool, video: bool) {
         );
     }
     if blocked || subtitle {
+        let color = context.global_style().visuals.text_color();
         let text = painter.layout(
             label.into(),
-            egui::FontId::proportional(13.0),
-            Color32::WHITE,
+            egui::FontId::proportional(crate::hover_help::TEXT_SIZE),
+            color,
             (viewport.width() - 16.0).max(1.0),
         );
         let origin = (badge.right_top() + vec2(6.0, 0.0))
             .min(viewport.max - text.size() - vec2(4.0, 4.0))
-            .max(viewport.min);
-        painter.rect_filled(
-            Rect::from_min_size(origin, text.size()).expand(4.0),
-            4.0,
-            Color32::from_black_alpha(220),
+            .max(viewport.min + vec2(4.0, 4.0));
+        let frame = crate::hover_help::frame(&context.global_style());
+        let bounds = Rect::from_min_size(origin, text.size());
+        painter.add(frame.paint(bounds));
+        let reference = painter.layout_no_wrap(
+            "H".into(),
+            egui::FontId::proportional(crate::hover_help::TEXT_SIZE),
+            color,
         );
-        painter.galley(origin, text, Color32::WHITE);
+        let offset = reference.size().y * 0.5 - reference.mesh_bounds.center().y;
+        painter.galley(origin + vec2(0.0, offset), text, color);
     }
     let language = localization::language(context);
     context.accesskit_node_builder(egui::Id::new("external-file-drop-notice"), |node| {

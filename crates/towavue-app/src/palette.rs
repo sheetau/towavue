@@ -1942,9 +1942,23 @@ mod tests {
                                 .into_owned()
                         }
                     };
+                    // Cover a full command cycle even when new global commands are added.
+                    let steps = if mode == 0 {
+                        2 * definitions
+                            .iter()
+                            .filter(|definition| {
+                                definition.is_enabled(CommandContext {
+                                    palette_open: true,
+                                    ..Default::default()
+                                })
+                            })
+                            .count()
+                    } else {
+                        24
+                    };
                     let mut unchanged_visible_steps = 0;
                     let mut edge_steps = 0;
-                    for _ in 0..24 {
+                    for _ in 0..steps {
                         let old_title = title(&palette);
                         let (old, clip) = picker_text(&output, &old_title).expect("selected text");
                         let old_position = old.pos;
@@ -1985,7 +1999,7 @@ mod tests {
                     assert!(unchanged_visible_steps > 0 && edge_steps > 0);
                     let mut reverse_visible = 0;
                     let mut reverse_edges = 0;
-                    for _ in 0..24 {
+                    for _ in 0..steps {
                         let old_title = title(&palette);
                         let (old, clip) = picker_text(&output, &old_title).expect("selected text");
                         let old_y = old.pos.y;

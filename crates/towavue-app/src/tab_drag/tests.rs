@@ -1,5 +1,109 @@
 use super::*;
 
+#[test]
+fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let mut app = setup(&root);
+        let context = app.ui_context.clone().expect("tab UI context");
+        context.set_pixels_per_point(density);
+        // A playlist may supply a larger interaction height than the title bar.
+        context.global_style_mut(|style| style.spacing.interact_size.y = 40.0);
+        let size = egui::vec2(960.0, 576.0);
+        let ids: Vec<_> = app.tabs.tab_ids().collect();
+        for id in [ids[0], ids[2]] {
+            app.edits
+                .entry(id)
+                .or_default()
+                .push(EditOperation::RotateClockwise, MediaKind::Image);
+        }
+        for _ in 0..3 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let label = state(&app).widgets[0].2;
+        let rect = label.with_max_x(label.right() + chrome::TAB_CLOSE_WIDTH);
+        assert!(rect.height() < 30.0, "tab must not inherit playlist height");
+        let color = |output: &egui::FullOutput, text: &str| {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(paint)
+                    if paint.galley.text() == text && rect.contains(paint.pos) =>
+                {
+                    Some(paint.override_text_color.unwrap_or(paint.fallback_color))
+                }
+                _ => None,
+            })
+        };
+        for (point, hovered) in [
+            (rect.center_top() - egui::vec2(0.0, 2.0), false),
+            (rect.center_bottom() + egui::vec2(0.0, 2.0), false),
+            (rect.center(), true),
+            (rect.right_center() - egui::vec2(12.0, 0.0), true),
+        ] {
+            frame(&mut app, size, true, vec![egui::Event::PointerMoved(point)]);
+            let (output, _) = frame(&mut app, size, true, vec![egui::Event::PointerMoved(point)]);
+            assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Rect(fill) if fill.rect == rect && fill.fill == chrome::FLOATING_BACKGROUND)), hovered);
+            assert_eq!(
+                color(&output, "a.png"),
+                Some(if hovered {
+                    chrome::FOREGROUND
+                } else {
+                    chrome::DISABLED
+                })
+            );
+            assert_eq!(
+                color(&output, if hovered { "\u{ea76}" } else { "\u{ea71}" }),
+                Some(if hovered {
+                    chrome::FOREGROUND
+                } else {
+                    chrome::DISABLED
+                })
+            );
+        }
+        let outside_close = rect.right_bottom() + egui::vec2(-12.0, 2.0);
+        frame(
+            &mut app,
+            size,
+            true,
+            vec![
+                egui::Event::PointerMoved(outside_close),
+                pointer(outside_close, true),
+            ],
+        );
+        let (_, actions) = frame(&mut app, size, true, vec![pointer(outside_close, false)]);
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action, UiAction::CloseTab(_))),
+            "nearby clicks stay outside the tab"
+        );
+        let origin = label.center();
+        frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::PointerMoved(origin), pointer(origin, true)],
+        );
+        let target = state(&app).widgets[1].2.center();
+        let (output, _) = frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::PointerMoved(target)],
+        );
+        assert!(hover_suppressed(&context));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(fill) if fill.fill == chrome::FLOATING_BACKGROUND && fill.rect.height() < 30.0)));
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "\u{ea76}")));
+        cancel(&context);
+    }
+}
+
 fn pointer(pos: egui::Pos2, pressed: bool) -> egui::Event {
     egui::Event::PointerButton {
         pos,

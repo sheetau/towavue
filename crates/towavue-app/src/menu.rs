@@ -194,7 +194,12 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 ReadingLeft,
                 ReadingRight,
             ],
-            &[ToggleFilmstrip, ToggleTimeline, ToggleCommandPalette],
+            &[
+                ToggleFilmstrip,
+                FocusSearch,
+                ToggleTimeline,
+                ToggleCommandPalette,
+            ],
         ],
     ),
     (

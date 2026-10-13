@@ -5,7 +5,7 @@
   ·
   <a href="https://github.com/sheetau/towavue/releases">Releases</a>
   ·
-  <a href="https://github.com/sheetau/towavue/blob/main/docs/DEVELOPMENT.md">Development</a>
+  <a href="https://github.com/sheetau/towavue/blob/main/docs/BENCHMARKS.md">Benchmark</a>
 </p>
 
 <h1></h1>

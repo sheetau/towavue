@@ -1,17 +1,26 @@
 import { Head, Html, Main, NextScript } from "next/document";
+import { asset } from "../src/site/config.mjs";
 
 export default function Document(props) {
   const locale = props.__NEXT_DATA__?.props?.pageProps?.locale ?? "en";
-  return (
-    <Html lang={locale}>
-      <Head>
-        <meta name="theme-color" content="#000000" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap" />
-        {locale === "ja" && <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+1+Code:wght@400;500&family=Noto+Serif+JP:wght@400&display=swap" />}
-      </Head>
-      <body><Main /><NextScript /></body>
-    </Html>
-  );
+  return <Html lang={locale}>
+    <Head>
+      <meta name="theme-color" content="#000000" />
+      <meta name="color-scheme" content="dark" />
+      <meta name="darkreader-lock" />
+      <link rel="preload" href={asset("fonts/atelier-femme-serif.ttf")} as="font" type="font/ttf" crossOrigin="anonymous" />
+      <link rel="preload" href={asset("fonts/helvetica-now-text.ttf")} as="font" type="font/ttf" crossOrigin="anonymous" />
+      <style dangerouslySetInnerHTML={{ __html: `
+        @font-face { font-family: "Atelier Femme Serif"; src: url("${asset("fonts/atelier-femme-serif.ttf")}") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+        @font-face { font-family: "Helvetica Now Text"; src: url("${asset("fonts/helvetica-now-text.ttf")}") format("truetype"); font-weight: 400; font-style: normal; font-display: swap; }
+      ` }} />
+      {locale === "ja" && <>
+        <link rel="preload" href={asset("fonts/towavue-jp-narrow-full.woff2")} as="font" type="font/woff2" crossOrigin="anonymous" />
+        <style dangerouslySetInnerHTML={{ __html: `
+          @font-face { font-family: "Towavue JP Narrow"; src: url("${asset("fonts/towavue-jp-narrow-full.woff2")}") format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+        ` }} />
+      </>}
+    </Head>
+    <body><Main /><NextScript /></body>
+  </Html>;
 }

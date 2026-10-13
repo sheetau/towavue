@@ -1,254 +1,48 @@
-import { useEffect, useRef, useState } from "react";
-import { asset } from "../site/config.mjs";
-import { photos, tracks, sampleVideo, formatSize, formatTime } from "../site/media";
-import { advanceAudio, createAudioState, toggleShuffle } from "../site/audio-playback.mjs";
-import { Icon, Logo, TabClose, WindowControls } from "./Icons";
-import { SeekBar } from "./SeekBar";
-import { useScrollSeek } from "./useScrollSeek";
-import { PausedVideoFrame } from "./PausedVideoFrame";
-
-const mediaTypes = ["video", "image", "audio"];
+import { useEffect, useRef } from "react";
+import { Logo, TabClose, WindowControls } from "./Icons";
+import { MediaThumbnail } from "./MediaThumbnail";
+import media from "../site/gallery.json";
 
 export function HeroDemo({ content }) {
-  const [tab, setTab] = useState("video");
-  const [photo, setPhoto] = useState(0);
-  const [audio, setAudio] = useState(() => createAudioState(tracks.length));
-  const [videoTime, setVideoTime] = useState(0);
-  const [videoPlaying, setVideoPlaying] = useState(false);
-  const [duration, setDuration] = useState(0);
-  const [useStillFrames, setUseStillFrames] = useState(null);
-  const [showStill, setShowStill] = useState(true);
-  const [videoError, setVideoError] = useState(false);
-  const [imageError, setImageError] = useState(false);
-  const demo = useRef(null);
-  const scrubbing = useRef(false);
-  const video = useRef(null);
-  const videoPosition = useRef(0);
-  const presentedFrame = useRef(null);
-  const tabRefs = useRef([]);
-  const image = photos[photo];
-  const track = tracks[audio.track];
-  const names = { image: image.name, video: sampleVideo.name, audio: track.name };
-  const value = tab === "image" ? photo : tab === "video" ? videoTime : audio.time;
-  const max = tab === "image" ? photos.length - 1 : tab === "video" ? duration : track.duration;
-  const playing = tab === "video" ? videoPlaying : audio.playing;
-  const metadata = tab === "image"
-    ? ["Fit", formatSize(image.bytes), "JPG", `${image.width}×${image.height}`, "Smooth"]
-    : tab === "video"
-      ? [formatSize(sampleVideo.bytes), "MP4", `${sampleVideo.width}×${sampleVideo.height}`, `${sampleVideo.fps} fps`, "1×"]
-      : [track.size, track.format, track.sampleRate, track.quality, "Stereo", "1×"];
-
-  useScrollSeek(demo, (delta) => {
-    if (scrubbing.current) return;
-    const clamp = (position, limit) => Math.max(0, Math.min(limit, position));
-    if (tab === "video" && video.current && duration && !videoError && video.current.paused) {
-      const position = useStillFrames ? videoPosition.current : video.current.currentTime;
-      seekVideo(clamp(position + delta * duration, duration));
-    }
-  });
-
-  // Scale the whole desktop layout, including typography and hit targets.
+  const viewport = useRef(null);
   useEffect(() => {
-    const figure = demo.current;
-    const frame = figure.querySelector(".demo-window");
-    function resize() {
-      const visibleWidth = Math.max(0, document.documentElement.clientWidth - figure.getBoundingClientRect().left);
-      const scale = Math.min(1, visibleWidth * 1.5 / frame.offsetWidth);
-      const height = parseFloat(getComputedStyle(frame).height);
-      figure.style.setProperty("--demo-scale", String(scale));
-      figure.style.setProperty("--demo-height", `${height * scale}px`);
-    }
-    const observer = new ResizeObserver(resize);
-    observer.observe(frame);
-    window.addEventListener("resize", resize);
-    resize();
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", resize);
+    const element = viewport.current;
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const max = Math.max(0, element.scrollHeight - element.clientHeight);
+      const pageTop = element.getBoundingClientRect().top + window.scrollY;
+      // Traverse every row while the gallery is still on screen, at any breakpoint.
+      const start = Math.max(0, pageTop - window.innerHeight * 0.65);
+      const end = Math.max(start + 1, pageTop + element.clientHeight * 0.2);
+      const progress = Math.min(1, Math.max(0, (window.scrollY - start) / (end - start)));
+      element.scrollTop = motion.matches ? 0 : max * progress;
     };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    const resize = new ResizeObserver(schedule);
+    resize.observe(element);
+    resize.observe(element.firstElementChild);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, { passive: true });
+    motion.addEventListener("change", schedule);
+    update();
+    return () => { cancelAnimationFrame(frame); resize.disconnect(); window.removeEventListener("resize", schedule); window.removeEventListener("scroll", schedule); motion.removeEventListener("change", schedule); };
   }, []);
 
-  // A cached default video can load before React attaches its event handlers.
-  useEffect(() => {
-    // iPadOS can identify as a Mac; touch support distinguishes that mode.
-    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
-      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    setUseStillFrames(ios);
-    if (ios) setDuration(sampleVideo.duration);
-    const player = video.current;
-    if (!ios && player?.readyState >= 1) player.currentTime = videoPosition.current;
-    if (player?.error) setVideoError(true);
-    if (player?.readyState >= 1 && Number.isFinite(player.duration)) setDuration(player.duration);
-  }, []);
-
-  useEffect(() => {
-    for (const index of [photo - 1, photo + 1]) {
-      if (index < 0 || index >= photos.length) continue;
-      const next = new Image();
-      next.src = asset(`samples/photo-${index + 1}.webp`);
-    }
-  }, [photo]);
-
-  function seekPreview(fraction) {
-    if (tab === "image") {
-      const index = Math.round(fraction * (photos.length - 1));
-      return { image: asset(`samples/photo-${index + 1}-thumb.webp`), label: `${index + 1} / ${photos.length}` };
-    }
-    if (tab === "video") {
-      const time = fraction * duration;
-      const frame = Math.min(sampleVideo.previewCount - 1, Math.floor(time / sampleVideo.previewInterval));
-      return { frame, label: formatTime(time) };
-    }
-    return null;
-  }
-
-  useEffect(() => {
-    if (tab !== "audio" || !audio.playing) return;
-    let previous = performance.now();
-    const timer = window.setInterval(() => {
-      const now = performance.now();
-      const elapsed = (now - previous) / 1000;
-      previous = now;
-      setAudio((state) => advanceAudio(state, elapsed, tracks));
-    }, 100);
-    return () => window.clearInterval(timer);
-  }, [tab, audio.playing]);
-
-  useEffect(() => {
-    const pause = () => {
-      if (!document.hidden) return;
-      video.current?.pause();
-      setAudio((state) => ({ ...state, playing: false }));
-    };
-    document.addEventListener("visibilitychange", pause);
-    return () => document.removeEventListener("visibilitychange", pause);
-  }, []);
-
-  function selectTab(type) {
-    if (type === tab) return;
-    setTab(type);
-    video.current?.pause();
-    setAudio((state) => ({ ...state, playing: false }));
-  }
-
-  function seekVideo(position) {
-    videoPosition.current = position;
-    setVideoTime(position);
-    if (video.current && (!useStillFrames || !video.current.paused)) video.current.currentTime = position;
-    else if (useStillFrames) setShowStill(true);
-  }
-
-  function syncVideoTime(player) {
-    // Only iOS uses an independent position while its native decoder is paused.
-    if (useStillFrames && player.paused) return;
-    videoPosition.current = player.currentTime;
-    setVideoTime(player.currentTime);
-  }
-
-  function pauseVideo(player) {
-    if (presentedFrame.current !== null) player.cancelVideoFrameCallback?.(presentedFrame.current);
-    presentedFrame.current = null;
-    setVideoPlaying(false);
-    videoPosition.current = player.currentTime;
-    setVideoTime(player.currentTime);
-  }
-
-  function revealPlayback(player) {
-    if (!useStillFrames) return;
-    const reveal = () => {
-      presentedFrame.current = null;
-      if (!player.paused) setShowStill(false);
-    };
-    if (presentedFrame.current !== null) player.cancelVideoFrameCallback?.(presentedFrame.current);
-    if (player.requestVideoFrameCallback) presentedFrame.current = player.requestVideoFrameCallback(reveal);
-    else reveal();
-  }
-
-  async function togglePlayback() {
-    if (tab === "audio") {
-      setAudio((state) => ({ ...state, time: state.time >= tracks[state.track].duration ? 0 : state.time, playing: !state.playing }));
-    } else if (tab === "video" && video.current && duration && !videoError) {
-      const player = video.current;
-      if (!player.paused) player.pause();
-      else {
-        if (useStillFrames) {
-          const position = videoPosition.current >= duration ? 0 : videoPosition.current;
-          videoPosition.current = position;
-          setVideoTime(position);
-          if (player.readyState >= 1) player.currentTime = position;
-        } else if (player.ended) player.currentTime = 0;
-        try { await player.play(); } catch { setVideoPlaying(false); setShowStill(true); }
-      }
-    }
-  }
-
-  function tabKey(event, index) {
-    const next = event.key === "ArrowRight" ? (index + 1) % 3 : event.key === "ArrowLeft" ? (index + 2) % 3 : event.key === "Home" ? 0 : event.key === "End" ? 2 : null;
-    if (next === null) return;
-    event.preventDefault();
-    selectTab(mediaTypes[next]);
-    tabRefs.current[next]?.focus();
-  }
-
-  function seek(event) {
-    const position = Number(event.target.value);
-    if (tab === "image") { setPhoto(position); setImageError(false); }
-    else if (tab === "video") {
-      seekVideo(position);
-    } else setAudio((state) => ({ ...state, time: position }));
-  }
-
-  return (
-    <figure ref={demo} className="hero-mockup" aria-label={content.label}>
-      <div className="demo-window">
-        <div className="demo-toolbar">
-          <span className="demo-logo-slot"><Logo className="demo-logo" /></span>
-          <div className="demo-tabs" role="tablist" aria-label={content.tabs}>
-            {mediaTypes.map((type, index) => (
-              <button key={type} type="button" className="demo-tab" role="tab" id={`demo-tab-${type}`} aria-controls={`demo-panel-${type}`} aria-selected={tab === type} aria-label={content[type]} tabIndex={tab === type ? 0 : -1} onClick={() => selectTab(type)} onKeyDown={(event) => tabKey(event, index)} ref={(element) => { tabRefs.current[index] = element; }}>
-                <span className="demo-tab-name">{names[type]}</span><span className="demo-tab-short">{content[type]}</span><TabClose />
-              </button>
-            ))}
-          </div>
-          <WindowControls />
-        </div>
-        <div className="demo-viewport">
-          <div className="demo-panel" id="demo-panel-image" role="tabpanel" aria-labelledby="demo-tab-image" hidden={tab !== "image"} tabIndex={0}>
-            <img className="demo-photo" src={asset(`samples/photo-${photo + 1}.webp`)} alt={content.imageAlt[photo]} width={image.width} height={image.height} fetchPriority="high" onError={() => setImageError(true)} />
-            {imageError && <p className="demo-error" role="status">{content.error}</p>}
-          </div>
-          <div className="demo-panel" id="demo-panel-video" role="tabpanel" aria-labelledby="demo-tab-video" hidden={tab !== "video"} tabIndex={0}>
-            <video ref={video} src={asset("samples/flowers.mp4")} poster={asset("samples/video-poster.webp")} muted playsInline preload="auto" disablePictureInPicture onLoadedMetadata={(event) => {
-              const player = event.currentTarget;
-              setDuration(Number.isFinite(player.duration) ? player.duration : useStillFrames ? sampleVideo.duration : 0);
-              if (useStillFrames === false) player.currentTime = Math.min(videoPosition.current, player.duration || 0);
-              // An iOS play gesture may arrive before metadata.
-              else if (!player.paused && videoPosition.current > 0) player.currentTime = Math.min(videoPosition.current, player.duration);
-            }} onTimeUpdate={(event) => syncVideoTime(event.currentTarget)} onPlay={() => setVideoPlaying(true)} onPlaying={(event) => revealPlayback(event.currentTarget)} onPause={(event) => pauseVideo(event.currentTarget)} onEnded={(event) => pauseVideo(event.currentTarget)} onError={() => { setVideoError(true); setVideoPlaying(false); setShowStill(true); }} />
-            {useStillFrames && <PausedVideoFrame time={videoTime} active={!videoPlaying || showStill} visible={showStill} />}
-            <button className="demo-video-toggle" type="button" aria-label={videoPlaying ? content.pauseVideo : content.playVideo} onClick={togglePlayback} disabled={!duration || videoError} />
-            {videoError && <p className="demo-error" role="status">{content.error}</p>}
-          </div>
-          <div className="demo-panel demo-audio" id="demo-panel-audio" role="tabpanel" aria-labelledby="demo-tab-audio" hidden={tab !== "audio"} tabIndex={0}>
-            <ol className="audio-playlist" aria-label={content.playlist}>
-              {tracks.map((item, index) => <li key={item.name}><button type="button" aria-pressed={audio.track === index} onClick={() => setAudio((state) => ({ ...state, track: index, time: 0 }))}><span className="track-number">{index + 1}.</span><span className="track-name">{item.name}</span><span className="track-duration">{formatTime(item.duration)}</span></button></li>)}
-            </ol>
-          </div>
-        </div>
-        <SeekBar key={tab} label={content[`${tab}Seek`]} valueText={tab === "image" ? `${photo + 1} / ${photos.length}` : `${formatTime(value)} / ${formatTime(max)}`} value={value} max={max} step={tab === "image" ? 1 : 0.01} disabled={tab === "video" && (!duration || videoError)} onChange={seek} getPreview={seekPreview} onScrubbingChange={(active) => { scrubbing.current = active; }} />
-        <div className="demo-statusbar">
-          <div className="demo-transport">
-            {tab === "image" ? <span className="demo-reading" role="img" aria-label={content.reading}><Icon name="book" /></span> : <button className="demo-icon-button" type="button" aria-label={playing ? content.pause : content.play} title={playing ? content.pause : content.play} onClick={togglePlayback} disabled={tab === "video" && (!duration || videoError)}><Icon name={playing ? "pause" : "play"} /></button>}
-            {tab === "audio" && <>
-              <button className="demo-icon-button" type="button" aria-label={content.repeat[audio.repeat]} title={content.repeat[audio.repeat]} aria-pressed={audio.repeat !== "off"} onClick={() => setAudio((state) => ({ ...state, repeat: { off: "all", all: "one", one: "off" }[state.repeat] }))}><Icon name={audio.repeat === "one" ? "repeat-one" : "repeat"} /></button>
-              <button className="demo-icon-button" type="button" aria-label={content.shuffle[audio.shuffle ? "on" : "off"]} title={content.shuffle[audio.shuffle ? "on" : "off"]} aria-pressed={audio.shuffle} onClick={() => setAudio((state) => toggleShuffle(state))}><Icon name="shuffle" /></button>
-            </>}
-          </div>
-          <span className="demo-position">{tab === "image" ? `${photo + 1} / ${photos.length}` : `${formatTime(value)} / ${formatTime(max)}`}</span>
-          <span className="demo-path">{tab === "image" ? "Photos" : tab === "video" ? "Videos" : "Music"}\{names[tab]}</span>
-          <span className="demo-metadata">{metadata.map((value, index) => <span key={index}>{value}</span>)}</span>
+  return <figure className="hero-mockup" aria-label={content.label}>
+    <div className="demo-window">
+      <div className="demo-toolbar" aria-hidden="true">
+        <span className="demo-logo-slot"><Logo /></span>
+        <div className="demo-tab"><span>{content.gallery}</span><TabClose /></div>
+        <WindowControls />
+      </div>
+      <div className="gallery-viewport" ref={viewport}>
+        <div className="gallery-grid">
+          {media.photos.map((photo, index) => <div className="gallery-cell" key={photo.name}><MediaThumbnail photo={photo} loading={index < 5 ? "eager" : "lazy"} /></div>)}
         </div>
       </div>
-    </figure>
-  );
+      <figcaption className="demo-statusbar">{content.date}</figcaption>
+    </div>
+  </figure>;
 }

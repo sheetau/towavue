@@ -1,3 +1,4 @@
+import { DownloadFluid } from "./DownloadFluid";
 import { getInstaller, releaseFallback } from "../site/download.mjs";
 
 export function DownloadLink({ content, compact = false, status, onStatusChange }) {
@@ -32,8 +33,9 @@ export function DownloadLink({ content, compact = false, status, onStatusChange 
   }
 
   return (
-    <a className={`button app-download${compact ? " button-sm" : ""}`} href={releaseFallback} onClick={download} aria-disabled={status === "loading"} aria-busy={status === "loading"}>
-      {compact ? content.download : content.downloadWindows}
+    <a className={`button app-download${compact ? " button-sm" : " button-fluid"}`} href={releaseFallback} onClick={download} aria-disabled={status === "loading"} aria-busy={status === "loading"}>
+      {!compact && <DownloadFluid />}
+      <span className="download-label">{compact ? content.download : content.downloadWindows}</span>
     </a>
   );
 }

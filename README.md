@@ -1,20 +1,19 @@
 # towavue website
 
-The landing page for [towavue](https://github.com/sheetau/towavue), a Windows media viewer.
+Landing page for [towavue](https://github.com/sheetau/towavue), based on the finished Frame 3 in `concepts/lp_concept.fig` and `concepts/plan.txt`.
 
 Website: **https://sheetau.github.io/towavue/**
 
 ## Local development
 
-Requires Node.js 22 or later.
+Requires Node.js 22 or later. Generated assets are committed; a normal build needs no Python or font installation.
 
 ```powershell
 npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000/towavue/`. Japanese is available at `/towavue/ja/`.
-To preview the exact exported production site, stop the development server first:
+Open `http://localhost:3000/towavue/`; Japanese is at `/towavue/ja/`.
 
 ```powershell
 npm run check
@@ -22,75 +21,68 @@ npm run build
 npm run preview
 ```
 
-The preview server supports byte-range video requests. Build output is in `out/`. Development uses `.next-dev/` while production builds use `.next/`, so they can compile without overwriting each other.
+Static output is in `out/`. Development uses `.next-dev/`, production uses `.next/`. Set `PORT` to change the preview port. For a phone on the same LAN, use `npm run preview:lan` and open the printed URL. Rebuild and reload after changes to the static preview.
 
-To review a production build from a phone on the same LAN, run `npm run build` then `npm run preview:lan`. This serves only `out/` on port 3001, prints the computer's LAN URL, and supports video byte-range requests. Open the printed URL on the phone (append `ja/` for Japanese). Rebuild after edits; the preview uses revalidation to avoid stale files. Set `PORT` to override the default port. Regular `npm run preview` remains loopback-only on port 3000.
+## Design and interactions
+
+The October 13, 2026 Frame 3 export defines a 1145px content width, black background, Atelier Femme Serif headings/introductions, Helvetica Now Text body text, and four feature sections. Shared layout, spacing, color, and typography tokens remain in `styles/globals.css`. The supplied font files are served locally. Japanese uses Noto Serif JP as its serif fallback.
+
+- Lenis smooth wheel scrolling uses interpolation (`lerp: 0.1`), matching the Pixel Reveal reference. Gallery and scroll progress follow the same native page position. Touch scrolling stays native and reduced-motion preferences disable smoothing.
+- Transparent sticky header with difference blending; its bottom line reflects document scroll progress.
+- One gallery tab containing 20 licensed archive images. Each image has the same diagonal and retains its aspect ratio. The gallery follows page scrolling through every row while the final row remains visible; direct wheel scrolling is disabled. Reduced-motion preferences stop this automatic effect. Caption controls retain decorative hover states. The old media-tab, playback, and video-scroll code has been removed.
+- Benchmark comparisons in IrfanView / MPC-HC / VLC order, with two bars each on a shared 0-400 completion-time scale. Bars animate once when entering view; reduced motion and no-JavaScript rendering show complete bars. The values and explanation match Frame 3.
+- Three workspace screenshots copied directly from `workspace1-3.png`.
+- Interactive waveform with screen blending. Left click/drag seeks, dotted edges resize the selection, and right drag within the selection moves it. Touch can move the selected region. Selection width cannot fall below 6% of the timeline. All four controls also support arrows, Shift+arrow, Home, and End.
+- Fifteen-image filmstrip with an animated set of corner brackets and moving file position/name. Hover, tap, focus, and arrow-key navigation update the active image. The mobile strip scrolls horizontally inside its own viewport.
+- Timeline selection and filmstrip brackets have one-time, in-view entrances using the benchmark easing. Interacting with the controls cancels the entrance immediately; reduced motion skips it.
+- Main download buttons use a white/gray fluid shader on hover or keyboard focus. The header keeps its plain hover. GPU drawing stops while idle or offscreen, and reduced motion holds a still frame.
+
+The page declares its native dark palette and includes Dark Reader's documented lock to prevent double transformation of its black background, white bars, and difference-blended header.
 
 ## Organization
 
-This follows the monapad LP's Next.js Pages Router, static export, separate website branch, and directory organization:
-
 | Location | Responsibility |
 | --- | --- |
-| `pages/` | English and Japanese static routes, document metadata, Google Fonts |
-| `src/components/` | Page composition and small interactive components |
-| `src/site/locales.js` | All page copy, feature definitions, and translated accessibility labels |
-| `src/site/config.mjs` | Repository, canonical site URL, base path, and asset paths |
-| `src/site/download.mjs` | Latest-release lookup and Windows x64 installer selection |
-| `src/site/media.js` | Generated media metadata, fictional audio tracks, and clock formatting |
-| `src/site/media-manifest.json` | Photo/video metadata generated by `scripts/prepare-media.py` |
-| `src/site/audio-playback.mjs` | Silent audio clock, queue progression, repeat, and shuffle |
-| `styles/globals.css` | Shared tokens, page layout, app demo, and responsive rules |
-| `public/media/` | Optimized copies of supplied media and the favicon |
-| `.github/workflows/deploy.yml` | Build `gh-pages` and deploy `out/` through GitHub Actions |
+| `pages/` | Static routes and document/font metadata |
+| `src/components/LandingPage.jsx` | Page composition and SEO metadata |
+| `src/components/HeroDemo.jsx` | Single gallery and scroll response |
+| `src/components/Benchmark.jsx` | Comparison data and reveal animation |
+| `src/components/TimelineDemo.jsx` | Pointer and keyboard timeline controls |
+| `src/components/FilmstripDemo.jsx` | Thumbnail selection, brackets, and metadata |
+| `src/site/locales.js`, `src/site/ja.json` | English and Japanese copy |
+| `src/site/gallery.json` | Generated image metadata |
+| `src/site/timeline.mjs` | Shared selection bounds and diagonal sizing |
+| `src/site/config.mjs`, `src/site/download.mjs` | URLs and latest Windows installer lookup |
+| `styles/globals.css` | Shared design tokens and responsive layout |
+| `public/media/` | Supplied artwork, generated thumbnails, fonts, and existing assets |
 
-The original `concepts/` and `images/` directories stay local and ignored. The app checkout is entirely separate. There is no shared worktree, symlink, or app build dependency.
+The original `concepts/` and `images/` directories remain local and ignored. The app checkout stays separate.
 
-The monapad names `--color-theme-*`, `--font-*`, `--max-width-container`, `.container`, `.hero-text`, `.hero-buttons`, `.app-download`, `.feature-block`, `.feature-showcase`, `.feature-media`, `.prefooter`, `.site-shell`, and `.language-switcher` are reused. Components consume explicit locale objects rather than replacing strings inside serialized HTML; content and interactions stay separate without duplicating markup.
+## Downloads, localization, and metadata
 
-## Design and content
+All three download links resolve the latest public Windows x64 setup at click time, with a shared status message and Releases fallback on errors. Without JavaScript they remain ordinary release links. Installer selection and failure handling are covered by tests. Download labels do not change during loading.
 
-`concepts/lp_concept.fig` was unpacked and its embedded Kiwi schema and Zstandard node data decoded. The frame hierarchy, text styles, fills, and strokes were inspected, alongside the PNG. The source defines a black canvas, white headings, gray body text, IBM Plex Serif headings (italic hero), and IBM Plex Mono body copy. The layout retains the narrow header, left-aligned hero, app demo, five selectable feature rows with a shared preview, three closing cards, and footer. Spacing is normalized through shared tokens.
+The existing language menu retains keyboard navigation, outside-click dismissal, and real locale links. Both routes have canonical and reciprocal hreflang URLs, Open Graph/Twitter images, and SoftwareApplication structured data. The supplied product preview and favicon remain unchanged. Add locales through `src/site/locales.js`, a corresponding page route, and `public/sitemap.xml`.
 
-The body copy is grounded in the app's README, STATUS, ARCHITECTURE, and playlist implementation. Closing artwork includes shortcuts, the viewer layered over its source code, and a minimal image-viewer screenshot. The source-code layer uses screen blending; both source layers skew by -10 degrees, with a dark upper-left shadow behind the viewer.
+Google Analytics retains measurement ID `G-C4WW8W4TVG` and the `download_click` event, but initializes only on `sheetau.github.io` so local preview visits do not reach the production property.
 
-The preview supports video, image, and audio tabs in that order, nine-image navigation, video playback and seeking, and fictional audio tracks with a silent playback clock. The video can be played/paused from either its status button or the media area, and has no audio stream. Audio supports repeat off/all/one and a shuffled queue, without loading an audio source. Switching tabs pauses playback and preserves positions. Window/close controls and the reading icon remain decorative. The supplied outline logo is used for the header and demo; only the browser tab uses the favicon.
+## Media preparation
 
-The header stays at the top on a translucent black background. Inset vertical rules sit behind the content and remain faintly visible through the header. Screenshot images preserve the source PNG alpha channel in lossless WebP, with no added borders or corner decoration. Demo tabs are rounded and their close/caption SVG paths come from monapad. Compact close and transport icons respond with white hover color only. The idle seek bar is a one-pixel track; hover animates its thickness and thumb scale and overlays a translucent preview up to the pointer, without seeking until an actual click or drag. Status metadata uses the supplied originals for images, the web video for video, and fictional audio metadata. Transport/reading artwork comes from Lucide; see [attribution and license](notices/lucide.md).
+The gallery contains 20 licensed archive images. The filmstrip uses the first 15 images in the gallery order, defined by `filmstripIds` in the gallery manifest. Source URLs, creator credits, image licences, and conversion notes are recorded in `src/site/gallery.json` and `public/media/gallery/credits.json`, and displayed at `/image-credits/`. Image licences are separate from the website code licence.
 
-Both download buttons fetch the latest public release at click time and select `towavue-*-windows-x64-setup.exe`. They initiate a browser download without replacing the LP. Button labels stay fixed in every state; shared progress, success, and error messages appear after the hero platform note, including a Releases fallback on failure. The smaller hero download button has no icon and sits beside a `Star on GitHub` link to the repository. The ordinary download link remains useful without JavaScript.
-
-Desktop and other non-iOS browsers scrub the native video directly. Only iOS/iPadOS paused video scrubbing displays independently decoded 960px-wide stills sampled at 12 fps, so it also works when a mobile browser does not repaint paused video seeks. It keeps the previous image until the next one decodes, and retains that overlay until playback presents a video frame. Native paused timeupdate events do not override the requested position. Scroll deltas advance only the paused video while the demo is visible; manual seeking establishes a new starting position. Scroll seeking pauses during dragging or playback and respects reduced-motion preferences. Image hover previews use small thumbnails, and video previews use a single sprite sampled every half second without seeking the player.
-
-Feature artwork uses each locale item's `images` array in front-to-back order. The speed preview uses ten 800px-wide frames in a separate high-quality sprite extracted from the original video, newest and brightest on top, with older frames beneath it. Its brief staggered entrance respects reduced-motion preferences. Shared `--feature-padding` controls top, bottom, and left spacing; stacked images distribute their vertical offsets across that space and clip at the right edge. The tab image has a gradient mask on an exactly matching wrapper.
-
-On narrow screens the demo uniformly scales its 1144px desktop layout, including fonts, buttons, and spacing, so at least the left two-thirds remain visible. The rest extends beyond the right viewport edge without horizontal page scrolling. Its reserved height follows the scaled height. Japanese h1 text uses the existing Noto Serif JP font compressed horizontally to 70%, anchored to the left.
-
-## Localization
-
-English is the default. The footer switches between explicit English and Japanese URLs without automatic redirects. To add a language:
-
-1. Add its label to `languages` and its copy to `locales` in `src/site/locales.js`.
-2. Add `pages/<locale>/index.jsx` following `pages/ja/index.jsx`.
-3. Rebuild and verify the new route and layout.
-
-Both pages have self-referencing canonical URLs and reciprocal `hreflang` links. The footer uses real links for language navigation, and `public/sitemap.xml` lists both production URLs and their language alternatives. Update that sitemap when adding a language or changing the production hostname/base path. Submit `https://sheetau.github.io/towavue/sitemap.xml` in Search Console; after a content update, request indexing for the changed page with URL Inspection. Indexing does not guarantee a particular query ranking or immediate search-result updates.
-
-The Japanese page includes the reading `トワビュー` only in its `keywords` meta tag and the application's structured-data `alternateName`; visible copy, titles, descriptions, and image alt text use `towavue`. Google does not use the keywords meta tag for indexing or ranking. Open Graph and Twitter cards use an unchanged copy of the supplied `images/towavue-product-preview.png` at `public/media/towavue-product-preview.png` (997 × 622); the media preparation script preserves this copy on regeneration.
-
-Google Analytics uses measurement ID `G-C4WW8W4TVG` from `src/site/config.mjs`, initialized through `next/script` after the page becomes interactive on both language pages. Both download buttons send `download_click` with `event_category: "Download"` and `event_label: "Windows Setup"`, matching monapad. This counts download attempts, not completed file transfers; clicks ignored during loading do not send another event. Analytics being unavailable or throwing an error does not interrupt the download. Browser checks intercept Google tag requests to avoid sending test events to the live property.
-
-Google Fonts loads IBM Plex Serif and IBM Plex Mono for English, and Noto Serif JP and M PLUS 1 Code for Japanese. The language trigger is unboxed and aligned to the right container edge; its rectangular popup follows the download button's colors with no outer padding or inter-item gaps. The monapad-style popup marks the current language and supports arrows, Home/End, Escape, outside-click dismissal, and focus restoration. Metadata includes document language, canonical and alternate URLs, Open Graph, and SoftwareApplication structured data.
-
-## Media
-
-Web-sized derivatives are committed, so a regular site build needs no media tooling. To regenerate from the original local files, install Python/Pillow and FFmpeg, then run:
+To recreate the proportional WebP thumbnails (Python, Pillow, requests):
 
 ```powershell
-python scripts/prepare-media.py
+python scripts/prepare-archive-media.py
 ```
 
-The image samples are the owner's nine supplied Unsplash files: Quino Al first, Logan Clark second, Vinh Thang second to last, and miom last. Original photographer identifiers remain in the preparation script and generated manifest. The video derives from supplied `Blooming white orchid.mp4`. The preparation script also generates photo thumbnails, the video frame sprite, and `src/site/media-manifest.json`; commit these together when replacing media. Source files are preserved. There is no generated replacement artwork. The MP4 is resized to 1280 pixels wide with its original aspect ratio, stripped of audio, encoded with frequent keyframes for seeking, and uses fast-start metadata.
+Original downloads are cached in ignored `output/archive-sources/`. Images are not cropped or recoloured. `scripts/prepare-media.py` still copies the supplied workspace artwork and Latin fonts, while preserving the archive catalogue.
+
+Japanese serif glyphs use **Towavue JP Narrow**, a renamed Noto Serif JP Regular derivative whose outlines and horizontal advances are scaled to 70%. It preserves the source font's full character coverage, alternate glyphs, and ideographic variation sequences. Atelier Femme Serif remains first in the font stack, so English text keeps its original width. The font is self-hosted with its SIL OFL licence; editing Japanese copy no longer requires regeneration. To regenerate the full font (Python, requests, fonttools, brotli):
+
+```powershell
+python scripts/prepare-japanese-serif.py
+```
 
 ## Publishing
 
@@ -114,10 +106,12 @@ For a different hosting subpath set `NEXT_PUBLIC_BASE_PATH` before both build an
 
 ## Verification
 
-- `npm run check`: installer selection and failures; paused/ended audio, track transitions, repeat one/all, and shuffle progression.
-- `npm run build`: static production output for English and Japanese.
-- Browser review: all nine images, scroll seeking, image/video hover thumbnails, keyboard and pointer tab controls, video playback/area-click/seek, silent audio playback/repeat/shuffle, feature previews, language-menu focus and dismissal, download success/failure, responsive overflow, Japanese font loading, inset rails, fixed header, and image borders.
-- Download browser checks use the live GitHub release response and intercept the installer payload with a small fixture; they do not run or install the EXE.
-- `npm audit`: dependency audit. PostCSS is explicitly overridden to the patched version while retaining the reference site's Next.js 15 structure.
+- `npm run check`: installer resolution/error cases, timeline minimum width and boundary preservation, image aspect ratio/diagonal sizing.
+- `npm run build`: English and Japanese static exports.
+- Browser review: desktop and mobile layouts, asset loading, bar reveal, gallery scroll response, timeline drag/keyboard boundaries, filmstrip movement, locale navigation, and horizontal overflow.
 
-Local visual-review artifacts are kept in ignored `output/playwright/`.
+Local design extraction and visual-review artifacts are in ignored `output/frame3/`.
+
+### Fluid background credit
+
+The download-button fluid shading is adapted from [Fluid Orb by Rare UI](https://rareui.com/components/fluidorb), copyright (c) 2026 Swami Malode. It uses the MIT + Commons Clause + Attribution terms in [third-party/rare-ui-LICENSE.txt](third-party/rare-ui-LICENSE.txt), separately from the website code licence. The adaptation fills a rectangular button, reads the existing grayscale tokens, and renders only while active.

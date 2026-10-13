@@ -1,17 +1,41 @@
 import Head from "next/head";
 import Script from "next/script";
-import { useState } from "react";
-import { analyticsId, asset, localePath, repository, siteUrl } from "../site/config.mjs";
+import { useEffect, useState } from "react";
+import { analyticsId, asset, basePath, localePath, repository, siteUrl } from "../site/config.mjs";
 import { languages, locales } from "../site/locales";
-import { Logo, Icon } from "./Icons";
+import { Logo } from "./Icons";
 import { DownloadLink, DownloadStatus } from "./DownloadLink";
 import { HeroDemo } from "./HeroDemo";
-import { FeatureShowcase } from "./FeatureShowcase";
+import { Benchmark } from "./Benchmark";
+import { TimelineDemo } from "./TimelineDemo";
+import { FilmstripDemo } from "./FilmstripDemo";
+import { ScrollProgress } from "./ScrollProgress";
+import media from "../site/gallery.json";
 import { LanguageSwitcher } from "./LanguageSwitcher";
-import { SourceArtwork } from "./SourceArtwork";
+
+
+function SectionHeading({ id, content, locale }) {
+  return <div className="section-heading">
+    <div className="section-label">{content.label}</div>
+    <h2 id={id}>{content.title}</h2>
+    <p>{content.description}</p>
+  </div>;
+}
+
+function FeatureColumns({ items }) {
+  return <div className="feature-grid">{items.map((item) => <article className="feature-column" key={item.title}>
+    <h3>{item.title}</h3><p>{item.description}</p>
+  </article>)}</div>;
+}
 
 export function LandingPage({ locale = "en" }) {
   const [downloadStatus, setDownloadStatus] = useState("idle");
+  useEffect(() => {
+    if (downloadStatus !== "success" && downloadStatus !== "error") return;
+    // Native download dialogs expose no completion/cancellation event to this page.
+    const timeout = window.setTimeout(() => setDownloadStatus("idle"), downloadStatus === "success" ? 5000 : 10000);
+    return () => window.clearTimeout(timeout);
+  }, [downloadStatus]);
   const content = locales[locale] ?? locales.en;
   const canonical = `${siteUrl}/${locale === "en" ? "" : `${locale}/`}`;
   const structuredData = {
@@ -65,88 +89,71 @@ export function LandingPage({ locale = "en" }) {
           window.dataLayer = window.dataLayer || [];
           function gtag(){window.dataLayer.push(arguments);}
           gtag("js", new Date());
-          gtag("config", ${JSON.stringify(analyticsId)});
+          if (location.hostname === "sheetau.github.io") {
+            gtag("config", ${JSON.stringify(analyticsId)});
+            const script = document.createElement("script");
+            script.src = "https://www.googletagmanager.com/gtag/js?id=" + ${JSON.stringify(analyticsId)};
+            script.async = true;
+            document.head.append(script);
+          }
         `}
       </Script>
-      <Script src={`https://www.googletagmanager.com/gtag/js?id=${analyticsId}`} strategy="afterInteractive" />
       <div className="site-shell">
         <a className="skip-link" href="#main">
           {content.skip}
         </a>
         <header className="site-header">
-          <div className="container header-inner">
-            <a className="site-logo" href={localePath(locale)} aria-label={content.home}>
-              <Logo />
-            </a>
+          <div className="header-inner">
+            <a className="site-logo" href={localePath(locale)} aria-label={content.home}><Logo /></a>
+            <a className="site-wordmark" href={localePath(locale)} aria-label={content.home}>towavue</a>
             <DownloadLink content={content} compact status={downloadStatus} onStatusChange={setDownloadStatus} />
           </div>
+          <ScrollProgress />
         </header>
-        <main id="main">
+        <main id="main" className="container main-content">
           <section className="hero section" aria-labelledby="hero-title">
-            <div className="container">
-              <div className="hero-text">
-                <h1 id="hero-title">
-                  {content.hero[0]} <br />
-                  {content.hero[1]}
-                </h1>
-                <p>{content.heroDescription}</p>
-                <div className="hero-buttons">
-                  <div className="hero-actions">
-                    <DownloadLink content={content} status={downloadStatus} onStatusChange={setDownloadStatus} />
-                    <a className="button github-star" href={repository} target="_blank" rel="noreferrer">Star on GitHub</a>
-                  </div>
-                  <div className="platform-note">{content.platform}<DownloadStatus content={content} status={downloadStatus} /></div>
-                </div>
-              </div>
-              <HeroDemo content={content.demo} />
+            <div className="hero-text">
+              <h1 id="hero-title">{content.hero}</h1>
+              <p>{content.heroDescription}</p>
             </div>
+            <div className="hero-buttons">
+              <div className="hero-actions">
+                <DownloadLink content={content} status={downloadStatus} onStatusChange={setDownloadStatus} />
+                <a className="button github-star" href={repository} target="_blank" rel="noreferrer">Star on GitHub</a>
+              </div>
+            </div>
+            <HeroDemo content={content.demo} />
           </section>
-          <section className="feature-block section" aria-labelledby="features-title">
-            <div className="container">
-              <div className="section-heading">
-                <h2 id="features-title">{content.featureTitle}</h2>
-                <p>{content.featureDescription}</p>
-              </div>
-              <FeatureShowcase content={content} />
-            </div>
+          <section className="section benchmark-section" aria-labelledby="benchmark-title">
+            <SectionHeading id="benchmark-title" content={content.benchmark} locale={locale} />
+            <Benchmark content={content.benchmark} locale={locale} />
           </section>
-          <section className="feature-block prefooter section" aria-labelledby="closing-title">
-            <div className="container">
-              <div className="section-heading">
-                <h2 id="closing-title">{content.closingTitle}</h2>
-                <p>{content.closingDescription}</p>
-              </div>
-              <div className="closing-grid">
-                {content.closing.map((item) => (
-                  <article className="closing-card" key={item.title}>
-                    <div
-                      className={`closing-media${item.artwork ? ` closing-media-${item.artwork}` : ""}${item.image || item.artwork ? "" : " is-empty"}`}
-                      aria-hidden={!item.image && !item.artwork ? "true" : undefined}
-                    >
-                      {item.artwork === "source" ? (
-                        <SourceArtwork label={item.alt} />
-                      ) : (
-                        item.image && (
-                          <img src={asset(item.image)} alt={item.alt} width="740" height="470" loading="lazy" />
-                        )
-                      )}
-                    </div>
-                    <div className="closing-copy">
-                      <h4>{item.title}</h4>
-                      <p>{item.description}</p>
-                      {item.link && (
-                        <a className="text-link" href={item.href} target="_blank" rel="noreferrer">
-                          {item.link}
-                          <Icon name="arrow" />
-                        </a>
-                      )}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </div>
+          <section className="section workspace-section" aria-labelledby="workspace-title">
+            <SectionHeading id="workspace-title" content={content.workspace} locale={locale} />
+            <div className="feature-grid workspace-grid">{content.workspace.items.map((item, index) => {
+              const picture = media.artwork[`workspace${index + 1}`];
+              return <article className="feature-column" key={item.title}>
+                <img className="workspace-image" src={asset(picture.src)} width={picture.width} height={picture.height} alt={item.alt} loading="lazy" />
+                <h3>{item.title}</h3><p>{item.description}</p>
+              </article>;
+            })}</div>
+          </section>
+          <section className="section editing-section" aria-labelledby="editing-title">
+            <SectionHeading id="editing-title" content={content.editing} locale={locale} />
+            <TimelineDemo content={content.timeline} />
+            <FeatureColumns items={content.editing.items} />
+          </section>
+          <section className="section discovery-section" aria-labelledby="discovery-title">
+            <SectionHeading id="discovery-title" content={content.discovery} locale={locale} />
+            <FilmstripDemo content={content.filmstrip} />
+            <FeatureColumns items={content.discovery.items} />
+          </section>
+          <section className="section final-download" aria-labelledby="closing-title">
+            <h2 id="closing-title">{content.closingTitle}</h2>
+            <DownloadLink content={content} status={downloadStatus} onStatusChange={setDownloadStatus} />
           </section>
         </main>
+        <div className={`download-feedback${downloadStatus === "idle" ? " is-idle" : ""}`}><DownloadStatus content={content} status={downloadStatus} /></div>
         <footer className="site-footer">
           <div className="container footer-inner">
             <span className="copyright">© 2026 sheeta.</span>
@@ -161,6 +168,7 @@ export function LandingPage({ locale = "en" }) {
                 {content.license}
               </a>
             </nav>
+            <a className="image-credits-link" href={`${basePath}/image-credits/`}>{locale === "ja" ? "画像の出典" : "Image credits"}</a>
             <LanguageSwitcher locale={locale} label={content.language} />
           </div>
         </footer>

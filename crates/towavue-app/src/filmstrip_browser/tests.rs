@@ -2,6 +2,93 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+fn breadcrumb_context_menu_has_five_safe_actions_and_retains_the_folder_target() {
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    let path = PathBuf::from("C:/Pictures/Folder");
+    browser.sync_folder(&path, &context);
+    browser.worker_failed = true;
+    let mut tabs = towavue_core::TabSet::default();
+    browser.owner = Some(crate::thumbnail_menu::Owner {
+        tab: tabs.open_gallery(),
+        instance: 7,
+    });
+    let size = egui::vec2(1000.0, 500.0);
+    for _ in 0..3 {
+        action_frame(&context, &mut browser, size, vec![]);
+    }
+    let output = action_frame(&context, &mut browser, size, vec![]).0;
+    let position = node(&output, "Folder").center();
+    for pressed in [true, false] {
+        action_frame(
+            &context,
+            &mut browser,
+            size,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Secondary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+    }
+    for _ in 0..3 {
+        action_frame(&context, &mut browser, size, vec![]);
+    }
+    let output = action_frame(&context, &mut browser, size, vec![]).0;
+    for text in [
+        Text::ThumbnailOpen,
+        Text::ThumbnailTab,
+        Text::ThumbnailWindow,
+        Text::CommandCopyFilePath,
+        Text::CommandRevealFile,
+    ] {
+        node(&output, text.in_language(localization::Language::English));
+    }
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("menu tree");
+    for text in [
+        Text::ThumbnailRename,
+        Text::ThumbnailMove,
+        Text::ThumbnailDelete,
+    ] {
+        assert!(!tree.nodes.iter().any(
+            |(_, node)| node.label() == Some(text.in_language(localization::Language::English))
+        ));
+    }
+    let target = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.label() == Some(Text::ThumbnailTab.in_language(localization::Language::English))
+        })
+        .expect("new tab")
+        .0;
+    let (_, action) = action_frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::AccessKitActionRequest(
+            egui::accesskit::ActionRequest {
+                action: egui::accesskit::Action::Click,
+                target_tree: egui::accesskit::TreeId::ROOT,
+                target_node: target,
+                data: None,
+            },
+        )],
+    );
+    assert!(
+        matches!(action, Some(Action::Menu(crate::thumbnail_menu::Intent { path: target, action: crate::thumbnail_menu::Action::Tab, scope: crate::thumbnail_menu::Scope::Folder, .. })) if target == path)
+    );
+}
+
+#[test]
 fn arriving_child_metadata_does_not_temporarily_elide_ancestors() {
     let Some(root) = crate::tests::isolated_test_root(
         "filmstrip_browser::tests::arriving_child_metadata_does_not_temporarily_elide_ancestors",
@@ -439,7 +526,7 @@ fn frame(
         output,
         action.and_then(|action| match action {
             Action::Folder(path, _) => Some(path),
-            Action::History(_) => None,
+            Action::History(_) | Action::Menu(_) => None,
         }),
     )
 }

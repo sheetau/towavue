@@ -107,6 +107,16 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
             assert_eq!(snapshot.target, Ok(folder.join(target)));
             assert!(!snapshot.used_name_fallback);
         }
+        let browser = crate::folder_browser::enumerate(folder.clone(), &current, |path| {
+            navigation::directories(path, &mut live, &current, true, &mut false, 4097)
+        })
+        .expect("ordered breadcrumb directories");
+        let names: Vec<_> = browser
+            .folders
+            .iter()
+            .map(|entry| entry.path.file_name().expect("name").to_string_lossy())
+            .collect();
+        assert_eq!(names, ["folder10", "folder2", "folder1"]);
         retry::FAIL_READS.set(3);
         let fallback = navigation::resolve(
             &folder,
@@ -768,4 +778,57 @@ unsafe fn fixture_views(folder: &OwnedPidl) -> Vec<(IFolderView2, HWND)> {
         }
         found
     }
+}
+
+#[test]
+fn long_shell_aliases_preserve_direct_open_paths_and_saved_order() {
+    use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+    let root = test_directory("long-alias-order");
+    let folder = root
+        .join("long-folder-component-".repeat(6))
+        .join("nested-component-".repeat(6));
+    fs::create_dir_all(&folder).expect("owned long directory");
+    for name in ["image number 2.jpg", "image number 10.jpg"] {
+        fs::write(folder.join(name), []).expect("owned media");
+    }
+    let fixture = folder.clone();
+    thread::spawn(move || {
+        let apartment = ShellApartment::new();
+        assert!(apartment.0);
+        let folder = canonical_shell_path(&fixture).expect("canonical long folder");
+        assert!(folder.as_os_str().encode_wide().count() > 260);
+        let extended = fs::canonicalize(&folder).expect("extended folder");
+        let input = wide_null(extended.as_os_str());
+        let mut short = vec![0; 32768];
+        // SAFETY: terminated input and a writable owned output buffer.
+        let count = unsafe { GetShortPathNameW(PCWSTR(input.as_ptr()), Some(&mut short)) };
+        assert!(count > 0 && (count as usize) < short.len());
+        short.truncate(count as usize);
+        let alias = normalized_shell_path(&PathBuf::from(OsString::from_wide(&short)));
+        let pidl = parse_path(&alias).expect("alias PIDL");
+        // SAFETY: all interfaces and fixture-only settings stay on this STA.
+        unsafe {
+            let item: IShellItem = SHCreateItemFromIDList(pidl.as_ptr()).expect("folder item");
+            assert_eq!(shell_item_path(&item), Some(folder.clone()));
+            save_fixture_sort(&alias, &pidl, &[native_column(NAME, SORT_DESCENDING)], 2);
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let result = shell_snapshot(&alias, 1, &mut None, &|| Instant::now() < deadline, false)
+            .expect("native long-folder snapshot");
+        assert_eq!(result.folder_path, folder);
+        assert_eq!(result.items.len(), 2);
+        for (item, name) in result
+            .items
+            .iter()
+            .zip(["image number 10.jpg", "image number 2.jpg"])
+        {
+            assert_eq!(
+                item.path,
+                canonical_shell_path(&folder.join(name)).expect("direct open")
+            );
+        }
+    })
+    .join()
+    .expect("STA test");
+    fs::remove_dir_all(root).expect("owned fixture cleanup");
 }

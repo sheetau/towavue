@@ -50,7 +50,7 @@ fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
             assert_eq!(
                 color(&output, "a.png"),
                 Some(if hovered {
-                    chrome::FOREGROUND
+                    chrome::MUTED
                 } else {
                     chrome::DISABLED
                 })
@@ -58,7 +58,7 @@ fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
             assert_eq!(
                 color(&output, if hovered { "\u{ea76}" } else { "\u{ea71}" }),
                 Some(if hovered {
-                    chrome::FOREGROUND
+                    chrome::MUTED
                 } else {
                     chrome::DISABLED
                 })
@@ -1565,7 +1565,7 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
             label.max + egui::vec2(chrome::TAB_CLOSE_WIDTH, 0.0),
         );
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))),
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(127))),
             "group opacity includes the close slot, not only the drag label");
         let (_, actions) = frame(&mut app, size, true, vec![pointer(body, false)]);
         assert!(
@@ -1574,7 +1574,7 @@ fn toolbar_magnetism_detaches_over_media_and_dims_the_whole_source_tab() {
         let (output, actions) = frame(&mut app, size, true, vec![]);
         assert!(actions.is_empty());
         assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
-            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(128))));
+            egui::Shape::Rect(rect) if rect.rect == expected && rect.fill == egui::Color32::from_black_alpha(127))));
     }
 }
 

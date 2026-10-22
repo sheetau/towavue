@@ -49,6 +49,7 @@ pub(super) fn resolve(
                     current,
                     shell_ready,
                     &mut used_name_fallback,
+                    usize::MAX,
                 )
                 .ok_or(Unavailable)?,
                 NoChild,
@@ -62,6 +63,7 @@ pub(super) fn resolve(
                     current,
                     shell_ready,
                     &mut used_name_fallback,
+                    usize::MAX,
                 )
                 .ok_or(Unavailable)?;
                 if !paths.contains(&origin) {
@@ -138,12 +140,13 @@ fn has_media_entries(
     Ok(false)
 }
 
-fn directories(
+pub(super) fn directories(
     folder: &Path,
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
     shell_ready: bool,
     used_name_fallback: &mut bool,
+    limit: usize,
 ) -> Option<Vec<PathBuf>> {
     if shell_ready
         && let Some(paths) = shell_listing(
@@ -174,6 +177,9 @@ fn directories(
                             && path.is_dir()
                         {
                             paths.push(path);
+                            if paths.len() == limit {
+                                break;
+                            }
                         }
                     }
                     Some(paths)
@@ -201,6 +207,9 @@ fn directories(
                 .is_ok_and(|kind| kind.is_dir() || (kind.is_symlink() && entry.path().is_dir()))
         {
             paths.push(entry.path());
+            if paths.len() == limit {
+                break;
+            }
         }
     }
     paths.sort_by(|left, right| natural_path_cmp(left, right));

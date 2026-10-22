@@ -307,3 +307,56 @@ fn modal_combo_text_shares_the_adjacent_label_center_without_growing_the_button(
         );
     }
 }
+
+#[test]
+fn maximized_top_gutter_activates_tabs_without_moving_the_title() {
+    for density in [1.0, 1.25, 2.0] {
+        for maximized in [false, true] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            context.global_style_mut(style);
+            if maximized {
+                context.data_mut(|data| data.insert_temp(egui::Id::new("tab-hit-top"), 0.0_f32));
+            }
+            let rect = Rect::from_min_size(egui::pos2(20.0, 4.0), egui::vec2(160.0, 24.0));
+            let point = egui::pos2(50.0, 0.5 / density);
+            let mut clicked = false;
+            let mut paint_y = None;
+            for pressed in [None, None, Some(true), Some(false)] {
+                let mut events = vec![egui::Event::PointerMoved(point)];
+                if let Some(pressed) = pressed {
+                    events.push(egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        tab_style(ui, rect, false, true);
+                        let response = tab_title(ui, rect, "Top gutter", false);
+                        clicked |= response.clicked();
+                    },
+                );
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == "Top gutter" => Some(text),
+                        _ => None,
+                    })
+                    .expect("title painted");
+                if let Some(y) = paint_y {
+                    assert_eq!(text.pos.y, y);
+                }
+                paint_y = Some(text.pos.y);
+            }
+            assert_eq!(clicked, maximized, "density={density}");
+        }
+    }
+}

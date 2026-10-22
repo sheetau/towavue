@@ -330,7 +330,7 @@ mod tests {
                 let idle = bars(&render(None, false));
                 assert_eq!(idle[0].fill.a(), 0);
                 let handle_color = egui::Color32::from_gray(0xcc);
-                assert_eq!(idle[1].fill, handle_color.gamma_multiply(0.6));
+                assert_eq!(idle[1].fill, handle_color.gamma_multiply(0.3));
                 assert!(
                     f32::from(idle[1].corner_radius.nw) >= idle[1].rect.size().min_elem() / 2.0
                 );

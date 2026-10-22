@@ -2,6 +2,8 @@
 use crate::*;
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
+#[path = "seek_verification/burst.rs"]
+mod burst;
 #[path = "seek_verification/drag.rs"]
 mod drag;
 
@@ -63,6 +65,7 @@ struct Trial {
     expected_edits: Option<Vec<EditOperation>>,
     configured_at: Option<Instant>,
     drag: Option<drag::Probe>,
+    burst: Option<burst::Probe>,
     sample: Option<Sample>,
     index: usize,
     sample_count: usize,
@@ -457,8 +460,14 @@ impl ApplicationHandler<window_host::Event> for Trial {
             {
                 drag.before_frame(&mut self.app);
             }
+            if let Some(burst) = &mut self.burst {
+                burst.before_frame(&mut self.app);
+            }
             let started = Instant::now();
             self.app.render_frame();
+            if let Some(burst) = &mut self.burst {
+                burst.after_frame(&mut self.app);
+            }
             let elapsed = started.elapsed();
             if self.index == self.sample_count
                 && let Some(drag) = &mut self.drag
@@ -489,7 +498,10 @@ impl ApplicationHandler<window_host::Event> for Trial {
             self.next_frame_at = Instant::now() + Duration::from_nanos(16_666_667);
         }
         self.observe();
-        if self.index == self.sample_count && self.drag.as_ref().is_none_or(drag::Probe::complete) {
+        if self.index == self.sample_count
+            && self.drag.as_ref().is_none_or(drag::Probe::complete)
+            && self.burst.as_ref().is_none_or(burst::Probe::complete)
+        {
             self.complete = true;
             event_loop.exit();
             event_loop.set_control_flow(ControlFlow::Poll);
@@ -582,16 +594,19 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         expected_edits: None,
         configured_at: None,
         drag: drag::Probe::from_environment(),
+        burst: burst::Probe::from_environment(),
         sample: None,
         index: 0,
-        sample_count: if std::env::var_os("TOWAVUE_SEEK_PAUSED_ONLY").is_some() {
+        sample_count: if std::env::var_os("TOWAVUE_SEEK_CLICK_BURST").is_some() {
+            0
+        } else if std::env::var_os("TOWAVUE_SEEK_PAUSED_ONLY").is_some() {
             6
         } else {
             12
         },
         next_at: Instant::now(),
         next_frame_at: Instant::now(),
-        deadline: Instant::now() + Duration::from_secs(180),
+        deadline: Instant::now() + Duration::from_secs(240),
         complete: false,
     };
     assert!(

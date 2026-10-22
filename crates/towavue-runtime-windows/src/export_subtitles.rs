@@ -283,8 +283,16 @@ fn project(
             .chain(document.cues()[start..end].iter());
         for cue in cues {
             check_cancelled(cancelled)?;
-            let SubtitleContent::Text(text) = cue.content() else {
-                continue;
+            let text: std::borrow::Cow<'_, str> = match cue.content() {
+                SubtitleContent::Text(text) => std::borrow::Cow::Borrowed(text),
+                SubtitleContent::Positioned(lines) => std::borrow::Cow::Owned(
+                    lines
+                        .iter()
+                        .map(|line| line.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                SubtitleContent::Bitmap(_) => continue,
             };
             let map = |time: MediaTime| {
                 output_ms(
@@ -303,7 +311,7 @@ fn project(
                 return Err(ExportError::Message(Text::SubtitleTooLarge));
             }
             let index = texts.len();
-            texts.push(text.as_str());
+            texts.push(text);
             events.extend([(a, true, index), (b, false, index)]);
         }
         offset += i128::from(span.duration().as_nanoseconds());

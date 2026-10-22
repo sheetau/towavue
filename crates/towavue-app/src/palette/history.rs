@@ -17,9 +17,10 @@ impl CommandPalette {
         let query = self.query[1..].trim().to_lowercase();
         let mut matches: Vec<_> = command_definitions()
             .iter()
+            .filter(|definition| !options::child(definition.id))
             .filter(|definition| {
-                definition
-                    .title_in(language)
+                options::title(definition.id, language)
+                    .unwrap_or_else(|| definition.title_in(language))
                     .to_lowercase()
                     .contains(&query)
             })
@@ -85,8 +86,11 @@ impl CommandPalette {
                         RowActions::new(row, index < recent_count && controls, controls);
                     let body = row_actions.body;
                     let background = ui.painter().add(egui::Shape::Noop);
-                    let mut atoms =
-                        egui::Atoms::new((definition.title_in(language), egui::Atom::grow()));
+                    let mut atoms = egui::Atoms::new((
+                        options::title(definition.id, language)
+                            .unwrap_or_else(|| definition.title_in(language)),
+                        egui::Atom::grow(),
+                    ));
                     if !shortcut.is_empty() {
                         atoms.push_right(label_gap(ui));
                         atoms.push_right(
@@ -118,7 +122,8 @@ impl CommandPalette {
                             );
                             ui.add(
                                 egui::Label::new(crate::hover_help::shortcut(
-                                    definition.title_in(language),
+                                    options::title(definition.id, language)
+                                        .unwrap_or_else(|| definition.title_in(language)),
                                     &shortcut,
                                 ))
                                 .wrap(),
@@ -128,7 +133,10 @@ impl CommandPalette {
                         .set(background, row_background(ui, row, &response, selected));
                     context.accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
-                        node.set_label(definition.title_in(language));
+                        node.set_label(
+                            options::title(definition.id, language)
+                                .unwrap_or_else(|| definition.title_in(language)),
+                        );
                         if !shortcut.is_empty() {
                             node.set_description(shortcut.clone());
                         }
@@ -149,7 +157,8 @@ impl CommandPalette {
                         context.accesskit_node_builder(configure.id, |node| {
                             node.set_label(formatted::configure_keybinding(
                                 language,
-                                definition.title_in(language),
+                                options::title(definition.id, language)
+                                    .unwrap_or_else(|| definition.title_in(language)),
                             ));
                         });
                         if configure.clicked() && !query_changed {
@@ -166,7 +175,8 @@ impl CommandPalette {
                         context.accesskit_node_builder(remove.id, |node| {
                             node.set_label(formatted::remove_recent_command(
                                 language,
-                                definition.title_in(language),
+                                options::title(definition.id, language)
+                                    .unwrap_or_else(|| definition.title_in(language)),
                             ));
                         });
                         if remove.clicked() && !query_changed {

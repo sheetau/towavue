@@ -121,6 +121,13 @@ impl AudioTempo {
         Ok(())
     }
 
+    pub(crate) fn restart(&mut self, output: &mut VecDeque<u8>) -> Result<(), Error> {
+        let rate = self.ordinary_rate.unwrap_or(1.0);
+        self.finish(output)?;
+        *self = Self::new(self.sample_rate, rate)?;
+        Ok(())
+    }
+
     pub(crate) fn finish(&mut self, output: &mut VecDeque<u8>) -> Result<(), Error> {
         if self.finished {
             return Ok(());
@@ -531,6 +538,42 @@ mod tests {
                     assert!(queue.is_empty());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn restart_preserves_pre_gap_tail_and_resets_filter_history_at_each_rate() {
+        let tone = |frequency: f32| -> Vec<u8> {
+            (0..2400)
+                .flat_map(|index| {
+                    let sample =
+                        (index as f32 * frequency * std::f32::consts::TAU / 48_000.0).sin() * 0.25;
+                    [sample, sample].into_iter().flat_map(f32::to_le_bytes)
+                })
+                .collect()
+        };
+        let first = tone(440.0);
+        let second = tone(880.0);
+        for rate in [0.5, 1.0, 1.1, 2.0] {
+            let independent = |bytes: &[u8]| {
+                let mut tempo = AudioTempo::new(48000, rate).expect("independent tempo");
+                let mut queue = VecDeque::new();
+                tempo.push(bytes, &mut queue).expect("independent input");
+                tempo.finish(&mut queue).expect("independent tail");
+                queue
+            };
+            let expected_first = independent(&first);
+            let expected_second = independent(&second);
+            let mut tempo = AudioTempo::new(48000, rate).expect("playback tempo");
+            let mut queue = VecDeque::new();
+            tempo.push(&first, &mut queue).expect("before gap");
+            let mut played: VecDeque<_> = queue.drain(..queue.len() / 2 / 8 * 8).collect();
+            tempo.restart(&mut queue).expect("flush and restart at gap");
+            played.extend(queue.drain(..));
+            assert_eq!(played, expected_first, "gap follows all pre-gap PCM");
+            tempo.push(&second, &mut queue).expect("after gap");
+            tempo.finish(&mut queue).expect("final tail");
+            assert_eq!(queue, expected_second, "no filter history crosses the gap");
         }
     }
 

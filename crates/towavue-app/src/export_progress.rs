@@ -102,6 +102,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                         | FolderIntent::OpenReplacing(_, _, _)
                         | FolderIntent::Related(_, _)
                         | FolderIntent::History(_)
+                        | FolderIntent::Window(_, _)
                         | FolderIntent::Background(_, _) => Some((
                             LoadingOwner::Folder(*generation),
                             Text::OpeningFolder.in_language(language),

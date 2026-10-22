@@ -5,7 +5,7 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 use CommandId::*;
 
 mod audio_tracks;
-mod choices;
+pub(crate) mod choices;
 #[cfg(test)]
 mod image_choices_tests;
 #[cfg(test)]
@@ -142,7 +142,6 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             ],
             &[SetTrimStart, SetTrimEnd],
             &[DeleteTimeSelection, KeepTimeSelection, PlayTimeSelection],
-            &[VolumeDown, VolumeUp, ToggleMute, CycleVolumeStep],
             &[EditSpeed],
         ],
     ),
@@ -155,6 +154,7 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
             &[RateDown, RateUp, ResetRate],
             &[PreviousVideoFrame, NextVideoFrame],
             &[StepAudioBackward, StepAudioForward],
+            &[VolumeDown, VolumeUp, ToggleMute, CycleVolumeStep],
             &[
                 CycleAudioRepeat,
                 ToggleVideoRepeat,
@@ -1385,12 +1385,15 @@ mod tests {
         navigate(egui::Key::ArrowLeft, false, "File");
         navigate(egui::Key::ArrowDown, false, "Edit");
         navigate(egui::Key::ArrowRight, false, "Paste image");
+        navigate(egui::Key::ArrowLeft, false, "Edit");
+        navigate(egui::Key::ArrowDown, false, "View");
+        navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
+        navigate(egui::Key::ArrowDown, false, "On window resize");
         navigate(egui::Key::ArrowDown, false, "Listening volume step");
         navigate(egui::Key::ArrowRight, false, "2%");
         navigate(egui::Key::ArrowDown, false, "5%");
         navigate(egui::Key::ArrowLeft, false, "Listening volume step");
-        navigate(egui::Key::ArrowLeft, false, "Edit");
-        navigate(egui::Key::ArrowDown, false, "View");
+        navigate(egui::Key::ArrowLeft, false, "View");
         navigate(egui::Key::ArrowRight, false, "Toggle fullscreen");
         navigate(egui::Key::Tab, true, "Language");
         navigate(egui::Key::ArrowRight, false, "English");

@@ -26,6 +26,7 @@ pub fn tab_title_layout(
     volume: Option<(f32, f32)>,
     icon: Option<crate::fluent::Kind>,
 ) -> egui::Response {
+    let hit_rect = tab_hit_rect(ui.ctx(), hit_rect);
     let response = tab_response(
         ui.put(
             hit_rect,

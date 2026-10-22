@@ -96,7 +96,7 @@ impl TabSet {
             let id = TabId(self.next_id);
             self.next_id = self.next_id.wrapping_add(1);
             self.gallery = Some(id);
-            self.order.push(id);
+            self.order.insert(0, id);
             id
         });
         self.active = ActiveTab::Gallery(id);
@@ -439,6 +439,20 @@ mod tests {
         );
         assert_eq!(tabs.open_gallery(), replacement);
         assert_eq!(tabs.len(), 1);
+    }
+
+    #[test]
+    fn newly_created_gallery_precedes_media_but_existing_gallery_keeps_its_position() {
+        let mut tabs = TabSet::default();
+        let original = tabs.gallery().expect("initial Gallery");
+        let first = tabs.open_new("first.png".into(), MediaKind::Image);
+        let second = tabs.open_new("second.png".into(), MediaKind::Image);
+        assert!(tabs.close_gallery(original));
+        let gallery = tabs.open_gallery();
+        assert_eq!(tabs.tab_ids().collect::<Vec<_>>(), [gallery, first, second]);
+        assert!(tabs.reorder(gallery, 3));
+        assert_eq!(tabs.open_gallery(), gallery);
+        assert_eq!(tabs.tab_ids().collect::<Vec<_>>(), [first, second, gallery]);
     }
 
     #[test]

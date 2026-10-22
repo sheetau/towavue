@@ -106,7 +106,7 @@ pub(crate) fn menu_checkbox(
     }
     let pass = ui.ctx().cumulative_pass_nr();
     ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), pass));
-    response
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Resolve pointer, keyboard and open-submenu feedback to one row per popup.

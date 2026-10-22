@@ -132,6 +132,7 @@ struct Request {
     folder: PathBuf,
     refresh: bool,
     navigation: Option<FolderNavigation>,
+    browser: bool,
     generation: u64,
     reply: Option<mpsc::Sender<FolderSnapshot>>,
 }
@@ -139,6 +140,7 @@ struct Request {
 enum Completion {
     Snapshot(FolderSnapshot),
     Navigation(FolderNavigationResult),
+    Browser(crate::folder_browser::FolderListing),
 }
 
 #[derive(Default)]
@@ -221,16 +223,16 @@ impl FolderOrderProvider {
     /// Notify Shell after a disk change, then enumerate current files.
     /// Every request uses fresh rows with the live view's sort/group settings.
     pub fn request_refreshed(&self, folder: PathBuf) -> u64 {
-        self.enqueue_mode(Some(folder), None, true, None)
+        self.enqueue_mode(Some(folder), None, true, None, false)
     }
 
     /// Resolve a related folder on the same cancellable STA. An empty result means stay.
     pub fn request_navigation(&self, folder: PathBuf, direction: FolderNavigation) -> u64 {
-        self.enqueue_mode(Some(folder), None, false, Some(direction))
+        self.enqueue_mode(Some(folder), None, false, Some(direction), false)
     }
 
     fn enqueue(&self, folder: Option<PathBuf>, reply: Option<mpsc::Sender<FolderSnapshot>>) -> u64 {
-        self.enqueue_mode(folder, reply, false, None)
+        self.enqueue_mode(folder, reply, false, None, false)
     }
 
     fn enqueue_mode(
@@ -239,6 +241,7 @@ impl FolderOrderProvider {
         reply: Option<mpsc::Sender<FolderSnapshot>>,
         refresh: bool,
         navigation: Option<FolderNavigation>,
+        browser: bool,
     ) -> u64 {
         let (mutex, ready) = &*self.shared;
         let mut mailbox = mutex.lock().expect("Shell mailbox");
@@ -255,12 +258,28 @@ impl FolderOrderProvider {
             folder,
             refresh,
             navigation,
+            browser,
             generation: mailbox.generation,
             reply,
         });
         mailbox.completed = None;
         ready.signal();
         mailbox.generation
+    }
+
+    pub(crate) fn request_browser(&self, folder: Option<PathBuf>) {
+        self.enqueue_mode(folder, None, false, None, true);
+    }
+
+    pub(crate) fn take_browser(&self) -> Option<crate::folder_browser::FolderListing> {
+        let mut mailbox = self.shared.0.lock().expect("Shell mailbox");
+        if !matches!(mailbox.completed, Some(Completion::Browser(_))) {
+            return None;
+        }
+        match mailbox.completed.take()? {
+            Completion::Browser(listing) => Some(listing),
+            _ => unreachable!("checked under mailbox lock"),
+        }
     }
 
     pub fn take_completed(&self) -> Option<FolderSnapshot> {
@@ -270,7 +289,9 @@ impl FolderOrderProvider {
         }
         match mailbox.completed.take()? {
             Completion::Snapshot(snapshot) => Some(snapshot),
-            Completion::Navigation(_) => unreachable!("checked under mailbox lock"),
+            Completion::Navigation(_) | Completion::Browser(_) => {
+                unreachable!("checked under mailbox lock")
+            }
         }
     }
 
@@ -282,7 +303,9 @@ impl FolderOrderProvider {
         }
         match mailbox.completed.take()? {
             Completion::Navigation(result) => Some(result),
-            Completion::Snapshot(_) => unreachable!("checked under mailbox lock"),
+            Completion::Snapshot(_) | Completion::Browser(_) => {
+                unreachable!("checked under mailbox lock")
+            }
         }
     }
 }
@@ -302,7 +325,7 @@ impl Drop for FolderOrderProvider {
 fn run_requests(
     shared: Arc<(Mutex<Mailbox>, ShellWake)>,
     notify: impl Fn(),
-    mut resolve: impl FnMut(&Path, u64, bool, Option<FolderNavigation>) -> Option<Completion>,
+    mut resolve: impl FnMut(&Path, u64, bool, Option<FolderNavigation>, bool) -> Option<Completion>,
 ) {
     let (mutex, ready) = &*shared;
     loop {
@@ -328,6 +351,7 @@ fn run_requests(
             request.generation,
             request.refresh,
             request.navigation,
+            request.browser,
         ) else {
             continue;
         };
@@ -364,59 +388,76 @@ fn shell_worker(shared: Arc<(Mutex<Mailbox>, ShellWake)>, notify: impl Fn()) {
     let mut apartment = None;
     let mut last_live_window = None;
     let current_shared = Arc::clone(&shared);
-    run_requests(shared, notify, |folder, generation, refresh, direction| {
-        let current = || request_is_current(&current_shared, generation);
-        if !current() {
-            return None;
-        }
-        let shell_ready = retry::read(&current, |_| {
-            if !apartment
-                .as_ref()
-                .is_some_and(|apartment: &ShellApartment| apartment.0)
-            {
-                apartment = Some(ShellApartment::new());
-            }
-            apartment
-                .as_ref()
-                .is_some_and(|apartment| apartment.0)
-                .then_some(())
-        })
-        .is_some();
-        if !current() {
-            return None;
-        }
-        if let Some(direction) = direction {
-            return navigation::resolve(
-                folder,
-                direction,
-                generation,
-                &mut last_live_window,
-                &current,
-                shell_ready,
-            )
-            .map(Completion::Navigation);
-        }
-        if shell_ready {
-            if let Some(snapshot) =
-                shell_snapshot(folder, generation, &mut last_live_window, &current, refresh)
-            {
-                return Some(Completion::Snapshot(snapshot));
-            }
+    run_requests(
+        shared,
+        notify,
+        |folder, generation, refresh, direction, browser| {
+            let current = || request_is_current(&current_shared, generation);
             if !current() {
                 return None;
             }
-            crate::diagnostic!(
-                "towavue: Shell view unavailable for {}; using natural-name order",
-                folder.display()
-            );
-        } else {
-            crate::diagnostic!(
-                "towavue: Shell STA initialization failed for {}; using natural-name order",
-                folder.display()
-            );
-        }
-        fallback_snapshot(folder, generation, &current).map(Completion::Snapshot)
-    });
+            let shell_ready = retry::read(&current, |_| {
+                if !apartment
+                    .as_ref()
+                    .is_some_and(|apartment: &ShellApartment| apartment.0)
+                {
+                    apartment = Some(ShellApartment::new());
+                }
+                apartment
+                    .as_ref()
+                    .is_some_and(|apartment| apartment.0)
+                    .then_some(())
+            })
+            .is_some();
+            if !current() {
+                return None;
+            }
+            if browser {
+                return crate::folder_browser::enumerate(folder.to_owned(), &current, |path| {
+                    navigation::directories(
+                        path,
+                        &mut last_live_window,
+                        &current,
+                        shell_ready,
+                        &mut false,
+                        crate::folder_browser::FOLDER_BROWSER_LIMIT + 1,
+                    )
+                })
+                .map(Completion::Browser);
+            }
+            if let Some(direction) = direction {
+                return navigation::resolve(
+                    folder,
+                    direction,
+                    generation,
+                    &mut last_live_window,
+                    &current,
+                    shell_ready,
+                )
+                .map(Completion::Navigation);
+            }
+            if shell_ready {
+                if let Some(snapshot) =
+                    shell_snapshot(folder, generation, &mut last_live_window, &current, refresh)
+                {
+                    return Some(Completion::Snapshot(snapshot));
+                }
+                if !current() {
+                    return None;
+                }
+                crate::diagnostic!(
+                    "towavue: Shell view unavailable for {}; using natural-name order",
+                    folder.display()
+                );
+            } else {
+                crate::diagnostic!(
+                    "towavue: Shell STA initialization failed for {}; using natural-name order",
+                    folder.display()
+                );
+            }
+            fallback_snapshot(folder, generation, &current).map(Completion::Snapshot)
+        },
+    );
 }
 
 fn request_is_current(shared: &(Mutex<Mailbox>, ShellWake), generation: u64) -> bool {
@@ -1174,7 +1215,22 @@ unsafe fn shell_item_path(item: &IShellItem) -> Option<PathBuf> {
         let value = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
         let path = value.to_string().ok().map(PathBuf::from);
         CoTaskMemFree(Some(value.0.cast()));
-        path
+        // Shell may shorten long filesystem paths to DOS aliases. Match the
+        // canonical identity used by direct opens before publishing a row;
+        // retain the native PIDL and its view position independently. Ordinary
+        // names avoid an additional filesystem query on every enumeration.
+        path.map(|path| {
+            let path = normalized_shell_path(&path);
+            if path
+                .as_os_str()
+                .encode_wide()
+                .any(|unit| unit == u16::from(b'~'))
+            {
+                canonical_shell_path(&path).unwrap_or(path)
+            } else {
+                path
+            }
+        })
     }
 }
 
@@ -1193,7 +1249,11 @@ fn wide_null(value: &OsStr) -> Vec<u16> {
 
 pub fn canonical_shell_path(path: &Path) -> std::io::Result<PathBuf> {
     let canonical = std::fs::canonicalize(path)?;
-    let wide = canonical.as_os_str().encode_wide().collect::<Vec<_>>();
+    Ok(normalized_shell_path(&canonical))
+}
+
+fn normalized_shell_path(path: &Path) -> PathBuf {
+    let wide = path.as_os_str().encode_wide().collect::<Vec<_>>();
     const EXTENDED: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
     const UNC: &[u16] = &[
         b'\\' as u16,
@@ -1215,7 +1275,7 @@ pub fn canonical_shell_path(path: &Path) -> std::io::Result<PathBuf> {
     } else {
         wide
     };
-    Ok(PathBuf::from(OsString::from_wide(&normalized)))
+    PathBuf::from(OsString::from_wide(&normalized))
 }
 
 struct OwnedPidl(*mut ITEMIDLIST);
@@ -1506,7 +1566,7 @@ mod tests {
             window_tx
                 .send(window.0 as usize)
                 .expect("test window identity");
-            run_requests(shared, || {}, |_, _, _, _| panic!("no folder requests"));
+            run_requests(shared, || {}, |_, _, _, _, _| panic!("no folder requests"));
             // SAFETY: the request loop has stopped; destroy this thread's retained window.
             unsafe { DestroyWindow(window).expect("destroy test window") };
         });
@@ -1657,7 +1717,7 @@ mod tests {
                     || {
                         ready_tx.send(()).expect("completion notification");
                     },
-                    |path, generation, refresh, _| {
+                    |path, generation, refresh, _, _| {
                         assert_eq!(refresh, path == Path::new("last"));
                         started_tx.send(path.to_owned()).expect("started request");
                         if path == Path::new("first") {
@@ -1735,7 +1795,7 @@ mod tests {
                 || {
                     ready_tx.send(()).expect("completion notification");
                 },
-                |path, generation, _, _| {
+                |path, generation, _, _, _| {
                     started_tx.send(()).expect("started request");
                     resume_rx
                         .recv_timeout(Duration::from_secs(5))

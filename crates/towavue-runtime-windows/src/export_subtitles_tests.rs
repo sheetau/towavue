@@ -22,7 +22,15 @@ fn projection_clips_surviving_spans_and_flattens_overlap_at_absolute_millisecond
     let document = SubtitleTimeline::new(vec![
         SubtitleCue::new(ms(500), ms(2500), SubtitleContent::Text("A & <B>".into())).expect("cue"),
         SubtitleCue::new(ms(2000), ms(4000), SubtitleContent::Text("Overlap".into())).expect("cue"),
-        SubtitleCue::new(ms(6000), ms(7000), SubtitleContent::Text("Tail".into())).expect("cue"),
+        SubtitleCue::new(
+            ms(6000),
+            ms(7000),
+            SubtitleContent::Positioned(vec![crate::SubtitleText {
+                text: "Tail".into(),
+                layout: crate::SubtitleLayout::default(),
+            }]),
+        )
+        .expect("cue"),
     ]);
     let timeline = EditTimeline::from_operations(ms(8000), &edits()).expect("timeline");
     let result =

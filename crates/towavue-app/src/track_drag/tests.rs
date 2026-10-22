@@ -73,6 +73,10 @@ fn track_drag_threshold_reverses_and_release_uses_shared_navigation_guards() {
                 match target {
                     Some(index) => {
                         assert!(
+                            app.status_message.is_none(),
+                            "release retires gesture guidance"
+                        );
+                        assert!(
                             matches!(&app.pending_guard, Some(GuardedAction::Navigate(path)) if path == &paths[index])
                         );
                         app.resolve_guard(GuardDecision::Cancel);

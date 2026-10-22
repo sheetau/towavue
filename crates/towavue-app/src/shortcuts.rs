@@ -9,7 +9,8 @@ use towavue_core::{CommandId, KeySequence, ShortcutBindings};
 mod editor;
 pub use editor::save_command;
 
-const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v15";
+const CURRENT_BINDING_HEADER: &str = "# towavue shortcuts v16";
+const FOCUS_BINDING_HEADER: &str = "# towavue shortcuts v15";
 const HISTORY_BINDING_HEADER: &str = "# towavue shortcuts v14";
 const SEARCH_BINDING_HEADER: &str = "# towavue shortcuts v13";
 const NAVIGATION_BINDING_HEADER: &str = "# towavue shortcuts v12";
@@ -191,6 +192,8 @@ pub fn defaults() -> ShortcutBindings {
         );
     }
     for (command, key) in [
+        (CommandId::PreviousSameKind, "Shift+P"),
+        (CommandId::NextSameKind, "Shift+N"),
         (CommandId::ClearSelection, "Ctrl+Shift+A"),
         (CommandId::VolumeUp, "Ctrl+Up"),
         (CommandId::VolumeDown, "Ctrl+Down"),
@@ -220,9 +223,13 @@ pub fn defaults() -> ShortcutBindings {
 
 fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings, Error> {
     let text = text.trim_start_matches('\u{feff}');
-    let focus_search_bindings = text
+    let same_kind_bindings = text
         .lines()
         .any(|line| line.trim() == CURRENT_BINDING_HEADER);
+    let focus_search_bindings =
+        same_kind_bindings || text.lines().any(|line| line.trim() == FOCUS_BINDING_HEADER);
+    let mut implicit_same_kind =
+        std::collections::BTreeSet::from([CommandId::PreviousSameKind, CommandId::NextSameKind]);
     let history_bindings = focus_search_bindings
         || text
             .lines()
@@ -327,6 +334,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 declared.remove(&command);
                 continue;
             }
+            implicit_same_kind.remove(&command);
             implicit_navigation.remove(&command);
             implicit_volume.remove(&command);
             if command == CommandId::ZoomIn {
@@ -395,7 +403,15 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
         {
             implicit_volume.remove(&command);
         }
-        let inherit = (implicit_volume.contains(&command)
+        if implicit_same_kind.contains(&command)
+            && (same_kind_bindings
+                || sequences.len() != 1
+                || standard.get(command) != sequences.first())
+        {
+            implicit_same_kind.remove(&command);
+        }
+        let inherit = (implicit_same_kind.contains(&command)
+            || implicit_volume.contains(&command)
             || command == CommandId::ClearSelection && implicit_deselect
             || legacy
                 && matches!(
@@ -559,6 +575,7 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                 && !declared.contains(&definition.id)
                 || definition.id == CommandId::ZoomIn && implicit_zoom
                 || definition.id == CommandId::ClearSelection && implicit_deselect
+                || implicit_same_kind.contains(&definition.id)
                 || implicit_volume.contains(&definition.id)
                 || implicit_navigation.contains(&definition.id)
         })
@@ -596,6 +613,11 @@ fn parse(text: &str, mut bindings: ShortcutBindings) -> Result<ShortcutBindings,
                         CommandId::ReadingLeft | CommandId::ReadingRight
                     ) && declared.contains(&definition.id)
                         && *candidate == standard.get(definition.id).expect("reading primary")
+                {
+                    return true;
+                }
+                if implicit_same_kind.contains(&definition.id)
+                    && !candidate.to_string().starts_with("Shift+")
                 {
                     return true;
                 }
@@ -665,6 +687,44 @@ fn serialize(bindings: &ShortcutBindings) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn same_kind_alternatives_migrate_without_overriding_custom_keys_or_prefixes() {
+        use super::*;
+        for (command, primary, alternative) in [
+            (CommandId::PreviousSameKind, "Ctrl+Left", "Shift+P"),
+            (CommandId::NextSameKind, "Ctrl+Right", "Shift+N"),
+        ] {
+            let old = format!("{FOCUS_BINDING_HEADER}\n{} = {primary}\n", command.as_str());
+            assert_eq!(
+                parse(&old, defaults()).expect("old defaults").all(command),
+                defaults().all(command)
+            );
+            for custom in ["", "Alt+Q", primary] {
+                let header = if custom == primary {
+                    CURRENT_BINDING_HEADER
+                } else {
+                    FOCUS_BINDING_HEADER
+                };
+                let source = format!("{header}\n{} = {custom}\n", command.as_str());
+                let parsed = parse(&source, defaults()).expect("explicit binding");
+                assert!(
+                    !parsed
+                        .all(command)
+                        .iter()
+                        .any(|key| key.to_string() == alternative)
+                );
+            }
+            for suffix in ["", " Q"] {
+                let source = format!("{old}open_file = {alternative}{suffix}\n");
+                let parsed = parse(&source, defaults()).expect("custom conflict");
+                assert_eq!(
+                    parsed.all(command),
+                    &[primary.parse::<KeySequence>().expect("primary")]
+                );
+            }
+        }
+    }
+
     #[test]
     fn search_focus_migrates_only_the_old_folder_default_and_preserves_conflicts() {
         use super::*;

@@ -172,6 +172,20 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return false;
         };
         drag.cursor = None;
+        // Retire gesture guidance before dispatch, preserving any new navigation error.
+        if drag.media == self.media_generation
+            && self.status_message.as_ref().is_some_and(|(message, _)| {
+                [
+                    localization::Text::TrackDragHint,
+                    localization::Text::TrackDragNext,
+                    localization::Text::TrackDragPrevious,
+                ]
+                .iter()
+                .any(|text| message == text.in_language(display_language))
+            })
+        {
+            self.status_message = None;
+        }
         if !cancel
             && drag.media == self.media_generation
             && self.track_drag_enabled()

@@ -9,6 +9,8 @@ use towavue_core::localization::{Language, Text};
 use towavue_core::{MediaTime, SubtitleCue, SubtitleTimeline, SubtitleTrack, SubtitleTrackId};
 
 mod bitmap;
+mod layout;
+pub use layout::{SubtitleLayout, SubtitleText};
 mod text;
 pub use bitmap::SubtitleBitmap;
 
@@ -21,6 +23,7 @@ const MAX_BYTES: usize = 128 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub enum SubtitleContent {
     Text(String),
+    Positioned(Vec<SubtitleText>),
     Bitmap(Vec<SubtitleBitmap>),
 }
 
@@ -97,6 +100,10 @@ pub fn read_subtitles(
             stream.parameters().id(),
             ffmpeg::codec::Id::SRT | ffmpeg::codec::Id::SUBRIP
         );
+        let authored = matches!(
+            stream.parameters().id(),
+            ffmpeg::codec::Id::ASS | ffmpeg::codec::Id::SSA
+        );
         let mut context =
             ffmpeg::codec::context::Context::from_parameters(stream.parameters())?.decoder();
         context.set_packet_time_base(base);
@@ -109,6 +116,7 @@ pub fn read_subtitles(
         crate::decode::discard_other_streams(&mut input, selected.index());
         let mut builder = Builder {
             html_markup,
+            layout: authored.then(|| subtitle_layout(&decoder)),
             ..Default::default()
         };
         loop {
@@ -162,6 +170,25 @@ pub fn read_subtitles(
     result
 }
 
+fn subtitle_layout(decoder: &ffmpeg::decoder::Subtitle) -> layout::Script {
+    // The decoder owns this buffer until it closes on this worker. Parse while
+    // borrowed and retain only owned strings and numbers, never native pointers.
+    let context = unsafe { &*decoder.as_ptr() };
+    if context.subtitle_header.is_null()
+        || context.subtitle_header_size <= 0
+        || context.subtitle_header_size as usize > MAX_BYTES
+    {
+        return layout::Script::default();
+    }
+    let bytes = unsafe {
+        std::slice::from_raw_parts(
+            context.subtitle_header,
+            context.subtitle_header_size as usize,
+        )
+    };
+    layout::Script::parse(&String::from_utf8_lossy(bytes))
+}
+
 fn bitmap_canvas(decoder: &ffmpeg::decoder::Subtitle) -> Option<(u32, u32)> {
     // Only read dimensions from the worker-owned decoder after decode returns.
     // Subtitle formats such as PGS can update these at presentation boundaries.
@@ -191,6 +218,7 @@ impl Drop for Decoded {
 #[derive(Default)]
 struct Builder {
     html_markup: bool,
+    layout: Option<layout::Script>,
     cues: Vec<SubtitleCue<SubtitleContent>>,
     pending_bitmap: Option<(i64, Option<i64>, Vec<SubtitleBitmap>)>,
     bytes: usize,
@@ -246,6 +274,7 @@ impl Builder {
             packet_duration.map(|duration| timestamp.saturating_add(duration.saturating_mul(1000)))
         };
         let mut texts = Vec::new();
+        let mut positioned = Vec::new();
         let mut images = Vec::new();
         for rect in subtitle.rects() {
             check()?;
@@ -276,7 +305,11 @@ impl Builder {
                     };
                     self.bytes += text.len();
                     if !text.is_empty() {
-                        texts.push(text);
+                        if ass && let Some(layout) = &self.layout {
+                            positioned.push(layout.event(&value, text));
+                        } else {
+                            texts.push(text);
+                        }
                     }
                 }
                 ffmpeg::subtitle::Rect::Bitmap(bitmap) => {
@@ -293,6 +326,10 @@ impl Builder {
         if !texts.is_empty() {
             let end = end.ok_or(SubtitleError::Message(Text::SubtitleInvalidData))?;
             self.push(start, end, SubtitleContent::Text(texts.join("\n")))?;
+        }
+        if !positioned.is_empty() {
+            let end = end.ok_or(SubtitleError::Message(Text::SubtitleInvalidData))?;
+            self.push(start, end, SubtitleContent::Positioned(positioned))?;
         }
         if !images.is_empty() {
             self.close_bitmap(start)?;

@@ -16,11 +16,14 @@ use towavue_runtime_windows::RecentKind;
 #[cfg(test)]
 mod files_tests;
 mod history;
+mod options;
+pub(crate) use options::Value;
 mod preview;
 mod row;
 use row::{RowActions, label_gap, overlay_scroll_bar, row_button, row_icon};
 
 pub struct CommandPalette {
+    step: Option<options::Step>,
     query: String,
     selected: Option<usize>,
     selected_path: Option<PathBuf>,
@@ -37,6 +40,7 @@ pub struct CommandPalette {
 impl Default for CommandPalette {
     fn default() -> Self {
         Self {
+            step: None,
             query: ">".into(),
             selected: None,
             selected_path: None,
@@ -68,6 +72,7 @@ pub(crate) enum Choice {
     RemoveCommand(CommandId),
     Configure(CommandId),
     Open(RecentAction),
+    Option((Option<towavue_core::TabId>, u64), Value),
 }
 
 impl CommandPalette {
@@ -114,6 +119,9 @@ impl CommandPalette {
     }
 
     pub fn file_query(&self) -> Option<String> {
+        if self.step.is_some() {
+            return None;
+        }
         (self.query.starts_with(['@', ':'])
             || !self.folders && !self.query.starts_with('>') && !self.query.trim().is_empty())
         .then(|| self.search_query())
@@ -173,7 +181,10 @@ impl CommandPalette {
         (
             choice.and_then(|choice| match choice {
                 Choice::Command(command) => Some(command),
-                Choice::Open(_) | Choice::RemoveCommand(_) | Choice::Configure(_) => None,
+                Choice::Open(_)
+                | Choice::RemoveCommand(_)
+                | Choice::Configure(_)
+                | Choice::Option(..) => None,
             }),
             close,
         )
@@ -201,7 +212,7 @@ impl CommandPalette {
             state.store(context, query_id);
             self.fresh = false;
         }
-        let (navigation, enter, close) = context.input_mut(|input| {
+        let (navigation, enter, mut close) = context.input_mut(|input| {
             // The pinned TextEdit exposes UIA ValuePattern but does not handle SetValue.
             if input.has_accesskit_action_request(query_id, egui::accesskit::Action::SetValue) {
                 for event in std::mem::take(&mut input.events) {
@@ -282,6 +293,15 @@ impl CommandPalette {
                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape),
             )
         });
+        if self.step.is_some()
+            && (close
+                || context.input_mut(|input| {
+                    input.consume_key(egui::Modifiers::ALT, egui::Key::ArrowLeft)
+                }))
+        {
+            self.back();
+            close = false;
+        }
         egui::Window::new(Text::PaletteTitle.in_language(language))
             .id("command-palette".into())
             .order(egui::Order::Foreground)
@@ -302,6 +322,21 @@ impl CommandPalette {
             .show(context, |ui| {
                 ui.spacing_mut().scroll.fade.strength = 0.0;
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
+                if let Some(step) = &self.step {
+                    let title = step.title.clone();
+                    let mut back = false;
+                    ui.horizontal(|ui| {
+                        back = ui
+                            .button("\u{2190}")
+                            .on_hover_text(Text::CommandHistoryBack.in_language(language))
+                            .clicked();
+                        ui.label(title);
+                        ui.weak("2/2");
+                    });
+                    if back {
+                        self.back();
+                    }
+                }
                 let previous_query = self.query.clone();
                 let inactive_stroke = ui.visuals().widgets.inactive.bg_stroke;
                 ui.visuals_mut().widgets.inactive.bg_stroke =
@@ -322,7 +357,9 @@ impl CommandPalette {
                         .id(query_id)
                         .text_color(crate::chrome::FOREGROUND)
                         .desired_width(f32::INFINITY)
-                        .hint_text(if folder_mode {
+                        .hint_text(if self.step.is_some() {
+                            Text::PaletteOptionHint.in_language(language)
+                        } else if folder_mode {
                             Text::PaletteFolderHint.in_language(language)
                         } else if previous_query.starts_with('>') {
                             Text::PaletteCommandHint.in_language(language)
@@ -334,7 +371,7 @@ impl CommandPalette {
                 .help_text(Text::PaletteHelp.in_language(language));
                 ui.visuals_mut().weak_text_color = weak_text_color;
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
-                let command_mode = self.query.starts_with('>');
+                let command_mode = self.step.is_some() || self.query.starts_with('>');
                 if command_mode {
                     self.clear_preview();
                     self.folders = false;
@@ -353,9 +390,15 @@ impl CommandPalette {
                 if query_changed {
                     self.selected = None;
                     self.selected_path = None;
-                    self.selected_command = None;
+                    if previous_query != self.query {
+                        self.selected_command = None;
+                    }
                     self.hidden_paths.clear();
                     self.removed_selection = None;
+                }
+                if self.step.is_some() {
+                    chosen = self.show_options(ui, navigation, enter.is_some(), query_changed);
+                    return;
                 }
                 if !command_mode {
                     chosen = self
@@ -1895,6 +1938,7 @@ mod tests {
 
     #[test]
     fn picker_keyboard_reveals_only_at_edges_and_wraps_virtual_rows() {
+        let mut reverse_coverage = (false, false);
         for size in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)] {
             for density in [1.0, 1.25, 2.0] {
                 for mode in 0..3 {
@@ -1926,11 +1970,15 @@ mod tests {
                     for _ in 0..4 {
                         output = render(&mut palette, vec![]);
                     }
-                    let definitions = command_definitions();
+                    let definitions: Vec<_> = command_definitions()
+                        .iter()
+                        .filter(|definition| !options::child(definition.id))
+                        .collect();
                     let title = |palette: &CommandPalette| -> String {
                         if mode == 0 {
-                            definitions[palette.selected.expect("selection")]
-                                .title
+                            let definition = definitions[palette.selected.expect("selection")];
+                            options::title(definition.id, localization::Language::English)
+                                .unwrap_or(definition.title)
                                 .into()
                         } else {
                             palette
@@ -2031,7 +2079,11 @@ mod tests {
                             }
                         }
                     }
-                    assert!(reverse_visible > 0 && reverse_edges > 0);
+                    // Disabled command gaps can span the entire compact viewport
+                    // after grouping choices. Cover both branches across the
+                    // layout matrix while checking every applicable move above.
+                    reverse_coverage.0 |= reverse_visible > 0;
+                    reverse_coverage.1 |= reverse_edges > 0;
                     // Reopen and wrap directly from the first to last enabled row, then back.
                     if mode == 0 {
                         palette.reset();
@@ -2136,6 +2188,7 @@ mod tests {
                 }
             }
         }
+        assert!(reverse_coverage.0 && reverse_coverage.1);
     }
 
     #[test]

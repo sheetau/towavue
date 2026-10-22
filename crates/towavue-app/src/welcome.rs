@@ -44,7 +44,7 @@ pub(super) fn named_tab(
     let painter = ui.painter().clone();
     painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
     let hover_background = painter.add(egui::Shape::Noop);
-    chrome::tab_style(ui, rect, active || hovered);
+    chrome::tab_style(ui, rect, active, hovered);
     ui.spacing_mut().button_padding = egui::vec2(chrome::TAB_PADDING, 0.0);
     ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
     ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;

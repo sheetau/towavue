@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,7 @@ struct State {
     device_nanoseconds: u128,
     wall_elapsed: Duration,
     started_at: Option<Instant>,
+    skips: VecDeque<(u128, Duration)>,
 }
 
 impl State {
@@ -26,9 +28,25 @@ impl State {
 
     fn position_at(&self, now: Instant) -> MediaTime {
         let elapsed = self.device_nanoseconds.max(self.wall_at(now).as_nanos());
+        let skipped = self
+            .skips
+            .iter()
+            .take_while(|(at, _)| *at <= elapsed)
+            .fold(Duration::ZERO, |total, (_, duration)| {
+                total.saturating_add(*duration)
+            });
         let elapsed = elapsed.min(i64::MAX as u128) as i64;
         let scaled = (elapsed as f64 * f64::from(self.rate)).min(i64::MAX as f64) as i64;
         MediaTime::from_nanoseconds(self.anchor.as_nanoseconds().saturating_add(scaled))
+            .saturating_add(skipped)
+    }
+
+    fn retire_skips(&mut self, now: Instant) {
+        let elapsed = self.device_nanoseconds.max(self.wall_at(now).as_nanos());
+        while self.skips.front().is_some_and(|(at, _)| *at <= elapsed) {
+            let (_, duration) = self.skips.pop_front().expect("due skip");
+            self.anchor = self.anchor.saturating_add(duration);
+        }
     }
 
     fn pause_at(&mut self, now: Instant) {
@@ -45,11 +63,12 @@ impl PositionClock {
             device_nanoseconds: 0,
             wall_elapsed: Duration::ZERO,
             started_at: None,
+            skips: VecDeque::new(),
         }))
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
-        // Only scalar arithmetic occurs under this lock. Retain the coherent
+        // Only clock metadata is accessed under this lock. Retain the coherent
         // state even during unwinding so the run guard can always freeze it.
         self.0.lock().unwrap_or_else(|error| error.into_inner())
     }
@@ -82,7 +101,17 @@ impl RunClock<'_> {
     }
 
     pub(super) fn publish_device(&self, nanoseconds: u128) {
-        self.0.state().device_nanoseconds = nanoseconds;
+        let mut state = self.0.state();
+        state.device_nanoseconds = nanoseconds;
+        state.retire_skips(Instant::now());
+    }
+
+    pub(super) fn skip_at(&self, output_nanoseconds: u128, source_duration: Duration) {
+        let mut state = self.0.state();
+        state.retire_skips(Instant::now());
+        // The native owner schedules in submitted-PCM order. Pending entries
+        // cover only the bounded audio queue; past entries become scalar offset.
+        state.skips.push_back((output_nanoseconds, source_duration));
     }
 }
 
@@ -173,6 +202,65 @@ mod tests {
         assert_eq!(clock.state().position_at(t), ns(i64::MAX - 5));
         run.publish_device(u128::MAX);
         assert_eq!(clock.position(), ns(i64::MAX));
+    }
+
+    #[test]
+    fn skips_begin_at_pcm_boundaries_without_scaling_the_source_gap() {
+        for rate in [0.5, 1.0, 2.0] {
+            let clock = PositionClock::new(ns(10_000_000_000));
+            let run = clock.run(rate);
+            run.skip_at(1_000_000_000, Duration::from_secs(2));
+            run.skip_at(1_500_000_000, Duration::from_millis(500));
+            run.publish_device(900_000_000);
+            assert_eq!(
+                clock.position(),
+                ns(10_000_000_000 + (900_000_000.0 * rate) as i64)
+            );
+            run.publish_device(1_000_000_000);
+            assert_eq!(
+                clock.position(),
+                ns(12_000_000_000 + (1_000_000_000.0 * rate) as i64)
+            );
+            assert_eq!(clock.state().skips.len(), 1);
+            run.publish_device(1_500_000_000);
+            assert_eq!(
+                clock.position(),
+                ns(12_500_000_000 + (1_500_000_000.0 * rate) as i64)
+            );
+            assert!(clock.state().skips.is_empty());
+        }
+    }
+
+    #[test]
+    fn wall_clock_crosses_scheduled_skip_and_pause_does_not_advance_it() {
+        let clock = PositionClock::new(ns(0));
+        let run = clock.run(1.0);
+        run.skip_at(100_000_000, Duration::from_secs(2));
+        let t = Instant::now();
+        let mut state = clock.state();
+        state.started_at = Some(t);
+        assert_eq!(
+            state.position_at(t + Duration::from_millis(99)),
+            ns(99_000_000)
+        );
+        assert_eq!(
+            state.position_at(t + Duration::from_millis(100)),
+            ns(2_100_000_000)
+        );
+        state.pause_at(t + Duration::from_millis(50));
+        assert_eq!(
+            state.position_at(t + Duration::from_secs(30)),
+            ns(50_000_000)
+        );
+        state.started_at = Some(t + Duration::from_secs(30));
+        assert_eq!(
+            state.position_at(t + Duration::from_millis(30_050)),
+            ns(2_100_000_000)
+        );
+        drop(state);
+        drop(run);
+        let fresh = PositionClock::new(ns(0));
+        assert_eq!(fresh.position(), ns(0), "new seek does not inherit skips");
     }
 }
 

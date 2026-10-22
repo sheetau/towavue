@@ -37,9 +37,12 @@ pub(super) fn submenu(
             }
             crate::chrome::menu_button(ui, text(ui.ctx(), Text::Subtitles), |ui| {
                 let delay_key = ui.id().with("subtitle-delay-control");
-                let editing = ui
-                    .data(|data| data.get_temp::<egui::Id>(delay_key))
-                    .is_some_and(|id| ui.memory(|memory| memory.has_focus(id)));
+                let scale_key = ui.id().with("subtitle-scale-control");
+                let offset_key = ui.id().with("subtitle-offset-control");
+                let editing = [delay_key, scale_key, offset_key].iter().any(|key| {
+                    ui.data(|data| data.get_temp::<egui::Id>(*key))
+                        .is_some_and(|id| ui.memory(|memory| memory.has_focus(id)))
+                });
                 // Leave text editing's arrows/Tab/IME to the numeric editor.
                 let keyboard = (!editing).then(|| MenuKeyboard::begin(ui));
                 let back = keyboard.as_ref().is_some_and(|keyboard| keyboard.left);
@@ -72,6 +75,8 @@ pub(super) fn submenu(
                             Text::CommandLoadSubtitles,
                             Text::CommandToggleSubtitles,
                             Text::SubtitleDelay,
+                            Text::SubtitleFontSize,
+                            Text::SubtitleVerticalPosition,
                         ]
                         .into_iter()
                         .map(|label| sizing::text_width(ui, text(ui.ctx(), label))),
@@ -151,6 +156,38 @@ pub(super) fn submenu(
                             (delay * 10.0).round() as i32,
                         )));
                     }
+                    for (label, key, scale) in [
+                        (Text::SubtitleFontSize, scale_key, true),
+                        (Text::SubtitleVerticalPosition, offset_key, false),
+                    ] {
+                        let label = ui.label(text(ui.ctx(), label));
+                        let mut appearance = data.subtitle_settings.appearance;
+                        let mut value = if scale {
+                            f64::from(appearance.scale_percent)
+                        } else {
+                            f64::from(appearance.offset_percent)
+                        };
+                        let response = ui
+                            .add_sized(
+                                [width.min(120.0), crate::chrome::INPUT_HEIGHT],
+                                egui::DragValue::new(&mut value)
+                                    .range(if scale { 50.0..=300.0 } else { -50.0..=50.0 })
+                                    .speed(1.0)
+                                    .fixed_decimals(0)
+                                    .suffix(" %"),
+                            )
+                            .labelled_by(label.id);
+                        ui.data_mut(|data| data.insert_temp(key, response.id));
+                        items.push((response.id, response.enabled()));
+                        if response.changed() && value.is_finite() {
+                            if scale {
+                                appearance.scale_percent = value as u16;
+                            } else {
+                                appearance.offset_percent = value as i16;
+                            }
+                            data.subtitle_action = Some(Action::Appearance(appearance));
+                        }
+                    }
                 });
                 if let Some(keyboard) = keyboard {
                     keyboard.finish(ui, items);
@@ -229,6 +266,7 @@ mod tests {
                                 Action::Select(selection) => settings.selection = selection,
                                 Action::Show(visible) => settings.visible = visible,
                                 Action::Delay(delay) => settings.delay = delay,
+                                Action::Appearance(appearance) => settings.appearance = appearance,
                             }
                             *chosen.borrow_mut() = Some(action);
                         }

@@ -20,6 +20,7 @@ pub(crate) struct Settings {
     pub visible: bool,
     pub delay: SubtitleDelay,
     pub external: Option<PathBuf>,
+    pub appearance: Appearance,
 }
 
 impl Default for Settings {
@@ -29,6 +30,30 @@ impl Default for Settings {
             visible: false,
             delay: SubtitleDelay::default(),
             external: None,
+            appearance: Appearance::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Appearance {
+    pub scale_percent: u16,
+    /// Percentage of viewport height; negative values move captions up.
+    pub offset_percent: i16,
+}
+impl Default for Appearance {
+    fn default() -> Self {
+        Self {
+            scale_percent: 100,
+            offset_percent: 0,
+        }
+    }
+}
+impl Appearance {
+    fn bounded(self) -> Self {
+        Self {
+            scale_percent: self.scale_percent.clamp(50, 300),
+            offset_percent: self.offset_percent.clamp(-50, 50),
         }
     }
 }
@@ -38,6 +63,7 @@ pub(crate) enum Action {
     Select(Selection),
     Show(bool),
     Delay(SubtitleDelay),
+    Appearance(Appearance),
 }
 
 #[derive(Clone)]
@@ -244,6 +270,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 }
             }
             Action::Delay(delay) => choice.settings.delay = delay,
+            Action::Appearance(appearance) => choice.settings.appearance = appearance.bounded(),
         }
         self.update_subtitle_read();
         self.request_redraw();
@@ -436,6 +463,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         let delay = choice.settings.delay;
+        let appearance = choice.settings.appearance;
         let position = self.current_position();
         let position = match self.session.as_ref().and_then(PlaybackSession::timeline) {
             Some(timeline) => timeline.source_time(position),
@@ -453,7 +481,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
             self.subtitles
                 .paint
-                .show(ui, viewport, &document, position, delay);
+                .show(ui, viewport, &document, position, delay, appearance);
         }
     }
 }

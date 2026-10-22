@@ -1196,3 +1196,140 @@ fn reference_session_compares_ordinary_range_and_timeline_seek_readiness() {
         "EDITED_SEEK_CHECKS samples={samples} source_stamp_unchanged=true same_source_targets=true muted=true presentation=false"
     );
 }
+
+#[test]
+#[ignore = "Explicit read-only TOWAVUE_SEEK_REFERENCE_SOURCE; windowless decode, muted audio, no pixel inspection"]
+fn reference_repeated_seeks_preserve_video_and_audio_without_presentation() {
+    let path = std::path::PathBuf::from(
+        std::env::var_os("TOWAVUE_SEEK_REFERENCE_SOURCE").expect("explicit reference"),
+    );
+    let stamp = || {
+        let metadata = std::fs::metadata(&path).expect("source metadata");
+        (
+            metadata.len(),
+            metadata.modified().expect("source timestamp"),
+        )
+    };
+    let before = stamp();
+    let input = format::input(&path).expect("read-only duration probe");
+    let duration = input.duration();
+    assert!(duration > 0);
+    drop(input);
+    let device = GraphicsDevice::hardware_for_test().expect("windowless hardware device");
+    for paused in [true, false] {
+        let (notify, events) = mpsc::channel();
+        let mut session = crate::PlaybackSession::open_paused(
+            &path,
+            device.clone(),
+            0.0,
+            1.0,
+            towavue_core::PlaybackRange::default(),
+            move |event| {
+                let _ = notify.send(event);
+            },
+        )
+        .expect("muted session");
+        session.set_paused(paused).expect("transport state");
+        for (index, numerator) in [0, 7, 1, 5, 2, 6, 3, 4, 1, 7, 0, 4].into_iter().enumerate() {
+            let target = MediaTime::from_nanoseconds(duration * 1000 * numerator / 8);
+            session.seek(target).expect("reference seek");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut ready = None;
+            loop {
+                for event in events
+                    .try_iter()
+                    .filter(|event| session.accepts_event(event))
+                {
+                    assert!(
+                        !matches!(
+                            event,
+                            crate::PlaybackEvent::Failed(..)
+                                | crate::PlaybackEvent::VideoFailed(..)
+                                | crate::PlaybackEvent::DeviceRemoved(..)
+                        ),
+                        "seek {index}, paused={paused}: {event:?}"
+                    );
+                }
+                if let Some(crate::AudioOutputEvent::Failed(failure)) = session.try_audio_event() {
+                    panic!("reference audio failed: {failure:?}");
+                }
+                if let Some(time) = session.pending_video_time() {
+                    if ready.is_none() {
+                        assert!(
+                            time >= target && time <= target.saturating_add(Duration::from_secs(1)),
+                            "target PTS"
+                        );
+                        ready = Some(Instant::now());
+                    }
+                    session.advance_pending();
+                }
+                if ready.is_some_and(|ready: Instant| ready.elapsed() >= Duration::from_millis(150))
+                {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "seek {index} readiness timeout");
+                thread::sleep(Duration::from_millis(1));
+            }
+            println!("REFERENCE_SEEK_OK index={index} paused={paused}");
+        }
+        // Reproduce rapid pointer clicks in the owner's 10-20% range. Most
+        // commands deliberately supersede native preroll instead of waiting
+        // for a frame; periodically drain the selected generation fully.
+        let mut random = 0x51a7_2943_u32;
+        for index in 0..240 {
+            random ^= random << 13;
+            random ^= random >> 17;
+            random ^= random << 5;
+            let target = MediaTime::from_nanoseconds(
+                duration * 1000 * (1000 + i64::from(random % 1001)) / 10_000,
+            );
+            session.seek(target).expect("superseding reference seek");
+            let settle = index % 12 == 11;
+            let started = Instant::now();
+            let interval = Duration::from_millis([0, 10, 40, 110, 250][index % 5]);
+            let mut ready = false;
+            loop {
+                for event in events
+                    .try_iter()
+                    .filter(|event| session.accepts_event(event))
+                {
+                    assert!(
+                        !matches!(
+                            event,
+                            crate::PlaybackEvent::Failed(..)
+                                | crate::PlaybackEvent::VideoFailed(..)
+                                | crate::PlaybackEvent::DeviceRemoved(..)
+                        ),
+                        "burst index={index} paused={paused} target_ns={}: {event:?}",
+                        target.as_nanoseconds()
+                    );
+                }
+                if let Some(crate::AudioOutputEvent::Failed(failure)) = session.try_audio_event() {
+                    panic!("burst audio index={index}: {failure:?}");
+                }
+                if let Some(time) = session.pending_video_time() {
+                    if !ready {
+                        assert!(
+                            time >= target && time <= target.saturating_add(Duration::from_secs(1)),
+                            "burst target PTS"
+                        );
+                    }
+                    ready = true;
+                    session.advance_pending();
+                }
+                if (!settle || ready) && started.elapsed() >= interval {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < Duration::from_secs(30),
+                    "burst readiness index={index}"
+                );
+                thread::sleep(Duration::from_millis(1));
+            }
+            if settle {
+                println!("REFERENCE_BURST_OK index={index} paused={paused}");
+            }
+        }
+    }
+    assert_eq!(stamp(), before, "reference remains unchanged");
+}

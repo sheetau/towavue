@@ -135,6 +135,12 @@ pub fn bars(
     }
     let bars = bar_viewport(viewport);
     let overflow = (displayed - viewport.size()).max(egui::Vec2::ZERO);
+    if overflow.x > 0.0 || overflow.y > 0.0 {
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| {
+            data.insert_temp(egui::Id::new("media-scroll-bottom"), (pass, bars.bottom()))
+        });
+    }
     let mut pan = egui::Vec2::from(view.pan);
     let (pressed, released) = ui.input(|input| {
         (

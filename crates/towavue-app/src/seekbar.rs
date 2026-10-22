@@ -59,6 +59,17 @@ fn show_drag_with_direction(
     allow_timeline: bool,
     reversed: bool,
 ) -> (Response, timeline_input::Drag) {
+    let paint = Rect::from_min_size(
+        status.left_top() - egui::vec2(0.0, HIT_HEIGHT * 0.5),
+        egui::vec2(status.width(), HIT_HEIGHT),
+    );
+    let mut hit_top = paint.top() - HOVER_ABOVE;
+    if let Some((pass, bottom)) =
+        context.data(|data| data.get_temp::<(u64, f32)>(egui::Id::new("media-scroll-bottom")))
+        && pass == context.cumulative_pass_nr()
+    {
+        hit_top = hit_top.max(bottom).min(paint.bottom());
+    }
     let area = egui::Area::new("compact-seek-bar".into());
     if let Some(parent) = parent {
         context.set_sublayer(parent, area.layer());
@@ -66,15 +77,15 @@ fn show_drag_with_direction(
     area.order(egui::Order::Middle)
         .enabled(enabled)
         .movable(false)
-        .fixed_pos(status.left_top() - egui::vec2(0.0, HIT_HEIGHT * 0.5 + HOVER_ABOVE))
+        .fixed_pos(egui::pos2(status.left(), hit_top))
         .constrain(false)
         .show(context, |ui| {
             let (_, mut response) = ui.allocate_exact_size(
-                egui::vec2(status.width(), HIT_HEIGHT + HOVER_ABOVE),
+                egui::vec2(status.width(), paint.bottom() - hit_top),
                 egui::Sense::click_and_drag(),
             );
             // Expand only the upper hit area; keep the track and precision origin fixed.
-            response.rect.min.y += HOVER_ABOVE;
+            response.rect.min.y = response.rect.bottom() - HIT_HEIGHT;
             show_control(ui, response, progress, allow_timeline, reversed)
         })
         .inner
@@ -955,5 +966,34 @@ mod tests {
         assert_eq!(item_index(0.5, 5), 2);
         assert_eq!(item_index(1.0, 5), 4);
         assert_eq!(item_index(1.0, 1), 0);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn compact_seek_hit_area_yields_to_current_media_scrollbars() {
+    let context = crate::fonts::test_context();
+    let status = Rect::from_min_size(egui::pos2(0.0, 100.0), egui::vec2(400.0, 30.0));
+    for present in [true, false] {
+        for _ in 0..3 {
+            let _ = context.run_ui(egui::RawInput::default(), |ui| {
+                if present {
+                    let pass = ui.ctx().cumulative_pass_nr();
+                    ui.data_mut(|data| {
+                        data.insert_temp(egui::Id::new("media-scroll-bottom"), (pass, 92.0_f32))
+                    });
+                }
+                let (response, _) = show_drag(&context, status, 0.5, None, true, false);
+                assert_eq!(
+                    response.rect.center().y,
+                    status.top(),
+                    "track remains fixed"
+                );
+                assert_eq!(
+                    response.interact_rect.top(),
+                    if present { 92.0 } else { 89.0 }
+                );
+            });
+        }
     }
 }

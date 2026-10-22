@@ -28,6 +28,33 @@ fn read(path: &Path, track: Option<SubtitleTrackId>) -> SubtitleDocument {
     .expect("subtitles")
 }
 
+#[test]
+fn native_ass_decoder_preserves_simultaneous_authored_placements() {
+    let root = root("ass-layout");
+    let path = root.join("positioned.ass");
+    fs::write(&path, "[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Name,Arial,32,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,20,20,30,1\nStyle: Dialogue,Arial,36,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,20,20,40,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:01.00,0:00:03.00,Name,,0,0,0,,Name\nDialogue: 0,0:00:01.00,0:00:03.00,Dialogue,,0,0,0,,Dialogue\nDialogue: 0,0:00:01.00,0:00:03.00,Name,,0,0,0,,{\\an9\\pos(1200,50)\\fn@Yu Gothic\\frz270}日本語\n").expect("ASS");
+    let document = read(&path, None);
+    let lines: Vec<_> = document
+        .active(
+            MediaTime::from_nanoseconds(2_000_000_000),
+            towavue_core::SubtitleDelay::default(),
+        )
+        .flat_map(|(_, cue)| match cue.content() {
+            SubtitleContent::Positioned(lines) => lines.as_slice(),
+            _ => panic!("positioned text"),
+        })
+        .collect();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0].layout.alignment, 8);
+    assert_eq!(lines[1].layout.alignment, 2);
+    assert_eq!(lines[1].layout.font_size, 36.0);
+    assert_eq!(lines[2].text, "日本語");
+    assert_eq!(lines[2].layout.canvas, (1280.0, 720.0));
+    assert_eq!(lines[2].layout.position, Some((1200.0, 50.0)));
+    assert!(lines[2].layout.vertical);
+    fs::remove_dir_all(root).expect("released reader");
+}
+
 fn assert_text(document: &SubtitleDocument) {
     let cues = document.cues();
     assert_eq!(cues.len(), 2);
@@ -65,9 +92,10 @@ fn external_srt_vtt_and_ass_keep_authored_times_unicode_overlap_and_plain_text()
     );
     let decoded = read(&ass, None);
     assert_eq!(decoded.cues()[0].start().as_nanoseconds(), 2_250_000_000);
-    let SubtitleContent::Text(text) = decoded.cues()[0].content() else {
+    let SubtitleContent::Positioned(lines) = decoded.cues()[0].content() else {
         panic!("ASS text");
     };
+    let text = &lines[0].text;
     assert_eq!(text, "Hello, 世界\nSecond line");
     assert_eq!(
         super::text::plain(

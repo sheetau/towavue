@@ -552,6 +552,7 @@ enum FolderIntent {
     Refresh(PathBuf),
     History(path_history::Request),
     Background(Option<TabId>, u64),
+    Window(Option<TabId>, u64),
 }
 
 enum DialogIntent {
@@ -2703,6 +2704,7 @@ where
                     | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
                     | FolderIntent::History(_)
+                    | FolderIntent::Window(_, _)
                     | FolderIntent::Background(_, _)
             ))
         ) {
@@ -2815,6 +2817,19 @@ where
                         }
                     } else {
                         self.finish_empty_folder(&snapshot.folder_path);
+                    }
+                } else {
+                    self.refresh_folder_snapshot();
+                }
+            }
+            FolderIntent::Window(tab, generation) => {
+                if tab == self.tabs.active_id() && generation == self.media_generation {
+                    if snapshot.items.is_empty() {
+                        self.finish_empty_folder(&snapshot.folder_path);
+                    } else {
+                        self.pending_window_launches
+                            .push(snapshot.folder_path.clone());
+                        self.refresh_folder_snapshot();
                     }
                 } else {
                     self.refresh_folder_snapshot();
@@ -5682,6 +5697,18 @@ where
                 (root.max_rect().top() + layout.top_padding - layout.drag_top) * density,
             );
         }
+        root.ctx().data_mut(|data| {
+            let key = egui::Id::new("tab-hit-top");
+            if self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.is_maximized())
+            {
+                data.insert_temp(key, layout.drag_top);
+            } else {
+                data.remove::<f32>(key);
+            }
+        });
         let controls_width = native.map_or(154.0, |bounds| bounds.width() / density);
         let panel = egui::Panel::top("tabs")
             .exact_size(layout.height)
@@ -6005,7 +6032,7 @@ where
                                         },
                                         0.0,
                                     );
-                                    chrome::tab_style(&mut tab_ui, rect, active || hovered);
+                                    chrome::tab_style(&mut tab_ui, rect, active, hovered);
                                     tab_ui.visuals_mut().widgets.inactive.bg_stroke =
                                         egui::Stroke::NONE;
                                     tab_ui.visuals_mut().widgets.hovered.bg_stroke =
@@ -7565,6 +7592,13 @@ where
         top: f32,
         actions: &mut Vec<UiAction>,
     ) {
+        if !self
+            .palette
+            .options_owner_matches((self.tabs.active_id(), self.media_generation))
+        {
+            self.cancel_command_overlay();
+            return;
+        }
         self.update_file_search();
         let search = self.file_search.result();
         let commands = self.command_context();
@@ -7584,6 +7618,9 @@ where
         );
         match chosen {
             Some(palette::Choice::Command(command)) => {
+                if self.begin_palette_options(command) {
+                    return;
+                }
                 self.recent_commands.retain(|old| *old != command);
                 self.recent_commands.insert(0, command);
                 self.recent_commands
@@ -7592,6 +7629,31 @@ where
                     history.record_command(command);
                 }
                 actions.push(UiAction::Command(command));
+            }
+            Some(palette::Choice::Option(owner, value)) => {
+                if owner == (self.tabs.active_id(), self.media_generation) {
+                    if let Some(command) = self.palette.options_command() {
+                        self.recent_commands.retain(|old| *old != command);
+                        self.recent_commands.insert(0, command);
+                        self.recent_commands
+                            .truncate(towavue_runtime_windows::COMMAND_HISTORY_LIMIT);
+                        if let Some(history) = &self.recent_files {
+                            history.record_command(command);
+                        }
+                    }
+                    self.cancel_command_overlay();
+                    match value {
+                        palette::Value::Command(command) => {
+                            actions.push(UiAction::Command(command))
+                        }
+                        palette::Value::Audio(selection) => {
+                            actions.push(UiAction::AudioTrack(owner.0, owner.1, selection))
+                        }
+                        palette::Value::Subtitle(action) => {
+                            actions.push(UiAction::Subtitle(owner.0, owner.1, action))
+                        }
+                    }
+                }
             }
             Some(palette::Choice::Configure(command)) => {
                 actions.push(UiAction::ConfigureKeybinding(command));
@@ -9379,6 +9441,7 @@ where
                     | FolderIntent::OpenReplacing(_, _, _)
                     | FolderIntent::Related(_, _)
                     | FolderIntent::History(_)
+                    | FolderIntent::Window(_, _)
                     | FolderIntent::Background(_, _)
             ))
         ) {
@@ -10118,6 +10181,7 @@ where
                         | FolderIntent::OpenReplacing(_, _, _)
                         | FolderIntent::Related(_, _)
                         | FolderIntent::History(_)
+                        | FolderIntent::Window(_, _)
                         | FolderIntent::Background(_, _)
                 ))
             )
@@ -11809,6 +11873,7 @@ where
                 | FolderIntent::OpenReplacing(_, _, _)
                 | FolderIntent::Related(_, _)
                 | FolderIntent::History(_)
+                | FolderIntent::Window(_, _)
                 | FolderIntent::Background(_, _) => Some(
                     localization::Text::OpeningFolderNotice
                         .in_language(language)
@@ -12101,12 +12166,19 @@ where
         if let Some(folder) = folder {
             self.filmstrip_browser.navigation =
                 [self.history_available(false), self.history_available(true)];
+            self.filmstrip_browser.owner = self.tabs.active_id().map(|tab| thumbnail_menu::Owner {
+                tab,
+                instance: self.media_generation,
+            });
             self.filmstrip_browser.sync_folder(folder, context);
             if let Some(target) =
                 self.filmstrip_browser
                     .show(context, rect, source, !self.palette_open)
             {
                 match target {
+                    filmstrip_browser::Action::Menu(intent) => {
+                        actions.push(UiAction::ThumbnailMenu(intent))
+                    }
                     filmstrip_browser::Action::Folder(folder, background) => {
                         actions.push(UiAction::FilmstripFolder(
                             self.tabs.active_id(),

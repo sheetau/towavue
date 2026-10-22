@@ -15,6 +15,7 @@ pub(crate) enum Scope {
     Gallery,
     Filmstrip,
     Playlist,
+    Folder,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,8 +93,11 @@ pub(crate) fn show(
                 chosen = Some(action);
             }
         }
-        chrome::separator(ui);
+        if scope != Scope::Folder {
+            chrome::separator(ui);
+        }
         match scope {
+            Scope::Folder => {}
             Scope::Gallery => {
                 let response = ui.button(Text::RemoveHistory.in_language(language));
                 items.push((response.id, response.enabled()));
@@ -193,6 +197,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     return;
                 }
             }
+            Scope::Folder => {
+                if !self.filmstrip_open
+                    || !self
+                        .path
+                        .as_deref()
+                        .and_then(Path::parent)
+                        .is_some_and(|folder| folder.ancestors().any(|ancestor| ancestor == path))
+                    || matches!(intent.action, Action::File(_) | Action::RemoveHistory)
+                {
+                    return;
+                }
+            }
             Scope::Filmstrip if self.filmstrip_target(&path).is_none() => return,
             Scope::Filmstrip => {}
         }
@@ -201,6 +217,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             && self.path.as_ref() == Some(&path)
             && !matches!(intent.action, Action::Open | Action::Copy)
         {
+            return;
+        }
+        if intent.scope == Scope::Folder {
+            match intent.action {
+                Action::Open | Action::Tab => self.handle_ui_action(UiAction::FilmstripFolder(
+                    Some(owner.tab),
+                    owner.instance,
+                    path,
+                    intent.action == Action::Tab,
+                )),
+                Action::Window => {
+                    self.open_folder_path(path);
+                    if let Some((_, intent)) = &mut self.pending_folder {
+                        *intent = FolderIntent::Window(Some(owner.tab), owner.instance);
+                    }
+                }
+                Action::Copy => {
+                    if let Some(context) = &self.ui_context {
+                        context.copy_text(path.display().to_string());
+                    }
+                }
+                Action::Reveal => self.reveal_path(path),
+                Action::RemoveHistory | Action::File(_) => {}
+            }
             return;
         }
         match intent.action {

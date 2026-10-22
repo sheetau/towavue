@@ -32,6 +32,7 @@ pub(super) fn run(
     checkpoints: &mut AudioCheckpoints,
     resume: Option<(i64, ffmpeg::Packet)>,
     intervals: &[TimeRange],
+    recover_corrupt_audio: bool,
     minimum: MediaTime,
     maximum: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
@@ -76,6 +77,12 @@ pub(super) fn run(
                 clip_audio_chunk(&mut chunk, minimum, maximum);
                 chunk.frames == 0 || emit(ParallelDecodeOutput::Audio(chunk))
             }
+            ParallelDecodeOutput::AudioSkipped(start, end) => {
+                finished = maximum.is_some_and(|limit| end >= limit);
+                let start = start.max(minimum);
+                let end = maximum.map_or(end, |limit| end.min(limit));
+                start >= end || emit(ParallelDecodeOutput::AudioSkipped(start, end))
+            }
             ParallelDecodeOutput::AudioFinished => {
                 finished = true;
                 true
@@ -97,6 +104,7 @@ pub(super) fn run(
         resume,
         trusted_axis,
         intervals,
+        recover_corrupt_audio,
     );
     check_cancelled(cancelled)?;
     if finished && !refused && matches!(result, Ok(()) | Err(DecodeError::ConsumerClosed)) {

@@ -1,6 +1,61 @@
 use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
+#[test]
+fn folder_window_open_rejects_stale_owners_and_reports_empty_media_without_launching() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "thumbnail_menu::tests::folder_window_open_rejects_stale_owners_and_reports_empty_media_without_launching",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    // The retained media path can outlive a source removed outside the app.
+    let path = root.join("removed.png");
+    let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+    app.path = Some(path);
+    app.media_kind = Some(MediaKind::Image);
+    app.filmstrip_open = true;
+    let owner = Owner {
+        tab,
+        instance: app.media_generation,
+    };
+    let intent = Intent {
+        owner: Some(owner),
+        path: root.clone(),
+        scope: Scope::Folder,
+        action: Action::Window,
+    };
+    app.handle_thumbnail_menu(Intent {
+        owner: Some(Owner {
+            instance: owner.instance + 1,
+            ..owner
+        }),
+        ..intent.clone()
+    });
+    assert!(app.pending_folder.is_none());
+    app.handle_thumbnail_menu(Intent {
+        action: Action::File(file_operations::Kind::Delete),
+        ..intent.clone()
+    });
+    assert!(app.file_operations.pending.is_none());
+    app.handle_thumbnail_menu(intent);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while app.pending_folder.is_some() {
+        app.finish_folder_load();
+        assert!(Instant::now() < deadline, "folder completion");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(app.pending_window_launches.is_empty());
+    assert_eq!(app.tabs.active_id(), Some(tab));
+    assert!(
+        app.status_message
+            .as_ref()
+            .expect("empty notification")
+            .0
+            .starts_with("No supported media")
+    );
+}
+
 fn snapshot(root: &Path, paths: &[PathBuf]) -> FolderSnapshot {
     FolderSnapshot {
         folder_identity: ShellIdentity::new(vec![]),
@@ -200,6 +255,7 @@ fn thumbnail_context_menus_keep_exact_target_in_language(language: crate::locali
                     ..Default::default()
                 },
                 |ui| match scope {
+                    Scope::Folder => unreachable!("breadcrumb-specific controls"),
                     Scope::Gallery => {
                         strip.show_recent(ui, &paths, 1, true, &mut actions);
                     }

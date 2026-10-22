@@ -47,10 +47,12 @@ fn menu_message(ui: &mut Ui, label: &str) {
 pub(super) enum Action {
     Folder(PathBuf, bool),
     History(bool),
+    Menu(crate::thumbnail_menu::Intent),
 }
 
 #[derive(Default)]
 pub(super) struct Browser {
+    pub owner: Option<crate::thumbnail_menu::Owner>,
     pub navigation: [bool; 2],
     tab: Option<towavue_core::TabId>,
     views: std::collections::BTreeMap<towavue_core::TabId, View>,
@@ -470,6 +472,18 @@ impl Browser {
                 })
                 .inner
                 .help_text(path.display().to_string());
+            let mut menu_actions = Vec::new();
+            crate::thumbnail_menu::show(
+                ui,
+                &name_response,
+                path,
+                crate::thumbnail_menu::Scope::Folder,
+                self.owner,
+                &mut menu_actions,
+            );
+            if let Some(crate::UiAction::ThumbnailMenu(intent)) = menu_actions.pop() {
+                *target = Some(Action::Menu(intent));
+            }
             let arrow_response = has_children.then(|| {
                 ui.push_id(("children", path), |ui| {
                     ui.interact(arrow, ui.id().with("arrow"), egui::Sense::click())

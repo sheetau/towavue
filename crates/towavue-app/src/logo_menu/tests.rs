@@ -1122,7 +1122,7 @@ fn choice_submenus_from_logo_click_apply_once_without_inheriting_parent_geometry
             } else {
                 "Folder navigation"
             };
-            let labels = [if edit { "Edit" } else { "View" }, title];
+            let labels = ["View", title];
             for label in labels {
                 for _ in 0..20 {
                     frame(&mut app, size, vec![]);

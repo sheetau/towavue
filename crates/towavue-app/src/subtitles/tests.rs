@@ -76,6 +76,10 @@ fn external_drop_loads_in_the_active_video_and_leaves_edits_transport_and_tabs_u
     };
     assert_eq!(text, "Hello 世界");
     app.apply_subtitle_action(Action::Delay(SubtitleDelay::from_tenths(-3)));
+    app.apply_subtitle_action(Action::Appearance(Appearance {
+        scale_percent: 150,
+        offset_percent: -10,
+    }));
     app.apply_subtitle_action(Action::Show(false));
     assert!(!app.subtitle_settings().visible);
     app.apply_subtitle_action(Action::Show(true));
@@ -88,6 +92,13 @@ fn external_drop_loads_in_the_active_video_and_leaves_edits_transport_and_tabs_u
             .expect("test fixture state")
     ));
     assert_eq!(app.subtitle_settings().delay.tenths(), -3);
+    assert_eq!(
+        app.subtitle_settings().appearance,
+        Appearance {
+            scale_percent: 150,
+            offset_percent: -10
+        }
+    );
     assert_eq!(app.edits, history);
     assert_eq!(app.state, PlaybackState::Paused);
     assert!(app.active_export.is_none());

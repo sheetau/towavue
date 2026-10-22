@@ -42,6 +42,7 @@ mod preview_frames;
 pub(crate) use preview_frames::preview_video_frames;
 #[cfg(test)]
 pub(crate) use preview_frames::{PREVIEW_WORK, REUSE_PREVIEW_GOP};
+mod audio_recovery;
 #[cfg(test)]
 pub(crate) mod audio_seek_comparison;
 #[cfg(test)]
@@ -172,6 +173,7 @@ pub enum DecodeOutput {
 
 pub(crate) enum ParallelSoftwareDecodeOutput {
     Item(DecodeOutput),
+    AudioSkipped(MediaTime, MediaTime),
     VideoFinished,
     AudioFinished,
 }
@@ -217,6 +219,7 @@ enum ParallelDecodeOutput {
     SoftwarePreroll(PrerollVideoFrame),
     HardwareVideo(HardwareVideoFrame),
     Audio(AudioChunk),
+    AudioSkipped(MediaTime, MediaTime),
     VideoFinished,
     AudioFinished,
     Failed(DecodeError),
@@ -916,6 +919,7 @@ pub(crate) struct ParallelInput {
     // Fresh path wrappers drop the input after their run. PlaybackAudioInput also
     // enables this within a run, restoring stream policies after workers join.
     single_use_audio: bool,
+    recover_corrupt_audio: bool,
     audio_checkpoints: AudioCheckpoints,
     retained_hardware: Option<hardware_reuse::Retained>,
 }
@@ -1014,6 +1018,7 @@ impl PlaybackAudioInput {
             .map(|stream| unsafe { (*stream.as_ptr()).discard })
             .collect();
         input.single_use_audio = true;
+        input.recover_corrupt_audio = true;
         let result = input.decode_software_with_policy(
             minimum_time,
             maximum_time,
@@ -1023,6 +1028,7 @@ impl PlaybackAudioInput {
             emit,
         );
         input.single_use_audio = false;
+        input.recover_corrupt_audio = false;
         for (mut stream, policy) in input.input.streams_mut().zip(discard) {
             // SAFETY: all per-run workers have joined; the owning input and its
             // stable stream indices remain live. The owner discards us on panic.
@@ -1081,6 +1087,7 @@ impl ParallelInput {
             frame_source: None,
             started: false,
             single_use_audio: false,
+            recover_corrupt_audio: false,
             audio_checkpoints: AudioCheckpoints::new(path),
             retained_hardware: None,
         }
@@ -1145,6 +1152,9 @@ impl ParallelInput {
                 ParallelDecodeOutput::Audio(chunk) => emit(ParallelSoftwareDecodeOutput::Item(
                     DecodeOutput::Audio(chunk),
                 )),
+                ParallelDecodeOutput::AudioSkipped(start, end) => {
+                    emit(ParallelSoftwareDecodeOutput::AudioSkipped(start, end))
+                }
                 ParallelDecodeOutput::AudioFinished => {
                     emit(ParallelSoftwareDecodeOutput::AudioFinished)
                 }
@@ -1186,6 +1196,7 @@ impl ParallelInput {
                 ParallelDecodeOutput::SoftwareVideo(_)
                 | ParallelDecodeOutput::SoftwarePreroll(_)
                 | ParallelDecodeOutput::Audio(_)
+                | ParallelDecodeOutput::AudioSkipped(..)
                 | ParallelDecodeOutput::AudioFinished
                 | ParallelDecodeOutput::Failed(_) => {
                     unreachable!("parallel decode output is handled internally")
@@ -1412,6 +1423,7 @@ impl ParallelInput {
             video,
             audio,
             sample_preroll,
+            self.recover_corrupt_audio,
             minimum_time,
             maximum_time,
             cancelled,
@@ -1483,6 +1495,7 @@ fn run_parallel_workers(
     video: Option<ParallelVideoConfig>,
     audio: Option<StreamConfig>,
     sample_preroll: Option<(MediaTime, PrerollSamples)>,
+    recover_corrupt_audio: bool,
     minimum_time: MediaTime,
     maximum_time: Option<MediaTime>,
     cancelled: &(dyn Fn() -> bool + Sync),
@@ -1501,6 +1514,7 @@ fn run_parallel_workers(
             audio_checkpoints,
             resume,
             audio_intervals,
+            recover_corrupt_audio,
             minimum_time,
             maximum_time,
             cancelled,
@@ -1602,6 +1616,7 @@ fn run_parallel_workers(
                         resume,
                         trusted_audio_axis,
                         audio_intervals,
+                        recover_corrupt_audio,
                     ) {
                         let _ = audio_output_tx.send(ParallelDecodeOutput::Failed(error));
                     }
@@ -1644,6 +1659,7 @@ fn run_parallel_workers(
                 ParallelDecodeOutput::SoftwarePreroll(frame) => Some(frame.presentation_time),
                 ParallelDecodeOutput::HardwareVideo(frame) => Some(frame.presentation_time),
                 ParallelDecodeOutput::Audio(chunk) => Some(chunk.presentation_time),
+                ParallelDecodeOutput::AudioSkipped(start, _) => Some(*start),
                 _ => None,
             };
             #[cfg(test)]
@@ -1654,7 +1670,14 @@ fn run_parallel_workers(
             let at_end = time.is_some_and(|time| maximum_time.is_some_and(|end| time >= end));
             let mut finished = time.is_none() || at_end;
             let mut accepted = true;
-            if let ParallelDecodeOutput::Audio(chunk) = &mut output {
+            if let ParallelDecodeOutput::AudioSkipped(start, end) = &mut output {
+                finished |= maximum_time.is_some_and(|limit| *end >= limit);
+                *start = (*start).max(minimum_time);
+                *end = maximum_time.map_or(*end, |limit| (*end).min(limit));
+                if *start < *end {
+                    accepted = emit(output);
+                }
+            } else if let ParallelDecodeOutput::Audio(chunk) = &mut output {
                 finished |= maximum_time.is_some_and(|end| {
                     chunk
                         .presentation_time
@@ -2060,6 +2083,7 @@ fn run_parallel_audio_worker(
     resume: Option<(i64, ffmpeg::Packet)>,
     trusted_axis: bool,
     intervals: &[TimeRange],
+    recover_corrupt_audio: bool,
 ) -> Result<(), DecodeError> {
     run_audio_packets(
         config,
@@ -2070,6 +2094,7 @@ fn run_parallel_audio_worker(
         resume,
         trusted_axis,
         intervals,
+        recover_corrupt_audio,
     )
 }
 
@@ -2083,6 +2108,7 @@ fn run_audio_packets(
     resume: Option<(i64, ffmpeg::Packet)>,
     trusted_axis: bool,
     mut intervals: &[TimeRange],
+    recover_corrupt_audio: bool,
 ) -> Result<(), DecodeError> {
     // A video-GOP/direct seek may start with an approximate audio sample axis.
     // Learn only after a sequential start or the exact prefix/checkpoint path,
@@ -2092,6 +2118,7 @@ fn run_audio_packets(
     let mut learn = trusted_axis && !sample_timestamps && independent.is_some();
     let mut count_deleted =
         !intervals.is_empty() && (trusted_axis || sample_timestamps) && independent.is_some();
+    let mut recovery = audio_recovery::Recovery::new(recover_corrupt_audio, &config);
     let mut pipeline = create_audio_pipeline_from(config)?;
     pipeline.sample_preroll = sample_preroll;
     if matches!(
@@ -2105,10 +2132,6 @@ fn run_audio_packets(
         pipeline.packet_samples = PacketSamples::new(pipeline.decoder.id());
     }
     let mut summary = DecodeSummary::default();
-    let mut emit_audio = |decoded| match decoded {
-        DecodeOutput::Audio(chunk) => output(ParallelDecodeOutput::Audio(chunk)),
-        DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
-    };
     let first_packet = resume.map(|(next_sample, packet)| {
         pipeline.next_sample = next_sample;
         packet
@@ -2148,7 +2171,20 @@ fn run_audio_packets(
         }
         let counted = pipeline.skip_sample_preroll(&packet)?;
         if !counted {
-            pipeline.decoder.send_packet(&packet)?;
+            let sent = pipeline.decoder.send_packet(&packet);
+            #[cfg(feature = "presentation-verification")]
+            if let Err(error) = &sent {
+                trace_audio_packet_error("send", &packet, summary.audio_frames, error);
+            }
+            if let Err(error) = sent {
+                recovery.replace(error.into(), &packet, &mut pipeline, output)?;
+                continue;
+            }
+            let mut emit_audio = |decoded| match decoded {
+                DecodeOutput::Audio(chunk) => output(ParallelDecodeOutput::Audio(chunk)),
+                DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
+            };
+            let frames_before = summary.audio_frames;
             if learn || count_deleted {
                 let mut chunks = 0;
                 pipeline.receive(
@@ -2163,7 +2199,18 @@ fn run_audio_packets(
                 learn &= chunks == 1;
                 count_deleted &= chunks == 1;
             } else {
-                pipeline.receive(&mut emit_audio, &mut summary)?;
+                let received = pipeline.receive(&mut emit_audio, &mut summary);
+                #[cfg(feature = "presentation-verification")]
+                if let Err(DecodeError::Ffmpeg(error)) = &received {
+                    trace_audio_packet_error("receive", &packet, summary.audio_frames, error);
+                }
+                if let Err(error) = received {
+                    recovery.replace(error, &packet, &mut pipeline, output)?;
+                    continue;
+                }
+            }
+            if summary.audio_frames > frames_before {
+                recovery.decoded();
             }
         }
         checkpoints.observe(
@@ -2173,6 +2220,11 @@ fn run_audio_packets(
             learn,
         );
     }
+    let mut emit_audio = |decoded| match decoded {
+        DecodeOutput::Audio(chunk) => output(ParallelDecodeOutput::Audio(chunk)),
+        DecodeOutput::Video(_) => unreachable!("audio worker emitted video"),
+    };
+    recovery.finish()?;
     pipeline.decoder.send_eof()?;
     pipeline.receive(&mut emit_audio, &mut summary)?;
     pipeline.flush_resampler(&mut emit_audio, &mut summary)?;
@@ -2180,6 +2232,25 @@ fn run_audio_packets(
         Ok(())
     } else {
         Err(DecodeError::ConsumerClosed)
+    }
+}
+
+#[cfg(feature = "presentation-verification")]
+fn trace_audio_packet_error(
+    stage: &str,
+    packet: &ffmpeg::Packet,
+    frames: u64,
+    error: &impl std::fmt::Display,
+) {
+    if std::env::var_os("TOWAVUE_SEEK_FAILURE_TRACE").is_some() {
+        crate::diagnostic!(
+            "AUDIO_PACKET_FAILURE stage={stage} position={} size={} pts={:?} dts={:?} crc={:?} decoded_frames={frames} error={error}",
+            packet.position(),
+            packet.size(),
+            packet.pts(),
+            packet.dts(),
+            packet.data().map(crc32fast::hash)
+        );
     }
 }
 
@@ -3664,6 +3735,9 @@ mod tests {
                                 samples += chunk.frames;
                             }
                             ParallelSoftwareDecodeOutput::VideoFinished => video_ends += 1,
+                            ParallelSoftwareDecodeOutput::AudioSkipped(..) => {
+                                panic!("strict decode must not skip data")
+                            }
                             ParallelSoftwareDecodeOutput::AudioFinished => audio_ends += 1,
                         }
                         true
@@ -3890,6 +3964,9 @@ mod tests {
                     match output {
                         ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
                             trimmed_samples += chunk.frames
+                        }
+                        ParallelSoftwareDecodeOutput::AudioSkipped(..) => {
+                            panic!("strict decode must not skip data")
                         }
                         ParallelSoftwareDecodeOutput::AudioFinished => trim_ends += 1,
                         _ => panic!("audio-only trim emitted video"),
@@ -4138,6 +4215,9 @@ mod tests {
                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Video(_)) => video_frames += 1,
                 ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => {
                     audio_frames += chunk.frames as u64;
+                }
+                ParallelSoftwareDecodeOutput::AudioSkipped(..) => {
+                    panic!("strict decode must not skip data")
                 }
                 ParallelSoftwareDecodeOutput::AudioFinished => audio_finished += 1,
                 ParallelSoftwareDecodeOutput::VideoFinished => {}

@@ -1147,11 +1147,11 @@ fn gallery_logo_middle_click_and_tab_drag_use_the_shared_actions() {
     );
     let gallery = app.tabs.gallery().expect("middle click opens Gallery");
     assert_eq!(app.tabs.active_id(), Some(gallery));
-    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [image, gallery]);
+    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [gallery, image]);
     assert!(!egui::Popup::is_any_open(&context));
     settle(&mut app);
     let start = tab_drag::tests::label_center(&app, gallery);
-    let end = tab_drag::tests::drop_point(&context, 0);
+    let end = tab_drag::tests::drop_point(&context, 2);
     frame(
         &mut app,
         size,
@@ -1163,7 +1163,7 @@ fn gallery_logo_middle_click_and_tab_drag_use_the_shared_actions() {
     frame(&mut app, size, vec![egui::Event::PointerMoved(end)]);
     assert_eq!(
         app.tabs.tab_ids().collect::<Vec<_>>(),
-        [image, gallery],
+        [gallery, image],
         "hold does not reorder"
     );
     frame(
@@ -1171,7 +1171,7 @@ fn gallery_logo_middle_click_and_tab_drag_use_the_shared_actions() {
         size,
         vec![pointer(end, egui::PointerButton::Primary, false)],
     );
-    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [gallery, image]);
+    assert_eq!(app.tabs.tab_ids().collect::<Vec<_>>(), [image, gallery]);
     assert_eq!(app.tabs.active_id(), Some(gallery));
     app.process_shortcut("Ctrl+Tab".parse().expect("next tab"));
     assert_eq!(app.tabs.active_id(), Some(image));

@@ -102,6 +102,7 @@ fn bitmap_subtitles_reach_gpu_with_alpha_canvas_timing_and_texture_retirement() 
                                     &self.0,
                                     MediaTime::from_nanoseconds(time * 1_000_000),
                                     SubtitleDelay::from_tenths(delay),
+                                    Appearance::default(),
                                 );
                             });
                     });

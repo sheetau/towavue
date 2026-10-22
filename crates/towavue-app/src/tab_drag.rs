@@ -80,6 +80,7 @@ impl Layout {
         } else {
             strip
         };
+        let press_strip = chrome::tab_hit_rect(context, press_strip);
         let (pointer, down, released, focused, escape, events) = ui.input(|input| {
             (
                 input.pointer.interact_pos(),
@@ -216,7 +217,7 @@ impl Layout {
         // overlapping primitive's alpha separately or copying a GPU surface.
         if let Some(rect) = self.source_rect {
             ui.painter_at(strip)
-                .rect_filled(rect, 3.0, egui::Color32::from_black_alpha(128));
+                .rect_filled(rect, 3.0, egui::Color32::from_black_alpha(127));
         }
         if let Some(drag) = &self.state.drag {
             if drag.crossed

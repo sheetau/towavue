@@ -1,4 +1,6 @@
 use super::*;
+mod positioned;
+use positioned::paint_positioned;
 use towavue_runtime_windows::SubtitleContent;
 
 #[cfg(test)]
@@ -18,6 +20,7 @@ impl Cache {
         document: &Arc<SubtitleDocument>,
         position: MediaTime,
         delay: SubtitleDelay,
+        appearance: Appearance,
     ) {
         if !self
             .document
@@ -43,6 +46,11 @@ impl Cache {
                         text.push('\n');
                     }
                     text.push_str(line);
+                }
+                SubtitleContent::Positioned(lines) => {
+                    for line in lines {
+                        paint_positioned(ui, viewport, line, appearance);
+                    }
                 }
                 SubtitleContent::Bitmap(images) => {
                     let textures = self.images.entry(index).or_insert_with(|| {
@@ -88,7 +96,10 @@ impl Cache {
                         };
                         painter.image(
                             texture.id(),
-                            bounds,
+                            bounds.translate(egui::vec2(
+                                0.0,
+                                viewport.height() * f32::from(appearance.offset_percent) / 100.0,
+                            )),
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                             egui::Color32::WHITE,
                         );
@@ -97,19 +108,20 @@ impl Cache {
             }
         }
         if !text.is_empty() {
-            paint_text(ui, viewport, &text);
+            paint_text(ui, viewport, &text, appearance);
         }
     }
 }
 
-fn paint_text(ui: &egui::Ui, viewport: egui::Rect, text: &str) {
+fn paint_text(ui: &egui::Ui, viewport: egui::Rect, text: &str, appearance: Appearance) {
     let inset = (viewport.width() * 0.025).clamp(4.0, 24.0);
     let bounds = viewport.shrink2(egui::vec2(inset, 4.0));
     if !bounds.is_positive() {
         return;
     }
     let mut font = egui::TextStyle::Body.resolve(ui.style());
-    font.size = (viewport.height() * 0.04).clamp(18.0, 28.0);
+    font.size =
+        (viewport.height() * 0.04).clamp(18.0, 28.0) * f32::from(appearance.scale_percent) / 100.0;
     let galley = loop {
         let mut job = egui::text::LayoutJob::simple(
             text.to_owned(),
@@ -129,8 +141,23 @@ fn paint_text(ui: &egui::Ui, viewport: egui::Rect, text: &str) {
         bounds.center().x,
         (bounds.bottom() - galley.size().y - 2.0).max(bounds.top() + 2.0),
     );
+    let position = position
+        + egui::vec2(
+            0.0,
+            viewport.height() * f32::from(appearance.offset_percent) / 100.0,
+        );
+    outlined(ui, viewport, position, galley, font.size);
+}
+
+fn outlined(
+    ui: &egui::Ui,
+    viewport: egui::Rect,
+    position: egui::Pos2,
+    galley: Arc<egui::Galley>,
+    font_size: f32,
+) {
     let painter = ui.painter().with_clip_rect(viewport);
-    let radius = (font.size / 14.0).clamp(1.0, 2.0);
+    let radius = (font_size / 14.0).clamp(1.0, 2.0);
     for (x, y) in [
         (-1.0, -1.0),
         (0.0, -1.0),
@@ -196,6 +223,7 @@ mod tests {
                                             &document,
                                             MediaTime::from_nanoseconds(time),
                                             SubtitleDelay::from_tenths(delay),
+                                            Appearance::default(),
                                         )
                                     },
                                 );

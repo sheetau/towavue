@@ -351,7 +351,7 @@ mod tests {
             drop(packet_tx);
             let (output_tx, output_rx) = mpsc::sync_channel(packets.len() + 1);
             run_parallel_audio_worker(
-                config, packet_rx, &output_tx, None, &mut cache, None, trusted, &intervals,
+                config, packet_rx, &output_tx, None, &mut cache, None, trusted, &intervals, false,
             )
             .expect("decode through the side-data boundary");
             drop(output_tx);

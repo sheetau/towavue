@@ -32,7 +32,7 @@ impl Default for Choices {
 
 type Options = (Text, &'static [(CommandId, Text)]);
 
-pub(super) fn options(command: CommandId) -> Option<Options> {
+pub(crate) fn options(command: CommandId) -> Option<Options> {
     Some(match command {
         ResizeViewFit => (
             Text::ViewResizeBehavior,
@@ -423,7 +423,7 @@ mod tests {
                             towavue_core::MediaKind::Video,
                         ),
                         (
-                            Section::Edit,
+                            Section::View,
                             "Listening volume step",
                             vec!["2%", "5%", "10%"],
                             "5%",

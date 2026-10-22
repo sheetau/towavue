@@ -685,6 +685,17 @@ impl PlaybackSession {
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
+        #[cfg(feature = "presentation-verification")]
+        if std::env::var_os("TOWAVUE_SEEK_FAILURE_TRACE").is_some() {
+            crate::diagnostic!(
+                "SEEK_PIPELINE generation={} target_ns={} paused={} rate={} retained_audio={}",
+                self.generation.value(),
+                self.target.as_nanoseconds(),
+                self.paused,
+                self.rate,
+                self.audio_input.is_some()
+            );
+        }
         #[cfg(any(test, feature = "presentation-verification"))]
         let stage = std::time::Instant::now();
         if self
@@ -1343,6 +1354,11 @@ fn run_audio_decode(
     let cancelled = || cancelled.load(Ordering::Relaxed);
     let emit = |output| match output {
         ParallelSoftwareDecodeOutput::Item(DecodeOutput::Audio(chunk)) => audio.push(chunk).is_ok(),
+        ParallelSoftwareDecodeOutput::AudioSkipped(start, end) => audio
+            .skip(std::time::Duration::from_nanos(
+                (end.as_nanoseconds() - start.as_nanoseconds()) as u64,
+            ))
+            .is_ok(),
         ParallelSoftwareDecodeOutput::AudioFinished => audio.finish().is_ok(),
         _ => unreachable!("audio-only decoder emitted video"),
     };

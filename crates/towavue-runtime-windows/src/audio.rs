@@ -68,6 +68,7 @@ pub enum AudioOutputError {
 
 enum AudioMessage {
     Chunk(AudioChunk),
+    Skip(Duration),
     End,
 }
 
@@ -127,6 +128,10 @@ impl AudioOutputSender {
             ));
         }
         self.send(AudioMessage::Chunk(chunk))
+    }
+
+    pub(crate) fn skip(&self, duration: Duration) -> Result<(), AudioOutputError> {
+        self.send(AudioMessage::Skip(duration))
     }
 
     pub(crate) fn finish(&self) -> Result<(), AudioOutputError> {
@@ -583,6 +588,7 @@ fn render_audio_loop(
         f32::from_bits(volume.load(Ordering::Relaxed)),
         format.sample_rate,
     );
+    let mut submitted_frames = 0_u64;
     let mut input_ended = false;
     let mut running = false;
     let run_clock = position_clock.run(rate);
@@ -625,6 +631,16 @@ fn render_audio_loop(
         while !input_ended && queue.len() < queue_limit {
             match audio_rx.try_recv() {
                 Ok(AudioMessage::Chunk(chunk)) => tempo.push(&chunk.bytes, &mut queue)?,
+                Ok(AudioMessage::Skip(duration)) => {
+                    // Finish pre-gap tempo output before locating the discontinuity.
+                    // No PCM for the damaged interval is submitted to WASAPI.
+                    tempo.restart(&mut queue)?;
+                    let boundary = submitted_frames + (queue.len() / bytes_per_frame) as u64;
+                    run_clock.skip_at(
+                        u128::from(boundary) * 1_000_000_000 / u128::from(format.sample_rate),
+                        duration,
+                    );
+                }
                 Ok(AudioMessage::End) | Err(TryRecvError::Disconnected) => {
                     tempo.finish(&mut queue)?;
                     input_ended = true;
@@ -645,6 +661,7 @@ fn render_audio_loop(
             render_client
                 .write_to_device(write_frames, &output, None)
                 .map_err(wasapi_error)?;
+            submitted_frames = submitted_frames.saturating_add(write_frames as u64);
 
             if !running
                 && (write_frames > 0 || client.get_current_padding().map_err(wasapi_error)? > 0)

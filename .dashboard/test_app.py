@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 import app
 
@@ -41,6 +42,51 @@ class LedgerTests(unittest.TestCase):
         optional = self.store.create({"kind": "question", "title": "Optional", "requires_answer": False,
                                       "default_action": "Keep the existing color"}, "assistant")
         self.task(status="doing", required_questions=[optional["id"]])
+
+    def test_question_promotion_preserves_answer_history_and_existing_gates(self):
+        question = self.store.create({"kind": "question", "title": "Choose behavior", "scope": "next",
+                                      "body": "Original question", "status": "answered", "answer": "Use A"}, "assistant")
+        dependent = self.task(required_questions=[question["id"]])
+        task = app.mutate(self.store, {"action": "promote", "id": question["id"], "rev": 1,
+                                      "text": "Keep the existing shortcuts"}, "user")
+        saved = self.store.item(question["id"])
+        self.assertEqual((task["kind"], task["status"], task["scope"]), ("task", "todo", "next"))
+        self.assertEqual(task["parent_id"], question["id"])
+        for text in ["Original question", "Use A", "Keep the existing shortcuts"]:
+            self.assertIn(text, task["body"])
+        self.assertEqual(saved["promoted_task_id"], task["id"])
+        self.assertEqual((saved["kind"], saved["status"], saved["answer"]), ("question", "answered", "Use A"))
+        self.assertEqual(len(self.store.history(question["id"])), 2)
+        self.assertEqual(self.store.history(question["id"])[0]["actor"], "user")
+        self.assertEqual(self.store.gates(dependent), [])
+        self.store.update(dependent["id"], {"status": "doing"}, dependent["rev"], "assistant")
+        for rev in [1, saved["rev"]]:
+            with self.assertRaises(app.Problem):
+                self.store.promote(question["id"], rev, "Duplicate", "user")
+        self.assertEqual(self.store.query(view="tasks")["total"], 2)
+        destination = Path(self.temp.name) / "restored.sqlite"
+        app.restore(destination, self.store.export())
+        restored = app.Store(destination)
+        try:
+            self.assertEqual(restored.item(question["id"])["promoted_task_id"], task["id"])
+            self.assertEqual(restored.item(task["id"])["body"], task["body"])
+        finally:
+            restored.close()
+
+    def test_question_promotion_rejects_stale_readonly_and_nonquestion_records(self):
+        question = self.store.create({"kind": "question", "title": "Unanswered"}, "user")
+        changed = self.store.comment(question["id"], "New context", question["rev"], "user")
+        with self.assertRaises(app.Problem):
+            self.store.promote(question["id"], question["rev"], "", "user")
+        task = self.store.promote(question["id"], changed["rev"], "", "user")
+        self.assertEqual(task["status"], "todo")
+        for record in [task,
+                       self.store.create({"kind": "question", "title": "Archived", "archived": True}, "user"),
+                       self.store.set_deleted(question["id"], changed["rev"] + 1, True, "user")]:
+            with self.assertRaises(app.Problem):
+                self.store.promote(record["id"], record["rev"], "", "user")
+        with self.assertRaises(app.Problem):
+            self.store.update(question["id"], {"promoted_task_id": "T-invalid"}, 4, "user")
 
     def test_overall_progress_excludes_inbox_canceled_archives_and_non_tasks(self):
         self.task(status="done", scope="current")
@@ -305,6 +351,14 @@ class LedgerTests(unittest.TestCase):
         self.assertNotIn("personal", text)
 
     def test_http_storage_boundary_and_revision_conflict(self):
+        # The reusable backend has no bundled UI; exercise serving with a disposable page.
+        web_root = Path(self.temp.name) / "web"
+        web_root.mkdir()
+        (web_root / "index.html").write_text(
+            '<script>const token = "__DASHBOARD_TOKEN__";</script>', encoding="utf-8")
+        root_patch = patch.object(app, "ROOT", web_root)
+        root_patch.start()
+        self.addCleanup(root_patch.stop)
         httpd = app.server(self.path)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()

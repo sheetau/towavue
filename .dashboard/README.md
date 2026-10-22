@@ -25,6 +25,18 @@ Explicit dependencies/checklists still apply. Implementation can proceed after a
 
 Delete moves records to **Trash**, excluding them from ordinary lists/progress. Restore retains original state, links and history. Deleted records are read-only; deleting a prerequisite never satisfies it or silently removes links. Exports/backups retain deleted records.
 
+## Current scope
+
+Use **Change** beside **Current scope**, or open **Project settings**, to edit the current scope and save it. Select an existing scope or enter a new name. The saved scope appears in the overview and becomes the default for new records. This revision-checked project update does not relabel existing records or reset progress; the list's scope filter is independent.
+
+An empty new-record form can be canceled without a discard prompt, including after typing and clearing its contents. Defaults and metadata such as kind, state and scope alone do not count as draft content. Nonempty title, body or supplementary content still requires confirmation.
+
+## Promote a question into implementation work
+
+The question's **Promote to task** button creates one linked `todo` task with the question title, scope, body, saved answer and optional implementation request from the reply field. The original question, answer and history remain intact, so existing question prerequisites remain valid. Promotion captures a snapshot; later question edits do not rewrite the task. After promotion, the button opens the existing task; corrections belong in that task's thread.
+
+`{"action":"promote","id":"Q-example","rev":2,"text":"Implement this answer with the existing shortcuts"}` performs the same operation through the CLI. It checks the source revision and atomically records both links and events; stale requests, duplicate promotions and read-only sources are rejected. Promotion schedules work without starting an agent.
+
 ## Progress periods
 
 Progress covers all scopes, regardless of filters: unfinished tasks plus owner-confirmed completions since the last checkpoint. Inbox, canceled, deleted and archived records, questions and notes are excluded. Review tasks remain unfinished.

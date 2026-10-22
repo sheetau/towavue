@@ -25,7 +25,7 @@ EXTRA = {
     "next_action", "acceptance", "blocked_reason", "parent_id", "depends_on",
     "required_questions", "checks", "answer", "recommended", "default_action",
     "requires_answer", "asked_by", "answer_by", "source", "source_date",
-    "verification", "commit", "archived", "resolution", "owner_review", "deleted", "thread_waiting_for",
+    "verification", "commit", "archived", "resolution", "owner_review", "deleted", "thread_waiting_for", "promoted_task_id",
 }
 PROJECT_FIELDS = {"name", "current_scope", "handoff", "next_action", "public_summary", "progress_since", "progress_label"}
 ACTORS = {"user", "assistant", "system"}
@@ -213,7 +213,7 @@ class Store:
             raise Problem("A waiting or blocked task needs a reason")
 
     def create(self, payload, actor):
-        allowed = {"kind", "title", "status", "scope", "body"} | (EXTRA - {"deleted"})
+        allowed = {"kind", "title", "status", "scope", "body"} | (EXTRA - {"deleted", "promoted_task_id"})
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise Problem("Unknown record field")
         kind = payload.get("kind", "task")
@@ -237,7 +237,7 @@ class Store:
         return self.item(item["id"])
 
     def update(self, identity, patch, rev, actor, thread_event=None):
-        if not isinstance(patch, dict) or set(patch) - ({"title", "status", "scope", "body"} | (EXTRA - {"deleted"})):
+        if not isinstance(patch, dict) or set(patch) - ({"title", "status", "scope", "body"} | (EXTRA - {"deleted", "promoted_task_id"})):
             raise Problem("Unknown or immutable record field")
         with self.transaction():
             old = self.item(identity)
@@ -264,6 +264,36 @@ class Store:
                 event_data.update(thread_event)
             self.event(identity, actor, "thread" if thread_event else "updated", event_data)
         return self.item(identity)
+
+    def promote(self, identity, rev, text, actor):
+        """Snapshot a question into one linked task without invalidating question gates."""
+        if not isinstance(text, str) or len(text) > 24000:
+            raise Problem("Implementation request must be text, at most 24,000 characters")
+        with self.transaction():
+            question = self.item(identity)
+            self.expect(question, rev)
+            if question["kind"] != "question" or question.get("archived") or question.get("deleted"):
+                raise Problem("Only an editable question can be promoted")
+            if question.get("promoted_task_id"):
+                raise Problem("This question already has an implementation task", 409)
+            sections = [f"Question {identity}\n\n{question['body']}"]
+            if question.get("answer", "").strip():
+                sections.append("Answer\n\n" + question["answer"])
+            if text.strip():
+                sections.append("Implementation request\n\n" + text)
+            task = dict(id="T-" + secrets.token_hex(4), kind="task", title=question["title"],
+                        status="todo", scope=question["scope"], body="\n\n".join(sections), parent_id=identity)
+            self.validate(task)
+            at = now()
+            self.db.execute("INSERT INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
+                task["id"], task["kind"], task["title"], task["status"], task["scope"], task["body"],
+                encode({"parent_id": identity}), 1, at, at, None))
+            data = {k: v for k, v in question.items() if k in EXTRA}
+            data["promoted_task_id"] = task["id"]
+            self.db.execute("UPDATE items SET data=?,rev=rev+1,updated_at=? WHERE id=?", (encode(data), at, identity))
+            self.event(task["id"], actor, "created", {"source_question": identity, "request": text})
+            self.event(identity, actor, "promoted", {"task_id": task["id"], "text": text})
+        return self.item(task["id"])
 
     def comment(self, identity, text, rev, actor):
         if not isinstance(text, str) or not text.strip() or len(text) > 24000:
@@ -487,6 +517,8 @@ def mutate(store, request, actor):
         return store.confirm(request.get("id"), request.get("rev"), actor)
     if action == "thread":
         return store.thread(request.get("id"), request.get("rev"), request.get("mode"), request.get("text"), actor)
+    if action == "promote":
+        return store.promote(request.get("id"), request.get("rev"), request.get("text", ""), actor)
     if action == "checkpoint":
         return store.checkpoint(request.get("rev"), request.get("label"), actor)
     if action in {"delete", "restore-item"}:

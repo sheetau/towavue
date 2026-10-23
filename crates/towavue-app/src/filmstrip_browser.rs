@@ -20,7 +20,6 @@ pub(super) struct View {
     search_focused: bool,
 }
 
-const HOVER: Color32 = Color32::from_rgba_premultiplied(24, 24, 24, 24);
 pub(super) const HEADER_HEIGHT: f32 = chrome::INPUT_HEIGHT + 36.0;
 type SourceKey = (PathBuf, u64, SystemTime, usize);
 
@@ -794,7 +793,8 @@ impl Browser {
                                     arrow_rect.left(),
                                     response.hovered() || response.has_focus(),
                                     open || arrow.hovered() || arrow.has_focus(),
-                                    HOVER,
+                                    ui.visuals().widgets.hovered.weak_bg_fill,
+                                    ui.visuals().widgets.hovered.bg_stroke,
                                 ),
                             );
                             response
@@ -868,6 +868,7 @@ fn split_background(
     left: bool,
     right: bool,
     color: Color32,
+    stroke: egui::Stroke,
 ) -> egui::Shape {
     if !left && !right {
         return egui::Shape::Noop;
@@ -890,12 +891,7 @@ fn split_background(
     );
     // Disjoint stroke and fill apply translucent feedback exactly once.
     egui::Shape::Vec(vec![
-        egui::Shape::rect_stroke(
-            rect,
-            3,
-            egui::Stroke::new(1.0, color),
-            egui::StrokeKind::Inside,
-        ),
+        egui::Shape::rect_stroke(rect, 3, stroke, egui::StrokeKind::Inside),
         egui::Shape::rect_filled(fill, radius, color),
     ])
 }

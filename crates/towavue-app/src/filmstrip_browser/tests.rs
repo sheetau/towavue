@@ -2,6 +2,99 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+fn chevron_menu_hover_uses_the_ordinary_row_fill_and_stroke() {
+    fn rectangles(shape: &egui::Shape, output: &mut Vec<egui::epaint::RectShape>) {
+        match shape {
+            egui::Shape::Rect(rect) => output.push(rect.clone()),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    rectangles(shape, output);
+                }
+            }
+            _ => {}
+        }
+    }
+    for density in [1.0, 1.25, 2.0] {
+        let context = context(density);
+        let mut browser = Browser {
+            worker_failed: true,
+            ..Default::default()
+        };
+        let folder = Path::new("C:/OwnedMenu/Current");
+        browser.sync_folder(folder, &context);
+        cached_listing(
+            &mut browser,
+            folder,
+            vec![
+                towavue_runtime_windows::BrowserFolder {
+                    path: folder.join("Branch"),
+                    has_children: Some(true),
+                },
+                towavue_runtime_windows::BrowserFolder {
+                    path: folder.join("Leaf"),
+                    has_children: Some(false),
+                },
+            ],
+        );
+        let size = egui::vec2(960.0, 576.0);
+        let mut output = frame(&context, &mut browser, size, vec![]).0;
+        for _ in 0..3 {
+            output = frame(&context, &mut browser, size, vec![]).0;
+        }
+        click(
+            &context,
+            &mut browser,
+            size,
+            node(&output, "Subfolders: Current").center(),
+        );
+        for _ in 0..3 {
+            output = frame(&context, &mut browser, size, vec![]).0;
+        }
+        let mut ordinary = None;
+        for label in ["Leaf", "Branch", "Subfolders: Branch"] {
+            let point = node(&output, label).center();
+            for _ in 0..3 {
+                output = frame(
+                    &context,
+                    &mut browser,
+                    size,
+                    vec![egui::Event::PointerMoved(point)],
+                )
+                .0;
+            }
+            let mut rects = Vec::new();
+            for shape in &output.shapes {
+                rectangles(&shape.shape, &mut rects);
+            }
+            let row = node(&output, label);
+            let hover = rects
+                .iter()
+                .find(|rect| {
+                    rect.rect.contains(point)
+                        && rect.rect.height() <= row.height() + 0.1
+                        && rect.fill != Color32::TRANSPARENT
+                })
+                .expect("hover background");
+            let colors = (hover.fill, hover.stroke);
+            if let Some(expected) = ordinary {
+                assert_eq!(colors, expected, "{label} at {density}");
+            } else {
+                ordinary = Some(colors);
+            }
+            assert!(
+                rects
+                    .iter()
+                    .filter(|rect| {
+                        rect.rect.intersects(row) && rect.rect.height() <= row.height() + 0.1
+                    })
+                    .all(|rect| rect.stroke == egui::Stroke::NONE),
+                "menu rows have no independent outline"
+            );
+        }
+    }
+}
+
+#[test]
 fn background_preparation_waits_for_pointer_idle_but_open_menus_bypass_it() {
     let context = context(1.0);
     let mut browser = Browser {

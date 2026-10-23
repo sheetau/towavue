@@ -1010,7 +1010,9 @@ impl Filmstrip {
         } else if pages != 0 {
             self.page_frame = Some(frame);
         }
-        let snap = recenter || self.focus_requested || relocated_focus.is_some();
+        // A new Shell order can relocate focus without owning the viewport.
+        // Only explicit navigation/reopening may recenter it.
+        let snap = recenter || self.focus_requested;
         let restore = self.restore_scroll && snapshot.is_some();
         let was_scrolling = self.scroll_target.is_some() || self.page_target.is_some();
         // Keyboard navigation owns selection until it reaches its destination.
@@ -1195,10 +1197,7 @@ impl Filmstrip {
                     current,
                     &mut self.scroll_offset,
                     (content_width - inset.width()).max(0.0),
-                    recenter
-                        || self.focus_requested
-                        || tab_target.is_some()
-                        || relocated_focus.is_some(),
+                    recenter || self.focus_requested || tab_target.is_some(),
                 );
                 let mut scroll_ui = ui.new_child(egui::UiBuilder::new().max_rect(inset));
                 let ui = &mut scroll_ui;

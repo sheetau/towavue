@@ -2921,7 +2921,7 @@ where
         self.trace_burst(towavue_runtime_windows::BurstEvent::FolderApplyPhase, 2);
         let preserve_filmstrip = self.filmstrip.take_preserved_refresh() && self.filmstrip_open;
         if preserve_filmstrip || (same_folder && (same_items || self.filmstrip_open)) {
-            if !same_items {
+            if !same_folder {
                 self.filmstrip.cancel_drag();
             }
             self.filmstrip

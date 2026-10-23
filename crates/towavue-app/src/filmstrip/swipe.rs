@@ -43,7 +43,9 @@ impl State {
     ) {
         let scope = Scope {
             folder: snapshot.folder_path.clone(),
-            generation: snapshot.generation,
+            // Scrolling belongs to the viewport, not the asynchronous Shell listing.
+            // Card transfers retain their separate generation-checked ownership.
+            generation: 0,
             current: current.map(Path::to_owned),
             rect: response.rect,
             density: response.ctx.pixels_per_point(),

@@ -625,9 +625,9 @@ fn filmstrip_scrollbar_drag_keeps_columns_fixed_through_loading_and_release() {
 }
 
 #[test]
-fn filmstrip_folder_updates_reveal_relocated_focus_once() {
+fn filmstrip_folder_updates_retain_focus_without_moving_the_viewport() {
     let Some(root) = crate::tests::isolated_test_root(
-        "filmstrip::drag_tests::filmstrip_folder_updates_reveal_relocated_focus_once",
+        "filmstrip::drag_tests::filmstrip_folder_updates_retain_focus_without_moving_the_viewport",
     ) else {
         return;
     };
@@ -680,6 +680,7 @@ fn filmstrip_folder_updates_reveal_relocated_focus_once() {
                     card(&output, "other.png").center(),
                 )],
             );
+            let offset = app.filmstrip.scroll_offset;
             for target in [99, 1] {
                 let index = snapshot
                     .items
@@ -701,11 +702,7 @@ fn filmstrip_folder_updates_reveal_relocated_focus_once() {
                         .expect("relocated focused card")
                         .1;
                     assert_eq!(node.label(), Some("other.png"));
-                    let bounds = node.bounds().expect("visible focus");
-                    assert!(
-                        bounds.x0 >= 8.0 && bounds.x1 <= 952.0,
-                        "target {target}: {bounds:?}"
-                    );
+                    assert_eq!(app.filmstrip.scroll_offset, offset, "target {target}");
                     assert!(
                         app.filmstrip.card_paths.len() < 12,
                         "keep virtualization bounded"
@@ -3006,6 +3003,95 @@ pub(crate) fn hardware_drag_cancel<N: Fn(AppEvent) + Send + Sync + 'static>(
     eprintln!(
         "PASS hardware filmstrip drag: stationary preview draw/cancel; unchanged tabs/history/transport/generation and CPU transfers 0; no child launched"
     );
+}
+
+#[test]
+fn filmstrip_pending_order_and_deliveries_do_not_interrupt_swipes_or_momentum() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip::drag_tests::filmstrip_pending_order_and_deliveries_do_not_interrupt_swipes_or_momentum",
+    ) else {
+        return;
+    };
+    let media = root.join("media");
+    std::fs::create_dir_all(&media).expect("owned media folder");
+    for density in [1.0, 1.25, 2.0] {
+        for discard in [false, true] {
+            let mut control = Vec::new();
+            for refresh in [false, true] {
+                let context = crate::fonts::test_context();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(chrome::style);
+                let mut app = Application::new(None, |_| {}).expect("app");
+                app.filmstrip =
+                    Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                        .expect("strip");
+                let mut listing = snapshot(&media);
+                for index in 3..100 {
+                    let mut item = listing.items[0].clone();
+                    item.identity = ShellIdentity::new(vec![index as u8]);
+                    item.path = media.join(format!("{index}.png"));
+                    listing.items.push(item);
+                }
+                let current = listing.items[20].path.clone();
+                app.path = Some(current.clone());
+                app.media_kind = Some(MediaKind::Image);
+                app.folder_snapshot = Some(listing.clone());
+                app.filmstrip_open = true;
+                let origin = egui::pos2(680.0, 180.0);
+                let mut offsets = Vec::new();
+                for step in 0..32 {
+                    if refresh {
+                        app.pending_folder = Some((
+                            listing.generation + 1,
+                            FolderIntent::Refresh(current.clone()),
+                        ));
+                        app.folder_refresh_started = Instant::now() - Duration::from_secs(1);
+                        assert!(app.folder_order_notice().is_some());
+                        // Deliver both unchanged and reordered generations, during the
+                        // held gesture and after release. The current path stays fixed.
+                        if matches!(step, 6 | 8 | 13) {
+                            listing.generation += 1;
+                            if step != 6 {
+                                listing.items.rotate_left(7);
+                            }
+                            app.apply_folder_snapshot(listing.clone());
+                            assert_eq!(app.path.as_ref(), Some(&current));
+                        }
+                    }
+                    let point =
+                        origin - egui::vec2(20.0 * (step as f32 - 4.0).clamp(0.0, 5.0), 0.0);
+                    let events = match step {
+                        0..=3 => vec![egui::Event::PointerMoved(origin)],
+                        4 => vec![pointer(origin, true)],
+                        5..=9 => vec![egui::Event::PointerMoved(point)],
+                        10 => vec![pointer(point, false)],
+                        _ => vec![],
+                    };
+                    let mut raw = input(events);
+                    raw.time = Some(step as f64 / 60.0);
+                    let mut actions = Vec::new();
+                    let _ = context.run_ui(raw, |_| {
+                        app.draw_filmstrip(&context, context.content_rect(), &mut actions);
+                        if discard && context.current_pass_index() == 0 {
+                            context.request_discard("Shell delivery during swipe");
+                        }
+                    });
+                    assert!(actions.is_empty());
+                    offsets.push(app.filmstrip.scroll_offset);
+                }
+                assert!(
+                    (offsets[9] - offsets[4] - 100.0).abs() < 0.01,
+                    "density={density}, discard={discard}, refresh={refresh}: {offsets:?}"
+                );
+                assert!(offsets[14] > offsets[10], "release retains momentum");
+                if refresh {
+                    assert_eq!(offsets, control, "Shell work cannot own scrolling");
+                } else {
+                    control = offsets;
+                }
+            }
+        }
+    }
 }
 
 #[test]

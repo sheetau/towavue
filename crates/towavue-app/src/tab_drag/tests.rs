@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn overflowing_audio_tabs_route_wheel_to_scrolling_instead_of_volume() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "tab_drag::tests::overflowing_audio_tabs_route_wheel_to_scrolling_instead_of_volume",
+    ) else {
+        return;
+    };
+    for count in [1, 24] {
+        let mut app = setup(&root);
+        app.tabs = towavue_core::TabSet::default();
+        for index in 0..count {
+            app.tabs
+                .open_new(root.join(format!("audio-{index}.wav")), MediaKind::Audio);
+        }
+        app.tabs.close_gallery(app.tabs.gallery().expect("gallery"));
+        let first = app.tabs.tab_ids().next().expect("audio tab");
+        app.tabs.activate(first);
+        app.path = Some(root.join("audio-0.wav"));
+        app.media_kind = Some(MediaKind::Audio);
+        let size = egui::vec2(640.0, 400.0);
+        for _ in 0..5 {
+            frame(&mut app, size, true, vec![]);
+        }
+        let before = state(&app).widgets[0].2;
+        let point = before.intersect(state(&app).strip.expect("strip")).center();
+        frame(&mut app, size, true, vec![egui::Event::PointerMoved(point)]);
+        let (_, actions) = frame(
+            &mut app,
+            size,
+            true,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -80.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::TabVolume(..))),
+            count == 1
+        );
+        for _ in 0..30 {
+            frame(&mut app, size, true, vec![]);
+        }
+        if count > 1 {
+            assert!(state(&app).widgets[0].2.left() < before.left() - 10.0);
+        }
+    }
+}
+
+#[test]
 fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
     let Some(root) = crate::tests::isolated_test_root(
         "tab_drag::tests::tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover",

@@ -233,7 +233,7 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.text_cursor.stroke.color = Color32::WHITE;
     style.visuals.faint_bg_color = BORDER;
     style.visuals.weak_text_color = Some(MUTED);
-    style.visuals.selection.bg_fill = HOVER;
+    style.visuals.selection.bg_fill = TRACK;
     style.visuals.selection.stroke = Stroke::new(1.0, FOREGROUND);
     style.spacing.scroll.bar_width = 5.0;
     style.spacing.scroll.dormant_background_opacity = 0.0;
@@ -392,6 +392,7 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
 
 /// Shared menu geometry, also used by combo popups and context menus.
 pub fn menu_style(style: &mut egui::Style) {
+    crate::scroll_style::control_style(style);
     egui::containers::menu::menu_style(style);
     // Popup edges keep their actual frame color. Translucent scroll fades mix
     // with clipped labels/highlights and can leave a lighter band at either end.

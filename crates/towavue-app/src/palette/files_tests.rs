@@ -859,6 +859,7 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         let context = crate::fonts::test_context();
         context.enable_accesskit();
         context.global_style_mut(|style| {
+            crate::chrome::style(style);
             style.animation_time = 0.0;
             style.scroll_animation = egui::style::ScrollAnimation::none();
             style.interaction.tooltip_delay = 60.0;
@@ -929,8 +930,8 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
             .bounds()
             .expect("scrollbar bounds");
         assert!(
-            f64::from(remove.right()) > bar.x0,
-            "actions extend underneath the scrollbar at {density}: {remove:?}, {bar:?}"
+            f64::from(remove.right()) <= bar.x0 + 1.0 / f64::from(density),
+            "the scrollbar occupies popup padding beyond actions at {density}: {remove:?}, {bar:?}"
         );
         assert!((gear.left() - hovered.right() - 2.0).abs() < 0.01);
         assert!((remove.left() - gear.right() - 2.0).abs() < 0.01);

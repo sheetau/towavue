@@ -2,7 +2,59 @@ use std::{ops::Range, sync::Arc};
 
 use egui::{Rect, ScrollArea, Style, Ui, scroll_area::ScrollAreaOutput};
 
+/// Controls and lists use quiet handles; media surfaces retain their own style.
+pub(crate) fn control_style(style: &mut Style) {
+    let scroll = &mut style.spacing.scroll;
+    scroll.dormant_handle_opacity = 0.15;
+    scroll.active_handle_opacity = 0.15;
+    scroll.interact_handle_opacity = 0.3;
+    scroll.dormant_background_opacity = 0.0;
+    scroll.active_background_opacity = 0.0;
+    scroll.interact_background_opacity = 0.0;
+}
+
+pub(crate) fn popup_scroll_id(ui: &Ui, salt: egui::IdSalt) -> egui::Id {
+    ui.make_persistent_id(egui::IdSalt::new("popup-scroll-edge"))
+        .with(salt)
+}
+
+fn popup_host<R>(
+    ui: &mut Ui,
+    padding: f32,
+    show: impl FnOnce(&mut Ui) -> ScrollAreaOutput<R>,
+) -> ScrollAreaOutput<R> {
+    let rect = ui.available_rect_before_wrap();
+    let mut host = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt("popup-scroll-edge")
+            .max_rect(rect.with_max_x(rect.right() + padding)),
+    );
+    control_style(host.style_mut());
+    host.spacing_mut().scroll.floating = true;
+    host.spacing_mut().scroll.floating_allocated_width = 0.0;
+    host.spacing_mut().scroll.bar_outer_margin = 0.0;
+    let result = show(&mut host);
+    let used = host.min_rect();
+    // The bar occupies existing popup padding, not extra popup width.
+    ui.advance_cursor_after_rect(used.with_max_x((used.right() - padding).max(used.left())));
+    result
+}
+
 pub(crate) trait ScrollAreaStyle {
+    fn show_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        content: impl FnOnce(&mut Ui) -> R,
+    ) -> ScrollAreaOutput<R>;
+    fn show_rows_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        height: f32,
+        count: usize,
+        content: impl FnOnce(&mut Ui, Range<usize>) -> R,
+    ) -> ScrollAreaOutput<R>;
     fn show_styled<R>(self, ui: &mut Ui, content: impl FnOnce(&mut Ui) -> R)
     -> ScrollAreaOutput<R>;
     fn show_rows_styled<R>(
@@ -56,6 +108,38 @@ fn with_style<R>(
 }
 
 impl ScrollAreaStyle for ScrollArea {
+    fn show_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        content: impl FnOnce(&mut Ui) -> R,
+    ) -> ScrollAreaOutput<R> {
+        popup_host(ui, padding, |host| {
+            self.content_margin(egui::Margin {
+                right: padding as i8,
+                ..Default::default()
+            })
+            .show_styled(host, content)
+        })
+    }
+
+    fn show_rows_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        height: f32,
+        count: usize,
+        content: impl FnOnce(&mut Ui, Range<usize>) -> R,
+    ) -> ScrollAreaOutput<R> {
+        popup_host(ui, padding, |host| {
+            self.content_margin(egui::Margin {
+                right: padding as i8,
+                ..Default::default()
+            })
+            .show_rows_styled(host, height, count, content)
+        })
+    }
+
     fn show_styled<R>(
         self,
         ui: &mut Ui,
@@ -133,6 +217,74 @@ impl ScrollAreaStyle for ScrollArea {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn popup_scrollbars_touch_the_border_without_moving_rows_or_vertical_ends() {
+        for density in [1.0, 1.25, 2.0] {
+            for padding in [4_i8, 6] {
+                let context = crate::fonts::test_context();
+                context.enable_accesskit();
+                context.set_pixels_per_point(density);
+                context.global_style_mut(crate::chrome::style);
+                let mut output = egui::FullOutput::default();
+                let mut frame = Rect::NOTHING;
+                let mut row = Rect::NOTHING;
+                let mut border = 0.0;
+                for _ in 0..6 {
+                    output = context.run_ui(egui::RawInput::default(), |ui| {
+                        let opener = ui.button("Open");
+                        let popup_frame = egui::Frame::popup(ui.style()).inner_margin(padding);
+                        border = popup_frame.stroke.width;
+                        frame = egui::Popup::menu(&opener)
+                            .open(true)
+                            .frame(popup_frame)
+                            .show(|ui| {
+                                ui.set_width(180.0);
+                                ScrollArea::vertical()
+                                    .max_height(80.0)
+                                    .auto_shrink([false, true])
+                                    .show_popup_styled(ui, f32::from(padding), |ui| {
+                                        for index in 0..20 {
+                                            let (_, bounds) = ui.allocate_space(egui::vec2(
+                                                ui.available_width(),
+                                                20.0,
+                                            ));
+                                            if index == 0 {
+                                                row = bounds;
+                                            }
+                                        }
+                                    });
+                            })
+                            .expect("popup")
+                            .response
+                            .rect;
+                    });
+                }
+                let tree = output.platform_output.accesskit_update.expect("tree");
+                let bounds = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == egui::accesskit::Role::ScrollBar)
+                    .expect("scrollbar")
+                    .1
+                    .bounds()
+                    .expect("bar bounds");
+                let bar = Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                let tolerance = 1.5 / density;
+                assert!(
+                    (frame.right() - bar.right() - border).abs() <= tolerance,
+                    "border: {frame:?} {bar:?}"
+                );
+                let inset = f32::from(padding) + border;
+                assert!((frame.right() - row.right() - inset).abs() <= tolerance);
+                assert!((bar.top() - frame.top() - inset).abs() <= tolerance);
+                assert!((frame.bottom() - bar.bottom() - inset).abs() <= tolerance);
+            }
+        }
+    }
 
     #[test]
     fn padded_rows_keep_partial_rows_and_scroll_padding_inside_the_viewport() {
@@ -232,9 +384,20 @@ mod tests {
     #[test]
     fn scrollbars_have_only_pill_handles_until_hovered_without_restyling_content() {
         for density in [1.0, 1.25, 2.0] {
-            for (kind, horizontal) in [(0, false), (0, true), (1, false), (2, false), (2, true)] {
+            for (kind, horizontal) in [
+                (0, false),
+                (0, true),
+                (1, false),
+                (2, false),
+                (2, true),
+                (3, false),
+                (3, true),
+            ] {
                 let context = egui::Context::default();
                 context.global_style_mut(crate::chrome::style);
+                if kind == 3 {
+                    context.global_style_mut(control_style);
+                }
                 context.global_style_mut(|style| style.animation_time = 0.0);
                 let mut pointer = None;
                 let mut pressed = false;
@@ -290,7 +453,7 @@ mod tests {
                                 });
                             };
                             match kind {
-                                0 => {
+                                0 | 3 => {
                                     area.show_styled(ui, content);
                                 }
                                 1 => {
@@ -330,7 +493,11 @@ mod tests {
                 let idle = bars(&render(None, false));
                 assert_eq!(idle[0].fill.a(), 0);
                 let handle_color = egui::Color32::from_gray(0xcc);
-                assert_eq!(idle[1].fill, handle_color.gamma_multiply(0.3));
+                assert_eq!(
+                    idle[1].fill,
+                    handle_color.gamma_multiply(if kind == 3 { 0.15 } else { 0.3 })
+                );
+                let hovered_color = handle_color.gamma_multiply(if kind == 3 { 0.3 } else { 1.0 });
                 assert!(
                     f32::from(idle[1].corner_radius.nw) >= idle[1].rect.size().min_elem() / 2.0
                 );
@@ -352,23 +519,31 @@ mod tests {
                 assert!(!handle.contains(track_point));
                 let track_hover = bars(&render(Some(track_point), false));
                 assert_eq!(
-                    track_hover[1].fill, handle_color,
+                    track_hover[1].fill, hovered_color,
                     "track hover shares the opaque handle color"
                 );
                 assert!(
-                    (102..=128).contains(&track_hover[0].fill.a()),
+                    if kind == 3 {
+                        track_hover[0].fill.a() == 0
+                    } else {
+                        (102..=128).contains(&track_hover[0].fill.a())
+                    },
                     "track remains legible over white content at 40-50% opacity"
                 );
                 for down in [false, true, false] {
                     let output = render(Some(handle.center()), down);
                     let shapes = bars(&output);
                     assert!(
-                        shapes[0].fill.a() > 0,
+                        if kind == 3 {
+                            shapes[0].fill.a() == 0
+                        } else {
+                            shapes[0].fill.a() > 0
+                        },
                         "interacting with the bar shows its track"
                     );
                     let handle = &shapes[1];
                     assert_eq!(
-                        handle.fill, handle_color,
+                        handle.fill, hovered_color,
                         "hover and press share the same opaque #ccc"
                     );
                     assert_eq!(output.pixels_per_point, density);
@@ -380,7 +555,10 @@ mod tests {
                 render(Some(handle.center()), true);
                 let outside = egui::pos2(80.0, 80.0);
                 let dragging = bars(&render(Some(outside), true));
-                assert_eq!(dragging[1].fill, handle_color, "captured drag stays opaque");
+                assert_eq!(
+                    dragging[1].fill, hovered_color,
+                    "captured drag retains its hover color"
+                );
                 render(Some(outside), false);
                 let released = bars(&render(Some(outside), false));
                 assert_eq!(

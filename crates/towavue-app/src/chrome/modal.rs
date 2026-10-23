@@ -200,6 +200,7 @@ pub fn modal_body<R>(
     // Egui rounds ScrollArea bounds separately from child widget positions.
     // Half a physical pixel retains their antialiasing at fractional densities.
     ui.visuals_mut().clip_rect_margin = 0.5 / ui.ctx().pixels_per_point();
+    crate::scroll_style::control_style(ui.style_mut());
     let body = egui::ScrollArea::vertical()
         .id_salt("modal-body")
         .auto_shrink([true, true])

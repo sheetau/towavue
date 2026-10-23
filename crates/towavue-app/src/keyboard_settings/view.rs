@@ -136,6 +136,7 @@ impl KeyboardSettings {
                 navigation.destination(index, rows.len(), ui.available_height(), 24.0)
             });
             let mut bar = ui.available_rect_before_wrap();
+            crate::scroll_style::control_style(ui.style_mut());
             bar.max.y = (bar.bottom() - 8.0).max(bar.top());
             let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("keyboard-rows")

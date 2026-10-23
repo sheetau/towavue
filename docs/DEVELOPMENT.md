@@ -498,6 +498,14 @@ These records describe particular candidates. Rebind source, binaries, notices, 
 
 For folder-menu enumeration changes, run runtime `folder_browser::` and Shell navigation/saved-order controls serially. Verify that the private filtered view contains only directories, ordinary media requests remain unfiltered, saved order is retained and a directory containing only files returns an empty menu. The ignored `reference_folder_menu_latency` accepts an authorized read-only directory in `TOWAVUE_FOLDER_BROWSER_REFERENCE`; record entries, wall time and cache limitations separately from generated correctness fixtures. App `filmstrip_browser::` controls also verify parent-first background preparation before any child menu opens, truthful leaf arrows, bounded scheduling and cancellation. The ignored `reference_browser_parent_and_child_presence_latency` uses the same directory variable and reports first-parent availability separately from all immediate child-presence flags.
 
+Folder menu publication must wait for every row's child-presence flag; cover
+partial snapshots and first-directory early exit as well as cancellation.
+Control scrollbar changes use `scroll_style::`, menu/palette, playlist and keyboard
+settings controls, including right-border placement, unchanged vertical ends,
+drag hit regions and preserved media scrollbar styling. Tab wheel routing uses
+`tab_drag::` with both fitting and overflowing audio tabs. Shared UI changes
+also require the full workspace suite and generated hidden menu/browser GPU checks.
+
 Command-palette grouping, next-value labels and selection indicators use app `palette::`, menu/subtitle controls and the generated hidden menu GPU checks. Similar-command scoring must preserve direct-match priority, filtered MRU grouping, command identity and execution, including empty/short/no-match queries. Choice-menu controls must also cover repeated pointer/keyboard selection, refreshed checkmarks, idempotent current choices, action replay prevention, and outside-click/Escape dismissal.
 
 File-expression changes use core `file_query::`, runtime `file_search::` and app

@@ -65,8 +65,8 @@ pub(crate) mod swipe;
 
 // Retain the transfer implementation while Gallery gestures scroll the grid.
 const GALLERY_DRAG_OUT: bool = false;
-pub(crate) const GALLERY_GAP: f32 = 36.0;
-const GALLERY_DIAMETER: f32 = 144.0;
+pub(crate) const GALLERY_GAP: f32 = 40.0;
+const GALLERY_DIAMETER: f32 = 136.0;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
     let minimum = gallery_minimum_inset(width);

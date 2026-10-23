@@ -185,7 +185,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
 
 #[test]
 fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
-    let cell = Rect::from_min_size(egui::pos2(64.0, 40.0), Vec2::splat(144.0));
+    let cell = Rect::from_min_size(egui::pos2(64.0, 40.0), Vec2::splat(136.0));
     for size in [
         Vec2::splat(100.0),
         egui::vec2(1920.0, 1080.0),
@@ -195,12 +195,13 @@ fn gallery_diagonal_and_duration_placement_balance_extreme_aspect_ratios() {
     ] {
         for scale in [1.0, 1.05] {
             let image = gallery_thumbnail(cell, size, scale);
-            assert!((image.size().length() - 144.0 * scale).abs() < 0.001);
+            assert!((image.size().length() - 136.0 * scale).abs() < 0.001);
             assert_eq!(image.center(), cell.center());
             for badge_size in [egui::vec2(32.0, 17.0), egui::vec2(78.0, 17.0)] {
                 let badge = duration_background(image, badge_size, true);
                 assert!(badge.left() >= cell.center().x && badge.top() >= cell.center().y);
-                assert!(cell.expand(8.0).contains_rect(badge));
+                // A long badge may enter the gutter, but never the next cell.
+                assert!(cell.expand(GALLERY_GAP / 2.0).contains_rect(badge));
             }
         }
     }
@@ -347,12 +348,12 @@ fn gallery_video_geometry_excludes_transparent_padding_and_preserves_black_pixel
         Rect::from_min_max(egui::pos2(4.0 / 12.0, 0.0), egui::pos2(7.0 / 12.0, 1.0))
     );
     let rect = gallery_thumbnail(
-        Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(144.0)),
+        Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(136.0)),
         egui::vec2(12.0, 8.0) * uv.size(),
         1.0,
     );
     assert!((rect.width() / rect.height() - 3.0 / 8.0).abs() < 0.001);
-    assert!((rect.size().length() - 144.0).abs() < 0.001);
+    assert!((rect.size().length() - 136.0).abs() < 0.001);
 }
 
 #[test]

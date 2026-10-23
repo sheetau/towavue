@@ -8,7 +8,7 @@ pub const FOLDER_BROWSER_LIMIT: usize = 4096;
 #[derive(Debug)]
 pub struct BrowserFolder {
     pub path: PathBuf,
-    /// Unknown until directory-only background preparation reaches this folder.
+    /// Determined before the complete menu snapshot is published.
     pub has_children: Option<bool>,
 }
 
@@ -71,6 +71,22 @@ fn directory(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_dir() && metadata.file_attributes() & 0x400 == 0)
 }
 
+fn child_presence(path: &Path, current: &impl Fn() -> bool) -> Option<bool> {
+    use std::os::windows::fs::MetadataExt;
+    for entry in fs::read_dir(path).ok()? {
+        if !current() {
+            return None;
+        }
+        // Windows DirEntry metadata comes from enumeration, without a separate
+        // filesystem query per file. Stop at the first eligible directory.
+        let metadata = entry.ok()?.metadata().ok()?;
+        if metadata.is_dir() && metadata.file_attributes() & 0x400 == 0 {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+
 pub(crate) fn enumerate(
     path: PathBuf,
     current: &impl Fn() -> bool,
@@ -97,9 +113,13 @@ pub(crate) fn enumerate(
         if !directory(&path) {
             continue;
         }
+        let Some(has_children) = child_presence(&path, current) else {
+            listing.unavailable = true;
+            return current().then_some(listing);
+        };
         listing.folders.push(BrowserFolder {
             path,
-            has_children: None,
+            has_children: Some(has_children),
         });
     }
     current().then_some(listing)
@@ -108,6 +128,25 @@ pub(crate) fn enumerate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn child_presence_stops_at_first_directory_and_cancels_without_publication() {
+        let root = std::env::temp_dir().join(format!("towavue-presence-{}", std::process::id()));
+        for index in 0..8 {
+            fs::create_dir_all(root.join(format!("child-{index}"))).expect("fixture");
+        }
+        let visits = std::cell::Cell::new(0);
+        assert_eq!(
+            child_presence(&root, &|| {
+                visits.set(visits.get() + 1);
+                true
+            }),
+            Some(true)
+        );
+        assert_eq!(visits.get(), 1, "one directory proves presence");
+        assert_eq!(child_presence(&root, &|| false), None);
+        assert_eq!(child_presence(&root.join("missing"), &|| true), None);
+        fs::remove_dir_all(root).expect("remove owned fixture");
+    }
     #[test]
     #[ignore = "requires an authorized read-only folder in TOWAVUE_FOLDER_BROWSER_REFERENCE"]
     fn reference_folder_menu_latency() {
@@ -154,8 +193,8 @@ mod tests {
             listing.folders[0].path.file_name().expect("name"),
             "folder2"
         );
-        assert_eq!(listing.folders[0].has_children, None);
-        assert_eq!(listing.folders[1].has_children, None);
+        assert_eq!(listing.folders[0].has_children, Some(false));
+        assert_eq!(listing.folders[1].has_children, Some(true));
 
         fs::write(root.join("folder2/only-file.jpg"), b"not decoded").expect("file-only child");
         worker.request(Some(root.join("folder2")));

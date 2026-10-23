@@ -342,16 +342,13 @@ mod tests {
                 ],
                 3.0,
             );
-            assert!(
-                matches!(actions.as_slice(), [UiAction::TabVolume(id, _, steps)] if *id == audio && steps == &[-1.0])
-            );
+            assert!(actions.is_empty(), "overflow wheel only scrolls the strip");
             for index in 0..30 {
                 frame(&mut app, vec![], 3.1 + index as f64 / 60.0);
             }
-            assert_eq!(
-                crate::tab_drag::tests::label_center(&app, audio),
-                before,
-                "volume wheel must not leave a scrolling tail in an overflowed tab strip"
+            assert!(
+                crate::tab_drag::tests::label_center(&app, audio).x < before.x,
+                "overflow wheel moves the tab strip without changing volume"
             );
         }
     }

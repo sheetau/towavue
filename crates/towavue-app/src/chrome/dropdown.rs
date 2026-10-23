@@ -60,7 +60,7 @@ impl Dropdown {
                 egui::Shape::rect_filled(
                     response.rect,
                     ui.visuals().widgets.hovered.corner_radius,
-                    ui.visuals().selection.bg_fill,
+                    super::HOVER,
                 ),
             );
             ui.ctx().graphics_mut(|graphics| {

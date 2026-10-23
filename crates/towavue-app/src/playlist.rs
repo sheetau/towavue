@@ -191,6 +191,7 @@ impl Playlist {
                 .map(|(path, index)| (path.as_path(), *index))
                 != focus;
             let mut bar = ui.available_rect_before_wrap();
+            crate::scroll_style::control_style(ui.style_mut());
             bar.min.y = (bar.top() + 8.0).min(bar.bottom());
             bar.max.y = (bar.bottom() - 8.0).max(bar.top());
             let mut scroll = egui::ScrollArea::vertical()

@@ -110,7 +110,7 @@ pub(crate) fn scroll<R>(
             context.request_repaint();
         }
     }
-    let output = area.show_styled(ui, content);
+    let output = area.show_popup_styled(ui, f32::from(ui.spacing().menu_margin.right), content);
     let maximum = (output.content_size.y - output.inner_rect.height()).max(0.0);
     let previous = context
         .data(|data| data.get_temp::<ScrollView>(key))

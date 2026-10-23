@@ -9,6 +9,7 @@ use towavue_runtime_windows::{FolderBrowser, FolderListing};
 use crate::chrome;
 use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
+use crate::scroll_style::ScrollAreaStyle;
 mod prefetch;
 
 #[derive(Default)]
@@ -604,21 +605,19 @@ impl Browser {
             menu_message(ui, Text::FilmstripNoFolders.in_language(language));
             return;
         }
+        // Publish each menu atomically: arrows never appear after its rows.
+        if listing
+            .folders
+            .iter()
+            .any(|entry| entry.has_children.is_none())
+        {
+            menu_message(ui, Text::FilmstripLoadingFolders.in_language(language));
+            return;
+        }
         let entries: Vec<_> = listing
             .folders
             .iter()
-            .map(|entry| {
-                (
-                    entry.path.as_path(),
-                    self.cache
-                        .iter()
-                        .find(|cached| cached.path == entry.path)
-                        .map_or_else(
-                            || self.prefetch.children(&entry.path).or(entry.has_children),
-                            |cached| Some(!cached.folders.is_empty()),
-                        ),
-                )
-            })
+            .map(|entry| (entry.path.as_path(), entry.has_children))
             .collect();
         self.folder_rows(ui, &entries, depth, target);
         if listing.truncated {
@@ -677,8 +676,9 @@ impl Browser {
         egui::ScrollArea::vertical()
             .id_salt("folder-cascade")
             .max_height(available.y)
-            .show_rows(
+            .show_rows_popup_styled(
                 ui,
+                f32::from(ui.spacing().menu_margin.right),
                 chrome::SEARCH_BUTTON_SIZE,
                 entries.len(),
                 |ui, range| {

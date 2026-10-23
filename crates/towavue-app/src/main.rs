@@ -5807,6 +5807,7 @@ where
                     let strip_width = (ui.available_width() - controls_width - 56.0).max(80.0);
 
                     ui.style_mut().always_scroll_the_only_direction = true;
+                    scroll_style::control_style(ui.style_mut());
                     ui.spacing_mut().scroll.bar_width = 3.0;
                     ui.spacing_mut().scroll.floating_width = 3.0;
                     ui.spacing_mut().scroll.bar_inner_margin = 0.0;
@@ -5853,6 +5854,12 @@ where
                                     })
                                     .collect();
                                 let strip = ui.min_rect().intersect(ui.clip_rect());
+                                let tabs_overflow = tab_rects
+                                    .first()
+                                    .zip(tab_rects.last())
+                                    .is_some_and(|(first, last)| {
+                                        last.right() - first.left() > strip_rect.width()
+                                    });
                                 let mut drag_layout = tab_drag::Layout::new(
                                     ui,
                                     self.tabs
@@ -6074,6 +6081,7 @@ where
                                     }
                                     if let Some(path) = tab.target.current_path()
                                         && self.tab_mute_state(tab.id).is_some()
+                                        && !tabs_overflow
                                         && !self.modal_input_blocked()
                                         && !self.palette_open
                                     {

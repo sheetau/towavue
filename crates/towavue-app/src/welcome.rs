@@ -321,7 +321,8 @@ pub fn show(
                 egui::Color32::WHITE,
             )
             .size()
-            .x;
+            .x
+            .min((header_width - crate::browser_controls::SEARCH_MIN).max(0.0));
         let response = crate::browser_controls::text_button(
             &header,
             egui::Rect::from_min_size(header_rect.min, egui::vec2(width, header_height)),

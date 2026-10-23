@@ -2,6 +2,55 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+fn menu_waits_for_every_child_presence_and_reveals_all_rows_together() {
+    let context = context(1.0);
+    let root = PathBuf::from("C:/owned-menu-fixture");
+    let mut browser = Browser::default();
+    browser.sync_folder(&root, &context);
+    browser.worker_failed = true;
+    for complete in [false, true] {
+        browser.cache = vec![Arc::new(FolderListing {
+            path: root.clone(),
+            unavailable: false,
+            truncated: false,
+            folders: vec![
+                towavue_runtime_windows::BrowserFolder {
+                    path: root.join("branch"),
+                    has_children: Some(true),
+                },
+                towavue_runtime_windows::BrowserFolder {
+                    path: root.join("leaf"),
+                    has_children: complete.then_some(false),
+                },
+            ],
+        })];
+        let mut output = egui::FullOutput::default();
+        for _ in 0..4 {
+            output = context.run_ui(egui::RawInput::default(), |ui| {
+                let opener = ui.button("Open");
+                egui::Popup::menu(&opener)
+                    .open(true)
+                    .show(|ui| browser.directory_menu(ui, &root, 0, &mut None));
+            });
+        }
+        let tree = output.platform_output.accesskit_update.expect("tree");
+        let has = |label: &str| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(label) || node.value() == Some(label))
+        };
+        assert_eq!(has("branch"), complete);
+        assert_eq!(has("leaf"), complete);
+        assert_eq!(has("Subfolders: branch"), complete);
+        assert!(!has("Subfolders: leaf"));
+        assert_eq!(
+            has(localization::text(&context, Text::FilmstripLoadingFolders)),
+            !complete
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires an authorized read-only directory in TOWAVUE_FOLDER_BROWSER_REFERENCE"]
 fn reference_browser_parent_and_child_presence_latency() {
     let root =
@@ -23,7 +72,7 @@ fn reference_browser_parent_and_child_presence_latency() {
             if listing
                 .folders
                 .iter()
-                .all(|folder| browser.prefetch.children(&folder.path).is_some())
+                .all(|folder| folder.has_children.is_some())
             {
                 eprintln!(
                     "Folder menu: {} entries; parent {:?}; all child-presence flags {:?}",

@@ -587,7 +587,7 @@ impl CommandPalette {
             // Reveal before virtualization, moving only far enough to expose the row.
             let offset = egui::scroll_area::State::load(
                 ui.ctx(),
-                ui.make_persistent_id(egui::IdSalt::new(scroll_salt)),
+                crate::scroll_style::popup_scroll_id(ui, egui::IdSalt::new(scroll_salt)),
             )
             .map_or(0.0, |state| state.offset.y);
             let top = index as f32 * row_height;
@@ -596,7 +596,7 @@ impl CommandPalette {
                 .vertical_scroll_offset(offset.clamp((bottom - height).max(0.0).min(top), top));
         }
         ui.spacing_mut().item_spacing.y = 0.0;
-        let output = scroll.show_rows_styled(ui, row_height, row_count, |ui, rows| {
+        let output = scroll.show_rows_popup_styled(ui, 6.0, row_height, row_count, |ui, rows| {
             if paths.is_empty() {
                 ui.add(
                     egui::Label::new(
@@ -810,7 +810,11 @@ fn row_background(
     egui::epaint::RectShape::new(
         row,
         visuals.corner_radius,
-        visuals.weak_bg_fill,
+        if selected {
+            crate::chrome::HOVER
+        } else {
+            visuals.weak_bg_fill
+        },
         egui::Stroke::NONE,
         egui::StrokeKind::Inside,
     )

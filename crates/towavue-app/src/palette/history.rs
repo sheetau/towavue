@@ -40,10 +40,11 @@ impl CommandPalette {
             .map(Choice::Command);
         let context = ui.ctx().clone();
         overlay_scroll_bar(ui);
+        let height = (context.content_rect().height() - 90.0).clamp(40.0, 264.0);
         let output = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
-            .max_height((context.content_rect().height() - 90.0).clamp(40.0, 264.0))
-            .show_styled(ui, |ui| {
+            .max_height(height)
+            .show_popup_styled(ui, 6.0, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 if matches.is_empty() {
                     ui.weak(text(ui.ctx(), Text::NoMatchingCommands));

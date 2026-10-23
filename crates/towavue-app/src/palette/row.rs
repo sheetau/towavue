@@ -79,6 +79,7 @@ pub(super) fn row_icon(ui: &mut egui::Ui, rect: egui::Rect, glyph: char) -> egui
 // ScrollArea paints and registers the floating bar after its children, so its
 // full hit region takes priority over row actions beneath it without a gutter.
 pub(super) fn overlay_scroll_bar(ui: &mut egui::Ui) {
+    crate::scroll_style::control_style(ui.style_mut());
     ui.spacing_mut().scroll.floating = true;
     ui.spacing_mut().scroll.floating_allocated_width = 0.0;
 }

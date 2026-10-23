@@ -141,7 +141,7 @@ impl CommandPalette {
             .id_salt("palette-options")
             .auto_shrink([false, true])
             .max_height(height)
-            .show_styled(ui, |ui| {
+            .show_popup_styled(ui, 6.0, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 if matches.is_empty() {
                     ui.weak(localization::text(ui.ctx(), Text::NoMatchingCommands));

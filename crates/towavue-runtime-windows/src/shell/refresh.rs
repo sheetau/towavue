@@ -53,7 +53,7 @@ impl ViewOrder {
                     return None;
                 }
                 pump_messages();
-                if let Some(array) = view_order_array(view, folder, folders_only) {
+                if let Some(array) = view_order_array(view, folder, folders_only, current) {
                     break array
                         .as_ref()
                         .map_or(Some(0), |array| array.GetCount().ok())?;

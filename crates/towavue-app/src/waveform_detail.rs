@@ -774,6 +774,11 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         rect: egui::Rect,
         gain_preview: Option<(towavue_core::TimeRange, f32)>,
     ) -> Option<egui::Mesh> {
+        if self.source_save.frozen {
+            return self
+                .waveform_detail
+                .mesh(rect, context.pixels_per_point(), gain_preview);
+        }
         let path = self.path.as_ref()?;
         let state = self.edit_state();
         let fallback;

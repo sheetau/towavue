@@ -346,11 +346,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         if let Some(worker) = &self.metadata_worker {
             worker.clear();
         }
-        self.filmstrip.clear_previews();
+        // Stop source readers without dropping the pixels currently on screen.
+        self.filmstrip.quiesce_previews();
         self.palette.clear_preview();
         self.video_sheets.clear();
         self.tab_preview.clear();
-        self.status_file_details.invalidate();
+        self.status_file_details.pause();
     }
 
     pub(super) fn source_readers_idle(&self) -> bool {
@@ -452,6 +453,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
 
     pub(super) fn thaw_source_save(&mut self, source: &Path) {
         self.source_save.frozen = false;
+        self.status_file_details.invalidate();
         self.retained_playback
             .retain(|_, tab| !tab.prepared_only || tab.duration.is_some());
         self.finish_file_relocation(source, None);

@@ -2638,7 +2638,7 @@ dependencies = [
 
 [[package]]
 name = "towavue-app"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "egui",
  "egui-winit",
@@ -2651,11 +2651,11 @@ dependencies = [
 
 [[package]]
 name = "towavue-core"
-version = "1.0.4"
+version = "1.0.5"
 
 [[package]]
 name = "towavue-runtime-windows"
-version = "1.0.4"
+version = "1.0.5"
 dependencies = [
  "arboard",
  "crc32fast",

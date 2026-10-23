@@ -655,7 +655,8 @@ fn native_recycle_video_retains_hosted_readers_positions_and_recreates_edits() {
             let window = event_loop
                 .create_window(Window::default_attributes().with_visible(false))
                 .expect("hidden window");
-            let renderer = FrameRenderer::new(&window).expect("D3D11");
+            let mut renderer = FrameRenderer::new(&window).expect("D3D11");
+            renderer.resize_surface(640, 480).expect("owned surface");
             let mut host = WindowHost::new(None, None).expect("host");
             let owner = source_app(&mut host, &self.source);
             let id = host.windows[&owner].displayed_tab.expect("tab");
@@ -706,6 +707,68 @@ fn native_recycle_video_retains_hosted_readers_positions_and_recreates_edits() {
                 app.generation = session.generation();
                 app.clock = Some(PlaybackClock::paused(position, 1.0));
                 app.session = Some(session);
+                // Freeze and paint before publication: keeping a decoder snapshot
+                // is insufficient if the normal UI stops assigning its geometry.
+                let context = crate::fonts::test_context();
+                app.ui_context = Some(context.clone());
+                app.quiesce_source_save(&self.source);
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while !app.source_readers_idle() {
+                    assert!(Instant::now() < deadline, "frozen reader drain");
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                for _ in 0..3 {
+                    let mut actions = Vec::new();
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(640.0, 480.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| app.draw_ui(ui, &mut actions),
+                    );
+                    assert!(
+                        app.video_rect.is_some(),
+                        "frozen video remains in the scene"
+                    );
+                    assert!(
+                        app.session
+                            .as_ref()
+                            .expect("session")
+                            .current_video_snapshot()
+                            .is_some()
+                    );
+                    assert!(app.source_readers_idle());
+                    assert!(actions.is_empty());
+                    renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear");
+                    assert!(
+                        app.session
+                            .as_mut()
+                            .expect("held session")
+                            .draw_current(
+                                &mut renderer,
+                                app.video_rect.expect("video bounds"),
+                                app.video_uv,
+                            )
+                            .expect("held video draw")
+                    );
+                    renderer.render_ui(&context, output).expect("held UI draw");
+                    let pixels = renderer
+                        .verification_surface_rgba()
+                        .expect("owned readback");
+                    assert!(
+                        pixels
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .any(|pixel| pixel[0].abs_diff(pixel[1]) > 32),
+                        "generated video colors remain visible during publication"
+                    );
+                    renderer.present_surface().expect("hidden Present");
+                }
+                app.thaw_source_save(&self.source);
             }
             let app = host.windows.get_mut(&owner).expect("owner");
             app.edits.entry(id).or_default().push(

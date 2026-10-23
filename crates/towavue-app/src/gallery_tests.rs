@@ -58,10 +58,10 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
         return;
     };
     for density in [1.0, 1.25, 2.0] {
-        for size in [
-            egui::vec2(660.0, 400.0),
-            egui::vec2(1100.0, 400.0),
-            egui::vec2(1920.0, 1080.0),
+        for (size, columns) in [
+            (egui::vec2(660.0, 400.0), 2),
+            (egui::vec2(1100.0, 400.0), 5),
+            (egui::vec2(1920.0, 1080.0), 9),
         ] {
             let mut app = Application::new(None, |_| {}).expect("app");
             let context = fonts::test_context();
@@ -119,10 +119,11 @@ fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_da
             assert!(
                 (first.x0 - f64::from(filmstrip::gallery_side_inset(size.x))).abs() <= tolerance
             );
-            assert!(first.x0 >= 64.0 - tolerance);
-            assert!(
-                row.len() > ((size.x - 128.0 + 32.0) / (176.0 + 32.0)).floor() as usize,
-                "smaller thumbnails increase the column count while respecting the preview budget"
+            assert!(first.x0 >= 80.0 - tolerance);
+            assert_eq!(
+                row.len(),
+                columns,
+                "wider thumbnail gaps retain the independent side margin"
             );
             for pair in row.windows(2) {
                 assert!(

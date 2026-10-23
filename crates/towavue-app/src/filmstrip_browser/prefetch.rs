@@ -56,27 +56,39 @@ impl Prefetch {
         }
         let depth = *depth;
         self.active = None;
-        self.known.remove(&listing.path);
-        self.known_order.retain(|path| *path != listing.path);
-        if self.known.len() == PREPARE_LIMIT {
-            let oldest = self.known_order.pop_front().expect("known folder order");
-            self.known.remove(&oldest);
-        }
         if !listing.unavailable {
-            self.known
-                .insert(listing.path.clone(), !listing.folders.is_empty());
-            self.known_order.push_back(listing.path.clone());
+            self.remember(&listing.path, !listing.folders.is_empty());
+        } else {
+            self.known.remove(&listing.path);
+            self.known_order.retain(|path| *path != listing.path);
         }
-        // Bound automatic work/memory even for a drive root. Unresolved rows
-        // can still be prioritized by hover, before opening their child menu.
+        // Parent enumeration already proves leaf membership. Do not construct a
+        // hidden Shell view merely to enumerate the same empty leaf again.
         if depth < 63 {
             for folder in &listing.folders {
-                if self.seen.len() < PREPARE_LIMIT && self.seen.insert(folder.path.clone()) {
+                if let Some(children) = folder.has_children {
+                    self.remember(&folder.path, children);
+                }
+                if folder.has_children != Some(false)
+                    && self.seen.len() < PREPARE_LIMIT
+                    && self.seen.insert(folder.path.clone())
+                {
                     self.pending.push_back((folder.path.clone(), depth + 1));
                 }
             }
         }
         true
+    }
+
+    fn remember(&mut self, path: &Path, children: bool) {
+        self.known.remove(path);
+        self.known_order.retain(|saved| saved != path);
+        if self.known.len() == PREPARE_LIMIT {
+            let oldest = self.known_order.pop_front().expect("known folder order");
+            self.known.remove(&oldest);
+        }
+        self.known.insert(path.to_owned(), children);
+        self.known_order.push_back(path.to_owned());
     }
 
     pub fn request(&mut self) -> Option<&Path> {
@@ -105,6 +117,22 @@ mod tests {
             unavailable: false,
             truncated: false,
         }
+    }
+
+    #[test]
+    fn proven_leaves_are_known_without_scheduling_another_shell_view() {
+        let mut work = Prefetch::default();
+        work.prioritize(Path::new("root"));
+        let mut root = listing("root", &["root/leaf", "root/branch"]);
+        root.folders[0].has_children = Some(false);
+        root.folders[1].has_children = Some(true);
+        assert!(work.complete(&root));
+        assert_eq!(work.children(Path::new("root/leaf")), Some(false));
+        assert_eq!(work.children(Path::new("root/branch")), Some(true));
+        assert_eq!(work.request(), Some(Path::new("root/branch")));
+        assert!(work.complete(&listing("root/branch", &[])));
+        assert_eq!(work.children(Path::new("root/branch")), Some(false));
+        assert_eq!(work.request(), None);
     }
 
     #[test]

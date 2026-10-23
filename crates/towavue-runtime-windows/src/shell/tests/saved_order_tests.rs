@@ -98,7 +98,7 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
                 // SAFETY: the callback runs synchronously on this owned STA.
                 unsafe {
                     Some(
-                        view_order_array(view, path, true)?
+                        view_order_array(view, path, true, &current)?
                             .map_or(0, |array| array.GetCount().expect("count")),
                     )
                 }

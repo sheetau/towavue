@@ -644,10 +644,15 @@ impl PlaybackSession {
     /// Quiesce the old device before its window surface is released.
     /// `position` is the current transport clock, not a new seek target.
     pub fn suspend_for_graphics_recovery(&mut self, position: MediaTime) {
+        let recovery_frame = self.video_recovery_frame(position);
+        self.stop_pipeline();
+        self.recovery_frame = recovery_frame;
+    }
+
+    fn video_recovery_frame(&self, position: MediaTime) -> Option<(MediaTime, MediaTime)> {
         // Keep only timestamps, never a texture from a removed device. A paused
         // clock can lie between frames; seeking at the clock would advance a frame.
-        let recovery_frame = self
-            .recovery_frame
+        self.recovery_frame
             .filter(|(saved, _)| *saved == position)
             .or_else(|| {
                 // A displayed seek placeholder is not the new target's paused frame.
@@ -657,18 +662,22 @@ impl PlaybackSession {
                         || self.retained_video_position == Some(position)))
                 .then(|| self.current_video_time().map(|frame| (position, frame)))
                 .flatten()
-            });
-        self.stop_pipeline();
-        self.recovery_frame = recovery_frame;
+            })
     }
 
     /// Release all file readers, including reusable video and audio demux inputs,
     /// before an accepted filesystem mutation. The device and transport settings stay.
     pub fn suspend_for_file_operation(&mut self, position: MediaTime) {
-        self.suspend_for_graphics_recovery(position);
+        let recovery_frame = self.video_recovery_frame(position);
+        // Unlike device recovery, a file operation keeps the same healthy device.
+        // The owned RGBA/AVFrame surface and detached source stamp hold no file
+        // reader. Retain them across the joined producer shutdown for painting.
+        let held = self.current_video.take();
+        self.stop_pipeline();
+        self.current_video = held;
+        self.recovery_frame = recovery_frame;
         self.video_input = None;
         self.audio_input = None;
-        self.current_video_source = None;
     }
 
     /// Resume the same content after a confirmed move, or the original path after
@@ -681,7 +690,10 @@ impl PlaybackSession {
         self.path = path.to_owned();
         self.video_input = None;
         self.audio_input = None;
-        self.replace_graphics_device(self.graphics_device.clone(), position)
+        let held = self.current_video.take();
+        let result = self.replace_graphics_device(self.graphics_device.clone(), position);
+        self.current_video = held;
+        result
     }
 
     fn start_pipeline(&mut self) -> Result<(), PlaybackError> {
@@ -1665,7 +1677,17 @@ mod tests {
         .expect("paused video");
         assert_eq!(session.source(), Some(&initial));
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
+        assert!(
+            session.advance_pending(),
+            "select the queued frame for presentation"
+        );
+        let geometry = session.video_geometry();
+        let snapshot = session.current_video_snapshot().expect("presented frame");
         session.suspend_for_file_operation(MediaTime::ZERO);
+        assert_eq!(session.video_geometry(), geometry);
+        let held = session.current_video_snapshot().expect("held frame");
+        assert_eq!(held.source_time(), snapshot.source_time());
+        assert!(Arc::ptr_eq(&held.source, &snapshot.source));
         let old = root.join("old.mp4");
         std::fs::rename(&path, &old).expect("external replacement removes old path");
         std::fs::copy(&old, &path).expect("new file with identical playable content");
@@ -1674,6 +1696,11 @@ mod tests {
         session
             .resume_after_file_operation(&path, MediaTime::ZERO)
             .expect("resume decoder");
+        assert_eq!(
+            session.video_geometry(),
+            geometry,
+            "keep pixels until replacement arrives"
+        );
         assert_eq!(wait_for_video(&mut session), MediaTime::ZERO);
         assert_eq!(
             session.source(),

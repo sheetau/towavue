@@ -72,19 +72,7 @@ fn directory(path: &Path) -> bool {
 }
 
 fn child_presence(path: &Path, current: &impl Fn() -> bool) -> Option<bool> {
-    use std::os::windows::fs::MetadataExt;
-    for entry in fs::read_dir(path).ok()? {
-        if !current() {
-            return None;
-        }
-        // Windows DirEntry metadata comes from enumeration, without a separate
-        // filesystem query per file. Stop at the first eligible directory.
-        let metadata = entry.ok()?.metadata().ok()?;
-        if metadata.is_dir() && metadata.file_attributes() & 0x400 == 0 {
-            return Some(true);
-        }
-    }
-    Some(false)
+    crate::shell::has_visible_children(path, current)
 }
 
 pub(crate) fn enumerate(

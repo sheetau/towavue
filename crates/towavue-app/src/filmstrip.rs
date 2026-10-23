@@ -65,7 +65,7 @@ pub(crate) mod swipe;
 
 // Retain the transfer implementation while Gallery gestures scroll the grid.
 const GALLERY_DRAG_OUT: bool = false;
-pub(crate) const GALLERY_GAP: f32 = 40.0;
+pub(crate) const GALLERY_GAP: f32 = 48.0;
 const GALLERY_DIAMETER: f32 = 136.0;
 
 pub(crate) fn gallery_side_inset(width: f32) -> f32 {
@@ -79,7 +79,7 @@ pub(crate) fn gallery_side_inset(width: f32) -> f32 {
 }
 
 pub(crate) fn gallery_minimum_inset(width: f32) -> f32 {
-    (GALLERY_GAP * 2.0).min(((width - GALLERY_DIAMETER) / 2.0).max(8.0))
+    80.0_f32.min(((width - GALLERY_DIAMETER) / 2.0).max(8.0))
 }
 
 fn gallery_thumbnail(cell: Rect, size: Vec2, scale: f32) -> Rect {
@@ -413,6 +413,15 @@ impl Filmstrip {
             // restarting missing/revalidation jobs without accepting old results.
             self.visible.clear();
         }
+    }
+
+    pub fn quiesce_previews(&mut self) {
+        self.pause_preparation();
+        self.preparation = None;
+        self.recent_preparation = None;
+        // Keep the visible pixels while a file mutates, but revalidate every
+        // retained entry on reuse, including Gallery without a folder snapshot.
+        self.refreshing = self.previews.keys().cloned().collect();
     }
 
     pub fn refresh_previews(&mut self, snapshot: &FolderSnapshot, open: bool) {
@@ -1522,7 +1531,11 @@ impl Filmstrip {
                     .abs_diff(anchor)
             });
         }
-        self.set_visible(wanted);
+        if enabled {
+            self.set_visible(wanted);
+        } else {
+            self.pause_preparation();
+        }
         self.drag.finish(context, band, actions);
     }
 
@@ -3526,6 +3539,34 @@ mod tests {
             original
         );
         assert!(strip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+        strip.quiesce_previews();
+        assert!(strip.refreshing.contains(&paths[0]));
+        let generation = strip.generation;
+        let output = frame(&mut strip, 0.0).0;
+        assert!(
+            output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Mesh(mesh) if mesh.texture_id == original)),
+            "publication retains pixels until revalidation completes"
+        );
+        assert_ne!(
+            strip.generation, generation,
+            "Gallery revalidates without a folder snapshot"
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while strip.refreshing.contains(&paths[0]) {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("revalidated preview notification");
+            strip.finish(&context);
+        }
+        assert_ne!(
+            strip.previews[&paths[0]]
+                .as_ref()
+                .expect("revalidated first")
+                .0
+                .id(),
+            original
+        );
         drop(strip);
         std::fs::remove_dir_all(root).expect("remove owned fixtures");
     }

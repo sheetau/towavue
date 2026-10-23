@@ -1,3 +1,4 @@
+pub(crate) use navigation::has_visible_children;
 use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -1042,7 +1043,7 @@ unsafe fn capture_view(
         if !current() {
             return None;
         }
-        let array = view_order_array(view, folder, false)?;
+        let array = view_order_array(view, folder, false, current)?;
         let mut items = Vec::new();
         for index in 0..array
             .as_ref()
@@ -1121,6 +1122,7 @@ unsafe fn view_order_array(
     view: &IFolderView2,
     folder: &Path,
     folders_only: bool,
+    current: &impl Fn() -> bool,
 ) -> Option<Option<IShellItemArray>> {
     unsafe {
         match view.Items::<IShellItemArray>(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER) {
@@ -1129,10 +1131,17 @@ unsafe fn view_order_array(
                 if u32::try_from(view.ItemCount(SVGIO_ALLVIEW).ok()?).ok()? != count {
                     return None;
                 }
+                // Shell can report zero before its filtered view has populated.
+                // Accept an empty menu only after checking visible filesystem children.
+                if folders_only && !navigation::directory_count_ready(folder, count, current) {
+                    return None;
+                }
                 Some(Some(array))
             }
             Err(_)
-                if (folders_only && view.ItemCount(SVGIO_ALLVIEW).ok()? == 0)
+                if (folders_only
+                    && view.ItemCount(SVGIO_ALLVIEW).ok()? == 0
+                    && navigation::directory_count_ready(folder, 0, current))
                     || empty_directory(folder) =>
             {
                 Some(None)

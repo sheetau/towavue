@@ -3765,6 +3765,25 @@ fn filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order
             assert!(Instant::now() < deadline, "preview readers drained");
             std::thread::sleep(Duration::from_millis(2));
         }
+        let preview_count = app.filmstrip.previews.len();
+        assert!(app.filmstrip.preparation.is_none() && app.filmstrip.recent_preparation.is_none());
+        assert!(
+            app.filmstrip
+                .previews
+                .keys()
+                .all(|path| app.filmstrip.refreshing.contains(path)),
+            "held previews must be revalidated after publication, including Gallery reuse"
+        );
+        for _ in 0..3 {
+            let held = draw(&mut app, vec![]);
+            assert!(held.shapes.len() > 20, "frozen Filmstrip remains painted");
+            assert_eq!(app.filmstrip.previews.len(), preview_count);
+            assert!(
+                app.source_readers_idle(),
+                "frozen paints cannot restart preview readers"
+            );
+            assert!((app.filmstrip.scroll_offset - offset).abs() < 1.0);
+        }
         let retained = active_source.then(|| {
             towavue_runtime_windows::RetainedSource::capture(&expected).expect("held original")
         });

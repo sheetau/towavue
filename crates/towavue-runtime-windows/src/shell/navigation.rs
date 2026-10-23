@@ -66,6 +66,17 @@ impl IFolderFilter_Impl for FoldersOnly_Impl {
 // SAFETY: browser and filter are used only on the caller's initialized STA.
 // SetFilter retains its own COM reference; callbacks capture no borrowed data.
 pub(super) unsafe fn filter_folders(browser: &IExplorerBrowser) -> Option<()> {
+    let filter: IFolderFilter = FoldersOnly(folder_enum_flags()).into();
+    unsafe {
+        browser
+            .cast::<IFolderFilterSite>()
+            .ok()?
+            .SetFilter(&filter)
+            .ok()
+    }
+}
+
+fn folder_enum_flags() -> u32 {
     let mut settings = SHELLSTATEA::default();
     // SAFETY: writable native settings buffer; false makes this a read only.
     unsafe {
@@ -85,14 +96,43 @@ pub(super) unsafe fn filter_folders(browser: &IExplorerBrowser) -> Option<()> {
     if bits & (1 << 15) != 0 {
         flags |= SHCONTF_INCLUDESUPERHIDDEN.0 as u32;
     }
-    let filter: IFolderFilter = FoldersOnly(flags).into();
-    unsafe {
-        browser
-            .cast::<IFolderFilterSite>()
-            .ok()?
-            .SetFilter(&filter)
-            .ok()
+    flags
+}
+
+fn visible_directory(attributes: u32, flags: u32) -> bool {
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_REPARSE_POINT,
+        FILE_ATTRIBUTE_SYSTEM,
+    };
+    attributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0
+        && attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 == 0
+        && (attributes & FILE_ATTRIBUTE_HIDDEN.0 == 0
+            || flags & SHCONTF_INCLUDEHIDDEN.0 as u32 != 0)
+        && (attributes & FILE_ATTRIBUTE_SYSTEM.0 == 0
+            || flags & SHCONTF_INCLUDESUPERHIDDEN.0 as u32 != 0)
+}
+
+pub(super) fn directory_count_ready(
+    folder: &Path,
+    count: u32,
+    current: &impl Fn() -> bool,
+) -> bool {
+    count != 0 || has_visible_children(folder, current) == Some(false)
+}
+
+pub(crate) fn has_visible_children(folder: &Path, current: &impl Fn() -> bool) -> Option<bool> {
+    use std::os::windows::fs::MetadataExt;
+    let flags = folder_enum_flags();
+    for entry in std::fs::read_dir(folder).ok()? {
+        if !current() {
+            return None;
+        }
+        // Windows caches these attributes in DirEntry: no per-file stat or decode.
+        if visible_directory(entry.ok()?.metadata().ok()?.file_attributes(), flags) {
+            return Some(true);
+        }
     }
+    current().then_some(false)
 }
 
 /// The destination of a related-folder lookup, before opening or enumerating its media.
@@ -254,7 +294,7 @@ pub(super) fn directories(
                 // SAFETY: Shell invokes this callback synchronously on the owning STA.
                 // Interfaces never leave it; only owned filesystem paths are returned.
                 unsafe {
-                    let Some(array) = view_order_array(view, folder, true)? else {
+                    let Some(array) = view_order_array(view, folder, true, current)? else {
                         return Some(Vec::new());
                     };
                     let mut paths = Vec::new();
@@ -316,6 +356,40 @@ pub(super) fn directories(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn zero_directory_count_waits_for_membership_and_respects_visibility() {
+        let root = super::super::tests::test_directory("directory-zero-readiness");
+        fs::create_dir_all(&root).expect("owned fixture directory");
+        fs::write(root.join("file.txt"), b"not media").expect("fixture");
+        assert!(directory_count_ready(&root, 0, &|| true));
+        assert!(!directory_count_ready(&root, 0, &|| false));
+        fs::create_dir(root.join("child")).expect("child");
+        assert!(!directory_count_ready(&root, 0, &|| true));
+        assert!(directory_count_ready(&root, 1, &|| panic!(
+            "nonempty view needs no scan"
+        )));
+        assert!(!directory_count_ready(&root.join("missing"), 0, &|| true));
+        for hidden in [false, true] {
+            for system in [false, true] {
+                let flags = (if hidden {
+                    SHCONTF_INCLUDEHIDDEN.0 as u32
+                } else {
+                    0
+                }) | (if system {
+                    SHCONTF_INCLUDESUPERHIDDEN.0 as u32
+                } else {
+                    0
+                });
+                assert!(visible_directory(0x10, flags));
+                assert_eq!(visible_directory(0x12, flags), hidden);
+                assert_eq!(visible_directory(0x16, flags), hidden && system);
+                assert!(!visible_directory(0x410, flags));
+                assert!(!visible_directory(0x80, flags));
+            }
+        }
+        fs::remove_dir_all(root).expect("owned fixture");
+    }
 
     #[test]
     fn ordinary_folder_open_excludes_directories_with_media_extensions() {

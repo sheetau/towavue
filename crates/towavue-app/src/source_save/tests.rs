@@ -1,4 +1,109 @@
 use super::*;
+use towavue_runtime_windows::DecodedImageFrame;
+
+#[test]
+fn frozen_file_operation_keeps_image_and_chrome_without_restarting_readers() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "source_save::tests::frozen_file_operation_keeps_image_and_chrome_without_restarting_readers",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        let context = crate::fonts::test_context();
+        context.set_pixels_per_point(density);
+        context.global_style_mut(crate::chrome::style);
+        let path = root.join("retained-image.bmp");
+        crate::tab_transfer::tests::bitmap(&path);
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(context.clone());
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Image);
+        app.displayed_tab = Some(tab);
+        app.path = Some(path.clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.state = PlaybackState::Paused;
+        app.image = Some(
+            ImagePresentation::from_decoded(
+                &context,
+                &path,
+                Arc::new(DecodedImage {
+                    animation_plays: 0,
+                    format: "test",
+                    frames: vec![DecodedImageFrame {
+                        width: 2,
+                        height: 2,
+                        rgba: vec![255; 16],
+                        delay: Duration::ZERO,
+                    }],
+                }),
+            )
+            .expect("generated image"),
+        );
+        let texture = app.image.as_ref().expect("image").texture.id();
+        let paint = |app: &mut Application<_>| {
+            let mut actions = Vec::new();
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 576.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.draw_ui(ui, &mut actions),
+            );
+            assert!(actions.is_empty());
+            let image = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh.clone()),
+                    _ => None,
+                })
+                .expect("held image remains in the rendered scene");
+            (output, image)
+        };
+        paint(&mut app);
+        let (_, before) = paint(&mut app);
+        app.quiesce_source_save(&path);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !app.source_readers_idle() {
+            assert!(Instant::now() < deadline, "reader drain");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        for _ in 0..3 {
+            let (output, held) = paint(&mut app);
+            assert_eq!(
+                held, before,
+                "image geometry, pixels and opacity remain unchanged"
+            );
+            assert!(
+                app.source_readers_idle(),
+                "painting must not reopen the source"
+            );
+            let notice = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains("Saving a file") => {
+                        Some(text.visual_bounding_rect())
+                    }
+                    _ => None,
+                })
+                .expect("operation status");
+            assert!(
+                notice.top() > 500.0,
+                "notice belongs to the bottom status bar"
+            );
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text().contains("retained-image"))),
+                "tab chrome remains visible"
+            );
+        }
+        app.thaw_source_save(&path);
+        assert!(!app.modal_input_blocked());
+    }
+}
 
 #[test]
 fn publication_error_keeps_uncertain_source_classification_after_localization() {

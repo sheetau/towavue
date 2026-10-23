@@ -2632,7 +2632,7 @@ where
         position: Duration,
         priority: bool,
     ) -> Option<video_sheets::Request> {
-        if self.media_kind != Some(MediaKind::Video) {
+        if self.source_save.frozen || self.media_kind != Some(MediaKind::Video) {
             return None;
         }
         let target = video_sheets::Request {
@@ -4331,20 +4331,12 @@ where
             tab,
             instance: self.media_generation,
         });
-        if self.source_save.frozen {
-            if self.active_export.is_some() {
-                root.disable();
-                self.draw_status_bar(root, actions, &mut Vec::new());
-            } else {
-                root.label(localization::text(
-                    root.ctx(),
-                    localization::Text::SavingFileOverlay,
-                ));
-            }
-            return;
-        }
         let previous_selection = self.image_view.selection;
-        if root.ctx().current_pass_index() == 0 && self.image_loading && self.ui_context.is_some() {
+        if !self.source_save.frozen
+            && root.ctx().current_pass_index() == 0
+            && self.image_loading
+            && self.ui_context.is_some()
+        {
             // A redraw can overtake the queued decoder wakeup; use an already-ready original.
             self.finish_image_load();
         }
@@ -4535,11 +4527,11 @@ where
         if self.gallery_active() {
             self.prepare_gallery(&context);
         }
-        if !self.filmstrip_open || modal_blocked || self.palette_open {
+        if !self.filmstrip_open || modal_blocked && !self.source_save.frozen || self.palette_open {
             self.filmstrip_browser.hide(Some(&context));
         }
         if self.filmstrip_open {
-            if !modal_blocked {
+            if !modal_blocked || self.source_save.frozen {
                 self.draw_filmstrip(&context, media_panel.response.rect, actions);
             }
         } else if !self.image_seek_preview_active && self.path.is_some() {
@@ -6596,6 +6588,9 @@ where
     }
 
     fn refresh_status_file_details(&mut self) {
+        if self.source_save.frozen {
+            return;
+        }
         if self
             .native_caption
             .as_ref()
@@ -7574,6 +7569,9 @@ where
             (owner, actions),
         ) {
             actions.push(UiAction::OpenMedia(path, false));
+        }
+        if self.source_save.frozen {
+            return;
         }
         let request = self.playlist.duration_request();
         if request != self.playlist_duration_pending {
@@ -11802,6 +11800,13 @@ where
 
     fn status_notice(&self) -> Option<String> {
         let language = self.language();
+        if self.source_save.frozen {
+            return Some(
+                localization::Text::SavingFileOverlay
+                    .in_language(language)
+                    .into(),
+            );
+        }
         if self.reading_drag.is_some() {
             return Some(self.reading_status());
         }
@@ -12022,7 +12027,8 @@ where
     }
 
     fn modal_input_blocked(&self) -> bool {
-        self.dialog_input_blocked()
+        self.source_save.frozen
+            || self.dialog_input_blocked()
             || self
                 .active_export
                 .as_ref()
@@ -12155,6 +12161,7 @@ where
         rect: egui::Rect,
         actions: &mut Vec<UiAction>,
     ) {
+        let enabled = !self.palette_open && !self.modal_input_blocked();
         let deleted = self
             .displayed_tab
             .and_then(|id| self.deleted_sources.get(&id));
@@ -12180,10 +12187,7 @@ where
                 instance: self.media_generation,
             });
             self.filmstrip_browser.sync_folder(folder, context);
-            if let Some(target) =
-                self.filmstrip_browser
-                    .show(context, rect, source, !self.palette_open)
-            {
+            if let Some(target) = self.filmstrip_browser.show(context, rect, source, enabled) {
                 match target {
                     filmstrip_browser::Action::Menu(intent) => {
                         actions.push(UiAction::ThumbnailMenu(intent))
@@ -12216,13 +12220,12 @@ where
             body,
             projected.as_deref(),
             self.path.as_deref(),
-            !self.palette_open,
+            enabled,
             actions,
             body.top() - rect.top(),
             rect,
         );
-        self.filmstrip_browser
-            .show_filters(context, rect, !self.palette_open);
+        self.filmstrip_browser.show_filters(context, rect, enabled);
     }
 
     fn prepare_filmstrip(&mut self, context: &egui::Context) {

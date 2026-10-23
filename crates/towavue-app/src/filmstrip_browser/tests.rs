@@ -2,6 +2,150 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+fn background_preparation_waits_for_pointer_idle_but_open_menus_bypass_it() {
+    let context = context(1.0);
+    let mut browser = Browser {
+        worker_failed: true,
+        ..Default::default()
+    };
+    let root = PathBuf::from("C:/owned-idle-fixture");
+    let mut ready = false;
+    let mut frame = |time, events, urgent| {
+        let _ = context.run_ui(
+            egui::RawInput {
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ready = browser.background_ready(ui);
+                browser.listing(ui, &root, ready || urgent);
+            },
+        );
+        (ready, browser.prefetch.request().map(Path::to_owned))
+    };
+    let point = egui::pos2(100.0, 100.0);
+    assert_eq!(
+        frame(1.0, vec![egui::Event::PointerMoved(point)], false),
+        (false, None)
+    );
+    assert_eq!(
+        frame(1.1, vec![egui::Event::PointerMoved(point)], false),
+        (false, None)
+    );
+    assert_eq!(frame(1.16, vec![], false), (true, Some(root.clone())));
+    assert!(
+        !frame(
+            2.0,
+            vec![egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            false
+        )
+        .0
+    );
+    assert!(
+        !frame(3.0, vec![], false).0,
+        "a stationary held drag also yields background work"
+    );
+    assert!(
+        !frame(
+            3.1,
+            vec![egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            true
+        )
+        .0
+    );
+    browser.hide(Some(&context));
+    let _ = context.run_ui(
+        egui::RawInput {
+            time: Some(4.0),
+            events: vec![egui::Event::PointerMoved(point + egui::vec2(10.0, 0.0))],
+            ..Default::default()
+        },
+        |ui| {
+            assert!(!browser.background_ready(ui));
+            browser.directory_menu(ui, &root, 0, &mut None);
+        },
+    );
+    assert_eq!(
+        browser.prefetch.request(),
+        Some(root.as_path()),
+        "explicit menu starts immediately"
+    );
+}
+
+#[test]
+fn a_confirmed_empty_branch_retires_its_arrow_and_closes_without_an_empty_message() {
+    let context = context(1.0);
+    let root = PathBuf::from("C:/owned-empty-menu-fixture");
+    let leaf = root.join("leaf");
+    let mut browser = Browser {
+        worker_failed: true,
+        ..Default::default()
+    };
+    browser.prefetch.prioritize(&leaf);
+    assert!(browser.prefetch.complete(&FolderListing {
+        path: leaf.clone(),
+        folders: vec![],
+        unavailable: false,
+        truncated: false,
+    }));
+    browser.cache.push(Arc::new(FolderListing {
+        path: root.clone(),
+        folders: vec![towavue_runtime_windows::BrowserFolder {
+            path: leaf.clone(),
+            has_children: Some(true),
+        }],
+        unavailable: false,
+        truncated: false,
+    }));
+    let mut output = egui::FullOutput::default();
+    for _ in 0..3 {
+        output = context.run_ui(egui::RawInput::default(), |ui| {
+            browser.directory_menu(ui, &root, 0, &mut None);
+        });
+    }
+    let tree = output.platform_output.accesskit_update.expect("tree");
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("leaf"))
+    );
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("Subfolders: leaf"))
+    );
+    browser.cache.push(Arc::new(FolderListing {
+        path: leaf.clone(),
+        folders: vec![],
+        unavailable: false,
+        truncated: false,
+    }));
+    let mut open = true;
+    let output = context.run_ui(egui::RawInput::default(), |ui| {
+        let opener = ui.button("Open");
+        egui::Popup::menu(&opener).open_bool(&mut open).show(|ui| {
+            browser.directory_menu(ui, &leaf, 1, &mut None);
+            assert!(ui.will_parent_close());
+        });
+    });
+    assert!(!open, "the empty popup is actually closed");
+    assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == "No subfolders")));
+}
+
+#[test]
 fn menu_waits_for_every_child_presence_and_reveals_all_rows_together() {
     let context = context(1.0);
     let root = PathBuf::from("C:/owned-menu-fixture");
@@ -121,7 +265,10 @@ fn directory_tree_prepares_before_submenus_open_and_leaf_rows_never_get_arrows()
     assert_eq!(browser.prefetch.children(&leaf), Some(false));
     assert_eq!(browser.prefetch.children(&branch), Some(true));
     assert_eq!(browser.prefetch.children(&deep), Some(false));
-    assert!(browser.cache.iter().any(|listing| listing.path == deep));
+    assert!(
+        !browser.cache.iter().any(|listing| listing.path == deep),
+        "known leaves need no Shell listing"
+    );
     let mut output = egui::FullOutput::default();
     for _ in 0..4 {
         output = context.run_ui(

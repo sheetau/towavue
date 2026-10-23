@@ -41,6 +41,11 @@ impl FileDetailsCache {
         self.worker.clear();
     }
 
+    pub fn pause(&mut self) {
+        self.ticket = self.ticket.wrapping_add(1);
+        self.worker.clear();
+    }
+
     pub fn update(&mut self, source: Option<Source>, notify: Arc<dyn Fn(AppEvent) + Send + Sync>) {
         if self.source == source {
             return;

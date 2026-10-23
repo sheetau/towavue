@@ -66,6 +66,8 @@ pub(super) struct Browser {
     worker: Option<FolderBrowser>,
     cache: Vec<Arc<FolderListing>>,
     prefetch: prefetch::Prefetch,
+    prepare_after: Option<f64>,
+    prepare_pointer: Option<egui::Pos2>,
     worker_failed: bool,
     menu_open: Option<egui::Id>,
     menu_floor: f32,
@@ -134,6 +136,8 @@ impl Browser {
         }
         self.cache.clear();
         self.prefetch = prefetch::Prefetch::default();
+        self.prepare_after = None;
+        self.prepare_pointer = None;
     }
 
     pub fn sync_folder(&mut self, folder: &Path, context: &Context) {
@@ -240,7 +244,8 @@ impl Browser {
                 // Apply arriving arrow metadata before measuring either column.
                 // A late change inside address_bar would elide ancestors for one frame.
                 if ui.is_enabled() && self.menu_open.is_none() {
-                    self.listing(ui, &self.folder.clone());
+                    let prepare = self.background_ready(ui);
+                    self.listing(ui, &self.folder.clone(), prepare);
                 }
                 let content = screen.shrink2(egui::vec2(crate::browser_controls::INSET, 0.0));
                 let navigation_width = 2.0 * chrome::SEARCH_BUTTON_SIZE + 18.0;
@@ -539,7 +544,34 @@ impl Browser {
                 )
     }
 
-    fn listing(&mut self, ui: &Ui, path: &Path) -> Option<Arc<FolderListing>> {
+    fn background_ready(&mut self, ui: &Ui) -> bool {
+        let (time, pointer, moving, pressed) = ui.input(|input| {
+            (
+                input.time,
+                input.pointer.hover_pos(),
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::PointerMoved(_))),
+                input.pointer.any_down() || input.pointer.any_pressed(),
+            )
+        });
+        if pressed || (moving && pointer != self.prepare_pointer) {
+            self.prepare_after = Some(time + 0.15);
+        }
+        self.prepare_pointer = pointer;
+        if let Some(deadline) = self.prepare_after
+            && time < deadline
+        {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f64(deadline - time));
+            return false;
+        }
+        self.prepare_after = None;
+        true
+    }
+
+    fn listing(&mut self, ui: &Ui, path: &Path, start_next: bool) -> Option<Arc<FolderListing>> {
         if let Some(result) = self.worker.as_ref().and_then(FolderBrowser::result)
             && self.prefetch.complete(&result)
         {
@@ -558,6 +590,11 @@ impl Browser {
                 self.cache.push(result.clone());
                 result
             });
+        // Retain completed work during pointer interaction, but defer the next
+        // hidden Shell view. An explicitly opened menu bypasses this idle delay.
+        if !start_next {
+            return result;
+        }
         if result.is_none() {
             self.prefetch.prioritize(path);
         }
@@ -585,7 +622,7 @@ impl Browser {
         target: &mut Option<Action>,
     ) {
         let language = localization::language(ui.ctx());
-        let Some(listing) = self.listing(ui, path) else {
+        let Some(listing) = self.listing(ui, path, true) else {
             menu_message(
                 ui,
                 if self.worker_failed {
@@ -602,7 +639,7 @@ impl Browser {
             return;
         }
         if listing.folders.is_empty() {
-            menu_message(ui, Text::FilmstripNoFolders.in_language(language));
+            ui.close();
             return;
         }
         // Publish each menu atomically: arrows never appear after its rows.
@@ -617,7 +654,14 @@ impl Browser {
         let entries: Vec<_> = listing
             .folders
             .iter()
-            .map(|entry| (entry.path.as_path(), entry.has_children))
+            .map(|entry| {
+                let children = if self.prefetch.children(&entry.path) == Some(false) {
+                    Some(false)
+                } else {
+                    entry.has_children
+                };
+                (entry.path.as_path(), children)
+            })
             .collect();
         self.folder_rows(ui, &entries, depth, target);
         if listing.truncated {
@@ -761,7 +805,7 @@ impl Browser {
                             ids.push(response.id);
                         }
                         if response.hovered() && presence.is_none() {
-                            self.listing(ui, path);
+                            self.listing(ui, path, true);
                         }
                         if response.clicked() || response.middle_clicked() {
                             *target =

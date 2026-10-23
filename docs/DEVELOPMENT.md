@@ -54,6 +54,15 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
+For source-operation presentation changes, run `source_save::tests::`,
+`filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order`
+and the native recycle controls in `window_host::file_operations::recycle_tests`.
+Check the frozen paint itself: held image geometry/opacity, video geometry and
+snapshot, Filmstrip scroll position, bottom status notice, and drained readers
+after repeated paints. Successful playback after thaw alone does not establish
+continuity during publication. Generated/hidden controls are separate from owner
+desktop review.
+
 For compact secondary-button seeking, run app `seekbar::precision::` and
 `timeline_input::` controls, plus the image-navigation and seek-preview regressions.
 They cover relative playhead anchoring, precision bands, reversed reading direction,

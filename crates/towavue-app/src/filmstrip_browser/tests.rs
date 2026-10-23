@@ -2,7 +2,7 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
-fn chevron_menu_hover_uses_the_ordinary_row_fill_and_stroke() {
+fn chevron_menu_hover_keeps_split_fill_and_full_outline_in_the_ordinary_color() {
     fn rectangles(shape: &egui::Shape, output: &mut Vec<egui::epaint::RectShape>) {
         match shape {
             egui::Shape::Rect(rect) => output.push(rect.clone()),
@@ -75,21 +75,30 @@ fn chevron_menu_hover_uses_the_ordinary_row_fill_and_stroke() {
                         && rect.fill != Color32::TRANSPARENT
                 })
                 .expect("hover background");
-            let colors = (hover.fill, hover.stroke);
+            let color = hover.fill;
             if let Some(expected) = ordinary {
-                assert_eq!(colors, expected, "{label} at {density}");
+                assert_eq!(color, expected, "{label} at {density}");
             } else {
-                ordinary = Some(colors);
+                ordinary = Some(color);
             }
-            assert!(
-                rects
-                    .iter()
-                    .filter(|rect| {
-                        rect.rect.intersects(row) && rect.rect.height() <= row.height() + 0.1
-                    })
-                    .all(|rect| rect.stroke == egui::Stroke::NONE),
-                "menu rows have no independent outline"
-            );
+            if label != "Leaf" {
+                let name = node(&output, "Branch");
+                let arrow = node(&output, "Subfolders: Branch");
+                let entire = name.union(arrow);
+                assert!(
+                    rects.iter().any(|rect| {
+                        rect.rect == entire
+                            && rect.stroke == egui::Stroke::new(1.0, color)
+                            && rect.fill == Color32::TRANSPARENT
+                    }),
+                    "either half retains the full-row outline"
+                );
+                let other = if label == "Branch" { arrow } else { name };
+                assert!(
+                    !hover.rect.contains(other.center()),
+                    "only the hovered half is filled"
+                );
+            }
         }
     }
 }

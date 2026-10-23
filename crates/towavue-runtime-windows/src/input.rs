@@ -96,6 +96,31 @@ fn is_client_button(message: u32) -> bool {
     )
 }
 
+/// Queue scalar input for an owned native test window without moving the real cursor.
+#[cfg(feature = "render-verification")]
+pub fn post_verification_cursor_move(window: &winit::window::Window, x: i16, y: i16) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+
+    let RawWindowHandle::Win32(handle) = window.window_handle().expect("test window").as_raw()
+    else {
+        panic!("Windows test window required");
+    };
+    let coordinates = u32::from(x as u16) | (u32::from(y as u16) << 16);
+    // SAFETY: Window owns this live HWND. Only scalar fields enter its message queue;
+    // no borrowed storage or native handle is retained by this helper.
+    unsafe {
+        PostMessageW(
+            Some(HWND(handle.hwnd.get() as *mut _)),
+            WM_MOUSEMOVE,
+            WPARAM(0),
+            LPARAM(coordinates as isize),
+        )
+    }
+    .expect("queue owned cursor move");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

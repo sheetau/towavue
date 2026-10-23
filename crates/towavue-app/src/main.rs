@@ -384,6 +384,7 @@ enum UiAction {
 }
 
 enum AppEvent {
+    Redraw,
     Language(localization::Language),
     RestartLanguage(localization::Language),
     FileOperationSource(
@@ -1277,6 +1278,7 @@ struct Application<N> {
     video_scrub_surface: Option<(egui::Painter, egui::Rect)>,
     video_uv: [UnitPoint; 4],
     ui_repaint_at: Option<Instant>,
+    redraw_queued: std::cell::Cell<bool>,
     restore_ui_textures: bool,
     queued_recovery: Option<FallbackPrompt>,
     native_prompt: Option<FallbackPrompt>,
@@ -1595,6 +1597,7 @@ where
             video_scrub_surface: None,
             video_uv: ImageTransform::new((1, 1), &[]).uv,
             ui_repaint_at: None,
+            redraw_queued: std::cell::Cell::new(false),
             restore_ui_textures: false,
             queued_recovery: None,
             native_prompt: None,
@@ -3491,12 +3494,20 @@ where
     }
 
     fn handle_app_event(&mut self, event: AppEvent) {
+        // Drawing a held publication is allowed while worker results are deferred.
+        // Clear before painting so actions from this frame can request another one.
+        if matches!(event, AppEvent::Redraw) {
+            self.redraw_queued.set(false);
+            self.render_frame();
+            return;
+        }
         let language = self.language();
         if self.source_save.frozen {
             self.source_save.deferred.push(event);
             return;
         }
         match event {
+            AppEvent::Redraw => unreachable!("redraw handled before publication deferral"),
             AppEvent::Language(_) | AppEvent::RestartLanguage(_) => {} // Handled by the host.
             AppEvent::VideoExportQualityChanged => self.request_redraw(),
             AppEvent::Update(_) => {} // Routed by the shared host.
@@ -12980,8 +12991,15 @@ where
     }
 
     fn request_redraw(&self) {
+        // WM_PAINT waits for an empty Windows input queue. Post one window-scoped
+        // event instead, so continuous pointer input cannot starve UI animation.
         if let Some(window) = &self.window {
-            window.request_redraw();
+            if self.event_loop_proxy.is_none() {
+                // Unhosted consumers can own a native pump without an AppEvent route.
+                window.request_redraw();
+            } else if !self.redraw_queued.replace(true) {
+                (self.notify)(AppEvent::Redraw);
+            }
         }
     }
 

@@ -54,6 +54,13 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
+UI repaint scheduling changes use the full workspace suite and the ignored
+`continuous_native_pointer_input_does_not_starve_coalesced_redraws` control,
+run serially. It keeps native mouse messages queued for a hidden window, checks
+that actual UI frames advance before the input burst drains, and verifies request
+coalescing. It does not establish physical desktop smoothness. Also run the hidden
+browser/menu GPU controls when changing their hover presentation.
+
 For source-operation presentation changes, run `source_save::tests::`,
 `filmstrip_file_mutations_keep_the_open_view_through_pending_and_changed_order`
 and the native recycle controls in `window_host::file_operations::recycle_tests`.

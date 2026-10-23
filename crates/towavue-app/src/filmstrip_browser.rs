@@ -794,7 +794,6 @@ impl Browser {
                                     response.hovered() || response.has_focus(),
                                     open || arrow.hovered() || arrow.has_focus(),
                                     ui.visuals().widgets.hovered.weak_bg_fill,
-                                    ui.visuals().widgets.hovered.bg_stroke,
                                 ),
                             );
                             response
@@ -868,7 +867,6 @@ fn split_background(
     left: bool,
     right: bool,
     color: Color32,
-    stroke: egui::Stroke,
 ) -> egui::Shape {
     if !left && !right {
         return egui::Shape::Noop;
@@ -891,7 +889,12 @@ fn split_background(
     );
     // Disjoint stroke and fill apply translucent feedback exactly once.
     egui::Shape::Vec(vec![
-        egui::Shape::rect_stroke(rect, 3, stroke, egui::StrokeKind::Inside),
+        egui::Shape::rect_stroke(
+            rect,
+            3,
+            egui::Stroke::new(1.0, color),
+            egui::StrokeKind::Inside,
+        ),
         egui::Shape::rect_filled(fill, radius, color),
     ])
 }

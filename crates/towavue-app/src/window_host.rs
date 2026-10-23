@@ -14,6 +14,10 @@ mod dropping;
 mod tests;
 
 #[cfg(test)]
+#[path = "window_redraw_tests.rs"]
+mod redraw_tests;
+
+#[cfg(test)]
 #[path = "window_graphics_tests.rs"]
 mod graphics_tests;
 

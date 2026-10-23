@@ -161,6 +161,8 @@ pub use image_loader::verification::{
 };
 pub use image_loader::{ImageLoader, LoadedImagePreview, LoadedImages};
 pub use image_paste::{ImagePasteJob, PastedImage};
+#[cfg(feature = "render-verification")]
+pub use input::post_verification_cursor_move;
 pub use input::{WheelScrollSettings, configure_mouse_input, wheel_scroll_settings};
 pub use latest_task::LatestTask;
 pub use orientation::VideoOrientation;

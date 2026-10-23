@@ -115,9 +115,9 @@ pub(super) fn submenu(
                     }
                     crate::chrome::separator(ui);
                     for (selection, label) in rows {
-                        let mut selected = data.subtitle_settings.selection == selection;
-                        let response = crate::chrome::menu_checkbox(ui, &mut selected, &label)
-                            .help_text(label);
+                        let selected = data.subtitle_settings.selection == selection;
+                        let response =
+                            crate::chrome::menu_radio(ui, selected, &label).help_text(label);
                         items.push((response.id, response.enabled()));
                         if crate::logo_menu::drag::clicked(&response) {
                             data.subtitle_action = Some(Action::Select(selection));

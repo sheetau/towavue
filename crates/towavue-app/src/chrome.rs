@@ -12,7 +12,7 @@ mod menu_tests;
 
 mod dropdown;
 mod menu_rows;
-pub(crate) use menu_rows::{MenuRows, check_mark, menu_checkbox};
+pub(crate) use menu_rows::{MenuRows, check_mark, menu_checkbox, menu_radio};
 mod modal;
 pub use dropdown::Dropdown;
 pub use modal::{modal, modal_actions, modal_body, set_modal_bounds};

@@ -256,10 +256,12 @@ fn menus_reach_gpu_at_supported_densities() {
                                         0 | 1 => cascade(ui, 0, &mut Vec::new()),
                                         2 => {
                                             let rows = MenuRows::new(ui);
-                                            let first = menu_checkbox(ui, &mut true, "English");
+                                            let first = menu_radio(ui, true, "English");
                                             first.request_focus();
-                                            let second = menu_checkbox(ui, &mut false, "Japanese");
-                                            rows.finish(ui, &[first.id, second.id]);
+                                            let second = menu_radio(ui, false, "Japanese");
+                                            let third =
+                                                menu_checkbox(ui, &mut true, "Show subtitles");
+                                            rows.finish(ui, &[first.id, second.id, third.id]);
                                         }
                                         4 | 5 => {
                                             ui.set_width(123.0);

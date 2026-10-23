@@ -59,11 +59,6 @@ pub(crate) fn menu_checkbox(
     if response.clicked() {
         *checked = !*checked;
         response.mark_changed();
-        // The cascade normally closes on an interior pointer click. Choice
-        // rows opt out for this pass so users can compare successive values.
-        let root = egui::containers::menu::find_menu_root(ui).id;
-        let pass = ui.ctx().cumulative_pass_nr();
-        ui.data_mut(|data| data.insert_temp(root.with("menu-choice-click"), pass));
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -75,12 +70,8 @@ pub(crate) fn menu_checkbox(
     });
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
-        checkbox_mark(
-            ui,
-            &response,
-            egui::pos2(rect.left() + height * 0.5, rect.center().y),
-            *checked,
-        );
+        let center = egui::pos2(rect.left() + height * 0.5, rect.center().y);
+        checkbox_mark(ui, &response, center, *checked);
         ui.painter().galley(
             egui::pos2(
                 rect.left() + height + padding,
@@ -90,8 +81,26 @@ pub(crate) fn menu_checkbox(
             visuals.fg_stroke.color,
         );
     }
+    choice_response(ui, response)
+}
+
+pub(crate) fn menu_radio(
+    ui: &mut Ui,
+    selected: bool,
+    label: impl Into<egui::WidgetText>,
+) -> Response {
+    let response = ui.radio(selected, label.into());
+    choice_response(ui, response)
+}
+
+fn choice_response(ui: &Ui, response: Response) -> Response {
     let pass = ui.ctx().cumulative_pass_nr();
-    ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), pass));
+    if response.clicked() {
+        // Keep choice menus open for successive comparisons in this pass.
+        let root = egui::containers::menu::find_menu_root(ui).id;
+        ui.data_mut(|data| data.insert_temp(root.with("menu-choice-click"), pass));
+    }
+    ui.data_mut(|data| data.insert_temp(response.id.with("menu-choice"), pass));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -160,7 +169,7 @@ impl MenuRows {
         });
         let pass = ui.ctx().cumulative_pass_nr();
         if let Some(row) = selected
-            && !ui.data(|data| data.get_temp::<u64>(row.id.with("menu-checkbox")) == Some(pass))
+            && !ui.data(|data| data.get_temp::<u64>(row.id.with("menu-choice")) == Some(pass))
         {
             ui.painter()
                 .with_clip_rect(ui.clip_rect())
@@ -203,6 +212,9 @@ fn disabled_foreground(shape: &mut egui::Shape, rows: &[Response]) {
             path.stroke.color = egui::epaint::ColorMode::Solid(super::DISABLED);
         }
         egui::Shape::LineSegment { stroke, .. } => stroke.color = super::DISABLED,
+        egui::Shape::Circle(circle) if circle.fill != super::BORDER => {
+            circle.fill = super::DISABLED;
+        }
         _ => {}
     }
 }
@@ -230,6 +242,109 @@ fn clear_row_backgrounds(shape: &mut egui::Shape, rows: &[Response]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn radio_choices_keep_circles_semantics_and_shared_hover_colors_without_row_backgrounds() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.enable_accesskit();
+            context.global_style_mut(crate::chrome::style);
+            context.set_pixels_per_point(density);
+            let draw = |events, enabled| {
+                let mut bounds = egui::Rect::NOTHING;
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        crate::chrome::menu(ui);
+                        ui.add_enabled_ui(enabled, |ui| {
+                            let rows = MenuRows::new(ui);
+                            let selected = menu_radio(ui, true, "Selected radio");
+                            assert!(!selected.changed(), "selected radio cannot toggle off");
+                            let other = menu_radio(ui, false, "Other radio");
+                            let checkbox = menu_checkbox(ui, &mut true, "Checkbox");
+                            bounds = selected.rect;
+                            rows.finish(ui, &[selected.id, other.id, checkbox.id]);
+                        });
+                    },
+                );
+                let tree = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .expect("tree");
+                for label in ["Selected radio", "Other radio"] {
+                    let node = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label() == Some(label))
+                        .expect("radio");
+                    assert_eq!(node.1.role(), egui::accesskit::Role::RadioButton);
+                }
+                let checkbox = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Checkbox"))
+                    .expect("checkbox");
+                assert_eq!(checkbox.1.role(), egui::accesskit::Role::CheckBox);
+                assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.rect == bounds && rect.fill == crate::chrome::HOVER
+                )), "radio rows have no highlight background");
+                let circles: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Circle(circle) if bounds.contains(circle.center) => {
+                            Some(circle)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(circles.len(), 2, "outer circle and selected dot");
+                let dot = circles
+                    .iter()
+                    .min_by(|a, b| a.radius.total_cmp(&b.radius))
+                    .expect("dot");
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == "Selected radio" => {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("label");
+                assert_eq!(
+                    dot.fill,
+                    text.override_text_color.unwrap_or(text.fallback_color)
+                );
+                (bounds, dot.fill)
+            };
+            draw(vec![], true);
+            let (bounds, color) = draw(vec![], true);
+            assert_eq!(color, crate::chrome::MUTED);
+            draw(vec![egui::Event::PointerMoved(bounds.center())], true);
+            assert_eq!(draw(vec![], true).1, crate::chrome::FOREGROUND);
+            for pressed in [true, false] {
+                draw(
+                    vec![egui::Event::PointerButton {
+                        pos: bounds.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    true,
+                );
+            }
+            assert_eq!(
+                draw(vec![egui::Event::PointerGone], false).1,
+                crate::chrome::DISABLED
+            );
+        }
+    }
 
     #[test]
     fn pointer_highlight_replaces_keyboard_background_and_preserves_checkmarks() {

@@ -1201,6 +1201,18 @@ mod tests {
 
     use super::*;
 
+    fn wait_for_original(loader: &ImageLoader, ready: &mpsc::Receiver<()>) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        // Preview and original publication share a wakeup channel. Inspect the
+        // terminal slot without consuming it: take_completed also retires previews,
+        // which would hide a worker-side retirement regression from these tests.
+        while loader.shared.0.lock().expect("mailbox").completed.is_none() {
+            ready
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("original completion before deadline");
+        }
+    }
+
     fn wait_for_prefetch(loader: &ImageLoader) {
         let (mailbox, timeout) = loader
             .shared
@@ -2745,6 +2757,7 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
+        let extra_ready = ready_tx.clone();
         let worker = thread::spawn(move || {
             run_worker(
                 shared,
@@ -2774,10 +2787,9 @@ mod tests {
         assert_eq!(preview.preview.source_size, (480, 320));
         assert_eq!(preview.preview.image, expected);
         loader.shared.0.lock().expect("mailbox").preview_ready = Some(preview);
+        extra_ready.send(()).expect("queued preview wakeup");
         release_tx.send(()).expect("resume original");
-        ready_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("original ready");
+        wait_for_original(&loader, &ready_rx);
         assert!(loader.take_preview().is_none());
         let completed = loader.take_completed().expect("original result");
         assert_eq!(completed.generation, generation);
@@ -3015,10 +3027,8 @@ mod tests {
             }
             release_tx.send(()).expect("release full decode");
             if matches!(mode, "success" | "failure" | "changed") {
-                ready_rx
-                    .recv_timeout(Duration::from_secs(10))
-                    .expect("original completion");
                 let loader = loader.as_ref().expect("loader");
+                wait_for_original(loader, &ready_rx);
                 assert!(loader.take_preview().is_none());
                 let completed = loader.take_completed().expect("completion");
                 let result = &completed.images[0].1;

@@ -170,12 +170,24 @@ fn cpu_accounting_advances_for_owned_thread_work() {
     let thread_before = cpu_times(false).expect("thread times");
     let started = Instant::now();
     let mut value = 1_u64;
-    while started.elapsed() < std::time::Duration::from_millis(150) {
-        value = std::hint::black_box(value.wrapping_mul(6364136223846793005).wrapping_add(1));
-    }
-    for (process, before) in [(false, thread_before), (true, process_before)] {
-        let after = cpu_times(process).expect("updated CPU times");
-        assert!(after[0] >= before[0] && after[1] >= before[1]);
-        assert!(after[0] + after[1] > before[0] + before[1]);
+    loop {
+        // Wall time does not guarantee CPU service on an oversubscribed VM, and
+        // FILETIME's units do not imply equally fine accounting updates.
+        for _ in 0..100_000 {
+            value = std::hint::black_box(value.wrapping_mul(6364136223846793005).wrapping_add(1));
+        }
+        let mut advanced = true;
+        for (process, before) in [(false, thread_before), (true, process_before)] {
+            let after = cpu_times(process).expect("updated CPU times");
+            assert!(after[0] >= before[0] && after[1] >= before[1]);
+            advanced &= after[0] + after[1] > before[0] + before[1];
+        }
+        if advanced {
+            break;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "owned thread and process CPU accounting did not advance"
+        );
     }
 }

@@ -76,6 +76,9 @@ fn hidden_session_switches_tracks_without_changing_edits_and_moves_choice_with_t
     ) else {
         return;
     };
+    if !crate::tests::shared_audio_endpoint_available("audio preview track switching") {
+        return;
+    }
     let path = root.join("tracks.mkv");
     let ffmpeg =
         PathBuf::from(std::env::var_os("FFMPEG_DIR").expect("FFmpeg")).join("bin/ffmpeg.exe");

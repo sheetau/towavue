@@ -2,6 +2,67 @@ use super::tests::{key, open_frame_at, picker_text};
 use super::*;
 
 #[test]
+fn file_expressions_keep_recent_priority_and_enter_uses_the_filtered_path() {
+    let context = crate::fonts::test_context();
+    context.enable_accesskit();
+    let paths = [
+        "C:/Media/alpha cat.png",
+        "C:/Media/alpha dog.mp4",
+        "C:/Media/beta.wav",
+    ]
+    .map(PathBuf::from);
+    let sources = OpenSources {
+        files: &paths,
+        ..Default::default()
+    };
+    let mut palette = CommandPalette::default();
+    palette.open_files(false);
+    for (query, selected) in [
+        ("alpha image:|video:", Some(0)),
+        ("!<alpha image:>", Some(1)),
+        ("folder:C:/Media ext:wav", Some(2)),
+        ("\"alpha cat\"", Some(0)),
+        ("<image:", None),
+    ] {
+        palette.query = query.into();
+        palette.selected_path = None;
+        for _ in 0..3 {
+            open_frame_at(
+                &context,
+                &mut palette,
+                sources,
+                vec![],
+                (egui::vec2(800.0, 500.0), 0.0, 1.0),
+            );
+        }
+        assert_eq!(
+            palette.selected_path.as_ref(),
+            selected.map(|index| &paths[index]),
+            "{query}"
+        );
+        let choices = open_frame_at(
+            &context,
+            &mut palette,
+            sources,
+            vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+            (egui::vec2(800.0, 500.0), 0.0, 1.0),
+        )
+        .1;
+        let expected: Vec<_> = selected
+            .map(|index| {
+                Choice::Open(RecentAction::Open(
+                    paths[index].clone(),
+                    RecentKind::File,
+                    OpenTarget::Tab,
+                ))
+            })
+            .into_iter()
+            .collect();
+        assert_eq!(choices, expected, "{query}");
+    }
+}
+
+#[test]
 fn recent_file_icons_follow_the_setting_without_changing_folder_or_command_rows() {
     for enabled in [false, true] {
         for folders in [false, true] {

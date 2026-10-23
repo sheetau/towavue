@@ -77,6 +77,7 @@ pub(super) fn submenu(
                             Text::SubtitleDelay,
                             Text::SubtitleFontSize,
                             Text::SubtitleVerticalPosition,
+                            Text::SubtitleOriginalPosition,
                         ]
                         .into_iter()
                         .map(|label| sizing::text_width(ui, text(ui.ctx(), label))),
@@ -114,13 +115,12 @@ pub(super) fn submenu(
                     }
                     crate::chrome::separator(ui);
                     for (selection, label) in rows {
-                        let response = ui
-                            .radio(data.subtitle_settings.selection == selection, &label)
+                        let mut selected = data.subtitle_settings.selection == selection;
+                        let response = crate::chrome::menu_checkbox(ui, &mut selected, &label)
                             .help_text(label);
                         items.push((response.id, response.enabled()));
                         if crate::logo_menu::drag::clicked(&response) {
                             data.subtitle_action = Some(Action::Select(selection));
-                            ui.close();
                         }
                         if response.gained_focus() {
                             response.scroll_to_me(None);
@@ -160,30 +160,48 @@ pub(super) fn submenu(
                         (Text::SubtitleFontSize, scale_key, true),
                         (Text::SubtitleVerticalPosition, offset_key, false),
                     ] {
+                        if !scale {
+                            let mut original =
+                                data.subtitle_settings.appearance.edge_percent.is_none();
+                            let response = crate::chrome::menu_checkbox(
+                                ui,
+                                &mut original,
+                                text(ui.ctx(), Text::SubtitleOriginalPosition),
+                            );
+                            items.push((response.id, response.enabled()));
+                            if response.changed() && !crate::logo_menu::drag::captured(ui.ctx()) {
+                                let mut appearance = data.subtitle_settings.appearance;
+                                appearance.edge_percent = (!original).then_some(5);
+                                data.subtitle_action = Some(Action::Appearance(appearance));
+                            }
+                        }
                         let label = ui.label(text(ui.ctx(), label));
                         let mut appearance = data.subtitle_settings.appearance;
                         let mut value = if scale {
                             f64::from(appearance.scale_percent)
                         } else {
-                            f64::from(appearance.offset_percent)
+                            f64::from(appearance.edge_percent.unwrap_or(0))
                         };
                         let response = ui
-                            .add_sized(
-                                [width.min(120.0), crate::chrome::INPUT_HEIGHT],
-                                egui::DragValue::new(&mut value)
-                                    .range(if scale { 50.0..=300.0 } else { -50.0..=50.0 })
-                                    .speed(1.0)
-                                    .fixed_decimals(0)
-                                    .suffix(" %"),
-                            )
-                            .labelled_by(label.id);
+                            .add_enabled_ui(scale || appearance.edge_percent.is_some(), |ui| {
+                                ui.add_sized(
+                                    [width.min(120.0), crate::chrome::INPUT_HEIGHT],
+                                    egui::DragValue::new(&mut value)
+                                        .range(if scale { 50.0..=300.0 } else { 0.0..=50.0 })
+                                        .speed(1.0)
+                                        .fixed_decimals(0)
+                                        .suffix(" %"),
+                                )
+                                .labelled_by(label.id)
+                            })
+                            .inner;
                         ui.data_mut(|data| data.insert_temp(key, response.id));
                         items.push((response.id, response.enabled()));
                         if response.changed() && value.is_finite() {
                             if scale {
                                 appearance.scale_percent = value as u16;
                             } else {
-                                appearance.offset_percent = value as i16;
+                                appearance.edge_percent = Some(value as u16);
                             }
                             data.subtitle_action = Some(Action::Appearance(appearance));
                         }
@@ -335,10 +353,22 @@ mod tests {
                             "row outside screen {bounds:?}"
                         );
                     }
+                    let delay_label = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            let label = text(&context, Text::SubtitleDelay);
+                            node.label() == Some(label) || node.value() == Some(label)
+                        })
+                        .expect("delay label")
+                        .0;
                     let numeric = tree
                         .nodes
                         .iter()
-                        .find(|(_, node)| node.numeric_value().is_some())
+                        .find(|(_, node)| {
+                            node.numeric_value().is_some()
+                                && node.labelled_by().contains(&delay_label)
+                        })
                         .expect("delay control")
                         .0;
                     frame(vec![click(numeric)]);
@@ -366,6 +396,7 @@ mod tests {
                         .expect("test fixture state")
                         .0;
                     frame(vec![click(id)]);
+                    assert!(egui::Popup::is_any_open(&context));
                     assert_eq!(
                         *chosen.borrow(),
                         Some(Action::Select(Selection::Embedded(tracks[0].id)))

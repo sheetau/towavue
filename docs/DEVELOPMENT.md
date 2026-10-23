@@ -495,3 +495,21 @@ Start with RELEASING for production builds and the dashboard for current release
 - [VC_REDIST](VC_REDIST.md), [INSTALLER_FIXTURE](INSTALLER_FIXTURE.md): prerequisite handling and isolated installer checks.
 
 These records describe particular candidates. Rebind source, binaries, notices, and evidence before using them for a new release; their presence does not certify the current executable.
+
+For folder-menu enumeration changes, run runtime `folder_browser::` and Shell navigation/saved-order controls serially. Verify that the private filtered view contains only directories, ordinary media requests remain unfiltered, saved order is retained and a directory containing only files returns an empty menu. The ignored `reference_folder_menu_latency` accepts an authorized read-only directory in `TOWAVUE_FOLDER_BROWSER_REFERENCE`; record entries, wall time and cache limitations separately from generated correctness fixtures. App `filmstrip_browser::` controls also verify parent-first background preparation before any child menu opens, truthful leaf arrows, bounded scheduling and cancellation. The ignored `reference_browser_parent_and_child_presence_latency` uses the same directory variable and reports first-parent availability separately from all immediate child-presence flags.
+
+Command-palette grouping, next-value labels and selection indicators use app `palette::`, menu/subtitle controls and the generated hidden menu GPU checks. Similar-command scoring must preserve direct-match priority, filtered MRU grouping, command identity and execution, including empty/short/no-match queries. Choice-menu controls must also cover repeated pointer/keyboard selection, refreshed checkmarks, idempotent current choices, action replay prevention, and outside-click/Escape dismissal.
+
+File-expression changes use core `file_query::`, runtime `file_search::` and app
+`browser_controls::`, `filmstrip_browser::`, `gallery_tests::` and `palette::`
+controls. Cover boolean precedence, quoted phrases, Unicode wildcards, ancestor
+boundaries, date periods and malformed input alongside counts, source order,
+selected-path dispatch and stale-result rejection. No source metadata is read on
+the UI thread. Cross-surface changes require the full workspace suite.
+
+Subtitle placement uses `subtitles::paint::` and lifecycle/menu controls. The
+ignored `bitmap_subtitles_reach_gpu_with_alpha_canvas_timing_and_texture_retirement`
+control also checks generated text at all four edges and compares GPU pixels with
+and without inherited clip padding at 100%, 125% and 200% density. Keep original
+placement, explicit edge distances, text size, outlines and tab/source lifetime
+covered separately from physical owner approval.

@@ -1,5 +1,28 @@
 use super::*;
 
+#[test]
+fn gallery_counts_combine_visit_dates_types_and_unknown_without_source_io() {
+    let paths = ["C:/Media/a.png", "C:/Media/b.mp4", "C:/Media/c.wav"].map(PathBuf::from);
+    let dates = [
+        (paths[0].clone(), (2026, 10, 23)),
+        (paths[1].clone(), (2026, 9, 1)),
+    ]
+    .into_iter()
+    .collect();
+    let mut counts = Counts::default();
+    counts.gallery_dates(&dates);
+    for (query, expected) in [
+        ("dg:2026/10/23", [1, 1, 0, 0]),
+        ("dg:2026 image:|video:", [2, 1, 1, 0]),
+        ("dg:unknown", [1, 0, 0, 1]),
+        ("!<dg:2026/10/23 image:>", [2, 0, 1, 1]),
+        ("dg:2026-02-30", [0, 0, 0, 0]),
+    ] {
+        counts.update(&paths, query);
+        assert_eq!(counts.values, expected, "{query}");
+    }
+}
+
 fn key(key: egui::Key) -> egui::Event {
     egui::Event::Key {
         key,

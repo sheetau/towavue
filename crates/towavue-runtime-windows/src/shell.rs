@@ -539,6 +539,7 @@ fn shell_snapshot(
         last_live_window,
         current,
         refresh,
+        false,
         &|view, folder, pidl, source| {
             // SAFETY: the listing callback is synchronous on the owning initialized STA.
             unsafe { capture_view(view, folder, pidl, source, generation, current) }
@@ -572,6 +573,7 @@ unsafe fn hidden_snapshot_with_order(
             folder_pidl,
             current,
             order,
+            false,
             &|view, folder, pidl, source| {
                 capture_view(view, folder, pidl, source, generation, current)
             },
@@ -584,6 +586,7 @@ fn shell_listing<T>(
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
     refresh: bool,
+    folders_only: bool,
     capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
 ) -> Option<T> {
     retry::read(current, |deadline| {
@@ -592,6 +595,7 @@ fn shell_listing<T>(
             last_live_window,
             &|| current() && Instant::now() < deadline,
             refresh,
+            folders_only,
             capture,
         )
     })
@@ -602,6 +606,7 @@ fn shell_listing_once<T>(
     last_live_window: &mut Option<HWND>,
     current: &impl Fn() -> bool,
     refresh: bool,
+    folders_only: bool,
     capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
 ) -> Option<T> {
     #[cfg(test)]
@@ -632,10 +637,17 @@ fn shell_listing_once<T>(
             let order = refresh::ViewOrder::read(&view)?;
             // Retry failed live-order reads rather than silently substituting a
             // different persisted order while that live view is still available.
-            return hidden_listing(&folder, &folder_pidl, current, Some(&order), capture);
+            return hidden_listing(
+                &folder,
+                &folder_pidl,
+                current,
+                Some(&order),
+                folders_only,
+                capture,
+            );
         }
 
-        hidden_listing(&folder, &folder_pidl, current, None, capture)
+        hidden_listing(&folder, &folder_pidl, current, None, folders_only, capture)
     }
 }
 
@@ -646,6 +658,7 @@ unsafe fn hidden_listing<T>(
     folder_pidl: &OwnedPidl,
     current: &impl Fn() -> bool,
     order: Option<&refresh::ViewOrder>,
+    folders_only: bool,
     capture: &impl Fn(&IFolderView2, &Path, &OwnedPidl, FolderSnapshotSource) -> Option<T>,
 ) -> Option<T> {
     unsafe {
@@ -653,6 +666,9 @@ unsafe fn hidden_listing<T>(
             return None;
         }
         let browser = HiddenExplorerBrowser::new()?;
+        if folders_only {
+            navigation::filter_folders(&browser.browser)?;
+        }
         let enumeration = HiddenEnumeration::new(&browser.browser)?;
         if !current() {
             return None;
@@ -676,7 +692,7 @@ unsafe fn hidden_listing<T>(
             saved_order = refresh::ViewOrder::read(&view)?;
             &saved_order
         };
-        requested_order.apply_ready(&view, folder, &enumeration, current)?;
+        requested_order.apply_ready(&view, folder, &enumeration, current, folders_only)?;
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             if !current() {
@@ -1026,7 +1042,7 @@ unsafe fn capture_view(
         if !current() {
             return None;
         }
-        let array = view_order_array(view, folder)?;
+        let array = view_order_array(view, folder, false)?;
         let mut items = Vec::new();
         for index in 0..array
             .as_ref()
@@ -1101,7 +1117,11 @@ fn property_key(key: PROPERTYKEY) -> PropertyKey {
 // SAFETY: the caller owns this enumerated view on its STA. Shell can publish an
 // item array before the row population is available. Counts only establish
 // membership readiness; hidden_listing separately waits for native SortDone.
-unsafe fn view_order_array(view: &IFolderView2, folder: &Path) -> Option<Option<IShellItemArray>> {
+unsafe fn view_order_array(
+    view: &IFolderView2,
+    folder: &Path,
+    folders_only: bool,
+) -> Option<Option<IShellItemArray>> {
     unsafe {
         match view.Items::<IShellItemArray>(SVGIO_ALLVIEW | SVGIO_FLAG_VIEWORDER) {
             Ok(array) => {
@@ -1111,7 +1131,12 @@ unsafe fn view_order_array(view: &IFolderView2, folder: &Path) -> Option<Option<
                 }
                 Some(Some(array))
             }
-            Err(_) if empty_directory(folder) => Some(None),
+            Err(_)
+                if (folders_only && view.ItemCount(SVGIO_ALLVIEW).ok()? == 0)
+                    || empty_directory(folder) =>
+            {
+                Some(None)
+            }
             Err(_) => None,
         }
     }

@@ -59,6 +59,11 @@ pub(crate) fn menu_checkbox(
     if response.clicked() {
         *checked = !*checked;
         response.mark_changed();
+        // The cascade normally closes on an interior pointer click. Choice
+        // rows opt out for this pass so users can compare successive values.
+        let root = egui::containers::menu::find_menu_root(ui).id;
+        let pass = ui.ctx().cumulative_pass_nr();
+        ui.data_mut(|data| data.insert_temp(root.with("menu-choice-click"), pass));
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -70,31 +75,12 @@ pub(crate) fn menu_checkbox(
     });
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
-        let checkbox = egui::Rect::from_center_size(
+        checkbox_mark(
+            ui,
+            &response,
             egui::pos2(rect.left() + height * 0.5, rect.center().y),
-            egui::Vec2::splat(ui.spacing().icon_width),
+            *checked,
         );
-        ui.painter().rect(
-            checkbox,
-            visuals.corner_radius,
-            super::BORDER,
-            egui::Stroke::NONE,
-            egui::StrokeKind::Inside,
-        );
-        let icon = egui::Rect::from_center_size(
-            checkbox.center(),
-            egui::Vec2::splat(ui.spacing().icon_width_inner),
-        );
-        if *checked {
-            ui.painter().add(egui::Shape::line(
-                vec![
-                    egui::pos2(icon.left(), icon.center().y),
-                    egui::pos2(icon.center().x, icon.bottom()),
-                    egui::pos2(icon.right(), icon.top()),
-                ],
-                visuals.fg_stroke,
-            ));
-        }
         ui.painter().galley(
             egui::pos2(
                 rect.left() + height + padding,
@@ -107,6 +93,34 @@ pub(crate) fn menu_checkbox(
     let pass = ui.ctx().cumulative_pass_nr();
     ui.data_mut(|data| data.insert_temp(response.id.with("menu-checkbox"), pass));
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn checkbox_mark(ui: &Ui, response: &Response, center: egui::Pos2, checked: bool) {
+    let visuals = ui.style().interact(response);
+    let checkbox = egui::Rect::from_center_size(center, egui::Vec2::splat(ui.spacing().icon_width));
+    ui.painter().rect(
+        checkbox,
+        visuals.corner_radius,
+        super::BORDER,
+        egui::Stroke::NONE,
+        egui::StrokeKind::Inside,
+    );
+    if checked {
+        check_mark(ui, center, visuals.fg_stroke);
+    }
+}
+
+pub(crate) fn check_mark(ui: &Ui, center: egui::Pos2, stroke: egui::Stroke) {
+    let icon =
+        egui::Rect::from_center_size(center, egui::Vec2::splat(ui.spacing().icon_width_inner));
+    ui.painter().add(egui::Shape::line(
+        vec![
+            egui::pos2(icon.left(), icon.center().y),
+            egui::pos2(icon.center().x, icon.bottom()),
+            egui::pos2(icon.right(), icon.top()),
+        ],
+        stroke,
+    ));
 }
 
 /// Resolve pointer, keyboard and open-submenu feedback to one row per popup.

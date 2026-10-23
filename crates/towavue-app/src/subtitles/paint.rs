@@ -1,5 +1,7 @@
 use super::*;
+mod placement;
 mod positioned;
+use placement::{Edge, translation};
 use positioned::paint_positioned;
 use towavue_runtime_windows::SubtitleContent;
 
@@ -30,7 +32,9 @@ impl Cache {
             self.images.clear();
             self.document = Some(Arc::clone(document));
         }
-        let viewport = viewport.intersect(ui.max_rect()).intersect(ui.clip_rect());
+        let viewport = viewport
+            .intersect(ui.max_rect())
+            .intersect(ui.ctx().content_rect());
         if viewport.width() < 8.0 || viewport.height() < 8.0 {
             return;
         }
@@ -38,7 +42,7 @@ impl Cache {
         self.images
             .retain(|index, _| active.iter().any(|(active, _)| active == index));
         let mut text = String::new();
-        let painter = ui.painter().with_clip_rect(viewport);
+        let painter = subtitle_painter(ui, viewport);
         for (index, cue) in active {
             match cue.content() {
                 SubtitleContent::Text(line) => {
@@ -96,9 +100,11 @@ impl Cache {
                         };
                         painter.image(
                             texture.id(),
-                            bounds.translate(egui::vec2(
-                                0.0,
-                                viewport.height() * f32::from(appearance.offset_percent) / 100.0,
+                            bounds.translate(translation(
+                                bounds,
+                                viewport,
+                                Edge::nearest(bounds, viewport),
+                                appearance.edge_percent,
                             )),
                             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                             egui::Color32::WHITE,
@@ -141,11 +147,8 @@ fn paint_text(ui: &egui::Ui, viewport: egui::Rect, text: &str, appearance: Appea
         bounds.center().x,
         (bounds.bottom() - galley.size().y - 2.0).max(bounds.top() + 2.0),
     );
-    let position = position
-        + egui::vec2(
-            0.0,
-            viewport.height() * f32::from(appearance.offset_percent) / 100.0,
-        );
+    let bounds = ink_bounds(&galley, position, font.size);
+    let position = position + translation(bounds, viewport, Edge::Bottom, appearance.edge_percent);
     outlined(ui, viewport, position, galley, font.size);
 }
 
@@ -156,8 +159,8 @@ fn outlined(
     galley: Arc<egui::Galley>,
     font_size: f32,
 ) {
-    let painter = ui.painter().with_clip_rect(viewport);
-    let radius = (font_size / 14.0).clamp(1.0, 2.0);
+    let painter = subtitle_painter(ui, viewport);
+    let radius = outline_radius(font_size);
     for (x, y) in [
         (-1.0, -1.0),
         (0.0, -1.0),
@@ -177,6 +180,25 @@ fn outlined(
         painter.add(shape);
     }
     painter.galley(position, galley, egui::Color32::WHITE);
+}
+
+fn outline_radius(font_size: f32) -> f32 {
+    (font_size / 14.0).clamp(1.0, 2.0)
+}
+
+fn ink_bounds(galley: &egui::Galley, position: egui::Pos2, font_size: f32) -> egui::Rect {
+    galley
+        .mesh_bounds
+        .translate(position.to_vec2())
+        .expand(outline_radius(font_size))
+}
+
+fn subtitle_painter(ui: &egui::Ui, viewport: egui::Rect) -> egui::Painter {
+    let mut painter = ui.painter().clone();
+    // Captions own the media-panel clip. Inherited text/scrollbar padding must
+    // not cut glyphs before they reach that panel's edge. Keep layer/opacity.
+    painter.set_clip_rect(viewport.intersect(ui.ctx().content_rect()));
+    painter
 }
 
 #[cfg(test)]

@@ -98,7 +98,6 @@ pub(super) fn submenu(
                         }
                         if crate::logo_menu::drag::clicked(&response) {
                             data.audio_action = Some(selection);
-                            ui.close();
                         }
                     }
                     crate::chrome::separator(ui);
@@ -264,6 +263,7 @@ mod tests {
                             row.0
                         };
                         frame(vec![click(id)]);
+                        assert!(egui::Popup::is_any_open(&context));
                         assert_eq!(
                             chosen.get(),
                             Some(if choose_all {

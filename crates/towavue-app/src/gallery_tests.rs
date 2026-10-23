@@ -1,6 +1,55 @@
 use crate::*;
 
 #[test]
+fn gallery_date_expression_filters_tiles_counts_and_background_open_guard_together() {
+    use crate::audio_export::tests::frame;
+    let Some(root) = tests::isolated_test_root(
+        "gallery_tests::gallery_date_expression_filters_tiles_counts_and_background_open_guard_together",
+    ) else {
+        return;
+    };
+    let mut app = Application::new(None, |_| {}).expect("app");
+    let context = fonts::test_context();
+    context.enable_accesskit();
+    context.global_style_mut(chrome::style);
+    app.ui_context = Some(context);
+    let paths = ["today.png", "earlier.mp4", "unknown.wav"].map(|name| root.join(name));
+    app.recent_paths = paths.to_vec();
+    app.recent_dates.insert(paths[0].clone(), (2026, 10, 23));
+    app.recent_dates.insert(paths[1].clone(), (2026, 9, 1));
+    app.gallery_search = "dg:2026/10/23 image:|video:".into();
+    for _ in 0..3 {
+        frame(&mut app, egui::vec2(800.0, 500.0), vec![]);
+    }
+    let output = frame(&mut app, egui::vec2(800.0, 500.0), vec![]);
+    let tree = output.platform_output.accesskit_update.expect("tree");
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("today.png"))
+    );
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("earlier.mp4"))
+    );
+    assert!(app.gallery_matches(&paths[0]));
+    assert!(!app.gallery_matches(&paths[1]));
+    assert!(!app.gallery_matches(&paths[2]));
+    let before = app.tabs.tabs().len();
+    app.handle_ui_action(UiAction::OpenGalleryBackground(paths[1].clone()));
+    assert_eq!(
+        app.tabs.tabs().len(),
+        before,
+        "filtered stale action rejected"
+    );
+    app.gallery_search = "dg:unknown audio:".into();
+    assert!(app.gallery_matches(&paths[2]));
+    assert!(!app.gallery_matches(&paths[0]));
+}
+
+#[test]
 fn gallery_tiles_are_centered_with_open_spacing_and_status_tracks_the_visible_day() {
     use crate::audio_export::tests::frame;
     let Some(root) = tests::isolated_test_root(

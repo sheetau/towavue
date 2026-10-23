@@ -1,6 +1,26 @@
+use crate::hover_help::HoverHelp;
 use egui::{Color32, FontId, Id, Rect, Response, Ui};
 use std::path::PathBuf;
 use towavue_core::MediaKind;
+
+pub(super) fn query_error(
+    expression: &towavue_core::FileQuery,
+    gallery: bool,
+) -> Option<crate::localization::Text> {
+    use crate::localization::Text;
+    use towavue_core::FileQueryError;
+    expression
+        .error()
+        .map(|error| match error {
+            FileQueryError::Syntax => Text::FileQuerySyntax,
+            FileQueryError::Date => Text::FileQueryDate,
+            FileQueryError::UnsupportedProperty => Text::FileQueryProperty,
+            FileQueryError::TooComplex => Text::FileQueryComplexity,
+        })
+        .or_else(|| {
+            (!gallery && expression.uses_gallery_date()).then_some(Text::FileQueryGalleryOnly)
+        })
+}
 
 const GAP: f32 = 16.0;
 pub(super) const INSET: f32 = 18.0;
@@ -35,6 +55,8 @@ mod tests;
 pub(super) struct Counts {
     query: String,
     valid: bool,
+    dates: std::collections::BTreeMap<PathBuf, towavue_core::SearchDate>,
+    today: Option<towavue_core::SearchDate>,
     pub values: [usize; 4],
 }
 
@@ -42,16 +64,25 @@ impl Counts {
     pub fn invalidate(&mut self) {
         self.valid = false;
     }
+    pub fn gallery_dates(
+        &mut self,
+        dates: &std::collections::BTreeMap<PathBuf, towavue_core::SearchDate>,
+    ) {
+        self.dates.clone_from(dates);
+        self.invalidate();
+    }
     pub fn update(&mut self, paths: &[PathBuf], query: &str) {
-        if self.valid && self.query == query {
+        let today = towavue_runtime_windows::current_local_date();
+        if self.valid && self.query == query && self.today == today {
             return;
         }
+        self.today = today;
+        let expression = towavue_core::FileQuery::new(query, today);
         self.values = [0; 4];
-        for path in paths
-            .iter()
-            .filter(|path| crate::welcome::matches(path, query))
-        {
-            if let Some(kind) = MediaKind::from_path(path) {
+        for path in paths {
+            if expression.matches_gallery(path, self.dates.get(path).copied())
+                && let Some(kind) = MediaKind::from_path(path)
+            {
                 self.add(kind);
             }
         }
@@ -176,6 +207,8 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
             ui.visuals_mut().override_text_color = Some(Color32::WHITE);
             crate::resize::unframed_text_input_with_id(ui, id, "", query)
         });
+        let help = crate::localization::text(ui.ctx(), crate::localization::Text::FileQueryHelp);
+        let response = response.help_text(help);
         let pixel = 1.0 / ui.ctx().pixels_per_point();
         let bottom = (rect.bottom() / pixel).round() * pixel;
         ui.painter().rect_filled(

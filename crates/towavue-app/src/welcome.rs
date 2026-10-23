@@ -387,11 +387,9 @@ pub fn show(
     None
 }
 
-pub(super) fn matches(path: &std::path::Path, query: &str) -> bool {
-    let path = path.to_string_lossy().replace('\\', "/").to_lowercase();
-    query
-        .split_whitespace()
-        .all(|word| path.contains(&word.replace('\\', "/").to_lowercase()))
+#[cfg(test)]
+fn matches(path: &std::path::Path, query: &str) -> bool {
+    towavue_core::FileQuery::new(query, None).matches_gallery(path, None)
 }
 
 #[cfg(test)]

@@ -37,6 +37,17 @@ pub(crate) fn local_date(ticks: u64) -> Option<(u16, u16, u16)> {
     Some((local.wYear, local.wMonth, local.wDay))
 }
 
+/// Local calendar day for relative search dates; does not access the filesystem.
+pub fn current_local_date() -> Option<towavue_core::SearchDate> {
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    let ticks = u64::try_from(elapsed.as_nanos() / 100)
+        .ok()?
+        .checked_add(116_444_736_000_000_000)?;
+    local_date(ticks)
+}
+
 fn local_system_time(
     ticks: u64,
     zone: Option<&DYNAMIC_TIME_ZONE_INFORMATION>,

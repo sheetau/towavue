@@ -136,11 +136,14 @@ fn language_menu_selects_with_pointer_and_keyboard_at_supported_densities() {
                         frame(vec![key(egui::Key::Enter)]).1
                     };
                     assert_eq!(selected, Some(Language::Japanese));
+                    assert!(egui::Popup::is_any_open(&context));
                     assert_eq!(
                         crate::localization::language(&context),
                         display,
                         "choice must not change live text"
                     );
+                    frame(vec![key(egui::Key::Escape)]);
+                    assert!(!egui::Popup::is_any_open(&context));
                     saving.set(true);
                     let output = frame(vec![]).0;
                     frame(vec![access(node(&output, "Fixture").0, Action::Click)]);

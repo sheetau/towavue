@@ -15,26 +15,7 @@ impl CommandPalette {
         let language = language(ui.ctx());
         let (navigation, enter) = navigation;
         let query = self.query[1..].trim().to_lowercase();
-        let mut matches: Vec<_> = command_definitions()
-            .iter()
-            .filter(|definition| !options::child(definition.id))
-            .filter(|definition| {
-                options::title(definition.id, language)
-                    .unwrap_or_else(|| definition.title_in(language))
-                    .to_lowercase()
-                    .contains(&query)
-            })
-            .collect();
-        matches.sort_by_key(|definition| {
-            history
-                .iter()
-                .position(|command| *command == definition.id)
-                .unwrap_or(usize::MAX)
-        });
-        let recent_count = matches
-            .iter()
-            .take_while(|definition| history.contains(&definition.id))
-            .count();
+        let (matches, recent_count, direct_count) = search::ranked(&query, language, history);
         let enabled: Vec<_> = matches
             .iter()
             .map(|definition| definition.is_enabled(commands))
@@ -68,12 +49,14 @@ impl CommandPalette {
                     ui.weak(text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, definition) in matches.iter().enumerate() {
-                    if index == recent_count && recent_count > 0 {
+                    if index > 0 && (index == recent_count || index == direct_count) {
                         crate::chrome::separator(ui);
                     }
-                    let group = if index == 0 && recent_count > 0 {
+                    let group = if index == direct_count {
+                        text(ui.ctx(), Text::SimilarCommands)
+                    } else if index == 0 && recent_count > 0 {
                         text(ui.ctx(), Text::RecentlyUsed)
-                    } else if index == recent_count {
+                    } else if index == recent_count && recent_count > 0 {
                         text(ui.ctx(), Text::OtherCommands)
                     } else {
                         ""
@@ -85,12 +68,18 @@ impl CommandPalette {
                     let row_actions =
                         RowActions::new(row, index < recent_count && controls, controls);
                     let body = row_actions.body;
+                    let title = search::title(definition, language);
+                    let title = self.next_values.get(&definition.id).map_or_else(
+                        || title.to_owned(),
+                        |value| {
+                            let action = Text::PaletteSetTo
+                                .in_language(language)
+                                .replace("{value}", value);
+                            format!("{title} ({action})")
+                        },
+                    );
                     let background = ui.painter().add(egui::Shape::Noop);
-                    let mut atoms = egui::Atoms::new((
-                        options::title(definition.id, language)
-                            .unwrap_or_else(|| definition.title_in(language)),
-                        egui::Atom::grow(),
-                    ));
+                    let mut atoms = egui::Atoms::new((title.as_str(), egui::Atom::grow()));
                     if !shortcut.is_empty() {
                         atoms.push_right(label_gap(ui));
                         atoms.push_right(
@@ -121,22 +110,15 @@ impl CommandPalette {
                                 (context.content_rect().width() - 32.0).clamp(1.0, 588.0),
                             );
                             ui.add(
-                                egui::Label::new(crate::hover_help::shortcut(
-                                    options::title(definition.id, language)
-                                        .unwrap_or_else(|| definition.title_in(language)),
-                                    &shortcut,
-                                ))
-                                .wrap(),
+                                egui::Label::new(crate::hover_help::shortcut(&title, &shortcut))
+                                    .wrap(),
                             );
                         });
                     ui.painter()
                         .set(background, row_background(ui, row, &response, selected));
                     context.accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
-                        node.set_label(
-                            options::title(definition.id, language)
-                                .unwrap_or_else(|| definition.title_in(language)),
-                        );
+                        node.set_label(title.as_str());
                         if !shortcut.is_empty() {
                             node.set_description(shortcut.clone());
                         }

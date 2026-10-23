@@ -161,6 +161,95 @@ fn bitmap_subtitles_reach_gpu_with_alpha_canvas_timing_and_texture_retirement() 
                     }
                 }
             }
+            // Own text at all four edges must render identically even when a
+            // parent UI leaves a scrollbar-sized clip inset around the panel.
+            for density in [1.0, 1.25, 2.0] {
+                let context = crate::localization::test_ui::japanese_context(density);
+                let width = (640.0 * density) as u32;
+                let height = (480.0 * density) as u32;
+                renderer
+                    .resize_surface(width, height)
+                    .expect("text surface");
+                let viewport =
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+                let lines =
+                    [(8, false), (2, false), (4, true), (6, true)].map(|(alignment, vertical)| {
+                        towavue_runtime_windows::SubtitleText {
+                            text: "字幕".into(),
+                            layout: towavue_runtime_windows::SubtitleLayout {
+                                canvas: (640.0, 480.0),
+                                font_size: 28.0,
+                                alignment,
+                                vertical,
+                                ..Default::default()
+                            },
+                        }
+                    });
+                let document = Arc::new(towavue_core::SubtitleTimeline::new(vec![
+                    towavue_core::SubtitleCue::new(
+                        MediaTime::ZERO,
+                        MediaTime::from_nanoseconds(1_000_000_000),
+                        SubtitleContent::Positioned(lines.to_vec()),
+                    )
+                    .expect("text cue"),
+                ]));
+                let mut cache = Cache::default();
+                let mut reference = None;
+                for padded in [false, true] {
+                    let output = context.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(viewport),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            egui::CentralPanel::default()
+                                .frame(egui::Frame::NONE)
+                                .show(ui, |ui| {
+                                    if padded {
+                                        ui.set_clip_rect(viewport.shrink(24.0));
+                                    }
+                                    cache.show(
+                                        ui,
+                                        viewport,
+                                        &document,
+                                        MediaTime::ZERO,
+                                        SubtitleDelay::default(),
+                                        Appearance {
+                                            scale_percent: 100,
+                                            edge_percent: Some(0),
+                                        },
+                                    );
+                                });
+                        },
+                    );
+                    renderer.clear([0.0, 0.0, 0.0, 1.0]).expect("clear text");
+                    renderer.render_ui(&context, output).expect("paint text");
+                    let pixels = renderer
+                        .verification_surface_rgba()
+                        .expect("owned text pixels");
+                    if let Some(reference) = &reference {
+                        assert_eq!(
+                            &pixels, reference,
+                            "inherited clip must not cut subtitle edges at {density}x"
+                        );
+                    }
+                    let band = (12.0 * density) as usize;
+                    let mut edges = [false; 4];
+                    for (index, rgba) in pixels.as_chunks::<4>().0.iter().enumerate() {
+                        if rgba[0] < 128 {
+                            continue;
+                        }
+                        let x = index % width as usize;
+                        let y = index / width as usize;
+                        edges[0] |= y < band;
+                        edges[1] |= y >= height as usize - band;
+                        edges[2] |= x < band;
+                        edges[3] |= x >= width as usize - band;
+                    }
+                    assert_eq!(edges, [true; 4], "text reaches all four media edges");
+                    reference = Some(pixels);
+                }
+            }
             self.1 = true;
             event_loop.exit();
         }

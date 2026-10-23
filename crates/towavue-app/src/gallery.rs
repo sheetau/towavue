@@ -24,6 +24,7 @@ pub(super) struct Listing {
     filter: Option<MediaKind>,
     visible_dates: Option<[Option<LocalDate>; 2]>,
     hovered: Option<PathBuf>,
+    today: Option<towavue_core::SearchDate>,
 }
 
 impl Listing {
@@ -77,6 +78,13 @@ impl Listing {
 }
 
 impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
+    pub(super) fn gallery_matches(&self, path: &std::path::Path) -> bool {
+        towavue_core::FileQuery::new(
+            &self.gallery_search,
+            towavue_runtime_windows::current_local_date(),
+        )
+        .matches_gallery(path, self.recent_dates.get(path).copied())
+    }
     pub(super) fn gallery_active(&self) -> bool {
         self.media_kind.is_none()
             && self.tabs.gallery().is_some()
@@ -140,7 +148,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
         let policy = self.gallery_preparation_policy(ui.ctx());
         let listing = &mut self.gallery_listing;
         if !listing.source_valid {
-            listing.counts.invalidate();
+            listing.counts.gallery_dates(&self.recent_dates);
             let missing: HashSet<_> = self.gallery_missing_files.iter().collect();
             listing.available = self
                 .recent_paths
@@ -163,6 +171,7 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             filter_valid,
             visible_dates,
             hovered,
+            today: old_today,
             ..
         } = listing;
         if let Some(command) = ui
@@ -175,14 +184,21 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                     available,
                     enabled,
                     |ui, query, filter| {
-                        if !*filter_valid || *old_query != query || *old_filter != filter {
+                        let today = towavue_runtime_windows::current_local_date();
+                        if !*filter_valid
+                            || *old_query != query
+                            || *old_filter != filter
+                            || *old_today != today
+                        {
+                            let expression = towavue_core::FileQuery::new(query, today);
                             *filtered = available
                                 .iter()
                                 .filter(|path| {
-                                    (query.trim().is_empty() || welcome::matches(path, query))
-                                        && filter.is_none_or(|kind| {
-                                            MediaKind::from_path(path) == Some(kind)
-                                        })
+                                    expression.matches_gallery(
+                                        path,
+                                        self.recent_dates.get(*path).copied(),
+                                    ) && filter
+                                        .is_none_or(|kind| MediaKind::from_path(path) == Some(kind))
                                 })
                                 .cloned()
                                 .collect();
@@ -211,13 +227,16 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
                             }
                             *old_query = query.to_owned();
                             *old_filter = filter;
+                            *old_today = today;
                             *filter_valid = true;
                             *revision = revision.wrapping_add(1);
                         }
                         if filtered.is_empty() && !available.is_empty() {
+                            let expression = towavue_core::FileQuery::new(query, today);
                             ui.label(crate::localization::text(
                                 ui.ctx(),
-                                Text::GalleryNoMatchingFiles,
+                                crate::browser_controls::query_error(&expression, true)
+                                    .unwrap_or(Text::GalleryNoMatchingFiles),
                             ));
                         }
                         let grid = self.filmstrip.show_recent_with_policy(

@@ -8,21 +8,24 @@ use towavue_core::{CommandContext, CommandId, ShortcutBindings, command_definiti
 use crate::hover_help::HoverHelp;
 use crate::menu::{OpenTarget, RecentAction};
 use std::path::{Path, PathBuf};
-use towavue_core::{
-    file_search_score as path_score, search_text as normalized, search_text_score as text_score,
-};
+#[cfg(test)]
+use towavue_core::file_search_score as path_score;
+use towavue_core::{FileQuery, search_text as normalized, search_text_score as text_score};
 use towavue_runtime_windows::RecentKind;
 
 #[cfg(test)]
 mod files_tests;
 mod history;
 mod options;
+mod search;
+mod state;
 pub(crate) use options::Value;
 mod preview;
 mod row;
 use row::{RowActions, label_gap, overlay_scroll_bar, row_button, row_icon};
 
 pub struct CommandPalette {
+    next_values: std::collections::BTreeMap<CommandId, String>,
     step: Option<options::Step>,
     query: String,
     selected: Option<usize>,
@@ -40,6 +43,7 @@ pub struct CommandPalette {
 impl Default for CommandPalette {
     fn default() -> Self {
         Self {
+            next_values: Default::default(),
             step: None,
             query: ">".into(),
             selected: None,
@@ -326,11 +330,14 @@ impl CommandPalette {
                     let title = step.title.clone();
                     let mut back = false;
                     ui.horizontal(|ui| {
-                        back = ui
-                            .button("\u{2190}")
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let (_, rect) =
+                            ui.allocate_space(egui::Vec2::splat(ui.spacing().interact_size.y));
+                        back = row_icon(ui, rect, '\u{eab5}')
                             .on_hover_text(Text::CommandHistoryBack.in_language(language))
                             .clicked();
                         ui.label(title);
+                        ui.add_space(8.0);
                         ui.weak("2/2");
                     });
                     if back {
@@ -368,7 +375,17 @@ impl CommandPalette {
                         }),
                     false,
                 )
-                .help_text(Text::PaletteHelp.in_language(language));
+                .help_text(
+                    if !folder_mode && self.step.is_none() && !previous_query.starts_with('>') {
+                        format!(
+                            "{}\n{}",
+                            Text::PaletteHelp.in_language(language),
+                            Text::FileQueryHelp.in_language(language)
+                        )
+                    } else {
+                        Text::PaletteHelp.in_language(language).into()
+                    },
+                );
                 ui.visuals_mut().weak_text_color = weak_text_color;
                 ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.step.is_some() || self.query.starts_with('>');
@@ -438,6 +455,7 @@ impl CommandPalette {
             sources.files
         };
         let query = self.search_query();
+        let expression = FileQuery::new(&query, None);
         let mut seen = std::collections::HashSet::new();
         let mut paths: Vec<_> = recent
             .iter()
@@ -445,7 +463,7 @@ impl CommandPalette {
                 let score = if folders {
                     text_score(&normalized(&path.to_string_lossy()), &query)
                 } else {
-                    path_score(path, &query)
+                    expression.score(path)
                 };
                 let key = normalized(&path.to_string_lossy());
                 score.is_some() && !self.hidden_paths.contains(&key) && seen.insert(key)
@@ -473,7 +491,7 @@ impl CommandPalette {
                 .iter()
                 .take(towavue_runtime_windows::FILE_SEARCH_LIMIT)
                 .filter_map(|item| {
-                    let score = path_score(&item.path, &query)?;
+                    let score = expression.score(&item.path)?;
                     let key = normalized(&item.path.to_string_lossy());
                     (!self.hidden_paths.contains(&key) && seen.insert(key))
                         .then_some((score, &item.path))
@@ -585,7 +603,9 @@ impl CommandPalette {
                         egui::RichText::new(if folders {
                             Text::NoMatchingFolders.in_language(language)
                         } else {
-                            Text::NoMatchingFiles.in_language(language)
+                            crate::browser_controls::query_error(&expression, false)
+                                .unwrap_or(Text::NoMatchingFiles)
+                                .in_language(language)
                         })
                         .weak(),
                     )
@@ -1792,6 +1812,64 @@ mod tests {
     }
 
     #[test]
+    fn command_groups_follow_filtered_matches_and_similar_commands_execute() {
+        let context = crate::fonts::test_context();
+        for (query, history, recent, other, similar) in [
+            (">open", vec![], false, false, false),
+            (">open", vec![CommandId::OpenFile], true, true, false),
+            (">open", vec![CommandId::TogglePause], false, false, false),
+            (">file open", vec![], false, false, true),
+        ] {
+            let mut palette = CommandPalette {
+                query: query.into(),
+                ..Default::default()
+            };
+            let sources = OpenSources {
+                commands: &history,
+                ..Default::default()
+            };
+            let mut output = egui::FullOutput::default();
+            for _ in 0..4 {
+                output = open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources,
+                    vec![],
+                    (egui::vec2(800.0, 600.0), 0.0, 1.0),
+                )
+                .0;
+            }
+            assert_eq!(
+                picker_text(&output, "recently used").is_some(),
+                recent,
+                "{query}"
+            );
+            assert_eq!(
+                picker_text(&output, "other commands").is_some(),
+                other,
+                "{query}"
+            );
+            assert_eq!(
+                picker_text(&output, "similar commands").is_some(),
+                similar,
+                "{query}"
+            );
+            if similar {
+                let selected = palette.selected_command.expect("suggestion");
+                let chosen = open_frame_at(
+                    &context,
+                    &mut palette,
+                    sources,
+                    vec![key(egui::Key::Enter, egui::Modifiers::NONE)],
+                    (egui::vec2(800.0, 600.0), 0.0, 1.0),
+                )
+                .1;
+                assert_eq!(chosen, [Choice::Command(selected)]);
+            }
+        }
+    }
+
+    #[test]
     fn command_history_groups_keep_identity_and_remove_without_running() {
         for size in [egui::vec2(600.0, 400.0), egui::vec2(240.0, 180.0)] {
             for density in [1.0, 1.25, 2.0] {
@@ -2377,9 +2455,8 @@ mod tests {
             let first = text("Ctrl+O");
             let second = text(prefix);
             assert!((file.pos.x - folder.pos.x).abs() < 1.0);
-            let group = text("other commands");
-            assert!(first.pos.x + first.galley.size().x <= group.pos.x);
-            assert!(group.pos.x + group.galley.size().x < panel.right());
+            assert!(picker_text(&output, "other commands").is_none());
+            assert!(first.pos.x + first.galley.size().x < panel.right());
             assert!(first.pos.x + first.galley.size().x <= second.pos.x + second.galley.size().x);
             assert!(first.pos.x >= file.pos.x + file.galley.size().x);
             assert!(second.pos.x >= folder.pos.x + folder.galley.size().x);
@@ -2572,7 +2649,7 @@ mod tests {
             run(&mut palette, vec![key(egui::Key::Enter)]),
             vec![CommandId::VolumeUp]
         );
-        palette.query = ">no matching command exists".into();
+        palette.query = ">qzxvnonexistent".into();
         assert!(run(&mut palette, vec![key(egui::Key::Enter)]).is_empty());
         assert_eq!(palette.selected, None);
         palette.query = ">zoom".into();

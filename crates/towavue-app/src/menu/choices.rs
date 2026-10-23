@@ -279,11 +279,8 @@ pub(super) fn submenu(
                     let response =
                         crate::chrome::menu_checkbox(ui, &mut checked, text(ui.ctx(), *label));
                     items.push((response.id, response.enabled()));
-                    if crate::logo_menu::drag::clicked(&response) {
-                        if !toggle || !was_selected {
-                            chosen = Some(*id);
-                        }
-                        ui.close();
+                    if crate::logo_menu::drag::clicked(&response) && (!toggle || !was_selected) {
+                        chosen = Some(*id);
                     }
                 }
                 keyboard.finish(ui, items);

@@ -88,6 +88,27 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
         let deadline = Instant::now() + Duration::from_secs(30);
         let current = || Instant::now() < deadline;
         let mut live = None;
+        let filtered_count = shell_listing(
+            &folder,
+            &mut live,
+            &current,
+            false,
+            true,
+            &|view, path, _, _| {
+                // SAFETY: the callback runs synchronously on this owned STA.
+                unsafe {
+                    Some(
+                        view_order_array(view, path, true)?
+                            .map_or(0, |array| array.GetCount().expect("count")),
+                    )
+                }
+            },
+        )
+        .expect("folder-only native enumeration");
+        assert_eq!(
+            filtered_count, 3,
+            "files must not enter the private directory view"
+        );
         for (origin, direction, target) in [
             ("", FolderNavigation::FirstChild, "folder10"),
             ("folder10", FolderNavigation::Next, "folder2"),
@@ -117,6 +138,13 @@ fn related_folder_navigation_uses_saved_shell_directory_order() {
             .map(|entry| entry.path.file_name().expect("name").to_string_lossy())
             .collect();
         assert_eq!(names, ["folder10", "folder2", "folder1"]);
+        let media =
+            shell_snapshot(&folder, 3, &mut live, &current, false).expect("ordinary media view");
+        assert_eq!(
+            media.items.len(),
+            1,
+            "folder filter must not leak into media requests"
+        );
         retry::FAIL_READS.set(3);
         let fallback = navigation::resolve(
             &folder,

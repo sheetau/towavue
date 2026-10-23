@@ -7,7 +7,7 @@ use std::os::windows::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use towavue_core::{MediaKind, file_search_score, search_text};
+use towavue_core::{FileQuery, MediaKind, search_text};
 
 use crate::{Cancellation, LatestTask};
 
@@ -130,10 +130,16 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
         return None;
     }
     let scope = result.request.scope;
+    let expression = FileQuery::new(&result.request.query, None);
     if !result.request.root.is_absolute()
         || scope == FileSearchScope::RecursiveFiles && result.request.query.trim().is_empty()
     {
         result.error = Some(FileSearchFailure::InvalidRequest);
+        return Some(result);
+    }
+    // Invalid/incomplete expressions have no results. Avoid walking
+    // a hierarchy that cannot produce any matches while the user is still typing.
+    if expression.error().is_some() || expression.uses_gallery_date() {
         return Some(result);
     }
     let root = match fs::read_dir(&result.request.root) {
@@ -188,12 +194,7 @@ fn scan(request: FileSearchRequest, cancellation: &Cancellation) -> Option<FileS
         if scope != FileSearchScope::CurrentFolders && MediaKind::from_path(&path).is_none() {
             continue;
         }
-        let search_path = if scope == FileSearchScope::RecursiveFiles {
-            path.as_path()
-        } else {
-            std::path::Path::new(path.file_name().expect("directory entry name"))
-        };
-        let Some(score) = file_search_score(search_path, &result.request.query) else {
+        let Some(score) = expression.score(&path) else {
             continue;
         };
         result.matches += 1;
@@ -256,6 +257,58 @@ mod tests {
             .expect("scan");
             assert!(result.error.is_none());
             assert_eq!(result.paths, expected);
+        }
+        fs::remove_dir_all(root).expect("owned fixture cleanup");
+    }
+
+    #[test]
+    fn file_expressions_apply_to_current_and_recursive_scans_with_full_folder_context() {
+        let root = fixture("expressions");
+        let child = root.join("child");
+        fs::create_dir(&child).expect("child");
+        for name in ["alpha cat.png", "alpha dog.mp4", "beta.wav"] {
+            fs::write(root.join(name), []).expect("owned file");
+        }
+        fs::write(child.join("nested.png"), []).expect("owned nested file");
+        for (scope, query, expected) in [
+            (
+                FileSearchScope::CurrentFiles,
+                "alpha image:|video:".into(),
+                vec![root.join("alpha cat.png"), root.join("alpha dog.mp4")],
+            ),
+            (
+                FileSearchScope::CurrentFiles,
+                "!<alpha image:>".into(),
+                vec![root.join("alpha dog.mp4"), root.join("beta.wav")],
+            ),
+            (
+                FileSearchScope::CurrentFiles,
+                format!("folder:\"{}\" ext:png", root.display()),
+                vec![root.join("alpha cat.png")],
+            ),
+            (
+                FileSearchScope::RecursiveFiles,
+                "folder:child *.png".into(),
+                vec![child.join("nested.png")],
+            ),
+            (
+                FileSearchScope::CurrentFiles,
+                "\"alpha cat\"".into(),
+                vec![root.join("alpha cat.png")],
+            ),
+            (FileSearchScope::RecursiveFiles, "ext:".into(), vec![]),
+        ] {
+            let result = scan(
+                FileSearchRequest {
+                    root: root.clone(),
+                    query: query.clone(),
+                    scope,
+                },
+                &Cancellation::default(),
+            )
+            .expect("scan");
+            assert!(result.error.is_none());
+            assert_eq!(result.paths, expected, "{query}");
         }
         fs::remove_dir_all(root).expect("owned fixture cleanup");
     }

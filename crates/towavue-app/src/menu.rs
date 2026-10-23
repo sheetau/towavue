@@ -580,7 +580,6 @@ fn language_menu(
                     items.push((response.id, response.enabled()));
                     if crate::logo_menu::drag::clicked(&response) {
                         data.language_action = Some(language);
-                        ui.close();
                     }
                 }
                 keyboard.finish(ui, items);

@@ -162,7 +162,11 @@ pub fn submenu<R>(
         let inside = deepest
             && !button.clicked()
             && ui.input(|input| input.pointer.any_click())
-            && hover.is_some_and(|pos| popup.response.interact_rect.contains(pos));
+            && hover.is_some_and(|pos| popup.response.interact_rect.contains(pos))
+            && !ui.data(|data| {
+                data.get_temp::<u64>(id.with("menu-choice-click"))
+                    == Some(ui.ctx().cumulative_pass_nr())
+            });
         let close = match config.close_behavior {
             PopupCloseBehavior::CloseOnClick => outside || inside,
             PopupCloseBehavior::CloseOnClickOutside => outside,

@@ -38,14 +38,15 @@ impl Default for Settings {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Appearance {
     pub scale_percent: u16,
-    /// Percentage of viewport height; negative values move captions up.
-    pub offset_percent: i16,
+    /// None preserves authored placement; otherwise distance inward from the
+    /// cue's aligned viewport edge, as a percentage of that viewport dimension.
+    pub edge_percent: Option<u16>,
 }
 impl Default for Appearance {
     fn default() -> Self {
         Self {
             scale_percent: 100,
-            offset_percent: 0,
+            edge_percent: None,
         }
     }
 }
@@ -53,7 +54,7 @@ impl Appearance {
     fn bounded(self) -> Self {
         Self {
             scale_percent: self.scale_percent.clamp(50, 300),
-            offset_percent: self.offset_percent.clamp(-50, 50),
+            edge_percent: self.edge_percent.map(|value| value.min(50)),
         }
     }
 }
@@ -470,15 +471,26 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             None => Some(position),
         };
         if let Some(position) = position {
-            let mut viewport = ui.max_rect().intersect(ui.clip_rect());
+            let mut viewport = ui.max_rect().intersect(ui.ctx().content_rect());
             // Use the same bottom clearance in windowed and fullscreen views.
             // The normal status row is shorter than the fullscreen transport
             // band; anchoring only to the media panel would move captions down.
             // A visible timeline may still require a higher content boundary.
-            viewport.max.y = viewport
-                .max
-                .y
-                .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
+            // Authored ASS/bitmap coordinates and explicit edge distances use
+            // the full media panel. Only automatic plain captions reserve the
+            // transport band's clearance.
+            let plain = document.active(position, delay).all(|(_, cue)| {
+                matches!(
+                    cue.content(),
+                    towavue_runtime_windows::SubtitleContent::Text(_)
+                )
+            });
+            if appearance.edge_percent.is_none() && plain {
+                viewport.max.y = viewport
+                    .max
+                    .y
+                    .min(ui.ctx().content_rect().bottom() - FULLSCREEN_CONTROL_BAND);
+            }
             self.subtitles
                 .paint
                 .show(ui, viewport, &document, position, delay, appearance);

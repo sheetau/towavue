@@ -7602,6 +7602,7 @@ where
         self.update_file_search();
         let search = self.file_search.result();
         let commands = self.command_context();
+        self.update_palette_states();
         let (chosen, close) = self.palette.show_with_sources(
             context,
             commands,
@@ -7977,7 +7978,7 @@ where
                         .is_some_and(egui::Popup::is_any_open)
                     || !self.recent_paths.contains(&path)
                     || self.gallery_missing_files.contains(&path)
-                    || !welcome::matches(&path, &self.gallery_search)
+                    || !self.gallery_matches(&path)
                     || self
                         .gallery_filter
                         .is_some_and(|kind| MediaKind::from_path(&path) != Some(kind))

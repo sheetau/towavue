@@ -2,6 +2,124 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
+#[ignore = "requires an authorized read-only directory in TOWAVUE_FOLDER_BROWSER_REFERENCE"]
+fn reference_browser_parent_and_child_presence_latency() {
+    let root =
+        PathBuf::from(std::env::var_os("TOWAVUE_FOLDER_BROWSER_REFERENCE").expect("reference"));
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    browser.sync_folder(&root, &context);
+    let started = std::time::Instant::now();
+    let mut initial = None;
+    loop {
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(60),
+            "directory preparation"
+        );
+        frame(&context, &mut browser, egui::vec2(1000.0, 600.0), vec![]);
+        if let Some(listing) = browser.cache.iter().find(|listing| listing.path == root) {
+            assert!(!listing.unavailable && !listing.truncated);
+            initial.get_or_insert(started.elapsed());
+            if listing
+                .folders
+                .iter()
+                .all(|folder| browser.prefetch.children(&folder.path).is_some())
+            {
+                eprintln!(
+                    "Folder menu: {} entries; parent {:?}; all child-presence flags {:?}",
+                    listing.folders.len(),
+                    initial.expect("parent"),
+                    started.elapsed()
+                );
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    browser.hide(Some(&context));
+}
+
+#[test]
+fn directory_tree_prepares_before_submenus_open_and_leaf_rows_never_get_arrows() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "filmstrip_browser::tests::directory_tree_prepares_before_submenus_open_and_leaf_rows_never_get_arrows",
+    ) else {
+        return;
+    };
+    let leaf = root.join("empty-leaf");
+    let branch = root.join("branch");
+    let deep = branch.join("deep-leaf");
+    std::fs::create_dir_all(&leaf).expect("leaf");
+    std::fs::create_dir_all(&deep).expect("branch");
+    std::fs::write(leaf.join("file.jpg"), b"not decoded").expect("file-only leaf");
+    let context = context(1.0);
+    let mut browser = Browser::default();
+    browser.sync_folder(&root, &context);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while browser.prefetch.children(&deep).is_none() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "background folder preparation"
+        );
+        assert_ne!(browser.prefetch.children(&leaf), Some(true));
+        assert!(
+            browser.menu_open.is_none(),
+            "preparation does not need a submenu"
+        );
+        frame(&context, &mut browser, egui::vec2(1000.0, 600.0), vec![]);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(browser.prefetch.children(&leaf), Some(false));
+    assert_eq!(browser.prefetch.children(&branch), Some(true));
+    assert_eq!(browser.prefetch.children(&deep), Some(false));
+    assert!(browser.cache.iter().any(|listing| listing.path == deep));
+    let mut output = egui::FullOutput::default();
+    for _ in 0..4 {
+        output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let button = ui.button("Folders");
+                egui::Popup::menu(&button).open(true).show(|ui| {
+                    browser.directory_menu(ui, &root, 0, &mut None);
+                });
+            },
+        );
+    }
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .expect("folder menu");
+    let prefix = Text::FilmstripSubfolders.in_language(localization::Language::English);
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some(format!("{prefix}: branch").as_str()))
+    );
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some(format!("{prefix}: empty-leaf").as_str()))
+    );
+    browser.hide(Some(&context));
+    assert!(browser.cache.is_empty());
+    assert!(browser.prefetch.request().is_none());
+    assert!(
+        browser
+            .worker
+            .as_ref()
+            .and_then(FolderBrowser::result)
+            .is_none()
+    );
+}
+
+#[test]
 fn breadcrumb_context_menu_has_five_safe_actions_and_retains_the_folder_target() {
     let context = context(1.0);
     let mut browser = Browser::default();
@@ -135,9 +253,23 @@ fn arriving_child_metadata_does_not_temporarily_elide_ancestors() {
     for _ in 0..3 {
         frame(&context, &mut browser, size, vec![]);
     }
-    // The worker retains its completed result. Reapply it on the next paint,
-    // reproducing an arrival after the old layout calculation deterministically.
+    // Listing eviction must not discard already known child presence.
     browser.cache.clear();
+    assert!(browser.has_children(&root));
+    // Background preparation may have advanced to another folder. Request a
+    // fresh root result without painting, then apply it on the next frame to
+    // reproduce arrival before layout deterministically.
+    browser.prefetch = prefetch::Prefetch::default();
+    browser.prefetch.prioritize(&root);
+    let worker = browser.worker.as_mut().expect("folder worker");
+    worker.request(None);
+    worker.request(Some(root.clone()));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !worker.result().is_some_and(|listing| listing.path == root) {
+        assert!(std::time::Instant::now() < deadline, "fresh root metadata");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(!browser.has_children(&root));
     let first = frame(&context, &mut browser, size, vec![]).0;
     assert!(browser.has_children(&root));
     let next = frame(&context, &mut browser, size, vec![]).0;
@@ -311,7 +443,7 @@ fn browser_middle_clicks_crumbs_and_cascade_rows_and_history_buttons_have_a_gap(
         folder.parent().expect("parent"),
         vec![towavue_runtime_windows::BrowserFolder {
             path: child.clone(),
-            has_children: false,
+            has_children: Some(false),
         }],
     );
     cached_listing(&mut browser, folder, vec![]);
@@ -437,6 +569,35 @@ fn context(density: f32) -> Context {
         style.animation_time = 0.0;
     });
     context
+}
+
+#[test]
+fn file_expressions_filter_without_changing_shell_order_identity_or_source() {
+    let source = snapshot(Path::new("C:/Media"));
+    let mut browser = Browser::default();
+    for (query, indices) in [
+        ("image:|audio:", vec![0, 2, 3]),
+        ("ext:jpg !z10", vec![2]),
+        ("!<image: z10>", vec![1, 2, 3]),
+        ("folder:C:/Media z?.jpg", vec![2]),
+        ("folder:C:/Media2", vec![]),
+        ("\"z2.jpg\"", vec![2]),
+        ("dg:unknown", vec![]),
+        ("!dg:unknown", vec![]),
+        ("<image:", vec![]),
+    ] {
+        browser.query = query.into();
+        let projected = browser.project(Some(&source)).0.expect("projection");
+        let expected: Vec<_> = indices
+            .into_iter()
+            .map(|i| source.items[i].clone())
+            .collect();
+        assert_eq!(projected.items, expected, "{query}");
+        assert_eq!(projected.generation, source.generation);
+        assert_eq!(projected.folder_identity, source.folder_identity);
+    }
+    assert_eq!(source.items.len(), 4);
+    assert!(browser.worker.is_none());
 }
 
 #[test]
@@ -703,7 +864,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
         folder,
         vec![towavue_runtime_windows::BrowserFolder {
             path: branch.clone(),
-            has_children: true,
+            has_children: Some(true),
         }],
     );
     cached_listing(
@@ -711,7 +872,7 @@ fn browser_long_child_name_truncates_without_raising_or_separating_the_cascade()
         &branch,
         vec![towavue_runtime_windows::BrowserFolder {
             path: long.clone(),
-            has_children: false,
+            has_children: Some(false),
         }],
     );
     let size = egui::vec2(320.0, 220.0);
@@ -929,7 +1090,7 @@ fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
                     .parent()
                     .expect("parent")
                     .join(format!("folder{index:02}")),
-                has_children: index == 0,
+                has_children: Some(index == 0),
             })
             .collect(),
     );
@@ -1177,10 +1338,10 @@ fn browser_lazy_cascade_reaches_descendants_without_opening_empty_parent() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         output = frame(&context, &mut browser, size, vec![]).0;
-        if browser.cache.iter().any(|listing| listing.path == root) {
+        if browser.prefetch.children(&root.join("empty")) == Some(true) {
             break;
         }
-        assert!(std::time::Instant::now() < deadline, "directory listing");
+        assert!(std::time::Instant::now() < deadline, "child arrow metadata");
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     for _ in 0..4 {
@@ -1343,7 +1504,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                         path: browser.folder.clone(),
                         folders: vec![towavue_runtime_windows::BrowserFolder {
                             path: browser.folder.join("Mountains"),
-                            has_children: false,
+                            has_children: Some(false),
                         }],
                         truncated: false,
                         unavailable: false,
@@ -1360,7 +1521,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                 (0..30)
                                     .map(|index| towavue_runtime_windows::BrowserFolder {
                                         path: folder.join(format!("Folder {index:02}")),
-                                        has_children: index == 0,
+                                        has_children: Some(index == 0),
                                     })
                                     .collect(),
                             );

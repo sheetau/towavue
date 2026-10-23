@@ -172,7 +172,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 if self.tabs.gallery() != Some(owner.tab)
                     || !self.recent_paths.contains(&path)
                     || self.gallery_missing_files.contains(&path)
-                    || !welcome::matches(&path, &self.gallery_search)
+                    || !self.gallery_matches(&path)
                     || self
                         .gallery_filter
                         .is_some_and(|kind| MediaKind::from_path(&path) != Some(kind))
@@ -235,7 +235,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 }
                 Action::Copy => {
                     if let Some(context) = &self.ui_context {
-                        context.copy_text(path.display().to_string());
+                        context.copy_text(format!("\"{}\"", path.display()));
                     }
                 }
                 Action::Reveal => self.reveal_path(path),
@@ -246,7 +246,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         match intent.action {
             Action::Copy => {
                 if let Some(context) = &self.ui_context {
-                    context.copy_text(path.display().to_string());
+                    context.copy_text(format!("\"{}\"", path.display()));
                 }
             }
             Action::Reveal => self.reveal_path(path),

@@ -8,7 +8,8 @@ pub const FOLDER_BROWSER_LIMIT: usize = 4096;
 #[derive(Debug)]
 pub struct BrowserFolder {
     pub path: PathBuf,
-    pub has_children: bool,
+    /// Unknown until directory-only background preparation reaches this folder.
+    pub has_children: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -96,19 +97,10 @@ pub(crate) fn enumerate(
         if !directory(&path) {
             continue;
         }
-        let mut has_children = false;
-        if let Ok(children) = fs::read_dir(&path) {
-            for child in children {
-                if !current() {
-                    return None;
-                }
-                if child.is_ok_and(|entry| directory(&entry.path())) {
-                    has_children = true;
-                    break;
-                }
-            }
-        }
-        listing.folders.push(BrowserFolder { path, has_children });
+        listing.folders.push(BrowserFolder {
+            path,
+            has_children: None,
+        });
     }
     current().then_some(listing)
 }
@@ -116,6 +108,27 @@ pub(crate) fn enumerate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires an authorized read-only folder in TOWAVUE_FOLDER_BROWSER_REFERENCE"]
+    fn reference_folder_menu_latency() {
+        let root = std::env::var_os("TOWAVUE_FOLDER_BROWSER_REFERENCE").expect("reference folder");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut worker = FolderBrowser::new(move || {
+            let _ = tx.send(());
+        })
+        .expect("worker");
+        let started = std::time::Instant::now();
+        worker.request(Some(root.into()));
+        rx.recv_timeout(std::time::Duration::from_secs(60))
+            .expect("completion");
+        let listing = worker.result().expect("result");
+        assert!(!listing.unavailable && !listing.truncated);
+        eprintln!(
+            "Folder menu: {} entries in {:?}",
+            listing.folders.len(),
+            started.elapsed()
+        );
+    }
     #[test]
     fn directories_include_empty_parents_and_lazy_children_without_media_probing() {
         let root = std::env::temp_dir().join(format!(
@@ -141,8 +154,15 @@ mod tests {
             listing.folders[0].path.file_name().expect("name"),
             "folder2"
         );
-        assert!(!listing.folders[0].has_children);
-        assert!(listing.folders[1].has_children);
+        assert_eq!(listing.folders[0].has_children, None);
+        assert_eq!(listing.folders[1].has_children, None);
+
+        fs::write(root.join("folder2/only-file.jpg"), b"not decoded").expect("file-only child");
+        worker.request(Some(root.join("folder2")));
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("empty child completion");
+        let child = worker.result().expect("empty child");
+        assert!(!child.unavailable && child.folders.is_empty());
 
         worker.request(None);
         assert!(worker.result().is_none());

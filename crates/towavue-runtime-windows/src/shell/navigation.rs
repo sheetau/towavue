@@ -1,4 +1,99 @@
 use super::*;
+use windows::Win32::System::SystemServices::SFGAO_FOLDER;
+use windows::Win32::UI::Shell::{
+    IFolderFilter, IFolderFilter_Impl, IFolderFilterSite, IShellFolder, SHCONTF_FOLDERS,
+    SHCONTF_INCLUDEHIDDEN, SHCONTF_INCLUDESUPERHIDDEN, SHELLSTATEA, SHGetSetSettings,
+    SSF_SHOWALLOBJECTS, SSF_SHOWSUPERHIDDEN,
+};
+
+#[windows::core::implement(IFolderFilter)]
+struct FoldersOnly(u32);
+
+impl IFolderFilter_Impl for FoldersOnly_Impl {
+    fn ShouldShow(
+        &self,
+        folder: windows::core::Ref<IShellFolder>,
+        _parent: *const ITEMIDLIST,
+        item: *const ITEMIDLIST,
+    ) -> windows::core::Result<()> {
+        let folder = folder.as_ref().ok_or_else(|| {
+            windows::core::Error::from_hresult(windows::Win32::Foundation::E_POINTER)
+        })?;
+        if item.is_null() {
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_POINTER,
+            ));
+        }
+        let mut attributes = SFGAO_FOLDER.0;
+        // SAFETY: Shell supplies a child PIDL owned by this folder for the
+        // synchronous callback. Neither the folder nor PIDL is retained here.
+        unsafe {
+            folder.GetAttributesOf(&[item], &mut attributes)?;
+        }
+        if attributes & SFGAO_FOLDER.0 != 0 {
+            Ok(())
+        } else {
+            // Enum flags are an optimization; refreshed/cached views can still
+            // present individual files. S_FALSE excludes them from the view.
+            Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::S_FALSE,
+            ))
+        }
+    }
+
+    fn GetEnumFlags(
+        &self,
+        _folder: windows::core::Ref<IShellFolder>,
+        _parent: *const ITEMIDLIST,
+        _window: *mut HWND,
+        flags: *mut u32,
+    ) -> windows::core::Result<()> {
+        if flags.is_null() {
+            return Err(windows::core::Error::from_hresult(
+                windows::Win32::Foundation::E_POINTER,
+            ));
+        }
+        // SAFETY: Shell owns this callback's writable output for its duration.
+        // This is an output-only parameter: never read its previous contents.
+        // Suppress files before enumeration/property loading.
+        unsafe {
+            *flags = self.0;
+        }
+        Ok(())
+    }
+}
+
+// SAFETY: browser and filter are used only on the caller's initialized STA.
+// SetFilter retains its own COM reference; callbacks capture no borrowed data.
+pub(super) unsafe fn filter_folders(browser: &IExplorerBrowser) -> Option<()> {
+    let mut settings = SHELLSTATEA::default();
+    // SAFETY: writable native settings buffer; false makes this a read only.
+    unsafe {
+        SHGetSetSettings(
+            Some(&mut settings),
+            SSF_SHOWALLOBJECTS | SSF_SHOWSUPERHIDDEN,
+            false,
+        );
+    }
+    // SHELLSTATE's persisted first bitfield: fShowAllObjects is bit 0,
+    // fShowSuperHidden is bit 15 (ShlObj_core.h). The binding exposes raw bits.
+    let bits = settings._bitfield1;
+    let mut flags = SHCONTF_FOLDERS.0 as u32;
+    if bits & 1 != 0 {
+        flags |= SHCONTF_INCLUDEHIDDEN.0 as u32;
+    }
+    if bits & (1 << 15) != 0 {
+        flags |= SHCONTF_INCLUDESUPERHIDDEN.0 as u32;
+    }
+    let filter: IFolderFilter = FoldersOnly(flags).into();
+    unsafe {
+        browser
+            .cast::<IFolderFilterSite>()
+            .ok()?
+            .SetFilter(&filter)
+            .ok()
+    }
+}
 
 /// The destination of a related-folder lookup, before opening or enumerating its media.
 #[derive(Debug)]
@@ -154,11 +249,12 @@ pub(super) fn directories(
             last_live_window,
             current,
             false,
+            true,
             &|view, _, _, _| {
                 // SAFETY: Shell invokes this callback synchronously on the owning STA.
                 // Interfaces never leave it; only owned filesystem paths are returned.
                 unsafe {
-                    let Some(array) = view_order_array(view, folder)? else {
+                    let Some(array) = view_order_array(view, folder, true)? else {
                         return Some(Vec::new());
                     };
                     let mut paths = Vec::new();

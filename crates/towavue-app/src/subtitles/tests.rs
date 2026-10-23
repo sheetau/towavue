@@ -78,7 +78,7 @@ fn external_drop_loads_in_the_active_video_and_leaves_edits_transport_and_tabs_u
     app.apply_subtitle_action(Action::Delay(SubtitleDelay::from_tenths(-3)));
     app.apply_subtitle_action(Action::Appearance(Appearance {
         scale_percent: 150,
-        offset_percent: -10,
+        edge_percent: Some(10),
     }));
     app.apply_subtitle_action(Action::Show(false));
     assert!(!app.subtitle_settings().visible);
@@ -96,7 +96,7 @@ fn external_drop_loads_in_the_active_video_and_leaves_edits_transport_and_tabs_u
         app.subtitle_settings().appearance,
         Appearance {
             scale_percent: 150,
-            offset_percent: -10
+            edge_percent: Some(10)
         }
     );
     assert_eq!(app.edits, history);

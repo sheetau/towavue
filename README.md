@@ -66,6 +66,8 @@ Images include PNG, APNG, JPEG, GIF, WebP, BMP, TIFF, and AVIF, including suppor
 
 Shortcuts depend on the active media and mode. Menus show available commands; customize bindings in **Keyboard Shortcuts** (Ctrl+K Ctrl+S).
 
+Gallery, Filmstrip and the file picker support [file search expressions](docs/SEARCH.md), including OR, NOT, quoted phrases, wildcards, extension/type filters and Gallery visit dates.
+
 ## License and source
 
 towavue is licensed under [Apache License 2.0](LICENSE-APACHE); see [NOTICE](NOTICE). Third-party components retain their own licenses; see [third-party notices](third-party/README.md).

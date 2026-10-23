@@ -137,7 +137,7 @@ pub use export::{
     MetadataSourceValue, VideoExportQuality, VideoFrameSnapshot, export_media,
     export_media_with_options, export_media_with_output, export_video_frame, read_export_metadata,
 };
-pub use file_details::FileDetails;
+pub use file_details::{FileDetails, current_local_date};
 pub use file_operation::{
     FileOperationAction, FileOperationError, FileOperationOutcome, FileOperationSource,
     FileRecycleReport, inspect_file_operation_source, start_file_operation, start_file_recycling,

@@ -9,6 +9,7 @@ use towavue_runtime_windows::{FolderBrowser, FolderListing};
 use crate::chrome;
 use crate::hover_help::HoverHelp;
 use crate::localization::{self, Text};
+mod prefetch;
 
 #[derive(Default)]
 pub(super) struct View {
@@ -63,6 +64,7 @@ pub(super) struct Browser {
     pub filter: Option<MediaKind>,
     worker: Option<FolderBrowser>,
     cache: Vec<Arc<FolderListing>>,
+    prefetch: prefetch::Prefetch,
     worker_failed: bool,
     menu_open: Option<egui::Id>,
     menu_floor: f32,
@@ -130,6 +132,7 @@ impl Browser {
             worker.request(None);
         }
         self.cache.clear();
+        self.prefetch = prefetch::Prefetch::default();
     }
 
     pub fn sync_folder(&mut self, folder: &Path, context: &Context) {
@@ -169,18 +172,13 @@ impl Browser {
         if self.source.as_ref() != Some(&key) || changed {
             self.source = Some(key);
             self.projected_query.clone_from(&self.query);
-            let words: Vec<_> = self
-                .query
-                .split_whitespace()
-                .map(str::to_lowercase)
-                .collect();
+            let expression = towavue_core::FileQuery::new(&self.query, None);
             self.counts.values = [0; 4];
             let mut items: Vec<_> = source
                 .items
                 .iter()
                 .filter(|item| {
-                    let name = crate::display_name(&item.path).to_lowercase();
-                    if !words.iter().all(|word| name.contains(word)) {
+                    if !expression.matches_path(&item.path, false) {
                         return false;
                     }
                     self.counts.add(item.kind);
@@ -364,9 +362,6 @@ impl Browser {
             .is_some_and(|id| !egui::Popup::is_id_open(context, id))
         {
             self.menu_open = None;
-            if let Some(worker) = &mut self.worker {
-                worker.request(None);
-            }
         }
         target
     }
@@ -432,7 +427,7 @@ impl Browser {
                     let entries: Vec<_> = paths[..first]
                         .iter()
                         .rev()
-                        .map(|path| (path.as_path(), true))
+                        .map(|path| (path.as_path(), Some(true)))
                         .collect();
                     self.folder_rows(ui, &entries, 0, target);
                 });
@@ -537,21 +532,37 @@ impl Browser {
                 .cache
                 .iter()
                 .find(|listing| listing.path == path)
-                .is_some_and(|listing| !listing.folders.is_empty())
+                .map_or_else(
+                    || self.prefetch.children(path) == Some(true),
+                    |listing| !listing.folders.is_empty(),
+                )
     }
 
     fn listing(&mut self, ui: &Ui, path: &Path) -> Option<Arc<FolderListing>> {
         if let Some(result) = self.worker.as_ref().and_then(FolderBrowser::result)
-            && !self.cache.iter().any(|saved| saved.path == result.path)
+            && self.prefetch.complete(&result)
         {
+            self.cache.retain(|saved| saved.path != result.path);
             if self.cache.len() == 64 {
                 self.cache.remove(0);
             }
             self.cache.push(result);
         }
-        if let Some(result) = self.cache.iter().find(|result| result.path == path) {
-            return Some(result.clone());
+        let result = self
+            .cache
+            .iter()
+            .position(|result| result.path == path)
+            .map(|index| {
+                let result = self.cache.remove(index);
+                self.cache.push(result.clone());
+                result
+            });
+        if result.is_none() {
+            self.prefetch.prioritize(path);
         }
+        let Some(request) = self.prefetch.request().map(Path::to_owned) else {
+            return result;
+        };
         if self.worker.is_none() && !self.worker_failed {
             let context = ui.ctx().clone();
             match FolderBrowser::new(move || context.request_repaint()) {
@@ -560,9 +571,9 @@ impl Browser {
             }
         }
         if let Some(worker) = &mut self.worker {
-            worker.request(Some(path.to_owned()));
+            worker.request(Some(request));
         }
-        None
+        result
     }
 
     fn directory_menu(
@@ -596,7 +607,18 @@ impl Browser {
         let entries: Vec<_> = listing
             .folders
             .iter()
-            .map(|entry| (entry.path.as_path(), entry.has_children))
+            .map(|entry| {
+                (
+                    entry.path.as_path(),
+                    self.cache
+                        .iter()
+                        .find(|cached| cached.path == entry.path)
+                        .map_or_else(
+                            || self.prefetch.children(&entry.path).or(entry.has_children),
+                            |cached| Some(!cached.folders.is_empty()),
+                        ),
+                )
+            })
             .collect();
         self.folder_rows(ui, &entries, depth, target);
         if listing.truncated {
@@ -607,7 +629,7 @@ impl Browser {
     fn folder_rows(
         &mut self,
         ui: &mut Ui,
-        entries: &[(&Path, bool)],
+        entries: &[(&Path, Option<bool>)],
         depth: usize,
         target: &mut Option<Action>,
     ) {
@@ -636,7 +658,7 @@ impl Browser {
                     .size()
                     .x
                     + 2.0 * ui.spacing().button_padding.x
-                    + if *children && depth < 63 {
+                    + if *children == Some(true) && depth < 63 {
                         chrome::SEARCH_BUTTON_SIZE
                     } else {
                         0.0
@@ -663,7 +685,8 @@ impl Browser {
                     let rows = chrome::MenuRows::new(ui);
                     let mut ids = Vec::new();
                     for index in range {
-                        let (path, children) = entries[index];
+                        let (path, presence) = entries[index];
+                        let children = presence == Some(true);
                         let label = &labels[index];
                         let response = if children && depth < 63 {
                             let row = ui
@@ -736,6 +759,9 @@ impl Browser {
                         };
                         if !children || depth >= 63 {
                             ids.push(response.id);
+                        }
+                        if response.hovered() && presence.is_none() {
+                            self.listing(ui, path);
                         }
                         if response.clicked() || response.middle_clicked() {
                             *target =

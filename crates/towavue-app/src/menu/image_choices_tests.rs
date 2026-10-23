@@ -25,6 +25,126 @@ fn access(target: NodeId, action: Action) -> egui::Event {
 }
 
 #[test]
+fn choices_stay_open_for_repeated_pointer_and_keyboard_changes_and_close_outside() {
+    for pointer in [false, true] {
+        let context = crate::fonts::test_context();
+        context.enable_accesskit();
+        context.global_style_mut(crate::chrome::style);
+        let current = std::cell::Cell::new(false);
+        let frame = |events| {
+            let mut chosen = None;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 1000.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.menu_button("Menu", |ui| {
+                        chosen = show_section_with_recent(
+                            ui,
+                            CommandContext {
+                                media_kind: Some(towavue_core::MediaKind::Image),
+                                ..Default::default()
+                            },
+                            &crate::shortcuts::defaults(),
+                            Some(Section::View),
+                            &mut MenuData {
+                                choices: Choices {
+                                    nearest_images: current.get(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            },
+                        );
+                    });
+                },
+            );
+            if chosen == Some(ToggleImageInterpolation) {
+                current.set(!current.get());
+            }
+            (output, chosen)
+        };
+        let mut output = frame(vec![]).0;
+        for label in [
+            "Menu",
+            Text::ImageInterpolation.in_language(Language::English),
+        ] {
+            frame(vec![access(node(&output, label).0, Action::Click)]);
+            for _ in 0..4 {
+                output = frame(vec![]).0;
+            }
+        }
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        for (label, expected) in [
+            (Text::StatusNearest, true),
+            (Text::StatusSmooth, false),
+            (Text::StatusSmooth, false),
+        ] {
+            let before = current.get();
+            let (id, item) = node(&output, label.in_language(Language::English));
+            let selected = if pointer {
+                let bounds = item.bounds().expect("choice bounds");
+                let pos = egui::pos2(
+                    ((bounds.x0 + bounds.x1) * 0.5) as f32,
+                    ((bounds.y0 + bounds.y1) * 0.5) as f32,
+                );
+                frame(vec![egui::Event::PointerMoved(pos), button(pos, true)]);
+                frame(vec![button(pos, false)]).1
+            } else {
+                frame(vec![access(id, Action::Focus)]);
+                let selected = frame(vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }])
+                .1;
+                frame(vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]);
+                selected
+            };
+            assert_eq!(
+                selected,
+                (before != expected).then_some(ToggleImageInterpolation)
+            );
+            assert_eq!(current.get(), expected);
+            assert!(egui::Popup::is_any_open(&context));
+            let (next, action) = frame(vec![]);
+            assert!(action.is_none(), "selection is not replayed");
+            output = next;
+            assert_eq!(
+                node(&output, label.in_language(Language::English))
+                    .1
+                    .toggled(),
+                Some(Toggled::True)
+            );
+        }
+        let outside = egui::pos2(990.0, 990.0);
+        frame(vec![
+            egui::Event::PointerMoved(outside),
+            button(outside, true),
+        ]);
+        assert!(frame(vec![button(outside, false)]).1.is_none());
+        assert!(!egui::Popup::is_any_open(&context));
+    }
+}
+
+#[test]
 fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_op() {
     for (width, nested) in [(660.0, false), (480.0, true)] {
         for language in [Language::English, Language::Japanese] {
@@ -185,7 +305,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                             )])
                             .1;
                             assert_eq!(chosen, if same { vec![] } else { vec![command] });
-                            assert!(!egui::Popup::is_any_open(&context));
+                            assert!(egui::Popup::is_any_open(&context));
                             assert!(frame(vec![]).1.is_empty(), "no replay");
                         }
                     }

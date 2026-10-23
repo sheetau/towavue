@@ -149,8 +149,11 @@ impl CommandPalette {
                 for (index, (original, row)) in matches.iter().enumerate() {
                     let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
                     let selected = selected == Some(index);
-                    let marker = if row.current { "\u{2713}" } else { "" };
-                    let atoms = egui::Atoms::new((row.label.as_str(), egui::Atom::grow(), marker));
+                    let atoms = egui::Atoms::new((
+                        row.label.as_str(),
+                        egui::Atom::grow(),
+                        egui::Atom::default().atom_size(egui::Vec2::splat(20.0)),
+                    ));
                     let background = ui.painter().add(egui::Shape::Noop);
                     let response = ui
                         .push_id(("palette-option", *original), |ui| {
@@ -159,6 +162,17 @@ impl CommandPalette {
                         .inner;
                     ui.painter()
                         .set(background, row_background(ui, rect, &response, selected));
+                    if row.current {
+                        crate::chrome::check_mark(
+                            ui,
+                            egui::pos2(rect.right() - 10.0, rect.center().y),
+                            if selected {
+                                ui.visuals().selection.stroke
+                            } else {
+                                ui.visuals().widgets.inactive.fg_stroke
+                            },
+                        );
+                    }
                     if selected && (navigation.moved() || query_changed) {
                         response.scroll_to_me(None);
                     }

@@ -35,6 +35,7 @@ impl ViewOrder {
         folder: &Path,
         events: &HiddenEnumeration,
         current: &impl Fn() -> bool,
+        folders_only: bool,
     ) -> Option<()> {
         unsafe {
             let previous = Self::read(view)?;
@@ -52,7 +53,7 @@ impl ViewOrder {
                     return None;
                 }
                 pump_messages();
-                if let Some(array) = view_order_array(view, folder) {
+                if let Some(array) = view_order_array(view, folder, folders_only) {
                     break array
                         .as_ref()
                         .map_or(Some(0), |array| array.GetCount().ok())?;

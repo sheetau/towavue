@@ -126,7 +126,7 @@ fn playlist_menu_routes_the_listed_file_without_switching_tracks() {
     let copied = context.run_ui(Default::default(), |_| {
         app.handle_thumbnail_menu(intent.clone())
     });
-    assert!(copied.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == &target.display().to_string())));
+    assert!(copied.platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(text) if text == &format!("\"{}\"", target.display()))));
     for action in [
         Action::Open,
         Action::Window,
@@ -533,7 +533,7 @@ fn thumbnail_menu_dispatch_preserves_gallery_and_rejects_stale_or_hidden_targets
             .commands
             .iter()
             .any(|command| matches!(command,
-        egui::OutputCommand::CopyText(text) if text == &path.display().to_string()))
+        egui::OutputCommand::CopyText(text) if text == &format!("\"{}\"", path.display())))
     );
     app.handle_thumbnail_menu(Intent {
         action: Action::Window,

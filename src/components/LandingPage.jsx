@@ -3,7 +3,7 @@ import Script from "next/script";
 import { useEffect, useState } from "react";
 import { analyticsId, asset, basePath, localePath, repository, siteUrl } from "../site/config.mjs";
 import { languages, locales } from "../site/locales";
-import { Logo } from "./Icons";
+import { HeaderLogo } from "./HeaderLogo";
 import { DownloadLink, DownloadStatus } from "./DownloadLink";
 import { HeroDemo } from "./HeroDemo";
 import { Benchmark } from "./Benchmark";
@@ -104,7 +104,7 @@ export function LandingPage({ locale = "en" }) {
         </a>
         <header className="site-header">
           <div className="header-inner">
-            <a className="site-logo" href={localePath(locale)} aria-label={content.home}><Logo /></a>
+            <HeaderLogo href={localePath(locale)} label={content.home} />
             <a className="site-wordmark" href={localePath(locale)} aria-label={content.home}>towavue</a>
             <DownloadLink content={content} compact status={downloadStatus} onStatusChange={setDownloadStatus} />
           </div>

@@ -156,6 +156,7 @@ svg {
   padding-inline: 15px;
 }
 .site-logo {
+  position: relative;
   display: grid;
   place-items: center;
   width: 30px;
@@ -164,6 +165,27 @@ svg {
 .site-logo svg {
   width: 23px;
   height: 23px;
+  position: relative;
+  z-index: 1;
+  opacity: var(--logo-svg-opacity, 1);
+}
+.logo-cube {
+  position: absolute;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: var(--logo-cube-opacity, 0);
+}
+.site-logo[data-logo-phase="exit"] svg {
+  z-index: 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-logo svg { opacity: 1; }
+  .site-logo .logo-cube { opacity: 0; }
 }
 .site-wordmark {
   position: absolute;

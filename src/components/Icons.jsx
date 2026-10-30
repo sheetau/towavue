@@ -12,6 +12,16 @@ export function Logo({ className = "" }) {
   );
 }
 
+// Header artwork: the supplied coordinates imply a 17.42-square viewBox
+// and a one-unit stroke (the .35 inset is half its diagonal projection).
+export function CubeLogo({ className = "" }) {
+  return <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 17.42 17.42" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
+    <line x1=".43" y1=".35" x2="6.84" y2="6.77" />
+    <line x1="10.66" y1="6.77" x2="17.07" y2=".35" />
+    <line x1=".35" y1="17.07" x2="6.77" y2="10.66" />
+  </svg>;
+}
+
 const paths = {
   arrow: "M7 17 17 7M7 7h10v10",
   download: "M12 3v12m-5-5 5 5 5-5M5 16v5h14v-5",

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Logo } from "./Icons";
+import { CubeLogo } from "./Icons";
 import { createLogoCubeRenderer, LOGO_FADE_DURATION, LOGO_IDLE_DELAY, LOGO_SPIN_DURATION, spinAngle } from "../site/logo-cube.mjs";
 
 // Both layers reach 80% opacity at the midpoint of each crossfade.
@@ -22,6 +22,7 @@ export function HeaderLogo({ href, label }) {
     let lost = false;
     let inView = false;
     let generation = 0;
+    let nextDirection = "left";
     const allowed = () => !disposed && !failed && !lost && !document.hidden && inView && !motion.matches;
     const schedule = () => {
       clearTimeout(timer);
@@ -50,12 +51,18 @@ export function HeaderLogo({ href, label }) {
         if (!renderer) { failed = true; busy = false; return; }
       }
       if (!allowed()) { stop(); return; }
+      const direction = nextDirection;
       const start = performance.now();
       const draw = (now) => {
         const elapsed = now - start;
         const progress = elapsed / LOGO_SPIN_DURATION;
-        if (progress >= 1) { stop(); schedule(); return; }
-        renderer.draw(spinAngle(progress));
+        if (progress >= 1) {
+          nextDirection = direction === "left" ? "up" : "left";
+          stop();
+          schedule();
+          return;
+        }
+        renderer.draw(spinAngle(progress), direction);
         // Overlap the two fades at 80% / 80% to soften the brightness dip
         // of a linear crossfade without holding either layer fully opaque.
         const entering = elapsed < LOGO_FADE_DURATION;
@@ -114,7 +121,7 @@ export function HeaderLogo({ href, label }) {
   }, []);
 
   return <a ref={linkRef} className="site-logo" href={href} aria-label={label}>
-    <Logo />
+    <CubeLogo />
     <canvas ref={canvasRef} className="logo-cube" aria-hidden="true" />
   </a>;
 }

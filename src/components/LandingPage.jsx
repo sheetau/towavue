@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { analyticsId, asset, basePath, localePath, repository, siteUrl } from "../site/config.mjs";
 import { languages, locales } from "../site/locales";
 import { HeaderLogo } from "./HeaderLogo";
+import { AmbientFish } from "./AmbientFish";
 import { DownloadLink, DownloadStatus } from "./DownloadLink";
 import { HeroDemo } from "./HeroDemo";
 import { Benchmark } from "./Benchmark";
@@ -98,6 +99,7 @@ export function LandingPage({ locale = "en" }) {
           }
         `}
       </Script>
+      <AmbientFish />
       <div className="site-shell">
         <a className="skip-link" href="#main">
           {content.skip}

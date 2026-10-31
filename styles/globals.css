@@ -2,6 +2,7 @@
   --font-serif: "Atelier Femme Serif", "Towavue JP Narrow", "Yu Mincho", serif;
   --font-sans: "Helvetica Now Text", "M PLUS 1 Code", "Meiryo", sans-serif;
   --color-theme-bg: #000;
+  --color-theme-bg-transparent: #00000080;
   --color-theme-fg: #eee;
   --color-theme-fg-02: #ccc;
   --color-theme-fg-03: #a5a5a5;
@@ -140,6 +141,28 @@ svg {
 .section + .section {
   scroll-margin-top: var(--header-height);
 }
+.ambient-fish {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1200ms ease;
+}
+.ambient-fish[data-ready="true"] {
+  opacity: 1;
+}
+.site-shell {
+  position: relative;
+  z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ambient-fish {
+    transition: none;
+  }
+}
 .site-header {
   position: sticky;
   top: 0;
@@ -184,8 +207,12 @@ svg {
   z-index: 3;
 }
 @media (prefers-reduced-motion: reduce) {
-  .site-logo svg { opacity: 1; }
-  .site-logo .logo-cube { opacity: 0; }
+  .site-logo svg {
+    opacity: 1;
+  }
+  .site-logo .logo-cube {
+    opacity: 0;
+  }
 }
 .site-wordmark {
   position: absolute;
@@ -260,7 +287,7 @@ svg {
 .button.github-star {
   border: 1px solid var(--color-theme-border-02);
   color: var(--color-theme-fg);
-  background: var(--color-theme-bg);
+  background: var(--color-theme-bg-transparent);
 }
 .button.github-star:hover {
   border-color: #949494;
@@ -326,7 +353,7 @@ svg {
 }
 .demo-window {
   border: 1px solid #363636;
-  background: #000;
+  background: var(--color-theme-bg-transparent);
   overflow: hidden;
 }
 .demo-toolbar {
@@ -469,7 +496,7 @@ svg {
 }
 .benchmark-bar {
   display: block;
-  background: #262626;
+  background: #ffffff2c;
   transform-origin: left;
 }
 .is-towavue .benchmark-bar {
@@ -531,7 +558,7 @@ svg {
 .timeline-track {
   position: relative;
   height: 100px;
-  background: #0b0b0b;
+  background: #ffffff10;
   touch-action: none;
   user-select: none;
   cursor: text;

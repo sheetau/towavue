@@ -26,13 +26,13 @@ function halfWidth(s) {
 
 // Sample each fish once, preserving its identity and route through resizes.
 // Only ranges are authored: no fixed spawn points, routes or pattern presets.
-function makeFish(id, width, time) {
+function makeFish(id, sceneScale, time, juvenile = false) {
   const burstDuration = random(1.4, 2.5);
   const interval = burstDuration + random(2.2, 4.8);
   const burstStart = time - random(0, interval);
   const patternScale = random(0.7, 1.6);
   return {
-    id, seed: random(0, TAU), angle: random(0, TAU),
+    id, juvenile, seed: random(0, TAU), angle: random(0, TAU),
     direction: Math.random() < 0.5 ? -1 : 1,
     centerX: random(0.44, 0.56), centerY: random(0.45, 0.56),
     orbitX: random(0.29, 0.37), orbitY: random(0.27, 0.36),
@@ -41,9 +41,10 @@ function makeFish(id, width, time) {
     harmonicY: Math.random() < 0.5 ? 2 : 3,
     distortionX: random(0.07, 0.15), distortionY: random(0.07, 0.15),
     phaseX: random(0, TAU), phaseY: random(0, TAU),
-    size: random(0.85, 1.12), pace: random(0.82, 1.18),
+    size: juvenile ? random(0.60, 0.66) : random(0.85, 1.12),
+    pace: random(0.82, 1.18) * (juvenile ? 0.85 : 1),
     strokeRate: random(3.1, 4.2), tailStrength: random(0.85, 1.15),
-    speed: (width < 700 ? 15 : 24) * random(0.8, 1.15),
+    speed: 24 * sceneScale * random(0.8, 1.15) * (juvenile ? 0.85 : 1),
     turn: 0, beat: random(0, TAU), activity: random(0.1, 0.5), bend: 0,
     burstStart, burstDuration, nextBurst: burstStart + interval,
     burstStrength: random(0.8, 1), nextRipple: time + random(0.2, 1.2),
@@ -87,7 +88,7 @@ function makeAtlas(cw, ch, dpr) {
   canvas.height = tileH * SHADES;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  ctx.font = `${Math.round(ch * dpr * 0.86)}px ui-monospace, Menlo, Consolas, monospace`;
+  ctx.font = `${tileH * 0.86}px ui-monospace, Menlo, Consolas, monospace`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (let level = 0; level < SHADES; level++) {
@@ -98,7 +99,7 @@ function makeAtlas(cw, ch, dpr) {
       const wash = index < 8 ? brightness : Math.round(brightness * 0.35);
       if (index < 16) {
         ctx.fillStyle = `rgb(${wash},${wash},${wash})`;
-        ctx.fillRect(x, y, tileW - Math.max(0.6, dpr * 0.55), tileH - Math.max(0.6, dpr * 0.55));
+        ctx.fillRect(x, y, tileW * 0.945, tileH * 0.945);
       }
       const ink = index < 8 ? Math.round(brightness * 0.42) : brightness;
       ctx.fillStyle = `rgb(${ink},${ink},${ink})`;
@@ -241,6 +242,7 @@ export function createAmbientFish(canvas) {
   let cw = 10;
   let ch = 10;
   let dpr = 1;
+  let sceneScale = 1;
   let atlas = null;
   let time = 0;
   let fish = [];
@@ -250,23 +252,32 @@ export function createAmbientFish(canvas) {
   function resize() {
     const rect = canvas.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return;
+    // Fish, tiles and motion share one continuous scale, keeping the number
+    // of tiles along a body stable across phone, tablet and desktop screens.
+    const bodyLength = clamp(Math.min(rect.width, rect.height) * 0.36, 110, 255);
+    const nextScale = bodyLength / 255;
+    const scaleRatio = nextScale / sceneScale;
     for (const ripple of ripples) {
       ripple.x *= rect.width / (width || rect.width);
       ripple.y *= rect.height / (height || rect.height);
+      ripple.scale *= scaleRatio;
     }
+    for (const f of fish) f.speed *= scaleRatio;
+    sceneScale = nextScale;
     width = rect.width;
     height = rect.height;
     dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    cw = ch = width < 600 ? 8 : 10;
+    cw = ch = 10 * sceneScale;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     mask.width = Math.ceil(width / cw);
     mask.height = Math.ceil(height / ch);
     atlas = makeAtlas(cw, ch, dpr);
-    const count = width < 700 ? 2 : width < 1500 ? 3 : 4;
-    fish = Array.from({ length: count }, (_, id) => fish[id] ?? makeFish(id, width, time));
+    const adults = width < 700 ? 2 : width < 1500 ? 3 : 4;
+    // Keep the child in a stable slot so resizing never turns an adult into it.
+    fish = Array.from({ length: adults + 1 }, (_, id) => fish[id] ?? makeFish(id, sceneScale, time, id === 0));
     for (const f of fish) {
-      f.length = clamp(Math.min(width, height) * 0.32, 125, 255) * f.size;
+      f.length = bodyLength * f.size;
       const p = pathAt(f, f.angle, width, height);
       f.x = p.x;
       f.y = p.y;
@@ -304,7 +315,7 @@ export function createAmbientFish(canvas) {
       const previousBeat = f.beat;
       f.beat += dt * (0.45 + f.activity * (f.strokeRate + f.speed * 0.035));
       const sweep = Math.abs(Math.cos(f.beat - TAIL_PHASE));
-      const targetSpeed = (width < 700 ? 15 : 24) * f.pace * (0.65 + f.activity * (0.9 + 0.16 * sweep ** 4));
+      const targetSpeed = 24 * sceneScale * f.pace * (0.65 + f.activity * (0.9 + 0.16 * sweep ** 4));
       const response = targetSpeed > f.speed ? 2.4 : 0.55;
       f.speed += (targetSpeed - f.speed) * (1 - Math.exp(-dt * response));
       f.angle += f.direction * f.speed / Math.max(1, Math.hypot(previous.dx, previous.dy)) * dt;
@@ -322,7 +333,7 @@ export function createAmbientFish(canvas) {
       const stroke = Math.floor((f.beat - TAIL_PHASE) / Math.PI) !== Math.floor((previousBeat - TAIL_PHASE) / Math.PI);
       if (dt > 0 && stroke && f.activity > 0.48 && time >= f.nextRipple) {
         const [x, y] = bodyPoint(f, 0.96);
-        ripples.push({ x, y, born: time, strength: 0.7 + f.activity * 0.15 + f.bend * 0.15 });
+        ripples.push({ x, y, born: time, scale: sceneScale * (f.juvenile ? f.size : 1), strength: 0.7 + f.activity * 0.15 + f.bend * 0.15 });
         if (ripples.length > 12) ripples.shift();
         f.nextRipple = time + 0.95 - f.bend * 0.2;
       }
@@ -366,7 +377,7 @@ export function createAmbientFish(canvas) {
       for (const delay of [0, 0.48]) {
         const t = age - delay;
         if (t < 0) continue;
-        const radius = 12 + t * 24;
+        const radius = (12 + t * 24) * ripple.scale;
         const count = Math.max(12, Math.round(TAU * radius / (cw * 1.45)));
         const fade = smooth(t / 0.35) * (1 - t / RIPPLE_LIFE) ** 1.5;
         for (let j = 0; j < count; j++) {

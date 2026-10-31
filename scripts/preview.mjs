@@ -9,7 +9,7 @@ const root = path.resolve("out");
 const lan = process.argv.includes("--lan");
 const port = Number(process.env.PORT ?? (lan ? 3001 : 3000));
 const host = lan ? "0.0.0.0" : "127.0.0.1";
-const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webp": "image/webp", ".png": "image/png", ".ico": "image/x-icon", ".ttf": "font/ttf", ".mp4": "video/mp4", ".xml": "application/xml", ".txt": "text/plain; charset=utf-8" };
+const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webp": "image/webp", ".png": "image/png", ".ico": "image/x-icon", ".ttf": "font/ttf", ".woff2": "font/woff2", ".mp4": "video/mp4", ".xml": "application/xml", ".txt": "text/plain; charset=utf-8" };
 
 createServer(async (request, response) => {
   try {

@@ -135,7 +135,7 @@ uniform vec3 u_color;
 varying float v_depth;
 varying vec3 v_normal;
 void main() {
-  // Preserve the current depth fade, including its half-bright rear limit.
+  // Fixed depth fog keeps the far-side rods subdued throughout the turn.
   float fog = smoothstep(-1.0, 1.0, v_depth);
   // Subtle shading reveals the prism sides; front-facing strokes stay white.
   float shade = 0.78 + 0.22 * abs(normalize(v_normal).z);

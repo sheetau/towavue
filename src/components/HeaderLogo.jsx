@@ -63,8 +63,7 @@ export function HeaderLogo({ href, label }) {
           return;
         }
         renderer.draw(spinAngle(progress), direction);
-        // Overlap the two fades at 80% / 80% to soften the brightness dip
-        // of a linear crossfade without holding either layer fully opaque.
+        // Overlap the two fades at 80% / 80% to soften the brightness dip.
         const entering = elapsed < LOGO_FADE_DURATION;
         const exiting = elapsed > LOGO_SPIN_DURATION - LOGO_FADE_DURATION;
         const fade = Math.max(0, Math.min(1, entering

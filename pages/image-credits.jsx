@@ -18,6 +18,7 @@ export default function ImageCredits() {
         <p><a href={photo.licenseUrl}>{photo.license}</a></p>
         <p>{photo.changes}</p>
       </article>)}</div>
+      <p>Japanese sans-serif: M PLUS 1 Code (M+ FONTS). <a href={asset("fonts/m-plus-1-code-OFL.txt")}>SIL Open Font License 1.1</a>.</p>
       <p>Japanese serif: Towavue JP Narrow, derived from Noto Serif JP (Google). <a href={asset("fonts/towavue-jp-narrow-OFL.txt")}>SIL Open Font License 1.1</a>.</p>
     </main>
   </>;

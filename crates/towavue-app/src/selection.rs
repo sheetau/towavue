@@ -6,6 +6,16 @@ use towavue_core::{MediaKind, PixelCrop, UnitRect};
 #[cfg(test)]
 mod gesture_tests;
 
+pub(super) fn claim_edges(context: &egui::Context) {
+    let pass = context.cumulative_pass_nr();
+    context.data_mut(|data| data.insert_temp(Id::new("selection-edge-pass"), pass));
+}
+
+pub(super) fn edges_claimed(context: &egui::Context) -> bool {
+    context.data(|data| data.get_temp::<u64>(Id::new("selection-edge-pass")))
+        == Some(context.cumulative_pass_nr())
+}
+
 pub fn has_focus(context: &egui::Context) -> bool {
     context
         .data(|data| data.get_temp::<Id>(Id::new("selection-value-focus")))

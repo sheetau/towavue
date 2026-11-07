@@ -14,7 +14,6 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
         let mut values = std::collections::BTreeMap::new();
         for (command, enabled) in [
             (ToggleTabIcons, self.shows_tab_icons()),
-            (ToggleReuseFolderTab, self.reuses_folder_tabs()),
             (ToggleFilmstrip, self.filmstrip_open),
             (ToggleReadingMode, self.reading_mode),
             (ReverseReadingOrder, self.reading_settings.reversed),

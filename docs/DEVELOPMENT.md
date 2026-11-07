@@ -537,3 +537,14 @@ control also checks generated text at all four edges and compares GPU pixels wit
 and without inherited clip padding at 100%, 125% and 200% density. Keep original
 placement, explicit edge distances, text size, outlines and tab/source lifetime
 covered separately from physical owner approval.
+
+Browser thumbnail changes use runtime `preview::browser::` and `preview_loader::`
+plus app Filmstrip/Gallery controls. Verify a fresh cache instance can restore
+pixels and duration from deliberately undecodable source fixtures, rejects
+changed sources/cancelled requests/corrupt records, and retains the bounded
+publication policy. These are cache-path correctness checks, not cold-storage
+or physical scrolling measurements. Selection-edge input uses
+`selection::gesture_tests::`, compact-seek controls and the hidden browser/menu
+GPU controls. Folder reuse additionally covers all three modes, explicit
+idempotent choices and restart restoration; missing-history controls cover both
+directions and preservation of live visits.

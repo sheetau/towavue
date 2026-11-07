@@ -1849,10 +1849,7 @@ mod tests {
                     } else if let Some((_, rows)) = choices::options(*command) {
                         if matches!(
                             command,
-                            ToggleImageInterpolation
-                                | ToggleImageMinification
-                                | ToggleTabIcons
-                                | ToggleReuseFolderTab
+                            ToggleImageInterpolation | ToggleImageMinification | ToggleTabIcons
                         ) {
                             assert_eq!(rows.len(), 2);
                             assert_ne!(rows[0].1, rows[1].1);
@@ -1880,7 +1877,10 @@ mod tests {
             command_definitions()
                 .iter()
                 .map(|definition| definition.id)
-                .filter(|id| !matches!(id, CycleVolumeStep | CycleAudioRepeat))
+                .filter(|id| !matches!(
+                    id,
+                    CycleVolumeStep | CycleAudioRepeat | ToggleReuseFolderTab
+                ))
                 .collect()
         );
     }

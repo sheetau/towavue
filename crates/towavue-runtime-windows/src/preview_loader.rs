@@ -71,6 +71,22 @@ impl PreviewLoader {
     }
 
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
+        Self::start(cache, notify, true)
+    }
+
+    /// Keep palette previews on the shared cache without browser persistence.
+    pub fn new_shared(
+        cache: PreviewCache,
+        notify: impl Fn() + Send + 'static,
+    ) -> std::io::Result<Self> {
+        Self::start(cache, notify, false)
+    }
+
+    fn start(
+        cache: PreviewCache,
+        notify: impl Fn() + Send + 'static,
+        persistent_browser: bool,
+    ) -> std::io::Result<Self> {
         let wic = crate::image::jpeg_wic_preview::worker_enabled();
         let shared = Arc::new((Mutex::new(Mailbox::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
@@ -78,42 +94,56 @@ impl PreviewLoader {
             .name("towavue-filmstrip".into())
             .spawn(move || {
                 let _wic = crate::image::jpeg_wic_preview::WorkerScope::new(wic);
-                let disk_keys = std::cell::RefCell::new(None);
+                let browser = persistent_browser
+                    .then(|| crate::preview::browser::BrowserCache::new(cache.clone()));
                 run_worker(
                     worker_shared,
                     notify,
                     |path, kind, cancellation, stage, disk_key| {
-                        let cache = cache.cancellable(cancellation.clone());
+                        let Some(browser) = &browser else {
+                            let cache = cache.cancellable(cancellation.clone());
+                            return if stage == PreviewStage::Memory {
+                                cache.cached_filmstrip(path, kind).ok().flatten()
+                            } else if kind == MediaKind::Image {
+                                cache.cached_image(path).ok().flatten().map(|preview| {
+                                    MediaPreview {
+                                        image: preview.image,
+                                        duration: None,
+                                    }
+                                })
+                            } else {
+                                None
+                            };
+                        };
                         if stage == PreviewStage::Memory {
-                            disk_keys.borrow_mut().take();
-                            let (key, preview) = cache.cached_filmstrip_key(path, kind).ok()?;
+                            let key = browser.key(path)?;
+                            let preview = browser.memory(&key).or_else(|| {
+                                cache
+                                    .cancellable(cancellation.clone())
+                                    .cached_filmstrip(path, kind)
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|preview| {
+                                        browser.import(path, &key, preview, cancellation)
+                                    })
+                            });
                             *disk_key = Some(key);
                             preview
                         } else {
-                            // Only a scheduling hint for this sweep. A later request checks again;
-                            // generation still checks disk if another consumer stores an entry.
-                            let mut keys = disk_keys.borrow_mut();
-                            let keys = keys.get_or_insert_with(|| cache.disk_entry_keys());
-                            let key = disk_key.as_deref()?;
-                            if !keys.contains(key) {
-                                return None;
-                            }
-                            // Disk image reads are bounded and never generate/probe media.
-                            cache
-                                .read_cached_image(path, key)
-                                .ok()
-                                .flatten()
-                                .map(|preview| MediaPreview {
-                                    image: preview.image,
-                                    duration: None,
-                                })
+                            browser
+                                .disk(path, disk_key.as_deref()?, cancellation)
+                                .or_else(|| browser.legacy_image(path, kind, cancellation))
                         }
                     },
                     |path, kind, cancellation| {
-                        cache
-                            .cancellable(cancellation.clone())
-                            .filmstrip(path, kind)
-                            .map_err(|error| error.to_string())
+                        if let Some(browser) = &browser {
+                            browser.generate(path, kind, cancellation)
+                        } else {
+                            cache
+                                .cancellable(cancellation.clone())
+                                .filmstrip(path, kind)
+                                .map_err(|error| error.to_string())
+                        }
                     },
                     |path, kind, cancellation| {
                         cache
@@ -302,7 +332,7 @@ fn run_worker(
             let mut work = mailbox.pending[index].clone();
             if work.stage == PreviewStage::Disk && mailbox.pending.len() == 1 {
                 // Nothing can overtake a single remaining request. Its ordinary load already
-                // checks disk; avoid enumerating the whole cache just to schedule that lookup.
+                // checks disk; avoid another scheduling round for that lookup.
                 work.stage = PreviewStage::Generate;
             }
             let cancellation = Cancellation::default();
@@ -374,12 +404,11 @@ fn run_worker(
                     .find(|pending| pending.path == work.path && pending.kind == work.kind)
                 {
                     pending.disk_key = work.disk_key;
-                    pending.stage =
-                        if work.stage == PreviewStage::Memory && work.kind == MediaKind::Image {
-                            PreviewStage::Disk
-                        } else {
-                            PreviewStage::Generate
-                        };
+                    pending.stage = if work.stage == PreviewStage::Memory {
+                        PreviewStage::Disk
+                    } else {
+                        PreviewStage::Generate
+                    };
                 }
                 false
             }

@@ -42,7 +42,15 @@ pub(super) fn named_tab(
     let hovered = chrome::tab_hovered(ui, rect);
     let show_close = active || hovered;
     let painter = ui.painter().clone();
-    painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
+    painter.rect_filled(
+        rect,
+        3.0,
+        if active {
+            chrome::ACTIVE_TAB
+        } else {
+            chrome::BACKGROUND
+        },
+    );
     let hover_background = painter.add(egui::Shape::Noop);
     chrome::tab_style(ui, rect, active, hovered);
     ui.spacing_mut().button_padding = egui::vec2(chrome::TAB_PADDING, 0.0);
@@ -599,7 +607,7 @@ mod tests {
                     let hovered = frame(position);
                     assert_eq!(text_rect(&hovered, "Gallery").expect("label"), text);
                     assert!(hovered.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Rect(background) if background.rect == rect && background.fill == if active { chrome::BACKGROUND } else { chrome::FLOATING_BACKGROUND }
+                        egui::Shape::Rect(background) if background.rect == rect && background.fill == if active { chrome::ACTIVE_TAB } else { chrome::FLOATING_BACKGROUND }
                     )));
                 }
             }

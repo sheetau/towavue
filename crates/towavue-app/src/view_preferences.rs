@@ -39,7 +39,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.high_quality_minification = store.value(Key::Minification) != 0;
         self.folder_navigation_loop = store.value(Key::FolderLoop) != 0;
         self.tab_icons = store.value(Key::TabIcons) != 0;
-        self.reuse_folder_tab = store.value(Key::ReuseFolderTab) != 0;
+        self.reuse_folder_tab = store.value(Key::ReuseFolderTab);
         let pages = store.value(Key::ReadingPages);
         self.reading_settings = ReadingSettings {
             page_count: usize::from(pages / 100),
@@ -80,7 +80,10 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 (Key::VolumeStep, u16::from(self.volume_step_percent))
             }
             ToggleTabIcons => (Key::TabIcons, u16::from(self.tab_icons)),
-            ToggleReuseFolderTab => (Key::ReuseFolderTab, u16::from(self.reuse_folder_tab)),
+            ToggleReuseFolderTab
+            | ReuseFolderTabOff
+            | ReuseFolderTabAll
+            | ReuseFolderTabSameKind => (Key::ReuseFolderTab, self.reuse_folder_tab),
             ToggleImageInterpolation => (Key::Nearest, u16::from(self.nearest_images)),
             ToggleImageMinification => {
                 (Key::Minification, u16::from(self.high_quality_minification))

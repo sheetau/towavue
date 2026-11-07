@@ -100,7 +100,9 @@ pub fn tab_title_fade(ui: &Ui, rect: Rect, active: bool, hovered: bool) {
     // Match Monapad's name-wrap mask: unchanged through 80%, transparent at
     // the close-button boundary. Paint only over the label on its actual tab
     // background, leaving the leading audio slot and trailing controls intact.
-    let background = if hovered && !active {
+    let background = if active {
+        ACTIVE_TAB
+    } else if hovered {
         FLOATING_BACKGROUND
     } else {
         BACKGROUND
@@ -222,7 +224,9 @@ mod tests {
                                 < 0.01
                         );
                         assert_eq!(bounds.right(), rect.right());
-                        let background = if hovered && !active {
+                        let background = if active {
+                            ACTIVE_TAB
+                        } else if hovered {
                             FLOATING_BACKGROUND
                         } else {
                             BACKGROUND

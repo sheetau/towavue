@@ -65,6 +65,7 @@ pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionA
 }
 
 pub const BACKGROUND: Color32 = Color32::BLACK;
+pub const ACTIVE_TAB: Color32 = Color32::from_gray(0x18);
 pub const FLOATING_BACKGROUND: Color32 = Color32::from_gray(12);
 pub const MUTED: Color32 = Color32::from_gray(128);
 pub const FOREGROUND: Color32 = Color32::WHITE;
@@ -779,104 +780,56 @@ pub fn logo(
     shift: f32,
     highlighted: bool,
 ) {
+    use crate::menu::Section;
     let rect = Rect::from_center_size(rect.center(), egui::vec2(16.0, 16.0));
-    paint_logo(ui.painter(), rect, selected, shift, highlighted);
+    let hover = ui.ctx().animate_value_with_time(
+        ui.id().with("logo-hover"),
+        if highlighted { 1.0 } else { 0.0 },
+        0.08,
+    );
+    let arrows = [Section::Edit, Section::View, Section::File].map(|section| {
+        ui.ctx().animate_value_with_time(
+            ui.id().with(("logo-arrow", section as u8)),
+            if selected == Some(section) { 1.0 } else { 0.0 },
+            0.08,
+        )
+    });
+    paint_menu_logo(ui.painter(), rect, shift, hover, arrows);
 }
 
-pub(super) fn paint_logo(
-    painter: &egui::Painter,
-    rect: Rect,
-    selected: Option<crate::menu::Section>,
-    shift: f32,
-    highlighted: bool,
-) {
-    use crate::menu::Section;
-    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 27.68);
-    let stroke = |section| {
-        Stroke::new(
-            1.1 * (rect.width() / 16.0),
-            if selected.is_some_and(|selected| Some(selected) == section)
-                || (selected.is_none() && highlighted)
-            {
-                FOREGROUND
-            } else {
-                DISABLED
-            },
-        )
-    };
-    let offset = shift * 15.3;
-    for (a, b, section) in [
+fn paint_menu_logo(painter: &egui::Painter, rect: Rect, shift: f32, hover: f32, arrows: [f32; 3]) {
+    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 17.0);
+    let stroke = Stroke::new(rect.width() / 16.0, FOREGROUND);
+    // Normalize both supplied SVG view boxes to the same painted bounds.
+    let outer = egui::lerp((0.35 * 17.0 / 16.71)..=0.5, shift);
+    let inner = egui::lerp((6.46 * 17.0 / 16.71)..=6.61, shift) - hover * (1.68 * 17.0 / 16.71);
+    let offset = shift * (17.0 - outer - inner);
+    for (a, b) in [
         (
-            (2.17 + offset, 2.17 + offset),
-            (10.21 + offset, 10.21 + offset),
-            Section::Edit,
+            (outer + offset, outer + offset),
+            (inner + offset, inner + offset),
         ),
-        ((2.17, 25.5), (10.21, 17.47), Section::View),
-        ((17.47, 10.21), (25.5, 2.17), Section::File),
+        ((outer, 17.0 - outer), (inner, 17.0 - inner)),
+        ((17.0 - outer, outer), (17.0 - inner, inner)),
     ] {
-        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke(Some(section)));
+        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
     }
-    // Preserve the supplied SVG's cubic corners instead of beveling them.
-    // Flatten to a physical-pixel tolerance and join the straight arms in one
-    // path, so the shared button/drop guide has no separate-stroke seams.
-    for (coordinates, section) in [
-        (
-            [
-                (9.82, 1.0),
-                (5.0, 1.0),
-                (2.79, 1.0),
-                (1.0, 2.79),
-                (1.0, 5.0),
-                (1.0, 9.82),
-            ],
-            None,
-        ),
-        (
-            [
-                (17.47, 1.0),
-                (22.68, 1.0),
-                (24.89, 1.0),
-                (26.68, 2.79),
-                (26.68, 5.0),
-                (26.68, 10.21),
-            ],
-            Some(Section::File),
-        ),
-        (
-            [
-                (26.68, 17.47),
-                (26.68, 22.68),
-                (26.68, 24.89),
-                (24.89, 26.68),
-                (22.68, 26.68),
-                (17.47, 26.68),
-            ],
-            Some(Section::Edit),
-        ),
-        (
-            [
-                (1.0, 17.86),
-                (1.0, 22.68),
-                (1.0, 24.89),
-                (2.79, 26.68),
-                (5.0, 26.68),
-                (9.82, 26.68),
-            ],
-            Some(Section::View),
-        ),
-    ] {
-        let [start, a, b, c, d, end] = coordinates.map(|(x, y)| point(x, y));
-        let stroke = stroke(section);
-        let mut points = egui::epaint::CubicBezierShape::from_points_stroke(
-            [a, b, c, d],
-            false,
-            Color32::TRANSPARENT,
-            stroke,
-        )
-        .flatten(Some(0.05 / painter.ctx().pixels_per_point()));
-        points.insert(0, start);
-        points.push(end);
-        painter.add(egui::Shape::line(points, stroke));
+    for (amount, (corner, a, b)) in arrows.into_iter().zip([
+        ((16.5, 16.5), (10.39, 16.5), (16.5, 10.24)),
+        ((0.5, 16.5), (0.5, 10.39), (6.76, 16.5)),
+        ((16.5, 0.5), (16.5, 6.61), (10.24, 0.5)),
+    ]) {
+        if amount > 0.0 {
+            let corner = point(corner.0, corner.1);
+            painter.add(egui::Shape::line(
+                vec![
+                    corner.lerp(point(a.0, a.1), amount),
+                    corner,
+                    corner.lerp(point(b.0, b.1), amount),
+                ],
+                stroke,
+            ));
+        }
     }
 }
 
@@ -1421,6 +1374,55 @@ mod tests {
                     extent <= available + 0.001 || width == 72.0,
                     "tabs may only overflow after reaching the minimum width"
                 );
+            }
+        }
+    }
+    #[test]
+    fn menu_artwork_shrinks_inward_endpoints_and_grows_only_selected_arrow_arms() {
+        for density in [1.0, 1.25, 2.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let rect = Rect::from_min_size(Pos2::ZERO, egui::Vec2::splat(16.0));
+            let render = |shift, hover, arrows| {
+                context.run_ui(Default::default(), |ui| {
+                    super::paint_menu_logo(ui.painter(), rect, shift, hover, arrows);
+                })
+            };
+            let idle = render(0.0, 0.0, [0.0; 3]);
+            let hover = render(0.0, 1.0, [0.0; 3]);
+            let lines = |output: egui::FullOutput| {
+                output
+                    .shapes
+                    .into_iter()
+                    .filter_map(|shape| {
+                        if let egui::Shape::LineSegment { points, stroke } = shape.shape {
+                            assert_eq!(stroke.color, super::FOREGROUND);
+                            Some(points)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let idle = lines(idle);
+            let hover = lines(hover);
+            assert_eq!(idle.len(), 3);
+            for (a, b) in idle.iter().zip(&hover) {
+                assert_eq!(a[0], b[0]);
+                assert!((b[1] - b[0]).length() < (a[1] - a[0]).length());
+            }
+            for selected in 0..3 {
+                let mut arrows = [0.0; 3];
+                arrows[selected] = 1.0;
+                let held = render(1.0, 0.0, arrows);
+                assert_eq!(
+                    held.shapes
+                        .iter()
+                        .filter(|s| matches!(s.shape, egui::Shape::Path(_)))
+                        .count(),
+                    1
+                );
+                assert!(lines(held)[0][0].x > rect.center().x);
             }
         }
     }

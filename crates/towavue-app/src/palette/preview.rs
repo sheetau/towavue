@@ -18,7 +18,7 @@ impl FilePreview {
 
     pub fn new(cache: PreviewCache, notify: impl Fn() + Send + 'static) -> std::io::Result<Self> {
         Ok(Self {
-            loader: PreviewLoader::new(cache, notify)?,
+            loader: PreviewLoader::new_shared(cache, notify)?,
             generation: 0,
             path: None,
             texture: None,

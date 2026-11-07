@@ -71,7 +71,7 @@ impl ViewPreference {
 
     fn valid(self, value: u16) -> bool {
         match self {
-            Self::Resize | Self::VideoQuality => value <= 2,
+            Self::Resize | Self::VideoQuality | Self::ReuseFolderTab => value <= 2,
             Self::VolumeStep => matches!(value, 2 | 5 | 10),
             Self::ReadingPages => {
                 (2..=10).contains(&(value / 100)) && (1..=value / 100).contains(&(value % 100))

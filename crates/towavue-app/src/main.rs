@@ -1133,7 +1133,7 @@ struct Application<N> {
     view_preferences: Option<Arc<towavue_runtime_windows::ViewPreferences>>,
     volume_step_percent: u8,
     folder_navigation_loop: bool,
-    reuse_folder_tab: bool,
+    reuse_folder_tab: u16,
     tab_icons: bool,
     graphics_epoch: u64,
     idle_graphics_frame: Option<(u64, u64)>,
@@ -1448,7 +1448,7 @@ where
             view_preferences: None,
             volume_step_percent: 2,
             folder_navigation_loop: true,
-            reuse_folder_tab: false,
+            reuse_folder_tab: 0,
             tab_icons: true,
             graphics_epoch: 0,
             idle_graphics_frame: None,
@@ -4881,7 +4881,13 @@ where
         // Compute bar input first, but keep the updated image behind the bars.
         let image_shape = painter.add(egui::Shape::Noop);
         if !self.fullscreen
-            && image_scroll::bars(ui, viewport, displayed, &mut self.image_view, enabled)
+            && image_scroll::bars(
+                ui,
+                viewport,
+                displayed,
+                &mut self.image_view,
+                enabled && !selection::edges_claimed(ui.ctx()),
+            )
         {
             self.forget_pointer_selection_focus(ui.ctx());
         }
@@ -5331,7 +5337,62 @@ where
         if !self.view_drag_allowed(&response.ctx) {
             return;
         }
-        let (origin, release) = view_drag_button_positions(response, egui::PointerButton::Primary);
+        let (mut origin, release) =
+            view_drag_button_positions(response, egui::PointerButton::Primary);
+        let edge_at = |position| {
+            response.enabled()
+                && response.rect.contains(position)
+                && self.image_view.selection.is_some_and(|selected| {
+                    selection_edge(position, image_rect, selected).is_some()
+                })
+                && response.ctx.layer_id_at(position).is_some_and(|layer| {
+                    layer == response.layer_id
+                        || layer
+                            == egui::LayerId::new(
+                                egui::Order::Middle,
+                                egui::Id::new("compact-seek-bar"),
+                            )
+                })
+        };
+        let edge_hover = pointer.is_some_and(edge_at);
+        let edge_press = response
+            .ctx
+            .input(|input| {
+                input
+                    .events
+                    .iter()
+                    .take_while(|event| {
+                        !matches!(
+                            event,
+                            egui::Event::PointerButton {
+                                button: egui::PointerButton::Primary,
+                                pressed: false,
+                                ..
+                            }
+                        )
+                    })
+                    .find_map(|event| match event {
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            ..
+                        } => Some(*pos),
+                        _ => None,
+                    })
+            })
+            .filter(|point| edge_at(*point));
+        if self.view_drag.is_none() && !timeline_input::owns_pointer(&response.ctx) {
+            if let Some(press) = edge_press {
+                origin = Some(press);
+                response.ctx.set_dragged_id(response.id);
+            }
+            if edge_hover || edge_press.is_some() {
+                selection::claim_edges(&response.ctx);
+            }
+        } else if matches!(self.view_drag, Some(ViewDrag::Selection { .. })) {
+            selection::claim_edges(&response.ctx);
+        }
         let frame = response.ctx.cumulative_frame_nr();
         let zoom_frame = response.id.with("selection-zoom-frame");
         if response.ctx.data(|data| data.get_temp::<u64>(zoom_frame)) == Some(frame) {
@@ -5376,7 +5437,7 @@ where
         };
         let point = unit_point(pointer, image_rect);
         if self.view_drag.is_none()
-            && response.hovered()
+            && (response.hovered() || edge_hover)
             && let Some(selection) = self.image_view.selection
         {
             if let Some(edge) = selection_edge(pointer, image_rect, selection) {
@@ -5749,7 +5810,7 @@ where
                             volume_step: self.volume_step_percent,
                             audio_repeat: self.audio_mode().0,
                             folder_loop: self.folder_navigation_loop && !self.reading_mode,
-                            reuse_folder_tab: self.reuses_folder_tabs(),
+                            reuse_folder_tab: self.folder_tab_reuse_mode(),
                             tab_icons: show_tab_icons,
                             nearest_images: self.nearest_images,
                             high_quality_minification: self.high_quality_minification,
@@ -5990,7 +6051,15 @@ where
                                     }
                                     let hovered = chrome::tab_hovered(ui, rect);
                                     let show_close = hovered || (active && !dirty);
-                                    painter.rect_filled(rect, 3.0, chrome::BACKGROUND);
+                                    painter.rect_filled(
+                                        rect,
+                                        3.0,
+                                        if active {
+                                            chrome::ACTIVE_TAB
+                                        } else {
+                                            chrome::BACKGROUND
+                                        },
+                                    );
                                     let hover_background = painter.add(egui::Shape::Noop);
                                     let mut label_rect = egui::Rect::from_min_max(
                                         rect.min,
@@ -8361,8 +8430,11 @@ where
                 self.request_redraw();
             }
             CommandId::ToggleReuseFolderTab => {
-                self.reuse_folder_tab = !self.reuses_folder_tabs();
+                self.reuse_folder_tab = (self.folder_tab_reuse_mode() + 1) % 3;
             }
+            CommandId::ReuseFolderTabOff => self.reuse_folder_tab = 0,
+            CommandId::ReuseFolderTabAll => self.reuse_folder_tab = 1,
+            CommandId::ReuseFolderTabSameKind => self.reuse_folder_tab = 2,
             CommandId::FolderNavigationStop | CommandId::FolderNavigationLoop => {
                 self.folder_navigation_loop = command == CommandId::FolderNavigationLoop;
                 self.request_redraw();
@@ -16734,7 +16806,8 @@ mod tests {
                 .iter()
                 .filter_map(|shape| match &shape.shape {
                     egui::Shape::Rect(tab)
-                        if [chrome::BORDER, chrome::BACKGROUND].contains(&tab.fill)
+                        if [chrome::BORDER, chrome::BACKGROUND, chrome::ACTIVE_TAB]
+                            .contains(&tab.fill)
                             && tab.corner_radius == egui::CornerRadius::same(3)
                             && tab.rect.width() >= 70.0
                             && tab.rect.top() < 32.0 =>
@@ -16774,17 +16847,12 @@ mod tests {
             for edge in edges {
                 assert!(edge.left() == clip.left() || edge.right() == clip.right());
             }
-            let index = app
-                .tabs
-                .tab_ids()
-                .position(|id| Some(id) == app.tabs.active_id())
-                .expect("active index");
             output
                 .shapes
                 .iter()
-                .filter_map(|shape| match &shape.shape {
+                .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.fill == chrome::BACKGROUND
+                        if rect.fill == chrome::ACTIVE_TAB
                             && (70.0..=220.0).contains(&rect.rect.width())
                             && rect.rect.height() < 30.0
                             && rect.rect.top() < 32.0 =>
@@ -16793,7 +16861,6 @@ mod tests {
                     }
                     _ => None,
                 })
-                .nth(index)
                 .expect("active tab rectangle")
         };
         let settle = |app: &mut Application<_>, width| {

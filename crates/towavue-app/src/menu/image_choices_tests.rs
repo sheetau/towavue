@@ -152,7 +152,6 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                 for (command, title) in [
                     (ToggleImageInterpolation, Text::ImageInterpolation),
                     (ToggleImageMinification, Text::ImageMinification),
-                    (ToggleReuseFolderTab, Text::CommandToggleReuseFolderTab),
                 ] {
                     for current in [false, true] {
                         for same in [false, true] {
@@ -190,7 +189,7 @@ fn image_choices_keep_custom_shortcuts_before_arrows_and_current_state_is_a_no_o
                                         ui.menu_button("Menu", |ui| {
                                             let mut data = MenuData {
                                                 choices: Choices {
-                                                    reuse_folder_tab: current,
+                                                    reuse_folder_tab: u16::from(current),
                                                     nearest_images: current,
                                                     high_quality_minification: current,
                                                     ..Default::default()

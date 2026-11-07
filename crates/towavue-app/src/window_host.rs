@@ -373,7 +373,13 @@ impl WindowHost {
             .ok_or("No open window can accept the file")?;
         let app = self.windows.get_mut(&key).expect("selected window");
         if app.modal_input_blocked() || app.pending_guard.is_some() {
-            return Err("Close the active dialog before opening an external file".into());
+            // A modal owns the document and its continuation. Acknowledge the
+            // launch after presenting that owner, without replacing its media.
+            if visible && let Some(window) = &app.window {
+                window.set_minimized(false);
+                towavue_runtime_windows::alert_modal_window(window.as_ref());
+            }
+            return Ok(key);
         }
         if let Some(path) = path {
             if MediaKind::from_path(&path).is_none() {

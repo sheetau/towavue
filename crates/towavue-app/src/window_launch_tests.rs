@@ -73,7 +73,11 @@ fn explorer_tabs_preserve_existing_tabs_and_respect_active_window_guards() {
     assert!(host.windows[&second].tabs.tabs().is_empty());
     host.last_active_window = Some(first);
     host.windows.get_mut(&first).expect("first").about_open = true;
-    assert!(host.open_launched_tab(Some(source.clone()), false).is_err());
+    assert_eq!(
+        host.open_launched_tab(Some(source.clone()), false)
+            .expect("modal feedback handled"),
+        first
+    );
     assert_eq!(host.windows[&first].tabs.tabs().len(), 1);
     host.last_active_window = Some(second);
     assert_eq!(

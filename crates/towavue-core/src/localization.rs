@@ -43,6 +43,10 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::OpenGallery => Text::CommandOpenGallery,
         CommandId::ToggleTabIcons => Text::CommandToggleTabIcons,
         CommandId::ToggleReuseFolderTab => Text::CommandToggleReuseFolderTab,
+        CommandId::ReuseFolderTabOff => Text::ReuseFolderTabOff,
+        CommandId::ReuseFolderTabAll => Text::ReuseFolderTabAll,
+        CommandId::ReuseFolderTabSameKind => Text::ReuseFolderTabSameKind,
+
         CommandId::GoToFile => Text::CommandGoToFile,
         CommandId::OpenRecentFolder => Text::CommandOpenRecentFolder,
         CommandId::FocusSearch => Text::CommandFocusSearch,

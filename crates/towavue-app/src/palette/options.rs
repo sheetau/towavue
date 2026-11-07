@@ -26,7 +26,8 @@ pub(super) struct Step {
 pub(crate) fn group(command: CommandId) -> bool {
     matches!(
         command,
-        CommandId::CycleVolumeStep
+        CommandId::ToggleReuseFolderTab
+            | CommandId::CycleVolumeStep
             | CommandId::CycleAudioRepeat
             | CommandId::ResizeViewFit
             | CommandId::ExportQualityHigh
@@ -38,7 +39,10 @@ pub(crate) fn group(command: CommandId) -> bool {
 pub(super) fn child(command: CommandId) -> bool {
     matches!(
         command,
-        CommandId::VolumeStepTwo
+        CommandId::ReuseFolderTabOff
+            | CommandId::ReuseFolderTabAll
+            | CommandId::ReuseFolderTabSameKind
+            | CommandId::VolumeStepTwo
             | CommandId::VolumeStepFive
             | CommandId::VolumeStepTen
             | CommandId::AudioRepeatOff
@@ -54,6 +58,7 @@ pub(super) fn child(command: CommandId) -> bool {
 pub(super) fn title(command: CommandId, language: localization::Language) -> Option<&'static str> {
     Some(
         match command {
+            CommandId::ToggleReuseFolderTab => Text::CommandToggleReuseFolderTab,
             CommandId::CycleVolumeStep => Text::ListeningVolumeStep,
             CommandId::CycleAudioRepeat => Text::AudioRepeat,
             CommandId::ResizeViewFit => Text::ViewResizeBehavior,
@@ -205,6 +210,11 @@ impl<N: Fn(crate::AppEvent) + Send + Sync + 'static> crate::Application<N> {
                     towavue_core::RepeatMode::Off => AudioRepeatOff,
                     towavue_core::RepeatMode::All => AudioRepeatAll,
                     towavue_core::RepeatMode::One => AudioRepeatOne,
+                },
+                ToggleReuseFolderTab => match self.folder_tab_reuse_mode() {
+                    1 => ReuseFolderTabAll,
+                    2 => ReuseFolderTabSameKind,
+                    _ => ReuseFolderTabOff,
                 },
                 ResizeViewFit => self.view_resize_mode.command(),
                 ExportQualityHigh => match self.video_export_quality() {
@@ -381,5 +391,26 @@ mod tests {
         frame(&mut palette, vec![]);
         assert_eq!(palette.selected_command, Some(CommandId::CycleVolumeStep));
         assert!(frame(&mut palette, vec![key(egui::Key::Escape)]).1);
+    }
+    #[test]
+    fn folder_reuse_palette_exposes_three_modes_and_restores_the_current_choice() {
+        let mut app = crate::Application::new(None, |_| {}).expect("app");
+        for mode in 0..3 {
+            app.reuse_folder_tab = mode;
+            assert!(app.begin_palette_options(CommandId::ToggleReuseFolderTab));
+            let step = app.palette.step.as_ref().expect("three-way choice");
+            assert_eq!(step.rows.len(), 3);
+            assert_eq!(step.selected, Some(mode as usize));
+            assert_eq!(step.rows.iter().filter(|row| row.current).count(), 1);
+            let expected = [
+                CommandId::ReuseFolderTabOff,
+                CommandId::ReuseFolderTabAll,
+                CommandId::ReuseFolderTabSameKind,
+            ];
+            for (row, command) in step.rows.iter().zip(expected) {
+                assert_eq!(row.value, Value::Command(command));
+            }
+            app.palette.back();
+        }
     }
 }

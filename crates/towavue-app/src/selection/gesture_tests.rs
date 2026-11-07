@@ -1006,3 +1006,91 @@ fn selection_press_clears_old_bounds_and_status_follows_the_dragged_corner() {
         }
     }
 }
+
+#[test]
+fn bottom_selection_edge_owns_seek_overlap_but_yields_to_modal_and_foreground_layers() {
+    let Some(_) = tests::isolated_test_root(
+        "selection::gesture_tests::bottom_selection_edge_owns_seek_overlap_but_yields_to_modal_and_foreground_layers",
+    ) else {
+        return;
+    };
+    for density in [1.0, 1.25, 2.0] {
+        for blocked in 0..3 {
+            let mut app = Application::new(None, |_| {}).expect("app");
+            let context = fonts::test_context();
+            app.ui_context = Some(context.clone());
+            app.media_kind = Some(MediaKind::Image);
+            app.about_open = blocked == 1;
+            let image = egui::Rect::from_min_max(egui::pos2(20.0, 30.0), egui::pos2(420.0, 270.0));
+            let initial = PixelCrop {
+                x: 100,
+                y: 100,
+                width: 800,
+                height: 500,
+            }
+            .unit_rect((1000, 600));
+            app.image_view.selection = Some(initial);
+            let status = egui::Rect::from_min_max(egui::pos2(0.0, 270.0), egui::pos2(450.0, 300.0));
+            let mut time = 0.0;
+            let mut frame = |app: &mut Application<_>, events| {
+                time += 0.05;
+                let mut input = egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(450.0, 300.0),
+                    )),
+                    events,
+                    ..Default::default()
+                };
+                input
+                    .viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .expect("root")
+                    .native_pixels_per_point = Some(density);
+                let _ = context.run_ui(input, |ui| {
+                    let response =
+                        ui.interact(image, "edge-owner".into(), egui::Sense::click_and_drag());
+                    let pointer = ui.input(|input| input.pointer.hover_pos());
+                    app.update_selection(&response, image, (1000, 600), false, pointer);
+                    let (_, seek) =
+                        seekbar::show_drag(&context, status, 0.5, None, !app.about_open, false);
+                    if blocked == 0 {
+                        assert!(!seek.started && !seek.dragging && !seek.released);
+                    }
+                    if blocked == 2 {
+                        egui::Area::new("front-control".into())
+                            .order(egui::Order::Foreground)
+                            .fixed_pos(image.min)
+                            .show(&context, |ui| {
+                                ui.allocate_exact_size(image.size(), egui::Sense::click_and_drag());
+                            });
+                    }
+                });
+            };
+            // First establish the compact seek area's previous-pass geometry.
+            for _ in 0..3 {
+                frame(&mut app, vec![]);
+            }
+            let start = egui::pos2(220.0, 269.0);
+            let target = egui::pos2(220.0, 220.0);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut app,
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+            );
+            frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+            frame(&mut app, vec![button(target, false)]);
+            if blocked == 0 {
+                assert!(app.image_view.selection.expect("resized").max.y < initial.max.y);
+            } else {
+                assert_eq!(app.image_view.selection, Some(initial));
+            }
+        }
+    }
+}

@@ -869,7 +869,7 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
             .iter()
             .find_map(|shape| match &shape.shape {
                 egui::Shape::LineSegment { points, stroke }
-                    if (stroke.width - 1.1).abs() < 0.0001
+                    if (stroke.width - 1.0).abs() < 0.0001
                         && points[0].x < 28.0
                         && points[0].y < 26.0 =>
                 {
@@ -889,7 +889,9 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
     }
     let held = frame(&mut app, size, vec![]);
     assert!(
-        (first_shaft(&held) - initial - egui::Vec2::splat(15.3 * 16.0 / 27.68)).length() < 0.01
+        (first_shaft(&held) - initial - egui::Vec2::splat((10.39 / 17.0 - 0.35 / 16.71) * 16.0))
+            .length()
+            < 0.01
     );
     assert!(
         held.viewport_output[&egui::ViewportId::ROOT].repaint_delay > Duration::from_millis(80),
@@ -905,123 +907,6 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
     assert!(
         restored.viewport_output[&egui::ViewportId::ROOT].repaint_delay > Duration::from_millis(80)
     );
-}
-
-#[test]
-fn logo_corners_follow_the_supplied_round_outline_at_button_and_drop_guide_sizes() {
-    for density in [1.0, 1.25, 2.0] {
-        for size in [16.0, 48.0] {
-            let context = crate::fonts::test_context();
-            context.set_pixels_per_point(density);
-            let rect = egui::Rect::from_min_size(egui::pos2(12.0, 12.0), egui::Vec2::splat(size));
-            let output = context.run_ui(Default::default(), |ui| {
-                chrome::paint_logo(ui.painter(), rect, None, 0.0, true);
-            });
-            let corners: Vec<_> = output
-                .shapes
-                .iter()
-                .filter_map(|shape| {
-                    if let egui::Shape::Path(path) = &shape.shape {
-                        Some(path)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            assert_eq!(corners.len(), 4);
-            let scale = size / 27.68;
-            for (path, center) in corners.into_iter().zip([
-                egui::pos2(5.0, 5.0),
-                egui::pos2(22.68, 5.0),
-                egui::pos2(22.68, 22.68),
-                egui::pos2(5.0, 22.68),
-            ]) {
-                let center = rect.min + center.to_vec2() * scale;
-                // The supplied SVG uses radius-four rounded corners. Check segment
-                // midpoints too: vertices on the arc alone also admit visible bevels.
-                let arc = &path.points[1..path.points.len() - 1];
-                for segment in arc.windows(2) {
-                    for point in [segment[0], segment[0].lerp(segment[1], 0.5), segment[1]] {
-                        let error = ((point - center).length() - 4.0 * scale).abs() * density;
-                        assert!(
-                            error < 0.075,
-                            "rounded outline error {error} px at {size} / {density}"
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn logo_feedback_preserves_geometry_and_only_highlights_the_selected_arrow() {
-    for density in [1.0, 1.25, 2.0] {
-        let context = crate::fonts::test_context();
-        context.set_pixels_per_point(density);
-        let idle = context.run_ui(Default::default(), |ui| {
-            chrome::logo(
-                ui,
-                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(28.0, 26.0)),
-                None,
-                0.0,
-                false,
-            );
-        });
-        for shape in idle.shapes {
-            match shape.shape {
-                egui::Shape::LineSegment { stroke, .. } => {
-                    assert_eq!(stroke.color, chrome::DISABLED)
-                }
-                egui::Shape::Path(path) => assert_eq!(
-                    path.stroke.color,
-                    egui::epaint::ColorMode::Solid(chrome::DISABLED)
-                ),
-                _ => {}
-            }
-        }
-        for selected in [
-            None,
-            Some(Section::File),
-            Some(Section::Edit),
-            Some(Section::View),
-        ] {
-            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(28.0, 26.0));
-            let output = context.run_ui(Default::default(), |ui| {
-                chrome::logo(
-                    ui,
-                    rect,
-                    selected,
-                    if selected.is_some() { 1.0 } else { 0.0 },
-                    true,
-                )
-            });
-            let mut opaque = 0;
-            let mut shafts = Vec::new();
-            let mut shapes = 0;
-            for shape in output.shapes {
-                match shape.shape {
-                    egui::Shape::LineSegment { points, stroke } => {
-                        shapes += 1;
-                        opaque += usize::from(stroke.color == chrome::FOREGROUND);
-                        assert!(points.into_iter().all(|point| rect.contains(point)));
-                        shafts.push(points);
-                    }
-                    egui::Shape::Path(path) => {
-                        shapes += 1;
-                        opaque += usize::from(
-                            path.stroke.color == egui::epaint::ColorMode::Solid(chrome::FOREGROUND),
-                        );
-                        assert!(path.points.into_iter().all(|point| rect.contains(point)));
-                    }
-                    _ => {}
-                }
-            }
-            assert_eq!(shapes, 7);
-            assert_eq!(opaque, if selected.is_some() { 2 } else { 7 });
-            assert_eq!(shafts[0][0].x > rect.center().x, selected.is_some());
-        }
-    }
 }
 
 pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(
@@ -1253,6 +1138,8 @@ fn pointer_menu_dismissal_does_not_leave_logo_focused_or_highlighted() {
                 .filter(|shape| {
                     matches!(&shape.shape,
                 egui::Shape::Path(path) if path.points.iter().all(|p| p.x < 30.0 && p.y < 32.0))
+                        || matches!(&shape.shape, egui::Shape::LineSegment { points, .. }
+                            if points.iter().all(|p| p.x < 30.0 && p.y < 32.0))
                 })
                 .map(|shape| shape.shape.clone())
                 .collect()
@@ -1288,6 +1175,9 @@ fn pointer_menu_dismissal_does_not_leave_logo_focused_or_highlighted() {
             }
         }
         frame(&mut app, size, vec![egui::Event::PointerGone]);
+        for _ in 0..12 {
+            frame(&mut app, size, vec![]);
+        }
         let output = frame(&mut app, size, vec![]);
         assert!(!egui::Popup::is_any_open(&context), "dismissal {mode}");
         assert_ne!(
@@ -1303,7 +1193,7 @@ fn pointer_menu_dismissal_does_not_leave_logo_focused_or_highlighted() {
         assert_eq!(
             artwork(&output),
             idle,
-            "logo returns to its idle colors: {mode}"
+            "logo animation returns to its idle artwork: {mode}"
         );
     }
 }

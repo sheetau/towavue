@@ -59,6 +59,7 @@ fn show_drag_with_direction(
     allow_timeline: bool,
     reversed: bool,
 ) -> (Response, timeline_input::Drag) {
+    let enabled = enabled && !crate::selection::edges_claimed(context);
     let paint = Rect::from_min_size(
         status.left_top() - egui::vec2(0.0, HIT_HEIGHT * 0.5),
         egui::vec2(status.width(), HIT_HEIGHT),
@@ -75,6 +76,7 @@ fn show_drag_with_direction(
         context.set_sublayer(parent, area.layer());
     }
     area.order(egui::Order::Middle)
+        .interactable(enabled)
         .enabled(enabled)
         .movable(false)
         .fixed_pos(egui::pos2(status.left(), hit_top))

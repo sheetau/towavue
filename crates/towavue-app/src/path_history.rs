@@ -95,11 +95,25 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(tab) = self.tabs.active_id() else {
             return;
         };
-        let Some(history) = self.path_history.get(&tab) else {
+        let Some(history) = self.path_history.get_mut(&tab) else {
             return;
         };
-        let Some(index) = history.index(forward) else {
-            return;
+        let index = loop {
+            let Some(index) = history.index(forward) else {
+                self.request_redraw();
+                return;
+            };
+            let (Target::File(path) | Target::Folder(path)) = &history.entries[index];
+            // Only a confirmed missing path is discarded. Permission and device
+            // failures retain the visit so an unavailable source can be retried.
+            if !matches!(path.try_exists(), Ok(false)) {
+                break index;
+            }
+            history.entries.remove(index);
+            if index <= history.cursor {
+                history.cursor = history.cursor.saturating_sub(1);
+            }
+            history.revision = history.revision.wrapping_add(1);
         };
         let request = Request {
             tab,
@@ -409,5 +423,37 @@ mod tests {
             history.entries.last(),
             Some(&Target::File("branch.png".into()))
         );
+    }
+    #[test]
+    fn missing_visits_are_skipped_in_both_directions_without_losing_live_history() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "path_history::tests::missing_visits_are_skipped_in_both_directions_without_losing_live_history",
+        ) else {
+            return;
+        };
+        let a = root.join("a.bmp");
+        let b = root.join("b.bmp");
+        for path in [&a, &b] {
+            tab_transfer::tests::bitmap(path);
+        }
+        let mut app = Application::new(None, |_| {}).expect("app");
+        app.ui_context = Some(fonts::test_context());
+        let tab =
+            tab_transfer::tests::install(&mut app, b.clone(), tab_transfer::tests::decoded(false));
+        let history = app.path_history.entry(tab).or_default();
+        history.record(Target::File(a.clone()));
+        history.record(Target::Folder(root.join("removed-folder")));
+        history.record(Target::File(root.join("removed.bmp")));
+        history.record(Target::File(b.clone()));
+        app.navigate_history(false);
+        assert_eq!(app.path.as_ref(), Some(&a));
+        assert_eq!(app.path_history[&tab].entries.len(), 2);
+        assert!(!app.history_available(false));
+        assert!(app.history_available(true));
+        std::fs::remove_file(b).expect("remove owned future visit");
+        app.navigate_history(true);
+        assert_eq!(app.path.as_ref(), Some(&a));
+        assert!(!app.history_available(true));
+        assert_eq!(app.path_history[&tab].entries, [Target::File(a)]);
     }
 }

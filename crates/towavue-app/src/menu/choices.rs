@@ -9,7 +9,7 @@ pub(crate) struct Choices {
     pub audio_repeat: RepeatMode,
     pub folder_loop: bool,
     pub tab_icons: bool,
-    pub reuse_folder_tab: bool,
+    pub reuse_folder_tab: u16,
     pub nearest_images: bool,
     pub high_quality_minification: bool,
 }
@@ -23,7 +23,7 @@ impl Default for Choices {
             audio_repeat: RepeatMode::Off,
             folder_loop: true,
             tab_icons: true,
-            reuse_folder_tab: false,
+            reuse_folder_tab: 0,
             nearest_images: false,
             high_quality_minification: true,
         }
@@ -68,8 +68,9 @@ pub(crate) fn options(command: CommandId) -> Option<Options> {
         ToggleReuseFolderTab => (
             Text::CommandToggleReuseFolderTab,
             &[
-                (ToggleReuseFolderTab, Text::ReuseFolderTabOff),
-                (ToggleReuseFolderTab, Text::ReuseFolderTabOn),
+                (ReuseFolderTabOff, Text::ReuseFolderTabOff),
+                (ReuseFolderTabAll, Text::ReuseFolderTabAll),
+                (ReuseFolderTabSameKind, Text::ReuseFolderTabSameKind),
             ],
         ),
         ExportQualityHigh => (
@@ -193,15 +194,17 @@ pub(super) fn submenu(
                 FolderNavigationStop
             }
         }
-        ToggleImageInterpolation
-        | ToggleImageMinification
-        | ToggleReuseFolderTab
-        | ToggleTabIcons => command,
+        ToggleReuseFolderTab => match choices.reuse_folder_tab {
+            1 => ReuseFolderTabAll,
+            2 => ReuseFolderTabSameKind,
+            _ => ReuseFolderTabOff,
+        },
+        ToggleImageInterpolation | ToggleImageMinification | ToggleTabIcons => command,
         _ => return None,
     };
     let toggle = matches!(
         command,
-        ToggleImageInterpolation | ToggleImageMinification | ToggleReuseFolderTab | ToggleTabIcons
+        ToggleImageInterpolation | ToggleImageMinification | ToggleTabIcons
     );
     let selected = match command {
         ToggleImageInterpolation if choices.nearest_images => Text::StatusNearest,
@@ -210,8 +213,6 @@ pub(super) fn submenu(
         ToggleImageMinification => Text::MinificationFast,
         ToggleTabIcons if choices.tab_icons => Text::ReuseFolderTabOn,
         ToggleTabIcons => Text::ReuseFolderTabOff,
-        ToggleReuseFolderTab if choices.reuse_folder_tab => Text::ReuseFolderTabOn,
-        ToggleReuseFolderTab => Text::ReuseFolderTabOff,
         _ => {
             rows.iter()
                 .find(|(id, _)| *id == selected)
@@ -383,6 +384,15 @@ mod tests {
             for width in [480.0, 1200.0] {
                 for (nested, right_edge) in [(false, false), (false, true), (true, false)] {
                     for (section, title, labels, selected, target, expected, kind) in [
+                        (
+                            Section::File,
+                            "Reuse tabs for files in the same folder",
+                            vec!["Off", "All types", "Same type"],
+                            "Off",
+                            "Same type",
+                            ReuseFolderTabSameKind,
+                            towavue_core::MediaKind::Image,
+                        ),
                         (
                             Section::View,
                             "On window resize",

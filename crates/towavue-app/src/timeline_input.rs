@@ -52,6 +52,12 @@ pub struct Drag {
     pub open_timeline: bool,
 }
 
+pub(super) fn owns_pointer(context: &Context) -> bool {
+    context
+        .data(|data| data.get_temp::<State>(state_id()))
+        .is_some_and(|state| state.active.is_some())
+}
+
 fn state_id() -> Id {
     Id::new("timeline-pointer-gesture")
 }

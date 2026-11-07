@@ -14,6 +14,9 @@ use towavue_core::MediaKind;
 
 use crate::Cancellation;
 
+#[path = "browser_preview.rs"]
+pub(crate) mod browser;
+
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const CACHE_LIMIT_BYTES: u64 = 64 * 1024 * 1024;
 const PUBLICATION_LOCK: &str = ".publication.lock";
@@ -136,6 +139,7 @@ pub struct PreviewImage {
     pub rgba: Arc<Vec<u8>>,
 }
 
+#[derive(Clone)]
 pub struct MediaPreview {
     pub image: PreviewImage,
     pub duration: Option<Duration>,
@@ -326,6 +330,7 @@ impl PreviewCache {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn disk_entry_keys(&self) -> HashSet<String> {
         fs::read_dir(&self.root)
             .into_iter()
@@ -343,7 +348,6 @@ impl PreviewCache {
             .collect()
     }
 
-    #[cfg(test)]
     pub(crate) fn cached_filmstrip(
         &self,
         source: &Path,

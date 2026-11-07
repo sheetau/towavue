@@ -29,6 +29,35 @@ pub fn activate_window(window: &impl HasWindowHandle) -> bool {
     }
 }
 
+/// Present the modal owner after an external launch that cannot replace its media.
+/// Hidden verification windows neither activate nor play a notification sound.
+pub fn alert_modal_window(window: &impl HasWindowHandle) {
+    use windows::Win32::System::Diagnostics::Debug::MessageBeep;
+    use windows::Win32::UI::WindowsAndMessaging::{GetLastActivePopup, MB_OK};
+    let Ok(borrowed) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = borrowed.as_raw() else {
+        return;
+    };
+    let owner = HWND(handle.hwnd.get() as *mut _);
+    // SAFETY: the synchronous borrow retains the owner. Its last active popup
+    // belongs to the owner's window chain; no HWND is stored or destroyed here.
+    unsafe {
+        if !IsWindowVisible(owner).as_bool() {
+            return;
+        }
+        let popup = GetLastActivePopup(owner);
+        let target = if IsWindowVisible(popup).as_bool() {
+            popup
+        } else {
+            owner
+        };
+        let _ = SetForegroundWindow(target);
+        let _ = MessageBeep(MB_OK);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,6 +109,7 @@ mod tests {
         // SAFETY: scalar queries; the window owner remains live.
         let foreground = unsafe { GetForegroundWindow() };
         assert!(!activate_window(&window));
+        alert_modal_window(&window);
         unsafe {
             assert!(!IsWindowVisible(window.0).as_bool());
             assert_eq!(GetForegroundWindow(), foreground);

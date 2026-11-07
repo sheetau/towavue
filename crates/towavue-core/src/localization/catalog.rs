@@ -1221,6 +1221,8 @@ messages! {
     CommandToggleReuseFolderTab => ("Reuse tabs for files in the same folder", "同じフォルダのファイルはタブを再利用"),
     ReuseFolderTabOff => ("Off", "オフ"),
     ReuseFolderTabOn => ("On", "オン"),
+    ReuseFolderTabAll => ("All types", "全種でオン"),
+    ReuseFolderTabSameKind => ("Same type", "同種でオン"),
     PaletteSetTo => ("set to {value}", "{value}に切り替え"),
     CommandOpenGallery => ("Open Gallery", "ギャラリーを開く"),
     CommandGoToFile => ("Go to File", "ファイルへ移動"),

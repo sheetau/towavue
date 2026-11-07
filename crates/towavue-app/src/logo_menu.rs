@@ -243,7 +243,7 @@ pub(super) fn show_with_recent(
         response.rect,
         selected,
         shift,
-        response.hovered() || response.has_focus() || egui::Popup::is_id_open(context, popup),
+        state.drag.is_none() && (response.hovered() || response.has_focus()),
     );
     let set_open = if open.is_some() {
         Some(egui::SetOpenCommand::Bool(true))

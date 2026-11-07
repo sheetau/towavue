@@ -1761,7 +1761,7 @@ fn preview_loader_serves_memory_then_persisted_images_before_uncached_sources() 
     assert_eq!(
         completed.iter().map(|item| &item.path).collect::<Vec<_>>(),
         [&later, &new_source],
-        "a new request refreshes the disk-key snapshot"
+        "a new request discovers newly persisted entries by exact lookup"
     );
     assert!(completed.iter().all(|item| {
         item.result

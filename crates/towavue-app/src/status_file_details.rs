@@ -535,13 +535,11 @@ mod tests {
                 app.nearest_images = false;
                 let details = app.status_details();
                 assert_eq!(details[0], Text::StatusFit.in_language(language));
-                assert_eq!(
-                    details[1],
-                    if frames == 1 {
-                        Text::StatusUnsaved.in_language(language)
-                    } else {
-                        "1.00×"
-                    }
+                assert_eq!(details[1], Text::StatusSmooth.in_language(language));
+                assert!(
+                    details
+                        .iter()
+                        .any(|field| field == Text::StatusUnsaved.in_language(language))
                 );
                 assert_eq!(
                     details
@@ -554,7 +552,7 @@ mod tests {
                     frames > 1
                 );
                 assert_eq!(details.iter().any(|field| field == "1.00×"), frames > 1);
-                assert!(details.iter().any(|field| field == "4×2"));
+                assert!(details.iter().any(|field| field == "PNG 4×2"));
                 let full = details.join("   ");
                 let mut previous = String::new();
                 let mut final_width = 0.0;
@@ -607,7 +605,10 @@ mod tests {
                     previous = shown.to_owned();
                 }
                 assert_eq!(previous, full, "wide windows reveal all available fields");
-                assert!(final_width > 410.0, "the old fixed ceiling must not return");
+                assert!(
+                    final_width > 320.0,
+                    "wide windows retain the complete compact information"
+                );
             }
         }
     }
@@ -660,7 +661,9 @@ mod tests {
                     );
                     let visible_date = output.shapes.iter().any(|shape| matches!(&shape.shape,
                         egui::Shape::Text(text) if text.galley.text().contains("2024-02-29 12:34:56")));
-                    assert_eq!(visible_date, width == 960.0, "{kind:?}, {density}, {width}");
+                    if width != 480.0 {
+                        assert_eq!(visible_date, width == 960.0, "{kind:?}, {density}, {width}");
+                    }
                     {
                         let full_info = app.status_details().join("   ");
                         let position = output

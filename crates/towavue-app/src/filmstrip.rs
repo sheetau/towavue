@@ -1278,9 +1278,20 @@ impl Filmstrip {
                     );
                     let offset_y = center_y - (origin.y + viewport.height() * 0.5);
                     let card_rect = |index| {
-                        self.layout
+                        let rect = self
+                            .layout
                             .rect(index, origin, viewport.size())
-                            .translate(egui::vec2(0.0, offset_y))
+                            .translate(egui::vec2(0.0, offset_y));
+                        if !self.previews.contains_key(&snapshot.items[index].path)
+                            && self.held_deleted.as_ref() != Some(&snapshot.items[index].path)
+                        {
+                            Rect::from_center_size(
+                                rect.center(),
+                                Vec2::splat(rect.size().length() / std::f32::consts::SQRT_2),
+                            )
+                        } else {
+                            rect
+                        }
                     };
                     // Set the shared target before creating any button so queued
                     // pointer or Tab navigation + Enter cannot activate the old target.
@@ -1444,7 +1455,9 @@ impl Filmstrip {
                                     crate::chrome::MUTED,
                                 );
                             }
-                            None => {}
+                            None => {
+                                ui.painter().rect_filled(rect, 0.0, crate::chrome::BORDER);
+                            }
                         }
                         if !deleted {
                             crate::thumbnail_menu::show(
@@ -1690,8 +1703,8 @@ impl Filmstrip {
                             },
                             1.0 + 0.05 * hover,
                         ),
-                        // Pending/failed previews retain their accessible fallback.
-                        _ => rect,
+                        None => gallery_thumbnail(rect, Vec2::splat(1.0), 1.0 + 0.05 * hover),
+                        Some(Err(_)) => rect,
                     };
                     let response = ui.interact(
                         image_rect,
@@ -1782,7 +1795,10 @@ impl Filmstrip {
                                 crate::chrome::MUTED,
                             );
                         }
-                        None => {}
+                        None => {
+                            ui.painter()
+                                .rect_filled(image_rect, 0.0, crate::chrome::BORDER);
+                        }
                     }
                     crate::thumbnail_menu::show(
                         ui,
@@ -4756,7 +4772,7 @@ mod tests {
                     assert!(
                         (title.pos.y
                             - (bounds.y0 + bounds.y1) as f32 * 0.5
-                            - layout::size(egui::vec2(3.0, 2.0)).y * 0.5
+                            - layout::size(egui::Vec2::splat(1.0)).y * 0.5
                             - indicator::GAP
                             - indicator::TEXT_GAP)
                             .abs()
@@ -5073,6 +5089,37 @@ mod tests {
                             "Filmstrip retains one selection; seek retains its caption: mode {mode}"
                         );
                         assert_eq!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id())), state == 2);
+                        if state == 0 && mode != 1 {
+                            let square = output
+                                .shapes
+                                .iter()
+                                .find_map(|shape| match &shape.shape {
+                                    egui::Shape::Rect(shape)
+                                        if shape.fill == crate::chrome::BORDER
+                                            && (shape.rect.width() - shape.rect.height()).abs()
+                                                < 0.01 =>
+                                    {
+                                        Some(shape.rect)
+                                    }
+                                    _ => None,
+                                })
+                                .expect("pending thumbnail square");
+                            let diagonal = if mode == 0 {
+                                layout::DIAMETER
+                            } else {
+                                GALLERY_DIAMETER
+                            };
+                            assert!((square.size().length() - diagonal).abs() < 0.1);
+                            if mode == 0 {
+                                let hit = context
+                                    .read_response(strip.card_paths[0].0)
+                                    .expect("thumbnail hit target");
+                                assert_eq!(
+                                    hit.rect, square,
+                                    "placeholder pixels share the thumbnail hit target"
+                                );
+                            }
+                        }
                         assert_eq!(output.pixels_per_point, density);
                     }
                 }

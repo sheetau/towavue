@@ -1822,7 +1822,7 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
     assert!(
         (title.pos.y
             - thumbnail.center().y
-            - layout::size(egui::vec2(3.0, 2.0)).y * 0.5
+            - layout::size(egui::Vec2::splat(1.0)).y * 0.5
             - indicator::GAP
             - indicator::TEXT_GAP)
             .abs()

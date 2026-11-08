@@ -70,11 +70,54 @@ pub(super) fn panel_resize_enabled(ui: &egui::Ui, panel: egui::Id) -> bool {
     }
     if enabled
         && !cancelled
+        && !interrupted
+        && context_resize_not_cancelled(ui.ctx(), panel)
         && let Some(response) = ui.ctx().read_response(panel.with("__resize"))
     {
         tab_focus::observe_pointer_control(&response, "timeline-resize");
+        // A resize handle has no click action. Claim the press immediately so
+        // egui's click-versus-drag threshold cannot interrupt its feedback.
+        if response.is_pointer_button_down_on() && ui.input(|input| input.pointer.primary_down()) {
+            ui.ctx().set_dragged_id(response.id);
+        }
     }
     enabled && !cancelled && context_resize_not_cancelled(ui.ctx(), panel)
+}
+
+pub(super) fn show_panel<R>(
+    root: &mut egui::Ui,
+    panel: egui::Id,
+    enabled: bool,
+    margin: egui::Margin,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let original = root.style().clone();
+    // Keep the cap on the layout grid so Panel's final clamp cannot shift its
+    // separator away from the already laid-out content by a rounding fraction.
+    let maximum = (root.available_height() * 0.3).floor();
+    if !enabled {
+        cancel_panel_resize(root.ctx(), panel);
+    }
+    let resizable = enabled && panel_resize_enabled(root, panel);
+    root.visuals_mut().widgets.active.fg_stroke = original.visuals.widgets.hovered.fg_stroke;
+    let result = egui::Panel::bottom(panel)
+        .default_size(96.0)
+        .size_range(64.0_f32.min(maximum)..=maximum)
+        .resizable(resizable)
+        .frame(
+            egui::Frame::NONE
+                .fill(chrome::BACKGROUND)
+                .inner_margin(margin),
+        )
+        .show(root, |ui| {
+            ui.set_style(original.clone());
+            if !enabled {
+                ui.disable();
+            }
+            content(ui)
+        });
+    root.set_style(original);
+    result
 }
 
 fn context_resize_not_cancelled(context: &egui::Context, panel: egui::Id) -> bool {

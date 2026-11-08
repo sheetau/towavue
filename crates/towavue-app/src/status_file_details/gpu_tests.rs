@@ -70,7 +70,7 @@ fn right_status_resize_bounds_gpu_color_drift_and_detects_pixel_displacement() {
                             .iter()
                             .find_map(|shape| match &shape.shape {
                                 egui::Shape::Text(text)
-                                    if text.galley.text().contains("Modified (local)") =>
+                                    if text.galley.text().contains("2024-02-29 12:34:56") =>
                                 {
                                     assert!(
                                         !text.galley.elided,

@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use egui::{Color32, Rect, TextureHandle, TextureOptions, Vec2};
 use towavue_core::{CommandId, MediaKind};
 
+use crate::hover_help::HoverHelp;
 use crate::scroll_style::ScrollAreaStyle;
 use crate::{AppEvent, Application, ImagePresentation, UiAction, chrome, localization, media_time};
 
@@ -305,36 +306,40 @@ where
         {
             actions.push(UiAction::Command(CommandId::ToggleVideoRepeat));
         }
-        ui.label(egui::RichText::new(label).color(chrome::MUTED));
+        let compact = ui.max_rect().width() < 340.0;
+        let shown = if compact {
+            crate::format_time_precise(media_time(position))
+        } else {
+            label.clone()
+        };
+        ui.add(
+            egui::Label::new(egui::RichText::new(shown).size(12.0).color(chrome::MUTED))
+                .truncate()
+                .show_tooltip_when_elided(false),
+        )
+        .help_text(label);
     }
 
     pub(super) fn draw_animation_timeline(&mut self, root: &mut egui::Ui) {
-        let max_height = root.available_height() * 0.6;
         let panel = self.timeline_panel_id();
-        let resizable = crate::timeline_edit::panel_resize_enabled(root, panel);
-        let enabled =
-            !self.modal_input_blocked() && !self.image_edit_pending && self.image_handoff.is_none();
+        let enabled = !self.modal_input_blocked()
+            && !self.filmstrip_open
+            && !self.image_edit_pending
+            && self.image_handoff.is_none();
         let image = self.image.as_mut().expect("animated image");
         image.open_transport();
         let mut selected = None;
-        egui::Panel::bottom(panel)
-            .default_size(96.0)
-            .size_range(64.0_f32.min(max_height)..=max_height)
-            .resizable(resizable)
-            .frame(
-                egui::Frame::NONE
-                    .fill(chrome::BACKGROUND)
-                    .inner_margin(egui::Margin {
-                        left: 8,
-                        right: 8,
-                        top: 8,
-                        bottom: 0,
-                    }),
-            )
-            .show(root, |ui| {
-                if !enabled {
-                    ui.disable();
-                }
+        crate::timeline_edit::show_panel(
+            root,
+            panel,
+            enabled,
+            egui::Margin {
+                left: 0,
+                right: 0,
+                top: 8,
+                bottom: 0,
+            },
+            |ui| {
                 let background = ui.available_rect_before_wrap();
                 let side = background.height().max(1.0);
                 let pitch = side + 5.0;
@@ -349,76 +354,95 @@ where
                     background.min + egui::vec2(8.0, 0.0),
                     background.max - egui::vec2(8.0, 0.0),
                 );
-                egui::ScrollArea::horizontal()
+                let anchor_id = panel.with("animation-viewport");
+                let previous = ui.data(|data| data.get_temp::<(f32, f32, f32)>(anchor_id));
+                let mut area = egui::ScrollArea::horizontal()
+                    .content_margin(0)
                     .id_salt("animation-frames")
                     .auto_shrink([false, false])
-                    .scroll_bar_rect(track)
-                    .show_viewport_styled(ui, |ui, viewport| {
-                        ui.set_min_size(egui::vec2((count as f32 * pitch - 5.0).max(0.0), side));
-                        let first = (viewport.left().max(0.0) / pitch).floor() as usize;
-                        let last =
-                            ((viewport.right().max(0.0) / pitch).ceil() as usize + 1).min(count);
-                        let transport = image
-                            .animation_transport
-                            .as_mut()
-                            .expect("animation transport");
-                        // Decoded frames already belong to the image; only visible
-                        // reduced textures are retained, independent of file previews.
-                        transport
-                            .thumbnails
-                            .retain(|index, _| (first..last).contains(index));
-                        for index in first..last {
-                            let rect = Rect::from_min_size(
-                                ui.min_rect().min + egui::vec2(index as f32 * pitch, 0.0),
-                                Vec2::splat(side),
+                    .scroll_bar_rect(track);
+                if let Some((old_pitch, old_width, offset)) = previous
+                    && (old_pitch - pitch).abs() > 0.01
+                {
+                    // Keep the frame coordinate at the viewport center while resizing.
+                    let center = (offset + old_width * 0.5 - 8.0) / old_pitch;
+                    area = area.horizontal_scroll_offset(
+                        (center * pitch + 8.0 - background.width() * 0.5).max(0.0),
+                    );
+                }
+                let output = area.show_viewport_styled(ui, |ui, viewport| {
+                    ui.set_min_size(egui::vec2(
+                        (count as f32 * pitch - 5.0).max(0.0) + 16.0,
+                        side,
+                    ));
+                    let first = ((viewport.left() - 8.0).max(0.0) / pitch).floor() as usize;
+                    let last = (((viewport.right() - 8.0).max(0.0) / pitch).ceil() as usize + 1)
+                        .min(count);
+                    let transport = image
+                        .animation_transport
+                        .as_mut()
+                        .expect("animation transport");
+                    // Decoded frames already belong to the image; only visible
+                    // reduced textures are retained, independent of file previews.
+                    transport
+                        .thumbnails
+                        .retain(|index, _| (first..last).contains(index));
+                    for index in first..last {
+                        let rect = Rect::from_min_size(
+                            ui.min_rect().min + egui::vec2(8.0 + index as f32 * pitch, 0.0),
+                            Vec2::splat(side),
+                        );
+                        let frame = &image.decoded.frames[index];
+                        let texture = transport.thumbnails.entry(index).or_insert_with(|| {
+                            ui.ctx().load_texture(
+                                format!("animation-frame-{index}"),
+                                thumbnail(frame),
+                                TextureOptions::LINEAR,
+                            )
+                        });
+                        ui.painter().rect_filled(rect, 3.0, chrome::BORDER);
+                        let size = texture.size_vec2();
+                        let fitted =
+                            Rect::from_center_size(rect.center(), size * (side / size.max_elem()));
+                        egui::Image::from_texture((texture.id(), texture.size_vec2()))
+                            .corner_radius(3.0)
+                            .paint_at(ui, fitted);
+                        if index == image.frame_index {
+                            ui.painter().rect_stroke(
+                                rect,
+                                3.0,
+                                egui::Stroke::new(
+                                    1.0 / ui.ctx().pixels_per_point(),
+                                    Color32::WHITE,
+                                ),
+                                egui::StrokeKind::Inside,
                             );
-                            let frame = &image.decoded.frames[index];
-                            let texture = transport.thumbnails.entry(index).or_insert_with(|| {
-                                ui.ctx().load_texture(
-                                    format!("animation-frame-{index}"),
-                                    thumbnail(frame),
-                                    TextureOptions::LINEAR,
-                                )
-                            });
-                            ui.painter().rect_filled(rect, 3.0, chrome::BORDER);
-                            let size = texture.size_vec2();
-                            let fitted = Rect::from_center_size(
-                                rect.center(),
-                                size * (side / size.max_elem()),
-                            );
-                            egui::Image::from_texture((texture.id(), texture.size_vec2()))
-                                .corner_radius(3.0)
-                                .paint_at(ui, fitted);
-                            if index == image.frame_index {
-                                ui.painter().rect_stroke(
-                                    rect,
-                                    3.0,
-                                    egui::Stroke::new(
-                                        1.0 / ui.ctx().pixels_per_point(),
-                                        Color32::WHITE,
-                                    ),
-                                    egui::StrokeKind::Inside,
-                                );
-                            }
-                            let response =
-                                ui.interact(rect, ui.id().with(index), egui::Sense::click());
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    ui.is_enabled(),
-                                    format!("{}/{}", index + 1, count),
-                                )
-                            });
-                            crate::tab_focus::observe_pointer_control(
-                                &response,
-                                ("animation-frame", index),
-                            );
-                            if response.clicked() {
-                                selected = Some(index);
-                            }
                         }
-                    });
-            });
+                        let response = ui.interact(rect, ui.id().with(index), egui::Sense::click());
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled(),
+                                format!("{}/{}", index + 1, count),
+                            )
+                        });
+                        crate::tab_focus::observe_pointer_control(
+                            &response,
+                            ("animation-frame", index),
+                        );
+                        if response.clicked() {
+                            selected = Some(index);
+                        }
+                    }
+                });
+                ui.data_mut(|data| {
+                    data.insert_temp(
+                        anchor_id,
+                        (pitch, background.width(), output.state.offset.x),
+                    )
+                });
+            },
+        );
         if let Some(index) = selected {
             image.select_animation_frame(index);
             root.ctx().request_repaint();
@@ -670,6 +694,37 @@ mod tests {
         );
         assert!(app.animation_timeline_visible());
         assert!(!app.timeline_is_visible(), "time editing stays unavailable");
+        let status = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                app.draw_status_bar(ui, &mut vec![], &mut vec![]);
+            },
+        );
+        let clock = status
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().contains("(1/3)") => Some(text),
+                _ => None,
+            })
+            .expect("animation clock");
+        assert!(
+            clock
+                .galley
+                .job
+                .sections
+                .iter()
+                .all(
+                    |section| section.format.font_id == egui::FontId::proportional(12.0)
+                        && section.format.color == chrome::MUTED
+                )
+        );
         let enabled = |id, context| {
             crate::command_definitions()
                 .iter()
@@ -741,7 +796,7 @@ mod tests {
         );
         app.media_kind = Some(MediaKind::Image);
         app.timeline_open = true;
-        let mut frame = |events| {
+        let frame = |app: &mut Application<fn(AppEvent)>, events| {
             context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(
@@ -755,20 +810,69 @@ mod tests {
             )
         };
         for _ in 0..3 {
-            frame(vec![]);
+            frame(&mut app, vec![]);
         }
-        frame(vec![
-            egui::Event::PointerMoved(egui::pos2(300.0, 350.0)),
-            egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                delta: egui::vec2(0.0, -600.0),
-                modifiers: egui::Modifiers::NONE,
-                phase: egui::TouchPhase::Move,
-            },
-        ]);
+        frame(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(egui::pos2(300.0, 350.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -600.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                },
+            ],
+        );
         for _ in 0..30 {
-            frame(vec![]);
+            frame(&mut app, vec![]);
         }
+        let panel = app.timeline_panel_id();
+        let anchor = panel.with("animation-viewport");
+        let before = context
+            .data(|data| data.get_temp::<(f32, f32, f32)>(anchor))
+            .expect("viewport");
+        let center = (before.2 + before.1 * 0.5 - 8.0) / before.0;
+        // Simulate a height update at the same nonzero scroll position.
+        context.data_mut(|data| {
+            data.insert_persisted(
+                panel,
+                egui::containers::panel::PanelState {
+                    outer_rect: Rect::from_min_max(
+                        egui::pos2(0.0, 280.0),
+                        egui::pos2(600.0, 400.0),
+                    ),
+                },
+            )
+        });
+        let output = frame(&mut app, vec![]);
+        let after = context
+            .data(|data| data.get_temp::<(f32, f32, f32)>(anchor))
+            .expect("resized viewport");
+        assert!(((after.2 + after.1 * 0.5 - 8.0) / after.0 - center).abs() < 0.02);
+        assert!(
+            output.shapes.iter().any(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.brush.is_some() => {
+                    let bounds = rect.rect;
+                    bounds.left() < 8.0 && bounds.right() > 0.0 && shape.clip_rect.left() <= 0.0
+                }
+                _ => false,
+            }),
+            "scrolled frames paint through the side padding to the screen edge"
+        );
+        app.ui_context = Some(context.clone());
+        let hidden_seek = context.run_ui(egui::RawInput::default(), |_| {
+            app.draw_seek_bar(
+                &context,
+                Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 24.0)),
+                None,
+                &mut vec![],
+            );
+        });
+        assert!(
+            hidden_seek.shapes.is_empty(),
+            "animation transport hides folder seeking"
+        );
         let thumbnails = &app
             .image
             .as_ref()

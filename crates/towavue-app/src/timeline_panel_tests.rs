@@ -112,10 +112,10 @@ fn resize_clamps_at_minimum_without_closing_timeline() {
                 let generation = app.generation;
                 let position = app.current_position();
                 let minimum = rect(&app).center_bottom() - egui::vec2(0.0, 64.0);
-                let larger = minimum - egui::vec2(0.0, 80.0);
+                let larger = minimum - egui::vec2(0.0, 16.0);
                 drag(&mut app, larger);
                 assert!(frame(&mut app, vec![button(larger, false)], false).is_empty());
-                assert!((rect(&app).height() - 144.0).abs() <= 1.0);
+                assert!((rect(&app).height() - 80.0).abs() <= 1.0);
                 drag(&mut app, minimum + egui::vec2(0.0, 4.0));
                 let below = minimum + egui::vec2(0.0, 80.0);
                 let events = if released {
@@ -146,7 +146,7 @@ fn resize_clamps_at_minimum_without_closing_timeline() {
                 assert!((rect(&app).height() - 64.0).abs() <= 1.0 / scale);
                 drag(&mut app, larger);
                 assert!(frame(&mut app, vec![button(larger, false)], true).is_empty());
-                assert!((rect(&app).height() - 144.0).abs() <= 1.0 / scale);
+                assert!((rect(&app).height() - 80.0).abs() <= 1.0 / scale);
             }
         }
     }
@@ -215,4 +215,70 @@ fn resize_preserves_cancellation_release_order_and_pointer_reentry() {
             "cancelled resize restores its initial height: {interruption}"
         );
     }
+}
+
+#[test]
+fn resize_moves_on_first_pixel_and_filmstrip_has_no_resize_target() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "timeline_edit::panel_tests::resize_moves_on_first_pixel_and_filmstrip_has_no_resize_target",
+    ) else {
+        return;
+    };
+    let mut app = setup(MediaKind::Video, 1.0);
+    let context = app.ui_context.clone().expect("context");
+    let id = app.timeline_panel_id().with("__resize");
+    let start = rect(&app).center_top();
+    frame(&mut app, vec![egui::Event::PointerMoved(start)], false);
+    frame(&mut app, vec![button(start, true)], false);
+    assert_eq!(context.dragged_id(), Some(id));
+    let next = start + egui::vec2(0.0, 1.0);
+    frame(&mut app, vec![egui::Event::PointerMoved(next)], false);
+    frame(&mut app, vec![], false);
+    assert!(
+        (context
+            .read_response(id)
+            .expect("resize handle")
+            .rect
+            .center()
+            .y
+            - next.y)
+            .abs()
+            < 0.6
+    );
+    frame(&mut app, vec![button(next, false)], false);
+    assert!((rect(&app).height() - 95.0).abs() < 0.6);
+    drag(&mut app, egui::pos2(start.x, 0.0));
+    frame(
+        &mut app,
+        vec![button(egui::pos2(start.x, 0.0), false)],
+        false,
+    );
+    assert!(
+        rect(&app).height() <= 120.0,
+        "maximum is at most 30% of the window"
+    );
+    app.filmstrip_open = true;
+    let before = rect(&app);
+    for _ in 0..3 {
+        frame(&mut app, vec![], false);
+    }
+    assert!(
+        context.read_response(id).is_none(),
+        "blocked resize has no hover or drag widget"
+    );
+    frame(
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(before.center_top()),
+            button(before.center_top(), true),
+        ],
+        false,
+    );
+    frame(
+        &mut app,
+        vec![egui::Event::PointerMoved(egui::pos2(start.x, 0.0))],
+        false,
+    );
+    assert_eq!(rect(&app), before);
+    assert_ne!(context.dragged_id(), Some(id));
 }

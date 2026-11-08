@@ -16,13 +16,25 @@ enum Group {
 pub(super) struct StatusInfo {
     language: Language,
     pub fields: Vec<String>,
+    field_groups: Vec<Group>,
+    pub image_position: Option<String>,
     help: Vec<(Group, String)>,
 }
 
 impl StatusInfo {
     fn push(&mut self, group: Group, compact: impl Into<String>, help: impl Into<String>) {
         self.fields.push(compact.into());
+        self.field_groups.push(group);
         self.help.push((group, help.into()));
+    }
+
+    pub fn folder_tooltip(&self) -> String {
+        self.help
+            .iter()
+            .filter(|(group, _)| *group == Group::Folder)
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>()
+            .join(" \u{00b7} ")
     }
 
     pub fn tooltip(&self) -> String {
@@ -118,19 +130,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 formatted::status_speed(language, &value),
             );
         }
-        if self.media_kind == Some(MediaKind::Video)
-            && let Some(fps) = self
-                .session
-                .as_ref()
-                .and_then(PlaybackSession::source_video_frame_rate)
-        {
-            let value = frame_rate_text(fps);
-            details.push(
-                Group::File,
-                &value,
-                formatted::source_frame_rate(language, &value),
-            );
-        }
         if self
             .tabs
             .active()
@@ -142,10 +141,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Text::StatusUnsavedHelp.in_language(language),
             );
         }
-        if let Some(file) = file {
-            let value = format_size(file.bytes);
-            details.push(Group::File, &value, &value);
-        }
+        let format_field = details.fields.len();
         if let Some(extension) = self
             .displayed_image_path()
             .and_then(|path| path.extension())
@@ -175,6 +171,29 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 Group::File,
                 &value,
                 formatted::status_pixels(language, &value),
+            );
+        }
+        if dimensions.is_some() && details.fields.len() == format_field + 2 {
+            let dimensions = details.fields.pop().expect("dimensions field");
+            details.field_groups.pop();
+            details.fields[format_field].push(' ');
+            details.fields[format_field].push_str(&dimensions);
+        }
+        if let Some(file) = file {
+            let value = format_size(file.bytes);
+            details.push(Group::File, &value, &value);
+        }
+        if self.media_kind == Some(MediaKind::Video)
+            && let Some(fps) = self
+                .session
+                .as_ref()
+                .and_then(PlaybackSession::source_video_frame_rate)
+        {
+            let value = frame_rate_text(fps);
+            details.push(
+                Group::File,
+                &value,
+                formatted::source_frame_rate(language, &value),
             );
         }
         if self.media_kind == Some(MediaKind::Image)
@@ -210,6 +229,18 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     Text::StatusItem.in_language(language)
                 };
                 details.push(Group::Folder, &value, format!("{kind} {value}"));
+                if self.media_kind == Some(MediaKind::Image) && !self.animation_timeline_visible() {
+                    details.image_position = Some(if self.reading_mode {
+                        let range = self.reading_settings.spread(index, count);
+                        if range.len() > 1 {
+                            format!("{}-{} / {count}", range.start + 1, range.end)
+                        } else {
+                            value.clone()
+                        }
+                    } else {
+                        value.clone()
+                    });
+                }
             }
         }
         if let Some(image) = image {
@@ -244,11 +275,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             }
         }
         if let Some(modified) = file.and_then(|file| file.modified_local.as_ref()) {
-            details.push(
-                Group::Modified,
-                formatted::status_modified(language, modified),
-                modified,
-            );
+            details.push(Group::Modified, modified, modified);
         }
         if let Some(snapshot) = &self.folder_snapshot {
             details.help.push((
@@ -256,6 +283,21 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 snapshot_source(language, snapshot.source).into(),
             ));
         }
+        let mut fields: Vec<_> = std::mem::take(&mut details.field_groups)
+            .into_iter()
+            .zip(std::mem::take(&mut details.fields))
+            .filter(|(group, _)| *group != Group::Folder || details.image_position.is_none())
+            .collect();
+        // Ordering also supplies the compact-width priority; tooltips retain all fields.
+        fields.sort_by_key(|(group, _)| match group {
+            Group::Display => 0,
+            Group::Playback => 1,
+            Group::Document => 2,
+            Group::File => 3,
+            Group::Folder => 4,
+            Group::Modified => 5,
+        });
+        details.fields = fields.into_iter().map(|(_, field)| field).collect();
         details
     }
 }
@@ -314,6 +356,79 @@ fn frame_rate_text(fps: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn image_position_moves_left_and_reading_reports_the_complete_spread() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "status_info::tests::image_position_moves_left_and_reading_reports_the_complete_spread",
+        ) else {
+            return;
+        };
+        let mut app = Application::new(None, (|_| {}) as fn(AppEvent)).expect("app");
+        let paths: Vec<_> = (0..6)
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        app.path = Some(paths[1].clone());
+        app.media_kind = Some(MediaKind::Image);
+        app.folder_snapshot = Some(towavue_core::FolderSnapshot {
+            folder_path: root,
+            folder_identity: towavue_core::ShellIdentity::new(vec![]),
+            items: paths
+                .iter()
+                .enumerate()
+                .map(|(index, path)| towavue_core::FolderMediaItem {
+                    path: path.clone(),
+                    kind: MediaKind::Image,
+                    identity: towavue_core::ShellIdentity::new(vec![index as u8]),
+                })
+                .collect(),
+            sort_columns: vec![],
+            source: towavue_core::FolderSnapshotSource::NaturalNameFallback,
+            generation: 1,
+            captured_at: std::time::SystemTime::now(),
+        });
+        let info = app.status_info();
+        assert_eq!(info.image_position.as_deref(), Some("2 / 6"));
+        assert!(!info.fields.iter().any(|field| field == "2 / 6"));
+        assert!(info.tooltip().contains("2 / 6"));
+        assert!(!info.folder_tooltip().contains('\u{2022}'));
+        app.reading_mode = true;
+        app.reading_settings.first_page_count = 1;
+        app.reading_settings.page_count = 3;
+        for reversed in [false, true] {
+            app.reading_settings.reversed = reversed;
+            assert_eq!(app.status_info().image_position.as_deref(), Some("2-4 / 6"));
+        }
+        app.reading_mode = false;
+        let context = fonts::test_context();
+        let frame = towavue_runtime_windows::DecodedImageFrame {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+            delay: Duration::from_millis(100),
+        };
+        app.image = Some(
+            ImagePresentation::from_named_frame(
+                &context,
+                "animation",
+                Arc::new(DecodedImage {
+                    animation_plays: 0,
+                    format: "png",
+                    frames: vec![frame.clone(), frame],
+                }),
+                0,
+                egui::TextureOptions::LINEAR,
+            )
+            .expect("image"),
+        );
+        app.timeline_open = true;
+        let info = app.status_info();
+        assert!(info.image_position.is_none());
+        assert!(info.fields.iter().any(|field| field == "2 / 6"));
+        assert!(info.fields.iter().any(|field| field == "PNG 1\u{00d7}1"));
+    }
+
     #[test]
     fn source_frame_rate_keeps_useful_fractional_precision() {
         for (fps, expected) in [

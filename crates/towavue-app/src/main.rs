@@ -6731,6 +6731,7 @@ where
                     ui.spacing_mut().item_spacing.x = chrome::STATUS_BUTTON_GAP;
                     ui.spacing_mut().interact_size = egui::Vec2::splat(chrome::STATUS_BUTTON_SIZE);
                     ui.spacing_mut().button_padding = egui::Vec2::ZERO;
+                    let info = self.status_info();
                     if self.update_is_held() {
                         self.draw_update_status(ui, actions);
                         return;
@@ -6959,8 +6960,17 @@ where
                             .disabled_help_text(
                                 localization::Text::ReadingUnsavedHelp.in_language(language),
                             );
+                        if let Some(position) = &info.image_position {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(position).size(12.0).color(chrome::MUTED),
+                                )
+                                .truncate()
+                                .show_tooltip_when_elided(false),
+                            )
+                            .help_text(info.folder_tooltip());
+                        }
                     }
-                    let info = self.status_info();
                     let full_info = info.tooltip();
                     let details = info.fields;
                     let remaining = ui.available_width();
@@ -7225,6 +7235,9 @@ where
         parent: Option<egui::LayerId>,
         actions: &mut Vec<UiAction>,
     ) {
+        if self.animation_timeline_visible() {
+            return;
+        }
         let language = self.language();
         let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
         if self.media_kind == Some(MediaKind::Image) {
@@ -7504,25 +7517,19 @@ where
         if !self.timeline_is_visible() {
             return;
         }
-        let max_height = root.available_height() * 0.6;
-        let min_height = 64.0_f32.min(max_height);
         let panel = self.timeline_panel_id();
-        let resizable = timeline_edit::panel_resize_enabled(root, panel);
-        egui::Panel::bottom(panel)
-            .default_size(96.0)
-            .size_range(min_height..=max_height)
-            .resizable(resizable)
-            .frame(
-                egui::Frame::NONE
-                    .fill(chrome::BACKGROUND)
-                    .inner_margin(egui::Margin {
-                        left: 8,
-                        right: 8,
-                        top: 8,
-                        bottom: 0,
-                    }),
-            )
-            .show(root, |ui| {
+        let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
+        timeline_edit::show_panel(
+            root,
+            panel,
+            enabled,
+            egui::Margin {
+                left: 8,
+                right: 8,
+                top: 8,
+                bottom: 0,
+            },
+            |ui| {
                 let background = ui.available_rect_before_wrap();
                 ui.set_min_size(background.size());
                 ui.painter().rect_filled(background, 3.0, chrome::BORDER);
@@ -7555,7 +7562,7 @@ where
                     self.draw_timeline_menu(ui, &response, actions);
                     return;
                 }
-                let enabled = !self.modal_input_blocked()
+                let enabled = enabled
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
                 let result = time_selection::show(
                     ui,
@@ -7630,7 +7637,8 @@ where
                 }
                 self.draw_waveform_activity(ui, rect);
                 self.draw_timeline_menu(ui, &response, actions);
-            });
+            },
+        );
     }
 
     fn timeline_panel_id(&self) -> egui::Id {
@@ -16096,7 +16104,7 @@ mod tests {
         }
         let before = frame(&mut app, size, vec![]);
         let start = before.center_top();
-        let end = start - egui::vec2(0.0, 90.0);
+        let end = start - egui::vec2(0.0, 20.0);
         let button = |pos, pressed| egui::Event::PointerButton {
             pos,
             button: egui::PointerButton::Primary,
@@ -16117,7 +16125,7 @@ mod tests {
         repeat_layout.set(true);
         for interruption in 0..6 {
             let start = after.center_top();
-            let end = start - egui::vec2(0.0, 60.0);
+            let end = start - egui::vec2(0.0, 15.0);
             for events in [
                 vec![egui::Event::PointerMoved(start)],
                 vec![button(start, true)],
@@ -16161,7 +16169,7 @@ mod tests {
             let cancelled = frame(&mut app, size, vec![]);
             if interruption == 5 {
                 assert!(
-                    (cancelled.height() - after.height() - 60.0).abs() <= 1.0,
+                    (cancelled.height() - after.height() - 15.0).abs() <= 1.0,
                     "a release before Escape must keep its committed height"
                 );
                 after = cancelled;
@@ -16190,14 +16198,14 @@ mod tests {
                 .is_none()
         );
         assert!(
-            after.height() > before.height() + 70.0,
+            after.height() > before.height() + 30.0,
             "{before:?} -> {after:?}"
         );
         for _ in 0..3 {
             frame(&mut app, egui::vec2(240.0, 150.0), vec![]);
         }
         let small = frame(&mut app, egui::vec2(240.0, 150.0), vec![]);
-        assert!(small.height() <= 54.0, "small panel: {small:?}");
+        assert!(small.height() <= 27.0, "small panel: {small:?}");
         assert!(small.top() >= 64.0, "keep a media viewport: {small:?}");
         assert_eq!(app.edits[&tab], history);
         assert_eq!(app.current_position(), position);
@@ -16789,7 +16797,10 @@ mod tests {
                             .expect("rounded timeline background");
                         assert_eq!(background.left(), 8.0);
                         assert_eq!(width - background.right(), 8.0);
-                        assert!((background.top() - borders[1] - 8.0).abs() <= 1.0 / density);
+                        assert!(
+                            (background.top() - borders[1] - 8.0).abs() <= 1.0 / density,
+                            "density={density}, background={background:?}, borders={borders:?}"
+                        );
                         assert!((background.bottom() - 270.0).abs() <= 1.0 / density);
                         let track = background;
                         let waveform = output

@@ -56,7 +56,11 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 Animated-image transport changes use `image_animation::tests::` plus the full
 workspace suite: variable frame delays, pause/replay/repeat, image-edit continuity,
-command ownership and ordinary-wheel frame virtualization. Selection creation uses
+command ownership, hidden folder seeking, ordinary-wheel frame virtualization and
+viewport-center preservation when resizing. `timeline_edit::panel_tests::` covers
+first-pixel resizing, the 30% height cap, Filmstrip suppression and cancellation.
+Status changes use `status_info::tests::` and `status_file_details::tests::`, including
+reading spread positions, grouped format/dimensions and full-width fitting. Selection creation uses
 `selection::tests::`; browser texture retention uses `filmstrip::tests::`, including
 return scrolling beyond 64 requests and byte-budget eviction. Hidden GPU controls
 and owner desktop review remain separate evidence. Run the ignored

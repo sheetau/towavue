@@ -147,7 +147,7 @@ fn shell_reordering_keeps_first_spread_loading_navigation_and_background_cards_c
                 .rgba[0],
             70
         );
-        assert!(app.status_details().contains(&"2 / 4".to_owned()));
+        assert!(app.status_info().folder_tooltip().contains("2 / 4"));
         let first = app.image.as_ref().expect("first page").texture.id();
         let second = app.reading_pages[0]
             .as_ref()
@@ -1183,7 +1183,8 @@ fn reading_leading_focus_survives_regrouping_background_restore_and_shell_change
                 assert_eq!(position.index, focus_index);
                 assert_eq!(position.reading_paths(), Some(paths[..count].to_vec()));
                 assert!(
-                    app.status_details()
+                    app.status_info()
+                        .folder_tooltip()
                         .contains(&format!("{} / 12", focus_index + 1))
                 );
                 assert_eq!(

@@ -309,7 +309,11 @@ fn untitled_canvas_resampling_and_rotation_work_without_file_identity() {
         );
         let texture = app.image.as_ref().expect("pasted").texture.id();
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)), "untitled image must render at {density}");
-        assert!(app.status_details().iter().any(|field| field == "PNG"));
+        assert!(
+            app.status_details()
+                .iter()
+                .any(|field| field.starts_with("PNG "))
+        );
     }
     app.dispatch(CommandId::FreeRotateImage);
     assert!(app.rotation_dialog.is_some(), "pathless rotation dialog");

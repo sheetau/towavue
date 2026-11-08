@@ -65,6 +65,10 @@ impl ImagePresentation {
         }
         let sampling = self.sampling.get();
         Ok(Self {
+            animation_transport: self
+                .animation_transport
+                .as_ref()
+                .map(image_animation::Transport::without_thumbnails),
             decoded: Arc::clone(&self.decoded),
             texture: context.load_texture(
                 format!(

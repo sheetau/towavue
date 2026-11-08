@@ -797,7 +797,7 @@ mod tests {
             context.global_style_mut(chrome::style);
             for density in [1.0, 1.25, 2.0] {
                 context.set_pixels_per_point(density);
-                for (label, repeated) in [("Video repeat on", true), ("Video repeat off", false)] {
+                for (label, repeated) in [("Repeat on", true), ("Repeat off", false)] {
                     frame(&mut app, vec![]);
                     let output = frame(&mut app, vec![]).0;
                     let update = output.platform_output.accesskit_update.expect("video UIA");

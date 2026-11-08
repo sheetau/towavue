@@ -54,6 +54,16 @@ The Release app is a GUI executable and does not open a console. Session warning
 
 ## Verification by impact
 
+Animated-image transport changes use `image_animation::tests::` plus the full
+workspace suite: variable frame delays, pause/replay/repeat, image-edit continuity,
+command ownership and ordinary-wheel frame virtualization. Selection creation uses
+`selection::tests::`; browser texture retention uses `filmstrip::tests::`, including
+return scrolling beyond 64 requests and byte-budget eviction. Hidden GPU controls
+and owner desktop review remain separate evidence. Run the ignored
+`animation_timeline_reaches_gpu_at_supported_densities` control serially for
+frame colors, the current-frame border and renderer recreation at 100%, 125%
+and 200%. `TOWAVUE_REFERENCE_RENDER_DIR` retains its generated RGBA readbacks.
+
 UI repaint scheduling changes use the full workspace suite and the ignored
 `continuous_native_pointer_input_does_not_starve_coalesced_redraws` control,
 run serially. It keeps native mouse messages queued for a hidden window, checks

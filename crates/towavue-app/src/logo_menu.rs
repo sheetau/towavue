@@ -243,7 +243,7 @@ pub(super) fn show_with_recent(
         response.rect,
         selected,
         shift,
-        state.drag.is_none() && (response.hovered() || response.has_focus()),
+        selected.is_none() && (state.drag.is_some() || response.hovered() || response.has_focus()),
     );
     let set_open = if open.is_some() {
         Some(egui::SetOpenCommand::Bool(true))

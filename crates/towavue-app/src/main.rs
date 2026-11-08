@@ -41,6 +41,7 @@ mod gallery_rail;
 mod gallery_tests;
 mod hold_speed;
 mod hover_help;
+mod image_animation;
 mod image_color;
 mod image_handoff;
 mod image_navigation;
@@ -623,6 +624,7 @@ struct ActiveExport {
 
 #[derive(Clone)]
 struct ImagePresentation {
+    animation_transport: Option<image_animation::Transport>,
     decoded: Arc<DecodedImage>,
     texture: TextureHandle,
     frame_index: usize,
@@ -760,6 +762,7 @@ impl ImageTextureCache {
         {
             let cached = self.entries.remove(index).expect("cached image");
             let mut image = ImagePresentation {
+                animation_transport: None,
                 plays_left: decoded.animation_plays,
                 decoded,
                 texture: cached.texture.clone(),
@@ -846,6 +849,7 @@ impl ImagePresentation {
         let next_frame_at = decoded.is_animated().then(|| Instant::now() + frame.delay);
         Ok(Self {
             plays_left: decoded.animation_plays,
+            animation_transport: None,
             decoded,
             texture,
             frame_index,
@@ -881,6 +885,7 @@ impl ImagePresentation {
             if self.frame_index + 1 == self.decoded.frames.len() {
                 if self.plays_left == 1 {
                     self.next_frame_at = None;
+                    self.animation_ended();
                     break;
                 }
                 self.plays_left = self.plays_left.saturating_sub(1);
@@ -6712,7 +6717,7 @@ where
             / density;
         egui::Panel::bottom("status")
             .exact_size(chrome::STATUS_HEIGHT)
-            .show_separator_line(!self.timeline_is_visible())
+            .show_separator_line(!self.timeline_is_visible() && !self.animation_timeline_visible())
             .frame(frame)
             .show(root, |ui| {
                 // Give padding its own non-focusable target before the controls,
@@ -6896,6 +6901,8 @@ where
                                 localization::Text::PlaybackVolumeHelp.in_language(language),
                             );
                         volume_targets.push(volume);
+                    } else if self.animation_timeline_visible() {
+                        self.draw_animation_transport(ui, actions);
                     } else if self.media_kind == Some(MediaKind::Image) {
                         let label = self.command_hint(
                             CommandId::ToggleReadingMode,
@@ -7489,6 +7496,10 @@ where
     }
 
     fn draw_timeline(&mut self, root: &mut egui::Ui, actions: &mut Vec<UiAction>) {
+        if self.animation_timeline_visible() {
+            self.draw_animation_timeline(root);
+            return;
+        }
         let language = self.language();
         if !self.timeline_is_visible() {
             return;
@@ -8308,6 +8319,9 @@ where
         self.palette_open = false;
         self.palette.clear_preview();
         self.file_search.update(None);
+        if self.animation_command(command) {
+            return;
+        }
         match command {
             CommandId::ToggleFullscreen => self.set_fullscreen(!self.fullscreen),
             CommandId::ResizeViewFit
@@ -8589,7 +8603,7 @@ where
                 }
                 self.image_view.selection = Some(UnitRect::FULL);
                 if let Some(context) = &self.ui_context {
-                    selection::focus_first(context, self.selection_identity());
+                    selection::focus_created(context, self.selection_identity());
                 }
                 self.request_redraw();
             }
@@ -9049,6 +9063,10 @@ where
         if let Some(previous) = &self.image {
             image.next_frame_at = previous.next_frame_at;
             image.plays_left = previous.plays_left;
+            image.animation_transport = previous
+                .animation_transport
+                .as_ref()
+                .map(image_animation::Transport::without_thumbnails);
         }
         self.image = Some(image);
         self.image_error = None;
@@ -11027,6 +11045,9 @@ where
     }
 
     fn toggle_pause(&mut self) {
+        if self.animation_command(CommandId::TogglePause) {
+            return;
+        }
         let language = self.language();
         let Some(next) = self.state.after_play_pause() else {
             return;
@@ -11103,6 +11124,13 @@ where
     }
 
     fn seek_relative(&mut self, forward: bool) {
+        if self.animation_command(if forward {
+            CommandId::SeekForward
+        } else {
+            CommandId::SeekBackward
+        }) {
+            return;
+        }
         if !matches!(
             self.state,
             PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
@@ -11472,6 +11500,7 @@ where
                     image.sampling.get(),
                 ),
             ));
+            textures.extend(image.restored_animation_textures());
         }
         textures.extend(self.image_previews.values().map(|preview| {
             (
@@ -12093,6 +12122,11 @@ where
             playback_blocked: self.state.after_play_pause().is_none()
                 || self.playback_duration() == Some(Duration::ZERO),
             timeline_open: self.timeline_is_visible(),
+            animated_image: self
+                .image
+                .as_ref()
+                .is_some_and(|image| image.decoded.is_animated()),
+            animation_timeline: self.animation_timeline_open(),
             has_time_selection: self.time_selection.is_some(),
             can_history_back: self.history_available(false),
             can_history_forward: self.history_available(true),
@@ -12693,6 +12727,12 @@ where
             return;
         }
         if self.media_kind == Some(MediaKind::Image) {
+            if self.animation_timeline_open()
+                && let Some(command) = self.repeated_seek_command(&stroke)
+            {
+                self.dispatch(command);
+                return;
+            }
             self.repeat_image_shortcut(stroke);
             return;
         }
@@ -12718,11 +12758,12 @@ where
     }
 
     fn repeated_seek_command(&self, stroke: &KeyStroke) -> Option<CommandId> {
-        if !matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
-            || !matches!(
-                self.state,
-                PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
-            )
+        if (!self.animation_timeline_open()
+            && (!matches!(self.media_kind, Some(MediaKind::Audio | MediaKind::Video))
+                || !matches!(
+                    self.state,
+                    PlaybackState::Playing | PlaybackState::Paused | PlaybackState::Ended
+                )))
             || self.native_ime_composing
             || self.modal_input_blocked()
             || self.palette_open
@@ -12746,7 +12787,9 @@ where
             ) => Some(command),
             ShortcutMatch::Command(
                 command @ (CommandId::PreviousVideoFrame | CommandId::NextVideoFrame),
-            ) if self.media_kind == Some(MediaKind::Video) => Some(command),
+            ) if self.media_kind == Some(MediaKind::Video) || self.animation_timeline_open() => {
+                Some(command)
+            }
             _ => None,
         }
     }
@@ -15141,6 +15184,7 @@ mod tests {
         );
         app.reading_mode = false;
         app.image_view.zoom = ZoomMode::Custom(4.0);
+        let before_selection_pan = app.image_view.pan;
         app.dispatch(CommandId::SelectAll);
         let visible = |tree: &egui::accesskit::TreeUpdate, index: usize| {
             let bounds = tree
@@ -15158,13 +15202,12 @@ mod tests {
             assert_eq!(tree.focus, ids[index]);
         };
         frame(&mut app, vec![]);
-        visible(&frame(&mut app, vec![]), 0);
+        frame(&mut app, vec![]);
         assert_eq!(
-            app.image_view.pan,
-            (320.0, 0.0),
-            "reveal the focused edge without panning beyond the image"
+            app.image_view.pan, before_selection_pan,
+            "creating a selection must not move the zoomed viewport"
         );
-        for index in [1, 2, 3, 0] {
+        for index in [0, 1, 2, 3, 0] {
             frame(
                 &mut app,
                 vec![egui::Event::AccessKitActionRequest(
@@ -15209,7 +15252,12 @@ mod tests {
         app.image_view.pan = (-800.0, 600.0);
         app.dispatch(CommandId::SelectAll);
         frame(&mut app, vec![]);
-        visible(&frame(&mut app, vec![]), 0);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[0]);
+        assert_eq!(
+            app.image_view.pan,
+            (-320.0, 143.0),
+            "selection creation only retains ordinary image-bound clamping"
+        );
         frame(&mut app, vec![request(0, 350.0)]);
         visible(&frame(&mut app, vec![]), 0);
         assert_eq!(crop(&app).x, 350);
@@ -15226,14 +15274,30 @@ mod tests {
         visible(&frame(&mut app, vec![]), 1);
         app.dispatch(CommandId::ToggleCommandPalette);
         frame(&mut app, vec![]);
+        let before_palette_selection_pan = app.image_view.pan;
         app.dispatch(CommandId::SelectAll);
         frame(&mut app, vec![]);
-        visible(&frame(&mut app, vec![]), 0);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[0]);
+        assert_eq!(app.image_view.pan, before_palette_selection_pan);
         assert!(app.command_overlay_return_focus.is_none());
         app.dispatch(CommandId::ToggleCommandPalette);
         frame(&mut app, vec![]);
         frame(&mut app, vec![key(egui::Key::Escape)]);
         frame(&mut app, vec![]);
+        assert_eq!(frame(&mut app, vec![]).focus, ids[0]);
+        // Returning from an overlay restores the role. An explicit edge-focus
+        // action still reveals an edge left offscreen by selection creation.
+        frame(
+            &mut app,
+            vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    action: egui::accesskit::Action::Focus,
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: ids[0],
+                    data: None,
+                },
+            )],
+        );
         visible(&frame(&mut app, vec![]), 0);
         assert!(app.command_overlay_return_focus.is_none());
         app.push_edit(EditOperation::FlipHorizontal);
@@ -25638,6 +25702,7 @@ mod tests {
             ],
         });
         app.image = Some(ImagePresentation {
+            animation_transport: None,
             plays_left: decoded.animation_plays,
             decoded: Arc::clone(&decoded),
             sampling: std::rc::Rc::new(std::cell::Cell::new(TextureOptions::LINEAR)),

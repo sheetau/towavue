@@ -84,9 +84,18 @@ fn selection_paints_only_the_inverted_outline_and_reports_edge_focus_in_status()
     }
 }
 
+#[cfg(test)]
 pub fn focus_first(context: &egui::Context, identity: Id) {
     context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
     context.data_mut(|data| data.insert_temp(identity.with("reveal"), 0_usize));
+}
+
+pub fn focus_created(context: &egui::Context, identity: Id) {
+    context.memory_mut(|memory| memory.request_focus(identity.with(0_usize)));
+    context.data_mut(|data| {
+        data.remove_temp::<usize>(identity.with("reveal"));
+        data.insert_temp(identity.with("preserve-created-view"), true);
+    });
 }
 
 pub fn reveal_offset(
@@ -318,8 +327,20 @@ pub fn controls(
         }
         .unit_rect(size)
     });
+    let frame = ui.ctx().cumulative_frame_nr();
+    let preserve_created_view = ui.ctx().data_mut(|data| {
+        if data
+            .remove_temp::<bool>(identity.with("preserve-created-view"))
+            .is_some()
+        {
+            data.insert_temp(identity.with("created-view-frame"), frame);
+        }
+        data.get_temp::<u64>(identity.with("created-view-frame")) == Some(frame)
+    });
     if let Some(index) = focused
-        && (responses[index].gained_focus() || requested_focus == Some(index) || changed.is_some())
+        && ((!preserve_created_view && responses[index].gained_focus())
+            || requested_focus == Some(index)
+            || changed.is_some())
     {
         ui.ctx()
             .data_mut(|data| data.insert_temp(identity.with("reveal"), index));
@@ -330,6 +351,57 @@ pub fn controls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creating_offscreen_selection_preserves_view_until_an_edge_is_edited() {
+        let context = crate::fonts::test_context();
+        let identity = Id::new("created selection");
+        let viewport = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 60.0));
+        let image = Rect::from_min_size(egui::pos2(-100.0, -50.0), egui::vec2(300.0, 160.0));
+        focus_created(&context, identity);
+        for edit in [false, false, true] {
+            let _ = context.run_ui(
+                egui::RawInput {
+                    events: if edit {
+                        vec![egui::Event::Key {
+                            key: egui::Key::ArrowRight,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |ui| {
+                    let (changed, _) = controls(
+                        ui,
+                        identity,
+                        image,
+                        UnitRect::FULL,
+                        (300, 160),
+                        MediaKind::Image,
+                        true,
+                    );
+                    let offset = reveal_offset(
+                        &context,
+                        identity,
+                        viewport,
+                        image,
+                        changed.unwrap_or(UnitRect::FULL),
+                    );
+                    if edit {
+                        assert!(changed.is_some());
+                        assert!(offset.x > 0.0);
+                    } else {
+                        assert_eq!(offset, egui::Vec2::ZERO);
+                    }
+                },
+            );
+        }
+    }
 
     #[test]
     fn reveal_is_single_use_and_yields_to_disabled_controls_and_pointer_buttons() {

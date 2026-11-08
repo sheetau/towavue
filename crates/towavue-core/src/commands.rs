@@ -560,6 +560,8 @@ pub struct CommandContext {
     pub image_transition: bool,
     pub playback_blocked: bool,
     pub timeline_open: bool,
+    pub animated_image: bool,
+    pub animation_timeline: bool,
     pub has_time_selection: bool,
     pub media_kind: Option<MediaKind>,
     pub palette_open: bool,
@@ -586,6 +588,33 @@ impl CommandDefinition {
     }
 
     pub fn is_enabled(self, context: CommandContext) -> bool {
+        if context.media_kind == Some(MediaKind::Image) {
+            if self.id == CommandId::ToggleTimeline {
+                return context.animated_image
+                    && !context.reading_mode
+                    && !context.image_transition;
+            }
+            if context.animation_timeline {
+                if matches!(
+                    self.id,
+                    CommandId::ToggleReadingMode | CommandId::PreviousImage | CommandId::NextImage
+                ) {
+                    return false;
+                }
+                if matches!(
+                    self.id,
+                    CommandId::TogglePause
+                        | CommandId::SeekBackward
+                        | CommandId::SeekForward
+                        | CommandId::PreviousVideoFrame
+                        | CommandId::NextVideoFrame
+                        | CommandId::ToggleVideoRepeat
+                ) || self.id.video_seek_percent().is_some()
+                {
+                    return context.animated_image && !context.image_transition;
+                }
+            }
+        }
         if (self.id == CommandId::HistoryBack && !context.can_history_back)
             || (self.id == CommandId::HistoryForward && !context.can_history_forward)
         {

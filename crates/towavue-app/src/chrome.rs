@@ -798,21 +798,35 @@ pub fn logo(
 }
 
 fn paint_menu_logo(painter: &egui::Painter, rect: Rect, shift: f32, hover: f32, arrows: [f32; 3]) {
-    let point = |x: f32, y: f32| rect.min + egui::vec2(x, y) * (rect.width() / 17.0);
-    let stroke = Stroke::new(rect.width() / 16.0, FOREGROUND);
-    // Normalize both supplied SVG view boxes to the same painted bounds.
-    let outer = egui::lerp((0.35 * 17.0 / 16.71)..=0.5, shift);
+    let density = painter.ctx().pixels_per_point();
+    let snap = |p: Pos2| (p.to_vec2() * density).round().to_pos2() / density;
+    let rect = Rect::from_min_max(snap(rect.min), snap(rect.max));
+    let stroke = Stroke::new(1.0 / density, FOREGROUND);
+    // Axis-aligned arms sit on physical pixel centers at every density.
+    let bounds = rect.shrink(stroke.width * 0.5);
+    let point = |x: f32, y: f32| {
+        bounds.min + egui::vec2((x - 0.5) / 16.0, (y - 0.5) / 16.0) * bounds.size()
+    };
+    let outer = 0.5;
     let inner = egui::lerp((6.46 * 17.0 / 16.71)..=6.61, shift) - hover * (1.68 * 17.0 / 16.71);
     let offset = shift * (17.0 - outer - inner);
-    for (a, b) in [
+    for (index, (a, b)) in [
         (
             (outer + offset, outer + offset),
             (inner + offset, inner + offset),
         ),
         ((outer, 17.0 - outer), (inner, 17.0 - inner)),
         ((17.0 - outer, outer), (17.0 - inner, inner)),
-    ] {
-        painter.line_segment([point(a.0, a.1), point(b.0, b.1)], stroke);
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut ends = [point(a.0, a.1), point(b.0, b.1)];
+        // Keep the diagonal cap inside the arrow joint rather than past its corner.
+        let tip = if index == 0 { 1 } else { 0 };
+        let direction = (ends[1 - tip] - ends[tip]).normalized();
+        ends[tip] += direction * (stroke.width * 0.75 * arrows[index]);
+        painter.line_segment(ends, stroke);
     }
     for (amount, (corner, a, b)) in arrows.into_iter().zip([
         ((16.5, 16.5), (10.39, 16.5), (16.5, 10.24)),
@@ -1397,6 +1411,8 @@ mod tests {
                     .filter_map(|shape| {
                         if let egui::Shape::LineSegment { points, stroke } = shape.shape {
                             assert_eq!(stroke.color, super::FOREGROUND);
+                            assert!((stroke.width * density - 1.0).abs() < 0.001);
+                            assert!(points.iter().all(|point| rect.contains(*point)));
                             Some(points)
                         } else {
                             None
@@ -1422,6 +1438,13 @@ mod tests {
                         .count(),
                     1
                 );
+                for shape in &held.shapes {
+                    if let egui::Shape::Path(path) = &shape.shape {
+                        let corner = path.points[1] * density;
+                        assert!(((corner.x - 0.5).fract()).abs() < 0.001);
+                        assert!(((corner.y - 0.5).fract()).abs() < 0.001);
+                    }
+                }
                 assert!(lines(held)[0][0].x > rect.center().x);
             }
         }

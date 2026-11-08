@@ -161,6 +161,8 @@ pub struct Filmstrip {
     previews: HashMap<PathBuf, Preview>,
     gallery_video_uvs: HashMap<PathBuf, Rect>,
     preview_order: Vec<PathBuf>,
+    retention_budget: usize,
+    retention_sampled: Option<std::time::Instant>,
     gallery_viewport: Vec<PathBuf>,
     refreshing: Vec<PathBuf>,
     preparation: Option<Preparation>,
@@ -224,6 +226,8 @@ impl Filmstrip {
             previews: HashMap::new(),
             gallery_video_uvs: HashMap::new(),
             preview_order: Vec::new(),
+            retention_budget: 16 * 1024 * 1024,
+            retention_sampled: None,
             gallery_viewport: Vec::new(),
             refreshing: Vec::new(),
             preparation: None,
@@ -700,6 +704,9 @@ impl Filmstrip {
             });
             self.previews.insert(preview.path, result);
             changed = true;
+        }
+        if changed {
+            self.trim_retained_previews();
         }
         changed
     }
@@ -1882,23 +1889,14 @@ impl Filmstrip {
         let visible: Vec<_> = wanted.iter().map(|(path, _)| path.clone()).collect();
         if visible != self.visible || foreground != self.foreground {
             self.warming = None;
-            // Reserve slots for current requests, then reuse recently wanted ready
-            // textures. A brief seek hover or narrow strip must not undo idle work.
+            // Request slots bound worker concurrency, not the lifetime of ready
+            // textures. Returning to a recently visited row must not upload it again.
             self.preview_order.retain(|path| {
-                !visible.is_empty()
-                    && !visible.contains(path)
-                    && self.previews.get(path).is_some_and(Result::is_ok)
+                !visible.contains(path) && self.previews.get(path).is_some_and(Result::is_ok)
             });
             self.preview_order
                 .sort_by_key(|path| !self.gallery_viewport.contains(path));
             self.preview_order.splice(0..0, visible.iter().cloned());
-            self.preview_order.truncate(VISIBLE_PREVIEW_LIMIT);
-            self.previews
-                .retain(|path, _| self.preview_order.contains(path));
-            self.gallery_video_uvs
-                .retain(|path, _| self.preview_order.contains(path));
-            self.refreshing
-                .retain(|path| self.preview_order.contains(path));
             let mut index = 0;
             let mut missing_foreground = 0;
             wanted.retain(|(path, _)| {
@@ -1910,7 +1908,58 @@ impl Filmstrip {
             self.generation = self.loader.request_prioritized(wanted, missing_foreground);
             self.visible = visible;
             self.foreground = foreground;
+            self.trim_retained_previews();
         }
+    }
+
+    fn trim_retained_previews(&mut self) {
+        if self.previews.is_empty() {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self
+            .retention_sampled
+            .is_none_or(|sample| now.duration_since(sample) >= Duration::from_secs(2))
+        {
+            if let Some(available) = towavue_runtime_windows::available_physical_memory() {
+                self.retention_budget =
+                    (available / 64).clamp(16 * 1024 * 1024, 128 * 1024 * 1024) as usize;
+            }
+            self.retention_sampled = Some(now);
+        }
+        let mut bytes = 0_usize;
+        let mut count = 0_usize;
+        self.preview_order.retain(|path| {
+            let size = self
+                .previews
+                .get(path)
+                .and_then(|preview| preview.as_ref().ok())
+                // Account for both egui's pixels and the renderer's texture.
+                .map_or(0, |(texture, _)| {
+                    texture
+                        .size()
+                        .into_iter()
+                        .product::<usize>()
+                        .saturating_mul(8)
+                });
+            let protected = self
+                .visible
+                .iter()
+                .take(self.foreground)
+                .any(|visible| visible == path);
+            let keep =
+                protected || (count < 4096 && bytes.saturating_add(size) <= self.retention_budget);
+            if keep {
+                bytes = bytes.saturating_add(size);
+                count += 1;
+            }
+            keep
+        });
+        let retained: std::collections::HashSet<_> = self.preview_order.iter().collect();
+        self.previews.retain(|path, _| retained.contains(path));
+        self.gallery_video_uvs
+            .retain(|path, _| retained.contains(path));
+        self.refreshing.retain(|path| retained.contains(path));
     }
 }
 
@@ -2013,6 +2062,83 @@ mod tests {
     use towavue_core::{FolderMediaItem, FolderSnapshotSource, MediaKind, ShellIdentity};
 
     use super::*;
+
+    fn assert_retention_budget(strip: &Filmstrip) {
+        assert!(strip.visible.len() <= VISIBLE_PREVIEW_LIMIT);
+        let bytes: usize = strip
+            .previews
+            .values()
+            .filter_map(|preview| preview.as_ref().ok())
+            .map(|(texture, _)| texture.size().into_iter().product::<usize>() * 8)
+            .sum();
+        assert!(bytes <= strip.retention_budget);
+        assert!(strip.previews.len() <= 4096);
+    }
+
+    #[test]
+    fn return_scroll_keeps_textures_beyond_request_limit_and_evicts_by_bytes() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::return_scroll_keeps_textures_beyond_request_limit_and_evicts_by_bytes",
+        ) else {
+            return;
+        };
+        let context = crate::fonts::test_context();
+        let mut strip =
+            Filmstrip::new(PreviewCache::new(root.join("cache")).expect("cache"), || {})
+                .expect("strip");
+        strip.retention_sampled = Some(std::time::Instant::now());
+        let paths: Vec<_> = (0..192)
+            .map(|index| root.join(format!("{index}.png")))
+            .collect();
+        let mut original = None;
+        for batch in paths.chunks(VISIBLE_PREVIEW_LIMIT) {
+            strip.set_visible(
+                batch
+                    .iter()
+                    .map(|path| (path.clone(), MediaKind::Image))
+                    .collect(),
+            );
+            for path in batch {
+                let texture = context.load_texture(
+                    path.display().to_string(),
+                    egui::ColorImage::filled([16, 16], Color32::WHITE),
+                    egui::TextureOptions::LINEAR,
+                );
+                if original.is_none() {
+                    original = Some(texture.id());
+                }
+                strip.previews.insert(path.clone(), Ok((texture, None)));
+            }
+            strip.trim_retained_previews();
+        }
+        assert_eq!(strip.previews.len(), paths.len());
+        strip.set_visible(Vec::new());
+        assert_eq!(
+            strip.previews.len(),
+            paths.len(),
+            "an empty viewport does not discard ready pixels"
+        );
+        strip.set_visible(
+            paths[..4]
+                .iter()
+                .map(|path| (path.clone(), MediaKind::Image))
+                .collect(),
+        );
+        assert_eq!(
+            strip.previews[&paths[0]].as_ref().expect("retained").0.id(),
+            original.expect("first")
+        );
+        strip.retention_budget = 8 * 16 * 16 * 8;
+        strip.trim_retained_previews();
+        assert_eq!(strip.previews.len(), 8);
+        assert!(
+            paths[..4]
+                .iter()
+                .all(|path| strip.previews.contains_key(path))
+        );
+        assert!(!strip.previews.contains_key(&paths[4]));
+        assert_retention_budget(&strip);
+    }
 
     #[test]
     fn gallery_progressively_warms_history_pauses_preserves_pixels_and_stops_at_capacity() {
@@ -3298,7 +3424,7 @@ mod tests {
                     app.handle_app_event(event);
                 }
             }
-            assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+            assert_retention_budget(&app.filmstrip);
         };
         wait(&mut app);
         let retained: Vec<_> = app
@@ -3489,7 +3615,7 @@ mod tests {
                 strip.finish(&context);
             }
             assert!(strip.previews.values().all(Result::is_ok));
-            assert!(strip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+            assert_retention_budget(strip);
         };
         for _ in 0..3 {
             frame(&mut strip, 0.0);
@@ -3537,7 +3663,7 @@ mod tests {
                 .id(),
             original
         );
-        assert!(strip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+        assert_retention_budget(&strip);
         strip.quiesce_previews();
         assert!(strip.refreshing.contains(&paths[0]));
         let generation = strip.generation;
@@ -3978,25 +4104,30 @@ mod tests {
                 .map(|path| (path.clone(), MediaKind::Image))
                 .collect(),
         );
-        assert_eq!(app.filmstrip.preview_order, paths[..VISIBLE_PREVIEW_LIMIT]);
+        assert_eq!(
+            app.filmstrip.preview_order[..VISIBLE_PREVIEW_LIMIT],
+            paths[..VISIBLE_PREVIEW_LIMIT]
+        );
         assert!(
-            app.filmstrip
-                .previews
-                .keys()
-                .all(|path| { paths[..VISIBLE_PREVIEW_LIMIT].contains(path) }),
-            "new visible requests reserve slots before retained neighbors"
+            app.filmstrip.previews.contains_key(&current),
+            "new visible requests retain ready neighbors within the byte budget"
         );
         for return_to_neighbors in [false, true] {
             if return_to_neighbors {
                 draw(&mut app);
             }
             let deadline = std::time::Instant::now() + Duration::from_secs(10);
-            while app.filmstrip.previews.len() != VISIBLE_PREVIEW_LIMIT {
+            while app
+                .filmstrip
+                .visible
+                .iter()
+                .any(|path| !app.filmstrip.previews.contains_key(path))
+            {
                 ready
                     .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
                     .expect("new working set finishes");
                 app.filmstrip.finish(&context);
-                assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+                assert_retention_budget(&app.filmstrip);
             }
             assert_eq!(
                 app.filmstrip.previews[&current]
@@ -4007,13 +4138,14 @@ mod tests {
                 texture_id
             );
         }
+        let retained_count = app.filmstrip.previews.len();
         app.pending_folder = Some((1, crate::FolderIntent::Refresh(current.clone())));
         app.prepare_filmstrip(&context);
         assert!(
             app.filmstrip.visible.is_empty(),
             "refresh pauses background work"
         );
-        assert_eq!(app.filmstrip.previews.len(), VISIBLE_PREVIEW_LIMIT);
+        assert_eq!(app.filmstrip.previews.len(), retained_count);
         let paused_generation = app.filmstrip.generation;
         app.prepare_filmstrip(&context);
         assert_eq!(
@@ -4024,12 +4156,12 @@ mod tests {
         app.apply_folder_snapshot(app.folder_snapshot.clone().expect("same listing"));
         assert_eq!(
             app.filmstrip.previews.len(),
-            VISIBLE_PREVIEW_LIMIT,
+            retained_count,
             "a refresh completing while closed must retain ready previews"
         );
         assert_eq!(
             app.filmstrip.refreshing.len(),
-            VISIBLE_PREVIEW_LIMIT,
+            retained_count,
             "retained previews still require source validation"
         );
         app.filmstrip_open = true;
@@ -4123,7 +4255,7 @@ mod tests {
                 .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
                 .expect("refreshed previews finish");
             app.filmstrip.finish(&context);
-            assert!(app.filmstrip.previews.len() <= VISIBLE_PREVIEW_LIMIT);
+            assert_retention_budget(&app.filmstrip);
             assert!(
                 retained
                     .iter()

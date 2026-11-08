@@ -173,6 +173,8 @@ pub use preview::{
     VideoSheetLayout,
 };
 pub use preview_loader::{PreviewLoader, VISIBLE_PREVIEW_LIMIT};
+mod memory_budget;
+pub use memory_budget::available_physical_memory;
 pub use renderer::{AdapterLuid, FrameRenderer, GraphicsDevice, RenderError, video_edit_geometry};
 #[cfg(feature = "render-verification")]
 pub use renderer::{VerificationMemory, verification_thread_cpu_time};

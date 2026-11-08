@@ -888,11 +888,7 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
         frame(&mut app, size, vec![]);
     }
     let held = frame(&mut app, size, vec![]);
-    assert!(
-        (first_shaft(&held) - initial - egui::Vec2::splat((10.39 / 17.0 - 0.35 / 16.71) * 16.0))
-            .length()
-            < 0.01
-    );
+    assert!((first_shaft(&held) - initial - egui::Vec2::splat(9.89 / 16.0 * 15.0)).length() < 0.01);
     assert!(
         held.viewport_output[&egui::ViewportId::ROOT].repaint_delay > Duration::from_millis(80),
         "settled feedback must not animate forever"
@@ -907,6 +903,53 @@ fn logo_shaft_animation_settles_while_held_and_returns_to_the_original_after_can
     assert!(
         restored.viewport_output[&egui::ViewportId::ROOT].repaint_delay > Duration::from_millis(80)
     );
+}
+
+#[test]
+fn pointer_press_keeps_hover_lengths_until_a_direction_is_selected() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "logo_menu::tests::pointer_press_keeps_hover_lengths_until_a_direction_is_selected",
+    ) else {
+        return;
+    };
+    let (mut app, origin) = setup(&root);
+    let size = egui::vec2(640.0, 480.0);
+    let shaft = |output: egui::FullOutput| {
+        output
+            .shapes
+            .into_iter()
+            .find_map(|shape| match shape.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == chrome::FOREGROUND
+                        && points[0].x < 28.0
+                        && points[0].y < 26.0 =>
+                {
+                    Some(points)
+                }
+                _ => None,
+            })
+            .expect("shaft")
+    };
+    frame(&mut app, size, vec![egui::Event::PointerMoved(origin)]);
+    for _ in 0..20 {
+        frame(&mut app, size, vec![]);
+    }
+    let hovered = shaft(frame(&mut app, size, vec![]));
+    frame(&mut app, size, vec![pointer(origin, true)]);
+    for _ in 0..20 {
+        frame(&mut app, size, vec![]);
+    }
+    assert_eq!(shaft(frame(&mut app, size, vec![])), hovered);
+    frame(
+        &mut app,
+        size,
+        vec![egui::Event::PointerMoved(origin + egui::vec2(24.0, 24.0))],
+    );
+    for _ in 0..20 {
+        frame(&mut app, size, vec![]);
+    }
+    let selected = shaft(frame(&mut app, size, vec![]));
+    assert!((selected[1] - selected[0]).length() > (hovered[1] - hovered[0]).length());
 }
 
 pub(crate) fn hardware_round_trip<N: Fn(AppEvent) + Send + Sync + 'static>(

@@ -582,6 +582,16 @@ mod tests {
             );
         }
         assert!(completed[2].result.is_ok());
+        // Pixels are notified before optional cache writes. A cache-only request
+        // on the same serial worker waits for those writes before fixture cleanup;
+        // dropping the loader deliberately does not join native work.
+        let barrier = loader.request_warming(uncached.clone(), MediaKind::Image);
+        ready
+            .recv_timeout(Duration::from_secs(10))
+            .expect("publication barrier");
+        let warmed = loader.take_warmed().expect("barrier completion");
+        assert_eq!(warmed.generation, barrier);
+        assert!(warmed.result.is_ok());
         drop(loader);
         let palette_root = root.join("palette");
         let (notify, ready) = std::sync::mpsc::channel();

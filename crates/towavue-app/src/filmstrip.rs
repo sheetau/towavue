@@ -2444,6 +2444,93 @@ mod tests {
     }
 
     #[test]
+    fn gallery_held_pointer_delivers_and_paints_new_thumbnails() {
+        let Some(root) = crate::tests::isolated_test_root(
+            "filmstrip::tests::gallery_held_pointer_delivers_and_paints_new_thumbnails",
+        ) else {
+            return;
+        };
+        let mut bmp = vec![0_u8; 70];
+        bmp[..2].copy_from_slice(b"BM");
+        for (offset, value) in [(2, 70_u32), (10, 54), (14, 40), (18, 2), (22, 2), (34, 16)] {
+            bmp[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+        }
+        bmp[26] = 1;
+        bmp[28] = 24;
+        bmp[54..].fill(180);
+        let paths: Vec<_> = (0..80)
+            .map(|i| {
+                let path = root.join(format!("held-{i:03}.bmp"));
+                std::fs::write(&path, &bmp).expect("owned BMP");
+                path
+            })
+            .collect();
+        let (notify, events) = std::sync::mpsc::channel();
+        let mut app = crate::Application::new_with_preview_cache(
+            None,
+            move |event| {
+                let _ = notify.send(event);
+            },
+            PreviewCache::new(root.join("cache")).expect("owned cache"),
+        )
+        .expect("app");
+        app.recent_files = None;
+        app.recent_paths = paths;
+        let context = crate::fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let draw = |app: &mut crate::Application<_>, events| {
+            context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(660.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.draw_gallery(ui, true, &mut vec![]),
+            )
+        };
+        let point = egui::pos2(650.0, 350.0);
+        draw(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(point),
+                egui::Event::PointerButton {
+                    pos: point,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert!(!app.filmstrip.visible.is_empty());
+        assert_eq!(app.filmstrip.visible.len(), app.filmstrip.foreground);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while app
+            .filmstrip
+            .visible
+            .iter()
+            .any(|path| !app.filmstrip.previews.contains_key(path))
+        {
+            let event = events
+                .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+                .expect("held-pointer completion");
+            app.handle_app_event(event);
+        }
+        assert!(context.input(|input| input.pointer.primary_down()));
+        let texture = app.filmstrip.previews[&app.filmstrip.visible[0]]
+            .as_ref()
+            .expect("valid pixels")
+            .0
+            .id();
+        let output = draw(&mut app, vec![]);
+        assert!(context.tessellate(output.shapes, output.pixels_per_point).iter().any(|primitive| matches!(
+            &primitive.primitive, egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture
+        )), "newly delivered pixels paint before pointer release");
+    }
+
+    #[test]
     fn gallery_policy_keeps_visible_cards_available_during_retained_playback() {
         let Some(root) = crate::tests::isolated_test_root(
             "filmstrip::tests::gallery_policy_keeps_visible_cards_available_during_retained_playback",

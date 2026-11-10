@@ -1819,9 +1819,9 @@ mod tests {
     fn command_groups_follow_filtered_matches_and_similar_commands_execute() {
         let context = crate::fonts::test_context();
         for (query, history, recent, other, similar) in [
-            (">open", vec![], false, false, false),
-            (">open", vec![CommandId::OpenFile], true, true, false),
-            (">open", vec![CommandId::TogglePause], false, false, false),
+            (">open", vec![], false, false, true),
+            (">open", vec![CommandId::OpenFile], true, true, true),
+            (">open", vec![CommandId::TogglePause], false, false, true),
             (">file open", vec![], false, false, true),
         ] {
             let mut palette = CommandPalette {

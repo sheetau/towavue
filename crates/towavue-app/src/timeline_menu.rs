@@ -32,7 +32,7 @@ impl Action {
             Self::Crop => CommandId::KeepTimeSelection,
             Self::Play => CommandId::PlayTimeSelection,
             Self::Speed => CommandId::EditSpeed,
-            Self::Silence => return None,
+            Self::Silence => CommandId::SilenceTimeSelection,
         })
     }
 }
@@ -256,15 +256,6 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(command) = intent.action.command() {
             self.dispatch(command);
-        } else if let Some(range) = intent.owner.selection.or_else(|| {
-            towavue_core::TimeRange::new(MediaTime::ZERO, media_time(self.playback_duration()?))
-        }) {
-            self.handle_ui_action(UiAction::TimeAdjustment(
-                intent.owner.tab,
-                intent.owner.generation,
-                intent.owner.selection,
-                towavue_core::TimelineEdit::ScaleVolume(range, 0.0),
-            ));
         }
     }
 }

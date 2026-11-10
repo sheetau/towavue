@@ -121,6 +121,7 @@ pub const fn command_text(command: CommandId) -> Text {
         CommandId::SetTrimEnd => Text::CommandSetTrimEnd,
         CommandId::DeleteTimeSelection => Text::CommandDeleteTimeSelection,
         CommandId::KeepTimeSelection => Text::CommandKeepTimeSelection,
+        CommandId::SilenceTimeSelection => Text::TimelineSilence,
         CommandId::VolumeDown => Text::CommandVolumeDown,
         CommandId::VolumeUp => Text::CommandVolumeUp,
         CommandId::ToggleMute => Text::CommandToggleMute,

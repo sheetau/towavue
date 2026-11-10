@@ -65,6 +65,7 @@ pub(super) struct Output {
     pub selection: Option<Option<TimeRange>>,
     pub seek: Option<MediaTime>,
     pub scrub: Option<(MediaTime, bool)>,
+    pub scrub_original_frame: bool,
     pub edit: Option<TimelineEdit>,
     pub gain_preview: Option<(TimeRange, f32)>,
     pub stretch_preview: Option<(TimeRange, MediaTime)>,
@@ -391,6 +392,10 @@ pub(super) fn show(
         }
         if drag.dragging && matches!(mode, Gesture::Seek | Gesture::Select) {
             output.scrub = Some((head, drag.released));
+            // Forward selection keeps the CTI at the press seek. Retain its native
+            // frame, including when a reverse drag crosses back over the origin.
+            output.scrub_original_frame =
+                matches!(mode, Gesture::Select) && head == snap(at(origin.x), origin.x);
         }
         // A discarded UI pass must not paint the pre-gesture CTI/selection again.
         ui.ctx()

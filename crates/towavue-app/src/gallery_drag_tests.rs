@@ -56,9 +56,9 @@ fn card(output: &egui::FullOutput, label: &str) -> egui::Rect {
 }
 
 #[test]
-fn gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it() {
+fn gallery_pointer_holds_keep_visible_loading_but_overlays_pause_it() {
     let Some(root) = tests::isolated_test_root(
-        "gallery_drag_tests::gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it",
+        "gallery_drag_tests::gallery_pointer_holds_keep_visible_loading_but_overlays_pause_it",
     ) else {
         return;
     };
@@ -101,7 +101,7 @@ fn gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it() {
         app.gallery_preparation_policy(&context),
         filmstrip::PreparationPolicy::All
     ));
-    let header = egui::pos2(20.0, 20.0);
+    let header = egui::pos2(400.0, 200.0);
     frame(
         &mut app,
         1.0,
@@ -109,7 +109,7 @@ fn gallery_rail_drag_keeps_visible_loading_but_other_holds_pause_it() {
     );
     assert!(matches!(
         app.gallery_preparation_policy(&context),
-        filmstrip::PreparationPolicy::Paused
+        filmstrip::PreparationPolicy::Visible
     ));
 }
 

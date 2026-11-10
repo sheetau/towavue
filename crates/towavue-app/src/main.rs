@@ -7642,17 +7642,22 @@ where
                         .is_some()
                     && let Some((target, released)) = result.scrub
                 {
+                    if result.scrub_original_frame {
+                        self.retain_native_scrub_frame();
+                    }
                     if released {
                         if let Some(tab) = self.tabs.active() {
                             self.queue_timeline_scrub(tab.id, result.selection, target, actions);
                         }
                     } else {
                         self.begin_video_scrub();
-                        self.update_seek_preview(
-                            Duration::from_nanos(target.as_nanoseconds().max(0) as u64),
-                            duration,
-                            None,
-                        );
+                        if !result.scrub_original_frame {
+                            self.update_seek_preview(
+                                Duration::from_nanos(target.as_nanoseconds().max(0) as u64),
+                                duration,
+                                None,
+                            );
+                        }
                     }
                 } else {
                     if let Some(tab) = self.tabs.active()
@@ -8292,6 +8297,7 @@ where
                     | CommandId::ApplyCrop
                     | CommandId::DeleteTimeSelection
                     | CommandId::KeepTimeSelection
+                    | CommandId::SilenceTimeSelection
                     | CommandId::PlayTimeSelection
                     | CommandId::RotateClockwise
                     | CommandId::RotateCounterclockwise
@@ -8860,6 +8866,18 @@ where
                 self.set_time_selection_endpoint(false);
             }
             CommandId::PlayTimeSelection => self.play_time_selection(),
+            CommandId::SilenceTimeSelection => {
+                if let Some(range) = self.time_selection.or_else(|| {
+                    towavue_core::TimeRange::new(
+                        MediaTime::ZERO,
+                        media_time(self.playback_duration()?),
+                    )
+                }) {
+                    self.push_edit(EditOperation::Timeline(
+                        towavue_core::TimelineEdit::ScaleVolume(range, 0.0),
+                    ));
+                }
+            }
             CommandId::DeleteTimeSelection | CommandId::KeepTimeSelection => {
                 if let Some(range) = self.time_selection {
                     self.push_edit(EditOperation::Timeline(

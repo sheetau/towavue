@@ -310,6 +310,12 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.video_scrub = Some(scrub);
     }
 
+    pub(super) fn retain_native_scrub_frame(&mut self) {
+        if let Some(scrub) = &mut self.video_scrub {
+            scrub.sample = None;
+        }
+    }
+
     pub(super) fn update_scrub_sample(&mut self, sample: Option<(TextureHandle, Rect)>) {
         if let Some(scrub) = &mut self.video_scrub
             && scrub.phase == Phase::Dragging

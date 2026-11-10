@@ -62,7 +62,7 @@ first-pixel resizing from off-center handle presses, the 30% height cap, a singl
 Filmstrip dimming overlay and cancellation. Native playback coverage in
 `video_scrub::tests::exercise` includes CTI/selection scrubbing, main-surface
 preview meshes, frozen decoder generations during holds, one release seek and
-play/pause restoration on cancellation. Clock controls cover independent
+play/pause restoration on cancellation. Forward selection must retain the native press frame; reverse selection uses a preview and crossing back restores the native frame. Clock controls cover independent
 minute/hour widths and shared three-digit millisecond labels.
 Status changes use `status_info::tests::` and `status_file_details::tests::`, including
 reading spread positions, grouped format/dimensions and full-width fitting. Selection creation uses
@@ -575,3 +575,10 @@ by later original opens, and cancelled/changed sources discard deferred writes. 
 The original-image/prefetch and benchmark observation paths remain unchanged.
 Editable speed-duration inputs use the same compact whole-time formatter while
 retaining exact fractional seconds and accepting both m:ss and h:mm:ss input.
+
+Palette search vocabulary lives in `palette/search/keywords.rs` as an exhaustive
+command match. Cover new command phrases in both English and Japanese, direction
+and numeric qualifiers, typo tolerance, irrelevant inputs and direct/MRU priority.
+Timeline Silence and Crop controls share menu/palette dispatch, selection/whole-range
+behavior, undo and unavailable-state guards. Gallery held-pointer controls require
+new worker completions to reach painted textures before releasing the pointer.

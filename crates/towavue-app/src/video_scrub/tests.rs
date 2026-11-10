@@ -468,7 +468,19 @@ fn exercise_timeline<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applicat
                 Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
             )));
             let output = frame(app, vec![], false).1;
-            assert!(context.tessellate(output.shapes, output.pixels_per_point).iter().any(|p| matches!(&p.primitive, egui::epaint::Primitive::Mesh(m) if m.texture_id == id)));
+            assert_eq!(context.tessellate(output.shapes, output.pixels_per_point).iter().any(|p| matches!(&p.primitive, egui::epaint::Primitive::Mesh(m) if m.texture_id == id)), gesture != 1,
+                "forward selection retains the native press frame");
+            if gesture == 2 {
+                let forward = pos2(x(0.9), start.y);
+                let output = frame(app, vec![egui::Event::PointerMoved(forward)], false).1;
+                assert!(app.video_scrub.as_ref().expect("scrub").sample.is_none());
+                assert!(!context.tessellate(output.shapes, output.pixels_per_point).iter().any(|p| matches!(&p.primitive, egui::epaint::Primitive::Mesh(m) if m.texture_id == id)));
+                frame(app, vec![egui::Event::PointerMoved(end)], false);
+                assert_eq!(
+                    app.generation, generation,
+                    "crossing the origin never seeks"
+                );
+            }
             if gesture == 3 {
                 frame(app, vec![egui::Event::WindowFocused(false)], false);
                 assert!(app.video_scrub.is_none());

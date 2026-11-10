@@ -440,6 +440,58 @@ fn timeline_context_covers_children_without_retargeting_selection_or_seeking_in_
 }
 
 #[test]
+fn timeline_commands_share_palette_menu_and_shortcut_dispatch() {
+    let Some(root) = crate::tests::isolated_test_root(
+        "timeline_menu::tests::timeline_commands_share_palette_menu_and_shortcut_dispatch",
+    ) else {
+        return;
+    };
+    for kind in [MediaKind::Audio, MediaKind::Video] {
+        let mut app = media_app(&root, kind);
+        let tab = app.tabs.active_id().expect("tab");
+        app.time_selection = Some(range());
+        app.dispatch(CommandId::SilenceTimeSelection);
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::Timeline(
+                towavue_core::TimelineEdit::ScaleVolume(range(), 0.0)
+            )]
+        );
+        app.dispatch(CommandId::Undo);
+        app.time_selection = Some(range());
+        app.dispatch(CommandId::KeepTimeSelection);
+        assert_eq!(
+            app.edits[&tab].operations(),
+            &[EditOperation::Timeline(towavue_core::TimelineEdit::Keep(
+                range()
+            ))]
+        );
+        app.dispatch(CommandId::Undo);
+        for command in [
+            CommandId::SilenceTimeSelection,
+            CommandId::KeepTimeSelection,
+        ] {
+            assert_eq!(
+                command
+                    .as_str()
+                    .parse::<CommandId>()
+                    .expect("custom shortcut command"),
+                command
+            );
+            app.timeline_open = false;
+            app.dispatch(command);
+            assert!(app.edits[&tab].operations().is_empty());
+            app.timeline_open = true;
+        }
+        for state in [PlaybackState::Loading, PlaybackState::Faulted] {
+            app.state = state;
+            app.dispatch(CommandId::SilenceTimeSelection);
+            assert!(app.edits[&tab].operations().is_empty());
+        }
+    }
+}
+
+#[test]
 fn timeline_context_edits_current_range_and_undo_restores_history() {
     let Some(root) = crate::tests::isolated_test_root(
         "timeline_menu::tests::timeline_context_edits_current_range_and_undo_restores_history",

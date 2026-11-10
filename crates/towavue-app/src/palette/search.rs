@@ -2,6 +2,8 @@ use super::*;
 use std::collections::BTreeMap;
 use towavue_core::CommandDefinition;
 
+mod keywords;
+
 pub(super) fn title(command: &CommandDefinition, language: localization::Language) -> &str {
     options::title(command.id, language).unwrap_or_else(|| match command.id {
         CommandId::ToggleImageInterpolation => Text::ImageInterpolation.in_language(language),
@@ -13,16 +15,15 @@ pub(super) fn title(command: &CommandDefinition, language: localization::Languag
 fn terms(text: &str) -> BTreeMap<String, usize> {
     let mut terms = BTreeMap::new();
     for word in text.split(|c: char| !c.is_alphanumeric()) {
-        if word.chars().count() >= if word.is_ascii() { 3 } else { 2 } {
+        if !word.is_empty() {
             *terms.entry(word.to_lowercase()).or_default() += 1;
         }
     }
     terms
 }
 
-// Direct matches retain MRU priority. Suggestions combine catalog words with a
-// small, explicit vocabulary of related actions and conservative typo matching.
-// No network model, opaque embeddings, or new dependency is needed.
+// Direct matches retain MRU priority. Every command supplies search phrases;
+// ranking is shared and never dispatches based on the query itself.
 pub(super) fn ranked(
     query: &str,
     language: localization::Language,
@@ -62,12 +63,15 @@ pub(super) fn ranked(
         .count();
     let direct_count = matches.len();
     let query_terms = terms(query);
-    if !query_terms.is_empty() {
+    if !query_terms.is_empty() && query.chars().count() >= if query.is_ascii() { 3 } else { 2 } {
         let documents: Vec<_> = labels
             .iter()
             .zip(&definitions)
             .map(|((label, alias), definition)| {
-                terms(&format!("{label} {alias} {}", related(definition.id)))
+                terms(&format!(
+                    "{label} {alias} {}",
+                    keywords::phrases(definition.id)
+                ))
             })
             .collect();
         let weights: Vec<_> = query_terms
@@ -89,20 +93,27 @@ pub(super) fn ranked(
             .enumerate()
             .filter(|(index, _)| !direct[*index])
             .filter_map(|(index, doc)| {
-                let score: f64 = weights
-                    .iter()
-                    .map(|(term, weight)| {
-                        let best = doc
-                            .keys()
-                            .map(|word| similarity(term, word))
-                            .fold(0.0_f64, f64::max);
-                        weight * best
-                    })
-                    .sum::<f64>()
-                    / total;
-                // One-word queries must have a close match. Multiword queries may
-                // also suggest a related command sharing a substantial topic.
-                (score >= if weights.len() == 1 { 0.8 } else { 0.45 }).then_some((index, score))
+                let mut score = 0.0;
+                for (term, weight) in &weights {
+                    let best = doc
+                        .keys()
+                        .map(|word| similarity(term, word))
+                        .fold(0.0_f64, f64::max);
+                    // Do not ignore an unmatched direction or qualifier: "skip back"
+                    // must not qualify a forward command just because "skip" matches.
+                    if best == 0.0 {
+                        return None;
+                    }
+                    score += weight * best;
+                }
+                score /= total;
+                let exact_phrase = keywords::phrases(definitions[index].id)
+                    .split('|')
+                    .any(|phrase| terms(phrase) == query_terms);
+                if exact_phrase {
+                    score += 0.15;
+                }
+                (score >= 0.8).then_some((index, score))
             })
             .collect();
         scores.sort_by(|(a, sa), (b, sb)| {
@@ -119,23 +130,6 @@ pub(super) fn ranked(
         }
     }
     (matches, recent_count, direct_count)
-}
-
-fn related(command: CommandId) -> &'static str {
-    match command {
-        CommandId::Save => "export write store 保存 書き出し",
-        CommandId::ExportAs => "export save write store convert 保存 書き出し 変換",
-        CommandId::ExportAudio | CommandId::ExportFrame => {
-            "save write store convert 保存 書き出し 変換"
-        }
-        CommandId::DeleteFile | CommandId::DeleteTimeSelection => "remove erase delete 削除 消去",
-        CommandId::FlipHorizontal | CommandId::FlipVertical => "mirror reflect 反転 鏡像",
-        CommandId::RotateClockwise | CommandId::RotateCounterclockwise => "turn rotation 回転",
-        CommandId::TogglePause => "play pause resume stop 再生 停止 一時停止",
-        CommandId::OpenFile => "load import 読み込み 開く",
-        CommandId::RenameFile => "name 名前 変更",
-        _ => "",
-    }
 }
 
 fn similarity(query: &str, word: &str) -> f64 {
@@ -183,6 +177,63 @@ fn title_for_english(command: &CommandDefinition) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn vocabulary_covers_actions_languages_directions_and_numeric_qualifiers() {
+        for language in [
+            localization::Language::English,
+            localization::Language::Japanese,
+        ] {
+            for (query, expected) in [
+                ("fast", CommandId::RateUp),
+                ("speed", CommandId::RateUp),
+                ("speed up", CommandId::RateUp),
+                ("slow down", CommandId::RateDown),
+                ("skip", CommandId::SeekForward),
+                ("skip back", CommandId::SeekBackward),
+                ("skip ahead", CommandId::SeekForward),
+                ("倍速", CommandId::RateUp),
+                ("巻き戻し", CommandId::SeekBackward),
+                ("crop selection", CommandId::KeepTimeSelection),
+                ("mute selection", CommandId::SilenceTimeSelection),
+                ("hotkeys", CommandId::OpenKeyboardSettings),
+                ("explorer", CommandId::RevealFile),
+                ("snapshot", CommandId::ExportFrame),
+                ("comic", CommandId::ToggleReadingMode),
+                ("captions", CommandId::LoadSubtitles),
+                ("random", CommandId::ToggleAudioShuffle),
+                ("soundtrack", CommandId::CycleAudioTrack),
+                ("原寸", CommandId::ActualSize),
+                ("revert edit", CommandId::Undo),
+                ("clipboard", CommandId::PasteImage),
+                ("jump to 30", CommandId::SeekVideo30),
+            ] {
+                let (matches, _, direct) = ranked(query, language, &[]);
+                assert!(
+                    matches.iter().any(|command| command.id == expected),
+                    "{language:?}: {query} -> {expected:?}"
+                );
+                assert!(matches.len() - direct <= 5);
+            }
+            for (query, rejected) in [
+                ("skip back", CommandId::SeekForward),
+                ("speed up", CommandId::RateDown),
+                ("slow down", CommandId::RateUp),
+                ("jump to 30", CommandId::SeekVideo40),
+            ] {
+                assert!(
+                    !ranked(query, language, &[])
+                        .0
+                        .iter()
+                        .any(|command| command.id == rejected),
+                    "{query}"
+                );
+            }
+            for query in ["speed banana", "skip zzzzzzz", "weather forecast"] {
+                assert!(ranked(query, language, &[]).0.is_empty(), "{query}");
+            }
+        }
+    }
+
     #[test]
     fn semantic_and_typo_suggestions_are_bounded_and_preserve_direct_priority() {
         for (query, expected) in [

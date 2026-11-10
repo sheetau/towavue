@@ -106,10 +106,9 @@ impl<Notify: Fn(crate::AppEvent) + Send + Sync + 'static> Application<Notify> {
             || self.palette_open
             || egui::Popup::is_any_open(context)
             || context.input(|input| !input.raw.hovered_files.is_empty())
-            || (context.input(|input| input.pointer.any_down()) && !gallery_rail::dragging(context))
         {
             PreparationPolicy::Paused
-        } else if gallery_rail::dragging(context)
+        } else if context.input(|input| input.pointer.any_down())
             || self.retained_playback.values().any(|saved| {
                 !saved.prepared_only
                     && matches!(

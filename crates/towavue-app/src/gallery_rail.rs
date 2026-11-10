@@ -75,18 +75,6 @@ pub(super) fn advance(context: &egui::Context, scroll_id: egui::Id) {
     }
 }
 
-pub(super) fn dragging(context: &egui::Context) -> bool {
-    context
-        .data(|data| data.get_temp::<(egui::Id, u64)>(egui::Id::new("gallery-rail-drag")))
-        .is_some_and(|(id, frame)| {
-            frame.saturating_add(1) >= context.cumulative_frame_nr()
-                && context.input(|input| input.focused && input.pointer.primary_down())
-                && context.read_response(id).is_some_and(|response| {
-                    response.is_pointer_button_down_on() || response.dragged()
-                })
-        })
-}
-
 #[derive(Clone)]
 pub(super) struct Month {
     pub date: Option<(u16, u16)>,
@@ -130,8 +118,6 @@ pub(super) fn show(
     rect: egui::Rect,
 ) {
     let language = localization::language(ui.ctx());
-    let drag_id = egui::Id::new("gallery-rail-drag");
-    ui.data_mut(|data| data.remove::<(egui::Id, u64)>(drag_id));
     let months = &output.inner;
     let position_id = output.id.with("gallery-rail-position");
     if months.is_empty() || rect.height() < 12.0 {
@@ -218,10 +204,6 @@ pub(super) fn show(
             egui::Sense::click_and_drag(),
         );
         let label = month.label(language);
-        if response.enabled() && (response.is_pointer_button_down_on() || response.dragged()) {
-            let frame = ui.ctx().cumulative_frame_nr();
-            ui.data_mut(|data| data.insert_temp(drag_id, (response.id, frame)));
-        }
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), &label)
         });
@@ -310,8 +292,6 @@ pub(super) fn show(
                 .clamp(0.0, 1.0),
             );
             dragging = true;
-            let frame = ui.ctx().cumulative_frame_nr();
-            ui.data_mut(|data| data.insert_temp(drag_id, (thumb_response.id, frame)));
         }
     } else {
         ui.data_mut(|data| data.remove::<DragAnchor>(anchor_id));

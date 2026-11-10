@@ -141,7 +141,12 @@ const MENUS: &[(Text, &[&[CommandId]])] = &[
                 FlipVertical,
             ],
             &[SetTrimStart, SetTrimEnd],
-            &[DeleteTimeSelection, KeepTimeSelection, PlayTimeSelection],
+            &[
+                DeleteTimeSelection,
+                KeepTimeSelection,
+                SilenceTimeSelection,
+                PlayTimeSelection,
+            ],
             &[EditSpeed],
         ],
     ),

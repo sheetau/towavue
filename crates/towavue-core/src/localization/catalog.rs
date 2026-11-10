@@ -1324,7 +1324,7 @@ messages! {
     CommandSetTrimStart => ("Set time selection start", "時間範囲の開始位置を設定"),
     CommandSetTrimEnd => ("Set time selection end", "時間範囲の終了位置を設定"),
     CommandDeleteTimeSelection => ("Delete selected time", "選択した時間範囲を削除"),
-    CommandKeepTimeSelection => ("Keep only selected time", "選択した時間範囲だけ残す"),
+    CommandKeepTimeSelection => ("Crop to selected time", "選択した時間範囲で切り抜き"),
     CommandVolumeDown => ("Decrease volume", "音量を下げる"),
     CommandVolumeUp => ("Increase volume", "音量を上げる"),
     CommandToggleMute => ("Toggle mute", "ミュートを切り替え"),

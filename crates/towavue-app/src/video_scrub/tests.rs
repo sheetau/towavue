@@ -343,6 +343,7 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
             }
         }
     }
+    exercise_timeline(app);
     app.begin_video_scrub();
     app.queue_video_scrub(media_time(Duration::from_secs(2)), &mut Vec::new());
     app.commit_video_scrub(media_time(Duration::from_secs(2)));
@@ -355,4 +356,154 @@ pub(crate) fn exercise<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applic
     eprintln!(
         "PASS video scrub: frozen transport, mesh, precision upward seek without timeline opening, one release seek, multi-pass, cancel and EOF"
     );
+}
+
+fn exercise_timeline<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Application<N>) {
+    for playing in [false, true] {
+        for gesture in 0..4 {
+            app.cancel_video_scrub();
+            app.time_selection = None;
+            app.playback_selection = None;
+            app.timeline_open = true;
+            app.filmstrip_open = false;
+            app.state = PlaybackState::Paused;
+            app.seek_to(media_time(Duration::from_millis(200)));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while app
+                .session
+                .as_ref()
+                .expect("test fixture")
+                .video_refresh_pending()
+                && Instant::now() < deadline
+            {
+                app.load_next_frame();
+                app.advance_media();
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(app.scrub_pause(!playing));
+            let context = fonts::test_context();
+            app.ui_context = Some(context.clone());
+            let frame = |app: &mut Application<N>, events, discard| {
+                let mut actions = Vec::new();
+                let output = context.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 400.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        app.video_scrub_seen = false;
+                        app.video_scrub_surface = Some((
+                            ui.painter().clone(),
+                            Rect::from_min_size(Pos2::ZERO, vec2(600.0, 250.0)),
+                        ));
+                        app.video_rect = Some(ui.max_rect());
+                        app.draw_timeline(ui, &mut actions);
+                        app.draw_video_scrub();
+                        if discard && context.current_pass_index() == 0 {
+                            context.request_discard("timeline release");
+                        }
+                    },
+                );
+                (actions, output)
+            };
+            frame(app, vec![], false);
+            frame(app, vec![], false);
+            let panel =
+                egui::containers::panel::PanelState::load(&context, app.timeline_panel_id())
+                    .expect("test fixture")
+                    .outer_rect;
+            let rect = Rect::from_min_max(panel.min + vec2(8.0, 8.0), panel.max - vec2(8.0, 0.0));
+            let x = |ratio| egui::lerp(rect.x_range(), ratio);
+            let ratio = (app.current_position().as_seconds_f64() / 2.0) as f32;
+            let start = if gesture == 1 {
+                pos2(x(0.3), rect.bottom() - 10.0)
+            } else if gesture == 2 {
+                pos2(x(0.8), rect.bottom() - 10.0)
+            } else {
+                pos2(x(ratio), rect.top() + 3.0)
+            };
+            let end = pos2(x(if gesture == 2 { 0.3 } else { 0.8 }), start.y);
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            };
+
+            frame(app, vec![egui::Event::PointerMoved(start)], false);
+            let press = frame(app, vec![button(start, true)], false).0;
+            if gesture == 1 || gesture == 2 {
+                assert!(matches!(press.as_slice(), [UiAction::Seek(_)]));
+            } else {
+                assert!(press.is_empty());
+            }
+            for action in press {
+                app.handle_ui_action(action);
+            }
+            let generation = app.generation;
+            assert!(
+                frame(app, vec![egui::Event::PointerMoved(end)], false)
+                    .0
+                    .is_empty()
+            );
+            assert_eq!(
+                app.generation, generation,
+                "held timeline gestures never seek the decoder"
+            );
+            assert_eq!(app.state, PlaybackState::Paused);
+            assert!(
+                app.video_scrub
+                    .as_ref()
+                    .is_some_and(|scrub| scrub.phase == Phase::Dragging)
+            );
+            let texture = context.load_texture(
+                "timeline-sample",
+                egui::ColorImage::filled([240, 160], Color32::RED),
+                egui::TextureOptions::LINEAR,
+            );
+            let id = texture.id();
+            app.update_scrub_sample(Some((
+                texture,
+                Rect::from_min_max(Pos2::ZERO, pos2(1.0, 1.0)),
+            )));
+            let output = frame(app, vec![], false).1;
+            assert!(context.tessellate(output.shapes, output.pixels_per_point).iter().any(|p| matches!(&p.primitive, egui::epaint::Primitive::Mesh(m) if m.texture_id == id)));
+            if gesture == 3 {
+                frame(app, vec![egui::Event::WindowFocused(false)], false);
+                assert!(app.video_scrub.is_none());
+                assert!(frame(app, vec![button(end, false)], false).0.is_empty());
+                assert_eq!(app.generation, generation);
+            } else {
+                let actions = frame(app, vec![button(end, false)], true).0;
+                assert_eq!(
+                    actions
+                        .iter()
+                        .filter(|action| matches!(action, UiAction::CommitTimelineScrub(..)))
+                        .count(),
+                    1
+                );
+                for action in actions {
+                    app.handle_ui_action(action);
+                }
+                assert_eq!(app.generation, generation.next());
+                let expected = if gesture == 1 || gesture == 2 {
+                    0.6
+                } else {
+                    1.6
+                };
+                assert!((app.current_position().as_seconds_f64() - expected).abs() < 0.02);
+                app.cancel_video_scrub();
+            }
+            assert_eq!(
+                app.state,
+                if playing {
+                    PlaybackState::Playing
+                } else {
+                    PlaybackState::Paused
+                }
+            );
+        }
+    }
+    app.timeline_open = false;
 }

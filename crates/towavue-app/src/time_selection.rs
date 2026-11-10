@@ -64,6 +64,7 @@ enum Gesture {
 pub(super) struct Output {
     pub selection: Option<Option<TimeRange>>,
     pub seek: Option<MediaTime>,
+    pub scrub: Option<(MediaTime, bool)>,
     pub edit: Option<TimelineEdit>,
     pub gain_preview: Option<(TimeRange, f32)>,
     pub stretch_preview: Option<(TimeRange, MediaTime)>,
@@ -387,6 +388,9 @@ pub(super) fn show(
             {
                 output.selection = Some(None);
             }
+        }
+        if drag.dragging && matches!(mode, Gesture::Seek | Gesture::Select) {
+            output.scrub = Some((head, drag.released));
         }
         // A discarded UI pass must not paint the pre-gesture CTI/selection again.
         ui.ctx()
@@ -1891,7 +1895,7 @@ mod tests {
                     ] {
                         let preview_length = if target > rect.right() { 10.0 } else { 5.0 };
                         let expected_labels = [
-                            "In 00:00:02:500".to_owned(),
+                            "In 0:02:500".to_owned(),
                             format!(
                                 "Out {}",
                                 crate::format_time_precise(time(2.5 + preview_length))
@@ -2009,11 +2013,11 @@ mod tests {
                                         .split(':')
                                         .map(|part| part.parse().expect("clock field"))
                                         .collect();
-                                    assert_eq!(parts.len(), 4);
-                                    let value = parts[0] * 3600.0
-                                        + parts[1] * 60.0
-                                        + parts[2]
-                                        + parts[3] / 1000.0;
+                                    assert!((3..=4).contains(&parts.len()));
+                                    let seconds = parts[..parts.len() - 1]
+                                        .iter()
+                                        .fold(0.0, |value, part| value * 60.0 + part);
+                                    let value = seconds + parts[parts.len() - 1] / 1000.0;
                                     let node = tree
                                         .nodes
                                         .iter()
@@ -2072,7 +2076,7 @@ mod tests {
                         if cancel {
                             assert!(actions.is_empty());
                             let expected = if selection.is_some() {
-                                vec!["In 00:00:02:500", "Out 00:00:05:000"]
+                                vec!["In 0:02:500", "Out 0:05:000"]
                             } else {
                                 vec![]
                             };

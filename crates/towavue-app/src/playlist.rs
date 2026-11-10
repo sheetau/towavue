@@ -251,7 +251,7 @@ impl Playlist {
                 .max()
                 .map(|duration| measure(crate::format_time(crate::media_time(*duration))))
                 .unwrap_or(0.0)
-                .max(measure("00:00".into()));
+                .max(measure("0:00".into()));
             let output =
                 scroll.show_rows_padded_styled(ui, 32.0, items.len(), [8.0, 8.0], |ui, rows| {
                     for index in rows {
@@ -683,8 +683,8 @@ mod tests {
                     snapshot.items[0].path.display(),
                     match language {
                         crate::localization::Language::English =>
-                            " (current track) · Duration 02:41",
-                        crate::localization::Language::Japanese => "（現在の曲） · 長さ 02:41",
+                            " (current track) · Duration 2:41",
+                        crate::localization::Language::Japanese => "（現在の曲） · 長さ 2:41",
                     }
                 );
                 let tree = output
@@ -699,7 +699,7 @@ mod tests {
                 );
                 let duration = texts(&output)
                     .into_iter()
-                    .find(|text| text.galley.text() == "02:41")
+                    .find(|text| text.galley.text() == "2:41")
                     .expect("duration caption");
                 assert!(
                     duration.pos.x > 260.0 && duration.pos.x + duration.galley.size().x <= 312.0
@@ -788,7 +788,7 @@ mod tests {
                 .collect();
             let durations: Vec<_> = painted
                 .iter()
-                .filter(|text| text.galley.text() == "02:03")
+                .filter(|text| text.galley.text() == "2:03")
                 .collect();
             assert!(numbers.iter().any(|text| text.galley.text() == "10"));
             assert_eq!(numbers.len(), names.len());
@@ -1175,7 +1175,7 @@ mod tests {
                             .filter(|text| {
                                 row.contains(text.pos)
                                     && (text.galley.text() == format!("track-{index}.wav")
-                                        || text.galley.text() == "02:03")
+                                        || text.galley.text() == "2:03")
                             })
                             .collect();
                         assert_eq!(captions.len(), 2);

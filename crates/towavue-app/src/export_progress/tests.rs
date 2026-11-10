@@ -159,7 +159,7 @@ fn japanese_export_status_tracks_phases_and_fits_cancel_without_changing_progres
                     app.active_export.as_ref().expect("job"),
                     started + Duration::from_secs(65)
                 ),
-                "出力を準備中 · 経過時間 01:05"
+                "出力を準備中 · 経過時間 1:05"
             );
             let size = egui::vec2(width, 400.0);
             for (analyzing, verifies, phase, fraction) in [
@@ -595,7 +595,7 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
             assert_eq!(
                 status(Language::English, export, started + Duration::from_secs(65)),
                 format!(
-                    "{} · elapsed 01:05",
+                    "{} · elapsed 1:05",
                     preparation_label(Language::English, normalized)
                 )
             );
@@ -629,7 +629,7 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
                     app.active_export.as_ref().expect("job"),
                     started
                 ),
-                "Encoded 00:02"
+                "Encoded 0:02"
             );
             // A fallback encoder restarts its own output clock, not the job clock.
             app.handle_export_event(ExportEvent::Progress(Duration::ZERO));
@@ -639,7 +639,7 @@ fn export_preparation_shows_elapsed_time_and_animates_until_output_advances() {
                     app.active_export.as_ref().expect("job"),
                     started + Duration::from_secs(70)
                 ),
-                "Preparing output · elapsed 01:10"
+                "Preparing output · elapsed 1:10"
             );
             app.handle_ui_action(UiAction::CancelExport);
             assert_eq!(

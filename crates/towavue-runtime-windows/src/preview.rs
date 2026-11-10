@@ -70,6 +70,12 @@ struct PreviewEntry {
     source_size: Option<(u32, u32)>,
 }
 
+pub(super) struct ImagePublication {
+    key: String,
+    image: PreviewImage,
+    source_size: Option<(u32, u32)>,
+}
+
 pub struct CachedImagePreview {
     pub image: PreviewImage,
     pub source_size: (u32, u32),
@@ -392,6 +398,147 @@ impl PreviewCache {
             return Ok((key, None));
         }
         Ok((key, preview))
+    }
+
+    // Publish pixels before optional cache encoding/writes, without the repeated
+    // speculative probe. Later original opens still need the shared PNG cache.
+    pub(crate) fn browser_image(
+        &self,
+        source: &Path,
+    ) -> Result<(MediaPreview, Option<ImagePublication>), PreviewError> {
+        self.check_cancelled()?;
+        let key = cache_key(source, IMAGE_PREVIEW_VARIANT)?;
+        let cached = self.memory.lock().expect("preview memory").get(&key);
+        if let Some(image) = cached {
+            self.check_cancelled()?;
+            return Ok((
+                MediaPreview {
+                    image,
+                    duration: None,
+                },
+                None,
+            ));
+        }
+        let _lease = self.claim_generation(&key)?;
+        let cached = self.memory.lock().expect("preview memory").get(&key);
+        if let Some(image) = cached {
+            self.check_cancelled()?;
+            return Ok((
+                MediaPreview {
+                    image,
+                    duration: None,
+                },
+                None,
+            ));
+        }
+        if let Some(preview) = self.cached_image(source)? {
+            return Ok((
+                MediaPreview {
+                    image: preview.image,
+                    duration: None,
+                },
+                None,
+            ));
+        }
+        let current = || self.check_cancelled().is_ok();
+        let jpeg = image::ImageFormat::from_path(source).ok() == Some(image::ImageFormat::Jpeg);
+        let direct = if jpeg {
+            crate::image::jpeg_thumbnail(source, crate::image::IMAGE_BYTE_LIMIT, &current)
+        } else {
+            crate::image::first_image_preview(source, crate::image::IMAGE_BYTE_LIMIT, &current)
+        }
+        .ok()
+        .flatten();
+        let memory_only = !jpeg && direct.is_some();
+        let direct = direct
+            .or_else(|| static_thumbnail_pixels(source, STATIC_THUMBNAIL_BYTE_LIMIT, &current));
+        self.check_cancelled()?;
+        let (image, source_size) = if let Some(preview) = direct {
+            (preview.image, Some(preview.source_size))
+        } else {
+            (
+                decode_png(&frame_preview(
+                    source,
+                    Duration::ZERO,
+                    "scale=240:160:force_original_aspect_ratio=decrease:reset_sar=1",
+                    self.cancellation.as_ref(),
+                )?)?,
+                None,
+            )
+        };
+        self.check_cancelled()?;
+        if cache_key(source, IMAGE_PREVIEW_VARIANT)? != key {
+            return Err(PreviewError::Generate(
+                "Source changed during preview generation".into(),
+            ));
+        }
+        let mut memory = self.memory.lock().expect("preview memory");
+        memory.insert(key.clone(), image.clone());
+        memory
+            .entries
+            .back_mut()
+            .expect("bounded browser preview")
+            .source_size = source_size;
+        let publication = (!memory_only).then(|| ImagePublication {
+            key,
+            image: image.clone(),
+            source_size,
+        });
+        Ok((
+            MediaPreview {
+                image,
+                duration: None,
+            },
+            publication,
+        ))
+    }
+
+    pub(super) fn publish_browser_image(&self, source: &Path, publication: ImagePublication) {
+        use image::ImageEncoder;
+        let current = || {
+            self.check_cancelled().is_ok()
+                && cache_key(source, IMAGE_PREVIEW_VARIANT).ok().as_ref() == Some(&publication.key)
+        };
+        if !current() {
+            return;
+        }
+        let mut bytes = Vec::new();
+        let image = &publication.image;
+        if image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(
+                &image.rgba,
+                image.width,
+                image.height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .is_err()
+        {
+            return;
+        }
+        if let Some(size) = publication.source_size {
+            bytes = thumbnail_size_chunk(bytes, size);
+        }
+        if !current() {
+            return;
+        }
+        let Some(_lock) = self.publication_lock() else {
+            return;
+        };
+        let temporary = self.root.join(format!(
+            "{}.{}.{}.tmp",
+            publication.key,
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = self.root.join(format!("{}.png", publication.key));
+        if let Err(error) = fs::write(&temporary, bytes).and_then(|()| fs::rename(&temporary, path))
+        {
+            let _ = fs::remove_file(&temporary);
+            crate::diagnostic!("towavue: could not store preview cache: {error}");
+        }
+        if let Err(error) = self.prune() {
+            crate::diagnostic!("towavue: could not prune preview cache: {error}");
+        }
     }
 
     pub fn filmstrip(&self, source: &Path, kind: MediaKind) -> Result<MediaPreview, PreviewError> {
@@ -1120,6 +1267,26 @@ fn static_thumbnail_ready(
     byte_limit: usize,
     current: &dyn Fn() -> bool,
 ) -> Option<(Vec<u8>, PreviewImage)> {
+    let preview = static_thumbnail_pixels(source, byte_limit, current)?;
+    let small = image::DynamicImage::ImageRgba8(image::RgbaImage::from_raw(
+        preview.image.width,
+        preview.image.height,
+        Arc::unwrap_or_clone(preview.image.rgba),
+    )?);
+    let bytes = thumbnail_png(&small, preview.source_size, current)?;
+    let image = PreviewImage {
+        width: small.width(),
+        height: small.height(),
+        rgba: small.into_rgba8().into_raw().into(),
+    };
+    Some((bytes, image))
+}
+
+fn static_thumbnail_pixels(
+    source: &Path,
+    byte_limit: usize,
+    current: &dyn Fn() -> bool,
+) -> Option<CachedImagePreview> {
     let format = image::ImageFormat::from_path(source).ok();
     let streamed = (format == Some(image::ImageFormat::Png))
         .then(|| {
@@ -1160,14 +1327,13 @@ fn static_thumbnail_ready(
             ),
         )
     };
-    let bytes = thumbnail_png(&small, source_size, current)?;
     // Keep the decoded/sampled pixels instead of decoding our new cache PNG again.
     let image = PreviewImage {
         width: small.width(),
         height: small.height(),
         rgba: small.into_rgba8().into_raw().into(),
     };
-    Some((bytes, image))
+    current().then_some(CachedImagePreview { source_size, image })
 }
 
 fn thumbnail_png(
@@ -1180,6 +1346,10 @@ fn thumbnail_png(
     }
     let mut bytes = std::io::Cursor::new(Vec::new());
     small.write_to(&mut bytes, image::ImageFormat::Png).ok()?;
+    current().then(|| thumbnail_size_chunk(bytes.into_inner(), source_size))
+}
+
+fn thumbnail_size_chunk(mut bytes: Vec<u8>, source_size: (u32, u32)) -> Vec<u8> {
     // The private ancillary chunk follows IHDR in our cache PNGs, never source files.
     let mut chunk = Vec::with_capacity(20);
     chunk.extend_from_slice(&8_u32.to_be_bytes());
@@ -1187,9 +1357,8 @@ fn thumbnail_png(
     chunk.extend_from_slice(&source_size.0.to_be_bytes());
     chunk.extend_from_slice(&source_size.1.to_be_bytes());
     chunk.extend_from_slice(&crc32fast::hash(&chunk[4..]).to_be_bytes());
-    let mut bytes = bytes.into_inner();
     bytes.splice(33..33, chunk);
-    current().then_some(bytes)
+    bytes
 }
 
 fn thumbnail_source_size(bytes: &[u8]) -> Option<(u32, u32)> {

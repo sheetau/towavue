@@ -369,6 +369,12 @@ enum UiAction {
     OpenGalleryWindow(PathBuf, u64, egui::Pos2, egui::Vec2),
     Seek(MediaTime),
     CommitVideoScrub(MediaTime),
+    CommitTimelineScrub(
+        TabId,
+        PlaybackGeneration,
+        Option<Option<towavue_core::TimeRange>>,
+        MediaTime,
+    ),
     ResolveGuard(GuardDecision),
     CancelExport,
     RevealExport(Instant),
@@ -7406,8 +7412,18 @@ where
     }
 
     fn draw_seek_preview(&mut self, response: &egui::Response, ratio: f32, duration: Duration) {
-        let language = self.language();
         let position = duration.mul_f32(ratio.clamp(0.0, 1.0));
+        self.update_seek_preview(position, duration, Some(response));
+    }
+
+    fn update_seek_preview(
+        &mut self,
+        position: Duration,
+        duration: Duration,
+        card: Option<&egui::Response>,
+    ) {
+        let language = self.language();
+        let ratio = (position.as_secs_f64() / duration.as_secs_f64()).clamp(0.0, 1.0) as f32;
         let source = self
             .session
             .as_ref()
@@ -7457,6 +7473,7 @@ where
         {
             self.load_hover_thumbnail(sample, bucket);
         }
+        let Some(response) = card else { return };
         seekbar::preview_tooltip(response, ratio).show(|ui| {
             let height =
                 (response.rect.top() - response.ctx.viewport_rect().top() - 40.0).clamp(1.0, 108.0);
@@ -7617,13 +7634,35 @@ where
                         chrome::FOREGROUND,
                     );
                 }
-                if let Some(tab) = self.tabs.active()
-                    && let Some(selection) = result.selection
+                if self.media_kind == Some(MediaKind::Video)
+                    && self
+                        .session
+                        .as_ref()
+                        .and_then(PlaybackSession::video_geometry)
+                        .is_some()
+                    && let Some((target, released)) = result.scrub
                 {
-                    actions.push(UiAction::TimeSelection(tab.id, self.generation, selection));
-                }
-                if let Some(target) = result.seek {
-                    actions.push(UiAction::Seek(target));
+                    if released {
+                        if let Some(tab) = self.tabs.active() {
+                            self.queue_timeline_scrub(tab.id, result.selection, target, actions);
+                        }
+                    } else {
+                        self.begin_video_scrub();
+                        self.update_seek_preview(
+                            Duration::from_nanos(target.as_nanoseconds().max(0) as u64),
+                            duration,
+                            None,
+                        );
+                    }
+                } else {
+                    if let Some(tab) = self.tabs.active()
+                        && let Some(selection) = result.selection
+                    {
+                        actions.push(UiAction::TimeSelection(tab.id, self.generation, selection));
+                    }
+                    if let Some(target) = result.seek {
+                        actions.push(UiAction::Seek(target));
+                    }
                 }
                 if let Some(tab) = self.tabs.active()
                     && let Some(edit) = result.edit
@@ -7849,7 +7888,10 @@ where
         if !matches!(action, UiAction::BeginTrackDrag(..)) {
             self.finish_track_drag(true);
         }
-        if !matches!(action, UiAction::CommitVideoScrub(_)) {
+        if !matches!(
+            action,
+            UiAction::CommitVideoScrub(_) | UiAction::CommitTimelineScrub(..)
+        ) {
             self.cancel_video_scrub();
         }
         if !matches!(action, UiAction::BeginReadingDrag(..)) {
@@ -8158,6 +8200,16 @@ where
             }
             UiAction::Seek(target) => self.seek_to(target),
             UiAction::CommitVideoScrub(target) => self.commit_video_scrub(target),
+            UiAction::CommitTimelineScrub(tab, generation, selection, target) => {
+                if self.tabs.active_id() == Some(tab)
+                    && self.generation == generation
+                    && self.timeline_is_visible()
+                {
+                    self.commit_video_scrub_selection(target, selection);
+                } else {
+                    self.cancel_video_scrub();
+                }
+            }
             UiAction::TabVolume(id, path, deltas) => self.tab_volume_wheel(id, &path, &deltas),
             UiAction::Volume(id, volume) => {
                 if self.tabs.active().is_some_and(|tab| tab.id == id) {
@@ -13461,25 +13513,19 @@ fn format_time(time: MediaTime) -> String {
     let seconds = time.as_nanoseconds().max(0) as u64 / 1_000_000_000;
     if seconds >= 3_600 {
         format!(
-            "{:02}:{:02}:{:02}",
+            "{}:{:02}:{:02}",
             seconds / 3_600,
             seconds / 60 % 60,
             seconds % 60
         )
     } else {
-        format!("{:02}:{:02}", seconds / 60, seconds % 60)
+        format!("{}:{:02}", seconds / 60, seconds % 60)
     }
 }
 
 fn format_time_precise(time: MediaTime) -> String {
     let milliseconds = time.as_nanoseconds().max(0) as u64 / 1_000_000;
-    format!(
-        "{:02}:{:02}:{:02}:{:03}",
-        milliseconds / 3_600_000,
-        milliseconds / 60_000 % 60,
-        milliseconds / 1_000 % 60,
-        milliseconds % 1_000
-    )
+    format!("{}:{:03}", format_time(time), milliseconds % 1_000)
 }
 
 fn media_time(duration: Duration) -> MediaTime {
@@ -15459,7 +15505,7 @@ mod tests {
                         assert!(actions.is_empty());
                         if !app.fullscreen && width == 960.0 {
                             assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                                egui::Shape::Text(text) if text.galley.text() == "00:00:02:000 / 00:00:10:000")),
+                                egui::Shape::Text(text) if text.galley.text() == "0:02:000 / 0:10:000")),
                                 "visible timeline clock includes milliseconds");
                         }
                         let tree = output.platform_output.accesskit_update.expect("tree");
@@ -17588,10 +17634,10 @@ mod tests {
                         assert!(hint.galley.text().contains("before continuing"));
                     }
                     if mode == 5 {
-                        assert!(hint.galley.text().contains("Analyzing audio 00:01"));
+                        assert!(hint.galley.text().contains("Analyzing audio 0:01"));
                     }
                     if mode == 6 {
-                        assert!(hint.galley.text().contains("Encoded 00:02"));
+                        assert!(hint.galley.text().contains("Encoded 0:02"));
                     }
                     if mode >= 5 {
                         assert!(hint.galley.text().contains("Metadata changes"));
@@ -18742,9 +18788,7 @@ mod tests {
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) if text.galley.text().starts_with("00:15") => {
-                        Some(text)
-                    }
+                    egui::Shape::Text(text) if text.galley.text().starts_with("0:15") => Some(text),
                     _ => None,
                 })
                 .expect("caption on the first hover frame, even before image readiness");
@@ -25443,24 +25487,24 @@ mod tests {
     #[test]
     fn formats_compact_status_values() {
         for (ns, expected) in [
-            (-1, "00:00"),
-            (0, "00:00"),
-            (125_000_000_000, "02:05"),
+            (-1, "0:00"),
+            (0, "0:00"),
+            (125_000_000_000, "2:05"),
             (3_599_999_999_999, "59:59"),
-            (3_600_000_000_000, "01:00:00"),
-            (3_661_999_999_999, "01:01:01"),
+            (3_600_000_000_000, "1:00:00"),
+            (3_661_999_999_999, "1:01:01"),
             (360_001_000_000_000, "100:00:01"),
             (i64::MAX, "2562047:47:16"),
         ] {
             assert_eq!(format_time(MediaTime::from_nanoseconds(ns)), expected);
         }
         for (ns, expected) in [
-            (-1, "00:00:00:000"),
-            (999_999, "00:00:00:000"),
-            (1_000_000, "00:00:00:001"),
-            (59_999_999_999, "00:00:59:999"),
-            (3_600_000_000_000, "01:00:00:000"),
-            (3_661_234_567_890, "01:01:01:234"),
+            (-1, "0:00:000"),
+            (999_999, "0:00:000"),
+            (1_000_000, "0:00:001"),
+            (59_999_999_999, "0:59:999"),
+            (3_600_000_000_000, "1:00:00:000"),
+            (3_661_234_567_890, "1:01:01:234"),
             (360_001_234_000_000, "100:00:01:234"),
             (i64::MAX, "2562047:47:16:854"),
         ] {

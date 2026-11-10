@@ -56,8 +56,8 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
                     let name = text.galley.text();
                     if name == "track.wav"
                         || name.ends_with("\\track.wav")
-                        || name == "00:00:00:000 / 00:03:00:000"
-                        || name == "00:00:00:000"
+                        || name == "0:00:000 / 3:00:000"
+                        || name == "0:00:000"
                         || name == "50%"
                     {
                         // Tab and playlist now paint the same filename, with
@@ -88,11 +88,11 @@ fn right_edge_resize_keeps_left_aligned_text_origins_stable() {
         }
         frame(280.0 * density);
         let narrow = origins(&frame(280.0 * density));
-        let clock = narrow.get("00:00:00:000").expect("compact clock");
+        let clock = narrow.get("0:00:000").expect("compact clock");
         for pixel in 1..40 {
             let current = origins(&frame(280.0 * density + pixel as f32));
             assert_eq!(
-                current.get("00:00:00:000"),
+                current.get("0:00:000"),
                 Some(clock),
                 "compact clock origin at density {density}, delta {pixel}"
             );

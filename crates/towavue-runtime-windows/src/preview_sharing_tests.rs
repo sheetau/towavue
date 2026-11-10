@@ -41,6 +41,15 @@ fn default_worker_uses_reduced_wic_jpeg_and_persists_its_result() {
     assert_eq!(item.generation, generation);
     assert_eq!(item.path, source);
     assert_eq!(item.result.expect("ready").image, expected.image);
+    // Pixel notification intentionally precedes persistence. A cache-only request
+    // on this serial worker is a barrier after both optional cache publications.
+    let barrier = loader.request_warming(source.clone(), MediaKind::Image);
+    ready
+        .recv_timeout(Duration::from_secs(10))
+        .expect("publication barrier");
+    let warmed = loader.take_warmed().expect("barrier completion");
+    assert_eq!(warmed.generation, barrier);
+    assert!(warmed.result.expect("cache-only completion"));
     drop(loader);
     let reopened = PreviewCache::new(store.root.clone()).expect("empty memory cache");
     let stored = reopened

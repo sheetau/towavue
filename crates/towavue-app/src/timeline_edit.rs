@@ -100,10 +100,36 @@ pub(super) fn show_panel<R>(
     }
     let resizable = enabled && panel_resize_enabled(root, panel);
     root.visuals_mut().widgets.active.fg_stroke = original.visuals.widgets.hovered.fg_stroke;
-    let result = egui::Panel::bottom(panel)
+    let anchor_id = panel.with("resize-anchor");
+    let response = root.ctx().read_response(panel.with("__resize"));
+    let live = resizable
+        && response
+            .as_ref()
+            .is_some_and(|r| r.dragged() || r.drag_stopped());
+    let mut builder = egui::Panel::bottom(panel)
         .default_size(96.0)
         .size_range(64.0_f32.min(maximum)..=maximum)
-        .resizable(resizable)
+        .resizable(resizable);
+    if live {
+        if let Some(pointer) = response.and_then(|r| r.interact_pointer_pos()) {
+            let origin = root
+                .input(|input| input.pointer.press_origin())
+                .unwrap_or(pointer);
+            let initial = egui::containers::panel::PanelState::load(root.ctx(), panel)
+                .map_or(96.0, |state| state.outer_rect.height());
+            let (start, height) = root.ctx().data_mut(|data| {
+                *data.get_temp_mut_or_insert_with(anchor_id, || (origin.y, initial))
+            });
+            // Preserve the grab offset, including a press anywhere in the handle.
+            // A fixed range prevents Panel's absolute-pointer resize from snapping.
+            builder = builder
+                .exact_size((height + start - pointer.y).clamp(64.0_f32.min(maximum), maximum));
+        }
+    } else {
+        root.ctx()
+            .data_mut(|data| data.remove::<(f32, f32)>(anchor_id));
+    }
+    let result = builder
         .frame(
             egui::Frame::NONE
                 .fill(chrome::BACKGROUND)
@@ -112,11 +138,17 @@ pub(super) fn show_panel<R>(
         .show(root, |ui| {
             ui.set_style(original.clone());
             if !enabled {
+                let opacity = ui.opacity();
                 ui.disable();
+                ui.set_opacity(opacity);
             }
             content(ui)
         });
     root.set_style(original);
+    if !enabled {
+        root.painter()
+            .rect_filled(result.response.rect, 0.0, Color32::from_black_alpha(128));
+    }
     result
 }
 

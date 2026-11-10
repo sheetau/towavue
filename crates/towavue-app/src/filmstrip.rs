@@ -2397,9 +2397,16 @@ mod tests {
         {
             advance(&mut app);
         }
+        // Pixels now precede optional persistence; neither the notification nor
+        // take_completed is a disk-publication barrier.
+        while fresh.cached_image(&oldest).expect("cache read").is_none()
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
         assert!(
             fresh.cached_image(&oldest).expect("cache read").is_some(),
-            "filtered visible demand still works after a stopped pass"
+            "filtered visible demand still persists after a stopped pass"
         );
         app.recent_paths.clear();
         app.gallery_listing.invalidate();

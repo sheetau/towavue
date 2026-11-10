@@ -1342,7 +1342,7 @@ messages! {
     CommandEditSpeed => ("Speed / Duration...", "速度 / 時間..."),
     SpeedLabel => ("Speed", "速度"),
     DurationLabel => ("Duration", "時間"),
-    SpeedDurationInvalid => ("Enter a positive speed or a duration in hh:mm:ss format (optional fractional seconds).", "正の速度、またはhh:mm:ss形式の時間を入力してください（小数秒も入力できます）。"),
+    SpeedDurationInvalid => ("Enter a positive speed or a duration in m:ss or h:mm:ss format (optional fractional seconds).", "正の速度、またはm:ssかh:mm:ss形式の時間を入力してください（小数秒も入力できます）。"),
     SpeedEditChanged => ("The timeline changed. Open Speed / Duration again.", "タイムラインが変わりました。速度 / 時間を開き直してください。"),
     CommandResetRate => ("Reset playback rate", "再生速度をリセット"),
     CommandDeleteFile => ("Delete file", "ファイルを削除"),

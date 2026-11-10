@@ -58,7 +58,12 @@ Animated-image transport changes use `image_animation::tests::` plus the full
 workspace suite: variable frame delays, pause/replay/repeat, image-edit continuity,
 command ownership, hidden folder seeking, ordinary-wheel frame virtualization and
 viewport-center preservation when resizing. `timeline_edit::panel_tests::` covers
-first-pixel resizing, the 30% height cap, Filmstrip suppression and cancellation.
+first-pixel resizing from off-center handle presses, the 30% height cap, a single
+Filmstrip dimming overlay and cancellation. Native playback coverage in
+`video_scrub::tests::exercise` includes CTI/selection scrubbing, main-surface
+preview meshes, frozen decoder generations during holds, one release seek and
+play/pause restoration on cancellation. Clock controls cover independent
+minute/hour widths and shared three-digit millisecond labels.
 Status changes use `status_info::tests::` and `status_file_details::tests::`, including
 reading spread positions, grouped format/dimensions and full-width fitting. Selection creation uses
 `selection::tests::`; browser texture retention uses `filmstrip::tests::`, including
@@ -562,3 +567,11 @@ or physical scrolling measurements. Selection-edge input uses
 GPU controls. Folder reuse additionally covers all three modes, explicit
 idempotent choices and restart restoration; missing-history controls cover both
 directions and preservation of live visits.
+
+Browser generation changes additionally compare fresh browser RGBA against the
+shared reference generator for PNG, JPEG, BMP, GIF, WebP and TIFF, including
+misleading extensions. Verify that pixels precede optional persistence, PNG encoding follows pixel notification while preserving the shared cache used
+by later original opens, and cancelled/changed sources discard deferred writes. These generated correctness controls do not remeasure media benchmarks.
+The original-image/prefetch and benchmark observation paths remain unchanged.
+Editable speed-duration inputs use the same compact whole-time formatter while
+retaining exact fractional seconds and accepting both m:ss and h:mm:ss input.

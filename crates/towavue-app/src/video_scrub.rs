@@ -235,6 +235,29 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
     }
 
+    pub(super) fn queue_timeline_scrub(
+        &mut self,
+        tab: TabId,
+        selection: Option<Option<towavue_core::TimeRange>>,
+        target: MediaTime,
+        actions: &mut Vec<UiAction>,
+    ) {
+        if let Some(scrub) = &mut self.video_scrub {
+            scrub.phase = Phase::Committing;
+            actions.push(UiAction::CommitTimelineScrub(
+                tab,
+                self.generation,
+                selection,
+                target,
+            ));
+        } else {
+            if let Some(selection) = selection {
+                actions.push(UiAction::TimeSelection(tab, self.generation, selection));
+            }
+            actions.push(UiAction::Seek(target));
+        }
+    }
+
     pub(super) fn cancel_video_scrub(&mut self) -> bool {
         let Some(scrub) = self.video_scrub.take() else {
             return false;
@@ -249,11 +272,30 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
     }
 
     pub(super) fn commit_video_scrub(&mut self, target: MediaTime) {
+        self.commit_video_scrub_selection(target, None);
+    }
+
+    pub(super) fn commit_video_scrub_selection(
+        &mut self,
+        target: MediaTime,
+        selection: Option<Option<towavue_core::TimeRange>>,
+    ) {
         let Some(mut scrub) = self.video_scrub.take() else {
             return;
         };
         if scrub.instance != self.media_generation || scrub.phase != Phase::Committing {
             return;
+        }
+        if let Some(selection) = selection {
+            self.time_selection = selection;
+            // Commit selection and target together. set_time_selection may seek;
+            // using it as a separate action would cancel the scrub or seek twice.
+            self.playback_selection = selection.filter(|range| {
+                self.playback_duration()
+                    .is_some_and(|duration| range.end() <= media_time(duration))
+                    && (self.playback_selection.is_some()
+                        || (scrub.was_playing && target >= range.start() && target < range.end()))
+            });
         }
         // Let the ordinary seek decide EOF/trim pausing, then resume only its accepted range.
         if scrub.was_playing {

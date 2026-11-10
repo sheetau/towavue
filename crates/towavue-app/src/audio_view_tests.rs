@@ -77,7 +77,7 @@ fn audio_viewing_seek_and_editing_modes_preserve_live_state_without_hover_cards(
                 let output = frame(&mut app, size, vec![]);
                 let (id, bounds) = slider(&output);
                 assert!(bounds.height() <= 14.1, "compact audio seek");
-                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "00:01 / 00:08")));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "0:01 / 0:08")));
                 let point = egui::pos2(
                     ((bounds.x0 + bounds.x1) / 2.0) as f32,
                     ((bounds.y0 + bounds.y1) / 2.0) as f32,
@@ -127,7 +127,7 @@ fn audio_viewing_seek_and_editing_modes_preserve_live_state_without_hover_cards(
                 }
                 let output = frame(&mut app, size, vec![]);
                 assert!(slider(&output).1.height() > 30.0);
-                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with("00:00:04:") && text.galley.text().ends_with(" / 00:00:08:000"))));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().starts_with("0:04:") && text.galley.text().ends_with(" / 0:08:000"))));
                 app.dispatch(CommandId::ToggleTimeline);
                 assert!(!app.timeline_is_visible());
                 app.set_fullscreen(true);

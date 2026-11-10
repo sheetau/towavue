@@ -12,6 +12,16 @@ pub(crate) struct BrowserCache {
     source: PreviewCache,
     root: PathBuf,
     memory: RefCell<VecDeque<(String, MediaPreview)>>,
+    deferred: bool,
+    pending: RefCell<Option<PendingPublication>>,
+}
+
+struct PendingPublication {
+    path: PathBuf,
+    key: String,
+    preview: MediaPreview,
+    cancellation: Cancellation,
+    image: Option<ImagePublication>,
 }
 
 impl BrowserCache {
@@ -20,6 +30,60 @@ impl BrowserCache {
             root: source.root.join("browser-v1"),
             source,
             memory: RefCell::default(),
+            deferred: false,
+            pending: RefCell::default(),
+        }
+    }
+
+    pub(crate) fn deferred(mut self) -> Self {
+        self.deferred = true;
+        self
+    }
+
+    pub(crate) fn flush(&self) {
+        if let Some(pending) = self.pending.borrow_mut().take() {
+            self.publish(pending);
+        }
+    }
+
+    fn publish(&self, pending: PendingPublication) {
+        if !pending.cancellation.is_cancelled()
+            && self.key(&pending.path).as_deref() == Some(&pending.key)
+        {
+            if let Some(image) = pending.image {
+                self.source
+                    .cancellable(pending.cancellation.clone())
+                    .publish_browser_image(&pending.path, image);
+            }
+            if !pending.cancellation.is_cancelled()
+                && self.key(&pending.path).as_deref() == Some(&pending.key)
+            {
+                self.store(&pending.key, &pending.preview);
+            }
+        }
+    }
+
+    fn persist(
+        &self,
+        path: &Path,
+        key: &str,
+        preview: &MediaPreview,
+        cancellation: &Cancellation,
+        image: Option<ImagePublication>,
+    ) {
+        let pending = PendingPublication {
+            path: path.to_owned(),
+            key: key.to_owned(),
+            preview: preview.clone(),
+            cancellation: cancellation.clone(),
+            image,
+        };
+        if self.deferred {
+            // One shared thumbnail allocation survives UI notification. Memory
+            // hits do not retry failed persistence; cancellation can discard it.
+            *self.pending.borrow_mut() = Some(pending);
+        } else {
+            self.publish(pending);
         }
     }
 
@@ -86,7 +150,7 @@ impl BrowserCache {
             return None;
         }
         self.remember(key.to_owned(), &preview);
-        self.store(key, &preview);
+        self.persist(path, key, &preview, cancellation, None);
         Some(preview)
     }
 
@@ -114,7 +178,7 @@ impl BrowserCache {
             duration: None,
         };
         self.remember(key.clone(), &preview);
-        self.store(&key, &preview);
+        self.persist(path, &key, &preview, cancellation, None);
         Some(preview)
     }
 
@@ -134,17 +198,19 @@ impl BrowserCache {
         {
             return Ok(preview);
         }
-        let preview = self
-            .source
-            .cancellable(cancellation.clone())
-            .filmstrip(path, kind)
-            .map_err(|error| error.to_string())?;
+        let source = self.source.cancellable(cancellation.clone());
+        let (preview, image) = if kind == MediaKind::Image {
+            source.browser_image(path)
+        } else {
+            source.filmstrip(path, kind).map(|preview| (preview, None))
+        }
+        .map_err(|error| error.to_string())?;
         if cancellation.is_cancelled() || self.key(path).as_deref() != Some(&key) {
             return Err("Preview source changed or request was cancelled".into());
         }
         self.remember(key.clone(), &preview);
         // Persistence is optional and never holds a cache lock during generation.
-        self.store(&key, &preview);
+        self.persist(path, &key, &preview, cancellation, image);
         Ok(preview)
     }
 
@@ -280,6 +346,140 @@ fn decode(bytes: &[u8]) -> Option<MediaPreview> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_pixels_match_shared_generation_and_persist_after_publication() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-browser-pixels-{}-{}",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).expect("fixture");
+        let pixels = image::RgbaImage::from_fn(311, 187, |x, y| {
+            image::Rgba([
+                x as u8,
+                y as u8,
+                (x ^ y) as u8,
+                if x % 5 == 0 { 0 } else { 255 },
+            ])
+        });
+        for (index, format) in [
+            image::ImageFormat::Png,
+            image::ImageFormat::Jpeg,
+            image::ImageFormat::Bmp,
+            image::ImageFormat::Gif,
+            image::ImageFormat::WebP,
+            image::ImageFormat::Tiff,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            for mislabeled in [false, true] {
+                let extension = if mislabeled {
+                    "data"
+                } else {
+                    format.extensions_str()[0]
+                };
+                let path = root.join(format!("{index}-{mislabeled}.{extension}"));
+                let image = image::DynamicImage::ImageRgba8(pixels.clone());
+                let image = if format == image::ImageFormat::Jpeg {
+                    image::DynamicImage::ImageRgb8(image.into_rgb8())
+                } else {
+                    image
+                };
+                image.save_with_format(&path, format).expect("source");
+                let legacy = PreviewCache::new(root.join(format!("old-{index}-{mislabeled}")))
+                    .expect("old cache");
+                let expected = legacy
+                    .filmstrip(&path, MediaKind::Image)
+                    .expect("reference pixels");
+                let source = PreviewCache::new(root.join(format!("new-{index}-{mislabeled}")))
+                    .expect("new cache");
+                let browser = BrowserCache::new(source.clone()).deferred();
+                let actual = browser
+                    .generate(&path, MediaKind::Image, &Cancellation::default())
+                    .expect("browser pixels");
+                assert_eq!(actual.image, expected.image, "{format:?}/{mislabeled}");
+                let key = browser.key(&path).expect("key");
+                let record = browser.root.join(format!("{key}.rgba"));
+                assert!(!record.exists(), "pixels are returned before disk work");
+                assert!(Arc::ptr_eq(
+                    &actual.image.rgba,
+                    &browser.memory(&key).expect("published memory").image.rgba
+                ));
+                assert!(
+                    !source
+                        .root
+                        .join(format!(
+                            "{}.png",
+                            cache_key(&path, IMAGE_PREVIEW_VARIANT).expect("test fixture")
+                        ))
+                        .exists(),
+                    "no PNG encoding before pixel publication"
+                );
+                browser.flush();
+                assert!(record.is_file());
+                if format != image::ImageFormat::Bmp
+                    && !(format == image::ImageFormat::Jpeg && mislabeled)
+                {
+                    let fresh_shared =
+                        PreviewCache::new(source.root.clone()).expect("shared cache restart");
+                    assert_eq!(
+                        fresh_shared
+                            .cached_image(&path)
+                            .expect("shared read")
+                            .expect("shared pixels")
+                            .image,
+                        expected.image
+                    );
+                }
+                let fresh =
+                    BrowserCache::new(PreviewCache::new(source.root.clone()).expect("restart"));
+                assert_eq!(
+                    fresh
+                        .disk(&path, &key, &Cancellation::default())
+                        .expect("test fixture")
+                        .image,
+                    expected.image
+                );
+            }
+        }
+        fs::remove_dir_all(root).expect("remove owned fixture");
+    }
+
+    #[test]
+    fn deferred_browser_publication_drops_cancelled_and_changed_sources() {
+        let root = std::env::temp_dir().join(format!(
+            "towavue-browser-defer-{}-{}",
+            std::process::id(),
+            NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).expect("fixture");
+        for changed in [false, true] {
+            let path = root.join(format!("{changed}.png"));
+            image::RgbaImage::from_pixel(2, 1, image::Rgba([1, 2, 3, 255]))
+                .save(&path)
+                .expect("image");
+            let browser = BrowserCache::new(
+                PreviewCache::new(root.join(format!("cache-{changed}"))).expect("test fixture"),
+            )
+            .deferred();
+            let cancellation = Cancellation::default();
+            browser
+                .generate(&path, MediaKind::Image, &cancellation)
+                .expect("pixels");
+            let key = browser.key(&path).expect("test fixture");
+            if changed {
+                fs::write(&path, b"changed source").expect("test fixture");
+            } else {
+                cancellation.cancel();
+            }
+            browser.flush();
+            assert!(!browser.root.join(format!("{key}.rgba")).exists());
+            assert!(browser.pending.borrow().is_none());
+        }
+        fs::remove_dir_all(root).expect("test fixture");
+    }
 
     #[test]
     fn restarted_browser_reads_pixels_and_duration_without_opening_media() {

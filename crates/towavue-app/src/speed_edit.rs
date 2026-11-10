@@ -173,14 +173,8 @@ impl Dialog {
 /// Exact nanosecond text round trips avoid changing an untouched short clip.
 fn format_duration(time: MediaTime) -> String {
     let nanos = time.as_nanoseconds();
-    let seconds = nanos / 1_000_000_000;
     let fraction = nanos % 1_000_000_000;
-    let mut text = format!(
-        "{:02}:{:02}:{:02}",
-        seconds / 3600,
-        seconds / 60 % 60,
-        seconds % 60
-    );
+    let mut text = crate::format_time(time);
     if fraction != 0 {
         text.push_str(format!(".{fraction:09}").trim_end_matches('0'));
     }
@@ -189,7 +183,7 @@ fn format_duration(time: MediaTime) -> String {
 
 fn parse_duration(text: &str) -> Option<MediaTime> {
     let fields: Vec<_> = text.trim().split(':').collect();
-    if fields.len() != 3 {
+    if !(2..=3).contains(&fields.len()) {
         return None;
     }
     let integer = |value: &str| -> Option<i64> {
@@ -197,9 +191,14 @@ fn parse_duration(text: &str) -> Option<MediaTime> {
             .then(|| value.parse().ok())
             .flatten()
     };
-    let hours = integer(fields[0])?;
-    let minutes = integer(fields[1])?;
-    let (seconds, fraction) = fields[2].split_once('.').unwrap_or((fields[2], ""));
+    let hours = if fields.len() == 3 {
+        integer(fields[0])?
+    } else {
+        0
+    };
+    let minutes = integer(fields[fields.len() - 2])?;
+    let last = fields[fields.len() - 1];
+    let (seconds, fraction) = last.split_once('.').unwrap_or((last, ""));
     let seconds = integer(seconds)?;
     if minutes >= 60
         || seconds >= 60

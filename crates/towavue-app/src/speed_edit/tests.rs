@@ -14,6 +14,11 @@ fn duration_text_round_trips_nanoseconds_and_rejects_invalid_or_overflowing_inpu
         let value = MediaTime::from_nanoseconds(nanos);
         assert_eq!(parse_duration(&format_duration(value)), Some(value));
     }
+    assert_eq!(format_duration(time(125)), "2:05");
+    assert_eq!(
+        parse_duration("2:05.123456789"),
+        Some(MediaTime::from_nanoseconds(125_123_456_789))
+    );
     for text in [
         "",
         "0",
@@ -276,7 +281,7 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                 assert!(
                     tree.nodes
                         .iter()
-                        .any(|(_, node)| node.value() == Some("00:00:05"))
+                        .any(|(_, node)| node.value() == Some("0:05"))
                 );
                 let (output, actions) = frame(
                     &context,

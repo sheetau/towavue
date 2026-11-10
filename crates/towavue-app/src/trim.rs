@@ -7,14 +7,9 @@ pub fn label(language: Language, state: &EditState, duration: MediaTime) -> Opti
     }
     Some(formatted::trim_edited(
         language,
-        &timestamp(state.trim_start.unwrap_or(MediaTime::ZERO)),
-        &timestamp(state.trim_end.unwrap_or(duration)),
+        &crate::format_time_precise(state.trim_start.unwrap_or(MediaTime::ZERO)),
+        &crate::format_time_precise(state.trim_end.unwrap_or(duration)),
     ))
-}
-
-fn timestamp(time: MediaTime) -> String {
-    let millis = time.as_nanoseconds().max(0) / 1_000_000;
-    format!("{}.{:03}", crate::format_time(time), millis % 1_000)
 }
 
 #[cfg(test)]
@@ -29,12 +24,12 @@ mod tests {
         state.trim_end = Some(MediaTime::from_nanoseconds(2_833_333_333));
         assert_eq!(
             label(Language::English, &state, duration).as_deref(),
-            Some("Trim 00:00.000 – 00:02.833 · playback and export")
+            Some("Trim 0:00:000 – 0:02:833 · playback and export")
         );
         state.trim_start = state.trim_end.take();
         assert_eq!(
             label(Language::English, &state, duration).as_deref(),
-            Some("Trim 00:02.833 – 00:30.000 · playback and export")
+            Some("Trim 0:02:833 – 0:30:000 · playback and export")
         );
         state.trim_start = Some(MediaTime::from_nanoseconds(3_600_123_999_999));
         assert_eq!(
@@ -44,7 +39,7 @@ mod tests {
                 MediaTime::from_nanoseconds(7_205_987_000_000)
             )
             .as_deref(),
-            Some("Trim 01:00:00.123 – 02:00:05.987 · playback and export")
+            Some("Trim 1:00:00:123 – 2:00:05:987 · playback and export")
         );
         assert_eq!(
             label(
@@ -53,7 +48,7 @@ mod tests {
                 MediaTime::from_nanoseconds(7_205_987_000_000)
             )
             .as_deref(),
-            Some("トリミング 01:00:00.123 – 02:00:05.987 · 再生と書き出しに適用")
+            Some("トリミング 1:00:00:123 – 2:00:05:987 · 再生と書き出しに適用")
         );
     }
 }

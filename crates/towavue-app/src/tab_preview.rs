@@ -1237,10 +1237,10 @@ mod tests {
                             assert_eq!(output.pixels_per_point, density);
                             let (unavailable, time) = match language {
                                 crate::localization::Language::English => {
-                                    ("No preview", "Preview near 00:00")
+                                    ("No preview", "Preview near 0:00")
                                 }
                                 crate::localization::Language::Japanese => {
-                                    ("プレビューなし", "00:00付近のプレビュー")
+                                    ("プレビューなし", "0:00付近のプレビュー")
                                 }
                             };
                             assert_eq!(

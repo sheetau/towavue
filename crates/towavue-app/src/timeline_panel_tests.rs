@@ -96,6 +96,75 @@ fn drag(app: &mut App, end: egui::Pos2) {
 }
 
 #[test]
+fn resize_preserves_grab_offset_and_disabled_panel_uses_one_overlay() {
+    let Some(_) = crate::tests::isolated_test_root(
+        "timeline_edit::panel_tests::resize_preserves_grab_offset_and_disabled_panel_uses_one_overlay",
+    ) else {
+        return;
+    };
+    for scale in [1.0, 1.25, 2.0] {
+        for offset in [-2.0, 2.0] {
+            let mut app = setup(MediaKind::Video, scale);
+            let before = rect(&app);
+            let start = before.center_top() + egui::vec2(0.0, offset);
+            frame(&mut app, vec![egui::Event::PointerMoved(start)], false);
+            frame(&mut app, vec![button(start, true)], true);
+            frame(&mut app, vec![], false);
+            let context = app.ui_context.clone().expect("test fixture");
+            let handle = app.timeline_panel_id().with("__resize");
+            assert!(
+                (context
+                    .read_response(handle)
+                    .expect("test fixture")
+                    .rect
+                    .center()
+                    .y
+                    - before.top())
+                .abs()
+                    < 0.6,
+                "press must not snap"
+            );
+            let next = start + egui::vec2(0.0, 1.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(next)], true);
+            frame(&mut app, vec![], false);
+            assert!(
+                (context
+                    .read_response(handle)
+                    .expect("test fixture")
+                    .rect
+                    .center()
+                    .y
+                    - before.top()
+                    - 1.0)
+                    .abs()
+                    < 0.6,
+                "first pixel preserves offset"
+            );
+            frame(&mut app, vec![button(next, false)], true);
+            assert!((rect(&app).height() - before.height() + 1.0).abs() < 0.6);
+        }
+    }
+    let context = fonts::test_context();
+    let output = context.run_ui(Default::default(), |ui| {
+        show_panel(
+            ui,
+            egui::Id::new("disabled-overlay"),
+            false,
+            egui::Margin::ZERO,
+            |ui| {
+                assert!(!ui.is_enabled());
+                assert_eq!(ui.opacity(), 1.0);
+                ui.painter().rect_filled(ui.max_rect(), 0.0, Color32::WHITE);
+            },
+        );
+    });
+    assert!(output.shapes.iter().any(
+        |shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::WHITE)
+    ));
+    assert_eq!(output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(128))).count(), 1);
+}
+
+#[test]
 fn resize_clamps_at_minimum_without_closing_timeline() {
     let Some(_) = crate::tests::isolated_test_root(
         "timeline_edit::panel_tests::resize_clamps_at_minimum_without_closing_timeline",

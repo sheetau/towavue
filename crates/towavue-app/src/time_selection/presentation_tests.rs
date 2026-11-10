@@ -132,7 +132,7 @@ fn japanese_timeline_numeric_controls_keep_ids_units_and_edit_routing() {
         )]);
         frame(vec![]);
         let hint = focus_hint(&context).expect("focus hint");
-        assert!(hint.starts_with("選択範囲の開始位置: 00:00:02:000"));
+        assert!(hint.starts_with("選択範囲の開始位置: 0:02:000"));
         assert!(hint.ends_with("←／→で調整"));
         let result = frame(vec![egui::Event::Key {
             key: egui::Key::ArrowRight,

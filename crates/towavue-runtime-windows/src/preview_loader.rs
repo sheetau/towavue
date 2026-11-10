@@ -95,10 +95,15 @@ impl PreviewLoader {
             .spawn(move || {
                 let _wic = crate::image::jpeg_wic_preview::WorkerScope::new(wic);
                 let browser = persistent_browser
-                    .then(|| crate::preview::browser::BrowserCache::new(cache.clone()));
+                    .then(|| crate::preview::browser::BrowserCache::new(cache.clone()).deferred());
                 run_worker(
                     worker_shared,
-                    notify,
+                    || {
+                        notify();
+                        if let Some(browser) = &browser {
+                            browser.flush();
+                        }
+                    },
                     |path, kind, cancellation, stage, disk_key| {
                         let Some(browser) = &browser else {
                             let cache = cache.cancellable(cancellation.clone());

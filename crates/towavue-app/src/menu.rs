@@ -1506,8 +1506,8 @@ mod tests {
         let hovered = frame(vec![egui::Event::PointerMoved(open)]).0;
         assert_eq!(
             color(&hovered, "Ctrl+K Ctrl+O"),
-            disabled,
-            "hover changes the title, not the shortcut"
+            crate::chrome::FAINT,
+            "hover brightens the enabled shortcut"
         );
         assert!(
             click(&mut frame, export).is_empty(),

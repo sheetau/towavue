@@ -330,7 +330,10 @@ mod tests {
                     let output = context.run_ui(Default::default(), |ui| {
                         let response =
                             crate::chrome::reading_button(ui, enabled, selected, direction);
-                        assert_eq!(response.rect.size(), egui::Vec2::splat(20.0));
+                        assert_eq!(
+                            response.rect.size(),
+                            egui::Vec2::splat(crate::chrome::STATUS_BUTTON_SIZE)
+                        );
                         assert_eq!(response.enabled(), enabled);
                     });
                     let mesh = output

@@ -189,7 +189,7 @@ fn show_control(
                 reversed,
             ),
             0.0,
-            egui::Color32::from_white_alpha(64),
+            crate::chrome::FOREGROUND.gamma_multiply(0.25),
         );
     }
     ui.painter().rect_filled(
@@ -575,9 +575,9 @@ mod tests {
                             _ => None,
                         })
                         .collect();
-                    let preview = rectangles
-                        .iter()
-                        .position(|rect| rect.fill == egui::Color32::from_white_alpha(64));
+                    let preview = rectangles.iter().position(|rect| {
+                        rect.fill == crate::chrome::FOREGROUND.gamma_multiply(0.25)
+                    });
                     assert_eq!(
                         preview.is_some(),
                         hover,
@@ -649,7 +649,7 @@ mod tests {
                 if dragging {
                     assert!(!output.shapes.iter().any(|shape| matches!(
                         &shape.shape,
-                        egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_white_alpha(64)
+                        egui::Shape::Rect(rect) if rect.fill == crate::chrome::FOREGROUND.gamma_multiply(0.25)
                     )), "dragging must suppress pointer hover progress");
                 }
                 (visible, commit)

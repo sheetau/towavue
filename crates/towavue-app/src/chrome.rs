@@ -64,24 +64,16 @@ pub fn caption_accessibility(ui: &Ui, buttons: &[CaptionButton]) -> Vec<CaptionA
     actions
 }
 
-pub const BACKGROUND: Color32 = Color32::BLACK;
-pub const ACTIVE_TAB: Color32 = Color32::from_gray(0x18);
-pub const FLOATING_BACKGROUND: Color32 = Color32::from_gray(12);
-pub const MUTED: Color32 = Color32::from_gray(128);
-pub const FOREGROUND: Color32 = Color32::WHITE;
-pub const BORDER: Color32 = Color32::from_gray(24);
-pub const HOVER: Color32 = Color32::from_gray(24);
-pub const TRACK: Color32 = Color32::from_gray(44);
-pub const DISABLED: Color32 = Color32::from_gray(64);
-pub const SURFACE_HOVER: Color32 = Color32::from_gray(24);
+mod tokens;
+pub use tokens::*;
 pub const TITLE_HEIGHT: f32 = 32.0;
 pub const STATUS_HEIGHT: f32 = 30.0;
-pub const STATUS_BUTTON_SIZE: f32 = 20.0;
+pub const STATUS_BUTTON_SIZE: f32 = ROW_HEIGHT;
 pub const STATUS_BUTTON_GAP: f32 = (STATUS_HEIGHT - STATUS_BUTTON_SIZE) * 0.5;
 pub const TAB_CLOSE_WIDTH: f32 = 24.0;
-pub const INPUT_HEIGHT: f32 = 26.0;
-pub const INPUT_RADIUS: u8 = 3;
-pub const SEARCH_BUTTON_SIZE: f32 = INPUT_HEIGHT - 4.0;
+pub const INPUT_HEIGHT: f32 = CONTROL_HEIGHT;
+pub const INPUT_RADIUS: u8 = RADIUS_XS;
+pub const SEARCH_BUTTON_SIZE: f32 = CONTROL_HEIGHT;
 // Match the visible close glyph's inset in its 24-point slot.
 pub const TAB_PADDING: f32 = 7.0;
 
@@ -158,7 +150,7 @@ pub fn tab_style(ui: &mut Ui, rect: Rect, active: bool, hovered: bool) {
         } else if hovered {
             MUTED
         } else {
-            DISABLED
+            FAINT
         };
     }
 }
@@ -228,10 +220,23 @@ pub fn style(style: &mut egui::Style) {
     }
     style.visuals.panel_fill = BACKGROUND;
     style.visuals.window_fill = FLOATING_BACKGROUND;
-    style.visuals.window_stroke.color = BORDER;
+    style.visuals.window_stroke = Stroke::NONE;
+    style.visuals.window_corner_radius = egui::CornerRadius::same(RADIUS_SM);
+    style.visuals.menu_corner_radius = egui::CornerRadius::same(RADIUS_SM);
+    for (text, size) in [
+        (egui::TextStyle::Small, TEXT_SM),
+        (egui::TextStyle::Body, TEXT_LG),
+        (egui::TextStyle::Button, TEXT_LG),
+        (egui::TextStyle::Heading, TEXT_LG),
+        (egui::TextStyle::Monospace, TEXT_MD),
+    ] {
+        style
+            .text_styles
+            .insert(text, egui::FontId::proportional(size));
+    }
     style.visuals.extreme_bg_color = BACKGROUND;
     style.visuals.text_edit_bg_color = Some(BACKGROUND);
-    style.visuals.text_cursor.stroke.color = Color32::WHITE;
+    style.visuals.text_cursor.stroke.color = FOREGROUND;
     style.visuals.faint_bg_color = BORDER;
     style.visuals.weak_text_color = Some(MUTED);
     style.visuals.selection.bg_fill = TRACK;
@@ -250,6 +255,9 @@ pub fn style(style: &mut egui::Style) {
     style.visuals.popup_shadow.blur = 10;
     style.visuals.popup_shadow.color = Color32::from_black_alpha(112);
     style.visuals.hyperlink_color = FOREGROUND;
+    style.visuals.warn_fg_color = FOREGROUND;
+    style.visuals.error_fg_color = FOREGROUND;
+    style.visuals.code_bg_color = SURFACE;
     style.visuals.interact_cursor = Some(egui::CursorIcon::PointingHand);
     for (visuals, foreground, background) in [
         (&mut style.visuals.widgets.noninteractive, MUTED, BORDER),
@@ -272,7 +280,7 @@ pub fn style(style: &mut egui::Style) {
         visuals.expansion = 0.0;
     }
     style.spacing.button_padding = egui::vec2(6.0, 3.0);
-    style.spacing.menu_margin = egui::Margin::same(4);
+    style.spacing.menu_margin = egui::Margin::same(MENU_PADDING);
 }
 
 pub fn input_style(ui: &mut Ui) {
@@ -321,10 +329,11 @@ pub fn number_input(
             input_style(ui);
             ui.spacing_mut().interact_size = egui::vec2(width, INPUT_HEIGHT);
             ui.style_mut().drag_value_text_style = egui::TextStyle::Body;
+            ui.spacing_mut().button_padding.y = 2.0;
             ui.visuals_mut().widgets.inactive.weak_bg_fill = ui.visuals().extreme_bg_color;
             ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
-            ui.visuals_mut().widgets.hovered.weak_bg_fill = Color32::from_gray(0x18);
-            ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_gray(0x18);
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = SURFACE;
+            ui.visuals_mut().widgets.hovered.bg_fill = SURFACE;
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
             ui.allocate_ui_with_layout(egui::vec2(width, INPUT_HEIGHT), layout, |ui| {
             let id = ui.next_auto_id();
@@ -386,7 +395,7 @@ pub fn flat_buttons(ui: &mut egui::Ui) {
         &mut widgets.noninteractive,
     ] {
         visuals.bg_stroke = egui::Stroke::NONE;
-        visuals.corner_radius = egui::CornerRadius::same(3);
+        visuals.corner_radius = egui::CornerRadius::same(RADIUS_XS);
         visuals.expansion = 0.0;
     }
 }
@@ -400,9 +409,10 @@ pub fn menu_style(style: &mut egui::Style) {
     style.spacing.scroll.fade.strength = 0.0;
     style.visuals.disabled_alpha = 1.0;
     style.visuals.widgets.noninteractive.fg_stroke.color = DISABLED;
-    style.spacing.interact_size.y = SEARCH_BUTTON_SIZE;
+    style.visuals.window_stroke = Stroke::NONE;
+    style.spacing.interact_size.y = CONTROL_HEIGHT;
     style.spacing.button_padding = egui::vec2(6.0, 2.0);
-    style.spacing.item_spacing.y = 0.0;
+    style.spacing.item_spacing.y = ITEM_GAP;
     for visual in [
         &mut style.visuals.widgets.noninteractive,
         &mut style.visuals.widgets.inactive,
@@ -411,7 +421,7 @@ pub fn menu_style(style: &mut egui::Style) {
         &mut style.visuals.widgets.open,
     ] {
         visual.bg_stroke = Stroke::NONE;
-        visual.corner_radius = egui::CornerRadius::same(3);
+        visual.corner_radius = egui::CornerRadius::same(RADIUS_XS);
         visual.expansion = 0.0;
     }
 }
@@ -461,6 +471,8 @@ fn combo_box_impl<R>(
     let mut result = ui
         .scope(|ui| {
             flat_buttons(ui);
+            ui.spacing_mut().interact_size.y = CONTROL_HEIGHT;
+            ui.spacing_mut().button_padding.y = 2.0;
             combo
                 .icon(move |ui, rect, visuals, _| {
                     // ComboBox centers its label and icon in the same content rect.
@@ -524,7 +536,34 @@ pub fn surface_icon_button_at(ui: &mut Ui, rect: Rect, button: egui::Button<'_>)
 pub fn separator(ui: &mut Ui) -> egui::Response {
     let previous = ui.visuals().widgets.noninteractive.bg_stroke;
     ui.visuals_mut().widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
-    let response = ui.separator();
+    let response = if ui
+        .stack()
+        .iter()
+        .any(|entry| entry.kind() == Some(egui::UiKind::Menu))
+    {
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(
+                if ui.is_sizing_pass() {
+                    0.0
+                } else {
+                    ui.available_width()
+                },
+                1.0,
+            ),
+            egui::Sense::hover(),
+        );
+        let width = MENU_PADDING as f32;
+        ui.painter()
+            .with_clip_rect(ui.clip_rect().expand(width))
+            .hline(
+                rect.left() - width..=rect.right() + width,
+                rect.center().y,
+                Stroke::new(1.0, BORDER),
+            );
+        response
+    } else {
+        ui.separator()
+    };
     ui.visuals_mut().widgets.noninteractive.bg_stroke = previous;
     response
 }
@@ -590,7 +629,7 @@ pub fn tab_audio_button(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         icon.text(),
-        egui::FontId::new(14.0, crate::fonts::icon_font().family),
+        crate::fonts::icon_font(),
         (if active {
             FOREGROUND
         } else {
@@ -605,20 +644,19 @@ pub fn button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
     button_with_sense(ui, icon, label, egui::Sense::click(), 24.0)
 }
 
-/// Keep layout spacing fixed while moving only the status button by one pixel.
+/// Keep the status control inside the shared row height.
 pub(super) fn status_text_button_size(ui: &Ui, label: &str) -> egui::Vec2 {
-    let text =
-        ui.painter()
-            .layout_no_wrap(label.into(), egui::FontId::proportional(12.0), FOREGROUND);
+    let text = ui.painter().layout_no_wrap(
+        label.into(),
+        egui::FontId::proportional(crate::chrome::TEXT_MD),
+        FOREGROUND,
+    );
     egui::vec2((text.size().x + 12.0).max(54.0), STATUS_BUTTON_SIZE)
 }
 
 pub fn status_button(ui: &mut Ui, size: egui::Vec2, button: egui::Button<'_>) -> egui::Response {
     let (_, rect) = ui.allocate_space(size);
-    ui.put(
-        rect.translate(egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point())),
-        button.min_size(size),
-    )
+    ui.put(rect, button.min_size(size))
 }
 
 pub fn transport_button(ui: &mut Ui, icon: Icon, label: &str) -> egui::Response {
@@ -1132,9 +1170,9 @@ mod tests {
                     );
                     assert_eq!(
                         icon.galley.job.sections[0].format.font_id,
-                        egui::FontId::new(14.0, crate::fonts::icon_font().family)
+                        crate::fonts::icon_font()
                     );
-                    let bounds = icon.galley.rect.translate(icon.pos.to_vec2());
+                    let bounds = icon.galley.mesh_bounds.translate(icon.pos.to_vec2());
                     assert!(row.contains_rect(bounds));
                     let title = output
                         .shapes
@@ -1213,7 +1251,7 @@ mod tests {
             match shape {
                 egui::Shape::Vec(shapes) => shapes.iter().any(floating_frame),
                 egui::Shape::Rect(rect) => {
-                    rect.fill == Color32::from_gray(12) && rect.stroke.color == BORDER
+                    rect.fill == FLOATING_BACKGROUND && rect.stroke == Stroke::NONE
                 }
                 _ => false,
             }
@@ -1222,7 +1260,7 @@ mod tests {
         style(&mut themed);
         #[cfg(debug_assertions)]
         assert!(!themed.debug.warn_if_rect_changes_id);
-        assert_eq!(HOVER, Color32::from_rgb(24, 24, 24));
+        assert_eq!(HOVER, Color32::from_gray(0x16));
         for visuals in [
             themed.visuals.widgets.hovered,
             themed.visuals.widgets.active,
@@ -1232,9 +1270,9 @@ mod tests {
             assert_eq!(visuals.weak_bg_fill, HOVER);
             assert_eq!(visuals.fg_stroke.color, FOREGROUND);
         }
-        assert_eq!(themed.visuals.window_fill(), Color32::from_gray(12));
+        assert_eq!(themed.visuals.window_fill(), FLOATING_BACKGROUND);
         assert_eq!(themed.visuals.panel_fill, BACKGROUND);
-        assert_eq!(themed.visuals.window_stroke().color, BORDER);
+        assert_eq!(themed.visuals.window_stroke(), Stroke::NONE);
         assert_eq!(themed.visuals.extreme_bg_color, BACKGROUND);
         assert_eq!(themed.visuals.text_edit_bg_color(), BACKGROUND);
         assert_eq!(themed.visuals.faint_bg_color, BORDER);
@@ -1244,8 +1282,8 @@ mod tests {
             egui::Frame::menu(&themed),
             egui::Frame::popup(&themed),
         ] {
-            assert_eq!(frame.fill, Color32::from_gray(12));
-            assert_eq!(frame.stroke.color, BORDER);
+            assert_eq!(frame.fill, FLOATING_BACKGROUND);
+            assert_eq!(frame.stroke, Stroke::NONE);
         }
         for density in [1.0, 1.25, 2.0] {
             let context = egui::Context::default();

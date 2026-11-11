@@ -351,7 +351,7 @@ fn clicks_interpolate_and_thumb_drag_preserves_grab_offset_with_retargeting() {
             .shapes
             .iter()
             .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(shape) if shape.fill == egui::Color32::from_rgb(24, 24, 24) => {
+                egui::Shape::Rect(shape) if shape.fill == crate::chrome::SURFACE => {
                     Some(shape.rect)
                 }
                 _ => None,

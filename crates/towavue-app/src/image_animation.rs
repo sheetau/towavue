@@ -313,9 +313,13 @@ where
             label.clone()
         };
         ui.add(
-            egui::Label::new(egui::RichText::new(shown).size(12.0).color(chrome::MUTED))
-                .truncate()
-                .show_tooltip_when_elided(false),
+            egui::Label::new(
+                egui::RichText::new(shown)
+                    .size(crate::chrome::TEXT_MD)
+                    .color(chrome::MUTED),
+            )
+            .truncate()
+            .show_tooltip_when_elided(false),
         )
         .help_text(label);
     }
@@ -413,7 +417,7 @@ where
                                 3.0,
                                 egui::Stroke::new(
                                     1.0 / ui.ctx().pixels_per_point(),
-                                    Color32::WHITE,
+                                    crate::chrome::FOREGROUND,
                                 ),
                                 egui::StrokeKind::Inside,
                             );

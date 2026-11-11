@@ -330,8 +330,8 @@ fn verify_selection_press<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut App
             .expect("timeline")
             .outer_rect;
         let track = egui::Rect::from_min_max(
-            panel.min + egui::vec2(8.0, 8.0),
-            panel.max - egui::vec2(8.0, 0.0),
+            panel.min + egui::vec2(5.0, 26.0),
+            panel.max - egui::vec2(5.0, 14.0),
         );
         let point =
             |fraction| egui::pos2(egui::lerp(track.x_range(), fraction), track.bottom() - 24.0);
@@ -494,7 +494,7 @@ fn queued_timeline_release_precedes_native_cancellation() {
                             )
                             .expect("timeline panel")
                             .outer_rect;
-                            let start = egui::pos2(rect.left() + 120.0, rect.bottom() - 12.0);
+                            let start = egui::pos2(rect.left() + 120.0, rect.bottom() - 24.0);
                             let end = start + egui::vec2(200.0, 0.0);
                             let button = |pos, pressed| egui::Event::PointerButton {
                                 pos,

@@ -3,7 +3,7 @@ use towavue_core::EditTimeline;
 
 const SETTLE_TIME: Duration = Duration::from_millis(150);
 pub(super) fn color() -> Color32 {
-    Color32::from_white_alpha(64)
+    chrome::FAINT
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -11,8 +11,6 @@ pub(super) struct Key {
     path: PathBuf,
     track: Option<towavue_core::AudioTrackId>,
     plan: EditTimeline,
-    rate: f32,
-    volume: f32,
     columns: u32,
 }
 
@@ -60,8 +58,7 @@ mod tests {
                         Default::default(),
                     )
                     .expect("plan"),
-                    rate: 1.0,
-                    volume: 1.0,
+
                     columns: 400,
                 });
                 app.waveform_detail = Detail {
@@ -124,8 +121,7 @@ mod tests {
                 path: "fixture.wav".into(),
                 track: None,
                 plan,
-                rate: 1.0,
-                volume: 1.0,
+
                 columns: 4,
             })),
             values: Some(Arc::from([0.1, 0.2, 1.5, 0.4])),
@@ -139,10 +135,20 @@ mod tests {
                 (Some((range, 2.0)), [10.0, 40.0, 100.0, 40.0]),
             ] {
                 let mesh = detail.mesh(rect, density, preview).expect("mesh");
-                assert_eq!(mesh.vertices.len(), 16);
-                for (vertices, height) in mesh.vertices.as_chunks::<4>().0.iter().zip(heights) {
-                    let bounds = egui::Rect::from_points(&vertices.map(|vertex| vertex.pos));
-                    assert!((bounds.height() - height).abs() <= 1.0 / density);
+                for (index, height) in heights.into_iter().enumerate() {
+                    let x = index as f32 * 100.0 + 50.0;
+                    let bounds = mesh
+                        .vertices
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .map(|vertices| egui::Rect::from_points(&vertices.map(|vertex| vertex.pos)))
+                        .find(|bounds| bounds.x_range().contains(x))
+                        .expect("visible envelope");
+                    assert!(
+                        (bounds.height() - height).abs() <= 1.0 / density + 0.001,
+                        "index={index}, density={density}, preview={preview:?}, expected={height}, bounds={bounds:?}"
+                    );
                 }
             }
         }
@@ -153,10 +159,10 @@ mod tests {
     }
 
     #[test]
-    fn refined_waveform_renders_native_samples_and_rejects_stale_edits_and_sizes() {
+    fn source_waveform_survives_zoom_edits_recovery_and_rejects_stale_sources() {
         use std::os::windows::process::CommandExt;
         let Some(root) = crate::tests::isolated_test_root(
-            "waveform_detail::tests::refined_waveform_renders_native_samples_and_rejects_stale_edits_and_sizes",
+            "waveform_detail::tests::source_waveform_survives_zoom_edits_recovery_and_rejects_stale_sources",
         ) else {
             return;
         };
@@ -178,301 +184,126 @@ mod tests {
                 ])
                 .arg(&path)
                 .status()
-                .expect("owned fixture")
+                .expect("fixture")
                 .success()
         );
+        let (send, receive) = std::sync::mpsc::channel();
+        let mut app = Application::new(None, move |event| {
+            let _ = send.send(event);
+        })
+        .expect("app");
+        let context = fonts::test_context();
+        app.ui_context = Some(context.clone());
+        let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
+        app.path = Some(path);
+        app.media_kind = Some(MediaKind::Audio);
+        app.media_duration = Some(Duration::from_secs(1));
+        app.state = PlaybackState::Paused;
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 80.0));
+        app.detailed_waveform(&context, rect, None);
+        app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
+        app.detailed_waveform(&context, rect, None);
+        let AppEvent::DetailedWaveform(generation, key, result) = receive
+            .recv_timeout(Duration::from_secs(10))
+            .expect("source peaks")
+        else {
+            panic!("waveform event")
+        };
+        let values = result.expect("native peaks");
+        assert_eq!(values.len(), 1024);
+        assert!(values.iter().all(|v| *v > 0.02 && *v < 0.2));
+        app.install_detailed_waveform(generation.wrapping_add(1), key.clone(), Ok(values.clone()));
+        assert!(app.waveform_detail.values.is_none());
+        app.install_detailed_waveform(generation, Arc::new((*key).clone()), Ok(values.clone()));
+        assert!(
+            app.waveform_detail.values.is_none(),
+            "obsolete request identity"
+        );
+        app.install_detailed_waveform(generation, key.clone(), Ok(values));
+        let retained = app.waveform_detail.values.clone().expect("installed");
         for density in [1.0, 1.25, 2.0] {
-            let (send, receive) = std::sync::mpsc::channel();
-            let mut app = Application::new(None, move |event| {
-                let _ = send.send(event);
-            })
-            .expect("app");
-            let context = fonts::test_context();
-            context.enable_accesskit();
             context.set_pixels_per_point(density);
-            app.ui_context = Some(context.clone());
-            let tab = app.tabs.open_new(path.clone(), MediaKind::Audio);
-            app.path = Some(path.clone());
-            app.media_kind = Some(MediaKind::Audio);
-            app.timeline_open = true;
-            app.media_duration = Some(Duration::from_secs(1));
-            app.state = PlaybackState::Paused;
-            let waveform = context.load_texture(
-                "overview",
-                egui::ColorImage::filled([16, 4], Color32::WHITE),
-                TextureOptions::LINEAR,
-            );
-            let texture = waveform.id();
-            app.waveform = Some(waveform);
-            let frame = |app: &mut Application<_>| {
-                context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(640.0, 300.0),
-                        )),
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let mut actions = Vec::new();
-                        app.draw_timeline(ui, &mut actions);
-                        assert!(actions.is_empty());
-                    },
-                )
-            };
-            frame(&mut app);
-            let before = frame(&mut app);
-            let rect = before
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture => {
-                        Some(mesh.calc_bounds())
-                    }
-                    _ => None,
-                })
-                .expect("coarse overview during settle time");
-            assert!(!app.waveform_detail.started);
-            app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
-            assert!(
-                app.detailed_waveform(
-                    &context,
-                    rect,
-                    Some((
-                        towavue_core::TimeRange::new(
-                            MediaTime::ZERO,
-                            media_time(Duration::from_secs(1))
-                        )
-                        .expect("range"),
-                        1.0
-                    ))
-                )
-                .is_none()
-            );
-            assert!(
-                !app.waveform_detail.started,
-                "release preview must not refine the pre-edit plan"
-            );
-            let started = frame(&mut app);
-            assert!(
-                started
-                    .platform_output
-                    .accesskit_update
-                    .as_ref()
-                    .expect("tree")
-                    .nodes
-                    .iter()
-                    .any(|(_, node)| node.value() == Some("Refining waveform…")),
-                "newly submitted refinement is labeled in the same timeline frame"
-            );
-            assert!(app.toolbar_loading(&context).is_none());
-            assert!(app.waveform_detail.started);
-            assert!(app.waveform_detail.is_pending());
-            app.load_waveform();
-            assert!(
-                !app.waveform_loading && app.waveform_detail.is_pending(),
-                "a retained source overview must not replace pending refinement"
-            );
-            let event = receive
-                .recv_timeout(Duration::from_secs(10))
-                .expect("native envelope worker completion");
-            let AppEvent::DetailedWaveform(generation, mut key, result) = event else {
-                panic!("waveform event")
-            };
-            let mut values = result.expect("native samples");
-            assert_eq!(values.len(), key.columns as usize);
-            assert_eq!(key.columns, (rect.width() * density).round() as u32);
-            assert!(values.iter().all(|value| *value > 0.02 && *value < 0.2));
-            for restart in [false, true] {
-                if restart {
-                    app.waveform_detail.restart_pending();
-                } else {
-                    let wider =
-                        egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
-                    app.detailed_waveform(&context, wider, None);
-                    app.detailed_waveform(&context, rect, None);
-                }
-                app.waveform_detail.changed = Some(Instant::now() - SETTLE_TIME);
-                app.detailed_waveform(&context, rect, None);
-                assert!(app.waveform_detail.is_pending());
-                let status = app.status_message.clone();
-                // Hold the completed old response until the same plan/width is pending again.
-                app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
-                assert!(
-                    app.waveform_detail.values.is_none(),
-                    "obsolete success must not finish a newer request; restart={restart}"
+            for width in [200.0, 640.0, 20_000.0] {
+                let full = egui::Rect::from_min_size(
+                    egui::pos2(-width * 0.2, 0.0),
+                    egui::vec2(width, 80.0),
                 );
-                app.install_detailed_waveform(
-                    generation,
-                    key.clone(),
-                    Err(towavue_runtime_windows::PreviewError::Generate(
-                        "obsolete failure".into(),
-                    )),
-                );
-                assert!(
-                    app.waveform_detail.is_pending(),
-                    "obsolete failure must not clear current progress; restart={restart}"
-                );
-                assert_eq!(
-                    app.status_message, status,
-                    "obsolete errors must not replace current status"
-                );
-                let AppEvent::DetailedWaveform(current_generation, current_key, result) = receive
-                    .recv_timeout(Duration::from_secs(10))
-                    .expect("replacement refinement")
-                else {
-                    panic!("replacement waveform event")
-                };
-                assert_eq!(current_generation, generation);
-                let current_values = result.expect("replacement samples");
-                assert_eq!(
-                    current_values, values,
-                    "same plan still produces the same waveform"
-                );
-                key = current_key;
-                values = current_values;
+                let mesh = app
+                    .detailed_waveform_view(&context, full, rect, None, None, None)
+                    .expect("retained mesh");
+                assert!(!mesh.vertices.is_empty());
+                assert!(mesh.vertices.len() <= ((rect.width() * density).ceil() as usize + 2) * 4);
+                assert!(Arc::ptr_eq(
+                    &retained,
+                    app.waveform_detail
+                        .values
+                        .as_ref()
+                        .expect("source unchanged")
+                ));
+                assert!(Arc::ptr_eq(
+                    &key,
+                    app.waveform_detail.key.as_ref().expect("no new request")
+                ));
             }
-            app.install_detailed_waveform(
-                generation.wrapping_add(1),
-                key.clone(),
-                Ok(values.clone()),
-            );
-            assert!(app.waveform_detail.values.is_none());
-            app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
-            let retained = app
-                .waveform_detail
-                .values
-                .clone()
-                .expect("installed envelope");
-            assert!(!app.waveform_detail.is_pending());
-            let expected = app
-                .waveform_detail
-                .mesh(rect, density, None)
-                .expect("sharp mesh");
-            let output = frame(&mut app);
-            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.vertices == expected.vertices)));
-            assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture)));
-            assert!(
-                output.textures_delta.set.is_empty(),
-                "refinement uploads no bitmap"
-            );
-            for vertex in &expected.vertices {
-                assert!((vertex.pos.x * density - (vertex.pos.x * density).round()).abs() < 0.0001);
-                assert!((vertex.pos.y * density - (vertex.pos.y * density).round()).abs() < 0.0001);
-            }
-            app.set_playback_volume(3.0);
-            assert!(
-                app.detailed_waveform(
-                    &context,
-                    rect,
-                    Some((
-                        towavue_core::TimeRange::new(
-                            MediaTime::ZERO,
-                            media_time(Duration::from_secs(1))
-                        )
-                        .expect("range"),
-                        1.0
-                    ))
+        }
+        for operation in [
+            TimelineEdit::ScaleVolume(
+                towavue_core::TimeRange::new(
+                    MediaTime::ZERO,
+                    media_time(Duration::from_millis(500)),
                 )
-                .is_some(),
-                "dragging retains the detailed envelope"
-            );
+                .expect("range"),
+                0.0,
+            ),
+            TimelineEdit::Stretch(
+                towavue_core::TimeRange::new(
+                    MediaTime::ZERO,
+                    media_time(Duration::from_millis(500)),
+                )
+                .expect("range"),
+                media_time(Duration::from_millis(750)),
+            ),
+            TimelineEdit::Delete(
+                towavue_core::TimeRange::new(
+                    MediaTime::ZERO,
+                    media_time(Duration::from_millis(250)),
+                )
+                .expect("range"),
+            ),
+        ] {
+            app.edits
+                .entry(tab)
+                .or_default()
+                .push(EditOperation::Timeline(operation), MediaKind::Audio);
             assert!(app.detailed_waveform(&context, rect, None).is_some());
             assert!(Arc::ptr_eq(
-                &retained,
-                app.waveform_detail
-                    .values
-                    .as_ref()
-                    .expect("same listening-independent data")
-            ));
-            assert!(app.edits.is_empty());
-            let taller =
-                egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), rect.height() * 2.0));
-            assert!(app.detailed_waveform(&context, taller, None).is_some());
-            assert!(Arc::ptr_eq(
-                &retained,
-                app.waveform_detail
-                    .values
-                    .as_ref()
-                    .expect("no height-dependent decode")
-            ));
-            let saved = app.waveform_detail.take_retained();
-            assert!(app.waveform_detail.values.is_none());
-            app.waveform_detail = saved;
-            app.graphics_epoch += 1;
-            assert!(
-                app.detailed_waveform(&context, rect, None).is_some(),
-                "CPU amplitudes survive graphics recovery"
-            );
-            assert!(Arc::ptr_eq(
-                &retained,
-                app.waveform_detail.values.as_ref().expect("retained data")
-            ));
-
-            let wider = egui::Rect::from_min_size(rect.min, rect.size() + egui::vec2(20.0, 0.0));
-            assert!(app.detailed_waveform(&context, wider, None).is_none());
-            app.install_detailed_waveform(generation, key.clone(), Ok(values.clone()));
-            assert!(
-                app.waveform_detail.values.is_none(),
-                "old-width completion cannot install"
-            );
-            let history = app.edits.entry(tab).or_default();
-            history.push(
-                EditOperation::Timeline(TimelineEdit::SetVolume(
-                    towavue_core::TimeRange::new(
-                        MediaTime::ZERO,
-                        media_time(Duration::from_millis(500)),
-                    )
-                    .expect("range"),
-                    0.0,
-                )),
-                MediaKind::Audio,
-            );
-            app.detailed_waveform(&context, rect, None);
-            assert_ne!(
+                &key,
                 app.waveform_detail
                     .key
                     .as_ref()
-                    .expect("new saved edit")
-                    .plan,
-                key.plan
-            );
-            app.install_detailed_waveform(generation, key, Ok(values));
-            assert!(
-                app.waveform_detail.values.is_none(),
-                "old-edit completion cannot install"
-            );
-            app.waveform_detail.started = true;
-            let failed_key = app.waveform_detail.key.clone().expect("pending key");
-            app.install_detailed_waveform(
-                generation,
-                failed_key,
-                Err(towavue_runtime_windows::PreviewError::Generate(
-                    "injected refinement failure".into(),
-                )),
-            );
-            assert!(
-                !app.waveform_detail.is_pending(),
-                "failed detail must not leave a loading indicator running"
-            );
-            let pending = app.waveform_detail.take_retained();
-            assert!(
-                !pending.started,
-                "cancelled background work is eligible on activation"
-            );
-            app.waveform_detail = pending;
-            app.media_duration = Some(Duration::ZERO);
-            frame(&mut app);
-            assert!(
-                app.waveform_detail.key.is_none(),
-                "empty timelines discard pending refinement"
-            );
-            app.load_path(root.join("next.wav"), MediaKind::Audio);
-            assert!(
-                app.waveform_detail.key.is_none(),
-                "navigation discards the former envelope"
-            );
+                    .expect("edit does not decode")
+            ));
         }
+        let retained_detail = app.waveform_detail.take_retained();
+        app.waveform_detail = retained_detail;
+        app.graphics_epoch += 1;
+        assert!(app.detailed_waveform(&context, rect, None).is_some());
+        assert!(Arc::ptr_eq(
+            &retained,
+            app.waveform_detail.values.as_ref().expect("CPU data")
+        ));
+        assert!(
+            receive.try_recv().is_err(),
+            "no work submitted for view/edit changes"
+        );
+        app.path = Some(root.join("another.wav"));
+        assert!(app.detailed_waveform(&context, rect, None).is_none());
+        app.install_detailed_waveform(generation, key, Ok(vec![1.0; 1024]));
+        assert!(
+            app.waveform_detail.values.is_none(),
+            "old source cannot install"
+        );
+        app.waveform_worker.clear();
     }
 
     #[test]
@@ -513,10 +344,10 @@ mod tests {
                 );
                 assert_eq!(app.waveform.as_ref().expect("same overview").id(), texture);
                 app.detailed_waveform(&context, rect, None);
-                assert_ne!(app.waveform_detail.key.as_ref(), Some(&previous));
+                assert_eq!(app.waveform_detail.key.as_ref(), Some(&previous));
                 assert!(
                     !app.waveform_detail.started,
-                    "the edited plan must settle before decoding"
+                    "source preparation still waits for its initial settle time"
                 );
             }
             assert_eq!(
@@ -543,102 +374,59 @@ pub(super) struct Detail {
     started: bool,
     finished: bool,
     values: Option<Arc<[f32]>>,
-    held_gain: Option<Vec<Band>>,
-    last_gain_preview: Option<(towavue_core::TimeRange, f32)>,
-}
-
-#[derive(Clone, Copy)]
-struct Band {
-    from: f64,
-    to: f64,
-    value: f64,
-}
-
-impl Band {
-    fn scaled(self, preview: Option<(f64, f64, f32)>) -> [Self; 3] {
-        let mut cuts = [self.from, self.from, self.to, self.to];
-        if let Some((from, to, _)) = preview {
-            cuts[1] = from.clamp(self.from, self.to);
-            cuts[2] = to.clamp(self.from, self.to);
-        }
-        cuts.sort_by(f64::total_cmp);
-        std::array::from_fn(|index| {
-            let from = cuts[index];
-            let to = cuts[index + 1];
-            let factor = preview
-                .filter(|(start, end, _)| from >= *start && to <= *end)
-                .map_or(1.0, |(_, _, factor)| f64::from(factor));
-            Self {
-                from,
-                to,
-                value: self.value * factor,
-            }
-        })
-    }
+    levels: Vec<Arc<[f32]>>,
+    display_plan: Option<EditTimeline>,
+    display_volume: f32,
 }
 
 impl Detail {
-    fn bands(&self) -> impl Iterator<Item = Band> + '_ {
-        let values = self.values.as_deref().unwrap_or_default();
-        values
-            .iter()
-            .enumerate()
-            .map(move |(column, value)| Band {
-                from: column as f64 / values.len() as f64,
-                to: (column + 1) as f64 / values.len() as f64,
-                value: f64::from(*value),
-            })
-            .chain(
-                self.held_gain
-                    .as_deref()
-                    .filter(|_| self.values.is_none())
-                    .unwrap_or_default()
-                    .iter()
-                    .copied(),
-            )
+    fn install(&mut self, values: Vec<f32>) {
+        self.levels.clear();
+        let mut level: Arc<[f32]> = values.into();
+        self.values = Some(level.clone());
+        while level.len() > 1 {
+            level = level
+                .chunks(2)
+                .map(|pair| pair.iter().copied().fold(0.0, f32::max))
+                .collect::<Vec<_>>()
+                .into();
+            self.levels.push(level.clone());
+        }
     }
 
-    fn hold_committed_gain(&self, next: &Key) -> Option<Vec<Band>> {
-        let previous = self.key.as_ref()?;
-        let (range, factor) = self.last_gain_preview?;
-        if previous.path != next.path
-            || previous.track != next.track
-            || previous.rate != next.rate
-            || previous.volume != next.volume
-            || previous.columns != next.columns
-            || (self.values.is_none() && self.held_gain.is_none())
-        {
-            return None;
+    fn peak(&self, from: f64, to: f64) -> f32 {
+        let Some(values) = self.values.as_deref() else {
+            return 0.0;
+        };
+        if values.is_empty() {
+            return 0.0;
         }
-        let mut expected = previous.plan.clone();
-        if !expected.apply(towavue_core::TimelineEdit::ScaleVolume(range, factor))
-            || expected != next.plan
-        {
-            return None;
-        }
-        let duration = previous.plan.duration().as_seconds_f64();
-        let preview = Some((
-            range.start().as_seconds_f64() / duration,
-            range.end().as_seconds_f64() / duration,
-            factor,
-        ));
-        let mut bands: Vec<Band> = Vec::new();
-        for band in self
-            .bands()
-            .flat_map(|band| band.scaled(preview))
-            .filter(|band| band.from < band.to)
-        {
-            if let Some(last) = bands.last_mut()
-                && last.to == band.from
-                && last.value == band.value
-            {
-                last.to = band.to;
+        let begin = (from * values.len() as f64 + 1e-9).floor().max(0.0) as usize;
+        let end = (to * values.len() as f64 - 1e-9).ceil().max(0.0) as usize;
+        let mut begin = begin.min(values.len() - 1);
+        let end = end.max(begin + 1).min(values.len());
+        let mut peak = 0.0_f32;
+        // Exact range maximum from aligned power-of-two blocks. Cost grows
+        // logarithmically with source bins, not the duration of the visible media.
+        while begin < end {
+            let remaining = end - begin;
+            let available = (usize::BITS - 1 - remaining.leading_zeros()) as usize;
+            let aligned = if begin == 0 {
+                available
             } else {
-                bands.push(band);
-            }
+                begin.trailing_zeros() as usize
+            };
+            let level = available.min(aligned).min(self.levels.len());
+            peak = peak.max(if level == 0 {
+                values[begin]
+            } else {
+                self.levels[level - 1][begin >> level]
+            });
+            begin += 1 << level;
         }
-        Some(bands)
+        peak
     }
+
     pub(super) fn is_pending(&self) -> bool {
         self.started && !self.finished
     }
@@ -648,75 +436,146 @@ impl Detail {
             self.changed = Some(Instant::now());
         }
     }
-
     pub(super) fn take_retained(&mut self) -> Self {
         let mut saved = std::mem::take(self);
-        // Navigation cancels the old worker. A completed CPU envelope survives
-        // transfer/recovery, but unfinished work must be eligible on activation.
         saved.restart_pending();
         saved
     }
 
+    #[cfg(test)]
     fn mesh(
         &self,
         rect: egui::Rect,
         density: f32,
         preview: Option<(towavue_core::TimeRange, f32)>,
     ) -> Option<egui::Mesh> {
-        if self.values.is_none() && self.held_gain.is_none() {
-            return None;
-        }
-        let duration = self.key.as_ref()?.plan.duration().as_seconds_f64();
-        let preview = preview.map(|(range, factor)| {
-            (
-                range.start().as_seconds_f64() / duration,
-                range.end().as_seconds_f64() / duration,
-                factor,
-            )
-        });
-        let snap = |value: f32| (value * density).round() / density;
+        self.mesh_view(rect, rect, density, preview, None)
+    }
+
+    fn mesh_view(
+        &self,
+        rect: egui::Rect,
+        clip: egui::Rect,
+        density: f32,
+        preview: Option<(towavue_core::TimeRange, f32)>,
+        viewport: Option<crate::timeline_view::View>,
+    ) -> Option<egui::Mesh> {
+        self.values.as_ref()?;
+        let key = self.key.as_ref()?;
+        let plan = self.display_plan.as_ref().unwrap_or(&key.plan);
+        let volume = if self.display_plan.is_some() {
+            self.display_volume
+        } else {
+            1.0
+        };
+        let duration = plan.duration().as_seconds_f64();
+        let source_duration = key.plan.duration().as_seconds_f64();
+        let (start, span_seconds) =
+            viewport.map_or((0.0, duration), |view| (view.start, view.span));
         let mut mesh = egui::Mesh::default();
-        for band in self
-            .bands()
-            .flat_map(|band| band.scaled(preview))
-            .filter(|band| band.from < band.to)
-        {
-            // Retain unclipped amplitudes across repeated commits, including
-            // selection boundaries inside a physical display column.
-            let half_height = rect.height() * band.value.min(1.0) as f32 * 0.5;
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(
-                    snap(rect.left() + rect.width() * band.from as f32),
-                    snap(rect.center().y - half_height),
-                ),
-                egui::pos2(
-                    snap(rect.left() + rect.width() * band.to as f32),
-                    snap(rect.center().y + half_height),
-                ),
-            );
-            if bar.is_positive() {
-                mesh.add_colored_rect(bar, color());
+        let mut offset = 0.0;
+        let mut last: Option<(egui::Rect, f32)> = None;
+        for span in plan.spans() {
+            let end = offset + span.duration().as_seconds_f64();
+            let span_left =
+                f64::from(rect.left()) + f64::from(rect.width()) * (offset - start) / span_seconds;
+            let span_right =
+                f64::from(rect.left()) + f64::from(rect.width()) * (end - start) / span_seconds;
+            let left = span_left.max(f64::from(clip.left()));
+            let right = span_right.min(f64::from(clip.right()));
+            if right > left {
+                let first = (left * f64::from(density)).floor() as i64;
+                let last_pixel = (right * f64::from(density)).ceil() as i64;
+                for pixel in first..last_pixel {
+                    let x0 = (pixel as f64 / f64::from(density)).max(left);
+                    let x1 = ((pixel + 1) as f64 / f64::from(density)).min(right);
+                    let time = |x: f64| {
+                        offset + (x - span_left) / (span_right - span_left) * (end - offset)
+                    };
+                    let mut cuts = [x0, x1, x1, x1];
+                    let mut cut_count = 2;
+                    if let Some((range, _)) = preview {
+                        for boundary in [range.start(), range.end()] {
+                            let x = f64::from(rect.left())
+                                + f64::from(rect.width()) * (boundary.as_seconds_f64() - start)
+                                    / span_seconds;
+                            if x > x0 && x < x1 {
+                                cuts[cut_count] = x;
+                                cut_count += 1;
+                            }
+                        }
+                    }
+                    cuts[..cut_count].sort_by(f64::total_cmp);
+                    for pair in cuts[..cut_count].windows(2) {
+                        let source = |x| {
+                            (span.source().start().as_seconds_f64()
+                                + (time(x) - offset) * span.rate())
+                                / source_duration
+                        };
+                        let factor = preview
+                            .filter(|(range, _)| {
+                                time((pair[0] + pair[1]) * 0.5) >= range.start().as_seconds_f64()
+                                    && time((pair[0] + pair[1]) * 0.5)
+                                        < range.end().as_seconds_f64()
+                            })
+                            .map_or(1.0, |(_, factor)| factor);
+                        let value = (self.peak(source(pair[0]), source(pair[1]))
+                            * span.volume()
+                            * volume
+                            * factor)
+                            .min(1.0);
+                        let half = (rect.height() * value * 0.5 * density).round() / density;
+                        let bar = egui::Rect::from_min_max(
+                            egui::pos2(
+                                pair[0] as f32,
+                                (rect.center().y * density).round() / density - half,
+                            ),
+                            egui::pos2(
+                                pair[1] as f32,
+                                (rect.center().y * density).round() / density + half,
+                            ),
+                        );
+                        if let Some((previous, previous_value)) = &mut last
+                            && *previous_value == value
+                            && (previous.right() - bar.left()).abs() < 0.001
+                        {
+                            previous.max.x = bar.right();
+                        } else {
+                            if let Some((bar, _)) = last.take()
+                                && bar.is_positive()
+                            {
+                                mesh.add_colored_rect(bar, color());
+                            }
+                            last = Some((bar, value));
+                        }
+                    }
+                }
             }
+            offset = end;
+        }
+        if let Some((bar, _)) = last
+            && bar.is_positive()
+        {
+            mesh.add_colored_rect(bar, color());
         }
         Some(mesh)
     }
 }
 
 impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
-    /// Complete a synthetic envelope without opening media or starting a worker.
-    #[cfg(feature = "presentation-verification")]
+    #[cfg(any(test, feature = "presentation-verification"))]
     pub(super) fn verification_complete_waveform(&mut self, refined: bool) -> u32 {
         let detail = &mut self.waveform_detail;
         let columns = detail.key.as_ref().expect("laid-out waveform key").columns;
         detail.started = true;
         detail.finished = true;
-        detail.held_gain = None;
-        detail.values = refined.then(|| {
-            (0..columns)
-                .map(|column| 0.1 + (column as f32 * 0.037).sin().abs() * 0.9)
-                .collect::<Vec<_>>()
-                .into()
-        });
+        if refined {
+            detail.install(
+                (0..columns)
+                    .map(|column| 0.1 + (column as f32 * 0.037).sin().abs() * 0.9)
+                    .collect(),
+            );
+        }
         columns
     }
 
@@ -768,68 +627,79 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.waveform_detail = Detail::default();
     }
 
+    #[cfg(test)]
     pub(super) fn detailed_waveform(
         &mut self,
         context: &egui::Context,
         rect: egui::Rect,
         gain_preview: Option<(towavue_core::TimeRange, f32)>,
     ) -> Option<egui::Mesh> {
+        self.detailed_waveform_view(context, rect, rect, gain_preview, None, None)
+    }
+
+    pub(super) fn detailed_waveform_view(
+        &mut self,
+        context: &egui::Context,
+        rect: egui::Rect,
+        clip: egui::Rect,
+        gain_preview: Option<(towavue_core::TimeRange, f32)>,
+        stretch: Option<(towavue_core::TimeRange, MediaTime)>,
+        viewport: Option<crate::timeline_view::View>,
+    ) -> Option<egui::Mesh> {
         if self.source_save.frozen {
-            return self
-                .waveform_detail
-                .mesh(rect, context.pixels_per_point(), gain_preview);
+            return self.waveform_detail.mesh_view(
+                rect,
+                clip,
+                context.pixels_per_point(),
+                gain_preview,
+                viewport,
+            );
         }
         let path = self.path.as_ref()?;
         let state = self.edit_state();
-        let fallback;
-        let plan = if let Some(plan) = self.session.as_ref().and_then(PlaybackSession::timeline) {
-            plan
-        } else {
-            fallback = self.history_timeline().ok()?.or_else(|| {
+        let source_plan = EditTimeline::new(media_time(self.media_duration?), Default::default())?;
+        let mut plan = self
+            .session
+            .as_ref()
+            .and_then(PlaybackSession::timeline)
+            .cloned()
+            .or(self.history_timeline().ok()?)
+            .or_else(|| {
                 EditTimeline::new(media_time(self.media_duration?), state.playback_range())
             })?;
-            &fallback
-        };
-        if plan.spans().is_empty() {
-            self.clear_detailed_waveform();
-            return None;
+        if let Some((range, length)) = stretch {
+            plan.apply(towavue_core::TimelineEdit::Stretch(range, length));
         }
-        let columns = (rect.width() * context.pixels_per_point())
-            .round()
-            .clamp(1.0, 8192.0) as u32;
+        // 240 bins/second gives eight source bins per 30 fps frame. Long sources
+        // use a bounded coarser envelope; zooming never causes another decode.
+        let columns = (source_plan.duration().as_seconds_f64() * 240.0)
+            .ceil()
+            .clamp(1024.0, 262_144.0) as u32;
         let track = self.waveform_audio_track();
-        let matches = self.waveform_detail.key.as_ref().is_some_and(|key| {
-            key.path == *path
-                && key.track == track
-                && key.plan == *plan
-                && key.rate == state.rate
-                && key.volume == state.volume
-                && key.columns == columns
-        });
+        let matches =
+            self.waveform_detail.key.as_ref().is_some_and(|key| {
+                key.path == *path && key.track == track && key.plan == source_plan
+            });
         if !matches {
             if self.waveform_detail.started && !self.waveform_loading {
                 self.waveform_worker.clear();
             }
-            let key = Arc::new(Key {
-                path: path.clone(),
-                track,
-                plan: plan.clone(),
-                rate: state.rate,
-                volume: state.volume,
-                columns,
-            });
-            // Only an exact commit of the last displayed gain may bridge the
-            // asynchronous refinement. Other edits, widths and sources invalidate it.
-            let held_gain = self.waveform_detail.hold_committed_gain(&key);
             self.waveform_detail = Detail {
-                key: Some(key),
-                held_gain,
+                key: Some(Arc::new(Key {
+                    path: path.clone(),
+                    track,
+                    plan: source_plan,
+
+                    columns,
+                })),
                 changed: Some(Instant::now()),
                 ..Default::default()
             };
         }
         let input = self.media_input(path);
         let detail = &mut self.waveform_detail;
+        detail.display_plan = Some(plan);
+        detail.display_volume = state.volume;
         if !detail.started
             && !self.waveform_loading
             && gain_preview.is_none()
@@ -838,21 +708,17 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             let remaining =
                 SETTLE_TIME.saturating_sub(detail.changed.expect("key timestamp").elapsed());
             if remaining.is_zero() {
-                // Give every submission a distinct identity, including retries of
-                // identical parameters: an already queued result cannot finish it.
                 let key = Arc::new(detail.key.as_deref().expect("requested key").clone());
-                detail.key = Some(Arc::clone(&key));
-                let notify = Arc::clone(&self.notify);
+                detail.key = Some(key.clone());
+                let notify = self.notify.clone();
                 let generation = self.media_generation;
                 detail.started = true;
                 detail.finished = false;
                 self.waveform_worker.submit(move |cancellation| {
-                    let result = towavue_runtime_windows::timeline_audio_track_waveform(
+                    let result = towavue_runtime_windows::source_audio_track_waveform(
                         input.path(),
                         key.track,
-                        &key.plan,
-                        key.rate,
-                        key.volume,
+                        key.plan.duration(),
                         key.columns,
                         &cancellation,
                     );
@@ -862,8 +728,13 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 context.request_repaint_after(remaining);
             }
         }
-        detail.last_gain_preview = gain_preview;
-        detail.mesh(rect, context.pixels_per_point(), gain_preview)
+        detail.mesh_view(
+            rect,
+            clip,
+            context.pixels_per_point(),
+            gain_preview,
+            viewport,
+        )
     }
 
     pub(super) fn install_detailed_waveform(
@@ -886,10 +757,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         self.waveform_detail.finished = true;
         match result {
-            Ok(values) => {
-                self.waveform_detail.values = Some(values.into());
-                self.waveform_detail.held_gain = None;
-            }
+            Ok(values) => self.waveform_detail.install(values),
             Err(error) => {
                 let language = self.language();
                 self.set_status(

@@ -91,7 +91,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                     );
                     assert!(actions.is_empty());
                     assert_eq!(output.pixels_per_point, density);
-                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_rgba_premultiplied(26, 26, 26, 153))).count();
+                    let backgrounds = output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == crate::chrome::TRACK.gamma_multiply(0.6))).count();
                     assert_eq!(backgrounds, 2, "only video/audio durations receive badges");
                     for (index, seconds) in [65, 3601].into_iter().enumerate() {
                         let label = format_time(media_time(Duration::from_secs(seconds)));
@@ -110,16 +110,16 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                         else {
                             panic!("backdrop before duration text");
                         };
-                        assert_eq!(
-                            background.fill,
-                            Color32::from_rgba_premultiplied(26, 26, 26, 153)
-                        );
+                        assert_eq!(background.fill, crate::chrome::TRACK.gamma_multiply(0.6));
                         assert_eq!(
                             background.rect,
                             Rect::from_min_size(text.pos, text.galley.size())
                                 .expand2(egui::vec2(4.0, 2.0))
                         );
-                        assert_eq!(background.corner_radius, egui::CornerRadius::same(2));
+                        assert_eq!(
+                            background.corner_radius,
+                            egui::CornerRadius::same(crate::chrome::RADIUS_XS)
+                        );
                         let image_index = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == textures[index])).expect("ready thumbnail");
                         assert!(image_index < text_index - 1, "badge is above its thumbnail");
                         let egui::Shape::Mesh(mesh) = &output.shapes[image_index].shape else {
@@ -162,7 +162,7 @@ fn gallery_and_filmstrip_durations_are_centered_and_audio_pixels_are_tinted() {
                                 < 0.01
                         );
                         let color = if index == 1 {
-                            Color32::from_gray(0x80)
+                            crate::chrome::MUTED
                         } else {
                             Color32::WHITE
                         };
@@ -553,7 +553,7 @@ fn gallery_grid_reaches_gpu_without_card_backgrounds() {
                         );
                         assert_eq!(
                             at(audio_bounds.left() + 8.0, audio_bounds.center().y),
-                            &Color32::from_gray(128).to_array()
+                            &crate::chrome::MUTED.to_array()
                         );
                         assert_eq!(
                             at(audio_bounds.left() + 8.0, audio_bounds.bottom() - 3.0),

@@ -404,7 +404,7 @@ impl KeyboardSettings {
             egui::epaint::RectShape::new(
                 outer,
                 chrome::INPUT_RADIUS,
-                egui::Color32::from_gray(12),
+                chrome::FLOATING_BACKGROUND,
                 stroke,
                 egui::StrokeKind::Inside,
             ),

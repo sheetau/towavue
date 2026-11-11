@@ -307,7 +307,7 @@ pub(super) fn field_gap(ui: &egui::Ui) -> f32 {
     ui.painter()
         .layout_no_wrap(
             "   ".into(),
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(crate::chrome::TEXT_MD),
             chrome::MUTED,
         )
         .size()
@@ -330,7 +330,7 @@ pub(super) fn fitting_text(
         };
         let mut job = egui::text::LayoutJob::simple_singleline(
             candidate.clone(),
-            egui::FontId::proportional(12.0),
+            egui::FontId::proportional(crate::chrome::TEXT_MD),
             chrome::MUTED,
         );
         job.halign = egui::Align::RIGHT;

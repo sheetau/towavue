@@ -455,13 +455,14 @@ pub(super) fn show_status(
                         )
                     })
                     .inner;
-                ui.painter().rect_filled(cancel.rect, 2.0, chrome::BORDER);
+                ui.painter()
+                    .rect_filled(cancel.rect, chrome::RADIUS_XS, chrome::BORDER);
                 chrome::filled_button_border(ui, &cancel, 2);
                 ui.painter().text(
-                    cancel.rect.center() - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
+                    cancel.rect.center(),
                     egui::Align2::CENTER_CENTER,
                     Text::Cancel.in_language(language),
-                    egui::FontId::proportional(12.0),
+                    egui::FontId::proportional(crate::chrome::TEXT_MD),
                     ui.style().interact(&cancel).text_color(),
                 );
                 cancel.widget_info(|| {

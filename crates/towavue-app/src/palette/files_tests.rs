@@ -120,7 +120,9 @@ fn recent_file_icons_follow_the_setting_without_changing_folder_or_command_rows(
                     .and_then(|(_, node)| node.bounds())
                     .expect("file row");
                 assert!(
-                    (icon.calc_bounds().left() - row.x0 as f32 - 6.0).abs() < 1.0,
+                    (icon.calc_bounds().left() - row.x0 as f32 - f32::from(crate::chrome::PADDING))
+                        .abs()
+                        < 1.0,
                     "icon shares the ordinary label inset"
                 );
                 let format = text.galley.job.sections[0].format.color;
@@ -515,17 +517,11 @@ fn file_and_folder_rows_remove_without_opening_and_keep_inline_labels_in_bounds(
                         "recently opened"
                     };
                     let name = picker_text(&output, "one.png").expect("name").0;
-                    let label = picker_text(&output, group).expect("inline group").0;
-                    assert!(
-                        (name.pos.y + name.galley.size().y / 2.0
-                            - label.pos.y
-                            - label.galley.size().y / 2.0)
-                            .abs()
-                            < 1.0
-                    );
+                    let label = picker_text(&output, group).expect("category heading").0;
+                    assert!(label.pos.y + label.galley.size().y <= name.pos.y);
                     assert_eq!(
                         label.galley.job.sections[0].format.color,
-                        crate::chrome::MUTED
+                        crate::chrome::FAINT
                     );
                     let remove_label =
                         format!("Remove from Recently Opened: {}", paths[0].display());
@@ -772,11 +768,15 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                             let point = button_position(output, label);
                             let full = egui::Rect::from_min_max(
                                 body.min,
-                                body.max + egui::vec2(22.0, 0.0),
+                                body.max
+                                    + egui::vec2(
+                                        crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP,
+                                        0.0,
+                                    ),
                             );
                             assert!(
                                 output.shapes.iter().any(|shape| matches!(&shape.shape,
-                            egui::Shape::Rect(painted) if painted.fill == crate::chrome::HOVER
+                            egui::Shape::Rect(painted) if (painted.fill == crate::chrome::HOVER || painted.fill == crate::chrome::SURFACE)
                                 && painted.rect.min.distance(full.min) < 0.1
                                 && painted.rect.max.distance(full.max) < 0.1
                                 && painted.rect.contains(point)
@@ -791,8 +791,11 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                     );
                     let second = rect(&output, &paths[1]);
                     let before = picker_text(&output, "second.png").expect("second").0.pos;
-                    let hovered =
-                        egui::Rect::from_min_max(second.min, second.max - egui::vec2(22.0, 0.0));
+                    let hovered = egui::Rect::from_min_max(
+                        second.min,
+                        second.max
+                            - egui::vec2(crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP, 0.0),
+                    );
                     let assert_rect = |actual: egui::Rect, expected: egui::Rect| {
                         assert!(
                             actual.min.distance(expected.min) <= 1.0 / density
@@ -911,11 +914,17 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         render(&mut palette, vec![egui::Event::PointerMoved(idle.center())]);
         output = render(&mut palette, vec![]).0;
         let hovered = bounds(&output);
-        assert!((idle.width() - hovered.width() - 44.0).abs() <= 1.0 / density);
+        assert!(
+            (idle.width()
+                - hovered.width()
+                - 2.0 * (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP))
+                .abs()
+                <= 1.0 / density
+        );
         let gear = button_rect(&output, &format!("Configure keybinding: {title}"));
         let remove = button_rect(&output, &format!("Remove {title} from Recently Used"));
-        assert_eq!(gear.size(), egui::Vec2::splat(20.0));
-        assert_eq!(remove.size(), egui::Vec2::splat(20.0));
+        assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
+        assert_eq!(remove.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
         let tree = output
             .platform_output
             .accesskit_update
@@ -937,8 +946,9 @@ fn command_history_returns_hidden_removal_width_and_keeps_removal_independent() 
         assert!((remove.left() - gear.right() - 2.0).abs() < 0.01);
         let shortcut =
             crate::shortcuts::defaults().label(CommandId::OpenFolder, CommandContext::default());
-        let (text, _) = picker_text(&output, &shortcut).expect("shortcut label");
-        assert!((gear.left() - text.pos.x - text.galley.size().x - 2.0).abs() <= 1.0 / density);
+        let last_key = shortcut.split(['+', ' ']).next_back().expect("last key");
+        let (text, _) = picker_text(&output, last_key).expect("shortcut keycap");
+        assert!((gear.left() - text.pos.x - text.galley.size().x - 6.0).abs() <= 1.0 / density);
         // The exposed portion still invokes removal, before the bar scrolls it away.
         let point = egui::pos2(remove.left() + 2.0, remove.center().y);
         render(&mut palette, vec![egui::Event::PointerMoved(point)]);
@@ -1010,7 +1020,7 @@ fn palette_gear_configures_enabled_and_context_disabled_commands_without_executi
             output = frame(&mut palette, vec![]).0;
             let label = format!("Configure keybinding: {}", definition.title);
             let gear = button_rect(&output, &label);
-            assert_eq!(gear.size(), egui::Vec2::splat(20.0));
+            assert_eq!(gear.size(), egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
             assert!(
                 (gear.left() - button_rect(&output, definition.title).right() - 2.0).abs() < 0.01
             );

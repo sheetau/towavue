@@ -48,7 +48,7 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
             egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
         assert!((input.width() - 120.0).abs() <= 1.0 / density);
-        assert!((input.height() - 26.0).abs() <= 1.0 / density);
+        assert!((input.height() - crate::chrome::INPUT_HEIGHT).abs() <= 1.0 / density);
         let dimensions = output
             .shapes
             .iter()

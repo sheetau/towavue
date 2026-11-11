@@ -98,8 +98,11 @@ impl Transport {
             egui::vec2(if audio { 72.0 } else { 24.0 }, 24.0),
         );
         if !audio {
-            ui.painter()
-                .rect_filled(rect, 4.0, Color32::from_black_alpha(160));
+            ui.painter().rect_filled(
+                rect,
+                crate::chrome::RADIUS_XS,
+                Color32::from_black_alpha(160),
+            );
         }
         let mut action = None;
         let mut buttons = ui.new_child(

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Rect, Ui, pos2, vec2};
+use egui::{Rect, Ui, pos2, vec2};
 use towavue_core::TabId;
 
 const HOLD: Duration = Duration::from_millis(1200);
@@ -139,7 +139,7 @@ impl Hud {
             crate::chrome::BORDER.gamma_multiply(0.45),
         );
         if fill.is_positive() {
-            painter.rect_filled(fill, 1.5, Color32::WHITE);
+            painter.rect_filled(fill, 1.5, crate::chrome::FOREGROUND);
         }
         changed
     }
@@ -454,9 +454,9 @@ mod tests {
                 )
             };
             let visible = frame(120, 1);
-            assert!(visible.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::WHITE)));
+            assert!(visible.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == crate::chrome::FOREGROUND)));
             assert!(context.memory(|memory| memory.focused()).is_none());
-            assert!(!frame(1320, 1).shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::WHITE)));
+            assert!(!frame(1320, 1).shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == crate::chrome::FOREGROUND)));
             hud.changed(tab, 1, start);
             let _ = context.run_ui(Default::default(), |ui| {
                 hud.show(ui, Some((tab, 2)), None, 1.0, start);

@@ -326,7 +326,7 @@ pub fn show(
             .layout_no_wrap(
                 label.into(),
                 egui::TextStyle::Body.resolve(header.style()),
-                egui::Color32::WHITE,
+                crate::chrome::FOREGROUND,
             )
             .size()
             .x

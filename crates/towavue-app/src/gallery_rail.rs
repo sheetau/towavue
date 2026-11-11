@@ -234,7 +234,7 @@ pub(super) fn show(
         let label = year_start.then(|| {
             painter.layout_no_wrap(
                 year.map_or_else(|| "?".into(), |year| year.to_string()),
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(crate::chrome::TEXT_SM),
                 chrome::MUTED,
             )
         });
@@ -304,11 +304,7 @@ pub(super) fn show(
     if opacity > 0.0 {
         painter.set(
             thumb_background,
-            egui::Shape::rect_filled(
-                thumb,
-                0.0,
-                egui::Color32::from_rgb(24, 24, 24).gamma_multiply(opacity),
-            ),
+            egui::Shape::rect_filled(thumb, 0.0, crate::chrome::SURFACE.gamma_multiply(opacity)),
         );
     }
     if let Some(target) = target.filter(|_| ui.is_enabled()) {
@@ -375,8 +371,11 @@ fn show_label(ui: &egui::Ui, id: egui::Id, anchor: egui::Pos2, label: String) {
         id.with("month-label"),
     ));
     let frame = crate::hover_help::frame(ui.style());
-    let galley =
-        painter.layout_no_wrap(label, egui::FontId::proportional(12.0), chrome::FOREGROUND);
+    let galley = painter.layout_no_wrap(
+        label,
+        egui::FontId::proportional(crate::chrome::TEXT_MD),
+        chrome::FOREGROUND,
+    );
     let size = galley.size() + frame.total_margin().sum();
     let outer = egui::Rect::from_min_size(anchor - egui::vec2(size.x, size.y * 0.5), size);
     let screen = ui.ctx().content_rect();

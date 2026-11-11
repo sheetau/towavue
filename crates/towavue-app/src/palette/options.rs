@@ -146,13 +146,22 @@ impl CommandPalette {
             .id_salt("palette-options")
             .auto_shrink([false, true])
             .max_height(height)
-            .show_popup_styled(ui, 6.0, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
+            .show_popup_styled(ui, crate::chrome::PADDING as f32, |ui| {
+                ui.spacing_mut().item_spacing.y = crate::chrome::ITEM_GAP;
                 if matches.is_empty() {
                     ui.weak(localization::text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, (original, row)) in matches.iter().enumerate() {
-                    let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
+                    let (_, rect) = ui.allocate_space(egui::vec2(
+                        ui.available_width(),
+                        crate::chrome::ROW_HEIGHT,
+                    ));
+                    let mut row_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("option-row", *original))
+                            .max_rect(rect),
+                    );
+                    let ui = &mut row_ui;
                     let selected = selected == Some(index);
                     let atoms = egui::Atoms::new((
                         row.label.as_str(),

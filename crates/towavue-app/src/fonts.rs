@@ -166,7 +166,10 @@ pub fn append_reading_hint(
 }
 
 pub fn icon_font() -> egui::FontId {
-    egui::FontId::new(16.0, egui::FontFamily::Name("codicon".into()))
+    egui::FontId::new(
+        crate::chrome::ICON_SIZE,
+        egui::FontFamily::Name("codicon".into()),
+    )
 }
 
 #[cfg(test)]

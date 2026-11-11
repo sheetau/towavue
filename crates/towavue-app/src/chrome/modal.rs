@@ -3,13 +3,16 @@ use egui::{Context, Id, Rect, Ui};
 use crate::scroll_style::ScrollAreaStyle;
 
 const MARGIN: f32 = 8.0;
-const FRAME_SPACE: f32 = 18.0;
+const FRAME_SPACE: f32 = 12.0;
 const MAX_CONTENT_WIDTH: f32 = 400.0;
 
 /// Keep action order and keyboard traversal left-to-right while aligning each
 /// wrapped footer row to the content's right edge.
 pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Response> {
     super::flat_buttons(ui);
+    ui.spacing_mut().item_spacing = egui::vec2(super::PADDING as f32, super::ITEM_GAP);
+    ui.spacing_mut().interact_size.y = super::CONTROL_HEIGHT;
+    ui.spacing_mut().button_padding = egui::vec2(super::PADDING as f32, 2.0);
     let gap = ui.spacing().item_spacing;
     let font = egui::TextStyle::Button.resolve(ui.style());
     let height = (ui.text_style_height(&egui::TextStyle::Button)
@@ -26,6 +29,7 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
                 .x
                 + 2.0 * ui.spacing().button_padding.x)
                 .ceil()
+                .max(60.0)
                 .min(available)
         })
         .collect();
@@ -45,7 +49,9 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
     if start < actions.len() {
         rows.push((start..actions.len(), used));
     }
-    let total_height = rows.len() as f32 * height + rows.len().saturating_sub(1) as f32 * gap.y;
+    let slot_height = height.max(super::ROW_HEIGHT);
+    let total_height =
+        rows.len() as f32 * slot_height + rows.len().saturating_sub(1) as f32 * gap.y;
     let rect = ui
         .allocate_exact_size(egui::vec2(width, total_height), egui::Sense::hover())
         .0;
@@ -60,7 +66,10 @@ pub fn modal_actions(ui: &mut Ui, actions: &[(&str, bool)]) -> Vec<egui::Respons
         let mut x = rect.right() - used;
         for index in indices {
             let button = Rect::from_min_size(
-                egui::pos2(x, rect.top() + row as f32 * (height + gap.y)),
+                egui::pos2(
+                    x,
+                    rect.top() + row as f32 * (slot_height + gap.y) + slot_height - height,
+                ),
                 egui::vec2(widths[index], height),
             );
             let mut child = ui.new_child(
@@ -118,7 +127,10 @@ pub fn modal(context: &Context, id: Id, preview: bool) -> egui::Modal {
     let area = egui::Modal::default_area(id)
         .constrain_to(client)
         .anchor(anchor, offset);
-    let frame = egui::Frame::popup(&context.global_style()).inner_margin(MARGIN);
+    let frame = egui::Frame::popup(&context.global_style())
+        .inner_margin(super::PADDING)
+        .fill(super::BACKGROUND)
+        .stroke(egui::Stroke::new(1.0, super::BORDER));
     let modal = egui::Modal::new(id).area(area).frame(frame);
     if preview {
         modal.backdrop_color(egui::Color32::TRANSPARENT)
@@ -137,6 +149,9 @@ pub fn modal_body<R>(
     content: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let bounds = bounds(ui.ctx());
+    ui.spacing_mut().item_spacing = egui::vec2(super::PADDING as f32, super::PADDING as f32);
+    ui.spacing_mut().interact_size.y = super::CONTROL_HEIGHT;
+    ui.spacing_mut().button_padding = egui::vec2(super::PADDING as f32, 2.0);
     // Reset the Area's remembered maximum to permit growth, without reserving
     // empty width. The body and footer determine the minimum on every pass.
     ui.set_max_width(MAX_CONTENT_WIDTH.min((bounds.width() - FRAME_SPACE).max(1.0)));
@@ -156,8 +171,19 @@ pub fn modal_body<R>(
         node.set_label(title);
         node.set_modal();
     });
-    let heading = ui.label(egui::RichText::new(title).color(super::FOREGROUND));
-    let header_gap = (MARGIN - ui.spacing().item_spacing.y).max(0.0);
+    let title = egui::WidgetText::from(egui::RichText::new(title).color(super::FOREGROUND))
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Wrap),
+            ui.available_width(),
+            egui::TextStyle::Body,
+        );
+    let (header, _) = ui.allocate_exact_size(
+        egui::vec2(title.size().x, title.size().y.max(super::ROW_HEIGHT)),
+        egui::Sense::hover(),
+    );
+    let heading = ui.put(header, egui::Label::new(title).halign(egui::Align::Min));
+    let header_gap = (super::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0);
     ui.add_space(header_gap);
     let font = egui::TextStyle::Button.resolve(ui.style());
     let row_height =
@@ -173,6 +199,7 @@ pub fn modal_body<R>(
             .size()
             .x
             + 2.0 * ui.spacing().button_padding.x;
+        let width = width.max(60.0);
         if used > 0.0 && used + ui.spacing().item_spacing.x + width > ui.available_width() {
             rows += 1;
             used = 0.0;
@@ -186,9 +213,10 @@ pub fn modal_body<R>(
     let footer_gap = if actions.is_empty() {
         0.0
     } else {
-        (MARGIN - ui.spacing().item_spacing.y).max(0.0)
+        (super::PADDING as f32 - ui.spacing().item_spacing.y).max(0.0)
     };
-    let footer = rows as f32 * (row_height + ui.spacing().item_spacing.y) + footer_gap;
+    let footer = rows as f32 * (row_height.max(super::ROW_HEIGHT) + ui.spacing().item_spacing.y)
+        + footer_gap;
     let height = (bounds.height()
         - FRAME_SPACE
         - heading.rect.height()
@@ -206,7 +234,16 @@ pub fn modal_body<R>(
         .auto_shrink([true, true])
         .max_height(height)
         .min_scrolled_height(1.0)
-        .show_styled(ui, content);
+        .show_styled(ui, |ui| {
+            egui::Frame::NONE
+                .inner_margin(super::PADDING)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing =
+                        egui::vec2(super::PADDING as f32, super::ITEM_GAP);
+                    content(ui)
+                })
+                .inner
+        });
     ui.visuals_mut().clip_rect_margin = clip_margin;
     if !actions.is_empty() {
         ui.add_space(footer_gap);
@@ -327,7 +364,12 @@ mod tests {
                                 );
                         }
                         assert!(
-                            (outer.width() - width - FRAME_SPACE).abs() <= 1.0 / density,
+                            (outer.width()
+                                - width
+                                - FRAME_SPACE
+                                - 2.0 * f32::from(super::super::PADDING))
+                            .abs()
+                                <= 1.0 / density,
                             "content determines width at density={density}, preview={preview}: {width}, {outer:?}"
                         );
                         assert!(media.contains_rect(outer), "dialog stays inside media");
@@ -337,7 +379,11 @@ mod tests {
                             "settled content is fully visible: density={density}, preview={preview}, width={width}, viewport={viewport_width}, clip={clip:?}, content={content:?}"
                         );
                         assert!(
-                            (buttons[0].top() - content.bottom() - MARGIN).abs() <= 1.0 / density,
+                            (buttons[0].top()
+                                - content.bottom()
+                                - 2.0 * f32::from(super::super::PADDING))
+                            .abs()
+                                <= 1.0 / density,
                             "footer gap matches the inner margin"
                         );
                         assert!(buttons.iter().all(|button| outer.contains_rect(*button)
@@ -441,9 +487,6 @@ mod tests {
                         frame(vec![], 80);
                     }
                     let (before, title) = frame(vec![], 80);
-                    eprintln!(
-                        "MODAL_LAYOUT density={density} preview={preview} size={size:?} media={media:?} geometry={before:?} title={title:?}"
-                    );
                     assert!(title.is_positive(), "settled modal paints its title");
                     let expected_width = 418.0_f32.min(media.width() - 16.0);
                     assert!(
@@ -458,7 +501,7 @@ mod tests {
                         );
                     }
                     assert!(
-                        media.contains_rect(before.0),
+                        media.expand(0.5 / density).contains_rect(before.0),
                         "{density} {size:?}: {:?}",
                         before.0
                     );

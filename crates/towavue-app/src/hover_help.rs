@@ -1,6 +1,6 @@
 use egui::{Response, Tooltip, Ui, WidgetText};
 
-pub const TEXT_SIZE: f32 = 12.0;
+pub const TEXT_SIZE: f32 = crate::chrome::TEXT_MD;
 pub const PADDING: i8 = 4;
 
 #[cfg(test)]
@@ -50,7 +50,9 @@ pub fn content<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
 }
 
 pub fn frame(style: &egui::Style) -> egui::Frame {
-    egui::Frame::popup(style).inner_margin(PADDING)
+    egui::Frame::popup(style)
+        .inner_margin(PADDING)
+        .stroke(egui::Stroke::new(1.0, crate::chrome::FLOATING_BACKGROUND))
 }
 
 pub fn filename(ui: &Ui, text: String, width: f32) -> std::sync::Arc<egui::Galley> {
@@ -129,7 +131,9 @@ fn show(response: &Response, above: bool, content: impl FnOnce(&mut Ui)) {
     }
     if Tooltip::should_show_tooltip(response, false) {
         let mut tooltip = Tooltip::for_widget(response);
-        tooltip.popup = tooltip.popup.frame(frame(&response.ctx.global_style()));
+        tooltip.popup = tooltip
+            .popup
+            .frame(frame(&response.ctx.global_style()).fill(crate::chrome::SURFACE));
         let content = |ui: &mut Ui| {
             self::content(ui, content);
         };

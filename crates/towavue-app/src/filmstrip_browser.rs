@@ -258,7 +258,7 @@ impl Browser {
                             .layout_no_wrap(
                                 crate::folder_navigation::folder_name(path),
                                 egui::TextStyle::Body.resolve(ui.style()),
-                                Color32::WHITE,
+                                crate::chrome::FOREGROUND,
                             )
                             .size()
                             .x
@@ -321,7 +321,7 @@ impl Browser {
                             crate::fluent::Kind::Back
                         },
                         if self.navigation[index] {
-                            Color32::WHITE
+                            crate::chrome::FOREGROUND
                         } else {
                             chrome::MUTED
                         },
@@ -420,7 +420,7 @@ impl Browser {
                 ui.id().with("ancestors"),
                 "…",
                 false,
-                Color32::WHITE,
+                crate::chrome::FOREGROUND,
             );
             if response.clicked() {
                 self.menu_open = Some(egui::Popup::default_response_id(&response));
@@ -467,7 +467,7 @@ impl Browser {
                         ui.id().with("name"),
                         &label,
                         false,
-                        Color32::WHITE,
+                        crate::chrome::FOREGROUND,
                     )
                 })
                 .inner
@@ -511,10 +511,11 @@ impl Browser {
                 let galley = ui.painter().layout_no_wrap(
                     glyph.to_string(),
                     crate::fonts::icon_font(),
-                    Color32::WHITE,
+                    crate::chrome::FOREGROUND,
                 );
                 let origin = arrow.center() - galley.mesh_bounds.center().to_vec2();
-                ui.painter().galley(origin, galley, Color32::WHITE);
+                ui.painter()
+                    .galley(origin, galley, crate::chrome::FOREGROUND);
             }
             if name_response.clicked() || name_response.middle_clicked() {
                 *target = Some(Action::Folder(path.clone(), name_response.middle_clicked()));
@@ -792,7 +793,9 @@ impl Browser {
                                     row,
                                     arrow_rect.left(),
                                     response.hovered() || response.has_focus(),
-                                    open || arrow.hovered() || arrow.has_focus(),
+                                    arrow.hovered()
+                                        || arrow.has_focus()
+                                        || (open && !response.hovered() && !response.has_focus()),
                                     ui.visuals().widgets.hovered.weak_bg_fill,
                                 ),
                             );
@@ -878,23 +881,21 @@ fn split_background(
         Rect::from_min_max(rect.min, egui::pos2(split, rect.bottom()))
     };
     let radius = egui::CornerRadius {
-        nw: if left && !right { 2 } else { 0 },
-        sw: if left && !right { 2 } else { 0 },
-        ne: if right || !has_arrow { 2 } else { 0 },
-        se: if right || !has_arrow { 2 } else { 0 },
+        nw: if left && !right { chrome::RADIUS_XS } else { 0 },
+        sw: if left && !right { chrome::RADIUS_XS } else { 0 },
+        ne: if right || !has_arrow {
+            chrome::RADIUS_XS
+        } else {
+            0
+        },
+        se: if right || !has_arrow {
+            chrome::RADIUS_XS
+        } else {
+            0
+        },
     };
-    let fill = Rect::from_min_max(
-        egui::pos2(half.left().max(rect.left() + 1.0), rect.top() + 1.0),
-        egui::pos2(half.right().min(rect.right() - 1.0), rect.bottom() - 1.0),
-    );
-    // Disjoint stroke and fill apply translucent feedback exactly once.
     egui::Shape::Vec(vec![
-        egui::Shape::rect_stroke(
-            rect,
-            3,
-            egui::Stroke::new(1.0, color),
-            egui::StrokeKind::Inside,
-        ),
-        egui::Shape::rect_filled(fill, radius, color),
+        egui::Shape::rect_filled(rect, chrome::RADIUS_XS, chrome::SURFACE),
+        egui::Shape::rect_filled(half, radius, color),
     ])
 }

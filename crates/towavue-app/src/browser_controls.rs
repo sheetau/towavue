@@ -101,7 +101,7 @@ impl Counts {
 
 /// A text-only control: underline belongs to the label, never its surrounding hit area.
 pub(super) fn text_button(ui: &Ui, rect: Rect, id: Id, label: &str, selected: bool) -> Response {
-    text_button_color(ui, rect, id, label, selected, Color32::WHITE)
+    text_button_color(ui, rect, id, label, selected, crate::chrome::FOREGROUND)
 }
 
 pub(super) fn text_button_color(
@@ -182,7 +182,7 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
             .layout_no_wrap(
                 title.into(),
                 egui::TextStyle::Body.resolve(ui.style()),
-                Color32::WHITE,
+                crate::chrome::FOREGROUND,
             )
             .size()
             .x;
@@ -204,7 +204,7 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
         let response = ui.put(rect, |ui: &mut Ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(rect));
             ui.spacing_mut().text_edit_width = f32::INFINITY;
-            ui.visuals_mut().override_text_color = Some(Color32::WHITE);
+            ui.visuals_mut().override_text_color = Some(crate::chrome::FOREGROUND);
             crate::resize::unframed_text_input_with_id(ui, id, "", query)
         });
         let help = crate::localization::text(ui.ctx(), crate::localization::Text::FileQueryHelp);
@@ -217,7 +217,7 @@ pub(super) fn search(ui: &mut Ui, rect: Rect, id: Id, label: &str, query: &mut S
                 egui::pos2((rect.right() / pixel).round() * pixel, bottom),
             ),
             0.0,
-            Color32::WHITE,
+            crate::chrome::FOREGROUND,
         );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, response.enabled(), label)
@@ -282,21 +282,21 @@ impl FilterGeometry {
         Self {
             widths: labels(ui).map(|(label, _)| {
                 ui.painter()
-                    .layout_no_wrap(label.into(), font.clone(), Color32::WHITE)
+                    .layout_no_wrap(label.into(), font.clone(), crate::chrome::FOREGROUND)
                     .size()
                     .x
             }),
             numbers: counts.map(|count| {
                 ui.painter().layout_no_wrap(
                     count.to_string(),
-                    FontId::proportional(10.0),
+                    FontId::proportional(crate::chrome::TEXT_SM),
                     Color32::PLACEHOLDER,
                 )
             }),
             visible: visible_filters(counts),
             space: ui
                 .painter()
-                .layout_no_wrap(" ".into(), font, Color32::WHITE)
+                .layout_no_wrap(" ".into(), font, crate::chrome::FOREGROUND)
                 .size()
                 .x,
             row: text_height(ui),
@@ -369,7 +369,7 @@ pub(super) fn filters(
                 name.center().y - geometry.numbers[index].size().y * 0.5 - 3.0,
             ),
             geometry.numbers[index].clone(),
-            Color32::WHITE,
+            crate::chrome::FOREGROUND,
         );
         x = right + geometry.space + geometry.numbers[index].size().x + gap;
     }

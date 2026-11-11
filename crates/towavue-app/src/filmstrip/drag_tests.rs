@@ -1763,7 +1763,8 @@ fn unified_target_trial(root: &Path, density: f32, discard: bool) {
             .iter()
             .filter_map(|shape| match &shape.shape {
                 egui::Shape::Rect(rect)
-                    if rect.stroke.color == Color32::WHITE && rect.stroke.width == 1.0 =>
+                    if rect.stroke.color == crate::chrome::FOREGROUND
+                        && rect.stroke.width == 1.0 =>
                 {
                     Some(rect.rect)
                 }

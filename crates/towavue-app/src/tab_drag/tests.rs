@@ -104,7 +104,7 @@ fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
                 Some(if hovered {
                     chrome::MUTED
                 } else {
-                    chrome::DISABLED
+                    chrome::FAINT
                 })
             );
             assert_eq!(
@@ -112,7 +112,7 @@ fn tab_feedback_uses_exact_bounds_unified_colors_and_no_drag_hover() {
                 Some(if hovered {
                     chrome::MUTED
                 } else {
-                    chrome::DISABLED
+                    chrome::FAINT
                 })
             );
         }

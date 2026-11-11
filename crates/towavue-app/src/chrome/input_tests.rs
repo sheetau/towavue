@@ -152,7 +152,10 @@ fn text_inputs_share_height_and_corners_without_collapsing_multiline_editors() {
         let output = frame();
         assert_eq!(output.pixels_per_point, density);
         for rect in &rects[..3] {
-            assert!((rect.height() - 26.0).abs() <= 1.0 / density, "{rect:?}");
+            assert!(
+                (rect.height() - crate::chrome::INPUT_HEIGHT).abs() <= 1.0 / density,
+                "{rect:?}"
+            );
         }
         assert_eq!(rects[3].height(), rects[4].height());
         assert!(rects[3].height() > 26.0);
@@ -302,8 +305,8 @@ fn modal_combo_text_shares_the_adjacent_label_center_without_growing_the_button(
             center("Lanczos")
         );
         assert!(
-            button_height < INPUT_HEIGHT,
-            "retain the original compact button height"
+            button_height <= INPUT_HEIGHT + 1.0 / density,
+            "combo height follows the compact control height"
         );
     }
 }

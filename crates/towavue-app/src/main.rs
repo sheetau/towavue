@@ -117,6 +117,7 @@ mod timeline_cpu_verification;
 mod timeline_edit;
 mod timeline_input;
 mod timeline_menu;
+mod timeline_view;
 mod track_drag;
 mod trim;
 #[cfg(test)]
@@ -6843,7 +6844,7 @@ where
                         let compact = ui.max_rect().width() < 340.0;
                         let mut time_text = egui::text::LayoutJob::default();
                         let format = egui::TextFormat {
-                            font_id: egui::FontId::proportional(12.0),
+                            font_id: egui::FontId::proportional(crate::chrome::TEXT_MD),
                             color: chrome::MUTED,
                             ..Default::default()
                         };
@@ -6899,7 +6900,7 @@ where
                                             "{:.0}%",
                                             self.playback_volume() * 100.0
                                         ))
-                                        .size(12.0)
+                                        .size(chrome::TEXT_MD)
                                     }
                                     .color(chrome::MUTED),
                                 ),
@@ -6969,7 +6970,9 @@ where
                         if let Some(position) = &info.image_position {
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(position).size(12.0).color(chrome::MUTED),
+                                    RichText::new(position)
+                                        .size(crate::chrome::TEXT_MD)
+                                        .color(chrome::MUTED),
                                 )
                                 .truncate()
                                 .show_tooltip_when_elided(false),
@@ -7147,7 +7150,10 @@ where
                             } else if let Some(job) = self.hold_progress_label(&text) {
                                 job.into()
                             } else {
-                                RichText::new(text).size(12.0).color(color).into()
+                                RichText::new(text)
+                                    .size(crate::chrome::TEXT_MD)
+                                    .color(color)
+                                    .into()
                             };
                             let response = ui
                                 .add(
@@ -7541,21 +7547,36 @@ where
             panel,
             enabled,
             egui::Margin {
-                left: 8,
-                right: 8,
-                top: 8,
+                left: chrome::PADDING,
+                right: chrome::PADDING,
+                top: chrome::PADDING,
                 bottom: 0,
             },
             |ui| {
                 let background = ui.available_rect_before_wrap();
                 ui.set_min_size(background.size());
-                ui.painter().rect_filled(background, 3.0, chrome::BORDER);
-                let rect = background;
+                let duration = self.playback_duration().unwrap_or_default();
+                let fps = self
+                    .session
+                    .as_ref()
+                    .and_then(PlaybackSession::source_video_frame_rate)
+                    .filter(|fps| fps.is_finite() && *fps > 0.0)
+                    .unwrap_or(100.0);
+                let layout = timeline_view::show(
+                    ui,
+                    panel.with(&self.path),
+                    background,
+                    media_time(duration),
+                    fps,
+                    enabled,
+                );
+                let rect = layout.waveform;
+                let full_rect = layout.view.full_rect(rect);
                 // Reserve the waveform's layer below selection and gain controls.
                 let waveform_painter = ui.painter().with_clip_rect(rect);
                 let waveform_slot = waveform_painter.add(egui::Shape::Noop);
-                let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-                let duration = self.playback_duration().unwrap_or_default();
+                let response =
+                    ui.allocate_rect(layout.interaction(), egui::Sense::click_and_drag());
                 if duration.is_zero() {
                     self.clear_detailed_waveform();
                     if let Some(waveform) = &self.waveform
@@ -7581,7 +7602,7 @@ where
                 }
                 let enabled = enabled
                     && !matches!(self.state, PlaybackState::Loading | PlaybackState::Faulted);
-                let result = time_selection::show(
+                let result = time_selection::show_in_view(
                     ui,
                     &response,
                     media_time(duration),
@@ -7589,18 +7610,29 @@ where
                     self.time_selection,
                     self.session.as_ref().and_then(PlaybackSession::timeline),
                     enabled,
+                    layout,
                 );
-                let detail = result
-                    .stretch_preview
-                    .is_none()
-                    .then(|| self.detailed_waveform(ui.ctx(), rect, result.gain_preview))
-                    .flatten();
+                timeline_view::paint(
+                    ui,
+                    layout,
+                    fps,
+                    result.display_position,
+                    result.display_selection,
+                );
+                let detail = self.detailed_waveform_view(
+                    ui.ctx(),
+                    rect,
+                    rect,
+                    result.gain_preview,
+                    result.stretch_preview,
+                    Some(layout.view),
+                );
                 if let Some(mesh) = detail {
                     waveform_painter.set(waveform_slot, egui::Shape::mesh(mesh));
                 } else if let Some(waveform) = &self.waveform {
                     let mut mesh = egui::Mesh::with_texture(waveform.id());
                     let regions = timeline_edit::waveform_regions(
-                        rect,
+                        full_rect,
                         self.media_duration.unwrap_or(duration),
                         self.session.as_ref().and_then(PlaybackSession::timeline),
                         self.edit_state().volume,
@@ -7608,7 +7640,7 @@ where
                     );
                     for (destination, uv) in timeline_edit::stretch_waveform_regions(
                         regions,
-                        rect,
+                        full_rect,
                         media_time(duration),
                         result.stretch_preview,
                     ) {
@@ -7630,7 +7662,7 @@ where
                         rect.center_top() + egui::vec2(0.0, 2.0),
                         Align2::CENTER_TOP,
                         localization::Text::SelectionPlayback.in_language(language),
-                        egui::FontId::proportional(11.0),
+                        egui::FontId::proportional(crate::chrome::TEXT_SM),
                         chrome::FOREGROUND,
                     );
                 }
@@ -16859,13 +16891,13 @@ mod tests {
                                 _ => None,
                             })
                             .expect("rounded timeline background");
-                        assert_eq!(background.left(), 8.0);
-                        assert_eq!(width - background.right(), 8.0);
+                        assert_eq!(background.left(), f32::from(chrome::PADDING));
+                        assert_eq!(width - background.right(), f32::from(chrome::PADDING));
                         assert!(
-                            (background.top() - borders[1] - 8.0).abs() <= 1.0 / density,
+                            (background.top() - borders[1] - 26.0).abs() <= 1.0 / density,
                             "density={density}, background={background:?}, borders={borders:?}"
                         );
-                        assert!((background.bottom() - 270.0).abs() <= 1.0 / density);
+                        assert!((background.bottom() - 256.0).abs() <= 1.0 / density);
                         let track = background;
                         let waveform = output
                             .shapes
@@ -16882,10 +16914,14 @@ mod tests {
                             .shapes
                             .iter()
                             .find_map(|shape| match &shape.shape {
-                                egui::Shape::Callback(callback) => Some(callback.rect),
+                                egui::Shape::Rect(selection)
+                                    if selection.fill == chrome::MUTED.gamma_multiply(0.25) =>
+                                {
+                                    Some(selection.rect)
+                                }
                                 _ => None,
                             })
-                            .expect("time-selection difference fill");
+                            .expect("rounded time-selection fill");
                         assert_eq!(fill.y_range(), track.y_range());
                         let pixel = 1.0 / output.pixels_per_point;
                         let start = (egui::lerp(track.x_range(), 0.25) / pixel).floor() * pixel;

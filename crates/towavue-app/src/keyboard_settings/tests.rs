@@ -101,7 +101,7 @@ fn recording_button_keeps_its_hover_fill_while_selected() {
                         super::view::icon(ui, rect, '\u{ea65}', "Record keys", true, None);
                     },
                 );
-                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(fill) if fill.rect == rect && fill.fill == chrome::HOVER)));
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(fill) if fill.rect == rect && fill.fill == chrome::SURFACE)));
             }
         }
     }
@@ -609,7 +609,7 @@ fn settings_list_is_dense_inset_nonselectable_and_keeps_colors_while_blocked() {
                 hovered.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::Shape::Rect(rect) if rect.rect.contains(point)
                         && rect.rect.width() > width * 0.8
-                        && rect.fill == egui::Color32::from_gray(0x18)
+                        && rect.fill == chrome::SURFACE
                         && rect.corner_radius == egui::CornerRadius::same(3)
                 )),
                 "rounded dark content-row hover"

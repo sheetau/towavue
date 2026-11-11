@@ -72,7 +72,8 @@ impl ResizeDialog {
         let mut link_slot = egui::Rect::NOTHING;
         egui::Grid::new("resize-dimensions")
             .num_columns(3)
-            .spacing(egui::vec2(8.0, 4.0))
+            .spacing(egui::vec2(chrome::PADDING as f32, chrome::ITEM_GAP))
+            .min_row_height(chrome::CONTROL_HEIGHT)
             .show(ui, |ui| {
                 ui.spacing_mut().text_edit_width = field_width;
                 aligned_label(ui, labels[0], label_width);
@@ -524,7 +525,9 @@ pub(crate) mod tests {
                 density,
             );
             assert_eq!(width.left(), height.left());
-            assert!((height.top() - width.bottom() - 4.0).abs() <= 1.0 / density);
+            assert!(
+                (height.top() - width.bottom() - crate::chrome::ITEM_GAP).abs() <= 1.0 / density
+            );
             for (label, input) in [(Text::WidthPixels, width), (Text::HeightPixels, height)] {
                 let text = output
                     .shapes
@@ -605,7 +608,7 @@ pub(crate) mod tests {
             (rect.width() - width).abs() <= 1.0 / density,
             "{label}: {rect:?}"
         );
-        assert!((rect.height() - 26.0).abs() <= 1.0 / density);
+        assert!((rect.height() - crate::chrome::INPUT_HEIGHT).abs() <= 1.0 / density);
         assert!(
             !node.value().expect("numeric value").contains(unit),
             "unit is not editable data"
@@ -666,7 +669,7 @@ pub(crate) mod tests {
                 }
             })
             .expect("painted input caret");
-        assert_eq!(stroke.color, egui::Color32::WHITE);
+        assert_eq!(stroke.color, chrome::FOREGROUND);
         assert!(
             ((points[0].y + points[1].y) * 0.5 - rect.center().y).abs() <= 1.0 / density,
             "caret centered at {density}x: {points:?} in {rect:?}"

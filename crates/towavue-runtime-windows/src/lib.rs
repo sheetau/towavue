@@ -186,7 +186,7 @@ pub use shell::{
     canonical_shell_path, reveal_file, reveal_license_guide, shell_workers_pending,
 };
 pub use watch::{FolderWatchError, FolderWatcher};
-pub use waveform::{timeline_audio_track_waveform, timeline_waveform};
+pub use waveform::{source_audio_track_waveform, timeline_audio_track_waveform, timeline_waveform};
 
 use std::path::Path;
 

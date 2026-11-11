@@ -354,8 +354,14 @@ fn tab_context_right_click_keeps_pointer_anchor_and_keyboard_navigation_tracks_r
         .1
         .bounds()
         .expect("bounds");
-    assert!((bounds.x0 as f32 - position.x).abs() < 20.0);
-    assert!((bounds.y0 as f32 - position.y).abs() < 20.0);
+    assert!(
+        (bounds.x0 as f32 - position.x).abs() < 20.0,
+        "anchor={position:?}, close={bounds:?}"
+    );
+    assert!(
+        (bounds.y0 as f32 - position.y).abs() < 20.0,
+        "anchor={position:?}, close={bounds:?}"
+    );
     tree(
         &mut app,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],

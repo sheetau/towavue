@@ -723,16 +723,17 @@ mod tests {
                             .then(|| node.bounds().expect("play bounds"))
                     })
                     .expect("leading transport control");
-                assert!((play.x0 - 5.0).abs() < 0.1);
-                assert!((play.width() - 20.0).abs() < 0.1);
-                assert!((play.y0 - 276.0).abs() < 0.1);
-                assert!((play.y1 - 296.0).abs() < 0.1);
+                assert!((play.x0 - f64::from(chrome::STATUS_BUTTON_GAP)).abs() < 0.1);
+                assert!((play.width() - f64::from(chrome::STATUS_BUTTON_SIZE)).abs() < 0.1);
+                assert!((play.y0 - 273.0).abs() < 1.0);
+                assert!((play.y1 - 297.0).abs() < 1.0);
                 assert!((play.width() - play.height()).abs() < 0.1);
                 assert!((bounds.width() - bounds.height()).abs() < 0.1);
                 let expected_x = if label == "Repeat all" {
-                    play.x1 + 5.0
+                    play.x1 + f64::from(chrome::STATUS_BUTTON_GAP)
                 } else {
-                    play.x1 + 30.0
+                    play.x1
+                        + f64::from(chrome::STATUS_BUTTON_SIZE + 2.0 * chrome::STATUS_BUTTON_GAP)
                 };
                 assert!(
                     (bounds.x0 - expected_x).abs() < 0.1,
@@ -808,15 +809,15 @@ mod tests {
                         .expect("video repeat button");
                     let bounds = node.bounds().expect("repeat bounds");
                     let tolerance = 1.0 / f64::from(density);
-                    assert!((bounds.width() - 20.0).abs() <= tolerance);
-                    assert!((bounds.height() - 20.0).abs() <= tolerance);
                     assert!(
-                        (bounds.y0 - 275.0 - 1.0 / f64::from(density)).abs() <= tolerance * 0.51
+                        (bounds.width() - f64::from(chrome::STATUS_BUTTON_SIZE)).abs() <= tolerance
                     );
                     assert!(
-                        (300.0 - bounds.y1 - 5.0 + 1.0 / f64::from(density)).abs()
-                            <= tolerance * 0.51
+                        (bounds.height() - f64::from(chrome::STATUS_BUTTON_SIZE)).abs()
+                            <= tolerance
                     );
+                    assert!((bounds.y0 - 273.0).abs() <= tolerance * 0.51);
+                    assert!((300.0 - bounds.y1 - 3.0).abs() <= tolerance * 0.51);
                     assert!(bounds.x0 >= 0.0 && bounds.x1 <= f64::from(width));
                     assert!(!node.is_disabled());
                     let (_, actions) = frame(

@@ -873,7 +873,7 @@ fn loudness_options_show_real_units_accept_numeric_input_and_remain_transactiona
 }
 
 #[test]
-fn loudness_numeric_input_keeps_26_point_height_when_editing() {
+fn loudness_numeric_input_keeps_shared_control_height_when_editing() {
     for density in [1.0, 1.25, 2.0] {
         for editing in [false, true] {
             let context = crate::fonts::test_context();
@@ -889,7 +889,8 @@ fn loudness_numeric_input_keeps_26_point_height_when_editing() {
                 let _ = context.run_ui(input, |ui| {
                     let response = target_control(ui, &mut value, -700..=-50, "Target", 160.0);
                     assert!(
-                        (response.rect.height() - 26.0).abs() <= 1.0 / density,
+                        (response.rect.height() - crate::chrome::INPUT_HEIGHT).abs()
+                            <= 1.0 / density,
                         "editing {editing}: {:?}",
                         response.rect
                     );

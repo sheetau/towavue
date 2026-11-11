@@ -31,7 +31,9 @@ fn popup_bounds(output: &egui::FullOutput) -> Vec<egui::Rect> {
             }
             egui::Shape::Rect(rect)
                 if rect.fill == chrome::FLOATING_BACKGROUND
-                    && rect.stroke.color == chrome::BORDER =>
+                    && rect.corner_radius == egui::CornerRadius::same(chrome::RADIUS_SM)
+                    && (rect.stroke == egui::Stroke::NONE
+                        || rect.stroke.color == chrome::FLOATING_BACKGROUND) =>
             {
                 bounds.push(rect.rect);
             }
@@ -1353,8 +1355,8 @@ fn root_menu_highlights_keep_both_corners_inside_equal_padding() {
             "padding left={left} right={right}"
         );
         assert!(
-            (left - 5.0).abs() <= 1.0 / density,
-            "four-point padding plus one-point frame stroke: left={left}, right={right}"
+            (left - f32::from(chrome::MENU_PADDING)).abs() <= 1.0 / density,
+            "shared menu padding: left={left}, right={right}"
         );
     }
 }

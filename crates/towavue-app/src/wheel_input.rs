@@ -86,6 +86,59 @@ pub fn tab_volume_deltas(context: &Context, target: &Response) -> Vec<f32> {
         .collect()
 }
 
+/// Timeline scrolling follows the pointer position of each native event, not
+/// the pointer's final location after a batch. Alt zoom uses raw detents;
+/// ordinary scrolling respects Windows line/page preferences.
+pub fn timeline_events(
+    context: &Context,
+    rect: egui::Rect,
+    layer: egui::LayerId,
+) -> Vec<(Pos2, f64, bool)> {
+    if context.input(|input| {
+        !input.focused
+            || input.pointer.any_down()
+            || input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    Event::PointerButton { pressed: true, .. } | Event::WindowFocused(false)
+                )
+            })
+    }) {
+        return Vec::new();
+    }
+    positioned_events(context)
+        .into_iter()
+        .filter_map(|(position, event)| {
+            let point = position.filter(|point| {
+                rect.contains(*point) && context.layer_id_at(*point) == Some(layer)
+            })?;
+            let event = native::scroll_event(context, event, rect.size());
+            let Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                phase: egui::TouchPhase::Move,
+            } = event
+            else {
+                return None;
+            };
+            if modifiers.ctrl || modifiers.shift || modifiers.mac_cmd {
+                return None;
+            }
+            let scale = match unit {
+                egui::MouseWheelUnit::Point => 1.0,
+                egui::MouseWheelUnit::Line => {
+                    context.options(|options| options.input_options.line_scroll_speed)
+                }
+                egui::MouseWheelUnit::Page => rect.width(),
+            };
+            let delta =
+                f64::from(if delta.y != 0.0 { delta.y } else { delta.x }) * f64::from(scale);
+            (delta.is_finite() && delta != 0.0).then_some((point, delta, modifiers.alt))
+        })
+        .collect()
+}
+
 pub enum ViewWheel {
     Zoom(f32),
     Pan(egui::Vec2),

@@ -44,15 +44,12 @@ impl CommandPalette {
         let output = egui::ScrollArea::vertical()
             .auto_shrink([false, true])
             .max_height(height)
-            .show_popup_styled(ui, 6.0, |ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
+            .show_popup_styled(ui, crate::chrome::PADDING as f32, |ui| {
+                ui.spacing_mut().item_spacing.y = crate::chrome::ITEM_GAP;
                 if matches.is_empty() {
                     ui.weak(text(ui.ctx(), Text::NoMatchingCommands));
                 }
                 for (index, definition) in matches.iter().enumerate() {
-                    if index > 0 && (index == recent_count || index == direct_count) {
-                        crate::chrome::separator(ui);
-                    }
                     let group = if index == direct_count {
                         text(ui.ctx(), Text::SimilarCommands)
                     } else if index == 0 && recent_count > 0 {
@@ -62,8 +59,20 @@ impl CommandPalette {
                     } else {
                         ""
                     };
+                    if !group.is_empty() {
+                        row::category(ui, group);
+                    }
                     let shortcut = shortcuts.label(definition.id, commands);
-                    let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
+                    let (_, row) = ui.allocate_space(egui::vec2(
+                        ui.available_width(),
+                        crate::chrome::ROW_HEIGHT,
+                    ));
+                    let mut row_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("command-row", definition.id))
+                            .max_rect(row),
+                    );
+                    let ui = &mut row_ui;
                     let selected = self.selected == Some(index);
                     let controls = selected || ui.rect_contains_pointer(row);
                     let row_actions =
@@ -81,21 +90,11 @@ impl CommandPalette {
                     );
                     let background = ui.painter().add(egui::Shape::Noop);
                     let mut atoms = egui::Atoms::new((title.as_str(), egui::Atom::grow()));
-                    if !shortcut.is_empty() {
-                        atoms.push_right(label_gap(ui));
+                    let caps = row::Keycaps::new(ui, &shortcut, selected, enabled[index]);
+                    let cap_width = caps.width().min(body.width() * 0.5);
+                    if cap_width > 0.0 {
                         atoms.push_right(
-                            egui::RichText::new(&shortcut)
-                                .color(crate::chrome::MUTED)
-                                .atom_max_width(body.width() * 0.5),
-                        );
-                    }
-                    if !group.is_empty() {
-                        atoms.push_right(label_gap(ui));
-                        atoms.push_right(
-                            egui::RichText::new(group)
-                                .small()
-                                .color(crate::chrome::MUTED)
-                                .atom_max_width(body.width() * 0.3),
+                            egui::Atom::default().atom_size(egui::vec2(cap_width + 5.0, 0.0)),
                         );
                     }
                     let response = ui
@@ -117,6 +116,14 @@ impl CommandPalette {
                         });
                     ui.painter()
                         .set(background, row_background(ui, row, &response, selected));
+                    caps.paint(
+                        ui,
+                        egui::Rect::from_min_max(
+                            egui::pos2(body.right() - cap_width, body.top()),
+                            body.max,
+                        ),
+                        selected,
+                    );
                     context.accesskit_node_builder(response.id, |node| {
                         node.clear_toggled();
                         node.set_label(title.as_str());

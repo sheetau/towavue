@@ -4,11 +4,12 @@ use towavue_core::localization::formatted;
 use towavue_core::{EditTimeline, MediaTime, TimeRange, TimelineEdit};
 
 mod adjustment;
+mod head_icon;
 pub(super) use adjustment::stretch_limits;
 #[cfg(test)]
 mod presentation_tests;
 
-pub(super) const LABEL_SIZE: f32 = 11.0;
+pub(super) const LABEL_SIZE: f32 = crate::chrome::TEXT_SM;
 const LABEL_INSET: f32 = 24.0;
 
 pub(super) fn focus_hint(context: &egui::Context) -> Option<String> {
@@ -63,6 +64,8 @@ enum Gesture {
 #[derive(Default)]
 pub(super) struct Output {
     pub selection: Option<Option<TimeRange>>,
+    pub display_position: MediaTime,
+    pub display_selection: Option<TimeRange>,
     pub seek: Option<MediaTime>,
     pub scrub: Option<(MediaTime, bool)>,
     pub scrub_original_frame: bool,
@@ -71,6 +74,7 @@ pub(super) struct Output {
     pub stretch_preview: Option<(TimeRange, MediaTime)>,
 }
 
+#[cfg(test)]
 pub(super) fn show(
     ui: &Ui,
     response: &Response,
@@ -80,21 +84,42 @@ pub(super) fn show(
     plan: Option<&EditTimeline>,
     enabled: bool,
 ) -> Output {
+    show_in_view(
+        ui,
+        response,
+        duration,
+        position,
+        selection,
+        plan,
+        enabled,
+        crate::timeline_view::Layout::plain(response.rect, duration),
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+pub(super) fn show_in_view(
+    ui: &Ui,
+    response: &Response,
+    duration: MediaTime,
+    position: MediaTime,
+    selection: Option<TimeRange>,
+    plan: Option<&EditTimeline>,
+    enabled: bool,
+    layout: crate::timeline_view::Layout,
+) -> Output {
     let language = localization::language(ui.ctx());
-    let rect = response.rect;
+    let rect = layout.waveform;
+    let visible = rect;
     let seconds = duration.as_seconds_f64();
     let at = |x: f32| {
         MediaTime::from_nanoseconds(
-            (duration.as_nanoseconds() as f64 * f64::from(crate::seekbar::ratio(rect, x))).round()
-                as i64,
+            ((layout.view.start + layout.view.span * f64::from(crate::seekbar::ratio(rect, x)))
+                * 1e9)
+                .round()
+                .clamp(0.0, duration.as_nanoseconds() as f64) as i64,
         )
     };
-    let x_at = |time: MediaTime| {
-        egui::lerp(
-            rect.x_range(),
-            (time.as_seconds_f64() / seconds).clamp(0.0, 1.0) as f32,
-        )
-    };
+    let x_at = |time: MediaTime| layout.view.x(rect, time.as_seconds_f64());
     let mut output = Output::default();
     let frame = ui.ctx().cumulative_frame_nr();
     let preview_id = response.id.with("cti-preview");
@@ -126,13 +151,20 @@ pub(super) fn show(
     let choose = |origin: egui::Pos2, modifiers: egui::Modifiers, secondary: bool| {
         let selected = selection
             .filter(|range| origin.x >= x_at(range.start()) && origin.x <= x_at(range.end()));
+        if origin.y < visible.top() {
+            return Gesture::Seek;
+        }
         if secondary {
             return selected.map_or(Gesture::Context, Gesture::Move);
         }
         if modifiers.alt && !modifiers.ctrl && !modifiers.shift {
             return selected.map_or(Gesture::Select, Gesture::Stretch);
         }
-        if playhead_contains(rect, cti_x(rect, x_at(position), pixel), origin) {
+        if playhead_contains(
+            rect.with_min_y(layout.head_top()),
+            cti_x(rect, x_at(position), pixel),
+            origin,
+        ) {
             return Gesture::Seek;
         }
         if !modifiers.any()
@@ -173,7 +205,10 @@ pub(super) fn show(
         use crate::hover_help::HoverHelp;
         let help = match choose(pointer, egui::Modifiers::NONE, false) {
             Gesture::Seek => Some((
-                playhead_rect(rect, cti_x(rect, x_at(position), pixel)),
+                playhead_rect(
+                    rect.with_min_y(layout.head_top()),
+                    cti_x(rect, x_at(position), pixel),
+                ),
                 "head",
                 Text::TimelinePositionHelp.in_language(language),
             )),
@@ -284,7 +319,8 @@ pub(super) fn show(
             && let Gesture::Move(range) = mode
         {
             let delta = (f64::from(pointer.x - origin.x) / f64::from(rect.width().max(1.0))
-                * duration.as_nanoseconds() as f64)
+                * layout.view.span
+                * 1e9)
                 .round() as i64;
             let delta = delta.clamp(
                 -range.start().as_nanoseconds(),
@@ -308,7 +344,8 @@ pub(super) fn show(
                 Gesture::Stretch(range) => {
                     let limits = adjustment::stretch_limits(range, plan);
                     let seconds = (range.duration().as_seconds_f64()
-                        + f64::from(pointer.x - origin.x) / f64::from(rect.width()) * seconds)
+                        + f64::from(pointer.x - origin.x) / f64::from(rect.width())
+                            * layout.view.span)
                         .clamp(*limits.start(), *limits.end());
                     let length = crate::media_time(std::time::Duration::from_secs_f64(seconds));
                     preview = TimeRange::new(
@@ -334,7 +371,8 @@ pub(super) fn show(
             let endpoint = if start { range.start() } else { range.end() };
             let delta = (f64::from(pointer.x) - f64::from(origin.x))
                 / f64::from(rect.width().max(1.0))
-                * duration.as_nanoseconds() as f64;
+                * layout.view.span
+                * 1e9;
             let point = MediaTime::from_nanoseconds(
                 ((endpoint.as_nanoseconds() as f64 + delta).round() as i64)
                     .clamp(0, duration.as_nanoseconds()),
@@ -418,26 +456,26 @@ pub(super) fn show(
     ) {
         output.seek = Some(crate::media_time(std::time::Duration::from_secs_f64(value)));
     }
-    let painter = ui.painter().with_clip_rect(rect);
+    let painter = ui.painter().with_clip_rect(visible);
     if let Some(range) = preview {
         // The outline paints inside these bounds. Include each endpoint's CTI
         // pixel so the right side does not land one pixel before the stop position.
-        towavue_runtime_windows::paint_time_selection(
-            &painter,
-            Rect::from_min_max(
-                egui::pos2(
-                    cti_x(rect, x_at(range.start()), pixel) - pixel * 0.5,
-                    rect.top(),
-                ),
-                egui::pos2(
-                    cti_x(rect, x_at(range.end()), pixel) + pixel * 0.5,
-                    rect.bottom(),
-                ),
-            ),
+        let selected = Rect::from_x_y_ranges(
+            (cti_x(rect, x_at(range.start()), pixel) - pixel * 0.5)
+                ..=(cti_x(rect, x_at(range.end()), pixel) + pixel * 0.5),
+            rect.y_range(),
+        );
+        painter.rect(
+            selected,
+            crate::chrome::RADIUS_XS,
+            crate::chrome::MUTED.gamma_multiply(0.25),
+            egui::Stroke::new(pixel, crate::chrome::FOREGROUND.gamma_multiply(0.25)),
+            egui::StrokeKind::Inside,
         );
     }
+
     let held_gain = gain_preview.filter(|_| crate::timeline_input::is_active(ui.ctx()));
-    adjustment::paint(&painter, rect, duration, held_gain, language);
+    adjustment::paint(&painter, rect, duration, held_gain, language, layout.view);
     if preview != selection
         && drag.dragging
         && gain_preview.is_none()
@@ -452,20 +490,15 @@ pub(super) fn show(
         );
     }
     let x = cti_x(rect, x_at(head), pixel);
-    let mut cti = egui::Mesh::default();
-    cti.add_colored_rect(
-        Rect::from_min_max(
-            egui::pos2((x - pixel * 0.5).max(rect.left()), rect.top()),
-            egui::pos2((x + pixel * 0.5).min(rect.right()), rect.bottom()),
-        ),
-        crate::chrome::FOREGROUND,
-    );
-    painter.add(cti);
-    painter.add(egui::Shape::convex_polygon(
-        playhead_points(rect.top(), x).to_vec(),
-        crate::chrome::FOREGROUND,
-        egui::Stroke::NONE,
-    ));
+    if x >= visible.left() && x <= visible.right() {
+        let painter = ui.painter().with_clip_rect(layout.interaction());
+        painter.vline(
+            x,
+            layout.head_top() + 10.0..=visible.bottom(),
+            (pixel, crate::chrome::FOREGROUND),
+        );
+        head_icon::paint(ui, &painter, egui::pos2(x - 4.5, layout.head_top()));
+    }
     for start in [true, false] {
         // Report the displayed drag preview without committing it to the model.
         let selection = output.selection.unwrap_or(preview);
@@ -475,13 +508,13 @@ pub(super) fn show(
         let bounds = Rect::from_min_size(
             egui::pos2(
                 if start {
-                    rect.left()
+                    visible.left()
                 } else {
-                    (rect.right() - 100.0).max(rect.left())
+                    (visible.right() - 100.0).max(visible.left())
                 },
-                rect.bottom() - 20.0,
+                visible.bottom() - 20.0,
             ),
-            egui::vec2(100.0_f32.min(rect.width()), 20.0),
+            egui::vec2(100.0_f32.min(visible.width()), 20.0),
         );
         let control = ui.interact(
             bounds,
@@ -551,7 +584,10 @@ pub(super) fn show(
         && output.selection.is_none()
         && !crate::timeline_input::is_active(ui.ctx())
     {
-        output.edit = adjustment::values(ui, response, duration, preview, plan, held_gain, enabled);
+        let mut controls = response.clone();
+        controls.rect = visible;
+        output.edit =
+            adjustment::values(ui, &controls, duration, preview, plan, held_gain, enabled);
     }
     output.stretch_preview = stretch_preview.or(match output.edit {
         Some(TimelineEdit::Stretch(range, length)) => Some((range, length)),
@@ -570,10 +606,15 @@ pub(super) fn show(
         ui.ctx()
             .data_mut(|data| data.insert_temp(gain_preview_id, (frame, preview)));
     }
+    output.display_position = head;
+    output.display_selection = preview;
     output
 }
 
 fn cti_x(rect: Rect, x: f32, pixel: f32) -> f32 {
+    if x < rect.left() || x > rect.right() {
+        return x;
+    }
     let left =
         ((x / pixel).floor() * pixel).clamp(rect.left(), (rect.right() - pixel).max(rect.left()));
     left + pixel.min(rect.width()) * 0.5
@@ -601,6 +642,20 @@ fn playhead_contains(rect: Rect, x: f32, point: egui::Pos2) -> bool {
 
 #[cfg(test)]
 mod tests {
+    fn cti_line(output: &egui::FullOutput) -> ([egui::Pos2; 2], egui::Stroke) {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if points[0].x == points[1].x && stroke.color == crate::chrome::FOREGROUND =>
+                {
+                    Some((*points, *stroke))
+                }
+                _ => None,
+            })
+            .expect("CTI line")
+    }
     use super::*;
     #[test]
     fn secondary_selection_cursor_changes_only_after_dragging_starts() {
@@ -809,42 +864,25 @@ mod tests {
                         );
                     });
                     assert_eq!(output.pixels_per_point, density);
-                    let meshes: Vec<_> = output
+                    let (points, stroke) = cti_line(&output);
+                    let outline = output
                         .shapes
                         .iter()
-                        .filter_map(|shape| match &shape.shape {
-                            egui::Shape::Mesh(mesh) => Some(mesh),
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(shape) if shape.stroke != egui::Stroke::NONE => {
+                                Some(shape)
+                            }
                             _ => None,
                         })
-                        .collect();
-                    let cti = meshes
-                        .iter()
-                        .find(|mesh| {
-                            mesh.vertices.len() == 4
-                                && mesh.texture_id == egui::TextureId::default()
-                        })
-                        .expect("CTI");
-                    let sides = meshes
-                        .iter()
-                        .find(|mesh| mesh.vertices.len() > 7 && mesh.vertices.len() % 4 == 0)
-                        .expect("dotted boundaries");
-                    let stem =
-                        Rect::from_points(&cti.vertices.iter().map(|v| v.pos).collect::<Vec<_>>());
+                        .expect("selection outline");
                     let side = if position == selection.start() {
-                        &sides.vertices[..4]
+                        outline.rect.left() + stroke.width * 0.5
                     } else {
-                        &sides.vertices[sides.vertices.len() - 4..]
+                        outline.rect.right() - stroke.width * 0.5
                     };
-                    let side = Rect::from_points(&side.iter().map(|v| v.pos).collect::<Vec<_>>());
-                    assert!(
-                        (stem.left() - side.left()).abs() * density < 0.001
-                            && (stem.right() - side.right()).abs() * density < 0.001,
-                        "CTI {:?} and endpoint {:?} differ at {density}, range {start}..{end}",
-                        stem.x_range(),
-                        side.x_range()
-                    );
-                    assert!((stem.width() * density - 1.0).abs() < 0.001);
-                    assert!(side.left() >= rect.left() && side.right() <= rect.right());
+                    assert!((points[0].x - side).abs() * density < 0.001);
+                    assert!((stroke.width * density - 1.0).abs() < 0.001);
+                    assert!(rect.expand(0.001 / density).contains_rect(outline.rect));
                 }
             }
         }
@@ -927,8 +965,13 @@ mod tests {
                 assert_eq!(node.numeric_value(), Some(value));
                 assert!(node.supports_action(egui::accesskit::Action::SetValue));
                 assert!(
-                    output.shapes.iter().all(|shape| !matches!(&shape.shape,
-                    egui::Shape::Rect(rect) if rect.stroke != egui::Stroke::NONE)),
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|shape| matches!(&shape.shape,
+                    egui::Shape::Rect(rect) if rect.stroke != egui::Stroke::NONE))
+                        .count()
+                        == 1,
                     "no extra value-focus frame at density {density}"
                 );
                 assert_eq!(
@@ -937,7 +980,7 @@ mod tests {
                         .iter()
                         .filter(|shape| matches!(shape.shape, egui::Shape::Callback(_)))
                         .count(),
-                    1
+                    0
                 );
                 let _ = context.run_ui(Default::default(), |ui| {
                     let response = ui.interact(
@@ -1369,58 +1412,31 @@ mod tests {
                         );
                     }
                     assert_eq!(output.platform_output.cursor_icon, expected);
-                    let cti = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Mesh(mesh)
-                                if mesh.vertices.len() == 4
-                                    && mesh.vertices.iter().all(|vertex| {
-                                        vertex.color == crate::chrome::FOREGROUND
-                                    }) =>
-                            {
-                                Some(mesh)
-                            }
-                            _ => None,
-                        })
-                        .expect("one CTI mesh");
-                    assert_eq!(cti.indices.len(), 6);
-                    let stem = Rect::from_points(
-                        &cti.vertices
-                            .iter()
-                            .map(|vertex| vertex.pos)
-                            .collect::<Vec<_>>(),
-                    );
+                    let (points, stroke) = cti_line(&output);
+                    let stem = Rect::from_two_pos(points[0], points[1])
+                        .expand2(egui::vec2(stroke.width * 0.5, 0.0));
                     assert!(rect.contains_rect(stem));
                     assert!((stem.width() * density - 1.0).abs() < 0.001);
-                    assert_eq!(stem.top(), rect.top());
+                    assert_eq!(stem.top(), rect.top() + 10.0);
                     assert_eq!(stem.bottom(), rect.bottom());
                     let marker = output
                         .shapes
                         .iter()
                         .find_map(|shape| match &shape.shape {
-                            egui::Shape::Path(path)
-                                if path.closed && path.fill == crate::chrome::FOREGROUND =>
+                            egui::Shape::Mesh(mesh)
+                                if mesh.vertices.len() == 4
+                                    && mesh.texture_id != egui::TextureId::default() =>
                             {
-                                Some(&path.points)
+                                Some(mesh)
                             }
                             _ => None,
                         })
-                        .expect("antialiased CTI head");
-                    let bounds = Rect::from_points(marker);
-                    assert_eq!(bounds.size(), egui::vec2(9.0, 10.0));
-                    assert!((bounds.center().x - stem.center().x).abs() < 0.0001);
-                    assert_eq!(marker[2].y - rect.top(), 6.0);
-                    assert_eq!(marker[5].y - rect.top(), 6.0);
-                    assert_eq!(marker[2].x - marker[3].x, 4.0);
-                    assert_eq!(marker[3].y - marker[2].y, 4.0);
-                    assert_eq!(marker[4].x - marker[5].x, 4.0);
-                    assert_eq!(marker[4].y - marker[5].y, 4.0);
-                    assert_eq!(marker[3].x - marker[4].x, 1.0);
-                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                        egui::Shape::Mesh(mesh) if mesh.vertices.len() == 4 && shape.clip_rect == rect)));
+                        .expect("cached CTI SVG");
+                    let bounds = marker.calc_bounds();
+                    assert!((bounds.size() - egui::vec2(9.0, 10.0)).length() < 0.001);
+                    assert!((bounds.center().x - stem.center().x).abs() <= 0.5 / density);
 
-                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == egui::Color32::from_white_alpha(128))));
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == crate::chrome::MUTED)));
                 }
             }
         }
@@ -1630,7 +1646,7 @@ mod tests {
                             .iter()
                             .filter_map(|shape| match &shape.shape {
                                 egui::Shape::LineSegment { points, stroke }
-                                    if stroke.color == egui::Color32::from_white_alpha(128)
+                                    if stroke.color == crate::chrome::MUTED
                                         && points[0].y == points[1].y =>
                                 {
                                     Some(points)
@@ -2147,20 +2163,7 @@ mod tests {
                             }
                         },
                     );
-                    let axis = output
-                        .shapes
-                        .iter()
-                        .find_map(|shape| match &shape.shape {
-                            egui::Shape::Path(path)
-                                if path.closed
-                                    && path.points.len() == 6
-                                    && path.fill == crate::chrome::FOREGROUND =>
-                            {
-                                Some(Rect::from_points(&path.points).center().x)
-                            }
-                            _ => None,
-                        })
-                        .expect("CTI head survives the discarded input pass");
+                    let axis = cti_line(&output).0[0].x;
                     (results, axis, output.platform_output.cursor_icon)
                 };
                 draw(vec![]);

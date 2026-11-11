@@ -154,14 +154,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                                 .fill(egui::Color32::TRANSPARENT)
                                 .stroke(egui::Stroke::NONE),
                         );
-                        ui.painter().rect_filled(cancel.rect, 2.0, chrome::BORDER);
+                        ui.painter()
+                            .rect_filled(cancel.rect, chrome::RADIUS_XS, chrome::BORDER);
                         chrome::filled_button_border(ui, &cancel, 2);
                         ui.painter().text(
-                            cancel.rect.center()
-                                - egui::vec2(0.0, 1.0 / ui.ctx().pixels_per_point()),
+                            cancel.rect.center(),
                             egui::Align2::CENTER_CENTER,
                             Text::Cancel.in_language(language),
-                            egui::FontId::proportional(12.0),
+                            egui::FontId::proportional(crate::chrome::TEXT_MD),
                             ui.style().interact(&cancel).text_color(),
                         );
                         cancel.widget_info(|| {
@@ -193,7 +193,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     ui.add(egui::Spinner::new().size(12.0));
                     ui.add(
                         egui::Label::new(
-                            RichText::new(message).size(12.0).color(chrome::FOREGROUND),
+                            RichText::new(message)
+                                .size(crate::chrome::TEXT_MD)
+                                .color(chrome::FOREGROUND),
                         )
                         .truncate()
                         .show_tooltip_when_elided(false),

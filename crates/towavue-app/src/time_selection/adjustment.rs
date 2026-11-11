@@ -109,18 +109,14 @@ pub(super) fn changes_plan(
 pub(super) fn paint(
     painter: &egui::Painter,
     rect: Rect,
-    duration: MediaTime,
+    _duration: MediaTime,
     preview: Option<(TimeRange, f32)>,
     language: Language,
+    view: crate::timeline_view::View,
 ) {
-    let stroke = (1.0, egui::Color32::from_white_alpha(128));
+    let stroke = (1.0, crate::chrome::MUTED);
     if let Some((range, gain)) = preview {
-        let x_at = |time: MediaTime| {
-            egui::lerp(
-                rect.x_range(),
-                (time.as_seconds_f64() / duration.as_seconds_f64()).clamp(0.0, 1.0) as f32,
-            )
-        };
+        let x_at = |time: MediaTime| view.x(rect, time.as_seconds_f64());
         let left = x_at(range.start());
         let right = x_at(range.end());
         if left > rect.left() {

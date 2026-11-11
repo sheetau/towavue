@@ -10,248 +10,87 @@ fn range(start: u64, end: u64) -> TimeRange {
 }
 
 #[test]
-fn released_gain_keeps_detailed_paint_through_refinement_and_repeated_edits() {
-    let Some(root) = crate::tests::isolated_test_root(
-        "waveform_detail::hold_tests::released_gain_keeps_detailed_paint_through_refinement_and_repeated_edits",
-    ) else {
-        return;
-    };
-    for kind in [MediaKind::Audio, MediaKind::Video] {
-        for density in [1.0, 1.25, 2.0] {
-            let mut app = Application::new(None, |_| {}).expect("app");
-            let context = fonts::test_context();
-            context.set_pixels_per_point(density);
-            app.ui_context = Some(context.clone());
-            let path = root.join("controlled-envelope.wav");
-            app.tabs.open_new(path.clone(), kind);
-            app.path = Some(path);
-            app.media_kind = Some(kind);
-            app.media_duration = Some(Duration::from_secs(10));
-            app.state = PlaybackState::Paused;
-            app.timeline_open = true;
-            app.time_selection = Some(range(2000, 6000));
-            app.waveform = Some(context.load_texture(
-                "coarse",
-                egui::ColorImage::filled([16, 4], Color32::WHITE),
-                TextureOptions::LINEAR,
-            ));
-            let coarse = app.waveform.as_ref().expect("overview").id();
-            let frame = |app: &mut Application<_>, events| {
-                let mut actions = Vec::new();
-                let output = context.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(640.0, 300.0),
-                        )),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        app.draw_timeline(ui, &mut actions);
-                        if context.current_pass_index() == 0 {
-                            context.request_discard("release continuity");
-                        }
-                    },
-                );
-                (output, actions)
-            };
-            for _ in 0..3 {
-                frame(&mut app, vec![]);
+fn source_peak_pyramid_matches_every_scalar_interval_and_retains_transients() {
+    let mut detail = Detail::default();
+    let values: Vec<_> = (0..1025)
+        .map(|i| {
+            if i == 777 {
+                4.0
+            } else {
+                (i % 17) as f32 / 20.0
             }
-            let columns = app.waveform_detail.key.as_ref().expect("key").columns;
-            app.waveform_detail.values = Some(
-                (0..columns)
-                    .map(|column| [0.13, 0.4, 1.5, 0.9][column as usize % 4])
-                    .collect::<Vec<_>>()
-                    .into(),
-            );
-            app.waveform_detail.started = true;
-            app.waveform_detail.finished = true;
-            let painted = |output: &egui::FullOutput| {
-                assert!(
-                    !output.shapes.iter().any(|shape| matches!(&shape.shape,
-                    egui::Shape::Mesh(mesh) if mesh.texture_id == coarse)),
-                    "never flash the coarse overview"
-                );
-                output
-                    .shapes
-                    .iter()
-                    .find_map(|shape| match &shape.shape {
-                        egui::Shape::Mesh(mesh)
-                            if !mesh.vertices.is_empty()
-                                && mesh.vertices.iter().all(|vertex| vertex.color == color()) =>
-                        {
-                            Some(mesh.clone())
-                        }
-                        _ => None,
-                    })
-                    .expect("detailed waveform")
-            };
-            let output = frame(&mut app, vec![]).0;
-            let rect = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(shape)
-                        if shape.fill == chrome::BORDER
-                            && shape.rect.width() > 400.0
-                            && shape.rect.height() > 50.0 =>
-                    {
-                        Some(shape.rect)
-                    }
-                    _ => None,
-                })
-                .expect("timeline bounds");
-            assert_eq!(color(), Color32::from_white_alpha(64));
-            let start = egui::pos2(rect.left() + rect.width() * 0.4, rect.center().y);
-            let end = egui::pos2(start.x, rect.top());
-            let button = |pos, pressed| egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: egui::Modifiers::NONE,
-            };
-            frame(
-                &mut app,
-                vec![egui::Event::PointerMoved(start), button(start, true)],
-            );
-            let dragging = painted(&frame(&mut app, vec![egui::Event::PointerMoved(end)]).0);
-            let (released, actions) = frame(&mut app, vec![button(end, false)]);
-            assert_eq!(painted(&released).vertices, dragging.vertices);
-            assert!(matches!(
-                actions.as_slice(),
-                [UiAction::TimeAdjustment(
-                    _,
-                    _,
-                    _,
-                    TimelineEdit::ScaleVolume(_, 2.0)
-                )]
-            ));
-            for action in actions {
-                app.handle_ui_action(action);
-            }
-            let held = painted(&frame(&mut app, vec![]).0);
-            assert_eq!(held.vertices, dragging.vertices, "first post-commit frame");
-            assert!(app.waveform_detail.held_gain.is_some());
-            assert!(app.waveform_detail.values.is_none());
-            // Keep the completion queued while verifying settling and an in-flight job.
-            app.waveform_detail.started = true;
-            app.waveform_detail.finished = false;
-            let obsolete = app.waveform_detail.key.clone().expect("old request");
-            for _ in 0..3 {
-                assert_eq!(painted(&frame(&mut app, vec![]).0).vertices, held.vertices);
-            }
-            let next = range(3123, 6789);
-            let preview = app
-                .detailed_waveform(&context, rect, Some((next, 0.5)))
-                .expect("next preview");
-            app.push_edit(EditOperation::Timeline(TimelineEdit::ScaleVolume(
-                next, 0.5,
-            )));
-            let committed = app
-                .detailed_waveform(&context, rect, None)
-                .expect("repeated commit");
+        })
+        .collect();
+    detail.install(values.clone());
+    for start in (0..values.len()).step_by(7) {
+        for length in [1, 2, 3, 17, 129, 1025] {
+            let end = (start + length).min(values.len());
+            let expected = values[start..end].iter().copied().fold(0.0, f32::max);
             assert_eq!(
-                committed.vertices, preview.vertices,
-                "retain fractional-column cuts and unclipped amplitudes"
-            );
-            app.install_detailed_waveform(
-                app.media_generation,
-                obsolete,
-                Ok(vec![0.0; columns as usize]),
-            );
-            assert_eq!(
-                app.detailed_waveform(&context, rect, None)
-                    .expect("reject stale result")
-                    .vertices,
-                committed.vertices
-            );
-            let retained = app.waveform_detail.take_retained();
-            app.waveform_detail = retained;
-            assert_eq!(
-                app.detailed_waveform(&context, rect, None)
-                    .expect("restored hold")
-                    .vertices,
-                committed.vertices
-            );
-            app.waveform_detail.started = true;
-            let key = app.waveform_detail.key.clone().expect("current request");
-            app.install_detailed_waveform(
-                app.media_generation,
-                key,
-                Err(towavue_runtime_windows::PreviewError::Generate(
-                    "controlled refinement failure".into(),
-                )),
-            );
-            assert_eq!(
-                app.detailed_waveform(&context, rect, None)
-                    .expect("failure retains exact preview")
-                    .vertices,
-                committed.vertices
-            );
-            app.waveform_detail.restart_pending();
-            app.waveform_detail.started = true;
-            let key = app.waveform_detail.key.clone().expect("accepted request");
-            app.install_detailed_waveform(
-                app.media_generation,
-                key,
-                Ok(vec![0.1; columns as usize]),
-            );
-            assert!(app.waveform_detail.held_gain.is_none());
-            assert_ne!(
-                app.detailed_waveform(&context, rect, None)
-                    .expect("refined result")
-                    .vertices,
-                committed.vertices
+                detail.peak(
+                    start as f64 / values.len() as f64,
+                    end as f64 / values.len() as f64
+                ),
+                expected
             );
         }
     }
 }
 
 #[test]
-fn gain_handoff_requires_the_exact_committed_preview_and_matching_source_geometry() {
-    let plan =
-        EditTimeline::new(media_time(Duration::from_secs(10)), Default::default()).expect("plan");
-    let key = Key {
-        path: "source.wav".into(),
+fn committed_gain_stretch_delete_and_undo_reuse_original_amplitudes() {
+    let source =
+        EditTimeline::new(media_time(Duration::from_secs(4)), Default::default()).expect("source");
+    let key = Arc::new(Key {
+        path: "owned-envelope.wav".into(),
         track: None,
-        plan,
-        rate: 1.0,
-        volume: 1.0,
+        plan: source.clone(),
         columns: 4,
-    };
-    let preview = (range(2123, 6345), 0.5);
-    let detail = Detail {
-        key: Some(Arc::new(key.clone())),
-        values: Some(Arc::from([0.2, 1.5, 0.4, 0.8])),
-        last_gain_preview: Some(preview),
+    });
+    let mut detail = Detail {
+        key: Some(key.clone()),
+        display_volume: 1.0,
         ..Default::default()
     };
-    let mut next = key.clone();
-    assert!(
-        next.plan
-            .apply(TimelineEdit::ScaleVolume(preview.0, preview.1))
+    detail.install(vec![0.2, 0.6, 1.4, 0.9]);
+    let retained = detail.values.clone().expect("source");
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 100.0));
+    let before = detail.mesh(rect, 1.0, None).expect("before");
+    let preview = detail
+        .mesh(rect, 1.0, Some((range(1000, 3000), 0.5)))
+        .expect("preview");
+    let mut plan = source.clone();
+    assert!(plan.apply(TimelineEdit::ScaleVolume(range(1000, 3000), 0.5)));
+    detail.display_plan = Some(plan.clone());
+    let committed = detail.mesh(rect, 1.0, None).expect("commit");
+    assert_eq!(
+        preview.vertices, committed.vertices,
+        "release retains the detailed waveform immediately"
     );
-    assert!(detail.hold_committed_gain(&next).is_some());
-    for change in 0..7 {
-        let mut changed = next.clone();
-        match change {
-            0 => changed.path = "other.wav".into(),
-            1 => changed.columns += 1,
-            2 => changed.rate = 2.0,
-            3 => changed.volume = 0.5,
-            4 => changed.plan = key.plan.clone(), // Cancellation/Undo.
-            5 => changed.track = Some(towavue_core::AudioTrackId::from_index(2)),
-            _ => {
-                changed.plan.apply(TimelineEdit::Delete(range(0, 1000)));
-            }
-        }
-        assert!(detail.hold_committed_gain(&changed).is_none());
-    }
-    let cancelled = Detail {
-        last_gain_preview: None,
-        ..detail
-    };
-    assert!(cancelled.hold_committed_gain(&next).is_none());
+    assert!(plan.apply(TimelineEdit::Stretch(
+        range(1000, 3000),
+        media_time(Duration::from_secs(4))
+    )));
+    detail.display_plan = Some(plan.clone());
+    let stretched = detail.mesh(rect, 1.0, None).expect("stretch");
+    assert_ne!(stretched.vertices, committed.vertices);
+    assert!(plan.apply(TimelineEdit::Delete(range(0, 1000))));
+    detail.display_plan = Some(plan);
+    assert!(
+        !detail
+            .mesh(rect, 1.0, None)
+            .expect("delete")
+            .vertices
+            .is_empty()
+    );
+    detail.display_plan = Some(source);
+    assert_eq!(
+        before.vertices,
+        detail.mesh(rect, 1.0, None).expect("undo").vertices
+    );
+    assert!(Arc::ptr_eq(
+        &retained,
+        detail.values.as_ref().expect("same data")
+    ));
+    assert!(Arc::ptr_eq(&key, detail.key.as_ref().expect("same source")));
 }

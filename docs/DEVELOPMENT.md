@@ -582,3 +582,16 @@ and numeric qualifiers, typo tolerance, irrelevant inputs and direct/MRU priorit
 Timeline Silence and Crop controls share menu/palette dispatch, selection/whole-range
 behavior, undo and unavailable-state guards. Gallery held-pointer controls require
 new worker completions to reach painted textures before releasing the pointer.
+
+Shared style values live in `chrome/tokens.rs`. Style changes require menu, palette,
+modal, toolbar, Gallery/Filmstrip and timeline checks at 100%, 125% and 200% density,
+including narrow windows, disabled/hover/selected states and keyboard selection.
+Keep media texture tint and authored subtitle colors separate from UI tokens.
+Timeline viewport changes use `timeline_view::`, `time_selection::`, timeline-panel
+and native timeline/seek controls. Verify pointer-anchored Alt-wheel zoom, ordinary
+wheel pan, both scrollbar resize edges, cancellation, ruler/gap seeking and the
+30-point-per-frame limit. `waveform_detail::` checks retained source peaks across
+viewport/edits, stale publication, gain clipping and maximum-pyramid accuracy;
+`waveform::` retains native decoder and cancellation controls. Hidden GPU checks
+are rendering evidence; inspect the normal Release window separately against the
+design, including the supplied CTI artwork and embedded application icon.

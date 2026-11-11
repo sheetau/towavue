@@ -413,7 +413,7 @@ fn exercise_timeline<N: Fn(AppEvent) + Send + Sync + 'static>(app: &mut Applicat
                 egui::containers::panel::PanelState::load(&context, app.timeline_panel_id())
                     .expect("test fixture")
                     .outer_rect;
-            let rect = Rect::from_min_max(panel.min + vec2(8.0, 8.0), panel.max - vec2(8.0, 0.0));
+            let rect = Rect::from_min_max(panel.min + vec2(5.0, 5.0), panel.max - vec2(5.0, 14.0));
             let x = |ratio| egui::lerp(rect.x_range(), ratio);
             let ratio = (app.current_position().as_seconds_f64() / 2.0) as f32;
             let start = if gesture == 1 {

@@ -244,8 +244,8 @@ impl Playlist {
                     scroll = scroll.vertical_scroll_offset((offset - delta.y).max(0.0));
                 }
             }
-            let font = egui::FontId::proportional(14.0);
-            let measure = |text: String| ui.painter().layout_no_wrap(text, font.clone(), egui::Color32::WHITE).size().x;
+            let font = egui::FontId::proportional(crate::chrome::TEXT_LG);
+            let measure = |text: String| ui.painter().layout_no_wrap(text, font.clone(), crate::chrome::FOREGROUND).size().x;
             let number_width = measure(items.len().to_string());
             let duration_width = self.durations.values().flatten()
                 .max()
@@ -259,8 +259,8 @@ impl Playlist {
                         self.visible.push(item.path.clone());
                         let selected = current == Some(item.path.as_path());
                         let name = crate::display_name(&item.path);
-                        let text = RichText::new(&name).size(14.0);
-                        let number = RichText::new((index + 1).to_string()).size(14.0);
+                        let text = RichText::new(&name).size(crate::chrome::TEXT_LG);
+                        let number = RichText::new((index + 1).to_string()).size(crate::chrome::TEXT_LG);
                         let duration = self
                             .durations
                             .get(&item.path)
@@ -268,7 +268,7 @@ impl Playlist {
                             .flatten()
                             .map(|duration| crate::format_time(crate::media_time(duration)))
                             .unwrap_or_else(|| "—".into());
-                        let duration = RichText::new(duration).size(14.0);
+                        let duration = RichText::new(duration).size(crate::chrome::TEXT_LG);
                         let response = ui
                             .scope_builder(
                                 egui::UiBuilder::new().id(ui.id().with(("audio-row", &item.path))),
@@ -276,7 +276,7 @@ impl Playlist {
                                     crate::chrome::flat_buttons(ui);
                                     if selected {
                                         ui.visuals_mut().widgets.inactive.fg_stroke.color =
-                                            egui::Color32::WHITE;
+                                            crate::chrome::FOREGROUND;
                                     }
                                     let background = ui.painter().add(egui::Shape::Noop);
                                     let response = ui.add_sized(
@@ -409,6 +409,7 @@ mod tests {
     fn hidden_playlist_scrollbar_preserves_wheel_navigation_and_returns_when_shown() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
             context.enable_accesskit();
             context.set_pixels_per_point(density);
             let snapshot = snapshot(100);
@@ -491,6 +492,7 @@ mod tests {
         {
             for (batched, focused) in [(false, false), (false, true), (true, false), (true, true)] {
                 let context = crate::fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
                 context.enable_accesskit();
                 let mut tabs = towavue_core::TabSet::default();
                 let active = tabs.open_new("active.wav".into(), MediaKind::Audio);
@@ -633,6 +635,7 @@ mod tests {
         ] {
             for density in [1.0, 1.25, 2.0] {
                 let context = crate::fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
                 context.enable_accesskit();
                 crate::localization::set_language(&context, language);
                 context.global_style_mut(crate::chrome::style);
@@ -704,7 +707,7 @@ mod tests {
                 assert!(
                     duration.pos.x > 260.0 && duration.pos.x + duration.galley.size().x <= 312.0
                 );
-                assert_eq!(duration.fallback_color, egui::Color32::WHITE);
+                assert_eq!(duration.fallback_color, crate::chrome::FOREGROUND);
                 let row = Rect::from_min_size(
                     Pos2::new(8.0, duration.pos.y - 5.0),
                     Vec2::new(300.0, 32.0),
@@ -749,6 +752,7 @@ mod tests {
     fn number_name_and_duration_columns_align_across_digit_counts() {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
+            context.global_style_mut(crate::chrome::style);
             context.global_style_mut(crate::chrome::style);
             context.set_pixels_per_point(density);
             let snapshot = snapshot(24);
@@ -999,6 +1003,7 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             let context = crate::fonts::test_context();
             context.global_style_mut(crate::chrome::style);
+            context.global_style_mut(crate::chrome::style);
             context.enable_accesskit();
             context.set_pixels_per_point(density);
             let snapshot = snapshot(100);
@@ -1092,6 +1097,7 @@ mod tests {
         for density in [1.0, 1.25, 2.0] {
             for width in [240.0, 960.0] {
                 let context = crate::fonts::test_context();
+                context.global_style_mut(crate::chrome::style);
                 context.enable_accesskit();
                 context.set_pixels_per_point(density);
                 context.global_style_mut(|style| {

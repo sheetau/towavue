@@ -437,7 +437,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                 part,
                 0.0,
                 egui::TextFormat {
-                    font_id: egui::FontId::proportional(12.0),
+                    font_id: egui::FontId::proportional(crate::chrome::TEXT_MD),
                     color,
                     ..Default::default()
                 },

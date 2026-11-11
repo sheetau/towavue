@@ -342,6 +342,7 @@ impl Preview {
             .show(context, |ui| {
                 ui.style_mut().interaction.selectable_labels = false;
                 egui::Frame::popup(ui.style())
+                    .stroke(egui::Stroke::new(1.0, crate::chrome::FLOATING_BACKGROUND))
                     .inner_margin(0)
                     .show(ui, |ui| {
                         ui.set_width(width);
@@ -726,7 +727,7 @@ mod tests {
                     );
                 }
                 let tolerance = 1.0 / density;
-                let border = context.global_style().visuals.window_stroke();
+                let border = crate::hover_help::frame(&context.global_style()).stroke;
                 assert!((pixels.top() - card.top() - border.width).abs() <= tolerance);
                 assert!((pixels.left() - card.left() - border.width).abs() <= tolerance);
                 assert!((card.right() - pixels.right() - border.width).abs() <= tolerance);

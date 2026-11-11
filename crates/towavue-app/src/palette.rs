@@ -311,43 +311,28 @@ impl CommandPalette {
             .order(egui::Order::Foreground)
             .anchor(
                 egui::Align2::CENTER_TOP,
-                [0.0, top - context.content_rect().top()],
+                [0.0, top - context.content_rect().top() + 6.0],
             )
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(crate::chrome::FLOATING_BACKGROUND)
+                    .fill(crate::chrome::BACKGROUND)
                     .stroke(egui::Stroke::new(1.0, crate::chrome::BORDER))
-                    .inner_margin(6)
+                    .inner_margin(crate::chrome::PADDING)
                     .corner_radius(context.global_style().visuals.menu_corner_radius),
             )
             .show(context, |ui| {
                 ui.spacing_mut().scroll.fade.strength = 0.0;
+                ui.visuals_mut().disabled_alpha = 1.0;
+                ui.visuals_mut().widgets.noninteractive.fg_stroke.color = crate::chrome::DISABLED;
                 ui.set_width((context.content_rect().width() - 50.0).clamp(120.0, 586.0));
-                if let Some(step) = &self.step {
-                    let title = step.title.clone();
-                    let mut back = false;
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 0.0;
-                        let (_, rect) =
-                            ui.allocate_space(egui::Vec2::splat(ui.spacing().interact_size.y));
-                        back = row_icon(ui, rect, '\u{eab5}')
-                            .on_hover_text(Text::CommandHistoryBack.in_language(language))
-                            .clicked();
-                        ui.label(title);
-                        ui.add_space(8.0);
-                        ui.weak("2/2");
-                    });
-                    if back {
-                        self.back();
-                    }
-                }
+                ui.spacing_mut().item_spacing =
+                    egui::vec2(crate::chrome::PADDING as f32, crate::chrome::ITEM_GAP);
+                ui.style_mut().override_font_id =
+                    Some(egui::FontId::proportional(crate::chrome::TEXT_MD));
                 let previous_query = self.query.clone();
-                let inactive_stroke = ui.visuals().widgets.inactive.bg_stroke;
-                ui.visuals_mut().widgets.inactive.bg_stroke =
-                    ui.visuals().widgets.hovered.bg_stroke;
                 ui.memory_mut(|memory| {
                     if !memory.has_focus(query_id) {
                         memory.request_focus(query_id);
@@ -357,37 +342,53 @@ impl CommandPalette {
                 ui.visuals_mut().weak_text_color = Some(crate::chrome::TRACK);
                 ui.spacing_mut().text_edit_width = f32::INFINITY;
                 let folder_mode = self.folder_mode();
-                crate::chrome::text_edit(
-                    ui,
-                    egui::TextEdit::singleline(&mut self.query)
-                        .vertical_align(egui::Align::Center)
-                        .id(query_id)
-                        .text_color(crate::chrome::FOREGROUND)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(if self.step.is_some() {
-                            Text::PaletteOptionHint.in_language(language)
-                        } else if folder_mode {
-                            Text::PaletteFolderHint.in_language(language)
-                        } else if previous_query.starts_with('>') {
-                            Text::PaletteCommandHint.in_language(language)
+                let mut back = false;
+                ui.horizontal(|ui| {
+                    if self.step.is_some() {
+                        let (_, rect) =
+                            ui.allocate_space(egui::Vec2::splat(crate::chrome::ROW_HEIGHT));
+                        back = row_icon(ui, rect, '\u{eab5}')
+                            .on_hover_text(Text::CommandHistoryBack.in_language(language))
+                            .clicked();
+                    }
+                    ui.add_sized(
+                        [ui.available_width(), crate::chrome::ROW_HEIGHT],
+                        egui::TextEdit::singleline(&mut self.query)
+                            .frame(egui::Frame::NONE)
+                            .margin(egui::vec2(crate::chrome::PADDING as f32, 0.0))
+                            .vertical_align(egui::Align::Center)
+                            .id(query_id)
+                            .text_color(crate::chrome::FOREGROUND)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(if self.step.is_some() {
+                                Text::PaletteOptionHint.in_language(language)
+                            } else if folder_mode {
+                                Text::PaletteFolderHint.in_language(language)
+                            } else if previous_query.starts_with('>') {
+                                Text::PaletteCommandHint.in_language(language)
+                            } else {
+                                Text::PaletteFileHint.in_language(language)
+                            }),
+                    )
+                    .help_text(
+                        if !folder_mode && self.step.is_none() && !previous_query.starts_with('>') {
+                            format!(
+                                "{}\n{}",
+                                Text::PaletteHelp.in_language(language),
+                                Text::FileQueryHelp.in_language(language)
+                            )
                         } else {
-                            Text::PaletteFileHint.in_language(language)
-                        }),
-                    false,
-                )
-                .help_text(
-                    if !folder_mode && self.step.is_none() && !previous_query.starts_with('>') {
-                        format!(
-                            "{}\n{}",
-                            Text::PaletteHelp.in_language(language),
-                            Text::FileQueryHelp.in_language(language)
-                        )
-                    } else {
-                        Text::PaletteHelp.in_language(language).into()
-                    },
-                );
+                            Text::PaletteHelp.in_language(language).into()
+                        },
+                    );
+                });
+                if back {
+                    self.back();
+                }
+                if let Some(step) = &self.step {
+                    row::category(ui, &step.title);
+                }
                 ui.visuals_mut().weak_text_color = weak_text_color;
-                ui.visuals_mut().widgets.inactive.bg_stroke = inactive_stroke;
                 let command_mode = self.step.is_some() || self.query.starts_with('>');
                 if command_mode {
                     self.clear_preview();
@@ -566,8 +567,33 @@ impl CommandPalette {
                 );
             }
         }
-        let row_height = 22.0;
-        let row_count = paths.len().max(1);
+        let row_height = crate::chrome::ROW_HEIGHT;
+        let gap = crate::chrome::ITEM_GAP;
+        let category_height = 16.0;
+        let groups: Vec<_> = (0..paths.len())
+            .filter_map(|index| {
+                let label = if folders && index == 0 {
+                    Text::FolderResults
+                } else if !folders && index == 0 && recent_count > 0 {
+                    Text::RecentlyOpened
+                } else if !folders && index == recent_count {
+                    Text::FileResults
+                } else {
+                    return None;
+                };
+                Some((index, label.in_language(language)))
+            })
+            .collect();
+        let row_top = |index: usize| {
+            index as f32 * (row_height + gap)
+                + groups.iter().filter(|(start, _)| *start <= index).count() as f32
+                    * (category_height + gap)
+        };
+        let total_height = if paths.is_empty() {
+            row_height
+        } else {
+            row_top(paths.len() - 1) + row_height
+        };
         // The window can constrain the inner height before reaching the screen edge.
         // Use the same effective viewport as ScrollArea when revealing a selected row.
         let height = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 8.0)
@@ -579,7 +605,10 @@ impl CommandPalette {
             .auto_shrink([false, true])
             .id_salt(scroll_salt)
             .max_height(height);
-        if (navigation.moved() || query_changed || selection_moved)
+        // Anchored windows can settle over several frames at fractional densities.
+        // Keep the selection visible when that layout reduces the viewport.
+        let viewport_shrank = height + 0.01 < self.list_height;
+        if (navigation.moved() || query_changed || selection_moved || viewport_shrank)
             && let Some(index) = selected
         {
             // Match ScrollArea's wrapped salt in egui 0.35. Loading the raw
@@ -590,169 +619,199 @@ impl CommandPalette {
                 crate::scroll_style::popup_scroll_id(ui, egui::IdSalt::new(scroll_salt)),
             )
             .map_or(0.0, |state| state.offset.y);
-            let top = index as f32 * row_height;
+            let top = row_top(index);
             let bottom = top + row_height;
-            scroll = scroll
-                .vertical_scroll_offset(offset.clamp((bottom - height).max(0.0).min(top), top));
+            // Window/ScrollArea layout can reduce the requested height at a
+            // fractional density. Reveal against the settled viewport, while
+            // leaving max_height free to grow after resizing or a query change.
+            let reveal_height = if query_changed {
+                height
+            } else {
+                height.min(self.list_height.max(1.0))
+            };
+            let was_visible = top >= offset - 1.0 && bottom <= offset + self.list_height + 1.0;
+            let manual_scroll = ui.input(|input| {
+                input.pointer.any_down()
+                    || input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::MouseWheel { .. }))
+            });
+            if navigation.moved()
+                || query_changed
+                || selection_moved
+                || (was_visible && !manual_scroll)
+            {
+                scroll = scroll.vertical_scroll_offset(
+                    offset.clamp((bottom - reveal_height).max(0.0).min(top), top),
+                );
+            }
         }
         ui.spacing_mut().item_spacing.y = 0.0;
-        let output = scroll.show_rows_popup_styled(ui, 6.0, row_height, row_count, |ui, rows| {
-            if paths.is_empty() {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(if folders {
-                            Text::NoMatchingFolders.in_language(language)
-                        } else {
-                            crate::browser_controls::query_error(&expression, false)
-                                .unwrap_or(Text::NoMatchingFiles)
-                                .in_language(language)
-                        })
-                        .weak(),
-                    )
-                    .truncate(),
-                );
-                return;
-            }
-            for index in rows {
-                let path = paths[index];
-                let name = path
-                    .file_name()
-                    .unwrap_or(path.as_os_str())
-                    .to_string_lossy();
-                let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
-                let (_, row) = ui.allocate_space(egui::vec2(ui.available_width(), 22.0));
-                let selected_row = selected == Some(index);
-                let hovered = ui.is_enabled()
-                    && ui.input(|input| input.pointer.hover_pos().is_some())
-                    && ui.rect_contains_pointer(row);
-                if hovered {
-                    hovered_path = Some((*path).clone());
-                }
-                let close = selected_row || hovered;
-                let row_actions = RowActions::new(row, close, false);
-                let body = row_actions.body;
-                let background = ui.painter().add(egui::Shape::Noop);
-                let group = if folders && index == 0 {
-                    Text::FolderResults.in_language(language)
-                } else if !folders && index == 0 && recent_count > 0 {
-                    Text::RecentlyOpened.in_language(language)
-                } else if !folders && index == recent_count {
-                    Text::FileResults.in_language(language)
-                } else {
-                    ""
-                };
-                if !folders && index == recent_count && recent_count > 0 {
-                    ui.painter().hline(
-                        row.x_range(),
-                        row.top(),
-                        egui::Stroke::new(1.0, crate::chrome::BORDER),
-                    );
-                }
-                let icon = (!folders
-                    && !current
-                    && index < recent_count
-                    && crate::tab_icons::enabled(ui.ctx()))
-                .then(|| crate::tab_icons::media(Some(path.as_path())))
-                .flatten();
-                let icon_width = if icon.is_some() { 22.0 } else { 0.0 };
-                let (name_width, parent_width, group_width) =
-                    file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, group);
-                let mut atoms = egui::Atoms::new((
-                    name.as_ref().atom_max_width(name_width),
-                    label_gap(ui),
-                    egui::RichText::new(parent.as_ref())
-                        .small()
-                        .color(crate::chrome::MUTED)
-                        .atom_max_width(parent_width)
-                        .atom_shrink(true),
-                    egui::Atom::grow(),
-                ));
-                if icon.is_some() {
-                    atoms.push_left(egui::Atom::default().atom_size(egui::vec2(icon_width, 0.0)));
-                }
-                if !group.is_empty() {
-                    atoms.push_right(label_gap(ui));
-                    atoms.push_right(
-                        egui::RichText::new(group)
-                            .small()
-                            .color(crate::chrome::MUTED)
-                            .atom_max_width(group_width),
-                    );
-                }
-                let response = ui
-                    .push_id(path, |ui| row_button(ui, body, selected_row, atoms))
-                    .inner
-                    .help_text(path.to_string_lossy());
-                if let Some(kind) = icon {
-                    let slot = egui::Rect::from_min_size(
-                        body.min + egui::vec2(6.0, 0.0),
-                        egui::vec2(16.0, body.height()),
-                    );
-                    let color = if selected_row {
-                        ui.visuals().selection.stroke.color
-                    } else {
-                        ui.visuals().widgets.inactive.fg_stroke.color
-                    };
-                    crate::tab_icons::paint(ui, slot, kind, color);
-                }
-                ui.painter()
-                    .set(background, row_background(ui, row, &response, selected_row));
-                ui.ctx().accesskit_node_builder(response.id, |node| {
-                    node.clear_toggled();
-                    node.set_label(path.to_string_lossy().as_ref());
-                });
-                if let Some(close_rect) = row_actions.remove {
-                    let label = if !current && (folders || index < recent_count) {
-                        Text::RemoveRecentlyOpened.in_language(language)
-                    } else {
-                        Text::DismissSearchResult.in_language(language)
-                    };
-                    let remove = ui
-                        .push_id(("remove-path", path), |ui| {
-                            row_icon(ui, close_rect, '\u{ea76}')
-                        })
-                        .inner
-                        .help_text(label);
-                    ui.ctx().accesskit_node_builder(remove.id, |node| {
-                        node.set_label(format!("{label}: {}", path.display()));
-                    });
-                    if remove.clicked() && !query_changed {
-                        self.hidden_paths
-                            .insert(normalized(&path.to_string_lossy()));
-                        if selected_row {
-                            self.selected_path = None;
-                            self.removed_selection = Some(index);
-                        }
-                        if !current {
-                            chosen = Some(RecentAction::Remove((*path).clone(), kind));
-                        }
+        let output = scroll.show_viewport_popup_styled(
+            ui,
+            f32::from(crate::chrome::PADDING),
+            |ui, viewport| {
+                let origin = ui.cursor().min;
+                ui.set_min_height(total_height);
+                for (index, label) in &groups {
+                    let top = row_top(*index) - category_height - gap;
+                    if top + category_height >= viewport.top() && top <= viewport.bottom() {
+                        let rect = egui::Rect::from_min_size(
+                            origin + egui::vec2(0.0, top),
+                            egui::vec2(ui.available_width(), category_height),
+                        );
+                        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+                        row::category(&mut child, label);
                     }
                 }
-                if response.clicked() && !query_changed {
-                    let modifiers = ui.input(|input| {
-                        input
-                            .events
-                            .iter()
-                            .rev()
-                            .find_map(|event| match event {
-                                egui::Event::PointerButton {
-                                    button: egui::PointerButton::Primary,
-                                    pressed: false,
-                                    modifiers,
-                                    ..
-                                } => Some(*modifiers),
-                                _ => None,
+                if paths.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(if folders {
+                                Text::NoMatchingFolders.in_language(language)
+                            } else {
+                                crate::browser_controls::query_error(&expression, false)
+                                    .unwrap_or(Text::NoMatchingFiles)
+                                    .in_language(language)
                             })
-                            .unwrap_or(input.modifiers)
-                    });
-                    chosen = Some(RecentAction::Open(
-                        (*path).clone(),
-                        kind,
-                        open_target(modifiers),
-                    ));
+                            .weak(),
+                        )
+                        .truncate(),
+                    );
+                    return;
                 }
-            }
-        });
+                for (index, path) in paths.iter().enumerate() {
+                    let top = row_top(index);
+                    if top + row_height < viewport.top() || top > viewport.bottom() {
+                        continue;
+                    }
+                    let path = *path;
+                    let name = path
+                        .file_name()
+                        .unwrap_or(path.as_os_str())
+                        .to_string_lossy();
+                    let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy();
+                    let row = egui::Rect::from_min_size(
+                        origin + egui::vec2(0.0, top),
+                        egui::vec2(ui.available_width(), row_height),
+                    );
+                    let mut row_ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt(("file-row", path))
+                            .max_rect(row),
+                    );
+                    let ui = &mut row_ui;
+                    let selected_row = selected == Some(index);
+                    let hovered = ui.is_enabled()
+                        && ui.input(|input| input.pointer.hover_pos().is_some())
+                        && ui.rect_contains_pointer(row);
+                    if hovered {
+                        hovered_path = Some((*path).clone());
+                    }
+                    let close = selected_row || hovered;
+                    let row_actions = RowActions::new(row, close, false);
+                    let body = row_actions.body;
+                    let background = ui.painter().add(egui::Shape::Noop);
+                    let icon = (!folders
+                        && !current
+                        && index < recent_count
+                        && crate::tab_icons::enabled(ui.ctx()))
+                    .then(|| crate::tab_icons::media(Some(path.as_path())))
+                    .flatten();
+                    let icon_width = if icon.is_some() { 22.0 } else { 0.0 };
+                    let (name_width, parent_width, _) =
+                        file_label_widths(ui, (body.width() - icon_width).max(0.0), &name, "");
+                    let mut atoms = egui::Atoms::new((
+                        name.as_ref().atom_max_width(name_width),
+                        label_gap(ui),
+                        egui::RichText::new(parent.as_ref())
+                            .size(crate::chrome::TEXT_SM)
+                            .color(crate::chrome::MUTED)
+                            .atom_max_width(parent_width)
+                            .atom_shrink(true),
+                        egui::Atom::grow(),
+                    ));
+                    if icon.is_some() {
+                        atoms.push_left(
+                            egui::Atom::default().atom_size(egui::vec2(icon_width, 0.0)),
+                        );
+                    }
+                    let response = ui
+                        .push_id(path, |ui| row_button(ui, body, selected_row, atoms))
+                        .inner
+                        .help_text(path.to_string_lossy());
+                    if let Some(kind) = icon {
+                        let slot = egui::Rect::from_min_size(
+                            body.min + egui::vec2(crate::chrome::PADDING as f32, 0.0),
+                            egui::vec2(16.0, body.height()),
+                        );
+                        let color = if selected_row {
+                            ui.visuals().selection.stroke.color
+                        } else {
+                            ui.visuals().widgets.inactive.fg_stroke.color
+                        };
+                        crate::tab_icons::paint(ui, slot, kind, color);
+                    }
+                    ui.painter()
+                        .set(background, row_background(ui, row, &response, selected_row));
+                    ui.ctx().accesskit_node_builder(response.id, |node| {
+                        node.clear_toggled();
+                        node.set_label(path.to_string_lossy().as_ref());
+                    });
+                    if let Some(close_rect) = row_actions.remove {
+                        let label = if !current && (folders || index < recent_count) {
+                            Text::RemoveRecentlyOpened.in_language(language)
+                        } else {
+                            Text::DismissSearchResult.in_language(language)
+                        };
+                        let remove = ui
+                            .push_id(("remove-path", path), |ui| {
+                                row_icon(ui, close_rect, '\u{ea76}')
+                            })
+                            .inner
+                            .help_text(label);
+                        ui.ctx().accesskit_node_builder(remove.id, |node| {
+                            node.set_label(format!("{label}: {}", path.display()));
+                        });
+                        if remove.clicked() && !query_changed {
+                            self.hidden_paths
+                                .insert(normalized(&path.to_string_lossy()));
+                            if selected_row {
+                                self.selected_path = None;
+                                self.removed_selection = Some(index);
+                            }
+                            if !current {
+                                chosen = Some(RecentAction::Remove((*path).clone(), kind));
+                            }
+                        }
+                    }
+                    if response.clicked() && !query_changed {
+                        let modifiers = ui.input(|input| {
+                            input
+                                .events
+                                .iter()
+                                .rev()
+                                .find_map(|event| match event {
+                                    egui::Event::PointerButton {
+                                        button: egui::PointerButton::Primary,
+                                        pressed: false,
+                                        modifiers,
+                                        ..
+                                    } => Some(*modifiers),
+                                    _ => None,
+                                })
+                                .unwrap_or(input.modifiers)
+                        });
+                        chosen = Some(RecentAction::Open(
+                            (*path).clone(),
+                            kind,
+                            open_target(modifiers),
+                        ));
+                    }
+                }
+            },
+        );
         self.list_height = output.inner_rect.height();
         let preview_path = hovered_path
             .as_deref()
@@ -788,7 +847,12 @@ fn file_label_widths(ui: &egui::Ui, width: f32, name: &str, group: &str) -> (f32
     };
     let name = measure(name.into()).min(available * 0.8);
     let remainder = (available - name).max(0.0);
-    let group = measure(egui::RichText::new(group).small().into()).min(remainder * 0.6);
+    let group = measure(
+        egui::RichText::new(group)
+            .size(crate::chrome::TEXT_SM)
+            .into(),
+    )
+    .min(remainder * 0.6);
     (name, remainder - group, group)
 }
 
@@ -811,7 +875,7 @@ fn row_background(
         row,
         visuals.corner_radius,
         if selected {
-            crate::chrome::HOVER
+            crate::chrome::SURFACE
         } else {
             visuals.weak_bg_fill
         },
@@ -847,7 +911,12 @@ fn navigate_enabled(
             steps: 0,
             pages: navigation.pages,
         }
-        .destination(index, enabled.len(), height, 22.0);
+        .destination(
+            index,
+            enabled.len(),
+            height,
+            crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP,
+        );
         // A page measures physical rows, including disabled commands. Clamp at the
         // ends, then find an enabled target without wrapping to the opposite edge.
         current = if navigation.pages > 0 {
@@ -1071,7 +1140,7 @@ mod tests {
                     .iter()
                     .find_map(|shape| match &shape.shape {
                         egui::Shape::Rect(rect)
-                            if rect.fill == crate::chrome::FLOATING_BACKGROUND
+                            if rect.fill == crate::chrome::BACKGROUND
                                 && rect.stroke.color == crate::chrome::BORDER =>
                         {
                             Some(rect.rect)
@@ -1920,7 +1989,11 @@ mod tests {
                     .0
                     .pos
                     .y;
-                assert!((file_y - folder_y - 22.0).abs() < 1.0);
+                assert!(
+                    (file_y - folder_y - (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP))
+                        .abs()
+                        < 1.0
+                );
                 frame(
                     &mut palette,
                     &history,
@@ -2109,10 +2182,13 @@ mod tests {
                         assert!(
                             selected.pos.y >= selected_clip.top() - 1.0
                                 && bottom <= selected_clip.bottom() + 1.0,
-                            "selection outside viewport: {mode} {size:?} {density} {selected_title} {bottom} {selected_clip:?}"
+                            "selection outside viewport: {mode} {size:?} {density} {selected_title} {bottom} {selected_clip:?}; viewport height={}",
+                            palette.list_height
                         );
                         if index > old_index {
-                            let expected = old_position.y + (index - old_index) as f32 * 22.0;
+                            let expected = old_position.y
+                                + (index - old_index) as f32
+                                    * (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP);
                             if expected + selected.galley.size().y + 4.0 <= clip.bottom() {
                                 assert!(
                                     (selected.pos.y - expected - selected_clip.top() + clip.top())
@@ -2146,7 +2222,9 @@ mod tests {
                         let (selected, selected_clip) =
                             picker_text(&output, &title(&palette)).expect("revealed selection");
                         if index < old_index {
-                            let expected = old_y - (old_index - index) as f32 * 22.0;
+                            let expected = old_y
+                                - (old_index - index) as f32
+                                    * (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP);
                             if expected - 4.0 >= clip.top() {
                                 assert!(
                                     (selected.pos.y - expected - selected_clip.top() + clip.top())
@@ -2414,7 +2492,7 @@ mod tests {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.fill == crate::chrome::FLOATING_BACKGROUND
+                        if rect.fill == crate::chrome::BACKGROUND
                             && rect.stroke.color == crate::chrome::BORDER
                             && rect.corner_radius
                                 == context.global_style().visuals.menu_corner_radius =>
@@ -2425,7 +2503,7 @@ mod tests {
                 })
                 .expect("dark palette panel");
             assert!(panel.left() >= 0.0 && panel.right() <= size.x);
-            assert!((panel.top() - top).abs() <= 1.0 && panel.bottom() <= size.y);
+            assert!((panel.top() - top - 6.0).abs() <= 1.0 && panel.bottom() <= size.y);
             assert!(panel.width() <= 600.0);
             assert!(
                 output.platform_output.ime.is_some(),
@@ -2435,7 +2513,7 @@ mod tests {
                 .read_response("command-palette-query".into())
                 .expect("search widget")
                 .rect;
-            assert!((search.height() - 26.0).abs() <= 1.0);
+            assert!((search.height() - crate::chrome::ROW_HEIGHT).abs() <= 1.0);
             assert!(
                 search.width() >= panel.width() - 24.0,
                 "full-width search: {search:?} inside {panel:?} at {size:?}"
@@ -2456,15 +2534,33 @@ mod tests {
                 crate::chrome::FOREGROUND
             );
             let folder = text("Open folder");
-            let first = text("Ctrl+O");
-            let second = text(prefix);
             assert!((file.pos.x - folder.pos.x).abs() < 1.0);
             assert!(picker_text(&output, "other commands").is_none());
-            assert!(first.pos.x + first.galley.size().x < panel.right());
-            assert!(first.pos.x + first.galley.size().x <= second.pos.x + second.galley.size().x);
-            assert!(first.pos.x >= file.pos.x + file.galley.size().x);
-            assert!(second.pos.x >= folder.pos.x + folder.galley.size().x);
-            assert!(second.pos.x + second.galley.size().x < panel.right());
+            for command in [file, folder] {
+                let center = command.pos.y + command.galley.size().y * 0.5;
+                let keys: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(key)
+                            if matches!(
+                                key.galley.text(),
+                                "Ctrl" | "Shift" | "O" | "K" | "P" | "S"
+                            ) && (key.pos.y + key.galley.size().y * 0.5 - center).abs()
+                                <= 1.0 =>
+                        {
+                            let visible = key.visual_bounding_rect().intersect(shape.clip_rect);
+                            visible.is_positive().then_some(visible)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert!(!keys.is_empty(), "individual shortcut keycaps");
+                for key in keys {
+                    assert!(key.left() >= command.pos.x + command.galley.size().x - 1.0);
+                    assert!(key.right() < panel.right());
+                }
+            }
             let pos = egui::pos2(folder.pos.x + 32.0, folder.pos.y + 7.0);
             for _ in 0..3 {
                 frame(vec![egui::Event::PointerMoved(pos)]);
@@ -2720,11 +2816,19 @@ mod tests {
                 let end = palette.selected.expect("page selection");
                 assert!(end > start + 1, "mode {mode}");
                 if mode != 0 {
-                    assert_eq!(end, (palette.list_height / 22.0).floor() as usize);
+                    assert_eq!(
+                        end,
+                        (palette.list_height
+                            / (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP))
+                            .floor() as usize
+                    );
                 }
                 frame(&mut palette, vec![key(egui::Key::PageUp)]);
                 if mode == 0 {
-                    let page = (palette.list_height / 22.0).floor().max(1.0) as usize;
+                    let page = (palette.list_height
+                        / (crate::chrome::ROW_HEIGHT + crate::chrome::ITEM_GAP))
+                        .floor()
+                        .max(1.0) as usize;
                     assert!(palette.selected.expect("enabled command") <= end.saturating_sub(page));
                 } else {
                     assert_eq!(palette.selected, Some(start));

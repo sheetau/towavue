@@ -35,11 +35,59 @@ pub fn timeline_audio_track_waveform(
     columns: u32,
     cancellation: &crate::Cancellation,
 ) -> Result<Vec<f32>, crate::PreviewError> {
+    waveform(
+        source,
+        track,
+        plan,
+        rate,
+        volume,
+        columns,
+        8192,
+        cancellation,
+    )
+}
+
+/// Bounded source-time peaks for an interactive editor. Decode once on the
+/// caller's existing background worker; viewport and edit changes reuse peaks.
+/// At most 262,144 f32 values (1 MiB) are returned, with no whole-source PCM.
+pub fn source_audio_track_waveform(
+    source: &std::path::Path,
+    track: Option<towavue_core::AudioTrackId>,
+    duration: towavue_core::MediaTime,
+    columns: u32,
+    cancellation: &crate::Cancellation,
+) -> Result<Vec<f32>, crate::PreviewError> {
+    let plan = towavue_core::EditTimeline::new(duration, Default::default()).ok_or(
+        crate::PreviewError::Message(towavue_core::localization::Text::WaveformInvalidInput),
+    )?;
+    waveform(
+        source,
+        track,
+        &plan,
+        1.0,
+        1.0,
+        columns,
+        262_144,
+        cancellation,
+    )
+}
+
+#[expect(clippy::too_many_arguments)]
+fn waveform(
+    source: &std::path::Path,
+    track: Option<towavue_core::AudioTrackId>,
+    plan: &towavue_core::EditTimeline,
+    rate: f32,
+    volume: f32,
+    columns: u32,
+    maximum: u32,
+    cancellation: &crate::Cancellation,
+) -> Result<Vec<f32>, crate::PreviewError> {
     use crate::{PreviewError, decode, playback::timeline as playback_timeline};
     if cancellation.is_cancelled() {
         return Err(PreviewError::Cancelled);
     }
-    if !(1..=8192).contains(&columns)
+    if !(1..=maximum).contains(&columns)
         || !rate.is_finite()
         || !(0.25..=4.0).contains(&rate)
         || !volume.is_finite()
@@ -779,5 +827,30 @@ mod tests {
             read(&mut &[][..], 10, 96).expect_err("empty audio").kind(),
             io::ErrorKind::InvalidData
         );
+    }
+}
+
+#[cfg(test)]
+mod source_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn source_envelope_rejects_excessive_columns_and_honors_cancellation_before_io() {
+        let path = std::path::Path::new("nonexistent-source-envelope.wav");
+        let duration = towavue_core::MediaTime::from_nanoseconds(1_000_000_000);
+        let cancellation = crate::Cancellation::default();
+        for columns in [0, 262_145, u32::MAX] {
+            assert!(matches!(
+                source_audio_track_waveform(path, None, duration, columns, &cancellation),
+                Err(crate::PreviewError::Message(
+                    towavue_core::localization::Text::WaveformInvalidInput
+                ))
+            ));
+        }
+        cancellation.cancel();
+        assert!(matches!(
+            source_audio_track_waveform(path, None, duration, 1024, &cancellation),
+            Err(crate::PreviewError::Cancelled)
+        ));
     }
 }

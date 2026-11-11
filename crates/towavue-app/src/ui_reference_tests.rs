@@ -69,6 +69,9 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image",
                     "image-deleted",
                     "image-reading",
+                    "image-palette",
+                    "image-files",
+                    "image-options",
                     "image-languages",
                     "image-filmstrip-menu",
                     "image-gallery-menu",
@@ -79,6 +82,7 @@ fn media_reference_layouts_reach_the_gpu() {
                     "image-export-wait",
                     "audio",
                     "audio-timeline",
+                    "audio-timeline-zoomed",
                     "video",
                     "video-timeline",
                 ] {
@@ -88,6 +92,8 @@ fn media_reference_layouts_reach_the_gpu() {
                         fonts::install(&context);
                     }
                     let menu_scene = scene.ends_with("-menu");
+                    let palette_scene =
+                        matches!(scene, "image-palette" | "image-files" | "image-options");
                     if menu_scene {
                         context.enable_accesskit();
                     }
@@ -117,6 +123,12 @@ fn media_reference_layouts_reach_the_gpu() {
                         app.activate_tab(gallery);
                     }
                     match scene {
+                        "image-palette" => app.dispatch(CommandId::ToggleCommandPalette),
+                        "image-files" => app.dispatch(CommandId::SearchCurrentFiles),
+                        "image-options" => {
+                            app.dispatch(CommandId::ToggleCommandPalette);
+                            assert!(app.begin_palette_options(CommandId::CycleVolumeStep));
+                        }
                         "image-modal-resize" => app.dispatch(CommandId::ResizeImage),
                         "image-modal-rotate" => app.dispatch(CommandId::FreeRotateImage),
                         "image-modal-error" => {
@@ -220,9 +232,25 @@ fn media_reference_layouts_reach_the_gpu() {
                                 },
                             ));
                         }
+                        if scene == "audio-timeline-zoomed" && frame == 2 {
+                            input.events.extend([
+                                egui::Event::PointerMoved(egui::pos2(614.0, 630.0)),
+                                egui::Event::MouseWheel {
+                                    unit: egui::MouseWheelUnit::Point,
+                                    delta: egui::vec2(0.0, 150.0),
+                                    phase: egui::TouchPhase::Move,
+                                    modifiers: egui::Modifiers::ALT,
+                                },
+                            ]);
+                        }
                         let mut actions = Vec::new();
                         let ui = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
                         assert!(actions.is_empty(), "passive reference rendering");
+                        if frame == 1 && app.timeline_open {
+                            // Seed the retained production envelope, so the later readbacks
+                            // inspect vector peaks rather than the initial loading texture.
+                            app.verification_complete_waveform(true);
+                        }
                         if menu_scene && frame == 1 {
                             menu_target = ui
                                 .platform_output
@@ -332,6 +360,14 @@ fn media_reference_layouts_reach_the_gpu() {
                                 > 200,
                             "modal text reaches the GPU"
                         );
+                    } else if palette_scene {
+                        assert!(app.palette_open);
+                        assert_eq!(at(614.0, 600.0), [32, 96, 160, 255]);
+                        let panel = context
+                            .memory(|memory| memory.area_rect("command-palette"))
+                            .expect("palette frame");
+                        assert!((panel.top() - 38.0).abs() <= 1.0 / density);
+                        assert!(panel.bottom() < 678.0 && panel.width() > 300.0);
                     } else if menu_scene {
                         assert!(
                             pixels
@@ -378,7 +414,7 @@ fn media_reference_layouts_reach_the_gpu() {
                         if scene == "video" {
                             assert_eq!(
                                 at(50.0, 678.0),
-                                [255, 255, 255, 255],
+                                chrome::FOREGROUND.to_array(),
                                 "video seek progress"
                             );
                         } else {
@@ -399,16 +435,16 @@ fn media_reference_layouts_reach_the_gpu() {
                             row_pixels > 100,
                             "audio rows must remain visible above the timeline: {scene}, {density}: {list:?}, {row_pixels} bright pixels"
                         );
-                        assert_eq!(app.timeline_open, scene == "audio-timeline");
+                        assert_eq!(app.timeline_open, scene.starts_with("audio-timeline"));
                         if scene == "audio" {
                             assert_eq!(
                                 at(50.0, 678.0),
-                                [255, 255, 255, 255],
+                                chrome::FOREGROUND.to_array(),
                                 "paused audio position reaches the compact seek bar"
                             );
                             assert_ne!(
                                 at(700.0, 678.0),
-                                [255, 255, 255, 255],
+                                chrome::FOREGROUND.to_array(),
                                 "remaining audio is not painted as played"
                             );
                         }
@@ -432,7 +468,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; forty-five full-client GPU readbacks. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; fifty-seven full-client GPU readbacks including palettes and zoomed timeline. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }
@@ -546,8 +582,12 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
             media_time(Duration::from_secs(50)),
             1.0,
         ));
-        app.timeline_open = scene.ends_with("-timeline");
+        app.timeline_open = scene.contains("-timeline");
         if app.timeline_open {
+            app.time_selection = towavue_core::TimeRange::new(
+                media_time(Duration::from_secs(80)),
+                media_time(Duration::from_secs(100)),
+            );
             let mut waveform = egui::ColorImage::filled([512, 64], Color32::TRANSPARENT);
             for x in 0..512 {
                 let amplitude = 4 + (x * 17 % 25);

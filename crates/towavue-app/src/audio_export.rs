@@ -170,7 +170,8 @@ impl AudioExportDialog {
                             (ui.available_width() - label_width - 8.0).clamp(40.0, 160.0);
                         egui::Grid::new("audio-options-grid")
                             .num_columns(2)
-                            .spacing(egui::vec2(8.0, 4.0))
+                            .spacing(egui::vec2(chrome::PADDING as f32, chrome::ITEM_GAP))
+                            .min_row_height(chrome::CONTROL_HEIGHT)
                             .show(ui, |ui| {
                                 let normalization = [
                                     (AudioNormalization::Off, Text::RepeatOff),

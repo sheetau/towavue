@@ -258,7 +258,8 @@ fn dialog_controls_link_inputs_fit_media_bounds_and_emit_one_action() {
                         .expect("input");
                     let rect = input.1.bounds().expect("input bounds");
                     assert!(
-                        (rect.height() - 26.0).abs() <= 1.1 / f64::from(density),
+                        (rect.height() - f64::from(crate::chrome::INPUT_HEIGHT)).abs()
+                            <= 1.1 / f64::from(density),
                         "{rect:?}"
                     );
                 }

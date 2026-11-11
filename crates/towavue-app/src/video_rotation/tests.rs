@@ -47,7 +47,7 @@ fn japanese_video_rotation_preserves_numeric_precision_and_validation() {
             egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
         assert!((input.width() - 120.0).abs() <= 1.0 / density);
-        assert!((input.height() - 26.0).abs() <= 1.0 / density);
+        assert!((input.height() - crate::chrome::INPUT_HEIGHT).abs() <= 1.0 / density);
         let dimensions = output
             .shapes
             .iter()

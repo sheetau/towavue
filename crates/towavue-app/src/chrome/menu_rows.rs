@@ -159,6 +159,9 @@ impl MenuRows {
                 list.mutate_shape(egui::layers::ShapeIdx(index), |clipped| {
                     clear_row_backgrounds(&mut clipped.shape, &rows);
                     disabled_foreground(&mut clipped.shape, &rows);
+                    if let Some(row) = selected {
+                        shortcut_foreground(&mut clipped.shape, row);
+                    }
                 });
             }
         });
@@ -180,6 +183,29 @@ impl MenuRows {
                 })
             });
         }
+    }
+}
+
+fn shortcut_foreground(shape: &mut egui::Shape, row: &Response) {
+    match shape {
+        egui::Shape::Vec(shapes) => {
+            for shape in shapes {
+                shortcut_foreground(shape, row);
+            }
+        }
+        egui::Shape::Text(text)
+            if row.enabled()
+                && row.rect.contains(text.visual_bounding_rect().center())
+                && text
+                    .galley
+                    .job
+                    .sections
+                    .iter()
+                    .all(|section| section.format.color == super::DISABLED) =>
+        {
+            text.override_text_color = Some(super::FAINT);
+        }
+        _ => {}
     }
 }
 

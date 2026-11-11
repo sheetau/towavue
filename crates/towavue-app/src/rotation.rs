@@ -129,7 +129,7 @@ pub(super) fn paint_checkerboard(painter: &egui::Painter, rect: egui::Rect) {
                         egui::vec2(12.0, 12.0),
                     ),
                     0.0,
-                    Color32::from_gray(44),
+                    crate::chrome::TRACK,
                 );
             }
         }

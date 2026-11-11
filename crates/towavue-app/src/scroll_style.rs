@@ -47,6 +47,12 @@ pub(crate) trait ScrollAreaStyle {
         padding: f32,
         content: impl FnOnce(&mut Ui) -> R,
     ) -> ScrollAreaOutput<R>;
+    fn show_viewport_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        content: impl FnOnce(&mut Ui, Rect) -> R,
+    ) -> ScrollAreaOutput<R>;
     fn show_rows_popup_styled<R>(
         self,
         ui: &mut Ui,
@@ -90,7 +96,7 @@ fn with_style<R>(
     let widgets = &mut ui.visuals_mut().widgets;
     // Track and thumb hover share one opaque handle color. The scroll style
     // supplies idle opacity and preserves the tab strip's separate fade.
-    let handle_color = egui::Color32::from_gray(0xcc);
+    let handle_color = crate::chrome::FOREGROUND;
     widgets.inactive.fg_stroke.color = handle_color;
     widgets.hovered.fg_stroke.color = handle_color;
     widgets.active.fg_stroke.color = handle_color;
@@ -120,6 +126,21 @@ impl ScrollAreaStyle for ScrollArea {
                 ..Default::default()
             })
             .show_styled(host, content)
+        })
+    }
+
+    fn show_viewport_popup_styled<R>(
+        self,
+        ui: &mut Ui,
+        padding: f32,
+        content: impl FnOnce(&mut Ui, Rect) -> R,
+    ) -> ScrollAreaOutput<R> {
+        popup_host(ui, padding, |host| {
+            self.content_margin(egui::Margin {
+                right: padding as i8,
+                ..Default::default()
+            })
+            .show_viewport_styled(host, content)
         })
     }
 
@@ -492,7 +513,7 @@ mod tests {
                 }
                 let idle = bars(&render(None, false));
                 assert_eq!(idle[0].fill.a(), 0);
-                let handle_color = egui::Color32::from_gray(0xcc);
+                let handle_color = crate::chrome::FOREGROUND;
                 assert_eq!(
                     idle[1].fill,
                     handle_color.gamma_multiply(if kind == 3 { 0.15 } else { 0.3 })

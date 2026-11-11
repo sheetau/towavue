@@ -783,7 +783,7 @@ impl Filmstrip {
                         cell.center(),
                         Align2::CENTER_CENTER,
                         localization::text(ui.ctx(), Text::NoPreview),
-                        FontId::proportional(11.0),
+                        FontId::proportional(crate::chrome::TEXT_SM),
                         crate::chrome::MUTED,
                     );
                 }
@@ -1159,8 +1159,8 @@ impl Filmstrip {
                         screen.center() - egui::vec2(0.0, header_height * 0.5),
                         Align2::CENTER_CENTER,
                         localization::text(ui.ctx(), Text::LoadingFolderOrderEllipsis),
-                        FontId::proportional(14.0),
-                        Color32::WHITE,
+                        FontId::proportional(crate::chrome::TEXT_LG),
+                        crate::chrome::FOREGROUND,
                     );
                     return;
                 };
@@ -1170,7 +1170,7 @@ impl Filmstrip {
                         screen.center() - egui::vec2(0.0, header_height * 0.5),
                         Align2::CENTER_CENTER,
                         localization::text(context, Text::NoMatchingFiles),
-                        FontId::proportional(14.0),
+                        FontId::proportional(crate::chrome::TEXT_LG),
                         crate::chrome::MUTED,
                     );
                     return;
@@ -1442,7 +1442,7 @@ impl Filmstrip {
                                     rect.center(),
                                     Align2::CENTER_CENTER,
                                     localization::text(ui.ctx(), Text::Deleted),
-                                    FontId::proportional(12.0),
+                                    FontId::proportional(crate::chrome::TEXT_MD),
                                     crate::chrome::MUTED,
                                 );
                             }
@@ -1451,7 +1451,7 @@ impl Filmstrip {
                                     rect.center(),
                                     Align2::CENTER_CENTER,
                                     localization::text(ui.ctx(), Text::NoPreview),
-                                    FontId::proportional(12.0),
+                                    FontId::proportional(crate::chrome::TEXT_MD),
                                     crate::chrome::MUTED,
                                 );
                             }
@@ -1791,7 +1791,7 @@ impl Filmstrip {
                                 image_rect.center(),
                                 Align2::CENTER_CENTER,
                                 localization::text(ui.ctx(), Text::NoPreview),
-                                FontId::proportional(12.0),
+                                FontId::proportional(crate::chrome::TEXT_MD),
                                 crate::chrome::MUTED,
                             );
                         }
@@ -2011,20 +2011,24 @@ fn draw_duration(ui: &egui::Ui, rect: Rect, duration: Duration, font_size: f32, 
     let galley = ui.painter().layout_no_wrap(
         format_time(media_time(duration)),
         FontId::proportional(font_size),
-        Color32::WHITE,
+        crate::chrome::FOREGROUND,
     );
     let padding = Vec2::new(4.0, 2.0);
     let size = galley.size() + 2.0 * padding;
     let background = duration_background(rect, size, gallery);
     // Very thin thumbnails may place the badge beyond the image, within its cell.
     let painter = ui.painter_at(if gallery { ui.clip_rect() } else { rect });
-    painter.rect_filled(background, 2.0, crate::chrome::TRACK.gamma_multiply(0.6));
-    painter.galley(background.min + padding, galley, Color32::WHITE);
+    painter.rect_filled(
+        background,
+        crate::chrome::RADIUS_XS,
+        crate::chrome::TRACK.gamma_multiply(0.6),
+    );
+    painter.galley(background.min + padding, galley, crate::chrome::FOREGROUND);
 }
 
 pub(crate) fn thumbnail_tint(kind: MediaKind) -> Color32 {
     if kind == MediaKind::Audio {
-        Color32::from_gray(0x80)
+        crate::chrome::MUTED
     } else {
         Color32::WHITE
     }

@@ -150,7 +150,7 @@ pub(super) fn paint(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 crate::localization::Text::NoPreview.in_language(language),
-                egui::FontId::proportional(12.0),
+                egui::FontId::proportional(crate::chrome::TEXT_MD),
                 crate::chrome::MUTED,
             );
         }

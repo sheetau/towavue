@@ -2,7 +2,7 @@ use super::*;
 use towavue_core::{FolderMediaItem, FolderSnapshotSource, ShellIdentity};
 
 #[test]
-fn chevron_menu_hover_keeps_split_fill_and_full_outline_in_the_ordinary_color() {
+fn chevron_menu_hover_uses_two_surfaces_without_an_outline() {
     fn rectangles(shape: &egui::Shape, output: &mut Vec<egui::epaint::RectShape>) {
         match shape {
             egui::Shape::Rect(rect) => output.push(rect.clone()),
@@ -72,7 +72,7 @@ fn chevron_menu_hover_keeps_split_fill_and_full_outline_in_the_ordinary_color() 
                 .find(|rect| {
                     rect.rect.contains(point)
                         && rect.rect.height() <= row.height() + 0.1
-                        && rect.fill != Color32::TRANSPARENT
+                        && rect.fill == chrome::HOVER
                 })
                 .expect("hover background");
             let color = hover.fill;
@@ -87,11 +87,12 @@ fn chevron_menu_hover_keeps_split_fill_and_full_outline_in_the_ordinary_color() 
                 let entire = name.union(arrow);
                 assert!(
                     rects.iter().any(|rect| {
-                        rect.rect == entire
-                            && rect.stroke == egui::Stroke::new(1.0, color)
-                            && rect.fill == Color32::TRANSPARENT
+                        (rect.rect.min - entire.min).length() <= 0.5 / density
+                            && (rect.rect.max - entire.max).length() <= 0.5 / density
+                            && rect.stroke == egui::Stroke::NONE
+                            && rect.fill == chrome::SURFACE
                     }),
-                    "either half retains the full-row outline"
+                    "quiet full row {entire:?}: {rects:?}"
                 );
                 let other = if label == "Branch" { arrow } else { name };
                 assert!(
@@ -1463,7 +1464,7 @@ fn browser_menus_expand_after_loading_align_labels_and_retain_address_input() {
             })
             .expect("filter text");
         assert!(text.galley.job.sections.iter().all(|section| {
-            text.override_text_color.unwrap_or(section.format.color) == Color32::WHITE
+            text.override_text_color.unwrap_or(section.format.color) == chrome::FOREGROUND
         }));
     }
     assert_eq!(
@@ -1917,7 +1918,7 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                         .iter()
                                         .find_map(|shape| match &shape.shape {
                                             egui::Shape::Rect(shape)
-                                                if shape.fill == Color32::WHITE
+                                                if shape.fill == chrome::FOREGROUND
                                                     && shape.rect.width() >= 90.0
                                                     && shape.rect.height() <= 1.01 =>
                                             {
@@ -1951,13 +1952,13 @@ fn browser_header_reaches_gpu_at_supported_densities() {
                                     };
                                     assert_eq!(
                                         at(y),
-                                        &[255, 255, 255, 255],
-                                        "white input border at {density}x"
+                                        &chrome::FOREGROUND.to_array(),
+                                        "foreground input border at {density}x"
                                     );
                                     for adjacent in [y - 1, y + 1] {
                                         assert_ne!(
                                             at(adjacent),
-                                            &[255, 255, 255, 255],
+                                            &chrome::FOREGROUND.to_array(),
                                             "one physical row"
                                         );
                                     }
@@ -2189,7 +2190,8 @@ fn folder_status_menus_size_to_their_current_message() {
                 });
             }
             assert!(
-                (measured.0 - measured.1 - 22.0).abs() <= 2.0 / density,
+                (measured.0 - measured.1 - (12.0 + 2.0 * f32::from(chrome::MENU_PADDING))).abs()
+                    <= 2.0 / density,
                 "message width plus row padding and frame: {measured:?}"
             );
         }

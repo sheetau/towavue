@@ -69,7 +69,8 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(border)
-                        if border.fill == Color32::WHITE && border.rect.width() > 200.0 =>
+                        if border.fill == crate::chrome::FOREGROUND
+                            && border.rect.width() > 200.0 =>
                     {
                         Some(border.rect)
                     }
@@ -77,7 +78,10 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
                 })
                 .expect("white input bottom border, including after blur");
             assert!((border.height() * density - 1.0).abs() < 0.001);
-            assert!((border.bottom() - 36.0).abs() <= 0.5 / density);
+            assert!(
+                (border.bottom() - (23.0 + crate::chrome::INPUT_HEIGHT * 0.5)).abs()
+                    <= 0.5 / density + 0.001
+            );
         };
         frame(vec![]);
         context.memory_mut(|memory| memory.request_focus(id.with("button")));
@@ -103,7 +107,7 @@ fn search_opens_with_keyboard_keeps_nonempty_blur_and_collapses_on_escape_or_emp
                 .job
                 .sections
                 .iter()
-                .all(|section| section.format.color == Color32::WHITE)
+                .all(|section| section.format.color == crate::chrome::FOREGROUND)
         );
         assert!(
             !output

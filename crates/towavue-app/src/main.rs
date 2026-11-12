@@ -7564,7 +7564,7 @@ where
                 let fps = self
                     .session
                     .as_ref()
-                    .and_then(PlaybackSession::source_video_frame_rate)
+                    .and_then(PlaybackSession::source_video_grid_rate)
                     .filter(|fps| fps.is_finite() && *fps > 0.0)
                     .unwrap_or(100.0);
                 ui.set_clip_rect(
@@ -7653,7 +7653,13 @@ where
                         media_time(duration),
                         result.stretch_preview,
                     ) {
-                        mesh.add_rect_with_uv(destination, uv, waveform_detail::color());
+                        crate::timeline_waveform_clip::add_visible_rect(
+                            &mut mesh,
+                            destination,
+                            uv,
+                            rect,
+                            waveform_detail::color(),
+                        );
                     }
                     if !mesh.is_empty() {
                         waveform_painter
@@ -11831,6 +11837,13 @@ where
     }
 
     fn current_position(&self) -> MediaTime {
+        // Stepping owns an exact decoded PTS. Audio packet/sample boundaries
+        // and the paused master clock must not shift its displayed cursor.
+        if self.state == PlaybackState::Paused
+            && let Some(position) = self.frame_steps.position()
+        {
+            return position;
+        }
         playback_tab::position(
             self.session.as_ref(),
             self.clock.as_ref(),

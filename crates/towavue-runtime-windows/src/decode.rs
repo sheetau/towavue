@@ -2635,6 +2635,7 @@ pub(crate) fn probe_audio_track_format(
 pub(crate) struct PlaybackFormats {
     pub audio_format: Option<AudioFormat>,
     pub source_video_frame_rate: Option<f64>,
+    pub source_video_grid_rate: Option<f64>,
     pub audio_tracks: towavue_core::AudioTrackCatalog,
     pub subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
 }
@@ -2650,12 +2651,18 @@ pub(crate) fn probe_playback_formats(
     let fps = input.streams().best(Type::Video).and_then(|stream| {
         positive_frame_rate(stream.avg_frame_rate()).or_else(|| positive_frame_rate(stream.rate()))
     });
+    // FFmpeg's base rate represents timestamp spacing. The average frame
+    // count per second is descriptive metadata, not a grid for VFR timestamps.
+    let grid_rate = input.streams().best(Type::Video).and_then(|stream| {
+        positive_frame_rate(stream.rate()).or_else(|| positive_frame_rate(stream.avg_frame_rate()))
+    });
     Ok(PlaybackFormats {
         audio_format: audio_tracks::selected_config(&input, track)?
             .map(create_audio_pipeline_from)
             .transpose()?
             .map(|pipeline| pipeline.output_format),
         source_video_frame_rate: fps,
+        source_video_grid_rate: grid_rate,
         audio_tracks: audio_tracks::catalog(&input),
         subtitle_tracks: crate::subtitles::catalog(&input),
     })

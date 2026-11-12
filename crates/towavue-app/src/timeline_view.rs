@@ -33,7 +33,11 @@ impl View {
     fn zoom(&mut self, factor: f64, anchor: f64, minimum: f64) {
         let fraction = anchor.clamp(0.0, 1.0);
         let time = self.start + fraction * self.span;
-        self.span = (self.span * factor).clamp(minimum.min(self.duration), self.duration);
+        let span = (self.span * factor).clamp(minimum.min(self.duration), self.duration);
+        if span == self.span {
+            return;
+        }
+        self.span = span;
         self.start = time - fraction * self.span;
         self.clamp(minimum);
     }
@@ -66,6 +70,7 @@ pub(super) struct Layout {
     hover_key: egui::Id,
     key: egui::Id,
     fps: f64,
+    minimum: f64,
 }
 
 impl Layout {
@@ -79,6 +84,7 @@ impl Layout {
             hover_key: egui::Id::NULL,
             key: egui::Id::NULL,
             fps: 0.0,
+            minimum: 0.0,
             view: View {
                 start: 0.0,
                 span: duration.as_seconds_f64().max(f64::EPSILON),
@@ -181,7 +187,10 @@ pub(super) fn show(
             (scrollbar.top() - GAP).max((ruler.bottom() + GAP).min(scrollbar.top())),
         ),
     );
-    let minimum = f64::from(rect.width().max(1.0)) / (fps.max(1.0) * 50.0);
+    // A fixed zoom limit avoids changing the viewport after navigation when
+    // true endpoints restore their five-point inset.
+    let minimum =
+        f64::from((rect.width() + 2.0 * chrome::PADDING as f32).max(1.0)) / (fps.max(1.0) * 50.0);
     let key = id.with("time-viewport");
     let mut view = ui
         .ctx()
@@ -201,10 +210,16 @@ pub(super) fn show(
         }
         for (pointer, delta, zoom) in wheel {
             if zoom {
+                let factor = (-delta * 0.01).exp();
+                if (factor < 1.0 && view.span <= minimum.min(view.duration))
+                    || (factor > 1.0 && view.span >= view.duration)
+                {
+                    continue;
+                }
                 let before = content_rect(rect, view);
                 let anchor = f64::from((pointer.x - before.left()) / before.width().max(1.0));
                 let time = view.start + anchor * view.span;
-                view.zoom((-delta * 0.01).exp(), anchor, minimum);
+                view.zoom(factor, anchor, minimum);
                 let after = content_rect(rect, view);
                 view.start = time
                     - f64::from((pointer.x - after.left()) / after.width().max(1.0)) * view.span;
@@ -250,7 +265,8 @@ pub(super) fn show(
         id.with("time-scrollbar"),
         egui::Sense::click_and_drag(),
     );
-    let thumb = thumb_rect(scrollbar, view);
+    let scale = ScrollScale::new(scrollbar, view.duration, minimum);
+    let thumb = scale.thumb(view);
     let drag_key = key.with("bar-drag");
     let interrupted =
         !can_navigate || ui.input(|input| !input.focused || input.key_pressed(egui::Key::Escape));
@@ -299,24 +315,7 @@ pub(super) fn show(
         }
         if let Some(drag) = ui.ctx().data(|data| data.get_temp::<BarDrag>(drag_key)) {
             if let Some(point) = response.interact_pointer_pos() {
-                let delta =
-                    f64::from((point.x - drag.origin) / scrollbar.width().max(1.0)) * view.duration;
-                view = drag.view;
-                match drag.edge {
-                    -1 => {
-                        let end = view.start + view.span;
-                        view.start = (view.start + delta).clamp(0.0, (end - minimum).max(0.0));
-                        view.span = end - view.start;
-                    }
-                    1 => {
-                        view.span = (view.span + delta)
-                            .clamp(minimum.min(view.duration), view.duration - view.start);
-                    }
-                    _ => {
-                        view.start += delta;
-                    }
-                }
-                view.clamp(minimum);
+                view = scale.drag(drag.view, point.x - drag.origin, drag.edge);
             }
             if !ui.input(|input| input.pointer.primary_down()) {
                 ui.ctx().data_mut(|data| data.remove::<BarDrag>(drag_key));
@@ -339,19 +338,6 @@ pub(super) fn show(
                 egui::CursorIcon::Default
             });
         }
-    }
-    let frame_minimum =
-        |view| f64::from(content_rect(waveform, view).width().max(1.0)) / (fps.max(1.0) * 50.0);
-    if view.span <= frame_minimum(view) + 1e-9 {
-        view.clamp(frame_minimum(view));
-        // Reaching a true endpoint restores its inset. Recompute the limit
-        // once with that geometry so one-frame ticks still fit at the boundary.
-        let end = view.start + view.span >= view.duration - f64::EPSILON;
-        view.span = frame_minimum(view).min(view.duration);
-        if end {
-            view.start = view.duration - view.span;
-        }
-        view.clamp(frame_minimum(view));
     }
     let at_start = view.start <= f64::EPSILON;
     let at_end = view.start + view.span >= view.duration - f64::EPSILON;
@@ -377,6 +363,7 @@ pub(super) fn show(
         hover_key: key.with("ruler-hover-suppressed"),
         key,
         fps,
+        minimum,
     }
 }
 
@@ -396,13 +383,114 @@ fn content_rect(mut rect: Rect, view: View) -> Rect {
     rect
 }
 
-fn thumb_rect(bar: Rect, view: View) -> Rect {
-    let width = ((view.span / view.duration) as f32 * bar.width())
-        .max(10.0)
-        .min(bar.width());
-    let left =
-        (bar.left() + (view.start / view.duration) as f32 * bar.width()).min(bar.right() - width);
-    Rect::from_min_size(egui::pos2(left, bar.top()), egui::vec2(width, bar.height()))
+/// The handle caps have fixed width; only their inner span represents zoom.
+/// A mild power curve keeps small spans selectable. For long clips, the prior
+/// five-frame ruler interval has one point of inner width, and maximum zoom
+/// has exactly zero. Both rendering and dragging use this invertible mapping.
+struct ScrollScale {
+    bar: Rect,
+    duration: f64,
+    minimum: f64,
+    caps: f64,
+    inner: f64,
+    exponent: f64,
+}
+
+impl ScrollScale {
+    fn new(bar: Rect, duration: f64, minimum: f64) -> Self {
+        let caps = f64::from(bar.width().clamp(0.0, 10.0));
+        let inner = (f64::from(bar.width()) - caps).max(0.0);
+        let minimum = minimum.min(duration);
+        let prior = 4.0 * minimum / (duration - minimum);
+        let exponent = if inner > 1.0 && prior > 0.0 && prior < 1.0 / inner {
+            ((1.0 / inner).ln() / prior.ln()).clamp(0.1, 1.0)
+        } else {
+            1.0
+        };
+        Self {
+            bar,
+            duration,
+            minimum,
+            caps,
+            inner,
+            exponent,
+        }
+    }
+
+    fn width(&self, span: f64) -> f64 {
+        if self.duration <= self.minimum {
+            return self.caps + self.inner;
+        }
+        self.caps
+            + self.inner
+                * ((span - self.minimum) / (self.duration - self.minimum))
+                    .clamp(0.0, 1.0)
+                    .powf(self.exponent)
+    }
+
+    fn span(&self, width: f64) -> f64 {
+        if self.inner <= 0.0 {
+            return self.duration;
+        }
+        self.minimum
+            + (self.duration - self.minimum)
+                * ((width - self.caps) / self.inner)
+                    .clamp(0.0, 1.0)
+                    .powf(1.0 / self.exponent)
+    }
+
+    fn thumb(&self, view: View) -> Rect {
+        let width = self.width(view.span);
+        let travel = (f64::from(self.bar.width()) - width).max(0.0);
+        let fraction = if view.span < view.duration {
+            view.start / (view.duration - view.span)
+        } else {
+            0.0
+        };
+        Rect::from_min_size(
+            egui::pos2(self.bar.left() + (travel * fraction) as f32, self.bar.top()),
+            egui::vec2(width as f32, self.bar.height()),
+        )
+    }
+
+    fn drag(&self, initial: View, delta: f32, edge: i8) -> View {
+        if delta == 0.0 {
+            return initial;
+        }
+        let width = self.width(initial.span);
+        let total = f64::from(self.bar.width());
+        let left = if initial.span < initial.duration {
+            (total - width) * initial.start / (initial.duration - initial.span)
+        } else {
+            0.0
+        };
+        let right = left + width;
+        let delta = f64::from(delta);
+        let (left, width) = match edge {
+            -1 => {
+                let left = (left + delta).clamp(0.0, (right - self.caps).max(0.0));
+                (left, right - left)
+            }
+            1 => (
+                left,
+                (right + delta - left).clamp(self.caps, (total - left).max(self.caps)),
+            ),
+            _ => ((left + delta).clamp(0.0, (total - width).max(0.0)), width),
+        };
+        let mut view = initial;
+        // Panning must preserve exact zoom, including at the minimum.
+        if edge != 0 {
+            view.span = self.span(width);
+        }
+        let travel = total - self.width(view.span);
+        view.start = if travel > 0.0 {
+            left / travel * (view.duration - view.span)
+        } else {
+            0.0
+        };
+        view.clamp(self.minimum);
+        view
+    }
 }
 
 pub(super) fn paint(
@@ -414,7 +502,11 @@ pub(super) fn paint(
 ) {
     let painter = ui.painter().with_clip_rect(layout.ruler);
     let view = layout.view;
-    let minimum = view.span / f64::from(layout.ruler.width().max(1.0)) * 50.0;
+    let minimum = if view.span <= layout.minimum && fps > 0.0 {
+        1.0 / fps
+    } else {
+        view.span / f64::from(layout.ruler.width().max(1.0)) * 50.0
+    };
     let (step, frames) = tick_step(minimum, fps);
     let first = (view.start / step).floor() as u64;
     let last = (((view.start + view.span) / step).ceil() as u64)
@@ -422,7 +514,11 @@ pub(super) fn paint(
     let mut shapes = Vec::new();
     for tick in first..=last.min(first + 512) {
         let seconds = tick as f64 * step;
-        let x = view.x(layout.ruler, seconds);
+        let x = crate::time_selection::cti_x(
+            layout.ruler,
+            view.x(layout.ruler, seconds),
+            1.0 / ui.ctx().pixels_per_point(),
+        );
         shapes.push(egui::Shape::line_segment(
             [
                 egui::pos2(x, layout.ruler.bottom() - 4.0),
@@ -491,7 +587,7 @@ pub(super) fn paint(
         chrome::RADIUS_XS,
         chrome::FLOATING_BACKGROUND,
     );
-    let thumb = thumb_rect(layout.scrollbar, view);
+    let thumb = ScrollScale::new(layout.scrollbar, view.duration, layout.minimum).thumb(view);
     painter.rect_filled(thumb, chrome::RADIUS_XS, chrome::KEY_ACTIVE);
     for left in [true, false] {
         let cap = if left {

@@ -770,7 +770,8 @@ fn filename_priority_and_full_row_background_survive_hover_and_selection() {
                                 body.min,
                                 body.max
                                     + egui::vec2(
-                                        crate::chrome::ICON_SIZE + crate::chrome::PADDING as f32,
+                                        crate::chrome::ICON_SIZE
+                                            + 2.0 * crate::chrome::PADDING as f32,
                                         0.0,
                                     ),
                             );

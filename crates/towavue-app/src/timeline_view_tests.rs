@@ -276,7 +276,9 @@ fn secondary_scrollbar_drag_does_not_change_view() {
     let context = crate::fonts::test_context();
     let layout = frame(&context, vec![], true);
     let layout = frame(&context, wheel(layout.waveform.center(), 100.0, true), true);
-    let point = thumb_rect(layout.scrollbar, layout.view).left_center();
+    let point = ScrollScale::new(layout.scrollbar, layout.view.duration, layout.minimum)
+        .thumb(layout.view)
+        .left_center();
     frame(&context, vec![egui::Event::PointerMoved(point)], true);
     frame(&context, vec![pointer_button(point, true, true)], true);
     let moved = frame(
@@ -350,7 +352,8 @@ fn wheel_zoom_pan_and_bar_resize_share_one_bounded_viewport_at_each_density() {
         let blocked = frame(&context, wheel(point, 100.0, true), false);
         assert_eq!(blocked.view.span, moved.view.span);
 
-        let thumb = thumb_rect(moved.scrollbar, moved.view);
+        let thumb =
+            ScrollScale::new(moved.scrollbar, moved.view.duration, moved.minimum).thumb(moved.view);
         let start = thumb.right_center() - egui::vec2(1.0, 0.0);
         frame(&context, vec![egui::Event::PointerMoved(start)], true);
         frame(
@@ -368,7 +371,10 @@ fn wheel_zoom_pan_and_bar_resize_share_one_bounded_viewport_at_each_density() {
             vec![egui::Event::PointerMoved(start - egui::vec2(40.0, 0.0))],
             true,
         );
-        assert!((resized.view.start - moved.view.start).abs() < 1e-6);
+        let resized_thumb =
+            ScrollScale::new(resized.scrollbar, resized.view.duration, resized.minimum)
+                .thumb(resized.view);
+        assert!((resized_thumb.left() - thumb.left()).abs() < 0.001);
         assert!(resized.view.span < moved.view.span);
         let cancelled = frame(
             &context,
@@ -652,5 +658,144 @@ fn ruler_and_gap_seek_in_edited_time_without_selecting_or_painting_an_offscreen_
             Some(MediaTime::from_nanoseconds(200_000_000_000))
         );
         assert!(result.selection.is_none() && result.edit.is_none());
+    }
+}
+
+#[test]
+fn maximum_zoom_wheel_is_an_exact_noop_at_both_ends_and_in_the_middle() {
+    for density in [1.0, 1.25, 2.0] {
+        for x in [20.0, 320.0, 620.0] {
+            let context = crate::fonts::test_context();
+            context.set_pixels_per_point(density);
+            let initial = frame(&context, vec![], true);
+            let point = egui::pos2(x, initial.waveform.center().y);
+            frame(&context, vec![egui::Event::PointerMoved(point)], true);
+            let zoomed = frame(&context, wheel(point, 10000.0, true), true);
+            for _ in 0..12 {
+                let held = frame(&context, wheel(point, 120.0, true), true);
+                assert_eq!(held.view.start, zoomed.view.start);
+                assert_eq!(held.view.span, zoomed.view.span);
+            }
+        }
+    }
+}
+
+#[test]
+fn scrollbar_inner_span_and_each_handle_share_a_continuous_inverse() {
+    let bar = Rect::from_min_size(egui::pos2(5.0, 100.0), egui::vec2(630.0, 10.0));
+    for duration in [2.0, 600.0, 1800.0, 86400.0] {
+        let minimum = 640.0 / 30.0 / 50.0;
+        let scale = ScrollScale::new(bar, duration, minimum);
+        let mut view = View {
+            start: (duration - minimum) * 0.6,
+            span: minimum,
+            duration,
+        };
+        let thumb = scale.thumb(view);
+        assert!((thumb.width() - 10.0).abs() < 0.0001);
+        for factor in [1.01, 1.2, 2.0, 5.0, 20.0] {
+            let span = (minimum * factor).min(duration);
+            assert!(scale.width(span) > 10.0);
+            assert!((scale.span(scale.width(span)) - span).abs() < 1e-8);
+        }
+        if duration >= 1800.0 {
+            assert!((scale.width(minimum * 5.0) - 11.0).abs() < 1e-6);
+        }
+        for edge in [-1, 1] {
+            for distance in [0.25, 1.0, 3.0, 20.0] {
+                let next = scale.drag(view, edge as f32 * distance, edge);
+                let next_thumb = scale.thumb(next);
+                assert!(next.span > minimum);
+                assert!((next_thumb.width() - thumb.width() - distance).abs() < 0.0001);
+                let stationary = if edge < 0 {
+                    next_thumb.right() - thumb.right()
+                } else {
+                    next_thumb.left() - thumb.left()
+                };
+                assert!(stationary.abs() < 0.0001, "opposite handle stays fixed");
+            }
+        }
+        view.span = duration;
+        view.start = 0.0;
+        assert_eq!(scale.thumb(view), bar);
+    }
+}
+
+#[test]
+fn long_selection_is_bounded_before_rounded_rectangle_tessellation() {
+    let fixture = DragFixture::new(300.0, 640.0 / 30.0 / 50.0, 30.0);
+    let mut selected = fixture;
+    selected.selection = TimeRange::new(time(0.0), time(600.0));
+    // Capture the selection shape before tessellation. Its huge time extent
+    // must not become a huge, shallow path that loses the horizontal borders.
+    let mut selected_rect = None;
+    let output = selected.context.run_ui(egui::RawInput::default(), |ui| {
+        let layout = show(
+            ui,
+            selected.id,
+            Rect::from_min_max(egui::pos2(5.0, 100.0), egui::pos2(635.0, 220.0)),
+            time(600.0),
+            30.0,
+            true,
+        );
+        let response = ui.allocate_rect(layout.interaction(), egui::Sense::click_and_drag());
+        crate::time_selection::show_in_view(
+            ui,
+            &response,
+            time(600.0),
+            time(300.0),
+            selected.selection,
+            None,
+            true,
+            layout,
+        );
+        selected_rect = Some(layout.waveform);
+    });
+    let visible = selected_rect.expect("waveform layout");
+    let outline = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Rect(rect)
+                if rect.stroke.color == chrome::FOREGROUND.gamma_multiply(0.25) =>
+            {
+                Some(rect)
+            }
+            _ => None,
+        })
+        .expect("selection outline");
+    assert!(outline.rect.width() <= visible.width() + 10.0);
+    assert_eq!(outline.rect.y_range(), visible.y_range());
+    assert!(outline.rect.left() < visible.left() && outline.rect.right() > visible.right());
+}
+
+#[test]
+fn decoded_nanosecond_pts_and_ruler_ticks_share_a_physical_pixel() {
+    for density in [1.0_f32, 1.25, 2.0] {
+        for fps in [25.0, 30.0, 30000.0 / 1001.0] {
+            let rect = Rect::from_min_size(egui::pos2(5.0, 0.0), egui::vec2(630.0, 60.0));
+            for first in [0_u64, 300, 3000000] {
+                let view = View {
+                    start: first as f64 / fps,
+                    span: 630.0 / fps / 50.0,
+                    duration: 864000.0,
+                };
+                for frame in first..first + 12 {
+                    let seconds = frame as f64 / fps;
+                    let pts = time(seconds);
+                    let tick =
+                        crate::time_selection::cti_x(rect, view.x(rect, seconds), 1.0 / density);
+                    let cti = crate::time_selection::cti_x(
+                        rect,
+                        view.x(rect, pts.as_seconds_f64()),
+                        1.0 / density,
+                    );
+                    assert!(
+                        (tick - cti).abs() < 0.01,
+                        "density={density} fps={fps} frame={frame} tick={tick} cti={cti}"
+                    );
+                }
+            }
+        }
     }
 }

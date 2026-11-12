@@ -38,6 +38,10 @@ impl FrameSteps {
         self.worker.is_idle()
     }
 
+    pub(super) fn position(&self) -> Option<MediaTime> {
+        self.cursor
+    }
+
     pub(super) fn holds_frame(&self) -> bool {
         self.cursor.is_some()
     }

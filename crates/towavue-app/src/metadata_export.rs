@@ -139,10 +139,7 @@ impl MetadataDialog {
                     Text::Cancel.in_language(display_language),
                 ],
                 |ui| {
-                    chrome::modal_description(
-                        ui,
-                        Text::MetadataField.in_language(display_language),
-                    );
+                    ui.label(Text::MetadataField.in_language(display_language));
                     let response = chrome::combo_box(
                         ui,
                         egui::ComboBox::from_id_salt("metadata-field").selected_text(

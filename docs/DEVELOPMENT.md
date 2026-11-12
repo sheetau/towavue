@@ -57,7 +57,7 @@ The Release app is a GUI executable and does not open a console. Session warning
 Shared style changes use `chrome::visual_contract_tests::`, `palette::row::tests::`,
 `scroll_style::tests::` and `timeline_view::input_tests::` alongside the full workspace
 suite. These cover visible cap-height centering, distinct selected/hovered
-rows, context-filtered commands, Unicode match highlighting, scrolling end padding, live Shift snapping, frame-grid placement, selection edge markers, secondary-scrollbar exclusion and post-drag hover suppression. Timeline controls also cover rounded waveform UV clipping, discarded-pass autoscroll anchors and accepted height persistence across tabs and a fresh settings store.
+rows, context-filtered commands, Unicode match highlighting, scrolling end padding, live Shift snapping, frame-grid placement, selection edge markers, secondary-scrollbar exclusion and post-drag hover suppression. Timeline controls also cover rounded waveform UV clipping, bounded long-selection geometry, an exact wheel no-op at maximum zoom, the scrollbar curve and both stationary opposite handles, discarded-pass autoscroll anchors and accepted height persistence across tabs and a fresh settings store. Frame-step controls distinguish the VFR timestamp base grid from average FPS and retain the exact CTI even when the paused master clock is ahead.
 Inspect the retained GPU reference images as well as geometric assertions at 100%,
 125% and 200%; offscreen rendering does not replace physical owner review.
 

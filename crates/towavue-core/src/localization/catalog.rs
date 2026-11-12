@@ -1125,7 +1125,7 @@ messages! {
     RotateDragTip => ("Tip: hold Alt and drag horizontally on the image.", "Altを押しながら画像上を左右にドラッグしても回転できます。"),
     RotationAngleHelp => ("Angle in degrees (clockwise, 0.1 degree steps)", "角度（時計回り、0.1度単位）"),
     RotationAngleInput => ("Rotation angle in degrees", "回転角度（度）"),
-    RotationAngle => ("Rotation angle", "回転角度"),
+    RotationAngle => ("Angle", "角度"),
     ImageRotationLimits => ("Use -180 to 180 degrees; the canvas must fit 16384 px per side and 128 Mi px.", "角度は-180～180度で指定してください。回転後のキャンバスは各辺16384px、総画素数128 Mipx以内に収めてください。"),
     FiniteRotationAngle => ("Use a finite angle from -180 to 180 degrees", "角度は-180～180度の有限な数値で指定してください"),
     RotatedCanvasLimit => ("The rotated canvas exceeds the image size limit", "回転後のキャンバスが画像サイズの上限を超えています"),

@@ -548,6 +548,10 @@ pub(super) fn show_in_view(
                 ..=(cti_x(rect, x_at(range.end()), pixel) + pixel * 0.5),
             rect.y_range(),
         );
+        let selected = selected.intersect(visible.expand2(egui::vec2(
+            crate::chrome::RADIUS_XS as f32 + 2.0 * pixel,
+            0.0,
+        )));
         painter.rect(
             selected,
             crate::chrome::RADIUS_XS,
@@ -695,7 +699,7 @@ pub(super) fn show_in_view(
     output
 }
 
-fn cti_x(rect: Rect, x: f32, pixel: f32) -> f32 {
+pub(super) fn cti_x(rect: Rect, x: f32, pixel: f32) -> f32 {
     if x < rect.left() || x > rect.right() {
         return x;
     }

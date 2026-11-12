@@ -164,10 +164,30 @@ fn asynchronous_steps_present_actual_vfr_pts_and_reject_obsolete_results() {
             );
             settle(&mut app, &rx);
             assert_eq!(displayed(&app), self.reference[1]);
+            assert_eq!(app.current_position(), self.reference[1]);
+            let grid = app
+                .session
+                .as_ref()
+                .expect("session")
+                .source_video_grid_rate()
+                .expect("base rate");
+            assert!((grid - 25.0).abs() < 1e-6);
+            for pts in &self.reference {
+                let frame = pts.as_seconds_f64() * grid;
+                assert!(
+                    (frame - frame.round()).abs() < 1e-6,
+                    "VFR PTS shares the base grid"
+                );
+            }
             let pending = app.pending_time.replace(self.reference[2]);
             let clock = app
                 .clock
                 .replace(crate::PlaybackClock::new(self.reference[10], 1.0));
+            assert_eq!(
+                app.current_position(),
+                self.reference[1],
+                "the stepped CTI uses the decoded PTS even when the master clock is ahead"
+            );
             assert!(
                 !app.frame_is_due(),
                 "paused stepping holds the exact frame even if a master deadline is ahead"

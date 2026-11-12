@@ -55,14 +55,18 @@ pub(super) fn rounded(mut mesh: Mesh, rect: Rect, start: bool, end: bool) -> Mes
             }
             let mut clipped = Vec::with_capacity(polygon.len() + 1);
             let mut previous = *polygon.last().expect("nonempty polygon");
-            let mut before = normal.dot(previous.pos - *a);
+            let distance = |point: egui::Pos2| {
+                (f64::from(point.x) - f64::from(a.x)) * f64::from(normal.x)
+                    + (f64::from(point.y) - f64::from(a.y)) * f64::from(normal.y)
+            };
+            let mut before = distance(previous.pos);
             for current in polygon {
-                let after = normal.dot(current.pos - *a);
+                let after = distance(current.pos);
                 if (before >= 0.0) != (after >= 0.0) {
                     let t = before / (before - after);
                     clipped.push(Vertex {
-                        pos: previous.pos.lerp(current.pos, t),
-                        uv: previous.uv.lerp(current.uv, t),
+                        pos: interpolate(previous.pos, current.pos, t),
+                        uv: interpolate(previous.uv, current.uv, t),
                         // Waveform meshes use a uniform tint, including gain previews.
                         color: current.color,
                     });
@@ -83,6 +87,42 @@ pub(super) fn rounded(mut mesh: Mesh, rect: Rect, start: bool, end: bool) -> Mes
         mesh.vertices.extend(polygon);
     }
     mesh
+}
+
+fn interpolate(a: egui::Pos2, b: egui::Pos2, t: f64) -> egui::Pos2 {
+    egui::pos2(
+        (f64::from(a.x) + (f64::from(b.x) - f64::from(a.x)) * t) as f32,
+        (f64::from(a.y) + (f64::from(b.y) - f64::from(a.y)) * t) as f32,
+    )
+}
+
+/// Bound quads before triangulation so their interpolation stays screen-local.
+pub(super) fn add_visible_rect(
+    mesh: &mut Mesh,
+    destination: Rect,
+    uv: Rect,
+    clip: Rect,
+    color: egui::Color32,
+) {
+    let visible = destination.intersect(clip);
+    if !visible.is_positive() {
+        return;
+    }
+    let at = |point: egui::Pos2| {
+        egui::pos2(
+            (f64::from(uv.left())
+                + f64::from(uv.width()) * (f64::from(point.x) - f64::from(destination.left()))
+                    / f64::from(destination.width())) as f32,
+            (f64::from(uv.top())
+                + f64::from(uv.height()) * (f64::from(point.y) - f64::from(destination.top()))
+                    / f64::from(destination.height())) as f32,
+        )
+    };
+    mesh.add_rect_with_uv(
+        visible,
+        Rect::from_min_max(at(visible.min), at(visible.max)),
+        color,
+    );
 }
 
 #[cfg(test)]

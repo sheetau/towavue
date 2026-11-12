@@ -84,6 +84,7 @@ fn media_reference_layouts_reach_the_gpu() {
                     "audio",
                     "audio-timeline",
                     "audio-timeline-zoomed",
+                    "audio-timeline-maximum",
                     "video",
                     "video-timeline",
                 ] {
@@ -254,12 +255,21 @@ fn media_reference_layouts_reach_the_gpu() {
                                 },
                             ));
                         }
-                        if scene == "audio-timeline-zoomed" && frame == 2 {
+                        if matches!(scene, "audio-timeline-zoomed" | "audio-timeline-maximum")
+                            && frame == 2
+                        {
                             input.events.extend([
                                 egui::Event::PointerMoved(egui::pos2(614.0, 630.0)),
                                 egui::Event::MouseWheel {
                                     unit: egui::MouseWheelUnit::Point,
-                                    delta: egui::vec2(0.0, 150.0),
+                                    delta: egui::vec2(
+                                        0.0,
+                                        if scene.ends_with("maximum") {
+                                            10000.0
+                                        } else {
+                                            150.0
+                                        },
+                                    ),
                                     phase: egui::TouchPhase::Move,
                                     modifiers: egui::Modifiers::ALT,
                                 },
@@ -268,7 +278,7 @@ fn media_reference_layouts_reach_the_gpu() {
                         let mut actions = Vec::new();
                         let ui = context.run_ui(input, |ui| app.draw_ui(ui, &mut actions));
                         assert!(actions.is_empty(), "passive reference rendering");
-                        if frame == 1 && app.timeline_open {
+                        if frame == 1 && app.timeline_open && scene != "audio-timeline-maximum" {
                             // Seed the retained production envelope, so the later readbacks
                             // inspect vector peaks rather than the initial loading texture.
                             app.verification_complete_waveform(true);
@@ -490,7 +500,7 @@ fn media_reference_layouts_reach_the_gpu() {
             }
             self.complete = true;
             eprintln!(
-                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; fifty-seven full-client GPU readbacks including palettes and zoomed timeline. Generated state with native paused decoding; no native-caption or physical-input evidence."
+                "PASS reference layouts: image/deleted/languages/reading/export status/modals/thumbnail menus, compact/editing audio and compact/editing video at 100/125/200%; full-client GPU readbacks including palettes, zoomed timeline and a day-long selection at maximum zoom. Generated state with native paused decoding; no native-caption or physical-input evidence."
             );
             event_loop.exit();
         }
@@ -605,11 +615,24 @@ fn fixture(root: &Path, context: &egui::Context, scene: &str) -> Application<fn(
             1.0,
         ));
         app.timeline_open = scene.contains("-timeline");
+        if scene == "audio-timeline-maximum" {
+            app.media_duration = Some(Duration::from_secs(86400));
+            app.clock = Some(PlaybackClock::paused(
+                media_time(Duration::from_secs(43200)),
+                1.0,
+            ));
+        }
         if app.timeline_open {
             app.time_selection = towavue_core::TimeRange::new(
                 media_time(Duration::from_secs(80)),
                 media_time(Duration::from_secs(100)),
             );
+            if scene == "audio-timeline-maximum" {
+                app.time_selection = towavue_core::TimeRange::new(
+                    MediaTime::ZERO,
+                    media_time(Duration::from_secs(86400)),
+                );
+            }
             let mut waveform = egui::ColorImage::filled([512, 64], Color32::TRANSPARENT);
             for x in 0..512 {
                 // Full-height endpoints expose rounded waveform clipping in readbacks.

@@ -152,6 +152,7 @@ pub struct PlaybackSession {
     subtitle_tracks: Vec<towavue_core::SubtitleTrack>,
     audio_selection: AudioTrackSelection,
     source_video_frame_rate: Option<f64>,
+    source_video_grid_rate: Option<f64>,
     video_rx: Option<Receiver<QueuedVideoFrame>>,
     pending_video: Option<QueuedVideoFrame>,
     current_video: Option<PresentationFrame>,
@@ -321,6 +322,7 @@ impl PlaybackSession {
         let decode::PlaybackFormats {
             audio_format,
             source_video_frame_rate,
+            source_video_grid_rate,
             audio_tracks,
             subtitle_tracks,
         } = decode::probe_playback_formats(path, selected)?;
@@ -342,6 +344,7 @@ impl PlaybackSession {
             subtitle_tracks,
             audio_selection: selection,
             source_video_frame_rate,
+            source_video_grid_rate,
             video_rx: None,
             pending_video: None,
             current_video: None,
@@ -1199,6 +1202,11 @@ impl PlaybackSession {
     /// presentation throughput. Uses the stream's reported average when available.
     pub fn source_video_frame_rate(&self) -> Option<f64> {
         self.source_video_frame_rate
+    }
+
+    /// Base timestamp grid reported by the source, distinct from average FPS.
+    pub fn source_video_grid_rate(&self) -> Option<f64> {
+        self.source_video_grid_rate
     }
 
     pub fn video_geometry(&self) -> Option<(u32, u32, f32)> {

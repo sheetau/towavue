@@ -61,6 +61,10 @@ fn japanese_image_rotation_returns_an_edit_without_changing_history_during_previ
             dimensions.pos.y >= input.bottom(),
             "dimensions occupy the following row"
         );
+        assert!(
+            (dimensions.pos.x - input.left()).abs() <= 1.0 / density,
+            "dimensions align to the input's left edge"
+        );
         ui::frame(
             &context,
             size,

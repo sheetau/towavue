@@ -67,7 +67,7 @@ impl VideoRotationDialog {
                                 .geometry_with(EditOperation::RotateVideo(value))
                                 .expect("validated rotation")
                         };
-                        ui.label(formatted::pixel_size(display_language, size.0, size.1));
+                        crate::rotation::angle_result_size(ui, (size.0, size.1));
                     }
                     let value = self.value_in(display_language);
                     if let Err(error) = &value {

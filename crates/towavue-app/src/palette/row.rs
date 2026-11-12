@@ -97,7 +97,7 @@ pub(super) struct RowActions {
 
 impl RowActions {
     pub fn new(row: egui::Rect, remove: bool, configure: bool) -> Self {
-        let mut right = row.right();
+        let mut right = row.right() - crate::chrome::PADDING as f32;
         let mut slot = |visible: bool| {
             visible.then(|| {
                 let rect = egui::Rect::from_center_size(
@@ -128,8 +128,8 @@ pub(super) fn row_button(
     selected: bool,
     mut atoms: egui::Atoms<'_>,
 ) -> egui::Response {
-    // Keep the shared left inset, with no symmetric right padding or
-    // empty trailing atoms extending the gap before independent row actions.
+    // RowActions reserves the outer right inset before laying out actions.
+    // Keep the matching left inset inside the body button.
     atoms
         .push_left(egui::Atom::default().atom_size(egui::vec2(crate::chrome::PADDING as f32, 0.0)));
     crate::chrome::flat_buttons(ui);

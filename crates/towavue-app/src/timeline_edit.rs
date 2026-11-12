@@ -100,9 +100,8 @@ pub(super) fn show_panel<R>(
         cancel_panel_resize(root.ctx(), panel);
     }
     let resizable = enabled && panel_resize_enabled(root, panel);
-    let stroke = egui::Stroke::new(1.0 / root.ctx().pixels_per_point(), chrome::FOREGROUND);
-    root.visuals_mut().widgets.active.fg_stroke = stroke;
-    root.visuals_mut().widgets.hovered.fg_stroke = stroke;
+    root.visuals_mut().widgets.active.fg_stroke.color = chrome::FOREGROUND;
+    root.visuals_mut().widgets.hovered.fg_stroke.color = chrome::FOREGROUND;
     let anchor_id = panel.with("resize-anchor");
     let response = root.ctx().read_response(panel.with("__resize"));
     let live = resizable

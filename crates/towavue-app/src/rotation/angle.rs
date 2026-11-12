@@ -35,3 +35,23 @@ pub(crate) fn input(ui: &mut Ui, angle: &mut String, first_frame: &mut bool) -> 
     }
     response.on_hover_text(Text::RotationAngleHelp.in_language(language))
 }
+
+/// Align the output size with the input, retaining the same row height and gap.
+pub(crate) fn result_size(ui: &mut Ui, size: (u32, u32)) {
+    let language = localization::language(ui.ctx());
+    let label = Text::RotationAngle.in_language(language);
+    let width = resize::label_width(ui, &[label]);
+    ui.horizontal(|ui| {
+        resize::aligned_label(ui, "", width);
+        ui.allocate_ui_with_layout(
+            egui::vec2(120.0, chrome::INPUT_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_height(chrome::INPUT_HEIGHT);
+                ui.label(towavue_core::localization::formatted::pixel_size(
+                    language, size.0, size.1,
+                ));
+            },
+        );
+    });
+}

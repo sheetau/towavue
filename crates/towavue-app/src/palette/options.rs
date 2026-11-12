@@ -176,7 +176,12 @@ impl CommandPalette {
                     let background = ui.painter().add(egui::Shape::Noop);
                     let response = ui
                         .push_id(("palette-option", *original), |ui| {
-                            row_button(ui, rect, selected, atoms)
+                            row_button(
+                                ui,
+                                rect.with_max_x(rect.right() - crate::chrome::PADDING as f32),
+                                selected,
+                                atoms,
+                            )
                         })
                         .inner;
                     ui.painter()
@@ -184,7 +189,10 @@ impl CommandPalette {
                     if row.current {
                         crate::chrome::check_mark(
                             ui,
-                            egui::pos2(rect.right() - 10.0, rect.center().y),
+                            egui::pos2(
+                                rect.right() - crate::chrome::PADDING as f32 - 10.0,
+                                rect.center().y,
+                            ),
                             if selected {
                                 ui.visuals().selection.stroke
                             } else {

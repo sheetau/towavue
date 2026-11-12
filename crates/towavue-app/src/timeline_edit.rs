@@ -171,6 +171,11 @@ pub(super) fn show_panel<R>(
     if !enabled {
         root.painter()
             .rect_filled(result.response.rect, 0.0, Color32::from_black_alpha(128));
+        root.painter().hline(
+            result.response.rect.x_range(),
+            result.response.rect.top() + 0.5,
+            (1.0, chrome::BORDER),
+        );
     }
     result
 }

@@ -104,6 +104,7 @@ pub(crate) struct WindowHost {
     last_playback_volume: Arc<std::sync::Mutex<playback_volume::PlaybackVolume>>,
     playback_volume_preferences: Option<Arc<towavue_runtime_windows::PlaybackVolumePreferences>>,
     view_preferences: Option<Arc<towavue_runtime_windows::ViewPreferences>>,
+    timeline_height_defaults: Arc<std::sync::Mutex<[f32; 2]>>,
     video_export_quality: Arc<std::sync::Mutex<towavue_runtime_windows::VideoExportQuality>>,
     idle_graphics: Option<idle_graphics::IdleGraphics>,
     tab_cursor_owner: Option<WindowKey>,
@@ -126,6 +127,15 @@ impl WindowHost {
             playback_volume::open_preferences(proxy.clone());
         let language = language::State::open(proxy.clone());
         let view_preferences = view_preferences::open(proxy.clone());
+        let timeline_height_defaults = Arc::new(std::sync::Mutex::new(
+            view_preferences.as_ref().map_or([96.0; 2], |store| {
+                use towavue_runtime_windows::ViewPreference as Key;
+                [
+                    f32::from(store.value(Key::TimelineHeight)),
+                    f32::from(store.value(Key::AnimationTimelineHeight)),
+                ]
+            }),
+        ));
         let mut host = Self {
             language,
             updates: updates::Updates::default(),
@@ -145,6 +155,7 @@ impl WindowHost {
             last_playback_volume: Arc::new(std::sync::Mutex::new(volume)),
             playback_volume_preferences,
             view_preferences,
+            timeline_height_defaults,
             video_export_quality: Arc::default(),
             idle_graphics: None,
             tab_cursor_owner: None,
@@ -203,6 +214,7 @@ impl WindowHost {
         app.playback_volume_preferences = self.playback_volume_preferences.clone();
         app.video_export_quality = Arc::clone(&self.video_export_quality);
         app.restore_view_preferences(self.view_preferences.clone());
+        app.timeline_heights.defaults = Arc::clone(&self.timeline_height_defaults);
         app.event_loop_proxy = self.proxy.clone();
         app.window_key = Some(key);
         app.hosted_graphics = true;

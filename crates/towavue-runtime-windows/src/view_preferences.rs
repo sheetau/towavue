@@ -26,10 +26,11 @@ pub enum ViewPreference {
     VideoQuality,
     HardwareEncode,
     TimelineHeight,
+    AnimationTimelineHeight,
 }
 
 impl ViewPreference {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Resize,
         Self::VolumeStep,
         Self::Nearest,
@@ -43,6 +44,7 @@ impl ViewPreference {
         Self::VideoQuality,
         Self::HardwareEncode,
         Self::TimelineHeight,
+        Self::AnimationTimelineHeight,
     ];
 
     fn key(self) -> &'static str {
@@ -60,13 +62,14 @@ impl ViewPreference {
             Self::VideoQuality => "video-quality",
             Self::HardwareEncode => "hardware-encode",
             Self::TimelineHeight => "timeline-height",
+            Self::AnimationTimelineHeight => "animation-timeline-height",
         }
     }
 
     pub fn default_value(self) -> u16 {
         match self {
             Self::VolumeStep => 2,
-            Self::TimelineHeight => 96,
+            Self::TimelineHeight | Self::AnimationTimelineHeight => 96,
             Self::Minification | Self::FolderLoop | Self::TabIcons => 1,
             Self::ReadingPages => 202,
             _ => 0,
@@ -77,7 +80,7 @@ impl ViewPreference {
         match self {
             Self::Resize | Self::VideoQuality | Self::ReuseFolderTab => value <= 2,
             Self::VolumeStep => matches!(value, 2 | 5 | 10),
-            Self::TimelineHeight => (64..=16384).contains(&value),
+            Self::TimelineHeight | Self::AnimationTimelineHeight => (64..=16384).contains(&value),
             Self::ReadingPages => {
                 (2..=10).contains(&(value / 100)) && (1..=value / 100).contains(&(value % 100))
             }

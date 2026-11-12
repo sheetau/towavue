@@ -326,10 +326,10 @@ where
             && !self.filmstrip_open
             && !self.image_edit_pending
             && self.image_handoff.is_none();
+        let mut height = self.timeline_height(true);
         let image = self.image.as_mut().expect("animated image");
         image.open_transport();
         let mut selected = None;
-        let mut height = self.timeline_height;
         crate::timeline_edit::show_panel(
             root,
             panel,
@@ -449,7 +449,7 @@ where
             image.select_animation_frame(index);
             root.ctx().request_repaint();
         }
-        self.remember_timeline_height(height);
+        self.remember_timeline_height(height, true);
     }
 }
 

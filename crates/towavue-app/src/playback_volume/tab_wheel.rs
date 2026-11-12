@@ -15,7 +15,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         {
             return;
         }
-        self.seed_playback_volume(id);
+        self.seed_tab_preferences(id);
         let before = self.playback_volume_for(id);
         let level = deltas
             .iter()

@@ -30,6 +30,7 @@ pub(super) struct MediaTabTransfer {
     metadata_options: Option<MetadataExportOptions>,
     audio_queue: Option<audio_playback::AudioTab>,
     playback_volume: Option<playback_volume::PlaybackVolume>,
+    timeline_heights: Option<[f32; 2]>,
     preview_rate: Option<f32>,
     audio_preview: Option<audio_preview::Choice>,
     subtitles: Option<subtitles::Choice>,
@@ -336,6 +337,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             metadata_options: self.metadata_export_settings.remove(&id),
             audio_queue: self.audio_queues.remove(&id),
             playback_volume: self.playback_volumes.remove(&id),
+            timeline_heights: self.timeline_heights.tabs.remove(&id),
             preview_rate: self.preview_rates.remove(&id),
             audio_preview: self.audio_preview_choices.remove(&id),
             subtitles: self.subtitles.take_choice(id),
@@ -431,6 +433,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         }
         if let Some(rate) = transfer.preview_rate {
             self.preview_rates.insert(id, rate);
+        }
+        if let Some(heights) = transfer.timeline_heights {
+            self.timeline_heights.tabs.insert(id, heights);
         }
         if let Some(volume) = transfer.playback_volume {
             self.playback_volumes.insert(id, volume);

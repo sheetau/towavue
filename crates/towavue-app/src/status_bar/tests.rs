@@ -40,12 +40,20 @@ fn target(output: &egui::FullOutput, label: &str) -> egui::Pos2 {
 }
 
 fn click(app: &mut App, pos: egui::Pos2) -> (egui::FullOutput, Vec<UiAction>) {
+    click_button(app, pos, egui::PointerButton::Primary)
+}
+
+fn click_button(
+    app: &mut App,
+    pos: egui::Pos2,
+    button: egui::PointerButton,
+) -> (egui::FullOutput, Vec<UiAction>) {
     frame(app, vec![egui::Event::PointerMoved(pos)]);
     frame(
         app,
         vec![egui::Event::PointerButton {
             pos,
-            button: egui::PointerButton::Primary,
+            button,
             pressed: true,
             modifiers: egui::Modifiers::NONE,
         }],
@@ -54,7 +62,7 @@ fn click(app: &mut App, pos: egui::Pos2) -> (egui::FullOutput, Vec<UiAction>) {
         app,
         vec![egui::Event::PointerButton {
             pos,
-            button: egui::PointerButton::Primary,
+            button,
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }],
@@ -108,7 +116,14 @@ fn status_access_uses_commands_and_path_menu_ignores_notifications() {
             .any(|action| matches!(action, UiAction::StatusPalette("resize / resample")))
     );
     let path = target(&output, "Pictures\\photo.png");
-    click(&mut app, path);
+    assert!(
+        click(&mut app, path)
+            .1
+            .iter()
+            .any(|action| matches!(action, UiAction::Command(CommandId::SearchCurrentFiles)))
+    );
+    assert!(!egui::Popup::is_any_open(&context));
+    click_button(&mut app, path, egui::PointerButton::Secondary);
     let output = frame(&mut app, vec![]).0;
     assert!(
         output
@@ -123,8 +138,34 @@ fn status_access_uses_commands_and_path_menu_ignores_notifications() {
     egui::Popup::close_all(&context);
     app.set_status("A temporary notice".into());
     frame(&mut app, vec![]);
-    click(&mut app, path);
+    assert!(click(&mut app, path).1.is_empty());
+    click_button(&mut app, path, egui::PointerButton::Secondary);
     assert!(!egui::Popup::is_any_open(&context));
+    app.status_message = None;
+    let mut decoded = (*tab_transfer::tests::decoded(false)).clone();
+    decoded.frames.push(decoded.frames[0].clone());
+    app.image = Some(
+        ImagePresentation::from_decoded(
+            &context,
+            app.path.as_ref().expect("path"),
+            Arc::new(decoded),
+        )
+        .expect("animation"),
+    );
+    let output = frame(&mut app, vec![]).0;
+    let frames = app
+        .status_info()
+        .fields
+        .into_iter()
+        .find(|field| field.contains("frames"))
+        .expect("frame count");
+    let point = target(&output, &frames);
+    assert!(
+        click(&mut app, point)
+            .1
+            .iter()
+            .any(|action| matches!(action, UiAction::Command(CommandId::ToggleTimeline)))
+    );
 }
 
 #[test]

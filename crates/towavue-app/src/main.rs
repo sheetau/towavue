@@ -1268,7 +1268,7 @@ struct Application<N> {
     thumbnail_worker: LatestTask,
     video_sheets: video_sheets::VideoSheets,
     frame_steps: frame_step::FrameSteps,
-    timeline_height: f32,
+    timeline_heights: view_preferences::TimelineHeights,
     held_speed: Option<hold_speed::Held>,
     space_hold: Option<hold_speed::keyboard::Press>,
     timeline_open: bool,
@@ -1591,7 +1591,7 @@ where
             held_speed: None,
             space_hold: None,
             timeline_open: false,
-            timeline_height: 96.0,
+            timeline_heights: Default::default(),
             waveform: None,
             waveform_detail: waveform_detail::Detail::default(),
             media_duration: None,
@@ -1937,7 +1937,7 @@ where
         } else {
             self.tabs.open_external(path.clone(), kind)
         };
-        self.seed_playback_volume(id);
+        self.seed_tab_preferences(id);
         self.begin_history_visit(id, &path);
         if kind == MediaKind::Audio
             && self.displayed_tab == Some(id)
@@ -2358,7 +2358,7 @@ where
             self.path_history.entry(id).or_default().begin(&path);
         }
         if let Some(id) = self.tabs.active().map(|tab| tab.id) {
-            self.seed_playback_volume(id);
+            self.seed_tab_preferences(id);
         }
         resume::record(self, true);
         self.resume_open = None;
@@ -7010,7 +7010,7 @@ where
         }
         let panel = self.timeline_panel_id();
         let enabled = !self.modal_input_blocked() && !self.filmstrip_open;
-        let mut height = self.timeline_height;
+        let mut height = self.timeline_height(false);
         timeline_edit::show_panel(
             root,
             panel,
@@ -7205,7 +7205,7 @@ where
                 self.draw_timeline_menu(ui, &response, actions);
             },
         );
-        self.remember_timeline_height(height);
+        self.remember_timeline_height(height, false);
     }
 
     fn timeline_panel_id(&self) -> egui::Id {
@@ -7679,7 +7679,7 @@ where
                 // Match filmstrip middle-click: register a fresh tab, without loading
                 // or activating media and without changing Gallery's view or focus.
                 let added = self.tabs.open_new(path.clone(), kind);
-                self.seed_playback_volume(added);
+                self.seed_tab_preferences(added);
                 self.begin_history_visit(added, &path);
                 self.edits.entry(added).or_default();
                 self.tabs.activate(gallery);
@@ -7724,7 +7724,7 @@ where
                         return;
                     }
                     let added = self.tabs.open_new(path.clone(), kind);
-                    self.seed_playback_volume(added);
+                    self.seed_tab_preferences(added);
                     self.begin_history_visit(added, &path);
                     self.edits.entry(added).or_default();
                     // Register only the path; activation loads it without interrupting this tab.
@@ -10226,6 +10226,7 @@ where
         }
         self.audio_queues.remove(&id);
         self.playback_volumes.remove(&id);
+        self.timeline_heights.tabs.remove(&id);
         self.preview_rates.remove(&id);
         self.audio_preview_choices.remove(&id);
         self.subtitles.take_choice(id);
@@ -11949,6 +11950,16 @@ where
                             folder,
                             background,
                         ))
+                    }
+                    filmstrip_browser::Action::FocusCurrent => {
+                        // A type filter must not hide the target of this explicit reveal.
+                        if self.filmstrip_browser.filter.is_some()
+                            && self.filmstrip_browser.filter != self.media_kind
+                        {
+                            self.filmstrip_browser.filter = None;
+                        }
+                        self.filmstrip.focus_current();
+                        self.request_redraw();
                     }
                     filmstrip_browser::Action::History(forward) => {
                         actions.push(UiAction::Command(if forward {

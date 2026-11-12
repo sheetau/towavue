@@ -279,6 +279,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                     &value,
                     formatted::status_animation_frames(language, image.decoded.frames.len()),
                 );
+                details.action(Action::Command(CommandId::ToggleTimeline));
             }
             let (short, help) = if self.nearest_images {
                 (

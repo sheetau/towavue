@@ -20,7 +20,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(path) = tab.target.current_path().map(Path::to_owned) else {
             return;
         };
-        self.seed_playback_volume(id);
+        self.seed_tab_preferences(id);
         self.media_sequence = self
             .media_sequence
             .max(self.media_generation)

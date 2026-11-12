@@ -156,7 +156,7 @@ pub(super) fn path_menu(
     owner: Option<thumbnail_menu::Owner>,
     actions: &mut Vec<UiAction>,
 ) {
-    thumbnail_menu::show_on_click(
+    thumbnail_menu::show(
         ui,
         response,
         path,
@@ -651,6 +651,9 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
                                             ui.label(format!("{tooltip}{hint}"));
                                         }
                                     });
+                            if path_link && response.clicked() {
+                                actions.push(UiAction::Command(CommandId::SearchCurrentFiles));
+                            }
                             if path_link && let Some(path) = self.displayed_image_path() {
                                 path_menu(
                                     ui,

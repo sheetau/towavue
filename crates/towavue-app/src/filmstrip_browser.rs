@@ -48,6 +48,7 @@ fn menu_message(ui: &mut Ui, label: &str) {
 pub(super) enum Action {
     Folder(PathBuf, bool),
     History(bool),
+    FocusCurrent,
     Menu(crate::thumbnail_menu::Intent),
 }
 
@@ -252,6 +253,8 @@ impl Browser {
                     self.listing(ui, &self.folder.clone(), prepare);
                 }
                 ui.painter().rect_filled(header, 0.0, chrome::BACKGROUND);
+                ui.painter()
+                    .hline(header.x_range(), header.top() + 0.5, (1.0, chrome::BORDER));
                 ui.style_mut().override_font_id = Some(egui::FontId::proportional(chrome::TEXT_LG));
                 let content = header.shrink(3.0);
                 let filter_width = crate::browser_controls::filter_width(
@@ -359,6 +362,9 @@ impl Browser {
                             self.notice.is_none(),
                         );
                         if let Some(path) = path.filter(|_| self.notice.is_none()) {
+                            if response.clicked() {
+                                target = Some(Action::FocusCurrent);
+                            }
                             let mut menu_actions = Vec::new();
                             crate::status_bar::path_menu(
                                 ui,

@@ -998,7 +998,7 @@ fn frame(
         output,
         action.and_then(|action| match action {
             Action::Folder(path, _) => Some(path),
-            Action::History(_) | Action::Menu(_) => None,
+            Action::History(_) | Action::Menu(_) | Action::FocusCurrent => None,
         }),
     )
 }
@@ -2253,5 +2253,42 @@ fn filmstrip_notice_replaces_filename_without_owning_a_path_menu() {
     assert!(!output.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.text()=="/" || t.galley.text()=="photo.png")));
     browser.notice = None;
     let output = frame(&context, &mut browser, size, vec![]).0;
-    assert!(node(&output, "photo.png").width() > 0.0);
+    let point = node(&output, "photo.png").center();
+    action_frame(
+        &context,
+        &mut browser,
+        size,
+        vec![egui::Event::PointerMoved(point)],
+    );
+    for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+        action_frame(
+            &context,
+            &mut browser,
+            size,
+            vec![egui::Event::PointerButton {
+                pos: point,
+                button,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let (_, action) = action_frame(
+            &context,
+            &mut browser,
+            size,
+            vec![egui::Event::PointerButton {
+                pos: point,
+                button,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        if button == egui::PointerButton::Primary {
+            assert!(matches!(action, Some(Action::FocusCurrent)));
+            assert!(!egui::Popup::is_any_open(&context));
+        } else {
+            assert!(action.is_none());
+            assert!(egui::Popup::is_any_open(&context));
+        }
+    }
 }

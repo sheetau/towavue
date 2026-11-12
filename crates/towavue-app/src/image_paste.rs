@@ -109,6 +109,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         let Some(id) = self.tabs.active().map(|tab| tab.id) else {
             return;
         };
+        self.seed_tab_preferences(id);
         self.cancel_hold_speed();
         self.retain_image_tab();
         self.retain_playback_tab();

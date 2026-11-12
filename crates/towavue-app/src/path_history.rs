@@ -192,7 +192,7 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             return;
         };
         let added = self.tabs.open_new(first.path.clone(), first.kind);
-        self.seed_playback_volume(added);
+        self.seed_tab_preferences(added);
         self.begin_history_visit(added, &first.path);
         let history = self.path_history.entry(added).or_default();
         history.begin(&first.path);

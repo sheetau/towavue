@@ -147,8 +147,9 @@ fn accepted_height_survives_tabs_reopening_and_a_fresh_preference_store() {
     let end = rect(&app).center_top() + egui::vec2(0.0, 16.0);
     drag(&mut app, end);
     frame(&mut app, vec![button(end, false)], true);
-    assert!((app.timeline_height - 80.0).abs() <= 1.0);
-    let preferred = app.timeline_height;
+    assert!((app.timeline_height(false) - 80.0).abs() <= 1.0);
+    let preferred = app.timeline_height(false);
+    let first = app.tabs.active_id().expect("first tab");
     app.timeline_open = false;
     frame(&mut app, vec![], false);
     app.tabs
@@ -158,6 +159,27 @@ fn accepted_height_survives_tabs_reopening_and_a_fresh_preference_store() {
         frame(&mut app, vec![], false);
     }
     assert!((rect(&app).height() - preferred).abs() <= 1.0);
+    let second = app.tabs.active_id().expect("second tab");
+    app.remember_timeline_height(100.0, false);
+    app.remember_timeline_height(72.0, true);
+    app.tabs.activate(first);
+    for _ in 0..3 {
+        frame(&mut app, vec![], false);
+    }
+    assert!((rect(&app).height() - preferred).abs() <= 1.0);
+    assert_eq!(app.timeline_height(true), 96.0);
+    app.tabs.activate(second);
+    assert_eq!(app.timeline_height(false), 100.0);
+    assert_eq!(app.timeline_height(true), 72.0);
+    let third = app
+        .tabs
+        .open_new(PathBuf::from("next.gif"), MediaKind::Image);
+    app.seed_tab_preferences(third);
+    assert_eq!(app.timeline_height(false), 100.0);
+    assert_eq!(app.timeline_height(true), 72.0);
+    app.remember_timeline_height(104.0, true);
+    assert_eq!(app.timeline_heights.tabs[&first], [preferred, 96.0]);
+    assert_eq!(app.timeline_heights.tabs[&second], [100.0, 72.0]);
     drop(app);
     drop(store);
     let store = Arc::new(
@@ -166,10 +188,12 @@ fn accepted_height_survives_tabs_reopening_and_a_fresh_preference_store() {
     );
     let mut app = setup(MediaKind::Audio, 2.0);
     app.restore_view_preferences(Some(store));
+    app.timeline_heights.tabs.clear(); // The fixture drew once before restoring startup preferences.
     for _ in 0..3 {
         frame(&mut app, vec![], false);
     }
-    assert!((rect(&app).height() - preferred).abs() <= 1.0);
+    assert!((rect(&app).height() - 100.0).abs() <= 1.0);
+    assert_eq!(app.timeline_height(true), 104.0);
 }
 
 fn drag(app: &mut App, end: egui::Pos2) {
@@ -256,6 +280,8 @@ fn resize_preserves_grab_offset_and_disabled_panel_uses_one_overlay() {
         |shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::WHITE)
     ));
     assert_eq!(output.shapes.iter().filter(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(128))).count(), 1);
+    let overlay = output.shapes.iter().position(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(128))).expect("overlay");
+    assert!(output.shapes[overlay+1..].iter().any(|shape| matches!(&shape.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == chrome::BORDER)));
 }
 
 #[test]
@@ -475,11 +501,12 @@ fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
                 renderer
                     .resize_surface(width, height_pixels)
                     .expect("surface");
-                for state in 0..4 {
+                for state in 0..5 {
                     let events = match state {
                         1 => vec![egui::Event::PointerMoved(top)],
                         2 => vec![button(top, true)],
                         3 => vec![egui::Event::PointerMoved(top + egui::vec2(0.0, 12.0))],
+                        4 => vec![button(top, false)],
                         _ => vec![],
                     };
                     for pass in 0..3 {
@@ -501,7 +528,7 @@ fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
                                 ui,
                                 panel,
                                 &mut height,
-                                true,
+                                state != 4,
                                 egui::Margin::ZERO,
                                 |_| {},
                             );
@@ -513,6 +540,12 @@ fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
                     if state == 3 {
                         assert!(resizing_panel(&context, panel), "owned resize drag");
                     }
+                    if state == 4 {
+                        assert!(
+                            !resizing_panel(&context, panel),
+                            "disabled panel owns no drag"
+                        );
+                    }
                     let pixels = renderer.verification_surface_rgba().expect("readback");
                     let x = (top.x * density).round() as usize;
                     let y = (top.y * density).round() as usize;
@@ -522,7 +555,7 @@ fn timeline_resize_feedback_reaches_gpu_without_opacity_changes() {
                         .expect("separator pixels");
                     assert_eq!(
                         peak,
-                        if state == 0 {
+                        if state == 0 || state == 4 {
                             chrome::BORDER.r()
                         } else {
                             chrome::FOREGROUND.r()

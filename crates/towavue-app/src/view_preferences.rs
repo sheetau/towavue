@@ -1,6 +1,27 @@
 use super::*;
 use towavue_runtime_windows::{ViewPreference as Key, ViewPreferences};
 
+/// Each tab captures both families once; only an accepted resize changes the seeds.
+pub(super) struct TimelineHeights {
+    pub defaults: Arc<std::sync::Mutex<[f32; 2]>>,
+    pub tabs: BTreeMap<TabId, [f32; 2]>,
+}
+impl Default for TimelineHeights {
+    fn default() -> Self {
+        Self {
+            defaults: Arc::new(std::sync::Mutex::new([96.0; 2])),
+            tabs: BTreeMap::new(),
+        }
+    }
+}
+impl TimelineHeights {
+    fn seed(&mut self, tab: TabId) -> &mut [f32; 2] {
+        self.tabs
+            .entry(tab)
+            .or_insert_with(|| *self.defaults.lock().expect("timeline height defaults"))
+    }
+}
+
 pub(super) fn open(
     proxy: Option<EventLoopProxy<window_host::Event>>,
 ) -> Option<Arc<ViewPreferences>> {
@@ -34,7 +55,14 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
             2 => view_resize::Mode::KeepScale,
             _ => view_resize::Mode::Fit,
         };
-        self.timeline_height = f32::from(store.value(Key::TimelineHeight));
+        *self
+            .timeline_heights
+            .defaults
+            .lock()
+            .expect("timeline height defaults") = [
+            f32::from(store.value(Key::TimelineHeight)),
+            f32::from(store.value(Key::AnimationTimelineHeight)),
+        ];
         self.volume_step_percent = store.value(Key::VolumeStep) as u8;
         self.nearest_images = store.value(Key::Nearest) != 0;
         self.high_quality_minification = store.value(Key::Minification) != 0;
@@ -64,14 +92,44 @@ impl<N: Fn(AppEvent) + Send + Sync + 'static> Application<N> {
         self.view_preferences = Some(store);
     }
 
-    pub(super) fn remember_timeline_height(&mut self, height: f32) {
-        if self.timeline_height == height {
+    pub(super) fn seed_tab_preferences(&mut self, id: TabId) {
+        self.seed_playback_volume(id);
+        self.timeline_heights.seed(id);
+    }
+
+    pub(super) fn timeline_height(&mut self, animation: bool) -> f32 {
+        let index = usize::from(animation);
+        if let Some(id) = self.tabs.active_id() {
+            self.timeline_heights.seed(id)[index]
+        } else {
+            self.timeline_heights
+                .defaults
+                .lock()
+                .expect("timeline height defaults")[index]
+        }
+    }
+
+    pub(super) fn remember_timeline_height(&mut self, height: f32, animation: bool) {
+        let Some(id) = self.tabs.active_id() else {
+            return;
+        };
+        let index = usize::from(animation);
+        let value = &mut self.timeline_heights.seed(id)[index];
+        if *value == height {
             return;
         }
-        self.timeline_height = height;
+        *value = height;
+        self.timeline_heights
+            .defaults
+            .lock()
+            .expect("timeline height defaults")[index] = height;
         if let Some(store) = &self.view_preferences
             && let Err(error) = store.remember(
-                Key::TimelineHeight,
+                if animation {
+                    Key::AnimationTimelineHeight
+                } else {
+                    Key::TimelineHeight
+                },
                 height.round().clamp(64.0, 16384.0) as u16,
             )
         {

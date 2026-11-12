@@ -91,6 +91,9 @@ fn untitled_transfer_preserves_pixels_edits_view_and_private_original_until_fina
     let id = crate::image_paste::tests::inject(&mut source, &events);
     source.dispatch(CommandId::FlipHorizontal);
     source.image_view.zoom = ZoomMode::Actual;
+    source.seed_tab_preferences(id);
+    source.remember_timeline_height(112.0, false);
+    source.remember_timeline_height(72.0, true);
     let pixels = Arc::clone(&source.image.as_ref().expect("image").decoded);
     let private = source.document_input(id).expect("input").path().to_owned();
     let request = source.capture_tab_transfer(id).expect("untitled owner");
@@ -103,6 +106,16 @@ fn untitled_transfer_preserves_pixels_edits_view_and_private_original_until_fina
     let target = destination.accept_tab_transfer(packet, 0);
     assert!(destination.path.is_none());
     assert_eq!(destination.image_view.zoom, ZoomMode::Actual);
+    assert!(!source.timeline_heights.tabs.contains_key(&id));
+    assert_eq!(destination.timeline_heights.tabs[&target], [112.0, 72.0]);
+    assert_eq!(
+        *destination
+            .timeline_heights
+            .defaults
+            .lock()
+            .expect("defaults"),
+        [96.0; 2]
+    );
     assert!(Arc::ptr_eq(
         &pixels,
         &destination.image.as_ref().expect("transferred").decoded

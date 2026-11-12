@@ -46,29 +46,6 @@ pub(crate) fn show(
     owner: Option<Owner>,
     actions: &mut Vec<UiAction>,
 ) {
-    show_with_trigger(ui, response, path, scope, owner, actions, false);
-}
-
-pub(crate) fn show_on_click(
-    ui: &egui::Ui,
-    response: &egui::Response,
-    path: &Path,
-    scope: Scope,
-    owner: Option<Owner>,
-    actions: &mut Vec<UiAction>,
-) {
-    show_with_trigger(ui, response, path, scope, owner, actions, true);
-}
-
-fn show_with_trigger(
-    ui: &egui::Ui,
-    response: &egui::Response,
-    path: &Path,
-    scope: Scope,
-    owner: Option<Owner>,
-    actions: &mut Vec<UiAction>,
-    primary: bool,
-) {
     let language = localization::language(ui.ctx());
     let popup = egui::Popup::default_response_id(response);
     let owner_id = popup.with("thumbnail-owner");
@@ -81,12 +58,8 @@ fn show_with_trigger(
         egui::Popup::close_id(ui.ctx(), popup);
         return;
     }
-    let chosen = tab_menu::popup_with_pointer(
-        ui,
-        response,
-        response,
-        response.secondary_clicked() || (primary && response.clicked()),
-        |ui| {
+    let chosen =
+        tab_menu::popup_with_pointer(ui, response, response, response.secondary_clicked(), |ui| {
             chrome::menu(ui);
             ui.set_min_width(170.0);
             let keyboard = menu::MenuKeyboard::begin(ui);
@@ -162,8 +135,7 @@ fn show_with_trigger(
                 ui.close();
             }
             chosen
-        },
-    );
+        });
     if egui::Popup::is_id_open(ui.ctx(), popup) {
         ui.ctx().data_mut(|data| data.insert_temp(owner_id, owner));
     } else {

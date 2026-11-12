@@ -1030,3 +1030,39 @@ fn playback_volume_worker_failure_uses_receiving_language_and_retains_unknown_pr
         b"unknown future volume"
     );
 }
+
+#[test]
+fn timeline_resize_seeds_cross_windows_without_changing_existing_tabs() {
+    let Some(_root) = crate::tests::isolated_test_root(
+        "window_host::tests::timeline_resize_seeds_cross_windows_without_changing_existing_tabs",
+    ) else {
+        return;
+    };
+    let mut host = WindowHost::new(None, None).expect("host");
+    let first = *host.windows.keys().next().expect("first");
+    let second = host.add_application(None).expect("second");
+    for key in [first, second] {
+        let app = host.windows.get_mut(&key).expect("window");
+        let tab = app.tabs.open_new("unopened.mp4".into(), MediaKind::Video);
+        app.seed_tab_preferences(tab);
+    }
+    let app = host.windows.get_mut(&first).expect("first");
+    app.remember_timeline_height(112.0, false);
+    app.remember_timeline_height(72.0, true);
+    let app = host.windows.get_mut(&second).expect("second");
+    assert_eq!(app.timeline_height(false), 96.0);
+    assert_eq!(app.timeline_height(true), 96.0);
+    let tab = app.tabs.open_new("next.gif".into(), MediaKind::Image);
+    app.seed_tab_preferences(tab);
+    assert_eq!(app.timeline_heights.tabs[&tab], [112.0, 72.0]);
+    let third = host.add_application(None).expect("third");
+    let app = host.windows.get_mut(&third).expect("third");
+    let tab = app.tabs.open_new("next.wav".into(), MediaKind::Audio);
+    app.seed_tab_preferences(tab);
+    assert_eq!(app.timeline_heights.tabs[&tab], [112.0, 72.0]);
+    app.remember_timeline_height(104.0, false);
+    assert_eq!(
+        *host.timeline_height_defaults.lock().expect("defaults"),
+        [104.0, 72.0]
+    );
+}
